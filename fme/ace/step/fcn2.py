@@ -291,6 +291,7 @@ class FCN2StepConfig(StepConfigABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ) -> "FCN2Step":
         logging.info("Initializing stepper from provided config")
         corrector = dataset_info.vertical_coordinate.build_corrector(
@@ -305,6 +306,7 @@ class FCN2StepConfig(StepConfigABC):
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
+            init_weights=init_weights,
         )
 
     def load(self):
@@ -326,6 +328,7 @@ class FCN2Step(StepABC):
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
+        init_weights: Callable[[list[nn.Module]], None],
     ):
         """
         Args:
@@ -334,6 +337,7 @@ class FCN2Step(StepABC):
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
+            init_weights: Function to initialize the weights of the model.
         """
         super().__init__()
         self.forcing_packer = Packer(config.forcing_names)
@@ -360,6 +364,7 @@ class FCN2Step(StepABC):
             img_shape=img_shape,
         )
         module = module.to(get_device())
+        init_weights([module])
 
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)

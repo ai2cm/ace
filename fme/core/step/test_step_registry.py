@@ -1,7 +1,10 @@
 import dataclasses
 import datetime
+from collections.abc import Callable
+from unittest.mock import MagicMock
 
 import torch
+from torch import nn
 
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
@@ -15,9 +18,11 @@ class MockStep(StepABC):
         self,
         config: "MockStepConfig",
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ):
         self.dataset_info = dataset_info
         self._config = config
+        self._init_weights = init_weights
 
     @property
     def config(self) -> "MockStepConfig":
@@ -58,8 +63,10 @@ class MockStepConfig(StepConfigABC):
     in_names: list[str] = dataclasses.field(default_factory=list)
     out_names: list[str] = dataclasses.field(default_factory=list)
 
-    def get_step(self, dataset_info: DatasetInfo):
-        return MockStep(self, dataset_info)
+    def get_step(
+        self, dataset_info: DatasetInfo, init_weights: Callable[[list[nn.Module]], None]
+    ):
+        return MockStep(self, dataset_info, init_weights)
 
     @property
     def diagnostic_names(self) -> list[str]:
@@ -121,6 +128,8 @@ def test_register():
         vertical_coordinate=vertical_coordinate,
         timestep=timestep,
     )
-    step = selector.get_step(dataset_info)
+    init_weights = MagicMock()
+    step = selector.get_step(dataset_info, init_weights)
     assert isinstance(step, MockStep)
     assert step.dataset_info == dataset_info
+    assert step._init_weights == init_weights
