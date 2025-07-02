@@ -96,16 +96,8 @@ class CoupledDatasetInfoBuilder:
             lat = torch.arange(N_LAT)
             lon = torch.arange(N_LON)
             self.hcoord = CoupledHorizontalCoordinates(
-                ocean=LatLonCoordinates(
-                    lon=lon,
-                    lat=lat,
-                    mask_provider=self.ocean_mask_provider,
-                ),
-                atmosphere=LatLonCoordinates(
-                    lon=lon,
-                    lat=lat,
-                    mask_provider=self.atmos_mask_provider,
-                ),
+                ocean=LatLonCoordinates(lon=lon, lat=lat),
+                atmosphere=LatLonCoordinates(lon=lon, lat=lat),
             )
 
     @property

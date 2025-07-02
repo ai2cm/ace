@@ -51,8 +51,7 @@
 import dataclasses
 import logging
 import os
-from collections.abc import Callable, Mapping, Sequence
-from datetime import timedelta
+from collections.abc import Callable, Sequence
 
 import dacite
 import torch
@@ -74,13 +73,11 @@ from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import HorizontalCoordinates
-from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -119,14 +116,11 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
 
     aggregator_builder = AggregatorBuilder(
         inference_config=config.inference_aggregator,
-        gridded_operations=dataset_info.gridded_operations,
-        horizontal_coordinates=train_data.horizontal_coordinates,
-        timestep=dataset_info.timestep,
+        dataset_info=dataset_info.update_variable_metadata(variable_metadata),
         output_dir=config.output_dir,
         initial_inference_time=initial_inference_times,
         record_step_20=record_step_20,
         n_timesteps=inference_n_forward_steps + stepper.n_ic_timesteps,
-        variable_metadata=variable_metadata,
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
@@ -155,15 +149,12 @@ class AggregatorBuilder(
     def __init__(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig | None,
-        gridded_operations: GriddedOperations,
-        horizontal_coordinates: HorizontalCoordinates,
-        timestep: timedelta,
+        dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray | None,
         record_step_20: bool,
         n_timesteps: int,
         output_dir: str,
         normalize: Callable[[TensorMapping], TensorDict],
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         loss_scaling: dict[str, torch.Tensor] | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
@@ -172,13 +163,10 @@ class AggregatorBuilder(
         ),
     ):
         self.inference_config = inference_config
-        self.gridded_operations = gridded_operations
-        self.horizontal_coordinates = horizontal_coordinates
-        self.timestep = timestep
+        self.dataset_info = dataset_info
         self.initial_inference_time = initial_inference_time
         self.record_step_20 = record_step_20
         self.n_timesteps = n_timesteps
-        self.variable_metadata = variable_metadata
         self.loss_scaling = loss_scaling
         self.channel_mean_names = channel_mean_names
         self.normalize = normalize
@@ -191,8 +179,7 @@ class AggregatorBuilder(
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return self.validation_config.build(
-            horizontal_coordinates=self.horizontal_coordinates,
-            variable_metadata=self.variable_metadata,
+            dataset_info=self.dataset_info,
             loss_scaling=self.loss_scaling,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
@@ -203,12 +190,10 @@ class AggregatorBuilder(
     ) -> InferenceEvaluatorAggregator:
         if isinstance(self.inference_config, InferenceEvaluatorAggregatorConfig):
             return self.inference_config.build(
-                horizontal_coordinates=self.horizontal_coordinates,
-                timestep=self.timestep,
+                dataset_info=self.dataset_info,
                 initial_time=self.initial_inference_time,
                 record_step_20=self.record_step_20,
                 n_timesteps=self.n_timesteps,
-                variable_metadata=self.variable_metadata,
                 channel_mean_names=self.channel_mean_names,
                 normalize=self.normalize,
                 save_diagnostics=self.save_per_epoch_diagnostics,

@@ -1,5 +1,4 @@
 import dataclasses
-import datetime
 import os
 import warnings
 from collections.abc import Callable, Mapping
@@ -25,7 +24,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from fme.coupled.data_loading.data_typing import CoupledHorizontalCoordinates
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
 
 
@@ -62,7 +61,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
 
     def __init__(
         self,
-        horizontal_coordinates: CoupledHorizontalCoordinates,
+        dataset_info: CoupledDatasetInfo,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
@@ -71,7 +70,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
     ):
         """
         Args:
-            horizontal_coordinates: Horizontal coordinates for the data.
+            dataset_info: Coordinate information of dataset.
             save_diagnostics: Whether to save diagnostics to disk.
             output_dir: Directory to write diagnostics to.
             variable_metadata: Metadata for each variable.
@@ -87,8 +86,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self._n_batches = 0
         self._aggregators = {
             "ocean": OneStepAggregator_(
-                horizontal_coordinates.ocean,
-                variable_metadata=variable_metadata,
+                dataset_info.ocean,
                 loss_scaling=ocean_loss_scaling,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
@@ -98,8 +96,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                 ),
             ),
             "atmosphere": OneStepAggregator_(
-                horizontal_coordinates.atmosphere,
-                variable_metadata=variable_metadata,
+                dataset_info.atmosphere,
                 loss_scaling=atmosphere_loss_scaling,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
@@ -200,9 +197,7 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        horizontal_coordinates: CoupledHorizontalCoordinates,
-        ocean_timestep: datetime.timedelta,
-        atmosphere_timestep: datetime.timedelta,
+        dataset_info: CoupledDatasetInfo,
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
         initial_time: xr.DataArray,
@@ -210,7 +205,6 @@ class InferenceEvaluatorAggregatorConfig:
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         save_diagnostics: bool = True,
         output_dir: str | None = None,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
             monthly_reference_data = None
@@ -239,9 +233,7 @@ class InferenceEvaluatorAggregatorConfig:
             log_zonal_mean_images = self.log_zonal_mean_images
 
         return InferenceEvaluatorAggregator(
-            horizontal_coordinates=horizontal_coordinates,
-            ocean_timestep=ocean_timestep,
-            atmosphere_timestep=atmosphere_timestep,
+            dataset_info=dataset_info,
             n_timesteps_ocean=n_timesteps_ocean,
             n_timesteps_atmosphere=n_timesteps_atmosphere,
             initial_time=initial_time,
@@ -256,7 +248,6 @@ class InferenceEvaluatorAggregatorConfig:
             log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
             monthly_reference_data=monthly_reference_data,
             time_mean_reference_data=time_mean,
-            variable_metadata=variable_metadata,
             ocean_normalize=ocean_normalize,
             atmosphere_normalize=atmosphere_normalize,
         )
@@ -324,9 +315,7 @@ class InferenceEvaluatorAggregator(
 ):
     def __init__(
         self,
-        horizontal_coordinates: CoupledHorizontalCoordinates,
-        ocean_timestep: datetime.timedelta,
-        atmosphere_timestep: datetime.timedelta,
+        dataset_info: CoupledDatasetInfo,
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
         initial_time: xr.DataArray,
@@ -340,7 +329,6 @@ class InferenceEvaluatorAggregator(
         log_seasonal_means: bool = False,
         log_global_mean_time_series: bool = True,
         log_global_mean_norm_time_series: bool = True,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         monthly_reference_data: xr.Dataset | None = None,
         log_histograms: bool = False,
         time_mean_reference_data: xr.Dataset | None = None,
@@ -349,8 +337,7 @@ class InferenceEvaluatorAggregator(
         self._record_atmos_step_20 = n_timesteps_atmosphere >= 20
         self._aggregators = {
             "ocean": InferenceEvaluatorAggregator_(
-                horizontal_coordinates=horizontal_coordinates.ocean,
-                timestep=ocean_timestep,
+                dataset_info=dataset_info.ocean,
                 n_timesteps=n_timesteps_ocean,
                 initial_time=initial_time,
                 log_histograms=log_histograms,
@@ -363,7 +350,6 @@ class InferenceEvaluatorAggregator(
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
                 record_step_20=self._record_ocean_step_20,
-                variable_metadata=variable_metadata,
                 channel_mean_names=None,
                 normalize=ocean_normalize,
                 save_diagnostics=save_diagnostics,
@@ -374,8 +360,7 @@ class InferenceEvaluatorAggregator(
                 ),
             ),
             "atmosphere": InferenceEvaluatorAggregator_(
-                horizontal_coordinates=horizontal_coordinates.atmosphere,
-                timestep=atmosphere_timestep,
+                dataset_info=dataset_info.atmosphere,
                 n_timesteps=n_timesteps_atmosphere,
                 initial_time=initial_time,
                 log_histograms=log_histograms,
@@ -388,7 +373,6 @@ class InferenceEvaluatorAggregator(
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
                 record_step_20=self._record_atmos_step_20,
-                variable_metadata=variable_metadata,
                 channel_mean_names=None,
                 normalize=atmosphere_normalize,
                 save_diagnostics=save_diagnostics,
