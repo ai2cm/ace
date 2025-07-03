@@ -19,10 +19,13 @@ from fme.downscaling.datasets import (
     HorizontalSubsetDataset,
     LatLonCoordinates,
     PairedBatchItem,
+    PairedDataLoaderConfig,
     XarrayEnsembleDataConfig,
     _scale_slice,
     _subset_horizontal,
 )
+from fme.downscaling.requirements import DataRequirements
+from fme.downscaling.test_train import data_paths_helper
 
 
 def test_ContiguousDistributedSampler():
@@ -506,7 +509,7 @@ def test_DataLoaderConfig_mpcontext(
         engine=coarse_engine,
         file_pattern="*.nc" if coarse_engine == "netcdf4" else "a.zarr",
     )
-    loader_config = DataLoaderConfig(
+    loader_config = PairedDataLoaderConfig(
         fine=[fine_config],
         coarse=[coarse_config],
         batch_size=2,
@@ -514,6 +517,30 @@ def test_DataLoaderConfig_mpcontext(
         strict_ensemble=False,
     )
     assert loader_config._mp_context() == expected
+
+
+def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
+    # TODO: this test can be removed after future PRs add a no-target
+    # run script integration test that covers this functionality.
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    paths = data_paths_helper(tmp_path)
+    requirements = DataRequirements(
+        fine_names=[], coarse_names=["x"], n_timesteps=1, use_fine_topography=True
+    )
+    data_config = DataLoaderConfig(
+        data=[XarrayDataConfig(paths.coarse)],
+        batch_size=2,
+        num_data_workers=1,
+        strict_ensemble=False,
+        topography=XarrayDataConfig(paths.fine),
+        lat_extent=ClosedInterval(1, 4),
+        lon_extent=ClosedInterval(0, 3),
+    )
+    data = data_config.build(requirements=requirements)
+    batch = next(iter(data.loader))
+    assert batch.data["x"].shape == (2, 4, 4)
+    assert batch.topography.shape == (2, 8, 8)
 
 
 @pytest.mark.parametrize(

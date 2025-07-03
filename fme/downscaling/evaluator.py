@@ -21,9 +21,9 @@ from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, SampleAggregator
 from fme.downscaling.datasets import (
     ClosedInterval,
-    DataLoaderConfig,
-    GriddedData,
     PairedBatchData,
+    PairedDataLoaderConfig,
+    PairedGriddedData,
 )
 from fme.downscaling.models import (
     DiffusionModel,
@@ -140,7 +140,7 @@ class CheckpointModelConfig:
 class Evaluator:
     def __init__(
         self,
-        data: GriddedData,
+        data: PairedGriddedData,
         model: Model | DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
@@ -201,7 +201,7 @@ class EventEvaluator:
     def __init__(
         self,
         event_name: str,
-        data: GriddedData,
+        data: PairedGriddedData,
         model: Model | DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
@@ -277,8 +277,8 @@ class EventConfig:
     date_format: str = "%Y-%m-%dT%H:%M"
 
     def get_gridded_data(
-        self, base_data_config: DataLoaderConfig, requirements: DataRequirements
-    ) -> GriddedData:
+        self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
+    ) -> PairedGriddedData:
         # Event evaluation only load the first snapshot.
         # Filling the slice stop isn't necessary but guards against
         # future code trying to iterate over the entire dataloader.
@@ -311,7 +311,7 @@ class EventConfig:
 class EvaluatorConfig:
     model: CheckpointModelConfig
     experiment_dir: str
-    data: DataLoaderConfig
+    data: PairedDataLoaderConfig
     logging: LoggingConfig
     n_samples: int = 4
     patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
