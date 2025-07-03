@@ -1,7 +1,7 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 77
+max_epochs: 1
 n_forward_steps: 1
 ema:
   decay: 0.999
@@ -117,10 +117,10 @@ stepper:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
       corrector:
-        conserve_dry_air: true
-        moisture_budget_correction: advection_and_precipitation
-        total_energy_budget_correction:
-          method: constant_temperature
+        conserve_dry_air: false
+        #moisture_budget_correction: advection_and_precipitation
+        #total_energy_budget_correction:
+        #  method: constant_temperature
         force_positive_names:
         - specific_total_water_0
         - specific_total_water_1
