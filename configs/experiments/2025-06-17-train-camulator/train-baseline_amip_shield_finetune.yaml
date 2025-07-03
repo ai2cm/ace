@@ -1,8 +1,8 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 1
-n_forward_steps: 1
+max_epochs: 77
+n_forward_steps: 2
 ema:
   decay: 0.999
 inference:
@@ -68,6 +68,8 @@ optimization:
   kwargs:
     weight_decay: 0.0
 stepper:
+  parameter_init:
+    weights_path: /ckpt.tar
   loss:
     type: MSE
     weights:
