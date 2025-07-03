@@ -216,8 +216,8 @@ class Trainer:
         self.stepper.update_training_history(TrainingJob.from_env())
 
         self.optimization = build_optimization(stepper.modules)
-        self._end_of_batch_ops = end_of_batch_callback
-        self._end_of_epoch_ops = end_of_epoch_callback
+        self._end_of_batch_callback = end_of_batch_callback
+        self._end_of_epoch_callback = end_of_epoch_callback
         self._no_optimization = NullOptimization()
         self._aggregator_builder = aggregator_builder
 
@@ -237,6 +237,9 @@ class Trainer:
         self._inference_data = inference_data
         self._ema = build_ema(stepper.modules)
         self._do_gc_collect = do_gc_collect
+
+    def set_end_of_epoch_callback(self, end_of_epoch_callback: EndOfEpochCallback):
+        self._end_of_epoch_callback = end_of_epoch_callback
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -313,8 +316,8 @@ class Trainer:
             if inference_error is not None:
                 logging.info(f"Inference error: {inference_error}")
 
-            with self._validation_context():
-                additional_logs = self._end_of_epoch_ops(self._epoch)
+            with self.validation_context():
+                additional_logs = self._end_of_epoch_callback(self._epoch)
 
             logging.info("Logging to wandb")
             all_logs = {
@@ -365,7 +368,7 @@ class Trainer:
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
             aggregator.record_batch(stepped)
-            self._end_of_batch_ops()
+            self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
             self.num_batches_seen += 1
             n_samples_seen_since_logging += self.train_data.batch_size
@@ -390,7 +393,7 @@ class Trainer:
         return aggregator.get_logs(label="train")
 
     @contextlib.contextmanager
-    def _validation_context(self):
+    def validation_context(self):
         """
         The context for running validation.
 
@@ -419,7 +422,7 @@ class Trainer:
         self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_validation_aggregator()
         logging.info("Starting loop over validation data")
-        with torch.no_grad(), self._validation_context(), GlobalTimer():
+        with torch.no_grad(), self.validation_context(), GlobalTimer():
             for batch in self.valid_data.loader:
                 stepped = self.stepper.train_on_batch(
                     batch,
@@ -434,21 +437,18 @@ class Trainer:
         logging.info("Getting validation aggregator logs")
         return aggregator.get_logs(label="val")
 
-    def inference_one_epoch(self):
-        self.stepper.set_eval()
-        aggregator = self._aggregator_builder.get_inference_aggregator()
+    def inference_one_epoch(
+        self,
+    ):
         logging.info("Starting inline inference run")
-        with torch.no_grad(), self._validation_context(), GlobalTimer():
-            run_inference(
-                predict=self.stepper.predict_paired,
-                data=self._inference_data,
-                aggregator=aggregator,
-            )
-        logging.info("Starting flush of reduced diagnostics to disk")
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._epoch:04d}")
-        logging.info("Getting inline inference aggregator logs")
-        logs = aggregator.get_summary_logs()
-        return {f"inference/{k}": v for k, v in logs.items()}
+        return inference_one_epoch(
+            stepper=self.stepper,
+            validation_context=self.validation_context,
+            dataset=self._inference_data,
+            aggregator=self._aggregator_builder.get_inference_aggregator(),
+            label="inference",
+            epoch=self._epoch,
+        )
 
     def save_checkpoint(self, checkpoint_path, include_optimization=False):
         # save to a temporary file in case we get pre-empted during save
@@ -541,6 +541,28 @@ class Trainer:
             logging.info(f"Saving EMA epoch checkpoint to {ema_epoch_checkpoint_path}")
             with self._ema_context():
                 self.save_checkpoint(ema_epoch_checkpoint_path)
+
+
+def inference_one_epoch(
+    stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+    validation_context: Callable[[], contextlib.AbstractContextManager],
+    dataset: InferenceDataABC[PS, FD],
+    aggregator: InferenceAggregatorABC[PS, SD],
+    label: str,
+    epoch: int,
+):
+    stepper.set_eval()
+    with torch.no_grad(), validation_context(), GlobalTimer():
+        run_inference(
+            predict=stepper.predict_paired,
+            data=dataset,
+            aggregator=aggregator,
+        )
+    logging.info("Starting flush of reduced diagnostics to disk")
+    aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
+    logging.info("Getting inline inference aggregator logs")
+    logs = aggregator.get_summary_logs()
+    return {f"{label}/{k}": v for k, v in logs.items()}
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
