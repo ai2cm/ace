@@ -68,8 +68,7 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
 )
-from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.ace.data_loading.gridded_data import InferenceGriddedData
+from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.cli import prepare_config, prepare_directory
@@ -77,7 +76,13 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
-from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
+from fme.core.generics.data import InferenceDataABC
+from fme.core.generics.trainer import (
+    AggregatorBuilderABC,
+    TrainConfigProtocol,
+    Trainer,
+    inference_one_epoch,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -107,10 +112,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
 
     if config.inference is None:
         initial_inference_times = None
-    elif isinstance(inference_data, InferenceGriddedData):
-        for batch in inference_data.loader:
-            initial_inference_times = batch.time.isel(time=0)
-            break
+    else:
+        initial_inference_times = inference_data.initial_time
     inference_n_forward_steps = config.inference_n_forward_steps
     record_step_20 = inference_n_forward_steps >= 20
 
@@ -129,7 +132,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     )
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type
-    return Trainer(
+    trainer = Trainer(
         train_data=train_data,
         validation_data=validation_data,
         inference_data=inference_data,
@@ -141,6 +144,34 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         end_of_batch_callback=end_of_batch_ops,
         do_gc_collect=do_gc_collect,
     )
+
+    def inference(
+        data: InferenceDataABC[PrognosticState, BatchData],
+        aggregator: InferenceEvaluatorAggregator,
+        label: str,
+        epoch: int,
+    ):
+        logging.info("Starting weather evaluation inference run")
+        return inference_one_epoch(
+            stepper=stepper,
+            validation_context=trainer.validation_context,
+            dataset=data,
+            aggregator=aggregator,
+            label=label,
+            epoch=epoch,
+        )
+
+    end_of_epoch_ops = builder.get_end_of_epoch_callback(
+        inference,
+        normalize=stepper.normalizer.normalize,
+        channel_mean_names=stepper.loss_names,
+        output_dir=config.output_dir,
+        variable_metadata=variable_metadata,
+        save_diagnostics=config.save_per_epoch_diagnostics,
+        n_ic_timesteps=stepper.n_ic_timesteps,
+    )
+    trainer.set_end_of_epoch_callback(end_of_epoch_ops)
+    return trainer
 
 
 class AggregatorBuilder(

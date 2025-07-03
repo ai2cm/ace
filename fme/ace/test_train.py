@@ -42,7 +42,12 @@ from fme.ace.testing import (
 )
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import InlineInferenceConfig, TrainBuilders, TrainConfig
+from fme.ace.train.train_config import (
+    InlineInferenceConfig,
+    TrainBuilders,
+    TrainConfig,
+    WeatherEvaluationConfig,
+)
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
@@ -180,6 +185,7 @@ def _get_test_yaml_files(
     )
     if skip_inline_inference:
         inline_inference_config = None
+        weather_evaluation_config = None
     else:
         inline_inference_config = InlineInferenceConfig(
             aggregator=InferenceEvaluatorAggregatorConfig(
@@ -203,6 +209,29 @@ def _get_test_yaml_files(
             n_forward_steps=inference_forward_steps,
             forward_steps_in_memory=2,
         )
+        weather_evaluation_config = WeatherEvaluationConfig(
+            aggregator=InferenceEvaluatorAggregatorConfig(
+                monthly_reference_data=(
+                    str(monthly_data_filename)
+                    if monthly_data_filename is not None
+                    else None
+                ),
+            ),
+            loader=InferenceDataLoaderConfig(
+                dataset=XarrayDataConfig(
+                    data_path=str(valid_data_path),
+                    spatial_dimensions=spatial_dimensions_str,
+                ),
+                start_indices=InferenceInitialConditionIndices(
+                    first=0,
+                    n_initial_conditions=2,
+                    interval=1,
+                ),
+            ),
+            n_forward_steps=inference_forward_steps,
+            forward_steps_in_memory=2,
+        )
+
     train_config = TrainConfig(
         train_loader=DataLoaderConfig(
             dataset=XarrayDataConfig(
@@ -266,6 +295,7 @@ def _get_test_yaml_files(
             ),
         ),
         inference=inline_inference_config,
+        weather_evaluation=weather_evaluation_config,
         n_forward_steps=n_forward_steps,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,

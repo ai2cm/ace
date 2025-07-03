@@ -415,7 +415,7 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
     assert valid_data.set_epoch_mock.mock_calls == []  # no shuffling
     assert train_data.log_info_mock.called
     assert valid_data.log_info_mock.called
-    assert trainer._end_of_epoch_ops.mock_calls == [  # type: ignore
+    assert trainer._end_of_epoch_callback.mock_calls == [  # type: ignore
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
 
