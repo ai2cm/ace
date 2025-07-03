@@ -5,6 +5,7 @@ from typing import Any, Generic, Literal, TypeVar
 
 import numpy as np
 import torch
+import xarray as xr
 
 from fme.ace.data_loading.augmentation import BatchModifierABC, NullModifier
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
@@ -202,6 +203,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             )
         else:
             self._initial_condition = initial_condition.to_device()
+        self._initial_time: xr.DataArray | None = None
 
     @property
     def loader(self) -> DataLoader[BatchData]:
@@ -254,6 +256,16 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     def initial_condition(self) -> PrognosticState:
         return self._initial_condition
 
+    @property
+    def initial_time(self) -> xr.DataArray:
+        if self._initial_time is None:
+            for batch in self.loader:
+                self._initial_time = batch.time.isel(time=0)
+                break
+            else:
+                raise ValueError("No data found in loader")
+        return self._initial_time
+
 
 class PSType:
     pass
@@ -263,10 +275,12 @@ class FDType:
     pass
 
 
-class NullInferenceData(InferenceDataABC[PSType, FDType]):
+class ErrorInferenceData(InferenceDataABC[PSType, FDType]):
     """
-    A null inference data class that does not provide any data.
-    This is useful for cases where we don't do inference.
+    A inference data class that raises an error when accessed.
+
+    Necessary because in some contexts inference is not run,
+    and no data is configured (but also we don't need data).
     """
 
     def __init__(self):
@@ -274,8 +288,12 @@ class NullInferenceData(InferenceDataABC[PSType, FDType]):
 
     @property
     def initial_condition(self) -> PSType:
-        return PSType()
+        raise ValueError("No inference data available")
 
     @property
     def loader(self) -> DataLoader[FDType]:
-        return [FDType()]
+        raise ValueError("No inference data available")
+
+    @property
+    def initial_inference_times(self) -> xr.DataArray:
+        raise ValueError("No inference data available")
