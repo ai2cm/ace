@@ -4,11 +4,10 @@ from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import torch
-import torch_harmonics
 import xarray as xr
 
-from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
 
@@ -16,8 +15,8 @@ from fme.core.typing_ import TensorMapping
 class SphericalPowerSpectrumAggregator:
     """Average the power spectrum over batch and time dimensions."""
 
-    def __init__(self, nlat: int, nlon: int, grid: str = "legendre-gauss"):
-        self._real_sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(get_device())
+    def __init__(self, gridded_operations: GriddedOperations):
+        self._real_sht = gridded_operations.get_real_sht()
         self._power_spectrum: dict[str, torch.Tensor] = {}
         self._counts: dict[str, int] = defaultdict(int)
 
@@ -57,13 +56,11 @@ class PairedSphericalPowerSpectrumAggregator:
 
     def __init__(
         self,
-        nlat: int,
-        nlon: int,
+        gridded_operations: GriddedOperations,
         report_plot: bool,
-        grid: str = "legendre-gauss",
     ):
-        self._gen_aggregator = SphericalPowerSpectrumAggregator(nlat, nlon, grid)
-        self._target_aggregator = SphericalPowerSpectrumAggregator(nlat, nlon, grid)
+        self._gen_aggregator = SphericalPowerSpectrumAggregator(gridded_operations)
+        self._target_aggregator = SphericalPowerSpectrumAggregator(gridded_operations)
         self._report_plot = report_plot
 
     @torch.no_grad()
