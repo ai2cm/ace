@@ -3,21 +3,18 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.spectrum import PairedSphericalPowerSpectrumAggregator
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 
 class SpectrumAggregator:
     def __init__(
         self,
-        nlat: int,
-        nlon: int,
-        grid: str,
+        gridded_operations: GriddedOperations,
         target_time: int = 1,
     ):
         self._wrapped = PairedSphericalPowerSpectrumAggregator(
-            nlat=nlat,
-            nlon=nlon,
-            grid=grid,
+            gridded_operations=gridded_operations,
             report_plot=False,
         )
         self._target_time = target_time
