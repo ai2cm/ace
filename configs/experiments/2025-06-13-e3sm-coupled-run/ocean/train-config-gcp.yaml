@@ -28,7 +28,6 @@ inference:
         file_pattern: 2025-06-12-E3SMv3-coupled-piControl-atmosphere-sfc-only-5daily.zarr
         engine: zarr
     num_data_workers: 8
-    time_buffer: 1
   aggregator:
     log_histograms: false
 logging:
