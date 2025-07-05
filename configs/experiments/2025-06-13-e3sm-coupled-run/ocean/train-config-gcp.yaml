@@ -136,8 +136,8 @@ stepper:
           - so_17
           - so_18
       next_step_forcing_names:
-      - tauuo
-      - tauvo
+      - TAUX
+      - TAUY
       - surface_precipitation_rate
       - surface_upward_longwave_flux
       - surface_upward_shortwave_flux
@@ -146,8 +146,8 @@ stepper:
       - LHFLX
       - SHFLX
       in_names:
-      - tauuo
-      - tauvo
+      - TAUX
+      - TAUY
       - surface_precipitation_rate
       - surface_upward_longwave_flux
       - surface_upward_shortwave_flux
