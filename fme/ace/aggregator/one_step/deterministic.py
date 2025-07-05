@@ -7,8 +7,7 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.coordinates import HorizontalCoordinates
-from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -54,17 +53,16 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
 
     def __init__(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
+        dataset_info: DatasetInfo,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
     ):
         """
         Args:
-            horizontal_coordinates: Horizontal coordinates of the data.
+            dataset_info: Dataset coordinates and metadata.
             save_diagnostics: Whether to save diagnostics.
             output_dir: Directory to write diagnostics to.
             variable_metadata: Metadata for each variable.
@@ -77,9 +75,10 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             raise ValueError("Output directory must be set to save diagnostics.")
         self._output_dir = output_dir
         self._save_diagnostics = save_diagnostics
+        horizontal_coordinates = dataset_info.horizontal_coordinates
         self._coords = horizontal_coordinates.coords
         self._aggregators: dict[str, _Aggregator] = {
-            "mean": MeanAggregator(horizontal_coordinates.gridded_operations),
+            "mean": MeanAggregator(dataset_info.gridded_operations),
         }
         if horizontal_coordinates.area_weights is not None:
             self._aggregators["power_spectrum"] = SpectrumAggregator(
@@ -89,11 +88,11 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             )
         if log_snapshots:
             self._aggregators["snapshot"] = SnapshotAggregator(
-                horizontal_coordinates.dims, variable_metadata
+                horizontal_coordinates.dims, dataset_info.variable_metadata
             )
         if log_mean_maps:
             self._aggregators["mean_map"] = MapAggregator(
-                horizontal_coordinates.dims, variable_metadata
+                horizontal_coordinates.dims, dataset_info.variable_metadata
             )
 
         self._loss_scaling = loss_scaling or {}

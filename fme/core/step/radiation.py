@@ -101,6 +101,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ) -> "SeparateRadiationStep":
         logging.info("Initializing stepper from provided config")
         corrector = dataset_info.vertical_coordinate.build_corrector(
@@ -115,6 +116,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
+            init_weights=init_weights,
         )
 
     def get_loss_normalizer(
@@ -247,6 +249,7 @@ class SeparateRadiationStep(StepABC):
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
+        init_weights: Callable[[list[nn.Module]], None],
     ):
         """
         Args:
@@ -255,6 +258,7 @@ class SeparateRadiationStep(StepABC):
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
+            init_weights: Function to initialize the weights of the step.
         """
         super().__init__()
         self.in_packer = Packer(config.main_in_names)
@@ -284,6 +288,7 @@ class SeparateRadiationStep(StepABC):
         self._config = config
         self._no_optimization = NullOptimization()
 
+        init_weights(self.modules)
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(self.module)
         self.radiation_module = dist.wrap_module(self.radiation_module)

@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime AS base
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime AS base
 
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch

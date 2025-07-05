@@ -33,7 +33,7 @@ from fme.ace.registry.test_hpx import (
     recurrent_block_config,
     up_sampling_block_config,
 )
-from fme.ace.stepper.single_module import SingleModuleStepperConfig
+from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
@@ -57,12 +57,14 @@ from fme.core.generics.trainer import (
 )
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice
@@ -94,6 +96,7 @@ def _get_test_yaml_files(
     save_per_epoch_diagnostics=False,
     log_validation_maps=False,
     skip_inline_inference=False,
+    time_buffer=1,
 ):
     input_time_size = 1
     output_time_size = 1
@@ -208,6 +211,7 @@ def _get_test_yaml_files(
             ),
             batch_size=2,
             num_data_workers=0,
+            time_buffer=time_buffer,
             sample_with_replacement=10,
         ),
         validation_loader=DataLoaderConfig(
@@ -228,28 +232,38 @@ def _get_test_yaml_files(
                 kwargs=dict(T_max=1),
             ),
         ),
-        stepper=SingleModuleStepperConfig(
-            crps_training=crps_training,
-            in_names=in_variable_names,
-            out_names=out_variable_names,
-            normalization=NormalizationConfig(
-                global_means_path=str(global_means_path),
-                global_stds_path=str(global_stds_path),
-            ),
-            residual_normalization=NormalizationConfig(
-                global_means_path=str(global_means_path),
-                global_stds_path=str(global_stds_path),
-            ),
+        stepper=StepperConfig(
             loss=WeightedMappingLossConfig(type="MSE"),
-            builder=ModuleSelector(
-                type=nettype,
-                config=net_config,
+            crps_training=crps_training,
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        crps_training=crps_training,
+                        in_names=in_variable_names,
+                        out_names=out_variable_names,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                global_means_path=str(global_means_path),
+                                global_stds_path=str(global_stds_path),
+                            ),
+                            residual=NormalizationConfig(
+                                global_means_path=str(global_means_path),
+                                global_stds_path=str(global_stds_path),
+                            ),
+                        ),
+                        builder=ModuleSelector(
+                            type=nettype,
+                            config=net_config,
+                        ),
+                        ocean=OceanConfig(
+                            surface_temperature_name=in_variable_names[0],
+                            ocean_fraction_name=mask_name,
+                        ),
+                        corrector=corrector_config,
+                    )
+                ),
             ),
-            ocean=OceanConfig(
-                surface_temperature_name=in_variable_names[0],
-                ocean_fraction_name=mask_name,
-            ),
-            corrector=corrector_config,
         ),
         inference=inline_inference_config,
         n_forward_steps=n_forward_steps,
@@ -330,6 +344,7 @@ def _setup(
     crps_training=False,
     log_validation_maps=False,
     skip_inline_inference=False,
+    time_buffer=1,
 ):
     if not path.exists():
         path.mkdir()
@@ -417,6 +432,7 @@ def _setup(
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
         log_validation_maps=log_validation_maps,
         skip_inline_inference=skip_inline_inference,
+        time_buffer=time_buffer,
     )
     return train_config_filename, inference_config_filename
 
@@ -512,6 +528,12 @@ def test_train_and_inference(
         tmp_path / "results" / "training_checkpoints" / "best_inference_ckpt.tar"
     )
     assert best_checkpoint_path.exists()
+    checkpoint_training_history = torch.load(best_checkpoint_path, weights_only=False)[
+        "stepper"
+    ].get("training_history")
+    assert checkpoint_training_history is not None
+    assert len(checkpoint_training_history) == 1
+    assert "git_sha" in checkpoint_training_history[0].keys()
     assert best_inference_checkpoint_path.exists()
     n_ic_timesteps = 1
     n_forward_steps = 6
@@ -746,6 +768,7 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         save_per_epoch_diagnostics=True,
         log_validation_maps=log_validation_maps,
         skip_inline_inference=True,
+        time_buffer=2,
     )
     with mock_wandb() as wandb:
         train_main(

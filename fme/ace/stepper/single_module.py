@@ -25,13 +25,12 @@ from fme.core.coordinates import (
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.dataset.utils import decode_timestep, encode_timestep
+from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
@@ -54,18 +53,22 @@ from fme.core.tensors import (
     unfold_ensemble_dim,
 )
 from fme.core.timing import GlobalTimer
+from fme.core.training_history import TrainingHistory, TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
+Weights = list[Mapping[str, Any]]
+StepperWeightsAndHistory = tuple[Weights, TrainingHistory]
 
-def _load_weights(path: str) -> list[Mapping[str, Any]]:
+
+def _load_weights_and_history(path: str) -> StepperWeightsAndHistory:
     stepper = load_stepper(path)
-    return_weights: list[Mapping[str, Any]] = []
+    return_weights: Weights = []
     for module in stepper.modules:
         return_weights.append(module.state_dict())
-    return return_weights
+    return return_weights, stepper.training_history
 
 
 @dataclasses.dataclass
@@ -179,23 +182,23 @@ class SingleModuleStepperConfig:
         self.load()
         return dataclasses.asdict(self)
 
-    def get_parameter_initializer(
-        self, load_weights: Callable[[str], list[Mapping[str, Any]]] = _load_weights
-    ) -> ParameterInitializer:
+    def get_parameter_initializer(self) -> ParameterInitializer:
         """
         Get the parameter initializer for this stepper configuration.
         """
-        return self.parameter_init.build(load_weights=load_weights)
+        return self.parameter_init.build(
+            load_weights_and_history=_load_weights_and_history
+        )
 
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-        parameter_initializer: ParameterInitializer | None = None,
+        apply_parameter_init: bool = True,
     ) -> "Stepper":
         """
         Args:
             dataset_info: Information about the training dataset.
-            parameter_initializer: The parameter initializer to use for loading weights.
+            apply_parameter_init: Whether to apply parameter initialization.
         """
         logging.info("Initializing stepper from provided legacy config")
         normalizer = self.normalization.build(self.normalize_names)
@@ -207,14 +210,12 @@ class SingleModuleStepperConfig:
         loss_normalizer = combined_normalization_config.get_loss_normalizer(
             self.normalize_names, residual_scaled_names=self.prognostic_names
         )
-        if parameter_initializer is None:
-            parameter_initializer = ParameterInitializer()
         new_config = self.to_stepper_config(
             normalizer=normalizer, loss_normalizer=loss_normalizer
         )
         return new_config.get_stepper(
             dataset_info=dataset_info,
-            parameter_initializer=parameter_initializer,
+            apply_parameter_init=apply_parameter_init,
         )
 
     def get_ocean(self) -> OceanConfig | None:
@@ -467,12 +468,12 @@ class ExistingStepperConfig:
 
     def get_parameter_initializer(self) -> ParameterInitializer:
         """Get a parameter initializer for this stepper configuration."""
-        return ParameterInitializer()
+        return self._stepper_config.get_parameter_initializer()
 
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-        parameter_initializer: ParameterInitializer | None = None,
+        apply_parameter_init: bool = True,
     ):
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
         return Stepper.from_state(self._load_checkpoint()["stepper"])
@@ -720,16 +721,23 @@ class StepperConfig:
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-        parameter_initializer: ParameterInitializer | None = None,
+        apply_parameter_init: bool = True,
+        training_history: TrainingHistory | None = None,
     ):
         """
         Args:
             dataset_info: Information about the training dataset.
-            parameter_initializer: The parameter initializer to use for loading weights
-                from an external source.
+            apply_parameter_init: Whether to apply parameter initialization.
+            training_history: History of the stepper's training jobs.
         """
         logging.info("Initializing stepper from provided config")
-        step = self.step.get_step(dataset_info)
+        if apply_parameter_init:
+            parameter_initializer = self.get_parameter_initializer()
+        else:
+            parameter_initializer = ParameterInitializer()
+        step = self.step.get_step(
+            dataset_info, init_weights=parameter_initializer.freeze_weights
+        )
         derive_func = dataset_info.vertical_coordinate.build_derive_function(
             dataset_info.timestep
         )
@@ -744,8 +752,6 @@ class StepperConfig:
             output_process_func = dataset_info.mask_provider.build_output_masker()
         except MissingDatasetInfo:
             output_process_func = NullPostProcessFn()
-        if parameter_initializer is None:
-            parameter_initializer = ParameterInitializer()
         return Stepper(
             config=self,
             step=step,
@@ -754,6 +760,7 @@ class StepperConfig:
             output_process_func=output_process_func,
             derive_func=derive_func,
             parameter_initializer=parameter_initializer,
+            training_history=training_history,
         )
 
     @classmethod
@@ -872,7 +879,9 @@ class StepperConfig:
         """
         Get the parameter initializer for this stepper configuration.
         """
-        return self.parameter_init.build(load_weights=_load_weights)
+        return self.parameter_init.build(
+            load_weights_and_history=_load_weights_and_history
+        )
 
 
 class Stepper(
@@ -900,6 +909,7 @@ class Stepper(
         output_process_func: Callable[[TensorMapping], TensorDict],
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         parameter_initializer: ParameterInitializer,
+        training_history: TrainingHistory | None = None,
     ):
         """
         Args:
@@ -914,6 +924,7 @@ class Stepper(
                 specific regions.
             parameter_initializer: The parameter initializer to use for loading weights
                 from an external source.
+            training_history: History of the stepper's training jobs.
         """
         self._config = config
         self._step_obj = step
@@ -948,6 +959,13 @@ class Stepper(
             self._parameter_initializer.get_l2_sp_tuning_regularizer(
                 step.modules,
             )
+        )
+
+        self._training_history = (
+            training_history if training_history is not None else TrainingHistory()
+        )
+        self._append_training_history_from(
+            base_training_history=self._parameter_initializer.training_history
         )
 
         _1: PredictFunction[  # for type checking
@@ -1002,6 +1020,24 @@ class Stepper(
         return self._dataset_info.variable_metadata
 
     @property
+    def training_history(self) -> TrainingHistory:
+        return self._training_history
+
+    def _append_training_history_from(
+        self, base_training_history: TrainingHistory | None
+    ):
+        """
+        When the stepper receives weights from a base stepper via parameter
+        initialization, this helper is used to extend its training history to include
+        the training history of the base stepper.
+
+        Args:
+            base_training_history: The training history from a base stepper to append.
+        """
+        if base_training_history is not None:
+            self._training_history.extend(base_training_history)
+
+    @property
     def effective_loss_scaling(self) -> TensorDict:
         """
         Effective loss scalings used to normalize outputs before computing loss.
@@ -1022,7 +1058,7 @@ class Stepper(
         state = self._step_obj.get_state()
         new_state = self._config.replace_multi_call(multi_call, state)
         new_stepper: Stepper = self._config.get_stepper(
-            dataset_info=self._dataset_info,
+            dataset_info=self._dataset_info, apply_parameter_init=False
         )
         new_stepper._step_obj.load_state(new_state)
         self._step_obj = new_stepper._step_obj
@@ -1037,11 +1073,12 @@ class Stepper(
         self._config.replace_ocean(ocean)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
+            apply_parameter_init=False,
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
 
-    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
+    def get_base_weights(self) -> Weights | None:
         """
         Get the base weights of the stepper.
 
@@ -1402,6 +1439,15 @@ class Stepper(
             optimization.accumulate_loss(step_loss)
         return output_list
 
+    def update_training_history(self, training_job: TrainingJob) -> None:
+        """
+        Update the stepper's history of training jobs.
+
+        Args:
+            training_job: The training job to add to the history.
+        """
+        self._training_history.append(training_job)
+
     def get_state(self):
         """
         Returns:
@@ -1411,6 +1457,7 @@ class Stepper(
             "config": self._config.as_loaded_dict(),
             "dataset_info": self._dataset_info.to_state(),
             "step": self._step_obj.get_state(),
+            "training_history": self._training_history.get_state(),
         }
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -1435,24 +1482,28 @@ class Stepper(
         """
         try:
             legacy_config = SingleModuleStepperConfig.from_state(state["config"])
-            encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
-            timestep = decode_timestep(encoded_timestep)
+            dataset_state = {}
+            dataset_state["timestep"] = state.get(
+                "encoded_timestep", DEFAULT_ENCODED_TIMESTEP
+            )
             if "sigma_coordinates" in state:
                 # for backwards compatibility with old checkpoints
-                state["vertical_coordinate"] = state["sigma_coordinates"]
-            vertical_coordinate = dacite.from_dict(
-                data_class=SerializableVerticalCoordinate,
-                data={"vertical_coordinate": state["vertical_coordinate"]},
-                config=dacite.Config(strict=True),
-            ).vertical_coordinate
+                dataset_state["vertical_coordinate"] = state["sigma_coordinates"]
+            else:
+                dataset_state["vertical_coordinate"] = state["vertical_coordinate"]
 
             if "area" in state:
                 # backwards-compatibility, these older checkpoints are always lat-lon
-                gridded_operations: GriddedOperations = LatLonOperations(state["area"])
+                dataset_state["gridded_operations"] = {
+                    "type": "LatLonOperations",
+                    "state": {"area_weights": state["area"]},
+                }
             else:
-                gridded_operations = GriddedOperations.from_state(
-                    state["gridded_operations"]
-                )
+                dataset_state["gridded_operations"] = state["gridded_operations"]
+
+            if "img_shape" in state:
+                dataset_state["img_shape"] = state["img_shape"]
+
             normalizer = StandardNormalizer.from_state(
                 state.get("normalizer", state.get("normalization"))
             )
@@ -1468,13 +1519,7 @@ class Stepper(
             config = legacy_config.to_stepper_config(
                 normalizer=normalizer, loss_normalizer=loss_normalizer
             )
-            dataset_info = DatasetInfo(
-                img_shape=state["img_shape"],
-                timestep=timestep,
-                vertical_coordinate=vertical_coordinate,
-                mask_provider=None,
-                gridded_operations=gridded_operations,
-            )
+            dataset_info = DatasetInfo.from_state(dataset_state)
             state["step"] = {
                 # SingleModuleStep inside MultiCallStep
                 "wrapped_step": {"module": state["module"]}
@@ -1482,7 +1527,13 @@ class Stepper(
         except dacite.exceptions.DaciteError:
             config = StepperConfig.from_stepper_state(state)
             dataset_info = DatasetInfo.from_state(state["dataset_info"])
-        stepper = config.get_stepper(dataset_info=dataset_info)
+        training_history = TrainingHistory.from_state(state.get("training_history", []))
+        stepper = config.get_stepper(
+            dataset_info=dataset_info,
+            training_history=training_history,
+            # don't need to initialize weights, we're about to load_state
+            apply_parameter_init=False,
+        )
         stepper.load_state(state)
         return stepper
 

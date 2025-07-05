@@ -284,8 +284,9 @@ def run_inference_from_config(config: InferenceConfig):
             stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
         except IncompatibleDatasetInfo as err:
             raise IncompatibleDatasetInfo(
-                "Inference dataset is not compatible with dataset "
-                "used for stepper training"
+                "Inference dataset is not compatible with dataset used for stepper "
+                "training. Set allow_incompatible_dataset to True to ignore this "
+                f"error. The incompatiblity found was: {str(err)}"
             ) from err
 
     variable_metadata = resolve_variable_metadata(
@@ -293,11 +294,10 @@ def run_inference_from_config(config: InferenceConfig):
         stepper_metadata=stepper.training_variable_metadata,
         stepper_all_names=stepper_config.all_names,
     )
+    dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
     aggregator = config.aggregator.build(
-        horizontal_coordinates=data.horizontal_coordinates,
+        dataset_info=dataset_info,
         n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
-        timestep=data.timestep,
-        variable_metadata=variable_metadata,
         output_dir=config.experiment_dir,
     )
 

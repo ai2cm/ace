@@ -145,7 +145,7 @@ def test_evaluator_inference(
     )
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=mock_data.vcoord,
-        img_shape=mock_data.img_shape,
+        hcoord=mock_data.hcoord,
         ocean_timestep=mock_data.ocean.timestep,
         atmos_timestep=mock_data.atmosphere.timestep,
         ocean_mask_provider=mock_data.ocean.mask_provider,

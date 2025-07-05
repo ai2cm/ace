@@ -22,7 +22,11 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator, GenerationAggregator
-from fme.downscaling.datasets import DataLoaderConfig, GriddedData, PairedBatchData
+from fme.downscaling.datasets import (
+    PairedBatchData,
+    PairedDataLoaderConfig,
+    PairedGriddedData,
+)
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -90,8 +94,8 @@ class Trainer:
         self,
         model: Model | DiffusionModel,
         optimization: Optimization,
-        train_data: GriddedData,
-        validation_data: GriddedData,
+        train_data: PairedGriddedData,
+        validation_data: PairedGriddedData,
         config: "TrainerConfig",
     ) -> None:
         self.model = model
@@ -140,7 +144,7 @@ class Trainer:
             )
 
     def _get_batch_generator(
-        self, data: GriddedData, random_offset: bool, shuffle: bool
+        self, data: PairedGriddedData, random_offset: bool, shuffle: bool
     ):
         if self.patch_data:
             batch_generator = paired_patch_generator_from_loader(
@@ -359,8 +363,8 @@ class Trainer:
 class TrainerConfig:
     model: DownscalingModelConfig | DiffusionModelConfig
     optimization: OptimizationConfig
-    train_data: DataLoaderConfig
-    validation_data: DataLoaderConfig
+    train_data: PairedDataLoaderConfig
+    validation_data: PairedDataLoaderConfig
     max_epochs: int
     experiment_dir: str
     save_checkpoints: bool
@@ -392,10 +396,10 @@ class TrainerConfig:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
-        train_data: GriddedData = self.train_data.build(
+        train_data: PairedGriddedData = self.train_data.build(
             train=True, requirements=self.model.data_requirements
         )
-        validation_data: GriddedData = self.validation_data.build(
+        validation_data: PairedGriddedData = self.validation_data.build(
             train=False, requirements=self.model.data_requirements
         )
         if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:

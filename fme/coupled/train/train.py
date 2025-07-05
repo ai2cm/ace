@@ -1,8 +1,7 @@
 import dataclasses
 import logging
 import os
-from collections.abc import Callable, Mapping, Sequence
-from datetime import timedelta
+from collections.abc import Callable, Sequence
 
 import dacite
 import torch
@@ -11,7 +10,6 @@ import xarray as xr
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer
@@ -25,7 +23,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from fme.coupled.data_loading.data_typing import CoupledHorizontalCoordinates
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
 
@@ -53,9 +51,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     )
     aggregator_builder = CoupledAggregatorBuilder(
         inference_config=config.inference_aggregator,
-        horizontal_coordinates=train_data.horizontal_coordinates,
-        ocean_timestep=builder.ocean_timestep,
-        atmosphere_timestep=builder.atmosphere_timestep,
+        dataset_info=train_data.dataset_info,
         initial_inference_times=initial_inference_times,
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
@@ -63,7 +59,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
         ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
         atmosphere_loss_scaling=stepper.atmosphere.effective_loss_scaling,
-        variable_metadata=train_data.variable_metadata,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
@@ -86,9 +81,7 @@ class CoupledAggregatorBuilder(
     def __init__(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
-        horizontal_coordinates: CoupledHorizontalCoordinates,
-        ocean_timestep: timedelta,
-        atmosphere_timestep: timedelta,
+        dataset_info: CoupledDatasetInfo,
         initial_inference_times: xr.DataArray,
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
@@ -97,18 +90,14 @@ class CoupledAggregatorBuilder(
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         ocean_loss_scaling: TensorMapping | None = None,
         atmosphere_loss_scaling: TensorMapping | None = None,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
-        self.horizontal_coordinates = horizontal_coordinates
-        self.ocean_timestep = ocean_timestep
-        self.atmosphere_timestep = atmosphere_timestep
+        self.dataset_info = dataset_info
         self.initial_inference_times = initial_inference_times
         self.n_timesteps_ocean = n_timesteps_ocean
         self.n_timesteps_atmosphere = n_timesteps_atmosphere
         self.output_dir = output_dir
-        self.variable_metadata = variable_metadata
         self.ocean_normalize = ocean_normalize
         self.atmosphere_normalize = atmosphere_normalize
         self.ocean_loss_scaling = ocean_loss_scaling
@@ -120,8 +109,7 @@ class CoupledAggregatorBuilder(
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
-            horizontal_coordinates=self.horizontal_coordinates,
-            variable_metadata=self.variable_metadata,
+            dataset_info=self.dataset_info,
             ocean_loss_scaling=self.ocean_loss_scaling,
             atmosphere_loss_scaling=self.atmosphere_loss_scaling,
             save_diagnostics=self.save_per_epoch_diagnostics,
@@ -130,15 +118,12 @@ class CoupledAggregatorBuilder(
 
     def get_inference_aggregator(self):
         return self.inference_config.build(
-            horizontal_coordinates=self.horizontal_coordinates,
-            ocean_timestep=self.ocean_timestep,
-            atmosphere_timestep=self.atmosphere_timestep,
+            dataset_info=self.dataset_info,
             n_timesteps_ocean=self.n_timesteps_ocean,
             n_timesteps_atmosphere=self.n_timesteps_atmosphere,
             initial_time=self.initial_inference_times,
             ocean_normalize=self.ocean_normalize,
             atmosphere_normalize=self.atmosphere_normalize,
-            variable_metadata=self.variable_metadata,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "inference"),
         )

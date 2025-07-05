@@ -373,7 +373,7 @@ class XarrayDataset(torch.utils.data.Dataset):
             self._horizontal_coordinates,
             self._static_derived_data,
             _loaded_horizontal_dims,
-        ) = self.configure_horizontal_coordinates(first_dataset, self._mask_provider)
+        ) = self.configure_horizontal_coordinates(first_dataset)
         (
             self._time_dependent_names,
             self._time_invariant_names,
@@ -547,15 +547,13 @@ class XarrayDataset(torch.utils.data.Dataset):
         )
 
     def configure_horizontal_coordinates(
-        self,
-        first_dataset,
-        mask_provider: MaskProvider,
+        self, first_dataset
     ) -> tuple[HorizontalCoordinates, StaticDerivedData, list[str]]:
         horizontal_coordinates: HorizontalCoordinates
         static_derived_data: StaticDerivedData
 
         horizontal_coordinates, dim_names = get_horizontal_coordinates(
-            first_dataset, self.spatial_dimensions, self.dtype, mask_provider
+            first_dataset, self.spatial_dimensions, self.dtype
         )
         static_derived_data = StaticDerivedData(horizontal_coordinates)
 

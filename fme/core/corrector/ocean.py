@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Protocol
 
 import dacite
 import torch
@@ -10,7 +10,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.masking import StaticMaskingConfig
-from fme.core.ocean_data import HasOceanDepthIntegral
+from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -59,6 +59,7 @@ class OceanCorrectorConfig:
     # compatibility with legacy SingleModuleStepperConfig checkpoints. Please
     # use SingleModuleStepConfig.input_masking instead.
     masking: StaticMaskingConfig | None = None
+    ocean_heat_content_correction: bool = False
 
     def __post_init__(self):
         if self.masking is not None and self.masking.mask_value != 0:
@@ -106,7 +107,71 @@ class OceanCorrector(CorrectorABC):
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.sea_ice_fraction_correction is not None:
             gen_data = self._config.sea_ice_fraction_correction(gen_data, input_data)
+        if self._config.ocean_heat_content_correction:
+            if self._vertical_coordinate is None:
+                raise ValueError(
+                    "Ocean heat content correction is turned on, but no vertical "
+                    "coordinate is available."
+                )
+            gen_data = _force_conserve_ocean_heat_content(
+                input_data,
+                gen_data,
+                self._gridded_operations.area_weighted_sum,
+                self._vertical_coordinate,
+                self._timestep.total_seconds(),
+            )
         if self._masking is not None:
             # NOTE: masking should be applied last to avoid overwriting
             gen_data = self._masking(gen_data)
         return dict(gen_data)
+
+
+class AreaWeightedSum(Protocol):
+    def __call__(
+        self, data: torch.Tensor, keepdim: bool, name: str | None = None
+    ) -> torch.Tensor: ...
+
+
+def _force_conserve_ocean_heat_content(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    area_weighted_sum: AreaWeightedSum,
+    vertical_coordinate: HasOceanDepthIntegral,
+    timestep_seconds: float,
+) -> TensorDict:
+    input = OceanData(input_data, vertical_coordinate)
+    if input.ocean_heat_content is None:
+        raise ValueError(
+            "ocean_heat_content is required to force ocean heat content conservation"
+        )
+    gen = OceanData(gen_data, vertical_coordinate)
+    global_gen_ocean_heat_content = area_weighted_sum(
+        gen.ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    global_input_ocean_heat_content = area_weighted_sum(
+        input.ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    expected_change_ocean_heat_content = area_weighted_sum(
+        (input.net_downward_surface_heat_flux + input.geothermal_heat_flux)
+        * input.sea_surface_fraction
+        * timestep_seconds,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    heat_content_correction_ratio = (
+        global_input_ocean_heat_content + expected_change_ocean_heat_content
+    ) / (global_gen_ocean_heat_content)
+
+    # apply same temperature correction to all vertical layers
+    n_levels = gen.sea_water_potential_temperature.shape[-1]
+    for k in range(n_levels):
+        name = f"thetao_{k}"
+        gen.data[name] = gen.data[name] * torch.nan_to_num(
+            heat_content_correction_ratio, nan=1.0
+        )
+
+    return gen.data

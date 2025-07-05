@@ -1,11 +1,13 @@
 import dataclasses
 import datetime
+from collections.abc import Callable
+from unittest.mock import MagicMock
 
 import torch
+from torch import nn
 
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean import OceanConfig
 
 from .step import StepABC, StepConfigABC, StepSelector
@@ -16,9 +18,11 @@ class MockStep(StepABC):
         self,
         config: "MockStepConfig",
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ):
         self.dataset_info = dataset_info
         self._config = config
+        self._init_weights = init_weights
 
     @property
     def config(self) -> "MockStepConfig":
@@ -59,8 +63,10 @@ class MockStepConfig(StepConfigABC):
     in_names: list[str] = dataclasses.field(default_factory=list)
     out_names: list[str] = dataclasses.field(default_factory=list)
 
-    def get_step(self, dataset_info: DatasetInfo):
-        return MockStep(self, dataset_info)
+    def get_step(
+        self, dataset_info: DatasetInfo, init_weights: Callable[[list[nn.Module]], None]
+    ):
+        return MockStep(self, dataset_info, init_weights)
 
     @property
     def diagnostic_names(self) -> list[str]:
@@ -113,14 +119,17 @@ def test_register():
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    gridded_operations = LatLonOperations(area_weights=torch.ones(img_shape))
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(img_shape[0]), lon=torch.zeros(img_shape[1])
+    )
     timestep = datetime.timedelta(hours=6)
     dataset_info = DatasetInfo(
-        img_shape=img_shape,
-        gridded_operations=gridded_operations,
+        horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=timestep,
     )
-    step = selector.get_step(dataset_info)
+    init_weights = MagicMock()
+    step = selector.get_step(dataset_info, init_weights)
     assert isinstance(step, MockStep)
     assert step.dataset_info == dataset_info
+    assert step._init_weights == init_weights

@@ -158,6 +158,7 @@ class SingleModuleStepConfig(StepConfigABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ) -> "SingleModuleStep":
         logging.info("Initializing stepper from provided config")
         corrector = dataset_info.vertical_coordinate.build_corrector(
@@ -172,6 +173,7 @@ class SingleModuleStepConfig(StepConfigABC):
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
+            init_weights=init_weights,
         )
 
     def load(self):
@@ -193,6 +195,7 @@ class SingleModuleStep(StepABC):
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
+        init_weights: Callable[[list[nn.Module]], None],
     ):
         """
         Args:
@@ -201,6 +204,7 @@ class SingleModuleStep(StepABC):
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
+            init_weights: Function to initialize the weights of the module.
         """
         super().__init__()
         n_in_channels = len(config.in_names)
@@ -219,6 +223,7 @@ class SingleModuleStep(StepABC):
             n_out_channels=n_out_channels,
             img_shape=img_shape,
         ).to(get_device())
+        init_weights([self.module])
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()

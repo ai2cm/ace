@@ -173,13 +173,11 @@ class TrainBuilders:
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
     ) -> DiffusionStepper:
-        parameter_initializer = self.config.stepper.get_parameter_initializer()
         return self.config.stepper.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
-            parameter_initializer=parameter_initializer,
         )
 
     def get_ema(self, modules) -> EMATracker:

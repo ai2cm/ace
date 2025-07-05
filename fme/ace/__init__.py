@@ -1,5 +1,7 @@
 import sys
 
+from fme.ace.aggregator.one_step import OneStepAggregatorConfig
+from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     InferenceInitialConditionIndices,
@@ -42,9 +44,14 @@ from fme.ace.stepper.parameter_init import (
     FrozenParameterConfig,
     ParameterInitializationConfig,
 )
+from fme.ace.stepper.single_module import StepperConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.config import (
+    ConcatDatasetConfig,
+    FillNaNsConfig,
+    MergeDatasetConfig,
+    MergeNoConcatDatasetConfig,
     OverwriteConfig,
     RepeatedInterval,
     TimeSlice,

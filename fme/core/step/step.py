@@ -24,8 +24,17 @@ class StepConfigABC(abc.ABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ) -> "StepABC":
         """
+        Args:
+            dataset_info: Information about the training dataset.
+            init_weights: Function to initialize the weights of the step before
+                wrapping in DistributedDataParallel. This is particularly useful
+                when freezing parameters, as the DistributedDataParallel will
+                otherwise expect frozen weights to have gradients, and will
+                raise an exception.
+
         Returns:
             The state of the stepper.
         """
@@ -131,8 +140,21 @@ class StepSelector(StepConfigABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None] = lambda x: None,
     ) -> "StepABC":
-        return self._step_config_instance.get_step(dataset_info)
+        """
+        Args:
+            dataset_info: Information about the training dataset.
+            init_weights: Function to initialize the weights of the step before
+                wrapping in DistributedDataParallel. This is particularly useful
+                when freezing parameters, as the DistributedDataParallel will
+                otherwise expect frozen weights to have gradients, and will
+                raise an exception.
+
+        Returns:
+            The state of the stepper.
+        """
+        return self._step_config_instance.get_step(dataset_info, init_weights)
 
     @classmethod
     def get_available_types(cls) -> set[str]:

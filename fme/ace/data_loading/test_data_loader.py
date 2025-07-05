@@ -390,7 +390,6 @@ def test_inference_data_loader(tmp_path):
     assert batch_data.time.sizes["sample"] == batch_size
     assert batch_data.time.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.time.dt.calendar == "proleptic_gregorian"
-    assert data._n_batches == 2
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
     initial_condition = data.initial_condition.as_batch_data()
@@ -554,7 +553,9 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
         window_requirements=window_requirements,
         initial_condition=PrognosticState(initial_condition),
     )
-    assert data._n_samples == math.ceil(total_forward_steps / forward_steps_in_memory)
+    assert len(data._loader.dataset) == math.ceil(  # type: ignore
+        total_forward_steps / forward_steps_in_memory
+    )
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
@@ -837,3 +838,124 @@ def test_data_loader_maintains_backward_concat_compatibility(recwarn):
     assert isinstance(data_loader.dataset, ConcatDatasetConfig)
     warning = recwarn.pop(DeprecationWarning)
     assert "Dataset list format is deprecated" in str(warning.message)
+
+
+@pytest.mark.parametrize(
+    (
+        "shuffle",
+        "steps_on_disk",
+        "n_timesteps_requirement",
+        "time_buffer",
+        "expected_start_indices",
+    ),
+    (
+        pytest.param(
+            False,
+            7,
+            2,
+            0,
+            list(range(0, 6)),
+            id="time_buffer=0",
+        ),
+        pytest.param(
+            False,
+            7,
+            2,
+            2,
+            list(range(0, 6)),
+            id="time_buffer=2",
+        ),
+        pytest.param(
+            False,
+            10,
+            2,
+            2,
+            list(range(0, 9)),
+            id="time_buffer=2, steps_on_disk=10",
+        ),
+        pytest.param(
+            False,
+            6,
+            2,
+            2,
+            list(range(0, 3)),
+            id=(
+                "time_buffer=2, steps_on_disk=6 "
+                "(lose some samples due to dropping last 'preloaded' batch)"
+            ),
+        ),
+        pytest.param(
+            False,
+            8,
+            3,
+            2,
+            list(range(0, 6)),
+            id="time_buffer=2, steps_on_disk=10, n_timesteps_requirement=3",
+        ),
+        pytest.param(
+            False,
+            10,
+            3,
+            2,
+            list(range(0, 6)),
+            id=(
+                "time_buffer=2, steps_on_disk=10, n_timesteps_requirement=3 "
+                "(lose some samples due to dropping last 'preloaded' batch)"
+            ),
+        ),
+        pytest.param(
+            True,
+            13,
+            2,
+            2,
+            list(range(0, 12)),
+            id="time_buffer=2, shuffle=True",
+        ),
+    ),
+)
+def test_time_buffer(
+    tmp_path,
+    shuffle,
+    steps_on_disk,
+    n_timesteps_requirement,
+    time_buffer,
+    expected_start_indices,
+):
+    _create_dataset_on_disk(tmp_path, n_times=steps_on_disk)
+    dataset_times = xr.open_dataset(
+        os.path.join(tmp_path, "data.nc"),
+        decode_times=xr.coders.CFDatetimeCoder(use_cftime=True),
+    )["time"].values
+    window_size = time_buffer + 1
+    i_window_starts = [
+        i
+        for i in range(0, len(dataset_times), window_size)
+        if i + window_size <= len(dataset_times) - n_timesteps_requirement + 1
+    ]
+    dataset_window_times = [dataset_times[i : i + window_size] for i in i_window_starts]
+    config = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        batch_size=1,
+        num_data_workers=0,
+        time_buffer=time_buffer,
+    )
+    requirements = DataRequirements(["foo"], n_timesteps_requirement)
+    data = get_data_loader(config, shuffle, requirements)
+    assert len(data.loader) == len(expected_start_indices)
+    start_times = []
+    for batch in data.loader:
+        start_times.append(batch.time[0, 0].item())
+        assert batch.n_timesteps == n_timesteps_requirement
+    if shuffle:
+        assert set(start_times) == set(dataset_times[expected_start_indices])
+    else:
+        assert start_times == list(dataset_times[expected_start_indices])
+    for i_window_start in i_window_starts:
+        # confirm that a "window's worth" of data is loaded consecutively;
+        # with shuffling we know that it will match one window, but not which one
+        loaded_times = start_times[i_window_start : i_window_start + window_size]
+        window_matches = [
+            set(loaded_times) == set(window_times)
+            for window_times in dataset_window_times
+        ]
+        assert sum(window_matches) == 1

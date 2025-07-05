@@ -13,6 +13,7 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
@@ -81,7 +82,6 @@ OCEAN_STEPPER_CONFIG = SingleModuleStepperConfig(
 class CoupledDatasetInfoBuilder:
     vcoord: CoupledVerticalCoordinate
     hcoord: CoupledHorizontalCoordinates | None = None
-    img_shape: tuple[int, int] = (N_LAT, N_LON)
     ocean_timestep: datetime.timedelta = OCEAN_TIMESTEP
     atmos_timestep: datetime.timedelta = ATMOS_TIMESTEP
     ocean_mask_provider: MaskProvider = dataclasses.field(
@@ -93,19 +93,11 @@ class CoupledDatasetInfoBuilder:
 
     def __post_init__(self):
         if self.hcoord is None:
-            lat = torch.arange(self.img_shape[0])
-            lon = torch.arange(self.img_shape[1])
+            lat = torch.arange(N_LAT)
+            lon = torch.arange(N_LON)
             self.hcoord = CoupledHorizontalCoordinates(
-                ocean=LatLonCoordinates(
-                    lon=lon,
-                    lat=lat,
-                    mask_provider=self.ocean_mask_provider,
-                ),
-                atmosphere=LatLonCoordinates(
-                    lon=lon,
-                    lat=lat,
-                    mask_provider=self.atmos_mask_provider,
-                ),
+                ocean=LatLonCoordinates(lon=lon, lat=lat),
+                atmosphere=LatLonCoordinates(lon=lon, lat=lat),
             )
 
     @property
@@ -113,15 +105,13 @@ class CoupledDatasetInfoBuilder:
         assert self.hcoord is not None
         return CoupledDatasetInfo(
             ocean=DatasetInfo(
-                img_shape=self.img_shape,
-                gridded_operations=self.hcoord.ocean.gridded_operations,
+                horizontal_coordinates=self.hcoord.ocean,
                 vertical_coordinate=self.vcoord.ocean,
                 mask_provider=self.ocean_mask_provider,
                 timestep=self.ocean_timestep,
             ),
             atmosphere=DatasetInfo(
-                img_shape=self.img_shape,
-                gridded_operations=self.hcoord.atmosphere.gridded_operations,
+                horizontal_coordinates=self.hcoord.atmosphere,
                 vertical_coordinate=self.vcoord.atmosphere,
                 mask_provider=self.atmos_mask_provider,
                 timestep=self.atmos_timestep,
@@ -455,6 +445,7 @@ SphericalData = namedtuple(
     "SphericalData",
     [
         "data",
+        "horizontal_coord",
         "vertical_coord",
     ],
 )
@@ -468,6 +459,8 @@ def get_data(
         data_dict[name] = torch.rand(
             n_samples, n_time, N_LAT, N_LON, device=fme.get_device()
         )
+    lats = torch.linspace(-89.5, 89.5, N_LAT)
+    horizontal_coords = LatLonCoordinates(lat=lats, lon=torch.linspace(0, 360, N_LON))
     vertical_coord: VerticalCoordinate
     if realm == "atmosphere":
         ak, bk = torch.arange(NZ), torch.arange(NZ)
@@ -483,7 +476,7 @@ def get_data(
             dims=["sample", "time"],
         ),
     )
-    return SphericalData(data, vertical_coord)
+    return SphericalData(data, horizontal_coords, vertical_coord)
 
 
 def get_coupled_data(
@@ -502,6 +495,9 @@ def get_coupled_data(
     assert nz == NZ, f"expected 7 interfaces in mock data vertical coord but got {nz}"
     return SphericalData(
         data,
+        CoupledHorizontalCoordinates(
+            ocean_data.horizontal_coord, atmos_data.horizontal_coord
+        ),
         CoupledVerticalCoordinate(
             ocean=ocean_data.vertical_coord, atmosphere=atmos_data.vertical_coord
         ),
@@ -533,7 +529,13 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    ocean_parameter_init: ParameterInitializationConfig | None = None,
+    atmosphere_parameter_init: ParameterInitializationConfig | None = None,
 ):
+    if ocean_parameter_init is None:
+        ocean_parameter_init = ParameterInitializationConfig()
+    if atmosphere_parameter_init is None:
+        atmosphere_parameter_init = ParameterInitializationConfig()
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
     # ocean fraction forcing variable
@@ -570,6 +572,7 @@ def get_stepper_config(
                     surface_temperature_name=sfc_temp_name_in_atmosphere_data,
                     ocean_fraction_name=ocean_fraction_name,
                 ),
+                parameter_init=atmosphere_parameter_init,
             ),
         ),
         ocean=ComponentConfig(
@@ -585,6 +588,7 @@ def get_stepper_config(
                 ),
                 loss=WeightedMappingLossConfig(type="MSE"),
                 corrector=CorrectorSelector("ocean_corrector", {}),
+                parameter_init=ocean_parameter_init,
             ),
         ),
         sst_name=sst_name_in_ocean_data,

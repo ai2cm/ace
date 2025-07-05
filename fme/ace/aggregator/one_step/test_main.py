@@ -6,8 +6,14 @@ import xarray as xr
 from fme.ace.aggregator.one_step import OneStepAggregator
 from fme.ace.stepper import TrainOutput
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.typing_ import EnsembleTensorDict
+
+
+def get_ds_info(nx: int, ny: int) -> DatasetInfo:
+    coords = LatLonCoordinates(lon=torch.arange(nx), lat=torch.arange(ny))
+    return DatasetInfo(horizontal_coordinates=coords)
 
 
 def test_labels_exist():
@@ -16,12 +22,8 @@ def test_labels_exist():
     n_time = 3
     nx, ny = 2, 2
     loss = 1.0
-    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
-    # keep area weights ones for simplicity
-    lat_lon_coordinates._area_weights = torch.ones(nx, ny)
-    agg = OneStepAggregator(
-        lat_lon_coordinates.to(device=get_device()), save_diagnostics=False
-    )
+    ds_info = get_ds_info(nx, ny)
+    agg = OneStepAggregator(ds_info, save_diagnostics=False)
     target_data = EnsembleTensorDict(
         {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())},
     )
@@ -65,13 +67,8 @@ def test_aggregator_raises_on_no_data():
     Basic test the aggregator combines loss correctly
     with multiple batches and no distributed training.
     """
-    nx, ny = 2, 2
-    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
-    # keep area weights ones for simplicity
-    lat_lon_coordinates._area_weights = torch.ones(nx, ny)
-    agg = OneStepAggregator(
-        lat_lon_coordinates.to(device=get_device()), save_diagnostics=False
-    )
+    ds_info = get_ds_info(2, 2)
+    agg = OneStepAggregator(ds_info, save_diagnostics=False)
     with pytest.raises(ValueError) as excinfo:
         agg.record_batch(
             batch=TrainOutput(
@@ -91,10 +88,8 @@ def test_aggregator_raises_on_no_data():
 )
 def test_flush_diagnostics(tmpdir, epoch):
     nx, ny, batch_size, n_ensemble, n_time = 3, 3, 10, 2, 3
-    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
-    agg = OneStepAggregator(
-        lat_lon_coordinates.to(device=get_device()), output_dir=(tmpdir / "val")
-    )
+    ds_info = get_ds_info(nx, ny)
+    agg = OneStepAggregator(ds_info, output_dir=(tmpdir / "val"))
     target_data = EnsembleTensorDict(
         {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())}
     )
@@ -127,8 +122,8 @@ def test_flush_diagnostics(tmpdir, epoch):
 
 
 def test_agg_raises_without_output_dir():
-    lat_lon_coordinates = LatLonCoordinates(torch.arange(2), torch.arange(2))
+    ds_info = get_ds_info(nx=2, ny=2)
     with pytest.raises(
         ValueError, match="Output directory must be set to save diagnostics"
     ):
-        OneStepAggregator(lat_lon_coordinates, save_diagnostics=True, output_dir=None)
+        OneStepAggregator(ds_info, save_diagnostics=True, output_dir=None)

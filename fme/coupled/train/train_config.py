@@ -208,10 +208,7 @@ class TrainBuilders:
     def ocean_timestep(self) -> datetime.timedelta:
         return self.config.stepper.ocean_timestep
 
-    def get_stepper(
-        self,
-        dataset_info: CoupledDatasetInfo,
-    ) -> CoupledStepper:
+    def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledStepper:
         return self.config.stepper.get_stepper(dataset_info)
 
     def get_ema(self, modules) -> EMATracker:

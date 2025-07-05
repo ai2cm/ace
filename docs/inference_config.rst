@@ -11,30 +11,37 @@ The example assumes you are running in a directory structure like:
 ::
 
    .
-   ├── ace_ckpt.tar
-   ├── climSST
-   │   ├── forcing_2021.zarr
-   │   ├── ic_2021-01-01.zarr
-   │   └── ic_2021.zarr
+   ├── ace2_era5_ckpt.tar
+   ├── initial_conditions
+   │   ├── ic_1940.nc
+   │   ├── ic_1950.nc
+   │   ├── ...
+   │   └── ic_2020.nc
+   ├── forcing_data
+   │   ├── forcing_1940.nc
+   │   ├── forcing_1941.nc
+   │   ├── ...
+   │   └── forcing_1989.nc
    └── inference-config.yaml
 
-that includes a model checkpoint (``ace_ckpt.tar``), forcing data (``forcing_2021.zarr``), and an initial condition (e.g., ``ic_2021-01-01.zarr``).  You can find the forcing and initial condition data in the `Zenodo repository`_.
+that includes a model checkpoint (``ace2_era5_ckpt.tar``), forcing data (e.g., ``forcing_1940.nc``), and initial conditions (e.g., ``ic_1940.nc``).
+You can find the checkpoint and forcing and initial condition data in the `ACE2-ERA5 Hugging Face page`_.
 
 The specified initial condition file should contain a time dimension of at least length 1, but can also
 contain multiple times. If multiple times are present and ``start_indices`` is not specified in the
 :class:`fme.ace.InitialConditionConfig` configuration, the inference will run an ensemble using all times
-in the initial condition file.  The ``ic_2021.zarr`` file is an example of a file with multiple times, containing
-initial conditions for each month of 2021.  For examples of selecting specific initial
+in the initial condition file.  The ``ic_1940.nc`` file is an example of a file with multiple times, containing
+initial conditions for each month of 1940.  For examples of selecting specific initial
 conditions, see :ref:`initial-condition-examples`.
 
-While Zarr files are specified in the example, netCDFs are also compatible. E.g.,
-specifying the parent folder with the netCDF files as the ``path`` setting ``engine`` to ``netcdf4``
-in the dataset configuration.  See :class:`fme.ace.XarrayDataConfig` for an example.
+While netCDFs files are specified in the example, zarr stores are also compatible, e.g.,
+specifying the parent folder containing the zarr store directory as the ``path``, setting ``engine`` to "zarr", and setting ``file_pattern`` to "<zarr_store_name>.zarr"
+in the dataset configuration.  See :class:`fme.ace.XarrayDataConfig` for more information.
 
 Example YAML Configuration
 ---------------------------
 
-.. _Zenodo repository: https://zenodo.org/records/14606905
+.. _ACE2-ERA5 Hugging Face page: https://huggingface.co/allenai/ACE2-ERA5
 
 .. literalinclude:: inference-config.yaml
    :language: yaml
@@ -57,9 +64,9 @@ Example YAML Configuration
    )
    # these paths are used in the documentation on this page
    # if they change then update the docs!
-   assert config.checkpoint_path == "ace_ckpt.tar"
-   assert config.initial_condition.path == "climSST/ic_2021.zarr"
-   assert config.forcing_loader.dataset.data_path == "climSST"
+   assert config.checkpoint_path == "ace2_era5_ckpt.tar"
+   assert config.initial_condition.path == "initial_conditions/ic_1940.nc"
+   assert config.forcing_loader.dataset.data_path == "forcing_data"
    print("Loaded successfully")
 
 .. testoutput::

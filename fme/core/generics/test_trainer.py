@@ -176,6 +176,9 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
     def set_eval(self) -> None:
         pass
 
+    def update_training_history(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
 
 @dataclasses.dataclass
 class Config:
