@@ -1,0 +1,174 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 77
+n_forward_steps: 2
+ema:
+  decay: 0.999
+inference:
+  n_forward_steps: 7300
+  forward_steps_in_memory: 40
+  loader:
+    start_indices:
+      times:
+        - '1996-01-01T00:00:00'
+        - '1996-02-15T00:00:00'
+        - '1996-04-01T00:00:00'
+        - '1996-05-15T00:00:00'
+        - '1996-07-01T00:00:00'
+        - '1996-08-15T00:00:00'
+        - '1996-10-01T00:00:00'
+        - '1996-11-15T00:00:00'
+    dataset:
+      data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0001/
+    num_data_workers: 4
+  aggregator:
+    log_histograms: true
+    time_mean_reference_data: /statsdata/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 32
+  num_data_workers: 4
+  prefetch_factor: 4
+  dataset:
+    concat:
+    - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0001/
+      subset:
+        stop_time: '1995-12-31'
+    - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0001/
+      subset:
+        start_time: '2011-01-01'
+        stop_time: '2019-12-31'
+    - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0001/
+      subset:
+        start_time: '2021-01-01'
+validation_loader:
+  batch_size: 128
+  num_data_workers: 4
+  prefetch_factor: 4
+  dataset:
+    data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0001/
+    subset:
+      start_time: '1996-01-01'
+      stop_time: '1997-12-31'
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.00001
+  scheduler:
+      type: CosineAnnealingLR
+      kwargs:
+        T_max: 77
+  optimizer_type: Adam
+  use_gradient_accumulation: true
+  kwargs:
+    weight_decay: 0.0
+stepper:
+  parameter_init:
+    weights_path: /ckpt.tar
+  loss:
+    type: MSE
+    weights:
+      air_temperature_0: 0.5
+      air_temperature_1: 0.5
+      eastward_wind_0: 0.5
+      northward_wind_0: 0.5
+      specific_total_water_0: 0.5
+      specific_total_water_1: 0.25
+      specific_total_water_2: 0.5
+      PRATEsfc: 0.5
+      DLWRFsfc: 2
+      ULWRFsfc: 5
+      USWRFsfc: 2
+      DSWRFsfc: 2
+      USWRFtoa: 2
+      tendency_of_total_water_path_due_to_advection: 0.5
+  step:
+    type: single_module
+    config:
+      builder:
+        type: SphericalFourierNeuralOperatorNet
+        config:
+          embed_dim: 384
+          filter_type: linear
+          hard_thresholding_fraction: 1.0
+          use_mlp: true
+          normalization_layer: instance_norm
+          num_layers: 8
+          operator_type: dhconv
+          scale_factor: 1
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+      normalization:
+        network:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-full-field.nc
+        residual:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-residual.nc
+      ocean:
+        surface_temperature_name: surface_temperature
+        ocean_fraction_name: ocean_fraction
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        total_energy_budget_correction:
+          method: constant_temperature
+        force_positive_names:
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - Q2m
+        - PRATEsfc
+        - ULWRFsfc
+        - ULWRFtoa
+        - DLWRFsfc
+        - DSWRFsfc
+        - USWRFsfc
+        - USWRFtoa
+      next_step_forcing_names:
+      - DSWRFtoa
+      forcing_names:
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
+      - DSWRFtoa
+      - HGTsfc
+      - global_mean_co2
+      atmosphere_prognostic_names:
+      - air_temperature
+      - specific_total_water
+      - eastward_wind
+      - northward_wind
+      atmosphere_levels: 8
+      surface_prognostic_names:
+      - PRESsfc
+      - surface_temperature
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
+      atmosphere_diagnostic_names: []
+      surface_diagnostic_names:
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - DLWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - USWRFtoa
+      - tendency_of_total_water_path_due_to_advection
+      - TMP850
+      - h500

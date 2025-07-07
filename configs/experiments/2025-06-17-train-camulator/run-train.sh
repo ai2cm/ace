@@ -26,8 +26,8 @@ run_training() {
     --priority normal \
     --preemptible \
     --cluster ai2/saturn-cirrascale \
-    --cluster ai2/jupiter-cirrascale-2 \
     --cluster ai2/ceres-cirrascale \
+    --cluster ai2/titan-cirrascale \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -45,12 +45,11 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-base_name="train-climsst-fcn2"
+base_name="train-shield-amip"
 
-stats_4deg_dataset="jeremym/2023-08-09-vertically-resolved-4deg-fme-ensemble-dataset-stats"
-stats_1deg_dataset="jeremym/2023-08-09-vertically-resolved-1deg-fme-ensemble-dataset-stats"
+stats_1deg_dataset="andrep/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats"
 
 # To run a subset of these, comment out the ones you don't want to run
 # and if needed use `--allow-dirty` in the gantry run command above.
 # run_training "train-baseline.yaml" "$base_name-baseline" "$stats_1deg_dataset"
-run_training "train-baseline-4deg.yaml" "$base_name-baseline-4deg" "$stats_4deg_dataset"
+run_training "train-baseline_amip_shield_finetune_sfno.yaml" "$base_name-1deg-energy-corrector" "$stats_1deg_dataset="
