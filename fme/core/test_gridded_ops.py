@@ -13,7 +13,7 @@ from fme.core.typing_ import TensorMapping
         (
             {
                 "type": "LatLonOperations",
-                "state": {"area_weights": torch.tensor([1.0, 2.0])},
+                "state": {"area_weights": torch.tensor([[1.0, 1.0], [1.0, 1.0]])},
             },
             LatLonOperations,
         ),
@@ -58,6 +58,16 @@ def test_latlon_area_weighted_sum_dict():
         )
 
 
+def test_latlon_zonal_mean():
+    area_weights = torch.ones(4, 5)
+    ops = LatLonOperations(area_weights=area_weights)
+    n_sample, n_time, n_lat, n_lon = 2, 4, 5, 6
+    data = torch.randn(n_sample, n_time, n_lat, n_lon)
+    result = ops.zonal_mean(data)
+    assert result.shape == (n_sample, n_time, n_lat)
+    torch.testing.assert_close(result, data.mean(dim=-1))
+
+
 def test_latlon_area_weighted_mean_dict():
     area_weights = torch.ones(4, 5)
     ops = LatLonOperations(area_weights=area_weights)
@@ -77,7 +87,7 @@ def test_latlon_area_weighted_mean_dict():
 
 
 def test_latlon_area_weighted_rmse_dict():
-    area_weights = torch.rand(4, 5)
+    area_weights = torch.rand(4).unsqueeze(-1).broadcast_to(4, 5)
     ops = LatLonOperations(area_weights=area_weights)
     truth_dict: TensorMapping = {
         "var1": torch.randn(2, 4, 5),
@@ -101,7 +111,7 @@ def test_latlon_area_weighted_rmse_dict():
 
 
 def test_latlon_area_weighted_std_dict_input():
-    area_weights = torch.rand(4, 5)
+    area_weights = torch.rand(4).unsqueeze(-1).broadcast_to(4, 5)
     ops = LatLonOperations(area_weights=area_weights)
     data_dict: TensorMapping = {
         "var1": torch.randn(2, 4, 5),
