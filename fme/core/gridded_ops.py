@@ -1,4 +1,5 @@
 import abc
+from collections.abc import Callable
 from typing import Any, TypeVar, final
 
 import torch
@@ -29,6 +30,10 @@ class GriddedOperations(abc.ABC):
             )
             + ")"
         )
+
+    @property
+    @abc.abstractmethod
+    def zonal_mean(self) -> Callable[[torch.Tensor], torch.Tensor] | None: ...
 
     @abc.abstractmethod
     def area_weighted_sum(
@@ -273,10 +278,23 @@ class LatLonOperations(GriddedOperations):
         area_weights: torch.Tensor,
         mask_provider: MaskProviderABC = NullMaskProvider,
     ):
+        # requires weights are longitudinally uniform
+        if not torch.allclose(area_weights, area_weights[..., :1]):
+            raise ValueError(
+                "Area weights must be longitudinally uniform, "
+                "as assumed for zonal mean."
+            )
         self._device_area = area_weights.to(get_device())
         self._cpu_area = area_weights.to("cpu")
         self._device_mask_provider = mask_provider.to(get_device())
         self._cpu_mask_provider = mask_provider.to("cpu")
+
+    @property
+    def zonal_mean(self) -> Callable[[torch.Tensor], torch.Tensor]:
+        return self._zonal_mean
+
+    def _zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        return data.mean(dim=self.HORIZONTAL_DIMS[1])
 
     def _get_area_weights(
         self,
@@ -359,6 +377,12 @@ class LatLonOperations(GriddedOperations):
 
 class HEALPixOperations(GriddedOperations):
     HORIZONTAL_DIMS = (-3, -2, -1)
+
+    @property
+    def zonal_mean(self) -> None:
+        # not implemented, though we definitely could
+        # as HEALPix rings are constant-latitude
+        return None
 
     def area_weighted_sum(
         self,
