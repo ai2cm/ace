@@ -299,12 +299,19 @@ class InferenceEvaluatorAggregator(
                 "Power spectrum aggregator not implemented for this grid type, "
                 "omitting."
             )
-        if isinstance(horizontal_coordinates, LatLonCoordinates):
-            if log_zonal_mean_images:
+        if log_zonal_mean_images:
+            if ops.zonal_mean is None:
+                logging.warning(
+                    "Zonal mean aggregator not implemented for this grid type, "
+                    "omitting."
+                )
+            else:
                 self._aggregators["zonal_mean"] = ZonalMeanAggregator(
+                    zonal_mean=ops.zonal_mean,
                     n_timesteps=n_timesteps,
                     variable_metadata=dataset_info.variable_metadata,
                 )
+        if isinstance(horizontal_coordinates, LatLonCoordinates):
             if log_video:
                 self._aggregators["video"] = VideoAggregator(
                     n_timesteps=n_timesteps,
