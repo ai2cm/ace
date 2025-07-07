@@ -36,7 +36,7 @@ from fme.coupled.data_loading.data_typing import (
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
-from .getters import get_data_loader
+from .getters import get_gridded_data
 from .inference import InferenceDataLoaderConfig
 
 N_LAT = 16
@@ -309,7 +309,7 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: bool):
         atmosphere_requirements=DataRequirements(atmos_names, n_timesteps=3),
     )
     # unshuffled data loader
-    data = get_data_loader(config, False, coupled_requirements)
+    data = get_gridded_data(config, False, coupled_requirements)
 
     assert data.n_batches == 2 * n_ics  # 2 samples per IC
     for batch in data.loader:

@@ -9,7 +9,7 @@ import torch
 from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregator
 from fme.ace.data_loading.config import DataLoaderConfig
-from fme.ace.data_loading.getters import get_data_loader, get_inference_data
+from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.train.train_config import InlineInferenceConfig
@@ -139,7 +139,7 @@ class TrainBuilders:
 
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.train_loader,
             requirements=data_requirements,
             train=True,
@@ -147,7 +147,7 @@ class TrainBuilders:
 
     def get_validation_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.validation_loader,
             requirements=data_requirements,
             train=False,

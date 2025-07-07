@@ -20,7 +20,7 @@ from fme.core.wandb import WandB
 
 from ..requirements import DataRequirements
 from .config import DataLoaderConfig
-from .getters import get_data_loader
+from .getters import get_gridded_data
 
 TMPDIR = f"/tmp/ace_benchmark_{uuid.uuid4()}"
 
@@ -37,7 +37,7 @@ class BenchmarkConfig:
     sleep: float = 0.1
 
     def build(self):
-        return get_data_loader(
+        return get_gridded_data(
             self.loader,
             train=self.train,
             requirements=DataRequirements(self.names, self.n_timesteps),
