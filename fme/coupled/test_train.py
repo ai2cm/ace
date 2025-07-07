@@ -75,6 +75,7 @@ stepper:
   ocean_fraction_prediction:
     sea_ice_fraction_name: {sea_ice_frac_name}
     land_fraction_name: {land_frac_name}
+    sea_ice_fraction_name_in_atmosphere: {atmos_sea_ice_frac_name}
   ocean:
     timedelta: 2D
     loss_contributions:
@@ -184,6 +185,7 @@ def _write_test_yaml_files(
     atmos_out_names: list[str],
     ocean_sfc_temp_name: str,
     sea_ice_frac_name: str,
+    atmos_sea_ice_frac_name: str,
     land_frac_name: str,
     atmos_sfc_temp_name: str,
     ocean_frac_name: str,
@@ -217,6 +219,7 @@ def _write_test_yaml_files(
         ocean_next_step_forcing_names=ocean_next_step_forcing_names,
         ocean_sfc_temp_name=ocean_sfc_temp_name,
         sea_ice_frac_name=sea_ice_frac_name,
+        atmos_sea_ice_frac_name=atmos_sea_ice_frac_name,
         land_frac_name=land_frac_name,
         atmos_sfc_temp_name=atmos_sfc_temp_name,
         ocean_frac_name=ocean_frac_name,
@@ -279,7 +282,7 @@ def test_train_and_inference(
         "mask_2d",
         "mask_0",
         "mask_1",
-        "sea_ice_fraction",
+        "ocean_sea_ice_fraction",
     ]
     # variable names for the atmos data on disk
     atmos_names = [
@@ -290,6 +293,7 @@ def test_train_and_inference(
         "surface_temperature",
         "ocean_fraction",
         "land_fraction",
+        "sea_ice_fraction",
     ]
 
     n_forward_times_ocean = 8
@@ -313,9 +317,9 @@ def test_train_and_inference(
         "mask_0",
         "mask_1",
         "land_fraction",
-        "sea_ice_fraction",
+        "ocean_sea_ice_fraction",
     ]
-    ocean_out_names = ["thetao_0", "thetao_1", "sst", "sea_ice_fraction"]
+    ocean_out_names = ["thetao_0", "thetao_1", "sst", "ocean_sea_ice_fraction"]
     ocean_derived_names = ["ocean_heat_content"]
     atmos_in_names = [
         "DLWRFsfc",
@@ -351,7 +355,8 @@ def test_train_and_inference(
         atmos_in_names,
         atmos_out_names,
         ocean_sfc_temp_name="sst",
-        sea_ice_frac_name="sea_ice_fraction",
+        sea_ice_frac_name="ocean_sea_ice_fraction",
+        atmos_sea_ice_frac_name="sea_ice_fraction",
         land_frac_name="land_fraction",
         atmos_sfc_temp_name="surface_temperature",
         ocean_frac_name="ocean_fraction",

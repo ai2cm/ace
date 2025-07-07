@@ -661,10 +661,18 @@ def get_stepper_and_batch(
         (None, False),
         (
             CoupledOceanFractionConfig(
-                sea_ice_fraction_name="sea_ice_frac",
-                land_fraction_name="land_frac",
+                sea_ice_fraction_name="sea_ice_fraction",
+                land_fraction_name="land_fraction",
             ),
-            True,  # required
+            True,  # NOTE: required
+        ),
+        (
+            CoupledOceanFractionConfig(
+                sea_ice_fraction_name="ocean_sea_ice_fraction",
+                land_fraction_name="land_fraction",
+                sea_ice_fraction_name_in_atmosphere="sea_ice_fraction",
+            ),
+            True,  # NOTE: required
         ),
     ],
 )
@@ -675,15 +683,23 @@ def test__get_atmosphere_forcings(
     sea_ice_frac_is_ocean_prog,
 ):
     torch.manual_seed(0)
-    ocean_in_names = ["land_frac", "sst", "a_diag"]
+    ocean_in_names = ["land_fraction", "sst", "a_diag"]
     ocean_out_names = ["sst"]
+    sea_ice_frac_name = "sea_ice_frac"
+    sea_ice_frac_name_in_atmos = sea_ice_frac_name
+    if ocean_fraction_prediction:
+        sea_ice_frac_name = ocean_fraction_prediction.sea_ice_fraction_name
+        sea_ice_frac_name_in_atmos = (
+            ocean_fraction_prediction.sea_ice_fraction_name_in_atmosphere
+            or sea_ice_frac_name
+        )
     if sea_ice_frac_is_ocean_prog:
-        ocean_in_names.append("sea_ice_frac")
-        ocean_out_names.append("sea_ice_frac")
-    atmos_in_names = ["land_frac", "ocean_frac", "sfc_temp"]
+        ocean_in_names.append(sea_ice_frac_name)
+        ocean_out_names.append(sea_ice_frac_name)
+    atmos_in_names = ["land_fraction", "ocean_frac", "sfc_temp"]
     atmos_out_names = ["sfc_temp", "a_diag"]
     if sea_ice_frac_is_input_to_atmos:
-        atmos_in_names.append("sea_ice_frac")
+        atmos_in_names.append(sea_ice_frac_name)
     config = get_stepper_config(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
@@ -707,14 +723,14 @@ def test__get_atmosphere_forcings(
     shape_ocean = (1, 1, N_LAT, N_LON)
     shape_atmos = (1, coupler.n_inner_steps + 1, N_LAT, N_LON)
     forcings_from_ocean = {
-        "sea_ice_frac": torch.rand(*shape_ocean, device=fme.get_device()),
+        sea_ice_frac_name: torch.rand(*shape_ocean, device=fme.get_device()),
         "sst": torch.rand(*shape_ocean, device=fme.get_device()),
     }
     for tensor in forcings_from_ocean.values():
         # apply mask to ocean data
         tensor[..., 0, 0] = float("nan")
     atmos_forcing_data = {
-        "land_frac": torch.rand(*shape_atmos, device=fme.get_device()),
+        "land_fraction": torch.rand(*shape_atmos, device=fme.get_device()),
         "ocean_frac": torch.rand(*shape_atmos, device=fme.get_device()),
     }
     expected_forcings_from_ocean = {
@@ -724,30 +740,53 @@ def test__get_atmosphere_forcings(
         expected_forcings_from_ocean["ocean_frac"] = atmos_forcing_data[
             "ocean_frac"
         ].clone()
-    else:
+    elif ocean_fraction_prediction.sea_ice_fraction_name == "sea_ice_fraction":
         expected_forcings_from_ocean["ocean_frac"] = torch.clip(
-            1 - (atmos_forcing_data["land_frac"] + forcings_from_ocean["sea_ice_frac"]),
+            1
+            - (
+                atmos_forcing_data["land_fraction"]
+                + forcings_from_ocean[sea_ice_frac_name]
+            ),
             min=0.0,
         )
+    elif ocean_fraction_prediction.sea_ice_fraction_name == "ocean_sea_ice_fraction":
+        # back sea_ice_fraction out of ocean_sea_ice_fraction
+        sic = forcings_from_ocean[sea_ice_frac_name] * (
+            1 - atmos_forcing_data["land_fraction"]
+        )
+        expected_forcings_from_ocean[sea_ice_frac_name_in_atmos] = sic
+        expected_forcings_from_ocean["ocean_frac"] = torch.clip(
+            1 - (atmos_forcing_data["land_fraction"] + sic),
+            min=0.0,
+        )
+    else:
+        sea_ice_fraction_name = ocean_fraction_prediction.sea_ice_fraction_name
+        raise ValueError(
+            "test__get_atmosphere_forcings has CoupledOceanFractionConfig with "
+            f"incompatible value {sea_ice_fraction_name=}"
+        )
+
     expected_forcings_from_ocean["ocean_frac"][:, :, 0, 0] = 0.0
     expected_atmos_forcings = {
-        "land_frac": atmos_forcing_data["land_frac"].clone(),
+        "land_fraction": atmos_forcing_data["land_fraction"].clone(),
         "ocean_frac": expected_forcings_from_ocean["ocean_frac"].clone(),
         "sfc_temp": forcings_from_ocean["sst"].clone().expand(*shape_atmos),
     }
     if sea_ice_frac_is_input_to_atmos:
         if ocean_fraction_prediction is None and not sea_ice_frac_is_ocean_prog:
             # sea ice frac comes from atmosphere
-            atmos_forcing_data["sea_ice_frac"] = torch.rand(
+            atmos_forcing_data[sea_ice_frac_name_in_atmos] = torch.rand(
                 *shape_atmos, device=fme.get_device()
             )
-            expected_atmos_forcings["sea_ice_frac"] = atmos_forcing_data[
-                "sea_ice_frac"
+            expected_atmos_forcings[sea_ice_frac_name_in_atmos] = atmos_forcing_data[
+                sea_ice_frac_name_in_atmos
             ].clone()
         else:
             # sea ice frac comes from the ocean
-            expected_atmos_forcings["sea_ice_frac"] = (
-                forcings_from_ocean["sea_ice_frac"].clone().expand(*shape_atmos)
+            expected_atmos_forcings[sea_ice_frac_name_in_atmos] = (
+                expected_forcings_from_ocean[sea_ice_frac_name_in_atmos]
+                .clone()
+                .expand(*shape_atmos)
             )
     new_atmos_forcings = coupler._get_atmosphere_forcings(
         atmos_forcing_data, forcings_from_ocean
