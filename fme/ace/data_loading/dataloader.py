@@ -1,11 +1,66 @@
 import logging
 import random
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import torch
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.core.dataset.xarray import XarrayDataset
+
+
+def get_data_loader(
+    dataset: torch.utils.data.Dataset,
+    batch_size: int,
+    n_window_timesteps: int,
+    time_buffer: int,
+    num_workers: int,
+    sampler: torch.utils.data.Sampler,
+    shuffled: bool,
+    drop_last: bool,
+    pin_memory: bool,
+    collate_fn: Callable,
+    multiprocessing_context: str | None,
+    persistent_workers: bool,
+    prefetch_factor: int | None,
+) -> torch.utils.data.DataLoader[BatchData] | "SlidingWindowDataLoader":
+    if prefetch_factor is None:
+        # DataLoader default is not None so we must leave it unset
+        kwargs = {}
+    else:
+        kwargs = {"prefetch_factor": prefetch_factor}
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        sampler=sampler,
+        drop_last=drop_last,
+        pin_memory=pin_memory,
+        collate_fn=collate_fn,
+        multiprocessing_context=multiprocessing_context,
+        persistent_workers=persistent_workers,
+        **kwargs,
+    )
+    if time_buffer > 0:
+        n_timesteps_preloaded = time_buffer + n_window_timesteps
+        dataloader = SlidingWindowDataLoader(
+            dataloader,
+            n_timesteps_preloaded,
+            n_window_timesteps,
+            shuffled,
+            dataset=dataloader.dataset,
+        )
+
+    if len(dataloader) == 0:
+        msg = (
+            "No batches in dataloader: "
+            f"{len(dataloader.dataset)} samples, "
+            f"batch size is {dataloader.batch_size}"
+        )
+        if time_buffer > 0:
+            msg += f", and an outer sample length is {n_timesteps_preloaded}"
+        raise ValueError(msg)
+
+    return dataloader
 
 
 class SlidingWindowDataLoader:

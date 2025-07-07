@@ -95,7 +95,7 @@ def get_datasets(
     return dataset, properties
 
 
-def get_data_loader(
+def get_gridded_data(
     config: CoupledDataLoaderConfig,
     train: bool,
     requirements: CoupledDataRequirements,

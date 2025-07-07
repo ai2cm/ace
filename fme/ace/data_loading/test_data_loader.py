@@ -19,8 +19,8 @@ from fme.ace.data_loading.config import (
     MergeDatasetConfig,
 )
 from fme.ace.data_loading.getters import (
-    get_data_loader,
     get_forcing_data,
+    get_gridded_data,
     get_inference_data,
 )
 from fme.ace.data_loading.inference import (
@@ -133,7 +133,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_timesteps - window_timesteps + 1
 
-    data = get_data_loader(config, True, requirements)
+    data = get_gridded_data(config, True, requirements)
     assert data.n_batches == samples_per_member * num_ensemble_members
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
@@ -166,7 +166,7 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
 
-    data = get_data_loader(config, True, requirements)
+    data = get_gridded_data(config, True, requirements)
     assert data.n_batches == n_samples * num_ensemble_members
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
@@ -183,7 +183,7 @@ def test_xarray_loader(tmp_path):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_data_loader(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, True, requirements)  # type: ignore
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
 
@@ -200,7 +200,7 @@ def test_xarray_loader_sample_with_replacement(tmp_path):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_data_loader(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, True, requirements)  # type: ignore
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
     epoch_samples = list(data.loader)
@@ -235,7 +235,7 @@ def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo", "foo2"], window_timesteps)
-    data = get_data_loader(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, True, requirements)  # type: ignore
     assert "foo" in data.variable_metadata.keys()
     assert "foo2" in data.variable_metadata.keys()
 
@@ -277,7 +277,7 @@ def test_xarray_loader_using_merged_dataset_errors_if_different_time(
         ValueError,
         match="All datasets in a merged dataset must have the same sample start times",
     ):
-        get_data_loader(config, True, requirements)  # type: ignore
+        get_gridded_data(config, True, requirements)  # type: ignore
 
     # subset source2 to have the same time stamps as source1
     config = DataLoaderConfig(
@@ -299,7 +299,7 @@ def test_xarray_loader_using_merged_dataset_errors_if_different_time(
         batch_size=1,
         num_data_workers=0,
     )
-    get_data_loader(config, True, requirements)  # type: ignore
+    get_gridded_data(config, True, requirements)  # type: ignore
 
 
 def test_xarray_loader_hpx(tmp_path):
@@ -320,7 +320,7 @@ def test_xarray_loader_hpx(tmp_path):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_data_loader(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, True, requirements)  # type: ignore
     for batch in data.loader:
         assert batch is not None
         # expect healpix shape
@@ -423,7 +423,7 @@ def test_data_loader_outputs(tmp_path, calendar):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_data_loader(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, True, requirements)  # type: ignore
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
@@ -523,9 +523,9 @@ def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_err
     requirements = DataRequirements(["foo"], window_timesteps)
     if raises_error:
         with pytest.raises(ValueError):
-            get_data_loader(config, True, requirements)  # type: ignore
+            get_gridded_data(config, True, requirements)  # type: ignore
     else:
-        get_data_loader(config, True, requirements)  # type: ignore
+        get_gridded_data(config, True, requirements)  # type: ignore
 
 
 @pytest.mark.parametrize("n_initial_conditions", [1, 2])
@@ -940,7 +940,7 @@ def test_time_buffer(
         time_buffer=time_buffer,
     )
     requirements = DataRequirements(["foo"], n_timesteps_requirement)
-    data = get_data_loader(config, shuffle, requirements)
+    data = get_gridded_data(config, shuffle, requirements)
     assert len(data.loader) == len(expected_start_indices)
     start_times = []
     for batch in data.loader:
