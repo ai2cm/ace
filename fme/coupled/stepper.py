@@ -211,6 +211,11 @@ class CoupledStepperConfig:
             set(self.ocean.stepper.all_names).difference(self._all_atmosphere_names)
         )
 
+        if self.ocean_fraction_prediction is not None:
+            self._all_ocean_names.append(
+                self.ocean_fraction_prediction.land_fraction_name
+            )
+
     @property
     def timestep(self) -> datetime.timedelta:
         # the "coupled timestep" is the same as the ocean's

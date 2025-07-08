@@ -283,6 +283,7 @@ def test_train_and_inference(
         "mask_0",
         "mask_1",
         "ocean_sea_ice_fraction",
+        "land_fraction",
     ]
     # variable names for the atmos data on disk
     atmos_names = [
@@ -320,7 +321,7 @@ def test_train_and_inference(
         "ocean_sea_ice_fraction",
     ]
     ocean_out_names = ["thetao_0", "thetao_1", "sst", "ocean_sea_ice_fraction"]
-    ocean_derived_names = ["ocean_heat_content"]
+    ocean_derived_names = ["ocean_heat_content", "sea_ice_fraction"]
     atmos_in_names = [
         "DLWRFsfc",
         "PRESsfc",
@@ -517,6 +518,9 @@ def test_train_and_inference(
         # outputs should have some masked regions
         assert np.isnan(ds_ocean[name].values).any()
 
+    # check that ocean derived variables are in the output
+    for name in ocean_derived_names:
+        assert name in ds_ocean.data_vars
     atmosphere_output_path = (
         tmp_path / "results" / "atmosphere" / "autoregressive_predictions.nc"
     )

@@ -10,6 +10,7 @@ import xarray as xr
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer
@@ -36,6 +37,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     logging.info("Initializing inline inference data loader")
     inference_data = builder.get_evaluation_inference_data()
 
+    variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+    dataset_info = train_data.dataset_info
     logging.info("Starting model initialization")
     stepper = builder.get_stepper(
         train_data.dataset_info,
@@ -51,7 +54,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     )
     aggregator_builder = CoupledAggregatorBuilder(
         inference_config=config.inference_aggregator,
-        dataset_info=train_data.dataset_info,
+        dataset_info=dataset_info.update_variable_metadata(variable_metadata),
         initial_inference_times=initial_inference_times,
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
