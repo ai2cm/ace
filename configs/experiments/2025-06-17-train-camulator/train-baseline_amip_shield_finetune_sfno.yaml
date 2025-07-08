@@ -1,7 +1,7 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 77
+max_epochs: 120
 n_forward_steps: 2
 ema:
   decay: 0.999
@@ -58,15 +58,11 @@ validation_loader:
       stop_time: '1997-12-31'
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.00001
-  scheduler:
-      type: CosineAnnealingLR
-      kwargs:
-        T_max: 77
-  optimizer_type: Adam
   use_gradient_accumulation: true
+  lr: 0.0001
+  optimizer_type: FusedAdam
   kwargs:
-    weight_decay: 0.0
+    weight_decay: 0.01
 stepper:
   loss:
     type: MSE
