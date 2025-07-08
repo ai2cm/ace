@@ -41,7 +41,6 @@ launch_job () {
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        #--dataset $CHECKPOINT_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
         --dataset $CHECKPOINT_DATASET:best_inference_ckpt.tar:/ckpt.tar \
         --gpus 1 \
         --shared-memory 20GiB \
