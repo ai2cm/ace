@@ -71,7 +71,7 @@ stepper:
   parameter_init:
     weights_path: /ckpt.tar
   loss:
-    type: MSE
+    type: AreaWeightedMSE
     weights:
       air_temperature_0: 0.5
       air_temperature_1: 0.5
