@@ -57,11 +57,11 @@ launch_job () {
 }
 
 # checkpoint datasets
-SHIELD_PRETRAINED_CAMULATOR=01JZ53HKJSVGZDHK3MDCFJJHZ8
+SHIELD_PRETRAINED_CAMULATOR=01JZNXBGRCRZXKRMHA10Y6XM4B
 
 
 for perturbation in 0 2 4; do
-    JOB_NAME="ace-inference-shield-pretrained-no-co2-camulator-p${perturbation}k"
+    JOB_NAME="ace-inference-shield-pretrained-camulator-finetuned-p${perturbation}k"
 
     CONFIG_PATH="${SCRIPT_PATH}shield-${perturbation}k-sst-evaluator.yaml"
 
