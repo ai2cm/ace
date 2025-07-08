@@ -60,6 +60,10 @@ def _save_netcdf(
             dim_sizes_to_use = dim_sizes_without_time
             rng = np.random.default_rng()
             data = rng.integers(low=0, high=2, size=list(dim_sizes_to_use.values()))
+        elif name == "land_fraction":
+            dim_sizes_to_use = dim_sizes_without_time
+            data = np.ones(tuple(dim_sizes_to_use.values()))
+            data[0, 0] = 0.0
         else:
             dim_sizes_to_use = dim_sizes
             data = np.random.uniform(size=list(dim_sizes_to_use.values()))
