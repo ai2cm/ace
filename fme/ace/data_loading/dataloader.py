@@ -1,15 +1,18 @@
+import abc
 import logging
 import random
 from collections.abc import Callable, Iterator
+from typing import Any, final
 
 import torch
+import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
-from fme.core.dataset.xarray import XarrayDataset
+from fme.core.typing_ import TensorDict
 
 
 def get_data_loader(
-    dataset: torch.utils.data.Dataset,
+    dataset: torch.utils.data.Dataset[tuple[TensorDict, xr.DataArray]],
     batch_size: int,
     n_window_timesteps: int,
     time_buffer: int,
@@ -22,13 +25,13 @@ def get_data_loader(
     multiprocessing_context: str | None,
     persistent_workers: bool,
     prefetch_factor: int | None,
-) -> torch.utils.data.DataLoader[BatchData] | "SlidingWindowDataLoader":
+) -> "DataLoaderABC":
     if prefetch_factor is None:
         # DataLoader default is not None so we must leave it unset
         kwargs = {}
     else:
         kwargs = {"prefetch_factor": prefetch_factor}
-    dataloader = torch.utils.data.DataLoader(
+    torch_dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
         num_workers=num_workers,
@@ -40,20 +43,20 @@ def get_data_loader(
         persistent_workers=persistent_workers,
         **kwargs,
     )
+    dataloader: DataLoaderABC = TorchDataLoader(torch_dataloader, dataset)
     if time_buffer > 0:
         n_timesteps_preloaded = time_buffer + n_window_timesteps
         dataloader = SlidingWindowDataLoader(
-            dataloader,
-            n_timesteps_preloaded,
-            n_window_timesteps,
-            shuffled,
-            dataset=dataloader.dataset,
+            loader=dataloader,
+            input_n_timesteps=n_timesteps_preloaded,
+            output_n_timesteps=n_window_timesteps,
+            shuffle=shuffled,
         )
 
     if len(dataloader) == 0:
         msg = (
             "No batches in dataloader: "
-            f"{len(dataloader.dataset)} samples, "
+            f"{dataloader.n_samples} samples, "
             f"batch size is {dataloader.batch_size}"
         )
         if time_buffer > 0:
@@ -63,7 +66,95 @@ def get_data_loader(
     return dataloader
 
 
-class SlidingWindowDataLoader:
+class DataLoaderABC(abc.ABC):
+    @abc.abstractmethod
+    def __iter__(self) -> Iterator[BatchData]:
+        pass
+
+    @abc.abstractmethod
+    def __len__(self) -> int:
+        pass
+
+    @abc.abstractmethod
+    def __next__(self) -> BatchData:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def batch_size(self) -> int:
+        """
+        Number of samples in a single batch.
+        """
+        pass
+
+    @property
+    @abc.abstractmethod
+    def n_samples(self) -> int:
+        pass
+
+    @property
+    @final
+    def n_batches(self) -> int:
+        # Note this method is not (at time of writing) used and has the same meaning
+        # as __len__, it exists only so that the meaning of the n_samples property
+        # is unambiguous. Previously there have been bugs caused by confusion between
+        # the two.
+        return len(self)
+
+    @abc.abstractmethod
+    def log_info(self, name: str):
+        pass
+
+
+class TorchDataLoader(DataLoaderABC):
+    def __init__(
+        self,
+        loader: torch.utils.data.DataLoader[BatchData],
+        dataset: torch.utils.data.Dataset[tuple[TensorDict, xr.DataArray]],
+    ):
+        """
+        Args:
+            loader: The underlying torch data loader.
+            dataset: The underlying dataset associated with the loader. This is
+                provided to allow direct access to the dataset.
+        """
+        self._loader = loader
+        self._dataset = dataset
+
+    def __iter__(self) -> Iterator[BatchData]:
+        return iter(self._loader)
+
+    def __len__(self) -> int:
+        return len(self._loader)
+
+    def __next__(self) -> BatchData:
+        return next(self._loader)
+
+    @property
+    def batch_size(self) -> int:
+        return self._loader.batch_size
+
+    @property
+    def n_samples(self) -> int:
+        return len(self) * self.batch_size
+
+    def log_info(self, name: str):
+        logging.info(
+            f"{name} data: {len(self) * self.batch_size} samples, {len(self)} batches"
+        )
+        logging.info(f"{name} data: first sample's initial time: {self._first_time}")
+        logging.info(f"{name} data: last sample's initial time: {self._last_time}")
+
+    @property
+    def _first_time(self) -> Any:
+        return self._dataset[0][1].values[0]
+
+    @property
+    def _last_time(self) -> Any:
+        return self._dataset[-1][1].values[0]
+
+
+class SlidingWindowDataLoader(DataLoaderABC):
     """
     A wrapper for the torch data loader that provides additional properties.
     Create more batches by applying a sliding window to existing batches.
@@ -71,11 +162,10 @@ class SlidingWindowDataLoader:
 
     def __init__(
         self,
-        loader: torch.utils.data.DataLoader[BatchData],
+        loader: DataLoaderABC,
         input_n_timesteps: int,
         output_n_timesteps: int,
         shuffle: bool,
-        dataset: XarrayDataset,
     ):
         """
         Create a sliding window over the input data loader to generate new batches.
@@ -99,7 +189,6 @@ class SlidingWindowDataLoader:
         self._output_n_timesteps = output_n_timesteps
         self._n_new_batches = input_n_timesteps - output_n_timesteps + 1
         self._shuffle = shuffle
-        self.dataset = dataset
 
     def __iter__(self) -> Iterator[BatchData]:
         # reset the iterator state
@@ -133,6 +222,10 @@ class SlidingWindowDataLoader:
         """
         return self._loader.batch_size
 
+    @property
+    def n_samples(self) -> int:
+        return self._loader.n_samples
+
     def _n_samples_per_dataset_item(self) -> int:
         """
         Number of samples per dataset outer item, i.e., in a window.
@@ -146,5 +239,7 @@ class SlidingWindowDataLoader:
         logging.info(
             f"{name} data: An outer window size of "
             f"{self._n_samples_per_dataset_item()} samples was used to load "
-            "the above samples and batches in chunks."
+            "the above samples and batches in chunks, coming from the following "
+            "base loader:"
         )
+        self._loader.log_info(name + " (base loader)")

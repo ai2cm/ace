@@ -1,7 +1,6 @@
 import datetime
-import logging
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
-from typing import Any, Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar
 
 import numpy as np
 import torch
@@ -9,7 +8,7 @@ import xarray as xr
 
 from fme.ace.data_loading.augmentation import BatchModifierABC, NullModifier
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.data_loading.dataloader import SlidingWindowDataLoader
+from fme.ace.data_loading.dataloader import DataLoaderABC
 from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
@@ -47,14 +46,14 @@ class GriddedData(GriddedDataABC[BatchData]):
 
     def __init__(
         self,
-        loader: DataLoader[BatchData] | SlidingWindowDataLoader,
+        loader: DataLoaderABC,
         properties: DatasetProperties,
         modifier: BatchModifierABC = NullModifier(),
         sampler: torch.utils.data.Sampler | None = None,
     ):
         """
         Args:
-            loader: torch DataLoader, which returns batches of type BatchData.
+            loader: Returns batches of BatchData.
                 Data can be on any device (but will typically be on CPU).
             properties: Batch-constant properties for the dataset, such as variable
                 metadata and coordinate information. Data can be on any device.
@@ -120,30 +119,11 @@ class GriddedData(GriddedDataABC[BatchData]):
         return len(self._loader)
 
     @property
-    def _first_time(self) -> Any:
-        return self._loader.dataset[0][1].values[0]  # type: ignore
-
-    @property
-    def _last_time(self) -> Any:
-        return self._loader.dataset[-1][1].values[0]  # type: ignore
-
-    @property
     def batch_size(self) -> int:
-        if self._batch_size is None:
-            example_data = next(iter(self.loader)).data
-            example_tensor = next(iter(example_data.values()))
-            self._batch_size = example_tensor.shape[0]
-        return self._batch_size
+        return self._loader.batch_size
 
     def log_info(self, name: str):
-        if isinstance(self._loader, SlidingWindowDataLoader):
-            self._loader.log_info(name)
-        else:
-            logging.info(
-                f"{name} data: {self.n_samples} samples, {self.n_batches} batches"
-            )
-        logging.info(f"{name} data: first sample's initial time: {self._first_time}")
-        logging.info(f"{name} data: last sample's initial time: {self._last_time}")
+        self._loader.log_info(name)
 
     def set_epoch(self, epoch: int):
         """
