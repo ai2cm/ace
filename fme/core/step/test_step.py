@@ -14,7 +14,6 @@ from torch import nn
 
 import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
-from fme.ace.step.fcn2 import FCN2Config, FCN2Selector, FCN2StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
@@ -250,82 +249,6 @@ def get_single_module_with_atmosphere_corrector_selector(
     )
 
 
-def get_fcn2_selector(
-    dir: pathlib.Path | None = None,
-) -> StepSelector:
-    forcing_names = [
-        "DSWRFtoa",
-        "HGTsfc",
-    ]
-    atmosphere_prognostic_names = [
-        "air_temperature",
-        "specific_total_water",
-    ]
-    atmosphere_diagnostic_names = [
-        "radiative_heating",
-    ]
-    atmosphere_levels = 6
-    surface_prognostic_names = [
-        "PRESsfc",
-    ]
-    surface_diagnostic_names = [
-        "PRATEsfc",
-        "LHTFLsfc",
-        "SHTFLsfc",
-        "ULWRFsfc",
-        "ULWRFtoa",
-        "DLWRFsfc",
-        "DSWRFsfc",
-        "USWRFtoa",
-        "USWRFsfc",
-        "tendency_of_total_water_path_due_to_advection",
-    ]
-    atmosphere_packed_names = []
-    for i in range(atmosphere_levels):
-        atmosphere_packed_names.append(f"air_temperature_{i}")
-        atmosphere_packed_names.append(f"specific_total_water_{i}")
-        atmosphere_packed_names.append(f"radiative_heating_{i}")
-    normalization = get_network_and_loss_normalization_config(
-        names=list(
-            set(forcing_names)
-            .union(atmosphere_packed_names)
-            .union(surface_prognostic_names)
-            .union(surface_diagnostic_names)
-        ),
-        dir=dir,
-    )
-    step_config = FCN2StepConfig(
-        builder=FCN2Selector(
-            type="FCN2",
-            config=FCN2Config(
-                scale_factor=1,
-                atmo_embed_dim=2,
-                surf_embed_dim=2,
-                aux_embed_dim=2,
-                num_layers=2,
-            ),
-        ),
-        forcing_names=forcing_names,
-        atmosphere_prognostic_names=atmosphere_prognostic_names,
-        atmosphere_diagnostic_names=atmosphere_diagnostic_names,
-        atmosphere_levels=atmosphere_levels,
-        surface_prognostic_names=surface_prognostic_names,
-        surface_diagnostic_names=surface_diagnostic_names,
-        normalization=normalization,
-        corrector=AtmosphereCorrectorConfig(
-            conserve_dry_air=True,
-            zero_global_mean_moisture_advection=True,
-            moisture_budget_correction="advection_and_precipitation",
-            force_positive_names=["PRATEsfc"],
-            total_energy_budget_correction=EnergyBudgetConfig("constant_temperature"),
-        ),
-    )
-    return StepSelector(
-        type="FCN2",
-        config=dataclasses.asdict(step_config),
-    )
-
-
 def get_multi_call_selector(
     dir: pathlib.Path | None = None,
 ) -> StepSelector:
@@ -350,7 +273,6 @@ def get_multi_call_selector(
 SEPARATE_RADIATION_CONFIG = get_separate_radiation_config()
 
 SELECTOR_GETTERS = [
-    get_fcn2_selector,
     get_single_module_with_atmosphere_corrector_selector,
     get_separate_radiation_selector,
     get_single_module_selector,
