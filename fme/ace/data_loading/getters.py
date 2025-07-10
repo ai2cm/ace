@@ -125,7 +125,7 @@ def get_gridded_data(
     batch_size = dist.local_batch_size(int(config.batch_size))
 
     dataloader = get_data_loader(
-        dataset,
+        dataset=dataset,
         batch_size=batch_size,
         n_window_timesteps=requirements.n_timesteps,
         time_buffer=config.time_buffer,
