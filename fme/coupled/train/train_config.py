@@ -4,12 +4,12 @@ import os
 
 import torch
 
-from fme.core.dataset.config import Slice
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig

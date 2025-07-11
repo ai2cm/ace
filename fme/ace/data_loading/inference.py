@@ -12,11 +12,13 @@ from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.perturbation import SSTPerturbation
 from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.dataset.config import MergeNoConcatDatasetConfig, XarrayDataConfig
-from fme.core.dataset.getters import get_per_dataset_names
-from fme.core.dataset.merged import MergedXarrayDataset
+from fme.core.dataset.merged import (
+    MergedXarrayDataset,
+    MergeNoConcatDatasetConfig,
+    get_per_dataset_names,
+)
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.xarray import XarrayDataset
+from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
 

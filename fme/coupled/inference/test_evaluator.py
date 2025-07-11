@@ -8,7 +8,7 @@ import xarray as xr
 import yaml
 
 from fme.ace.inference.data_writer.main import DataWriterConfig
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import mock_wandb
 from fme.core.typing_ import Slice
