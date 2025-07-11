@@ -87,6 +87,22 @@ class Distributed:
             distributed = False
         return distributed
 
+    def get_sampler(
+        self,
+        dataset: torch.utils.data.Dataset,
+        shuffle: bool,
+        seed: int = 0,
+        drop_last: bool = False,
+    ) -> torch.utils.data.Sampler:
+        return torch.utils.data.DistributedSampler(
+            dataset,
+            shuffle=shuffle,
+            num_replicas=self.world_size,
+            rank=self.rank,
+            seed=seed,
+            drop_last=drop_last,
+        )
+
     def local_batch_size(self, batch_size: int) -> int:
         """
         Get the local batch size for the current process.
