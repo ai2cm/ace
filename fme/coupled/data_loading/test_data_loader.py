@@ -21,8 +21,8 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
     VerticalCoordinate,
 )
-from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.xarray import (
+    XarrayDataConfig,
     _get_mask_provider,
     _get_vertical_coordinate,
     get_horizontal_coordinates,

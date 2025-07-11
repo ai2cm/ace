@@ -5,17 +5,13 @@ import torch.utils.data
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.dataset.config import (
-    ConcatDatasetConfig,
+from fme.core.dataset.concat import ConcatDatasetConfig, get_dataset
+from fme.core.dataset.merged import (
     MergeDatasetConfig,
     MergeNoConcatDatasetConfig,
-)
-from fme.core.dataset.getters import (
-    get_dataset,
     get_merged_datasets,
-    get_xarray_dataset,
 )
-from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
+from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset, get_xarray_dataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 

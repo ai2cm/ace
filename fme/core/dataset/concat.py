@@ -1,11 +1,17 @@
+import dataclasses
 from collections.abc import Sequence
 from typing import Self
 
 import torch
 import xarray as xr
 
-from fme.core.dataset.subset import XarraySubset
-from fme.core.dataset.xarray import XarrayDataset
+from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.xarray import (
+    XarrayDataConfig,
+    XarrayDataset,
+    XarraySubset,
+    get_datasets,
+)
 from fme.core.typing_ import TensorDict
 
 
@@ -47,3 +53,33 @@ class XarrayConcat(torch.utils.data.Dataset):
     def sample_n_times(self) -> int:
         """The length of the time dimension of each sample."""
         return self._sample_n_times
+
+
+def get_dataset(
+    dataset_configs: Sequence[XarrayDataConfig],
+    names: list[str],
+    n_timesteps: int,
+    strict: bool = True,
+) -> tuple[XarrayConcat, DatasetProperties]:
+    datasets, properties = get_datasets(
+        dataset_configs, names, n_timesteps, strict=strict
+    )
+    ensemble = XarrayConcat(datasets)
+    return ensemble, properties
+
+
+@dataclasses.dataclass
+class ConcatDatasetConfig:
+    """
+    Configuration for concatenating multiple datasets.
+    Parameters:
+        concat: List of XarrayDataConfig objects to concatenate.
+        strict: Whether to enforce that the datasets to be concatenated
+            have the same dimensions and coordinates.
+    """
+
+    concat: Sequence[XarrayDataConfig]
+    strict: bool = True
+
+    def __post_init__(self):
+        self.zarr_engine_used = any(ds.engine == "zarr" for ds in self.concat)

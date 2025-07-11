@@ -54,7 +54,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.generics.trainer import (
     _restore_checkpoint,
     count_parameters,

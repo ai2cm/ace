@@ -13,11 +13,7 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.data_loading.config import (
-    ConcatDatasetConfig,
-    DataLoaderConfig,
-    MergeDatasetConfig,
-)
+from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import (
     get_forcing_data,
     get_gridded_data,
@@ -34,7 +30,9 @@ from fme.ace.data_loading.inference import (
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.coordinates import HybridSigmaPressureCoordinate
-from fme.core.dataset.config import MergeNoConcatDatasetConfig, XarrayDataConfig
+from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.typing_ import Slice
 
 

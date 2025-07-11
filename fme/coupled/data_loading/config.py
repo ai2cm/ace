@@ -1,7 +1,7 @@
 import dataclasses
 from collections.abc import Sequence
 
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
 
