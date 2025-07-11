@@ -1,0 +1,62 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: compute-noise-floor-
+spec:
+  entrypoint: compute-noise-floor
+  volumes:
+    - name: gcp-key-secret
+      secret:
+        defaultMode: 420
+        secretName: gcp-key
+  arguments:
+    parameters:
+    - name: python_script
+    - name: config
+  templates:
+    - name: compute-noise-floor
+      steps:
+      - - name: generate-stats
+          template: generate-stats
+          arguments:
+            parameters:
+            - name: python_script
+              value: "{{workflow.parameters.python_script}}"
+            - name: config
+              value: "{{workflow.parameters.config}}"
+    - name: generate-stats
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      inputs:
+        parameters:
+          - name: python_script
+          - name: config
+      container:
+        image: us.gcr.io/vcm-ml/fme:8abd4f11
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "27Gi"
+          requests:
+            cpu: "7500m"
+            memory: "27Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << EOF > script.py
+            {{inputs.parameters.python_script}}
+            EOF
+            cat << EOF > config.yaml
+            {{inputs.parameters.config}}
+            EOF
+            python script.py config.yaml
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret

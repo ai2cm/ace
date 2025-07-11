@@ -46,7 +46,7 @@ def get_time_invariant_vars(ds: xr.Dataset) -> Dict[str, xr.DataArray]:
 @click.option(
     "--input_dir",
     type=Path,
-    help=("Directory containing netcdf files, e.g. from a single ensemble " "member"),
+    help=("Directory containing netcdf files, e.g. from a single ensemble member"),
     required=True,
 )
 @click.option(
@@ -66,7 +66,7 @@ def get_time_invariant_vars(ds: xr.Dataset) -> Dict[str, xr.DataArray]:
 def main(n_times: int, input_dir: Path, output_dir: Path, repeat_variables, nc_format):
     click.echo("Loading data...", nl=False)
     files = sorted(glob(str(input_dir / "*.nc")))
-    arrays = get_time_invariant_vars(xr.open_dataset(files[0]))
+    arrays = get_time_invariant_vars(xr.open_dataset(files[0], decode_timedelta=False))
     ds = xr.open_mfdataset(files)
     click.echo("done")
 
@@ -94,11 +94,12 @@ def main(n_times: int, input_dir: Path, output_dir: Path, repeat_variables, nc_f
         )
 
     dt: int = (ds.time[1] - ds.time[0]).values.astype("timedelta64[h]").astype(int)
-    time_coord = xr.cftime_range(
+    time_coord = xr.date_range(
         ds.time.item(0),
         periods=len(ds.time) * n_times,
         freq=f"{dt}h",
         calendar=ds.time.dt.calendar,
+        use_cftime=True,
     )
 
     coords = {**ds.coords, "time": time_coord, "initial_condition": [0]}
@@ -114,7 +115,7 @@ def main(n_times: int, input_dir: Path, output_dir: Path, repeat_variables, nc_f
             data = data.drop_vars(ic_vars)
         bytes += data.nbytes
         click.echo(
-            f"Processing month {i+1}/{len(monthly_ds)} ({(bytes / 1e9):.2f} GB)\r",
+            f"Processing month {i + 1}/{len(monthly_ds)} ({(bytes / 1e9):.2f} GB)\r",
             nl=False,
         )
         # use these options to enable opening data with netCDF4.MFDataset

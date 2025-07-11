@@ -1,0 +1,5 @@
+path: initial_conditions.nc
+start_indices:
+   times:
+      - "2021-01-01T00:00:00"
+      - "2021-02-01T00:00:00"

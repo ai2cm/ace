@@ -1,0 +1,13 @@
+beaker-py
+cftime
+click
+dacite
+dask[distributed]
+fsspec
+gcsfs
+pyyaml
+scipy
+xarray>=2025.1.2
+xpartition>=2025.3.0
+xtorch_harmonics @ git+https://github.com/ai2cm/fv3net.git@3d1589321e40cddc06bb88c22b44f597646473b2#egg=xtorch_harmonics&subdirectory=external/xtorch_harmonics
+zarr>=3.0.3

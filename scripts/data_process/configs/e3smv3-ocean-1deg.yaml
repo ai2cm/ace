@@ -1,0 +1,65 @@
+runs:
+  data: /pscratch/sd/e/elynnwu/e3smv3-couple-run/2024-11-06-e3smv3-ocn-seaice-1deg/
+data_output_directory: /pscratch/sd/e/elynnwu/e3smv3-couple-run/2024-11-06-e3smv3-ocn-seaice-1deg
+dataset_computation:
+  ocean_dataset_nc_files: /pscratch/sd/e/elynnwu/e3smv3-couple-run/ocean_data/v3.LR.piControl_bonus.mpaso.hist.am.timeSeriesStatsCustom.*.nc
+  ocean_dataset_monthly_layer_thickness_files: /pscratch/sd/e/elynnwu/e3smv3-couple-run/ocean_data/v3.LR.piControl_bonus.mpaso.hist.am.timeSeriesStatsMonthly.*.nc
+  compute_e3sm_surface_downward_heat_flux: True
+  ice_dataset_nc_files: /pscratch/sd/e/elynnwu/e3smv3-couple-run/ice_data/v3.LR.piControl_bonus.mpassi.hist.am.timeSeriesStatsCustom.*.nc
+  ocean_zarr: not-used
+  ice_zarr: not-used
+  nc_grid_path: /pscratch/sd/e/elynnwu/e3smv3-couple-run/mpaso.IcoswISC30E3r5.regrid.nc
+  nc_mosaic_path: not-used
+  nc_target_grid_path: not-used
+  chunking:
+    time_dim: 10
+    latitude_dim: 180
+    longitude_dim: 360
+  standard_names:
+    time_dim: Time
+    longitude_dim: lon
+    latitude_dim: lat
+    vertical_dim: nVertLevels
+    ocean_layer_thickness: timeMonthly_avg_layerThickness
+  renaming:
+    timeCustom_avg_activeTracers_salinity: so
+    timeCustom_avg_activeTracers_temperature: thetao
+    timeCustom_avg_velocityMeridional: vo
+    timeCustom_avg_velocityZonal: uo
+    timeCustom_avg_windStressMeridional: tauuo
+    timeCustom_avg_windStressZonal: tauvo
+    timeCustom_avg_ssh: zos
+    timeCustom_avg_iceAreaCell: sea_ice_fraction
+    timeCustom_avg_iceVolumeCell: sea_ice_volume
+    Time: time
+    timeCustom_avg_rainFlux: rain_flux
+    timeCustom_avg_snowFlux: snow_flux
+    timeCustom_avg_frazilIceFreshwaterFlux: frazil_flux
+  ocean_vertical_target_interface_levels:
+    - 5.0
+    - 15.0
+    - 30.0
+    - 40.0
+    - 65.0
+    - 105.0
+    - 165.0
+    - 250.0
+    - 375.0
+    - 550.0
+    - 775.0
+    - 1050.0
+    - 1400.0
+    - 1850.0
+    - 2400.0
+    - 3100.0
+    - 3500.0
+    - 4000.0
+    - 4700.0
+    - 5400.0
+n_split: 100
+stats:
+  output_directory: /pscratch/sd/e/elynnwu/e3smv3-couple-run/2024-11-06-E3SM-trial-run-ocean-100yr/stats
+  start_date: "0401-01-01"
+  end_date: "0501-01-01"
+  data_type: E3SMV2
+  beaker_dataset: not_used

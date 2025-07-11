@@ -1,0 +1,20 @@
+experiment_dir: evaluator_output
+n_forward_steps: 400  # 100 days
+forward_steps_in_memory: 50
+checkpoint_path: ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace
+  entity: your_wandb_entity
+loader:
+  dataset:
+    data_path: validation
+  start_indices:
+    first: 0
+    n_initial_conditions: 1
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

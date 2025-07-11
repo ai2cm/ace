@@ -1,0 +1,7 @@
+dacite
+dask[distributed]
+gcsfs
+h5netcdf
+h5py==3.11.0 # ran into https://github.com/h5py/h5py/issues/2442 with 3.12.1
+xgcm
+xpartition>=0.2.2

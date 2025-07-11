@@ -1,0 +1,44 @@
+runs:
+  2024-11-11-CM4-ocean-200yr-preprocessed: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
+data_output_directory: gs://leap-scratch/elynnwu
+dataset_computation:
+  ocean_zarr: ocean_5daily.zarr
+  ice_zarr: ice_5daily.zarr
+  ocean_static:
+      zarr: ocean_static.zarr
+      names:
+      - wet
+      - hfgeou
+      renaming:
+        xh: x
+        yh: y
+        wet: sea_surface_fraction
+  nc_grid_path: s3://emulators/ai2_colab/2024-11-11-static-data/ocean_static_no_mask_table.nc
+  nc_mosaic_path: s3://emulators/ai2_colab/2024-11-11-static-data/ocean_hgrid.nc
+  nc_target_grid_path: s3://emulators/ai2_colab/2024-11-11-static-data/gaussian_grid_180_by_360.nc
+  chunking:
+    time_dim: 10
+    latitude_dim: 180
+    longitude_dim: 360
+  renaming:
+    x: lon
+    y: lat
+n_split: 500
+dask:
+  n_workers: 64
+  use_gateway: true
+  cluster_options:
+    worker_resource_allocation: "8CPU, 57.9Gi"
+    idle_timeout_minutes: 10
+stats:
+  output_directory: /pscratch/sd/e/elynnwu/fme-dataset/2024-11-12-cm4-piControl-200yr-dataset-stats
+  start_date: "0200-01-01"
+  end_date: "0250-01-01"
+  data_type: CM4
+  beaker_dataset: not_used
+filesystem:
+  protocol: s3
+  storage_options:
+    profile: ai2
+    client_kwargs:
+      endpoint_url: https://nyu1.osn.mghpcc.org

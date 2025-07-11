@@ -11,15 +11,23 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.batch_data import BatchData, default_collate
-from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.config import (
+    ConcatDatasetConfig,
+    DataLoaderConfig,
+    MergeDatasetConfig,
+)
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     months_for_timesteps,
 )
-from fme.ace.stepper import AtmosphericDeriveFn
-from fme.core.dataset.getters import get_datasets
-from fme.core.dataset.requirements import DataRequirements
-from fme.core.dataset.xarray import DatasetProperties
+from fme.ace.requirements import DataRequirements
+from fme.core.coordinates import (
+    AtmosphericDeriveFn,
+    OptionalHybridSigmaPressureCoordinate,
+)
+from fme.core.dataset.getters import get_datasets, get_merged_datasets
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -52,8 +60,17 @@ def get_data_loaders(
             "Data loading for write_monthly_data.py is not "
             "supported in distributed mode."
         )
-
-    datasets, properties = get_datasets(config.dataset, requirements)
+    datasets: torch.utils.data.Dataset
+    if isinstance(config.dataset, ConcatDatasetConfig):
+        datasets, properties = get_datasets(
+            config.dataset.concat, requirements.names, requirements.n_timesteps
+        )
+    elif isinstance(config.dataset, MergeDatasetConfig):
+        datasets, properties = get_merged_datasets(
+            config.dataset,
+            requirements.names,
+            requirements.n_timesteps,
+        )
 
     data_loaders = []
     for dataset in datasets:
@@ -138,6 +155,7 @@ class Config:
             n_months=n_months,
             variable_metadata=data.properties.variable_metadata,
             coords=coords,
+            dataset_metadata=DatasetMetadata.from_env(),
         )
 
 
@@ -149,7 +167,6 @@ class Data:
 
 
 def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
-    window_batch_data_list: List[BatchData]
     for window_batch_data_list in zip(*loaders):
         tensors = [item.data for item in window_batch_data_list]
         time = [item.time for item in window_batch_data_list]
@@ -170,6 +187,9 @@ def run(config: Config):
     data = config.get_data()
     writer = config.get_data_writer(data)
 
+    assert isinstance(
+        data.properties.vertical_coordinate, OptionalHybridSigmaPressureCoordinate
+    )
     derive_func = AtmosphericDeriveFn(
         vertical_coordinate=data.properties.vertical_coordinate,
         timestep=data.properties.timestep,
@@ -191,7 +211,7 @@ def run(config: Config):
             batch_time=window_batch_data.time,
         )
         if i % 10 == 0:
-            logging.info(f"Writing batch {i+1} of {n_batches}.")
+            logging.info(f"Writing batch {i + 1} of {n_batches}.")
             writer.flush()
 
     writer.flush()
