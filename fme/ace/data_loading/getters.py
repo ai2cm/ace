@@ -1,8 +1,6 @@
 import logging
 
 import torch.utils.data
-from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data.sampler import RandomSampler
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
@@ -60,10 +58,8 @@ def _get_sampler(
             num_samples=local_sample_with_replacement_dataset_size,
             replacement=True,
         )
-    elif dist.is_distributed():
-        sampler = DistributedSampler(dataset, shuffle=train)
     else:
-        sampler = RandomSampler(dataset) if train else None
+        sampler = dist.get_sampler(dataset, shuffle=train)
     return sampler
 
 
@@ -80,9 +76,6 @@ def get_gridded_data(
         requirements: Data requirements for the model.
     """
     n_timesteps_preloaded = config.time_buffer + requirements.n_timesteps
-    # include requirements.n_timesteps - 1 steps of overlap so that no samples are
-    # skipped at the boundaries of the preloaded timesteps
-    start_every_n = config.time_buffer + 1
     dataset: torch.utils.data.Dataset
     if isinstance(config.dataset, XarrayDataConfig):
         dataset, properties = get_xarray_dataset(
@@ -105,6 +98,9 @@ def get_gridded_data(
         )
 
     if config.time_buffer > 0:
+        # include requirements.n_timesteps - 1 steps of overlap so that no samples are
+        # skipped at the boundaries of the preloaded timesteps
+        start_every_n = config.time_buffer + 1
         indices = range(len(dataset))[::start_every_n]
         dataset = torch.utils.data.Subset(dataset, indices)
 
