@@ -3,11 +3,9 @@ import warnings
 from collections.abc import Sequence
 
 from fme.ace.data_loading.augmentation import AugmentationConfig
-from fme.core.dataset.config import (
-    ConcatDatasetConfig,
-    MergeDatasetConfig,
-    XarrayDataConfig,
-)
+from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.merged import MergeDatasetConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
 

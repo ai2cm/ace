@@ -37,8 +37,8 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
-from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device

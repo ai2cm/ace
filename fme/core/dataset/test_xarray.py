@@ -19,25 +19,22 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     NullVerticalCoordinate,
 )
-from fme.core.dataset.concat import XarrayConcat
-from fme.core.dataset.config import (
-    FillNaNsConfig,
-    OverwriteConfig,
-    RepeatedInterval,
-    TimeSlice,
-    XarrayDataConfig,
-)
-from fme.core.dataset.getters import get_dataset, get_xarray_dataset
+from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.merged import MergedXarrayDataset
-from fme.core.dataset.subset import XarraySubset
+from fme.core.dataset.time import RepeatedInterval, TimeSlice
+from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import (
+    OverwriteConfig,
+    XarrayDataConfig,
     XarrayDataset,
+    XarraySubset,
     _get_cumulative_timesteps,
     _get_file_local_index,
     _get_raw_times,
     _get_timestep,
     _get_vertical_coordinate,
     _repeat_and_increment_time,
+    get_xarray_dataset,
 )
 from fme.core.typing_ import Slice
 

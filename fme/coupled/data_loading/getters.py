@@ -6,7 +6,7 @@ import torch
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
-from fme.core.dataset.getters import get_xarray_dataset
+from fme.core.dataset.xarray import get_xarray_dataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
