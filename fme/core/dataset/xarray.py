@@ -24,6 +24,7 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
+from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
@@ -376,7 +377,7 @@ class OverwriteConfig:
 
 
 @dataclasses.dataclass
-class XarrayDataConfig:
+class XarrayDataConfig(DatasetConfigABC):
     """
     Parameters:
         data_path: Path to the data.
@@ -478,6 +479,17 @@ class XarrayDataConfig:
         if self.engine == "zarr":
             self.zarr_engine_used = True
 
+    def build(
+        self,
+        names: Sequence[str],
+        n_timesteps: int,
+    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+        return get_xarray_dataset(
+            self,
+            list(names),
+            n_timesteps,
+        )
+
 
 class XarrayDataset(torch.utils.data.Dataset):
     """Load data from a directory of files matching a pattern using xarray. The
@@ -489,7 +501,9 @@ class XarrayDataset(torch.utils.data.Dataset):
     provide three samples: (t0, t1, t2), (t1, t2, t3), and (t2, t3, t4).
     """
 
-    def __init__(self, config: XarrayDataConfig, names: list[str], n_timesteps: int):
+    def __init__(
+        self, config: XarrayDataConfig, names: Sequence[str], n_timesteps: int
+    ):
         self._horizontal_coordinates: HorizontalCoordinates
         self._names = names
         self.path = config.data_path
@@ -909,7 +923,7 @@ class XarraySubset(torch.utils.data.Dataset):
 
 
 def get_xarray_dataset(
-    config: XarrayDataConfig, names: list[str], n_timesteps: int
+    config: XarrayDataConfig, names: Sequence[str], n_timesteps: int
 ) -> tuple["XarraySubset", DatasetProperties]:
     dataset = XarrayDataset(config, names, n_timesteps)
     properties = dataset.properties
@@ -918,9 +932,9 @@ def get_xarray_dataset(
     return dataset, properties
 
 
-def get_datasets(
+def get_xarray_datasets(
     dataset_configs: Sequence[XarrayDataConfig],
-    names: list[str],
+    names: Sequence[str],
     n_timesteps: int,
     strict: bool = True,
 ) -> tuple[list[XarraySubset], DatasetProperties]:

@@ -5,12 +5,13 @@ from typing import Self
 import torch
 import xarray as xr
 
+from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import (
     XarrayDataConfig,
     XarrayDataset,
     XarraySubset,
-    get_datasets,
+    get_xarray_datasets,
 )
 from fme.core.typing_ import TensorDict
 
@@ -57,11 +58,11 @@ class XarrayConcat(torch.utils.data.Dataset):
 
 def get_dataset(
     dataset_configs: Sequence[XarrayDataConfig],
-    names: list[str],
+    names: Sequence[str],
     n_timesteps: int,
     strict: bool = True,
 ) -> tuple[XarrayConcat, DatasetProperties]:
-    datasets, properties = get_datasets(
+    datasets, properties = get_xarray_datasets(
         dataset_configs, names, n_timesteps, strict=strict
     )
     ensemble = XarrayConcat(datasets)
@@ -69,7 +70,7 @@ def get_dataset(
 
 
 @dataclasses.dataclass
-class ConcatDatasetConfig:
+class ConcatDatasetConfig(DatasetConfigABC):
     """
     Configuration for concatenating multiple datasets.
     Parameters:
@@ -83,3 +84,15 @@ class ConcatDatasetConfig:
 
     def __post_init__(self):
         self.zarr_engine_used = any(ds.engine == "zarr" for ds in self.concat)
+
+    def build(
+        self,
+        names: Sequence[str],
+        n_timesteps: int,
+    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+        return get_dataset(
+            self.concat,
+            names,
+            n_timesteps,
+            strict=self.strict,
+        )

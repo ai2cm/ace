@@ -5,13 +5,8 @@ import torch.utils.data
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.dataset.concat import ConcatDatasetConfig, get_dataset
-from fme.core.dataset.merged import (
-    MergeDatasetConfig,
-    MergeNoConcatDatasetConfig,
-    get_merged_datasets,
-)
-from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset, get_xarray_dataset
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
@@ -72,26 +67,7 @@ def get_gridded_data(
         requirements: Data requirements for the model.
     """
     n_timesteps_preloaded = config.time_buffer + requirements.n_timesteps
-    dataset: torch.utils.data.Dataset
-    if isinstance(config.dataset, XarrayDataConfig):
-        dataset, properties = get_xarray_dataset(
-            config.dataset,
-            requirements.names,
-            n_timesteps_preloaded,
-        )
-    elif isinstance(config.dataset, ConcatDatasetConfig):
-        dataset, properties = get_dataset(
-            config.dataset.concat,
-            requirements.names,
-            n_timesteps_preloaded,
-            strict=config.dataset.strict,
-        )
-    elif isinstance(config.dataset, MergeDatasetConfig):
-        dataset, properties = get_merged_datasets(
-            config.dataset,
-            requirements.names,
-            n_timesteps_preloaded,
-        )
+    dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
 
     if config.time_buffer > 0:
         # include requirements.n_timesteps - 1 steps of overlap so that no samples are
