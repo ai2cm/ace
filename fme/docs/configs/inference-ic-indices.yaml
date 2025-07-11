@@ -1,5 +1,0 @@
-path: initial_conditions.nc
-start_indices:
-  n_initial_conditions: 3
-  first: 1
-  interval: 2
