@@ -81,6 +81,9 @@ class GriddedData(GriddedDataABC[BatchData]):
 
         return SizedMap(modify_and_on_device, self._loader)
 
+    def subset_loader(self, start: int) -> DataLoader[BatchData]:
+        return self._loader.subset(start)
+
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
@@ -129,10 +132,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         """
         Set the epoch for the data loader sampler, if it is a distributed sampler.
         """
-        if self._sampler is not None and isinstance(
-            self._sampler, torch.utils.data.DistributedSampler
-        ):
-            self._sampler.set_epoch(epoch)
+        self._loader.set_epoch(epoch)
 
 
 def get_initial_condition(
