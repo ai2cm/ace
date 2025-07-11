@@ -4,14 +4,15 @@ from collections.abc import Sequence
 import xarray as xr
 
 from fme.core.dataset.concat import ConcatDatasetConfig, XarrayConcat
+from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import (
     XarrayDataConfig,
     XarrayDataset,
     XarraySubset,
-    get_datasets,
     get_raw_paths,
     get_xarray_dataset,
+    get_xarray_datasets,
 )
 from fme.core.typing_ import TensorDict
 
@@ -86,7 +87,7 @@ class MergedXarrayDataset:
 
 
 @dataclasses.dataclass
-class MergeDatasetConfig:
+class MergeDatasetConfig(DatasetConfigABC):
     """
     Configuration for merging multiple datasets.
     Parameters:
@@ -107,10 +108,21 @@ class MergeDatasetConfig:
                     self.zarr_engine_used = True
                     break
 
+    def build(
+        self,
+        names: Sequence[str],
+        n_timesteps: int,
+    ):
+        return get_merged_datasets(
+            self,
+            names,
+            n_timesteps,
+        )
+
 
 def get_merged_datasets(
     merged_config: MergeDatasetConfig,
-    names: list[str],
+    names: Sequence[str],
     n_timesteps: int,
 ) -> tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
@@ -128,7 +140,7 @@ def get_merged_datasets(
             )
             merged_xarray_datasets.append(current_source_xarray_dataset)
         elif isinstance(config, ConcatDatasetConfig):
-            current_source_datasets, current_source_properties = get_datasets(
+            current_source_datasets, current_source_properties = get_xarray_datasets(
                 config.concat,
                 per_dataset_names[config_counter],
                 n_timesteps,
@@ -150,7 +162,7 @@ def get_merged_datasets(
 
 
 @dataclasses.dataclass
-class MergeNoConcatDatasetConfig:
+class MergeNoConcatDatasetConfig(DatasetConfigABC):
     """
     Configuration for merging multiple datasets. No concatenation is allowed.
     Parameters:
@@ -165,6 +177,17 @@ class MergeNoConcatDatasetConfig:
             if ds.engine == "zarr":
                 self.zarr_engine_used = True
                 break
+
+    def build(
+        self,
+        names: Sequence[str],
+        n_timesteps: int,
+    ) -> tuple[MergedXarrayDataset, DatasetProperties]:
+        return get_merged_datasets(
+            MergeDatasetConfig(merge=self.merge),
+            names,
+            n_timesteps,
+        )
 
 
 def _infer_available_variables(config: XarrayDataConfig):
@@ -184,9 +207,9 @@ def _infer_available_variables(config: XarrayDataConfig):
 
 def get_per_dataset_names(
     merged_config: MergeDatasetConfig | MergeNoConcatDatasetConfig,
-    names: list[str],
+    names: Sequence[str],
 ) -> list[list[str]]:
-    merged_required_names = names.copy()
+    merged_required_names = list(names)
     per_dataset_names = []
     for config in merged_config.merge:
         if isinstance(config, XarrayDataConfig):

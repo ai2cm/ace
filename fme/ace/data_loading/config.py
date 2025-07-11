@@ -2,9 +2,12 @@ import dataclasses
 import warnings
 from collections.abc import Sequence
 
+import torch
+
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
@@ -63,6 +66,18 @@ class DataLoaderConfig:
     )
     sample_with_replacement: int | None = None
     time_buffer: int = 0
+
+    def get_dataset(
+        self,
+        names: Sequence[str],
+        n_timesteps: int,
+    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+        if isinstance(self.dataset, Sequence):
+            raise RuntimeError(
+                "Dataset list should have been replaced by a ConcatDatasetConfig "
+                "at init time, perhaps the attribute was set post-init?"
+            )
+        return self.dataset.build(names, n_timesteps)
 
     def __post_init__(self):
         dist = Distributed.get_instance()

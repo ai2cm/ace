@@ -25,7 +25,7 @@ from fme.core.coordinates import (
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, get_merged_datasets
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.xarray import get_datasets
+from fme.core.dataset.xarray import get_xarray_datasets
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -60,7 +60,7 @@ def get_data_loaders(
         )
     datasets: torch.utils.data.Dataset
     if isinstance(config.dataset, ConcatDatasetConfig):
-        datasets, properties = get_datasets(
+        datasets, properties = get_xarray_datasets(
             config.dataset.concat, requirements.names, requirements.n_timesteps
         )
     elif isinstance(config.dataset, MergeDatasetConfig):
