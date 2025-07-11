@@ -5,6 +5,5 @@ Changes:
 - Can group multiple related symbols on a single bullet
 
 - [ ] Tests added
-- [ ] If dependencies changed, "deps only" image rebuilt and "latest_deps_only_image.txt" file updated
 
 Resolves #<github issues> (delete if none)
