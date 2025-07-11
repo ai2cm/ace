@@ -202,13 +202,15 @@ class InferenceDataset(torch.utils.data.Dataset):
         ocean_fraction_name: str | None = None,
     ):
         if isinstance(config.dataset, XarrayDataConfig):
-            dataset = XarrayDataset(
+            dataset: XarrayDataset | MergedXarrayDataset = XarrayDataset(
                 config.dataset, requirements.names, requirements.n_timesteps
             )
-            self._dataset = dataset
+            properties = dataset.properties
         elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
-            self._dataset = self._resolve_merged_datasets(config.dataset, requirements)
-        self._properties = self._dataset.properties
+            dataset = self._resolve_merged_datasets(config.dataset, requirements)
+            properties = dataset.properties
+        self._properties = properties
+        self._dataset = dataset
         self._forward_steps_in_memory = requirements.n_timesteps - 1
         self._total_forward_steps = total_forward_steps
         self._perturbations = config.perturbations
