@@ -1,4 +1,4 @@
-__version__ = "2024.9.0"
+__version__ = "2024.12.0"
 
 
 from . import ace
