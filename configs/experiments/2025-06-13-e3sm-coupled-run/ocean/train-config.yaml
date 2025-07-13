@@ -21,13 +21,13 @@ inference:
       - '0491-01-06T00:00:00'
     dataset:
       merge:
-      - data_path: /climate-default
+      - data_path: gs://vcm-ml-intermediate
         file_pattern: 2025-07-11-E3SMv3-piControl-100yr-coupled-ocean.zarr
         engine: zarr
-      - data_path: /climate-default
+      - data_path: gs://vcm-ml-intermediate
         file_pattern: 2025-06-11-E3SM-piControl-ocean-ice-19-levs-fix-mask.zarr
         engine: zarr
-      - data_path: /climate-default
+      - data_path: gs://vcm-ml-intermediate
         file_pattern: 2025-06-12-E3SMv3-coupled-piControl-atmosphere-sfc-only-5daily.zarr
         engine: zarr
     num_data_workers: 8
@@ -42,44 +42,46 @@ logging:
 train_loader:
   batch_size: 16
   num_data_workers: 8
+  time_buffer: 1
   dataset:
     merge:
-    - data_path: /climate-default
+    - data_path: gs://vcm-ml-intermediate
       file_pattern: 2025-07-11-E3SMv3-piControl-100yr-coupled-ocean.zarr
       engine: zarr
       subset:
-        stat_time: '0421-01-01'
+        start_time: '0421-01-01'
         stop_time: '0501-01-01'
-    - data_path: /climate-default
+    - data_path: gs://vcm-ml-intermediate
       file_pattern: 2025-06-11-E3SM-piControl-ocean-ice-19-levs-fix-mask.zarr
       engine: zarr
       subset:
-        stat_time: '0421-01-01'
+        start_time: '0421-01-01'
         stop_time: '0501-01-01'
-    - data_path: /climate-default
+    - data_path: gs://vcm-ml-intermediate
       file_pattern: 2025-06-12-E3SMv3-coupled-piControl-atmosphere-sfc-only-5daily.zarr
       engine: zarr
       subset:
-        stat_time: '0421-01-01'
+        start_time: '0421-01-01'
         stop_time: '0501-01-01'
 validation_loader:
   batch_size: 16
   num_data_workers: 8
+  time_buffer: 1
   dataset:
     merge:
-    - data_path: /climate-default
+    - data_path: gs://vcm-ml-intermediate
       file_pattern: 2025-07-11-E3SMv3-piControl-100yr-coupled-ocean.zarr
       engine: zarr
       subset:
         start_time: '0401-01-01'
         stop_time: '0406-01-01'
-    - data_path: /climate-default
+    - data_path: gs://vcm-ml-intermediate
       file_pattern: 2025-06-11-E3SM-piControl-ocean-ice-19-levs-fix-mask.zarr
       engine: zarr
       subset:
         start_time: '0401-01-01'
         stop_time: '0406-01-01'
-    - data_path: /climate-default
+    - data_path: gs://vcm-ml-intermediate
       file_pattern: 2025-06-12-E3SMv3-coupled-piControl-atmosphere-sfc-only-5daily.zarr
       engine: zarr
       subset:
@@ -150,8 +152,8 @@ stepper:
           - so_17
           - so_18
       next_step_forcing_names:
-      - tauuo
-      - tauvo
+      - TAUX
+      - TAUY
       - surface_precipitation_rate
       - surface_upward_longwave_flux
       - surface_upward_shortwave_flux
@@ -160,8 +162,8 @@ stepper:
       - LHFLX
       - SHFLX
       in_names:
-      - tauuo
-      - tauvo
+      - TAUX
+      - TAUY
       - surface_precipitation_rate
       - surface_upward_longwave_flux
       - surface_upward_shortwave_flux
