@@ -1,28 +1,17 @@
 import logging
 
 import torch.utils.data
-from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data.sampler import RandomSampler
 
 from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.data_loading.dataloader import get_data_loader
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.dataset.config import (
-    ConcatDatasetConfig,
-    MergeDatasetConfig,
-    MergeNoConcatDatasetConfig,
-)
-from fme.core.dataset.getters import (
-    get_dataset,
-    get_merged_datasets,
-    get_xarray_dataset,
-)
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
 from .batch_data import PrognosticState
 from .config import DataLoaderConfig
-from .dataloader import SlidingWindowDataLoader
 from .gridded_data import GriddedData, InferenceGriddedData
 from .inference import (
     ExplicitIndices,
@@ -52,19 +41,20 @@ def _get_sampler(
 ) -> torch.utils.data.Sampler:
     dist = Distributed.get_instance()
     if sample_with_replacement_dataset_size is not None:
+        local_sample_with_replacement_dataset_size = (
+            sample_with_replacement_dataset_size // dist.world_size
+        )
         sampler = torch.utils.data.RandomSampler(
             dataset,
-            num_samples=sample_with_replacement_dataset_size,
+            num_samples=local_sample_with_replacement_dataset_size,
             replacement=True,
         )
-    elif dist.is_distributed():
-        sampler = DistributedSampler(dataset, shuffle=train)
     else:
-        sampler = RandomSampler(dataset) if train else None
+        sampler = dist.get_sampler(dataset, shuffle=train)
     return sampler
 
 
-def get_data_loader(
+def get_gridded_data(
     config: DataLoaderConfig,
     train: bool,
     requirements: DataRequirements,
@@ -77,31 +67,12 @@ def get_data_loader(
         requirements: Data requirements for the model.
     """
     n_timesteps_preloaded = config.time_buffer + requirements.n_timesteps
-    # include requirements.n_timesteps - 1 steps of overlap so that no samples are
-    # skipped at the boundaries of the preloaded timesteps
-    start_every_n = config.time_buffer + 1
-    dataset: torch.utils.data.Dataset
-    if isinstance(config.dataset, XarrayDataConfig):
-        dataset, properties = get_xarray_dataset(
-            config.dataset,
-            requirements.names,
-            n_timesteps_preloaded,
-        )
-    elif isinstance(config.dataset, ConcatDatasetConfig):
-        dataset, properties = get_dataset(
-            config.dataset.concat,
-            requirements.names,
-            n_timesteps_preloaded,
-            strict=config.dataset.strict,
-        )
-    elif isinstance(config.dataset, MergeDatasetConfig):
-        dataset, properties = get_merged_datasets(
-            config.dataset,
-            requirements.names,
-            n_timesteps_preloaded,
-        )
+    dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
 
     if config.time_buffer > 0:
+        # include requirements.n_timesteps - 1 steps of overlap so that no samples are
+        # skipped at the boundaries of the preloaded timesteps
+        start_every_n = config.time_buffer + 1
         indices = range(len(dataset))[::start_every_n]
         dataset = torch.utils.data.Subset(dataset, indices)
 
@@ -121,42 +92,21 @@ def get_data_loader(
     dist = Distributed.get_instance()
     batch_size = dist.local_batch_size(int(config.batch_size))
 
-    if config.prefetch_factor is None:
-        # DataLoader default is not None so we must leave it unset
-        kwargs = {}
-    else:
-        kwargs = {"prefetch_factor": config.prefetch_factor}
-
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
+    dataloader = get_data_loader(
+        dataset=dataset,
         batch_size=batch_size,
+        n_window_timesteps=requirements.n_timesteps,
+        time_buffer=config.time_buffer,
         num_workers=config.num_data_workers,
         sampler=sampler,
+        shuffled=train,
         drop_last=True,
         pin_memory=using_gpu(),
         collate_fn=CollateFn(list(properties.horizontal_coordinates.dims)),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
-        **kwargs,
+        prefetch_factor=config.prefetch_factor,
     )
-    if config.time_buffer > 0:
-        dataloader = SlidingWindowDataLoader(
-            dataloader,
-            n_timesteps_preloaded,
-            requirements.n_timesteps,
-            train,
-            dataset=dataloader.dataset,
-        )
-
-    if len(dataloader) == 0:
-        msg = (
-            "No batches in dataloader: "
-            f"{len(dataloader.dataset)} samples, "
-            f"batch size is {dataloader.batch_size}"
-        )
-        if config.time_buffer > 0:
-            msg += f", and an outer sample length is {n_timesteps_preloaded}"
-        raise ValueError(msg)
 
     return GriddedData(
         loader=dataloader,

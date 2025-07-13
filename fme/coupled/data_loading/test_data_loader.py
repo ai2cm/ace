@@ -21,8 +21,8 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
     VerticalCoordinate,
 )
-from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.xarray import (
+    XarrayDataConfig,
     _get_mask_provider,
     _get_vertical_coordinate,
     get_horizontal_coordinates,
@@ -36,7 +36,7 @@ from fme.coupled.data_loading.data_typing import (
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
-from .getters import get_data_loader
+from .getters import get_gridded_data
 from .inference import InferenceDataLoaderConfig
 
 N_LAT = 16
@@ -60,6 +60,10 @@ def _save_netcdf(
             dim_sizes_to_use = dim_sizes_without_time
             rng = np.random.default_rng()
             data = rng.integers(low=0, high=2, size=list(dim_sizes_to_use.values()))
+        elif name == "land_fraction":
+            dim_sizes_to_use = dim_sizes_without_time
+            data = np.ones(tuple(dim_sizes_to_use.values()))
+            data[0, 0] = 0.0
         else:
             dim_sizes_to_use = dim_sizes
             data = np.random.uniform(size=list(dim_sizes_to_use.values()))
@@ -309,7 +313,7 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: bool):
         atmosphere_requirements=DataRequirements(atmos_names, n_timesteps=3),
     )
     # unshuffled data loader
-    data = get_data_loader(config, False, coupled_requirements)
+    data = get_gridded_data(config, False, coupled_requirements)
 
     assert data.n_batches == 2 * n_ics  # 2 samples per IC
     for batch in data.loader:

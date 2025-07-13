@@ -1,6 +1,8 @@
 import asyncio
+import dataclasses
 import datetime
 from collections.abc import Hashable, MutableMapping, Sequence
+from typing import Literal
 
 import numpy as np
 import torch
@@ -12,7 +14,6 @@ from fme.core.coordinates import (
     HorizontalCoordinates,
     LatLonCoordinates,
 )
-from fme.core.dataset.config import FillNaNsConfig
 
 SLICE_NONE = slice(None)
 
@@ -122,6 +123,20 @@ def _load_all_variables(
     if "time" in ds.dims:
         ds = ds.isel(time=time_slice)
     return ds[variables].compute()
+
+
+@dataclasses.dataclass
+class FillNaNsConfig:
+    """
+    Configuration to fill NaNs with a constant value or others.
+
+    Parameters:
+        method: Type of fill operation. Currently only 'constant' is supported.
+        value: Value to fill NaNs with.
+    """
+
+    method: Literal["constant"] = "constant"
+    value: float = 0.0
 
 
 def load_series_data_zarr_async(

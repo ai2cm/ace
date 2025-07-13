@@ -287,20 +287,31 @@ class InferenceEvaluatorAggregator(
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
                 ops, target_time=20
             )
-        if isinstance(horizontal_coordinates, LatLonCoordinates):
-            if log_zonal_mean_images:
-                self._aggregators["zonal_mean"] = ZonalMeanAggregator(
-                    n_timesteps=n_timesteps,
-                    variable_metadata=dataset_info.variable_metadata,
-                )
+        try:
             self._aggregators["power_spectrum"] = (
                 PairedSphericalPowerSpectrumAggregator(
-                    nlat=horizontal_coordinates.area_weights.shape[-2],
-                    nlon=horizontal_coordinates.area_weights.shape[-1],
-                    grid=horizontal_coordinates.grid,
+                    gridded_operations=ops,
                     report_plot=True,
                 )
             )
+        except NotImplementedError:
+            logging.warning(
+                "Power spectrum aggregator not implemented for this grid type, "
+                "omitting."
+            )
+        if log_zonal_mean_images:
+            if ops.zonal_mean is None:
+                logging.warning(
+                    "Zonal mean aggregator not implemented for this grid type, "
+                    "omitting."
+                )
+            else:
+                self._aggregators["zonal_mean"] = ZonalMeanAggregator(
+                    zonal_mean=ops.zonal_mean,
+                    n_timesteps=n_timesteps,
+                    variable_metadata=dataset_info.variable_metadata,
+                )
+        if isinstance(horizontal_coordinates, LatLonCoordinates):
             if log_video:
                 self._aggregators["video"] = VideoAggregator(
                     n_timesteps=n_timesteps,

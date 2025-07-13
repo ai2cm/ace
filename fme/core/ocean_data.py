@@ -166,7 +166,12 @@ class OceanData:
     @property
     def sea_ice_fraction(self) -> torch.Tensor:
         """Returns the sea ice fraction."""
-        return self._get("sea_ice_fraction")
+        try:
+            return self._get("sea_ice_fraction")
+        except KeyError:
+            land_fraction = self.land_fraction
+            ocean_sea_ice_fraction = self.ocean_sea_ice_fraction
+            return ocean_sea_ice_fraction * (1 - land_fraction)
 
     @property
     def land_fraction(self) -> torch.Tensor:
@@ -177,3 +182,10 @@ class OceanData:
     def ocean_sea_ice_fraction(self) -> torch.Tensor:
         """Returns the sea ice fraction as a proportion of the sea surface."""
         return self._get("ocean_sea_ice_fraction")
+
+    @property
+    def ocean_fraction(self) -> torch.Tensor:
+        """Returns the dynamic ocean fraction, computed from the sea ice
+        fraction and land fraction.
+        """
+        return 1 - self.land_fraction - self.sea_ice_fraction

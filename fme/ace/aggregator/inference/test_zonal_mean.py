@@ -6,8 +6,12 @@ from fme.core import get_device
 n_sample, n_time, ny, nx = 3, 6, 10, 20
 
 
+def zonal_mean(data: torch.Tensor) -> torch.Tensor:
+    return data.mean(dim=3)
+
+
 def test_zonal_mean_dims():
-    agg = ZonalMeanAggregator(n_timesteps=n_time)
+    agg = ZonalMeanAggregator(zonal_mean, n_timesteps=n_time)
     target_data = {"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())}
     agg.record_batch(target_data, gen_data, target_data, gen_data, i_time_start=0)
@@ -21,7 +25,7 @@ def test_zonal_mean_dims():
 
 
 def test_zonal_mean_lat_varying():
-    agg = ZonalMeanAggregator(n_timesteps=n_time)
+    agg = ZonalMeanAggregator(zonal_mean, n_timesteps=n_time)
     arr = torch.arange(ny, dtype=torch.float32, device=get_device())
     arr = arr[None, None, :, None].expand(n_sample, n_time, -1, nx)
     agg.record_batch({"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0)
@@ -34,7 +38,7 @@ def test_zonal_mean_lat_varying():
 
 
 def test_zonal_mean_zonally_varying():
-    agg = ZonalMeanAggregator(n_timesteps=n_time)
+    agg = ZonalMeanAggregator(zonal_mean, n_timesteps=n_time)
     arr = torch.arange(nx, dtype=torch.float32, device=get_device())
     arr = arr[None, None, None, :].expand(n_sample, n_time, ny, -1)
     agg.record_batch({"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0)
@@ -47,7 +51,7 @@ def test_zonal_mean_zonally_varying():
 
 
 def test_zonal_mean_batch_varying():
-    agg = ZonalMeanAggregator(n_timesteps=n_time)
+    agg = ZonalMeanAggregator(zonal_mean, n_timesteps=n_time)
     for i in range(n_sample):  # assume one sample per batch
         arr = torch.tensor(i, dtype=torch.float32, device=get_device())
         arr = arr[None, None, None, None].expand(-1, n_time, ny, nx)
@@ -64,7 +68,7 @@ def test_zonal_mean_batch_varying():
 def test_zonal_mean_mulitple_time_slices():
     n_time_windows = 2
     n_time_in_memory = n_time // n_time_windows
-    agg = ZonalMeanAggregator(n_timesteps=n_time)
+    agg = ZonalMeanAggregator(zonal_mean, n_timesteps=n_time)
     for i_time in range(0, n_time, n_time_in_memory):
         arr = torch.arange(ny, dtype=torch.float32, device=get_device())
         arr = arr[None, None, :, None].expand(n_sample, n_time_in_memory, ny, nx)

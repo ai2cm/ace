@@ -24,6 +24,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.ocean_data import OceanData
 from fme.core.optimization import NullOptimization
 from fme.core.tensors import add_ensemble_dim
 from fme.core.timing import GlobalTimer
@@ -75,11 +76,14 @@ class CoupledOceanFractionConfig:
             is also passed as an input to the atmosphere.
         land_fraction_name: Name of the land fraction field in the atmosphere
             data. If needed, will be passed to the ocean stepper as a forcing.
+        sea_ice_fraction_name_in_atmosphere: Name of the sea ice fraction field in
+            the atmosphere data, if required and different from sea_ice_fraction_name.
 
     """
 
     sea_ice_fraction_name: str
     land_fraction_name: str
+    sea_ice_fraction_name_in_atmosphere: str | None = None
 
     def validate_ocean_prognostic_names(self, prognostic_names: Iterable[str]):
         if self.sea_ice_fraction_name not in prognostic_names:
@@ -94,6 +98,17 @@ class CoupledOceanFractionConfig:
                 f"CoupledOceanFractionConfig expected {self.land_fraction_name} "
                 "to be an ML forcing of the atmosphere model, but it is not."
             )
+
+    def build_ocean_data(
+        self, forcings_from_ocean: TensorMapping, atmos_forcing_data: TensorMapping
+    ) -> OceanData:
+        # compute ocean frac from land frac and ocean-predicted sea ice frac
+        land_frac_name = self.land_fraction_name
+        sea_ice_frac_name = self.sea_ice_fraction_name
+        # fill nans with 0s
+        sea_ice_frac = torch.nan_to_num(forcings_from_ocean[sea_ice_frac_name])
+        land_frac = atmos_forcing_data[land_frac_name]
+        return OceanData({land_frac_name: land_frac, sea_ice_frac_name: sea_ice_frac})
 
 
 @dataclasses.dataclass
@@ -195,6 +210,11 @@ class CoupledStepperConfig:
         self._all_ocean_names = list(
             set(self.ocean.stepper.all_names).difference(self._all_atmosphere_names)
         )
+
+        if self.ocean_fraction_prediction is not None:
+            self._all_ocean_names.append(
+                self.ocean_fraction_prediction.land_fraction_name
+            )
 
     @property
     def timestep(self) -> datetime.timedelta:
@@ -756,13 +776,18 @@ class CoupledStepper(
             forcings_from_ocean[ocean_frac_name] = atmos_forcing_data[ocean_frac_name]
         else:
             # compute ocean frac from land frac and ocean-predicted sea ice frac
-            land_frac_name = self._config.ocean_fraction_prediction.land_fraction_name
-            sic_name = self._config.ocean_fraction_prediction.sea_ice_fraction_name
-            sea_ice_frac = forcings_from_ocean[sic_name]
-            ocean_frac = 1 - atmos_forcing_data[land_frac_name] - sea_ice_frac
-            # remove negative values just in case the ocean doesn't constrain
-            # the sea ice
-            forcings_from_ocean[ocean_frac_name] = torch.clip(ocean_frac, min=0)
+            ofrac_config = self._config.ocean_fraction_prediction
+            ocean_data = ofrac_config.build_ocean_data(
+                forcings_from_ocean, atmos_forcing_data
+            )
+            sea_ice_frac_name = (
+                ofrac_config.sea_ice_fraction_name_in_atmosphere
+                or ofrac_config.sea_ice_fraction_name
+            )
+            forcings_from_ocean[sea_ice_frac_name] = ocean_data.sea_ice_fraction
+            forcings_from_ocean[ocean_frac_name] = torch.clip(
+                ocean_data.ocean_fraction, min=0
+            )
         for name, tensor in forcings_from_ocean.items():
             # set ocean invalid points to 0 based on the ocean masking
             mask = self._ocean_mask_provider.get_mask_tensor_for(name)

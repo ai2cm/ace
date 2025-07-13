@@ -36,3 +36,9 @@ class Slice:
     @property
     def slice(self) -> slice:
         return slice(self.start, self.stop, self.step)
+
+    def contains(self, value: int) -> bool:
+        start = self.start if self.start is not None else 0
+        stop = self.stop if self.stop is not None else float("inf")
+        step = self.step if self.step is not None else 1
+        return start <= value < stop and (value - start) % step == 0

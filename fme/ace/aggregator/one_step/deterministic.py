@@ -80,11 +80,13 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         self._aggregators: dict[str, _Aggregator] = {
             "mean": MeanAggregator(dataset_info.gridded_operations),
         }
-        if horizontal_coordinates.area_weights is not None:
+        try:
             self._aggregators["power_spectrum"] = SpectrumAggregator(
-                nlat=horizontal_coordinates.area_weights.shape[-2],
-                nlon=horizontal_coordinates.area_weights.shape[-1],
-                grid=horizontal_coordinates.grid,
+                dataset_info.gridded_operations,
+            )
+        except NotImplementedError:
+            logging.warning(
+                "Spectrum aggregator not implemented for this grid type, omitting."
             )
         if log_snapshots:
             self._aggregators["snapshot"] = SnapshotAggregator(

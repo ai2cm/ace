@@ -13,7 +13,7 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
 )
 from fme.core.coordinates import DimSize
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 
 
 def _coord_value(
