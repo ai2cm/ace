@@ -22,7 +22,7 @@ inference:
     dataset:
       merge:
       - data_path: /climate-default
-        file_pattern: 2025-07-11-cm4-piControl-200yr-coupled-threshold-sst_from_ts-atmosphere.zarr
+        file_pattern: 2025-07-11-E3SMv3-piControl-100yr-coupled-threshold-sst_from_ts-atmosphere.zarr
         engine: zarr
       - data_path: /climate-default
         file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
@@ -45,7 +45,7 @@ train_loader:
   dataset:
     merge:
     - data_path: /climate-default
-      file_pattern: 2025-07-11-cm4-piControl-200yr-coupled-threshold-sst_from_ts-atmosphere.zarr
+      file_pattern: 2025-07-11-E3SMv3-piControl-100yr-coupled-threshold-sst_from_ts-atmosphere.zarr
       engine: zarr
       subset:
         start_time: '0421-01-01T06:00:00'
@@ -68,7 +68,7 @@ validation_loader:
   dataset:
     merge:
     - data_path: /climate-default
-      file_pattern: 2025-07-11-cm4-piControl-200yr-coupled-threshold-sst_from_ts-atmosphere.zarr
+      file_pattern: 2025-07-11-E3SMv3-piControl-100yr-coupled-threshold-sst_from_ts-atmosphere.zarr
       engine: zarr
       subset:
         start_time: '0401-01-01T06:00:00'
