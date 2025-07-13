@@ -2,7 +2,7 @@
 
 set -e
 
-CONFIG_FILENAME="ace-train-config-gcp.yaml"
+CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -12,7 +12,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-E3SMv3-atmosphere-with-sfc-wind-stress-interpolate-true"
+JOB_GROUP="BK-E3SMv3-atmosphere-threshold-sst-interpolate-false"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
@@ -20,7 +20,7 @@ STATS_DATA=elynn/2025-06-27-E3SMv3-coupled-piControl-atmosphere-stats-with-wind-
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=1
+N_RANDOM_SEED_RUNS=2
 
 for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
@@ -49,7 +49,8 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --workspace ai2/ace \
           --priority $PRIORITY \
           --preemptible \
-          --cluster ai2/augusta-google-1 \
+          --cluster ai2/jupiter-cirrascale-2 \
+          --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$BEAKER_USERNAME \
           --env WANDB_NAME="${JOB_NAME}" \
           --env WANDB_JOB_TYPE=training \
