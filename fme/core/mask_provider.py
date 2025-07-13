@@ -1,4 +1,5 @@
 import abc
+import logging
 import re
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -129,15 +130,19 @@ class MaskProvider(MaskProviderABC):
         Raises a ValueError if there are overlapping mask names between the two
         MaskProviders.
         """
-        # self_keys = set(self.masks.keys())
-        # other_keys = set(other.masks.keys())
-        # intersection = self_keys.intersection(other_keys)
-        # if intersection:
-        #     raise ValueError(
-        #         "Cannot update MaskProvider with overlapping mask names: "
-        #         f"{', '.join(sorted(list(intersection)))}"
-        #     )
-        self._masks.update(other.masks)
+        self_keys = set(self.masks.keys())
+        other_keys = set(other.masks.keys())
+        intersection = self_keys.intersection(other_keys)
+        if intersection:
+            logging.info(
+                f"Skipping overlapping mask names: {', '.join(sorted(intersection))}"
+            )
+            other_masks_filtered = {
+                k: v for k, v in other.masks.items() if k not in intersection
+            }
+            return self._masks.update(other_masks_filtered)
+        else:
+            self._masks.update(other.masks)
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, MaskProvider):
