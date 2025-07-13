@@ -2,7 +2,7 @@
 
 set -e
 
-CONFIG_FILENAME="train-config-gcp.yaml"
+CONFIG_FILENAME="train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -20,7 +20,7 @@ STATS_DATA=elynn/2025-06-13-E3SM-piControl-ocean-with-atmos-sfc-var-stats-includ
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=1
+N_RANDOM_SEED_RUNS=2
 
 for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
@@ -47,7 +47,8 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --workspace ai2/ace \
           --priority $PRIORITY \
           --preemptible \
-          --cluster ai2/augusta-google-1 \
+          --cluster ai2/jupiter-cirrascale-2 \
+          --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$BEAKER_USERNAME \
           --env WANDB_NAME=$JOB_NAME \
           --env WANDB_JOB_TYPE=training \
