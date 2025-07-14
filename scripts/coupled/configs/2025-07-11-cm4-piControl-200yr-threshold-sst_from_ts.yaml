@@ -1,0 +1,25 @@
+# config for creating surface temperature and fractions dataset for uncoupled
+# atmosphere pretraining
+
+coupled_ts:
+  how: threshold
+  ocean_fraction_threshold: 0.5
+  sst_from_ts: true
+coupled_sea_ice:
+  sst_threshold: 291.75
+  extra_masked_names: ["HI", "sea_ice_volume"]
+output_name_prefix: cm4-piControl-200yr-coupled
+version: "2025-07-11"
+output_directory: /climate-default
+ocean:
+  zarr_path: /climate-default/2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+  time_chunk_size: 25
+  timedelta: 5D
+  extra_names_and_prefixes: ["idepth_", "mask_"]
+atmosphere:
+  zarr_path: /climate-default/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+  time_chunk_size: 500
+  timedelta: 6h
+  extra_names_and_prefixes: ["ak_", "bk_"]
+output_writer:
+  n_dask_workers: 64
