@@ -24,8 +24,7 @@ def save_ocean_nd_netcdf(
 ):
     """
     Saves a netCDF file with synthetic ocean data, including masks and NaNs.
-    Inspired by fme/coupled/data_loading/test_data_loader.py::_save_netcdf
-    and fme.ace.testing.fv3gfs_data.save_nd_netcdf.
+    Inspired by fme.ace.testing.fv3gfs_data.save_nd_netcdf.
     """
     base_variable_names = [
         name
