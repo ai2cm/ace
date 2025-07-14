@@ -25,7 +25,9 @@ class FrozenParameterConfig:
     in either the include or exclude list, or
     an exception will be raised.
 
-    An exception is raised if a parameter is included by both lists.
+    An exception is raised if a parameter is matched by both lists, or if
+    a rule in one of the lists is not matched by any parameters in the model
+    (including if it is already matched by an earlier rule).
 
     Parameters:
         include: list of parameter names to freeze (set requires_grad = False)
@@ -50,7 +52,9 @@ class FrozenParameterConfig:
                 )
 
     def apply(self, model: nn.Module):
-        apply_by_wildcard(model, _freeze_weight, self.include, self.exclude)
+        apply_by_wildcard(
+            model, _freeze_weight, self.include, self.exclude, raise_if_unused=True
+        )
 
 
 def _freeze_weight(module: nn.Module, name: str):
