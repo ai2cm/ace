@@ -88,3 +88,5 @@ dataset_computation:
       - RH200
     scalar.zarr:
       - global_mean_co2
+  standard_names:
+    total_frozen_precip_rate: None

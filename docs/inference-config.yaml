@@ -1,0 +1,22 @@
+experiment_dir: inference_output
+n_forward_steps: 400 # 100 days
+forward_steps_in_memory: 50
+checkpoint_path: ace2_era5_ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace
+  entity: your_wandb_entity
+initial_condition:
+  path: initial_conditions/ic_1940.nc
+  start_indices:
+    n_initial_conditions: 2
+    first: 0
+    interval: 3
+forcing_loader:
+  dataset:
+    data_path: forcing_data
+  num_data_workers: 2
+data_writer:
+  save_prediction_files: false

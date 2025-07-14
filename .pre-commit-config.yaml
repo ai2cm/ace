@@ -3,7 +3,7 @@ repos:
   rev: v0.8.1
   hooks:
     - id: ruff
-      args: ["--fix", "--config", "fme/pyproject.toml"]
+      args: ["--fix", "--config", "pyproject.toml"]
     - id: ruff-format
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -11,14 +11,21 @@ repos:
     - id: check-added-large-files
       args: [--maxkb=250]
     - id: trailing-whitespace
+    - id: file-contents-sorter
+      files: |
+            (?x)^(
+                ^.*requirements.*\.txt|
+                constraints.txt|
+                analysis-deps.txt
+            )$
 -   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.2.0
+    rev: v1.15.0
     hooks:
     - id: mypy
-      additional_dependencies: ["types-PyYaml==5.4.3"]
+      additional_dependencies: ["types-PyYaml==5.4.3", "wandb==0.19.0"]
       args: ["--ignore-missing-imports", "--check-untyped-defs"]
       exclude: |
         (?x)^(
         .+/conf.py |
-        .+/conftest.py
+        .+/conftest.py |
         )$

@@ -1,0 +1,125 @@
+runs:
+  ic_0001: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0001
+  ic_0002: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0002
+  ic_0003: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0003
+  ic_0004: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0004
+  ic_0005: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0005
+  ic_0006: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0006
+  ic_0007: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0007
+  ic_0008: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0008
+  ic_0009: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0009
+  ic_0010: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0010
+  ic_0011: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0011
+  ic_0012: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0012
+  ic_0013: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0013
+  ic_0014: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0014
+  ic_0015: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0015
+  ic_0016: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0016
+  ic_0017: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0017
+  ic_0018: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0018
+  ic_0019: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0019
+  ic_0020: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0020
+  ic_0021: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0021
+  ic_0022: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0022
+  ic_0023: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0023
+  ic_0024: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0024
+  ic_0025: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0025
+  ic_0026: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0026
+  ic_0027: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0027
+  ic_0028: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0028
+  ic_0029: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0029
+  ic_0030: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0030
+  ic_0031: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0031
+  ic_0032: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0032
+  ic_0033: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0033
+  ic_0034: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0034
+  ic_0035: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0035
+  ic_0036: gs://vcm-ml-raw-flexible-retention/2025-02-20-C96-SHiELD-SOM-1xCO2-idealized-heating-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0036
+data_output_directory: gs://vcm-ml-intermediate/2025-02-21-vertically-resolved-1deg-c96-shield-som-1xCO2-idealized-heating-ensemble-fme-dataset
+stats:
+  output_directory: gs://vcm-ml-intermediate/2025-02-21-vertically-resolved-1deg-c96-shield-som-1xCO2-idealized-heating-ensemble-fme-dataset-stats
+  beaker_dataset: 2025-02-21-vertically-resolved-1deg-c96-shield-som-1xCO2-idealized-heating-ensemble-fme-dataset-stats
+  start_date: null
+  end_date: null
+  data_type: FV3GFS
+dataset_computation:
+  reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
+  vertical_coarsening_indices:
+    - [0, 11]
+    - [11, 21]
+    - [21, 30]
+    - [30, 39]
+    - [39, 49]
+    - [49, 58]
+    - [58, 67]
+    - [67, 79]
+  renaming:
+    specific_humidity_at_two_meters: Q2m
+    air_temperature_at_two_meters: TMP2m
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+  variable_sources:
+    fluxes_2d.zarr:
+      - PRATEsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - DLWRFsfc
+      - DSWRFsfc
+      - DSWRFtoa
+      - ULWRFsfc
+      - ULWRFtoa
+      - USWRFsfc
+      - USWRFtoa
+      - precipitable_water_path
+      - GRAUPELsfc
+      - ICEsfc
+      - SNOWsfc
+    full_state.zarr:
+      - surface_temperature
+      - air_temperature
+      - specific_humidity
+      - cloud_water_mixing_ratio
+      - cloud_ice_mixing_ratio
+      - graupel_mixing_ratio
+      - rain_mixing_ratio
+      - snow_mixing_ratio
+      - northward_wind
+      - eastward_wind
+      - pressure_thickness_of_atmospheric_layer
+      - PRESsfc
+      - HGTsfc
+      - column_soil_moisture
+      - soil_moisture_0
+      - soil_moisture_1
+      - soil_moisture_2
+      - soil_moisture_3
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
+      - specific_humidity_at_two_meters
+      - air_temperature_at_two_meters
+      - northward_wind_at_ten_meters
+      - eastward_wind_at_ten_meters
+      - RH200
+      - RH500
+      - RH850
+      - TMP200
+      - TMP500
+      - TMP850
+      - UGRD200
+      - UGRD500
+      - UGRD850
+      - VGRD200
+      - VGRD500
+      - VGRD850
+      - h50
+      - h200
+      - h500
+      - h850
+    ocean_forcing.zarr:
+      - prescribed_mixed_layer_depth
+      - prescribed_qflux
+    scalar.zarr:
+      - global_mean_co2
+  standard_names:
+    total_frozen_precip_rate: None

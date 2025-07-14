@@ -69,3 +69,6 @@ dataset_computation:
     rain_mixing_ratio: None
     snow_mixing_ratio: None
     precipitable_water_path: None
+    surface_snow_rate: None
+    surface_ice_rate: None
+    surface_graupel_rate: None

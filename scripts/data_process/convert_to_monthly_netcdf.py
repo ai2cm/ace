@@ -21,7 +21,7 @@ import xarray as xr
 def main(input_zarr, output_directory, start_date, end_date, nc_format, prepend_nans):
     """Save data at INPUT_ZARR to monthly netcdf files in OUTPUT_DIRECTORY.
     It is assumed that OUTPUT_DIRECTORY does not exist."""
-    os.makedirs(output_directory)
+    os.makedirs(output_directory, exist_ok=True)
     ds = xr.open_zarr(input_zarr)
     if prepend_nans:
         # prepend NaNs to first timestep
