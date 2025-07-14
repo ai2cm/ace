@@ -8,6 +8,7 @@ from fme.core.coordinates import (
     HEALPixCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    e2ghpx,
 )
 from fme.core.mask_provider import MaskProvider
 
@@ -239,6 +240,7 @@ def test_healpix_ops_raises_value_error_with_mask():
         healpix_coords.get_gridded_operations(mask_provider=mask_provider)
 
 
+@pytest.mark.skipif(e2ghpx is None, reason="earth2grid healpix not available")
 @pytest.mark.parametrize("pad", [True, False])
 def test_healpix_coordinates_xyz(pad: bool, very_fast_only: bool):
     if very_fast_only:
