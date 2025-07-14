@@ -43,9 +43,6 @@ cache-keys = [
     { file = "requirements-healpix.txt" },
 ]
 
-[tool.ruff]
-exclude = ["fme/ace/models/makani_fcn2/**"]
-
 [tool.ruff.lint]
 select = ["D", "E", "F", "I", "W", "UP"]
 ignore = ["D1", "D200", "D205", "D212", "E203", "W293", "F541", "E402"]

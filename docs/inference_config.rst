@@ -41,7 +41,7 @@ in the dataset configuration.  See :class:`fme.ace.XarrayDataConfig` for more in
 Example YAML Configuration
 ---------------------------
 
-.. _Zenodo repository: https://zenodo.org/records/14606905
+.. _ACE2-ERA5 Hugging Face page: https://huggingface.co/allenai/ACE2-ERA5
 
 .. literalinclude:: inference-config.yaml
    :language: yaml

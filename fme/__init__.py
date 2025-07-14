@@ -36,5 +36,4 @@ __all__ = [
     "using_gpu",
     "weighted_std",
     "ace",
-    "coupled",
 ]
