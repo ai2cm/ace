@@ -1,0 +1,11 @@
+input_directories:
+  # in priority order to handle name conflicts
+  - /climate-default/2025-06-03-cm4-piControl-200yr-coupled-ocean-stats # coupling vars
+  - /climate-default/2025-07-11-cm4-piControl-200yr-coupled-threshold-sst_from_ts-atmosphere-stats # surface_temperature -> sst
+  - /climate-default/2025-04-16-cm4-piControl-ocean-200yr-dataset/statsdata # non-coupling vars
+  - /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/stats # 5-daily sfc fluxes
+rename:
+  - data_var: surface_temperature
+    new_name: sst
+    drop: true
+output_directory: /climate-default/2025-07-11-cm4-piControl-200yr-coupled-stats/ocean
