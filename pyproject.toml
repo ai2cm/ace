@@ -30,7 +30,6 @@ dependencies = { file = "requirements.txt" }
 optional-dependencies.dev = { file = "requirements-dev.txt" }
 optional-dependencies.docs = { file = "docs/requirements.txt" }
 optional-dependencies.deploy = { file = "requirements-deploy.txt" }
-optional-dependencies.healpix = { file = "requirements-healpix.txt" }
 
 [tool.setuptools.packages]
 find = {}
@@ -40,7 +39,6 @@ cache-keys = [
     { file = "requirements.txt" },
     { file = "requirements-dev.txt" },
     { file = "docs/requirements.txt" },
-    { file = "requirements-healpix.txt" },
 ]
 
 [tool.ruff.lint]
