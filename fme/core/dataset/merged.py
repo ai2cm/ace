@@ -11,8 +11,6 @@ from fme.core.dataset.xarray import (
     XarrayDataset,
     XarraySubset,
     get_raw_paths,
-    get_xarray_dataset,
-    get_xarray_datasets,
 )
 from fme.core.typing_ import TensorDict
 
@@ -70,6 +68,10 @@ class MergedXarrayDataset:
         return self.datasets[0].all_times
 
     @property
+    def sample_start_times(self):
+        return self.datasets[0].sample_start_times
+
+    @property
     def properties(self) -> DatasetProperties:
         data_properties = None
         for dataset in self.datasets:
@@ -120,47 +122,6 @@ class MergeDatasetConfig(DatasetConfigABC):
         )
 
 
-def get_merged_datasets(
-    merged_config: MergeDatasetConfig,
-    names: Sequence[str],
-    n_timesteps: int,
-) -> tuple[MergedXarrayDataset, DatasetProperties]:
-    merged_xarray_datasets = []
-    merged_properties: DatasetProperties | None = None
-    per_dataset_names = get_per_dataset_names(merged_config, names)
-    config_counter = 0
-    for config in merged_config.merge:
-        if isinstance(config, XarrayDataConfig):
-            current_source_xarray_dataset, current_source_properties = (
-                get_xarray_dataset(
-                    config,
-                    per_dataset_names[config_counter],
-                    n_timesteps,
-                )
-            )
-            merged_xarray_datasets.append(current_source_xarray_dataset)
-        elif isinstance(config, ConcatDatasetConfig):
-            current_source_datasets, current_source_properties = get_xarray_datasets(
-                config.concat,
-                per_dataset_names[config_counter],
-                n_timesteps,
-                strict=config.strict,
-            )
-            current_source_ensemble = XarrayConcat(current_source_datasets)
-            merged_xarray_datasets.append(current_source_ensemble)
-
-        if merged_properties is None:
-            merged_properties = current_source_properties
-        else:
-            merged_properties.update_merged_dataset(current_source_properties)
-        config_counter += 1
-
-    if merged_properties is None:
-        raise ValueError("At least one dataset must be provided.")
-    merged_datasets = MergedXarrayDataset(datasets=merged_xarray_datasets)
-    return merged_datasets, merged_properties
-
-
 @dataclasses.dataclass
 class MergeNoConcatDatasetConfig(DatasetConfigABC):
     """
@@ -188,6 +149,37 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
             names,
             n_timesteps,
         )
+
+
+def get_merged_datasets(
+    merged_config: MergeDatasetConfig | MergeNoConcatDatasetConfig,
+    names: Sequence[str],
+    n_timesteps: int,
+) -> tuple[MergedXarrayDataset, DatasetProperties]:
+    merged_xarray_datasets = []
+    merged_properties: DatasetProperties | None = None
+    per_dataset_names = get_per_dataset_names(merged_config, names)
+    config_counter = 0
+    for config in merged_config.merge:
+        (
+            current_source_xarray_dataset,
+            current_source_properties,
+        ) = config.build(
+            per_dataset_names[config_counter],
+            n_timesteps,
+        )
+        merged_xarray_datasets.append(current_source_xarray_dataset)
+
+        if merged_properties is None:
+            merged_properties = current_source_properties
+        else:
+            merged_properties.update_merged_dataset(current_source_properties)
+        config_counter += 1
+
+    if merged_properties is None:
+        raise ValueError("At least one dataset must be provided.")
+    merged_datasets = MergedXarrayDataset(datasets=merged_xarray_datasets)
+    return merged_datasets, merged_properties
 
 
 def _infer_available_variables(config: XarrayDataConfig):

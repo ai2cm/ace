@@ -8,6 +8,7 @@ import cftime
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
@@ -21,6 +22,7 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
     VerticalCoordinate,
 )
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import (
     XarrayDataConfig,
     _get_mask_provider,
@@ -37,7 +39,7 @@ from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
 from .getters import get_gridded_data
-from .inference import InferenceDataLoaderConfig
+from .inference import InferenceDataLoaderConfig, InferenceDataset
 
 N_LAT = 16
 N_LON = 32
@@ -411,3 +413,111 @@ def test_zarr_engine_used_false_inference():
         start_indices=ExplicitIndices([0]),
     )
     assert not config.zarr_engine_used
+
+
+def test_coupled_data_loader_merge_no_concat(tmp_path):
+    ocean_names = ["var_ocean_1", "var_ocean_2"]
+    atmos_names = ["var_atmos_1", "var_atmos_2"]
+    n_forward_times_ocean = 2
+    n_forward_times_atmosphere = 4
+
+    data_path = tmp_path / "data"
+    data_path.mkdir()
+
+    ocean_dir = data_path / "ocean"
+    ocean_dir_part1 = data_path / "ocean_part1"
+    ocean_dir_part2 = data_path / "ocean_part2"
+    ocean_dir.mkdir()
+    ocean_dir_part1.mkdir()
+    ocean_dir_part2.mkdir()
+
+    atmos_dir = data_path / "atmos"
+    atmos_dir.mkdir()
+
+    ocean_dim_sizes = {"time": n_forward_times_ocean + 1, "lat": N_LAT, "lon": N_LON}
+    atmos_dim_sizes = {
+        "time": n_forward_times_atmosphere + 1,
+        "lat": N_LAT,
+        "lon": N_LON,
+    }
+
+    ocean_timestep_size = n_forward_times_atmosphere // n_forward_times_ocean
+
+    ocean_config: MergeNoConcatDatasetConfig | XarrayDataConfig
+    atmos_config: MergeNoConcatDatasetConfig | XarrayDataConfig
+    _save_netcdf(
+        filename=ocean_dir_part1 / "data.nc",
+        dim_sizes=ocean_dim_sizes,
+        variable_names=[ocean_names[0]],
+        calendar="proleptic_gregorian",
+        realm="ocean",
+        timestep_size=ocean_timestep_size,
+    )
+    _save_netcdf(
+        filename=ocean_dir_part2 / "data.nc",
+        dim_sizes=ocean_dim_sizes,
+        variable_names=[ocean_names[1]],
+        calendar="proleptic_gregorian",
+        realm="ocean",
+        timestep_size=ocean_timestep_size,
+    )
+    _save_netcdf(
+        filename=atmos_dir / "data.nc",
+        dim_sizes=atmos_dim_sizes,
+        variable_names=atmos_names,
+        calendar="proleptic_gregorian",
+        realm="atmosphere",
+    )
+    ocean_config = MergeNoConcatDatasetConfig(
+        merge=[
+            XarrayDataConfig(data_path=str(ocean_dir_part1)),
+            XarrayDataConfig(data_path=str(ocean_dir_part2)),
+        ]
+    )
+    atmos_config = XarrayDataConfig(data_path=str(atmos_dir))
+
+    # test CoupledDataLoaderConfig
+    config = CoupledDataLoaderConfig(
+        dataset=[
+            CoupledDatasetConfig(
+                ocean=ocean_config,
+                atmosphere=atmos_config,
+            )
+        ],
+        batch_size=1,
+        num_data_workers=0,
+    )
+    coupled_requirements = CoupledDataRequirements(
+        ocean_timestep=datetime.timedelta(days=ocean_timestep_size),
+        ocean_requirements=DataRequirements(ocean_names, n_timesteps=2),
+        atmosphere_timestep=datetime.timedelta(days=1),
+        atmosphere_requirements=DataRequirements(atmos_names, n_timesteps=3),
+    )
+
+    data = get_gridded_data(config, False, coupled_requirements)
+    batch = next(iter(data.loader))
+    assert set(batch.ocean_data.data.keys()) == set(ocean_names)
+    assert set(batch.atmosphere_data.data.keys()) == set(atmos_names)
+
+    # test InferenceDataLoaderConfig
+    inference_config = InferenceDataLoaderConfig(
+        dataset=CoupledDatasetConfig(
+            ocean=ocean_config,
+            atmosphere=atmos_config,
+        ),
+        start_indices=ExplicitIndices([0]),
+    )
+    dataset = InferenceDataset(
+        config=inference_config,
+        total_coupled_steps=1,
+        requirements=coupled_requirements,
+    )
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=None,  # batching is handled by the dataset
+        num_workers=inference_config.num_data_workers,
+    )
+
+    inference_batch = next(iter(loader))
+    assert set(inference_batch.ocean_data.data.keys()) == set(ocean_names)
+    assert set(inference_batch.atmosphere_data.data.keys()) == set(atmos_names)
