@@ -6,7 +6,6 @@ import torch
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
-from fme.core.dataset.xarray import get_xarray_dataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
@@ -50,11 +49,13 @@ def get_dataset(
 ) -> tuple[CoupledDataset, CoupledDatasetProperties]:
     ocean_reqs = requirements.ocean_requirements
     atmosphere_reqs = requirements.atmosphere_requirements
-    ocean, ocean_properties = get_xarray_dataset(
-        config.ocean, ocean_reqs.names, ocean_reqs.n_timesteps
+    ocean: torch.utils.data.Dataset
+    atmosphere: torch.utils.data.Dataset
+    ocean, ocean_properties = config.ocean.build(
+        ocean_reqs.names, ocean_reqs.n_timesteps
     )
-    atmosphere, atmosphere_properties = get_xarray_dataset(
-        config.atmosphere, atmosphere_reqs.names, atmosphere_reqs.n_timesteps
+    atmosphere, atmosphere_properties = config.atmosphere.build(
+        atmosphere_reqs.names, atmosphere_reqs.n_timesteps
     )
     properties = CoupledDatasetProperties(
         ocean.sample_start_times, ocean_properties, atmosphere_properties

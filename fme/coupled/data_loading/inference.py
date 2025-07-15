@@ -8,7 +8,6 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
-from fme.core.dataset.xarray import get_xarray_dataset
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData
 from fme.coupled.data_loading.config import CoupledDatasetConfig
@@ -68,15 +67,13 @@ class InferenceDataset(torch.utils.data.Dataset):
     ):
         ocean_reqs = requirements.ocean_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
-        ocean, ocean_properties = get_xarray_dataset(
-            config.dataset.ocean,
-            ocean_reqs.names,
-            ocean_reqs.n_timesteps,
+        ocean: torch.utils.data.Dataset
+        atmosphere: torch.utils.data.Dataset
+        ocean, ocean_properties = config.dataset.ocean.build(
+            ocean_reqs.names, ocean_reqs.n_timesteps
         )
-        atmosphere, atmosphere_properties = get_xarray_dataset(
-            config.dataset.atmosphere,
-            atmosphere_reqs.names,
-            atmosphere_reqs.n_timesteps,
+        atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
+            atmosphere_reqs.names, atmosphere_reqs.n_timesteps
         )
         properties = CoupledDatasetProperties(
             ocean.sample_start_times, ocean_properties, atmosphere_properties
