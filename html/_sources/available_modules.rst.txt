@@ -1,0 +1,3 @@
+.. code-block:: text
+
+   dict_keys(['Samudra', 'prebuilt', 'SphericalFourierNeuralOperatorNet', 'SFNO-v0.1.0', 'NoiseConditionedSFNO', 'HEALPixRecUNet'])
