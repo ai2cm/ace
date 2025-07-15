@@ -22,19 +22,15 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: v1-${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('requirements-healpix.txt') }}-${{ hashFiles('constraints.txt') }}
+          key: v1-${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           python -m pip install uv
-          # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
-          uv venv --python 3.11
-          uv pip install -c constraints.txt -e .[dev]
-          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix]
+          uv pip install --system -c constraints.txt -e .[dev]
       - name: Run pytest with code coverage
         run: |
-          source .venv/bin/activate
           make test_cov
-  cpu-very-fast-no-healpix:
+  cpu-very-fast:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
