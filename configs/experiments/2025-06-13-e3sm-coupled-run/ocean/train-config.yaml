@@ -3,7 +3,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 120
+max_epochs: 100
 n_forward_steps: 4
 inference:
   n_forward_steps: 730
@@ -95,6 +95,8 @@ optimization:
   kwargs:
     weight_decay: 0.01
 stepper:
+  parameter_init:
+    weights_path: /ocean_ckpt.tar
   loss:
     type: MSE
   input_masking:
