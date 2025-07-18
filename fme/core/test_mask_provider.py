@@ -108,22 +108,21 @@ def test_mask_provider_update_success():
         assert torch.equal(mask, expected_masks[name])
 
 
-def test_mask_provider_update_failure_overlapping_keys():
+def test_mask_provider_update_uses_first_overlapped_keys():
     # test updating masks fails when keys overlap
     masks1 = {"mask_temp": torch.tensor([1, 0]), "mask_common": torch.tensor([0, 0])}
     masks2 = {
         "mask_humidity": torch.tensor([0, 1]),
         "mask_common": torch.tensor([1, 1]),
     }
-    provider1 = MaskProvider(masks=masks1)
-    provider2 = MaskProvider(masks=masks2)
+    provider1 = MaskProvider(masks=masks1.copy())
+    provider2 = MaskProvider(masks=masks2.copy())
+    provider1.update(provider2)
+    assert torch.equal(provider1.masks["mask_common"], masks1["mask_common"])
+    assert "mask_humidity" in provider1.masks
 
-    with pytest.raises(ValueError, match="mask_common"):
-        provider1.update(provider2)
-
-    # Ensure original provider is unchanged
-    assert provider1.masks.keys() == masks1.keys()
-    for name, mask in provider1.masks.items():
+    # Ensure original provider mask is unchanged
+    for name, mask in masks1.items():
         assert torch.equal(mask, masks1[name])
 
 
