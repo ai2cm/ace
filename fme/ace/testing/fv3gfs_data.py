@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
 import pathlib
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 import cftime
 import numpy as np
@@ -12,7 +13,7 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
 )
 from fme.core.coordinates import DimSize
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 
 
 def _coord_value(
@@ -31,19 +32,19 @@ def _coord_value(
 @dataclasses.dataclass
 class DimSizes:
     n_time: int
-    horizontal: List[DimSize]
+    horizontal: list[DimSize]
     nz_interface: int
 
     @property
-    def shape_nd(self) -> List[int]:
+    def shape_nd(self) -> list[int]:
         return [self.n_time] + [dim.size for dim in self.horizontal]
 
     @property
-    def dims_nd(self) -> List[str]:
+    def dims_nd(self) -> list[str]:
         return ["time"] + [dim.name for dim in self.horizontal]
 
     @property
-    def shape_vertical_interface(self) -> Tuple[int]:
+    def shape_vertical_interface(self) -> tuple[int]:
         return (self.nz_interface,)
 
     @property
@@ -62,11 +63,12 @@ class DimSizes:
 def save_nd_netcdf(
     filename,
     dim_sizes: DimSizes,
-    variable_names: List[str],
+    variable_names: list[str],
     timestep_days: float,
-    time_varying_values: Optional[List[float]] = None,
+    time_varying_values: list[float] | None = None,
     save_vertical_coordinate: bool = True,
-):
+    return_ds: bool = False,
+) -> xr.Dataset | None:
     """
     Save a ND netcdf file with random data for the given variable names and
     dimensions.
@@ -78,6 +80,7 @@ def save_nd_netcdf(
         timestep_days: The number of days between each time step.
         time_varying_values: If not None, the values to use for each time step.
         save_vertical_coordinate: If True, save vertical coordinate variables.
+        return_ds: If True, return the dataset in addition to saving it.
     """
     ds = get_nd_dataset(
         dim_sizes=dim_sizes,
@@ -90,11 +93,14 @@ def save_nd_netcdf(
             for i in range(dim_sizes.n_time):
                 ds[name].isel(time=i).values[:] = time_varying_values[i]
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+    if return_ds:
+        return ds
+    return None
 
 
 def save_scalar_netcdf(
     filename,
-    variable_names: List[str],
+    variable_names: list[str],
 ):
     ds = get_scalar_dataset(variable_names)
     ds.to_netcdf(filename, format="NETCDF4_CLASSIC")
@@ -103,7 +109,7 @@ def save_scalar_netcdf(
 @dataclasses.dataclass
 class StatsData:
     path: pathlib.Path
-    names: List[str]
+    names: list[str]
 
     def __post_init__(self):
         save_scalar_netcdf(
@@ -127,10 +133,10 @@ class StatsData:
 @dataclasses.dataclass
 class FV3GFSData:
     path: pathlib.Path
-    names: List[str]
+    names: list[str]
     dim_sizes: DimSizes
     timestep_days: float
-    time_varying_values: Optional[List[float]] = None
+    time_varying_values: list[float] | None = None
     num_data_workers: int = 0
     save_vertical_coordinate: bool = True
 
@@ -144,13 +150,14 @@ class FV3GFSData:
                 f"Number of time-varying values ({len(self.time_varying_values)}) "
                 f"must match number of time steps ({self.dim_sizes.n_time})"
             )
-        save_nd_netcdf(
+        self._ds: xr.Dataset = save_nd_netcdf(
             self.data_filename,
             dim_sizes=self.dim_sizes,
             variable_names=self.names,
             timestep_days=self.timestep_days,
             time_varying_values=self.time_varying_values,
             save_vertical_coordinate=self.save_vertical_coordinate,
+            return_ds=True,
         )
 
     @property
@@ -161,6 +168,10 @@ class FV3GFSData:
     @property
     def data_filename(self):
         return self.data_path / "data.nc"
+
+    @property
+    def horizontal_coords(self) -> dict[str, xr.DataArray]:
+        return {dim.name: self._ds[dim.name] for dim in self.dim_sizes.horizontal}
 
     @property
     def inference_data_loader_config(self) -> InferenceDataLoaderConfig:
@@ -178,7 +189,7 @@ class FV3GFSData:
 @dataclasses.dataclass
 class MonthlyReferenceData:
     path: pathlib.Path
-    names: List[str]
+    names: list[str]
     dim_sizes: DimSizes
     n_ensemble: int
 
@@ -189,7 +200,7 @@ class MonthlyReferenceData:
             variable_names=self.names,
         )
         # drop default time coord from get_nd_dataset
-        ds = ds.drop(["time"])
+        ds = ds.drop_vars(["time"])
         # add a time axis for months
         months = []
         for i in range(self.dim_sizes.n_time):
@@ -282,7 +293,7 @@ def get_nd_dataset(
 
 def get_scalar_dataset(
     variable_names: Iterable[str],
-    fill_value: Optional[float] = None,
+    fill_value: float | None = None,
 ):
     data_vars = {}
     for name in variable_names:

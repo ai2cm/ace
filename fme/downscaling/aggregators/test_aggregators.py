@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 import torch
 import xarray as xr
@@ -8,10 +9,16 @@ from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
 
 from .. import metrics_and_maths
-from ..datasets_new import BatchData, BatchedLatLonCoordinates, PairedBatchData
+from ..datasets import BatchData, BatchedLatLonCoordinates, PairedBatchData
 from ..models import ModelOutputs
 from .generation import GenerationAggregator
-from .main import Mean, MeanComparison, MeanMapAggregator, SnapshotAggregator
+from .main import (
+    Mean,
+    MeanComparison,
+    MeanMapAggregator,
+    SnapshotAggregator,
+    _get_spectrum_metrics,
+)
 from .shape_helpers import (
     _check_all_datasets_compatible_sample_dim,
     _check_batch_dims_for_recording,
@@ -151,7 +158,7 @@ def test_map_aggregator(n_steps: int):
         }
         aggregator.record_batch(target, prediction)
 
-    _, maps = aggregator._get()
+    _, maps, _ = aggregator._get_metrics_and_maps()
     for var_name in ("x", "y"):
         assert maps[f"maps/full-field/{var_name}"].shape == (
             height,
@@ -224,6 +231,7 @@ def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
             batch=batch,
         )
         aggregator.get_wandb(prefix="test")
+        aggregator.get_dataset()
 
 
 @pytest.mark.parametrize("valid_shape", [(2, 4, 8), (2, 3, 4, 8)])
@@ -296,3 +304,15 @@ def test_check_all_datasets_compatible_sample_dim():
 
     with pytest.raises(ValueError):
         _check_all_datasets_compatible_sample_dim([prediction, invalid_dims])
+
+
+def test__get_spectrum_metrics():
+    gen_spectrum = {"x": np.array([0, 1, 2, 3, 4])}
+    target_spectrum = {"x": np.array([0, 2, 4, 1, 2])}
+    spectrum_metrics = _get_spectrum_metrics(
+        gen_spectrum,
+        target_spectrum,
+    )
+    assert spectrum_metrics["positive_norm_bias/x"] == 0.6
+    assert spectrum_metrics["negative_norm_bias/x"] == -0.2
+    assert spectrum_metrics["mean_abs_norm_bias/x"] == 0.8

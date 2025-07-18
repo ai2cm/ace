@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime AS base
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime AS base
 
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch
@@ -17,11 +17,12 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
   tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
   apt-key --keyring /usr/share/keyrings/cloud.google.gpg  add - && apt-get update -y && apt-get install google-cloud-cli -y
 
+ENV FORCE_CUDA_EXTENSION=1
 # install python deps
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install -r /tmp/requirements.txt
-COPY healpix-requirements.txt /tmp/healpix-requirements.txt
-RUN python3 -m pip install --no-build-isolation -r /tmp/healpix-requirements.txt
+COPY requirements-healpix.txt /tmp/requirements-healpix.txt
+RUN python3 -m pip install --no-build-isolation -r /tmp/requirements-healpix.txt
 
 FROM base AS production
 

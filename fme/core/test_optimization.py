@@ -1,5 +1,5 @@
 import copy
-from typing import Literal, Optional
+from typing import Literal
 
 import pytest
 import torch
@@ -21,7 +21,7 @@ from fme.core.scheduler import SchedulerConfig
 @pytest.mark.parametrize("scheduler", [None, "CosineAnnealingLR"])
 @pytest.mark.parametrize("enable_amp", [False, True])
 def test_optimization_reload(
-    scheduler: Optional[Literal["CosineAnnealingLR"]],
+    scheduler: Literal["CosineAnnealingLR"] | None,
     enable_amp: bool,
 ):
     """

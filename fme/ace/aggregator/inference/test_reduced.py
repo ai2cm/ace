@@ -8,6 +8,7 @@ from fme.ace.aggregator.inference.reduced import (
 )
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 def test_area_weighted_reduced_metric_includes_later_window_starts():
@@ -16,8 +17,10 @@ def test_area_weighted_reduced_metric_includes_later_window_starts():
     of a window is always recorded, as we clip it before calling.
     """
 
-    def compute_metric(truth, predicted, weights=None, dim=()):
-        return truth.mean(dim=(2, 3))
+    def compute_metric(
+        truth: TensorMapping, predicted: TensorMapping, weights=None, dim=()
+    ) -> TensorDict:
+        return {name: truth[name].mean(dim=(2, 3)) for name in truth}
 
     metric = AreaWeightedReducedMetric(
         device=get_device(),
@@ -26,12 +29,16 @@ def test_area_weighted_reduced_metric_includes_later_window_starts():
     )
 
     data = torch.ones([2, 3, 4, 4], device=get_device())
-    metric.record(data, data, 0)
-    data[:, 0, :, :] = np.nan
-    metric.record(data, data, 2)
-    metric.record(data, data, 4)
-    result = metric.get()
-    result = result.cpu().numpy()
+    data_dict = {"var1": data}
+    metric.record(data_dict, data_dict, 0)
+    data_nan = data.clone()
+    data_nan[:, 0, :, :] = np.nan
+    data_dict_nan = {"var1": data_nan}
+    metric.record(data_dict_nan, data_dict_nan, 2)
+    metric.record(data_dict_nan, data_dict_nan, 4)
+    result_dict = metric.get()
+    assert "var1" in result_dict
+    result = result_dict["var1"].cpu().numpy()
     # assert tensor is all ones
     assert np.sum(np.isnan(result)) == 2
     assert np.isnan(result[2])

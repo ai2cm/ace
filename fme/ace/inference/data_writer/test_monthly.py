@@ -6,6 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     add_data,
@@ -40,6 +41,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
         save_names=None,
         variable_metadata={"x": VariableMetadata(units="m", long_name="x_name")},
         coords={},
+        dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
     )
     month_values = []
     for year in range(2020, 2022):
@@ -64,7 +66,9 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
                 assert time.shape == (n_samples, window_size)
                 writer.append_batch(data=month_data, start_timestep=0, batch_time=time)
     writer.flush()
-    written = xr.open_dataset(str(tmpdir / "monthly_mean_predictions.nc"))
+    written = xr.open_dataset(
+        str(tmpdir / "monthly_mean_predictions.nc"), decode_timedelta=False
+    )
     assert written["x"].shape == (n_samples, 24, n_lat, n_lon)
     assert np.sum(written["x"].values != 0) > 0, "No non-zero values written"
     assert (
@@ -75,6 +79,11 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
         written["x"],
         torch.cat(month_values, dim=1).cpu().numpy(),
     )
+    assert "counts" in written.coords
+    assert "counts" in written.x.coords
+    assert "counts" in written.valid_time.coords
+    assert written.attrs["title"] == "ACE monthly predictions data file"
+    assert written.attrs["source.inference_version"] == "1.0"
 
 
 @pytest.mark.parametrize(

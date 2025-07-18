@@ -28,7 +28,8 @@ SOFTWARE.
 """
 
 import dataclasses
-from typing import Iterable, Iterator, List, Protocol, Tuple
+from collections.abc import Iterable, Iterator
+from typing import Protocol
 
 import torch
 from torch import nn
@@ -37,7 +38,7 @@ from torch import nn
 class HasNamedParameters(Protocol):
     def named_parameters(
         self, recurse: bool = True
-    ) -> Iterator[Tuple[str, nn.Parameter]]: ...
+    ) -> Iterator[tuple[str, nn.Parameter]]: ...
 
 
 @dataclasses.dataclass
@@ -95,7 +96,7 @@ class EMATracker:
                 self._module_name_to_ema_name.update({name: ema_name})
                 self._ema_params[ema_name] = p.clone().detach().data
 
-        self._stored_params: List[nn.Parameter] = []
+        self._stored_params: list[nn.Parameter] = []
 
     def __call__(self, model: HasNamedParameters):
         """

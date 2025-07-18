@@ -1,5 +1,4 @@
 from datetime import timedelta
-from typing import Tuple
 
 import cftime
 import pytest
@@ -51,7 +50,7 @@ def _get_windowed_data(
 
 
 def _get_windowed_times(
-    start_time: Tuple[int, ...],
+    start_time: tuple[int, ...],
     n_samples: int,
     n_times: int,
     i_start: int = 0,
@@ -62,10 +61,11 @@ def _get_windowed_times(
         hours=6 * i_start
     )
     sample_time_array = xr.DataArray(
-        data=xr.cftime_range(
+        data=xr.date_range(
             start=start_time,
             periods=n_times,
             freq=freq,
+            use_cftime=True,
         ).values,
         dims=("time",),
     )
@@ -155,7 +155,7 @@ def test_regional__raw_index():
         lon_bounds=(9.5, 11.5),
     )
     # overwrite the area weights with ones for testing
-    gridded_operations = lat_lon_coordinates.gridded_operations
+    gridded_operations = lat_lon_coordinates.get_gridded_operations()
     gridded_operations._cpu_area = torch.ones(n_lat, n_lon)
     gridded_operations._device_area = torch.ones(n_lat, n_lon).to(device=get_device())
     agg = RegionalIndexAggregator(
@@ -186,10 +186,11 @@ def test_regional__raw_index():
     expected_times = xr.concat(
         [
             xr.DataArray(
-                data=xr.cftime_range(
+                data=xr.date_range(
                     start=cftime.DatetimeNoLeap(*start_date),
                     periods=n_times,
                     freq="6h",
+                    use_cftime=True,
                 ).values,
                 dims=("time"),
             )
@@ -327,7 +328,7 @@ def test_regional_index__get_gathered_indices(use_mock_distributed):
     )
     agg = RegionalIndexAggregator(
         regional_weights=region.regional_weights,
-        regional_mean=lat_lon_coordinates.gridded_operations.regional_area_weighted_mean,
+        regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
     )
     agg.record_batch(sample_times, sample_data)
     if use_mock_distributed:
@@ -372,12 +373,16 @@ def test_regional_index_aggregator(variable_name):
     )
     agg = RegionalIndexAggregator(
         regional_weights=region.regional_weights,
-        regional_mean=lat_lon_coordinates.gridded_operations.regional_area_weighted_mean,
+        regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
     )
     agg.record_batch(time=time, data=data)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     metric_name = f"test/{variable_name}_nino34_index"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], plt.Figure)
+
+    metric_name = f"test/{variable_name}_nino34_index_power_spectrum"
     assert metric_name in logs
     assert isinstance(logs[metric_name], plt.Figure)
 
@@ -415,16 +420,20 @@ def test_paired_regional_index_aggregator(variable_name):
     agg = PairedRegionalIndexAggregator(
         target_aggregator=RegionalIndexAggregator(
             regional_weights=region.regional_weights,
-            regional_mean=lat_lon_coordinates.gridded_operations.regional_area_weighted_mean,
+            regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
         ),
         prediction_aggregator=RegionalIndexAggregator(
             regional_weights=region.regional_weights,
-            regional_mean=lat_lon_coordinates.gridded_operations.regional_area_weighted_mean,
+            regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
         ),
     )
     agg.record_batch(time=time, target_data=target_data, gen_data=prediction_data)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     metric_name = f"test/{variable_name}_nino34_index"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], plt.Figure)
+
+    metric_name = f"test/{variable_name}_nino34_index_power_spectrum"
     assert metric_name in logs
     assert isinstance(logs[metric_name], plt.Figure)

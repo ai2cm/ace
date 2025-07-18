@@ -1,7 +1,8 @@
 import dataclasses
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
 
@@ -13,11 +14,11 @@ class CoupledDatasetConfig:
         atmosphere: Configuration for the atmosphere dataset.
     """
 
-    ocean: XarrayDataConfig
-    atmosphere: XarrayDataConfig
+    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
 
     @property
-    def data_configs(self) -> Sequence[XarrayDataConfig]:
+    def data_configs(self) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
         return [self.ocean, self.atmosphere]
 
 
@@ -39,7 +40,7 @@ class CoupledDataLoaderConfig:
     dataset: Sequence[CoupledDatasetConfig]
     batch_size: int
     num_data_workers: int = 1
-    prefetch_factor: Optional[int] = None
+    prefetch_factor: int | None = None
     strict_ensemble: bool = True
 
     def __post_init__(self):
@@ -49,3 +50,15 @@ class CoupledDataLoaderConfig:
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
+        self._zarr_engine_used = any(
+            ds.zarr_engine_used
+            for ds_coupled in self.dataset
+            for ds in ds_coupled.data_configs
+        )
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        """
+        Whether the dataset uses the Zarr engine in any of its components.
+        """
+        return self._zarr_engine_used

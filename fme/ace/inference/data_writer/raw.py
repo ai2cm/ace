@@ -1,6 +1,7 @@
+import copy
 import datetime
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Sequence
 
 import cftime
 import numpy as np
@@ -9,6 +10,7 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.utils import (
     DIM_INFO_HEALPIX,
     DIM_INFO_LATLON,
@@ -35,9 +37,10 @@ class PairedRawDataWriter:
         self,
         path: str,
         n_initial_conditions: int,
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
     ):
         self._target_writer = RawDataWriter(
             path=path,
@@ -46,6 +49,7 @@ class PairedRawDataWriter:
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
+            dataset_metadata=dataset_metadata,
         )
         self._prediction_writer = RawDataWriter(
             path=path,
@@ -54,12 +58,13 @@ class PairedRawDataWriter:
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
+            dataset_metadata=dataset_metadata,
         )
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+        prediction: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -89,9 +94,10 @@ class RawDataWriter:
         path: str,
         label: str,
         n_initial_conditions: int,
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
     ):
         """
         Args:
@@ -103,6 +109,7 @@ class RawDataWriter:
                 If None, all provided variables will be saved.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
+            dataset_metadata: Metadata for the dataset.
         """
         filename = str(Path(path) / label)
         self._save_names = save_names
@@ -118,6 +125,12 @@ class RawDataWriter:
         self.dataset.createVariable(VALID_TIME, "i8", (IC_DIM, LEAD_TIME_DIM))
         self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
         self._dataset_dims_created = False
+        dataset_metadata = copy.copy(dataset_metadata)
+        dataset_metadata.title = (
+            f"ACE {label.removesuffix('.nc').replace('_', ' ')} data file"
+        )
+        for key, value in dataset_metadata.as_flat_str_dict().items():
+            self.dataset.setncattr(key, value)
 
     def _get_variable_names_to_save(
         self, *data_varnames: Iterable[str]
@@ -126,7 +139,7 @@ class RawDataWriter:
 
     def append_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        data: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):

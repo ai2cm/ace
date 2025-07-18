@@ -2,7 +2,7 @@ import argparse
 import dataclasses
 import logging
 import os
-from typing import List, Mapping, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 import dacite
 import torch.utils.data
@@ -12,6 +12,7 @@ import yaml
 import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.batch_data import BatchData, default_collate
 from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     months_for_timesteps,
@@ -21,8 +22,10 @@ from fme.core.coordinates import (
     AtmosphericDeriveFn,
     OptionalHybridSigmaPressureCoordinate,
 )
-from fme.core.dataset.getters import get_datasets, get_merged_datasets
-from fme.core.dataset.xarray import DatasetProperties
+from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.merged import MergeDatasetConfig, get_merged_datasets
+from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.xarray import get_xarray_datasets
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -55,16 +58,16 @@ def get_data_loaders(
             "Data loading for write_monthly_data.py is not "
             "supported in distributed mode."
         )
-    if isinstance(config.dataset, Sequence):
-        datasets, properties = get_datasets(
-            config.dataset, requirements.names, requirements.n_timesteps
+    datasets: torch.utils.data.Dataset
+    if isinstance(config.dataset, ConcatDatasetConfig):
+        datasets, properties = get_xarray_datasets(
+            config.dataset.concat, requirements.names, requirements.n_timesteps
         )
-    elif isinstance(config.dataset, Mapping):
-        dataset, properties = get_merged_datasets(
+    elif isinstance(config.dataset, MergeDatasetConfig):
+        datasets, properties = get_merged_datasets(
             config.dataset,
             requirements.names,
             requirements.n_timesteps,
-            strict=config.strict_ensemble,
         )
 
     data_loaders = []
@@ -150,6 +153,7 @@ class Config:
             n_months=n_months,
             variable_metadata=data.properties.variable_metadata,
             coords=coords,
+            dataset_metadata=DatasetMetadata.from_env(),
         )
 
 

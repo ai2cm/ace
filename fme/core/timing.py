@@ -2,12 +2,8 @@ import contextlib
 import logging
 import time
 import warnings
-from typing import Dict, Optional
 
 import numpy as np
-
-singleton: Optional["GlobalTimer"] = None
-
 
 INACTIVE_WARNING_MESSAGE = (
     "The GlobalTimer is currently inactive; therefore no timing information "
@@ -73,9 +69,9 @@ class GlobalTimer:
         singleton = None
 
     def __init__(self):
-        self._timers: Dict[str, CumulativeTimer] = {}
+        self._timers: dict[str, CumulativeTimer] = {}
         self._active = False
-        self._current_category: Optional[str] = None
+        self._current_category: str | None = None
 
     def outer_context(self, category: str) -> contextlib.AbstractContextManager:
         """
@@ -160,9 +156,12 @@ class GlobalTimer:
         else:
             return np.nan
 
-    def get_durations(self) -> Dict[str, float]:
+    def get_durations(self) -> dict[str, float]:
         return {category: timer.duration for category, timer in self._timers.items()}
 
     def log_durations(self):
         for name, duration in self.get_durations().items():
             logging.info(f"{name} duration: {duration:.2f}s")
+
+
+singleton: GlobalTimer | None = None

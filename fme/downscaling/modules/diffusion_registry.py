@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Any, List, Mapping, Optional, Protocol, Tuple, Type
+from collections.abc import Mapping
+from typing import Any, Protocol
 
 import dacite
 import torch
@@ -15,7 +16,7 @@ class ModuleConfig(Protocol):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
     ) -> torch.nn.Module: ...
@@ -29,7 +30,7 @@ class PreBuiltBuilder:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
     ) -> torch.nn.Module:
@@ -39,11 +40,11 @@ class PreBuiltBuilder:
 @dataclasses.dataclass
 class UNetDiffusionSong:
     model_channels: int = 128
-    channel_mult: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 2, 2])
+    channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 2, 2])
 
     channel_mult_emb: int = 4
     num_blocks: int = 4
-    attn_resolutions: List[int] = dataclasses.field(default_factory=lambda: [16])
+    attn_resolutions: list[int] = dataclasses.field(default_factory=lambda: [16])
     dropout: float = 0.10
     label_dropout: int = 0
 
@@ -51,13 +52,13 @@ class UNetDiffusionSong:
     channel_mult_noise: int = 1
     encoder_type: str = "standard"
     decoder_type: str = "standard"
-    resample_filter: List[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
 
     def build(
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
     ):
@@ -103,7 +104,7 @@ class DiffusionModuleRegistrySelector:
 
     type: str
     config: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    expects_interpolated_input: Optional[bool] = None
+    expects_interpolated_input: bool | None = None
 
     def __post_init__(self):
         if self.type == "prebuilt" and self.expects_interpolated_input is None:
@@ -118,7 +119,7 @@ class DiffusionModuleRegistrySelector:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
     ) -> torch.nn.Module:
@@ -135,7 +136,7 @@ class DiffusionModuleRegistrySelector:
         )
 
 
-NET_REGISTRY: Mapping[str, Type[ModuleConfig]] = {
+NET_REGISTRY: Mapping[str, type[ModuleConfig]] = {
     "unet_diffusion_song": UNetDiffusionSong,
     "prebuilt": PreBuiltBuilder,
 }

@@ -1,5 +1,3 @@
-from typing import Dict, Optional
-
 import torch
 
 from fme.ace.stepper import TrainOutput
@@ -26,19 +24,21 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         self._n_batches += 1
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, torch.Tensor]:
+    def get_logs(self, label: str) -> dict[str, torch.Tensor]:
         """
         Returns logs as can be reported to WandB.
 
         Args:
             label: Label to prepend to all log keys.
         """
-        logs = {f"{label}/mean/loss": self._loss / self._n_batches}
+        logs = {}
+        if self._n_batches > 0:
+            logs[f"{label}/mean/loss"] = self._loss / self._n_batches
         dist = Distributed.get_instance()
         for key in sorted(logs.keys()):
             logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
         return logs
 
     @torch.no_grad()
-    def flush_diagnostics(self, subdir: Optional[str]) -> None:
+    def flush_diagnostics(self, subdir: str | None) -> None:
         pass

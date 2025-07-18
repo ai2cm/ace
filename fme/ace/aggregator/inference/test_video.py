@@ -1,5 +1,3 @@
-from typing import List, Tuple
-
 import numpy as np
 import pytest
 import torch
@@ -12,8 +10,8 @@ USING_MPS = get_device().type == "mps"
 
 
 def _make_data(
-    names: List[str], n_samples: int, nx: int, ny: int, offsets: np.ndarray
-) -> Tuple[TensorDict, TensorDict]:
+    names: list[str], n_samples: int, nx: int, ny: int, offsets: np.ndarray
+) -> tuple[TensorDict, TensorDict]:
     """
     Make a 2D array with a pattern of offsets.
 
@@ -47,7 +45,7 @@ def time_select(
     i_end: int,
     gen: TensorDict,
     target: TensorDict,
-) -> Tuple[TensorDict, TensorDict]:
+) -> tuple[TensorDict, TensorDict]:
     """
     Select a time range from the generated and target data.
 

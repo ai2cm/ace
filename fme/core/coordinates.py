@@ -1,18 +1,10 @@
 import abc
 import dataclasses
 import math
+import re
+from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import (
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Literal, TypeVar
 
 import dacite
 import numpy as np
@@ -31,6 +23,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
+from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
 from fme.core.masking import StaticMasking
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
@@ -64,7 +57,7 @@ class AtmosphericDeriveFn(DeriveFnABC):
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.vertical_coordinate, NullVerticalCoordinate):
-            vertical_coord: Optional["HybridSigmaPressureCoordinate"] = None
+            vertical_coord: HybridSigmaPressureCoordinate | None = None
         else:
             vertical_coord = self.vertical_coordinate.to(get_device())
         return compute_derived_quantities(
@@ -88,7 +81,7 @@ class OceanDeriveFn(DeriveFnABC):
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.depth_coordinate, NullVerticalCoordinate):
-            depth_coord: Optional["DepthCoordinate"] = None
+            depth_coord: DepthCoordinate | None = None
         else:
             depth_coord = self.depth_coordinate.to(get_device())
         return compute_ocean_derived_quantities(
@@ -119,9 +112,17 @@ class VerticalCoordinate(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def __repr__(self) -> str:
+        pass
+
+    @abc.abstractmethod
+    def __eq__(self, other) -> bool:
+        pass
+
+    @abc.abstractmethod
     def build_corrector(
         self,
-        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
+        config: AtmosphereCorrectorConfig | CorrectorSelector,
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> CorrectorABC:
@@ -131,13 +132,9 @@ class VerticalCoordinate(abc.ABC):
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         pass
 
-    @abc.abstractmethod
-    def build_post_process_function(self) -> PostProcessFnType:
-        pass
-
     @property
     @abc.abstractmethod
-    def coords(self) -> Dict[str, np.ndarray]:
+    def coords(self) -> dict[str, np.ndarray]:
         pass
 
     @abc.abstractmethod
@@ -192,7 +189,7 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
 
     def build_corrector(
         self,
-        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
+        config: AtmosphereCorrectorConfig | CorrectorSelector,
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> AtmosphereCorrector:
@@ -222,9 +219,6 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         return AtmosphericDeriveFn(self, timestep)
 
-    def build_post_process_function(self) -> PostProcessFnType:
-        return NullPostProcessFn()
-
     def get_ak(self) -> torch.Tensor:
         return self.ak
 
@@ -232,7 +226,7 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         return self.bk
 
     @property
-    def coords(self) -> Dict[str, np.ndarray]:
+    def coords(self) -> dict[str, np.ndarray]:
         return {"ak": self.ak.cpu().numpy(), "bk": self.bk.cpu().numpy()}
 
     @property
@@ -252,7 +246,15 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
     def __eq__(self, other) -> bool:
         if not isinstance(other, HybridSigmaPressureCoordinate):
             return False
-        return torch.allclose(self.ak, other.ak) and torch.allclose(self.bk, other.bk)
+        try:
+            torch.testing.assert_close(self.ak, other.ak)
+            torch.testing.assert_close(self.bk, other.bk)
+        except AssertionError:
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return f"HybridSigmaPressureCoordinate(\n    ak={self.ak},\n    bk={self.bk}\n)"
 
     def as_dict(self) -> TensorMapping:
         return {"ak": self.ak, "bk": self.bk}
@@ -303,6 +305,9 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         return (integrand * pressure_thickness).sum(dim=-1) / GRAVITY
 
 
+LEVEL_PATTERN = re.compile(r"_(\d+)$")
+
+
 @dataclasses.dataclass
 class DepthCoordinate(VerticalCoordinate):
     """
@@ -319,6 +324,7 @@ class DepthCoordinate(VerticalCoordinate):
 
     idepth: torch.Tensor
     mask: torch.Tensor
+    surface_mask: torch.Tensor | None = None
 
     def __post_init__(self):
         if len(self.idepth.shape) != 1:
@@ -346,12 +352,24 @@ class DepthCoordinate(VerticalCoordinate):
     def get_mask_level(self, level: int) -> torch.Tensor:
         return self.mask.select(dim=-1, index=level)
 
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
+        match = LEVEL_PATTERN.search(name)
+        if match:
+            # 3D variable
+            level = int(match.group(1))
+            return self.get_mask_level(level)
+        else:
+            # 2D variable
+            if self.surface_mask is not None:
+                return self.surface_mask
+            return self.get_mask_level(0)
+
     def get_idepth(self) -> torch.Tensor:
         return self.idepth
 
     def build_corrector(
         self,
-        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
+        config: AtmosphereCorrectorConfig | CorrectorSelector,
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> OceanCorrector:
@@ -380,17 +398,16 @@ class DepthCoordinate(VerticalCoordinate):
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         return OceanDeriveFn(self, timestep)
 
-    def build_post_process_function(self) -> PostProcessFnType:
+    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
         """
-        Return a function that fills in NaNs outside of the mask valid
-        points, i.e. where the mask value is 0.
+        Returns a StaticMasking object that fills in NaNs outside of mask
+        valid points, i.e. where the mask value is 0.
 
         """
         return StaticMasking(
             mask_value=0,
             fill_value=float("nan"),
-            mask_2d=self.get_mask_level(0),
-            mask_3d=self.mask,
+            mask=self,
         )
 
     @property
@@ -402,20 +419,31 @@ class DepthCoordinate(VerticalCoordinate):
         return self.idepth.device
 
     @property
-    def coords(self) -> Dict[str, np.ndarray]:
+    def coords(self) -> dict[str, np.ndarray]:
         return {"idepth": self.idepth.cpu().numpy()}
 
     def to(self, device: str) -> "DepthCoordinate":
         idepth_on_device = self.idepth.to(device)
         mask_on_device = self.mask.to(device)
+        if self.surface_mask is not None:
+            surface_mask_on_device = self.surface_mask.to(device)
+            return DepthCoordinate(
+                idepth_on_device, mask_on_device, surface_mask_on_device
+            )
         return DepthCoordinate(idepth_on_device, mask_on_device)
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, DepthCoordinate):
             return False
-        idepth_equals = torch.allclose(self.idepth, other.idepth)
-        mask_equals = torch.allclose(self.mask, other.mask)
-        return idepth_equals and mask_equals
+        try:
+            torch.testing.assert_close(self.idepth, other.idepth)
+            torch.testing.assert_close(self.mask, other.mask)
+        except AssertionError:
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return f"DepthCoordinate(\n    idepth={self.idepth},\n    mask={self.mask}\n)"
 
     def as_dict(self) -> TensorMapping:
         return {"idepth": self.idepth, "mask": self.mask}
@@ -445,7 +473,9 @@ class DepthCoordinate(VerticalCoordinate):
                 f"{self.idepth.shape}."
             )
         layer_thickness = self.idepth.diff(dim=-1)
-        return (integrand * layer_thickness * self.mask).nansum(dim=-1)
+        ohc = (integrand * layer_thickness * self.mask).nansum(dim=-1)
+        mask = self.get_mask_level(0).expand(ohc.shape)
+        return ohc.where(mask > 0, float("nan"))
 
 
 @dataclasses.dataclass
@@ -457,12 +487,15 @@ class NullVerticalCoordinate(VerticalCoordinate):
     def __eq__(self, other) -> bool:
         return isinstance(other, NullVerticalCoordinate)
 
+    def __repr__(self) -> str:
+        return "NullVerticalCoordinate()"
+
     def __len__(self) -> int:
         return 0
 
     def build_corrector(
         self,
-        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
+        config: AtmosphereCorrectorConfig | CorrectorSelector,
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> CorrectorABC:
@@ -506,9 +539,6 @@ class NullVerticalCoordinate(VerticalCoordinate):
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         return NullDeriveFn()
 
-    def build_post_process_function(self) -> PostProcessFnType:
-        return NullPostProcessFn()
-
     def to(self, device: str) -> "NullVerticalCoordinate":
         return self
 
@@ -516,7 +546,7 @@ class NullVerticalCoordinate(VerticalCoordinate):
         return {}
 
     @property
-    def coords(self) -> Dict[str, np.ndarray]:
+    def coords(self) -> dict[str, np.ndarray]:
         return {}
 
 
@@ -556,8 +586,14 @@ class HorizontalCoordinates(abc.ABC):
     Contains coords which must be subclassed to provide the coordinates.
     """
 
+    SelfType = TypeVar("SelfType", bound="HorizontalCoordinates")
+
     @abc.abstractmethod
     def __eq__(self, other) -> bool:
+        pass
+
+    @abc.abstractmethod
+    def __repr__(self) -> str:
         pass
 
     @abc.abstractmethod
@@ -571,31 +607,19 @@ class HorizontalCoordinates(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def xyz(self) -> Tuple[float, float, float]:
+    def xyz(self) -> tuple[float, float, float]:
         pass
 
     @property
     @abc.abstractmethod
-    def dims(self) -> List[str]:
+    def dims(self) -> list[str]:
         """Names of model horizontal dimensions."""
         pass
 
     @property
     @abc.abstractmethod
-    def loaded_dims(self) -> List[str]:
-        """Names of horizontal dimensions as loaded from training dataset."""
-        pass
-
-    @property
-    @abc.abstractmethod
-    def loaded_sizes(self) -> List[DimSize]:
+    def loaded_sizes(self) -> list[DimSize]:
         """Sizes of horizontal dimensions as loaded from training dataset."""
-        pass
-
-    @property
-    @abc.abstractmethod
-    def loaded_default_sizes(self) -> List[DimSize]:
-        """Default sizes of horizontal data dimensions, used by testing code."""
         pass
 
     @property
@@ -603,27 +627,30 @@ class HorizontalCoordinates(abc.ABC):
     def grid(self) -> Literal["equiangular", "legendre-gauss", "healpix"]:
         pass
 
-    # A temporary solution for training which allows us to aggregate along the
-    # latitude dimension.
-    # TODO: https://github.com/ai2cm/full-model/issues/1003
+    @property
     @abc.abstractmethod
-    def get_lat(self) -> torch.Tensor:
+    def area_weights(self) -> torch.Tensor | None:
+        pass
+
+    @abc.abstractmethod
+    def get_gridded_operations(
+        self, mask_provider: MaskProviderABC = NullMaskProvider
+    ) -> GriddedOperations:
         pass
 
     @property
     @abc.abstractmethod
-    def area_weights(self) -> Optional[torch.Tensor]:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def gridded_operations(self) -> GriddedOperations:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Meshgrids of latitudes and longitudes, respectively."""
+        pass
+
+    @property
+    @abc.abstractmethod
+    def shape(self) -> tuple[int, ...]:
+        pass
+
+    @abc.abstractmethod
+    def to_state(self) -> TensorMapping:
         pass
 
 
@@ -635,36 +662,28 @@ class LatLonCoordinates(HorizontalCoordinates):
     Parameters:
         lat: 1-dimensional tensor of latitudes
         lon: 1-dimensional tensor of longitudes
-        loaded_lat_name: name of the latitude dimension
-            as loaded from training dataset
-        loaded_lon_name: name of the longitude dimension
-            as loaded from training dataset
     """
 
     lon: torch.Tensor
     lat: torch.Tensor
-    loaded_lat_name: str = "lat"
-    loaded_lon_name: str = "lon"
 
     def __post_init__(self):
-        self._area_weights: Optional[torch.Tensor] = None
+        self._area_weights: torch.Tensor | None = None
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, LatLonCoordinates):
             return False
-        return (
-            torch.allclose(self.lat, other.lat)
-            and torch.allclose(self.lon, other.lon)
-            and self.loaded_lat_name == other.loaded_lat_name
-            and self.loaded_lon_name == other.loaded_lon_name
-        )
+        lat_eq = torch.allclose(self.lat, other.lat)
+        lon_eq = torch.allclose(self.lon, other.lon)
+        return lat_eq and lon_eq
+
+    def __repr__(self) -> str:
+        return f"LatLonCoordinates(\n    lat={self.lat},\n    lon={self.lon}\n"
 
     def to(self, device: str) -> "LatLonCoordinates":
         return LatLonCoordinates(
             lon=self.lon.to(device),
             lat=self.lat.to(device),
-            loaded_lat_name=self.loaded_lat_name,
-            loaded_lon_name=self.loaded_lon_name,
         )
 
     @property
@@ -675,40 +694,28 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
-        # TODO: Replace with lat/lon name?
         return {
-            "lat": self.lat.cpu().type(torch.float32).numpy(),
-            "lon": self.lon.cpu().type(torch.float32).numpy(),
+            self.dims[0]: self.lat.cpu().type(torch.float32).numpy(),
+            self.dims[1]: self.lon.cpu().type(torch.float32).numpy(),
         }
 
     @property
-    def xyz(self) -> Tuple[float, float, float]:
+    def xyz(self) -> tuple[float, float, float]:
         lats, lons = np.broadcast_arrays(
-            self.coords["lat"][:, None], self.coords["lon"][None, :]
+            self.coords[self.dims[0]][:, None], self.coords[self.dims[1]][None, :]
         )
         return lon_lat_to_xyz(lons, lats)
 
-    def get_lat(self) -> torch.Tensor:
-        return self.lat
-
     @property
-    def dims(self) -> List[str]:
+    def dims(self) -> list[str]:
         return ["lat", "lon"]
 
     @property
-    def loaded_dims(self) -> List[str]:
-        return [self.loaded_lat_name, self.loaded_lon_name]
-
-    @property
-    def loaded_sizes(self) -> List[DimSize]:
+    def loaded_sizes(self) -> list[DimSize]:
         return [
-            DimSize(self.loaded_lat_name, len(self.lat)),
-            DimSize(self.loaded_lon_name, len(self.lon)),
+            DimSize(self.dims[0], len(self.lat)),
+            DimSize(self.dims[1], len(self.lon)),
         ]
-
-    @property
-    def loaded_default_sizes(self) -> List[DimSize]:
-        return [DimSize(self.loaded_lat_name, 16), DimSize(self.loaded_lon_name, 32)]
 
     @property
     def grid(self) -> Literal["equiangular", "legendre-gauss"]:
@@ -720,13 +727,21 @@ class LatLonCoordinates(HorizontalCoordinates):
         else:
             return "legendre-gauss"
 
-    @property
-    def gridded_operations(self) -> LatLonOperations:
-        return LatLonOperations(self.area_weights)
+    def get_gridded_operations(
+        self, mask_provider: MaskProviderABC = NullMaskProvider
+    ) -> LatLonOperations:
+        return LatLonOperations(self.area_weights, mask_provider)
 
     @property
-    def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
         return torch.meshgrid(self.lat, self.lon, indexing="ij")
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return (len(self.lat), len(self.lon))
+
+    def to_state(self) -> TensorMapping:
+        return {"lat": self.lat, "lon": self.lon}
 
 
 @dataclasses.dataclass
@@ -754,6 +769,15 @@ class HEALPixCoordinates(HorizontalCoordinates):
             and torch.allclose(self.width, other.width)
         )
 
+    def __repr__(self) -> str:
+        return (
+            "HEALPixCoordinates(\n"
+            f"    face={self.face},\n"
+            f"    height={self.height},\n"
+            f"    width={self.width}\n"
+            ")"
+        )
+
     def to(self, device: str) -> "HEALPixCoordinates":
         return HEALPixCoordinates(
             face=self.face.to(device),
@@ -770,7 +794,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
         }
 
     @property
-    def xyz(self) -> Tuple[float, float, float]:
+    def xyz(self) -> tuple[float, float, float]:
         level = int(math.log2(len(self.width)))
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
@@ -781,36 +805,20 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return x, y, z
 
     @property
-    def dims(self) -> List[str]:
+    def dims(self) -> list[str]:
         return ["face", "height", "width"]
 
     @property
-    def loaded_dims(self) -> List[str]:
+    def loaded_dims(self) -> list[str]:
         return self.dims
 
     @property
-    def loaded_sizes(self) -> List[DimSize]:
+    def loaded_sizes(self) -> list[DimSize]:
         return [
             DimSize("face", len(self.face)),
             DimSize("height", len(self.width)),
             DimSize("width", len(self.height)),
         ]
-
-    @property
-    def loaded_default_sizes(cls) -> List[DimSize]:
-        return [
-            DimSize("face", 12),
-            DimSize("height", 16),
-            DimSize("width", 16),
-        ]
-
-    # TODO: https://github.com/ai2cm/full-model/issues/1003
-    # This is currently the dummy solution.
-    def get_lat(self) -> torch.Tensor:
-        raise NotImplementedError(
-            "healpix does not support get_lat. If latitude is needed \
-            for some reason, you may use this class's self.xyz property to derive it."
-        )
 
     @property
     def grid(self) -> Literal["healpix"]:
@@ -820,18 +828,57 @@ class HEALPixCoordinates(HorizontalCoordinates):
     def area_weights(self) -> Literal[None]:
         return None
 
-    @property
-    def gridded_operations(self) -> HEALPixOperations:
+    def get_gridded_operations(
+        self, mask_provider: MaskProviderABC = NullMaskProvider
+    ) -> HEALPixOperations:
+        # this code is necessary because when no masks are in a given dataset, we return
+        # an empty MaskProvider instead of the NullMaskProvider.
+        if mask_provider == NullMaskProvider:
+            null_mask = True
+        elif isinstance(mask_provider, MaskProvider):
+            null_mask = len(mask_provider.masks) == 0
+        else:
+            raise TypeError(
+                f"Don't know how to handle given mask_provider: {mask_provider}"
+            )
+        if not (null_mask):
+            raise NotImplementedError(
+                "HEALPixCoordinates does not support a mask provider. "
+                "Use NullMaskProvider when getting gridded operations "
+                "for HEALPixCoordinates."
+            )
         return HEALPixOperations()
 
     @property
-    def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
         # We'll return a 3D (face, width, height) tensor representing the lat-lon
         # coordinates of this grid.
         level = int(math.log2(len(self.width)))
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
-        lats = lats.reshape(len(self.face), len(self.width), len(self.height))
+        lats = lats.reshape(self.shape)
         lons = hpx.lon
-        lons = lons.reshape(len(self.face), len(self.width), len(self.height))
+        lons = lons.reshape(self.shape)
         return lats, lons
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return (len(self.face), len(self.width), len(self.height))
+
+    def to_state(self) -> TensorMapping:
+        return {"face": self.face, "height": self.height, "width": self.width}
+
+
+@dataclasses.dataclass
+class SerializableHorizontalCoordinates:
+    """Only for use in serializing/deserializing coordinates with dacite."""
+
+    horizontal_coordinates: LatLonCoordinates | HEALPixCoordinates
+
+    @classmethod
+    def from_state(cls, state) -> HorizontalCoordinates:
+        return dacite.from_dict(
+            data_class=cls,
+            data={"horizontal_coordinates": state},
+            config=dacite.Config(strict=True),
+        ).horizontal_coordinates

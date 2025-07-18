@@ -3,17 +3,8 @@ return tensors of shape (batch, channel, height, width).
 """
 
 import dataclasses
-from typing import (
-    Any,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Protocol,
-    Sequence,
-    Tuple,
-    Type,
-)
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, Protocol
 
 import dacite
 import torch
@@ -28,7 +19,7 @@ class ModuleConfig(Protocol):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ) -> torch.nn.Module: ...
 
@@ -46,7 +37,7 @@ class SwinirConfig:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ):
         height, width = coarse_shape
@@ -66,31 +57,6 @@ class SwinirConfig:
             in_chans=n_in_channels,
             out_chans=n_out_channels,
         )
-
-
-def compute_unet_padding_size(value: int, divisor: int) -> int:
-    """Compute the padding size so that `value + padding_size` is divisible by
-    `divisor`.
-    """
-    remainder = value % divisor
-    if remainder == 0:
-        return 0
-    return divisor - remainder
-
-
-def pad_right(tensor: torch.Tensor, target_shape: Tuple[int, int]) -> torch.Tensor:
-    """Pad the right side of the tensor with zeros to match the target shape."""
-    return torch.nn.functional.pad(
-        tensor,
-        [
-            0,
-            target_shape[-1] - tensor.shape[-1],
-            0,
-            target_shape[-2] - tensor.shape[-2],
-        ],
-        mode="constant",
-        value=0,
-    )
 
 
 class UNetRegressionModule(torch.nn.Module):
@@ -113,7 +79,7 @@ class UNetRegressionModule(torch.nn.Module):
         unet: torch.nn.Module,
         downscale_factor: int,
     ):
-        super(UNetRegressionModule, self).__init__()
+        super().__init__()
         self.unet = unet
         self.downscale_factor = downscale_factor
 
@@ -128,11 +94,11 @@ class UNetRegressionModule(torch.nn.Module):
 @dataclasses.dataclass
 class UNetRegressionSong:
     model_channels: int = 128
-    channel_mult: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 2, 2])
+    channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 2, 2])
 
     channel_mult_emb: int = 4
     num_blocks: int = 4
-    attn_resolutions: List[int] = dataclasses.field(default_factory=lambda: [16])
+    attn_resolutions: list[int] = dataclasses.field(default_factory=lambda: [16])
     dropout: float = 0.10
     label_dropout: int = 0
 
@@ -140,21 +106,16 @@ class UNetRegressionSong:
     channel_mult_noise: int = 1
     encoder_type: str = "standard"
     decoder_type: str = "standard"
-    resample_filter: List[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
 
     def build(
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ):
-        divisor = 2 ** (len(self.channel_mult) - 1)
-        target_height, target_width = [
-            s * downscale_factor
-            + compute_unet_padding_size(s * downscale_factor, divisor)
-            for s in coarse_shape
-        ]
+        target_height, target_width = [s * downscale_factor for s in coarse_shape]
         unet = SongUNet(
             min(target_height, target_width),
             n_in_channels,
@@ -181,11 +142,11 @@ class UNetRegressionSong:
 @dataclasses.dataclass
 class UNetRegressionDhariwal:
     model_channels: int = 192
-    channel_mult: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 3, 4])
+    channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 3, 4])
 
     channel_mult_emb: int = 4
     num_blocks: int = 3
-    attn_resolutions: List[int] = dataclasses.field(default_factory=lambda: [32, 16, 8])
+    attn_resolutions: list[int] = dataclasses.field(default_factory=lambda: [32, 16, 8])
     dropout: float = 0.10
     label_dropout: int = 0
 
@@ -193,15 +154,10 @@ class UNetRegressionDhariwal:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ):
-        divisor = 2 ** (len(self.channel_mult) - 1)
-        target_height, target_width = [
-            s * downscale_factor
-            + compute_unet_padding_size(s * downscale_factor, divisor)
-            for s in coarse_shape
-        ]
+        target_height, target_width = [s * downscale_factor for s in coarse_shape]
         unet = DhariwalUNet(
             min(target_height, target_width),
             n_in_channels,
@@ -234,7 +190,7 @@ class ModuleRegistrySelector:
 
     type: str
     config: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    expects_interpolated_input: Optional[bool] = None
+    expects_interpolated_input: bool | None = None
 
     def __post_init__(self):
         if self.type == "prebuilt" and self.expects_interpolated_input is None:
@@ -249,7 +205,7 @@ class ModuleRegistrySelector:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ) -> torch.nn.Module:
         return dacite.from_dict(
@@ -272,7 +228,7 @@ class PreBuiltBuilder:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ) -> torch.nn.Module:
         return self.module
@@ -280,7 +236,7 @@ class PreBuiltBuilder:
 
 class Interpolate(torch.nn.Module):
     def __init__(self, downscale_factor: int, mode: Literal["bicubic", "nearest"]):
-        super(Interpolate, self).__init__()
+        super().__init__()
         self.downscale_factor = downscale_factor
         self.mode = mode
 
@@ -305,13 +261,13 @@ class InterpolateConfig:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ) -> torch.nn.Module:
         return Interpolate(downscale_factor, self.mode)
 
 
-NET_REGISTRY: Mapping[str, Type[ModuleConfig]] = {
+NET_REGISTRY: Mapping[str, type[ModuleConfig]] = {
     "swinir": SwinirConfig,
     "prebuilt": PreBuiltBuilder,
     "interpolate": InterpolateConfig,

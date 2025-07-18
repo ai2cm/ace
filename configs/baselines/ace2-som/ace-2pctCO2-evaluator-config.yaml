@@ -1,0 +1,24 @@
+experiment_dir: /results
+n_forward_steps: 102267
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-som
+  entity: ai2cm
+aggregator:
+  log_zonal_mean_images: false
+loader:
+  start_indices:
+    times:
+      - "2031-01-01T06:00:00"
+  dataset:
+    data_path:  /climate-default/2025-03-22-vertically-resolved-1deg-c96-shield-som-3d-radiative-heating-rates-increasing-co2-fme-dataset
+    file_pattern: increasing-CO2.zarr
+    engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

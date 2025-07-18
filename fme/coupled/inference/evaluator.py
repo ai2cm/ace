@@ -2,7 +2,7 @@ import dataclasses
 import logging
 import os
 import pathlib
-from typing import Optional, Sequence, Union
+from collections.abc import Sequence
 
 import dacite
 import torch
@@ -12,9 +12,7 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.inference.evaluator import validate_time_coarsen_config
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import load_stepper_config as load_single_stepper_config
-from fme.ace.stepper.single_module import get_serialized_stepper_vertical_coordinate
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import DepthCoordinate
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -24,15 +22,18 @@ from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.getters import get_inference_data
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.inference.data_writer import (
     CoupledDataWriterConfig,
     CoupledPairedDataWriter,
+    DatasetMetadata,
 )
 from fme.coupled.stepper import (
     ComponentConfig,
     CoupledOceanFractionConfig,
     CoupledStepper,
     CoupledStepperConfig,
+    load_coupled_stepper,
 )
 
 
@@ -66,7 +67,7 @@ class StandaloneComponentCheckpointsConfig:
     ocean: StandaloneComponentConfig
     atmosphere: StandaloneComponentConfig
     sst_name: str = "sst"
-    ocean_fraction_prediction: Optional[CoupledOceanFractionConfig] = None
+    ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
@@ -82,23 +83,19 @@ class StandaloneComponentCheckpointsConfig:
             ocean_fraction_prediction=self.ocean_fraction_prediction,
         )
 
-    def _load_sst_mask(self) -> Optional[torch.Tensor]:
-        ocean_ckpt = torch.load(
-            self.ocean.path, map_location=fme.get_device(), weights_only=False
-        )
-        ocean_vertical_coord = get_serialized_stepper_vertical_coordinate(
-            ocean_ckpt["stepper"]
-        )
-        if isinstance(ocean_vertical_coord, DepthCoordinate):
-            return ocean_vertical_coord.get_mask_level(0)
-        return None
-
     def load_stepper(self) -> CoupledStepper:
+        ocean = load_single_stepper(self.ocean.path)
+        atmosphere = load_single_stepper(self.atmosphere.path)
+        dataset_info = CoupledDatasetInfo(
+            ocean=ocean.training_dataset_info,
+            atmosphere=atmosphere.training_dataset_info,
+        )
+
         return CoupledStepper(
             config=self.load_stepper_config(),
-            ocean=load_single_stepper(self.ocean.path),
-            atmosphere=load_single_stepper(self.atmosphere.path),
-            sst_mask=self._load_sst_mask(),
+            ocean=ocean,
+            atmosphere=atmosphere,
+            dataset_info=dataset_info,
         )
 
 
@@ -157,13 +154,7 @@ def load_stepper(
         )
         return checkpoint_path.load_stepper()
 
-    logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
-    stepper = CoupledStepper.from_state(checkpoint["stepper"])
-
-    return stepper
+    return load_coupled_stepper(checkpoint_path)
 
 
 @dataclasses.dataclass
@@ -187,7 +178,7 @@ class InferenceEvaluatorConfig:
 
     experiment_dir: str
     n_coupled_steps: int
-    checkpoint_path: Union[str, StandaloneComponentCheckpointsConfig]
+    checkpoint_path: str | StandaloneComponentCheckpointsConfig
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
     coupled_steps_in_memory: int = 1
@@ -202,7 +193,7 @@ class InferenceEvaluatorConfig:
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def configure_wandb(
-        self, env_vars: Optional[dict] = None, resumable: bool = False, **kwargs
+        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
     ):
         config = to_flat_dict(dataclasses.asdict(self))
         self.logging.configure_wandb(
@@ -215,7 +206,10 @@ class InferenceEvaluatorConfig:
     def load_stepper_config(self) -> CoupledStepperConfig:
         return load_stepper_config(self.checkpoint_path)
 
-    def get_data_writer(self, data: InferenceGriddedData) -> CoupledPairedDataWriter:
+    def get_data_writer(
+        self,
+        data: InferenceGriddedData,
+    ) -> CoupledPairedDataWriter:
         if self.data_writer.ocean.time_coarsen is not None:
             try:
                 validate_time_coarsen_config(
@@ -240,6 +234,11 @@ class InferenceEvaluatorConfig:
                 )
 
         variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+        dataset_metadata = DatasetMetadata.from_env()
+        coupled_dataset_metadata = {
+            "ocean": dataset_metadata,
+            "atmosphere": dataset_metadata,
+        }
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             n_initial_conditions=self.loader.n_initial_conditions,
@@ -249,10 +248,11 @@ class InferenceEvaluatorConfig:
             atmosphere_timestep=data.atmosphere_timestep,
             variable_metadata=variable_metadata,
             coords=data.coords,
+            dataset_metadata=coupled_dataset_metadata,
         )
 
 
-def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
+def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
         data_class=InferenceEvaluatorConfig,
@@ -299,27 +299,24 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     stepper = config.load_stepper()
     stepper.set_eval()
-    stepper.validate_inference_data(data)
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))
     initial_time = batch.ocean_data.time.isel(time=0)
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
     n_timesteps_ocean = config.n_coupled_steps + stepper.ocean.n_ic_timesteps
     n_timesteps_atmosphere = (
         config.n_coupled_steps * stepper.n_inner_steps
         + stepper.atmosphere.n_ic_timesteps
     )
     aggregator = aggregator_config.build(
-        horizontal_coordinates=data.horizontal_coordinates,
-        ocean_timestep=data.ocean_timestep,
-        atmosphere_timestep=data.atmosphere_timestep,
+        dataset_info=dataset_info,
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
         initial_time=initial_time,
         ocean_normalize=stepper.ocean.normalizer.normalize,
         atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
-        variable_metadata=variable_metadata,
         output_dir=config.experiment_dir,
     )
 

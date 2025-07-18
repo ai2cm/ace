@@ -76,6 +76,37 @@ def test_compute_ocean_derived_variable_raises_value_error_when_overwriting():
         )
 
 
+def test_compute_ocean_derived_variable_existing_variable():
+    """Test that attempting to overwrite an existing variable raises an error."""
+    fake_data = {
+        "sea_ice_fraction": torch.tensor([1.0]),
+    }
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 5.0, 15.0]),
+        mask=torch.ones(2),
+    )
+
+    def modify_sea_ice_fraction(data: OceanData, *_) -> torch.Tensor:
+        return data.sea_ice_fraction - 1
+
+    new_data = _compute_ocean_derived_variable(
+        fake_data,
+        depth_coordinate,
+        TIMESTEP,
+        "sea_ice_fraction",
+        modify_sea_ice_fraction,
+        exists_ok=True,
+    )
+    torch.testing.assert_close(
+        fake_data["sea_ice_fraction"],
+        new_data["sea_ice_fraction"],
+        msg=(
+            "Existing variables should not be modified by "
+            "_compute_ocean_derived_variable"
+        ),
+    )
+
+
 def test_compute_ocean_derived_quantities():
     """Test computing all registered ocean derived variables."""
     torch.manual_seed(0)
@@ -83,6 +114,8 @@ def test_compute_ocean_derived_quantities():
     fake_data = {
         "thetao_0": torch.rand(2, 3, 4, 8),  # [batch, time, lat, lon]
         "thetao_1": torch.rand(2, 3, 4, 8),
+        "ocean_sea_ice_fraction": torch.rand(2, 3, 4, 8),
+        "land_fraction": torch.rand(2, 3, 4, 8),
     }
     gen_data = fake_data.copy()
     depth_coordinate = DepthCoordinate(
@@ -104,6 +137,10 @@ def test_compute_ocean_derived_quantities():
     # Test that ocean_heat_content was computed
     assert "ocean_heat_content" in out_data
     assert out_data["ocean_heat_content"].shape == (2, 3, 4, 8)
+
+    # Test that sea_ice_fraction was computed
+    assert "sea_ice_fraction" in out_data
+    assert out_data["sea_ice_fraction"].shape == (2, 3, 4, 8)
 
 
 def test_metadata_registry():

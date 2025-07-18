@@ -1,4 +1,5 @@
-from typing import Any, Callable, Dict, Generic, Mapping, Type, TypeVar
+from collections.abc import Callable, Mapping
+from typing import Any, Generic, TypeVar
 
 import dacite
 
@@ -18,9 +19,9 @@ class Registry(Generic[T]):
             default_type: if given, the "type" key in the config dict is optional
                 and by default this type will be used.
         """
-        self._types: Dict[str, Type[T]] = {}
+        self._types: dict[str, type[T]] = {}
 
-    def register(self, type_name: str) -> Callable[[Type[T]], Type[T]]:
+    def register(self, type_name: str) -> Callable[[type[T]], type[T]]:
         """
         Registers a configuration type with the registry.
 
@@ -34,7 +35,7 @@ class Registry(Generic[T]):
                 class as the target type to be initialized when using `get`.
         """
 
-        def register_func(cls: Type[T]) -> Type[T]:
+        def register_func(cls: type[T]) -> type[T]:
             base_type = None
             # attribute exists only when type parameter is passed
             # i.e. Registry[BaseClass]()

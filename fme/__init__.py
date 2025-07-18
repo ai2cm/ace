@@ -1,8 +1,8 @@
 __version__ = "2024.9.0"
 
-import torch_harmonics
 
 from . import ace, coupled
+from . import sht_fix as _sht_fix
 from .core import Packer, StandardNormalizer, get_device, get_normalizer, using_gpu
 from .core.metrics import (
     gradient_magnitude,
@@ -14,13 +14,10 @@ from .core.metrics import (
     weighted_mean,
     weighted_mean_bias,
     weighted_mean_gradient_magnitude,
+    weighted_nanmean,
     weighted_std,
+    weighted_sum,
 )
-
-APPLY_SHT_FIX = True
-
-if APPLY_SHT_FIX:
-    from .sht_fix import InverseRealSHT, RealSHT
 
 __all__ = [
     "spherical_area_weights",
@@ -37,9 +34,7 @@ __all__ = [
     "Packer",
     "StandardNormalizer",
     "using_gpu",
+    "weighted_std",
+    "ace",
+    "coupled",
 ]
-
-
-if APPLY_SHT_FIX:
-    torch_harmonics.RealSHT = RealSHT
-    torch_harmonics.InverseRealSHT = InverseRealSHT

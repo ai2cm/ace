@@ -1,14 +1,14 @@
-from typing import Iterable, Optional, Union
+from collections.abc import Iterable
+from typing import TypeAlias
 
 import numpy as np
 import torch
 import torch_harmonics
-from typing_extensions import TypeAlias
 
 from fme.core.constants import GRAVITY, LATENT_HEAT_OF_FREEZING
 
-Dimension: TypeAlias = Union[int, Iterable[int]]
-Array: TypeAlias = Union[np.ndarray, torch.Tensor]
+Dimension: TypeAlias = int | Iterable[int]
+Array: TypeAlias = np.ndarray | torch.Tensor
 
 
 def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:
@@ -32,9 +32,37 @@ def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:
     return weights
 
 
+def weighted_sum(
+    tensor: torch.Tensor,
+    weights: torch.Tensor | None = None,
+    dim: Dimension = (),
+    keepdim: bool = False,
+) -> torch.Tensor:
+    """Computes the weighted sum across the specified list of dimensions.
+
+    Args:
+        tensor: torch.Tensor
+        weights: Weights to apply to the sum.
+        dim: Dimensions to compute the sum over.
+        keepdim: Whether the output tensor has `dim` retained or not.
+
+    Returns:
+        a tensor of the weighted sum averaged over the specified dimensions `dim`.
+    """
+    if weights is None:
+        return tensor.sum(dim=dim, keepdim=keepdim)
+
+    expanded_weights = weights.expand(tensor.shape)
+
+    # remove potential "expected NaNs", i.e. any NaNs with 0 weight
+    tensor = tensor.where(expanded_weights != 0.0, 0.0)
+
+    return (tensor * expanded_weights).sum(dim=dim, keepdim=keepdim)
+
+
 def weighted_mean(
     tensor: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
     keepdim: bool = False,
 ) -> torch.Tensor:
@@ -50,18 +78,46 @@ def weighted_mean(
         a tensor of the weighted mean averaged over the specified dimensions `dim`.
     """
     if weights is None:
-        return tensor.nanmean(dim=dim, keepdim=keepdim)
+        return tensor.mean(dim=dim, keepdim=keepdim)
 
+    expanded_weights = weights.expand(tensor.shape)
+
+    # remove potential "expected NaNs", i.e. any NaNs with 0 weight
+    tensor = tensor.where(expanded_weights != 0.0, 0.0)
+
+    return (tensor * expanded_weights).sum(
+        dim=dim, keepdim=keepdim
+    ) / expanded_weights.sum(dim=dim, keepdim=keepdim)
+
+
+def weighted_nanmean(
+    tensor: torch.Tensor,
+    weights: torch.Tensor | None = None,
+    dim: Dimension = (),
+    keepdim: bool = False,
+) -> torch.Tensor:
+    """Computes the weighted nanmean across the specified list of dimensions.
+
+    Args:
+        tensor: torch.Tensor
+        weights: Weights to apply to the mean.
+        dim: Dimensions to compute the mean over.
+        keepdim: Whether the output tensor has `dim` retained or not.
+
+    Returns:
+        a tensor of the weighted mean averaged over the specified dimensions `dim`.
+    """
+    if weights is None:
+        return tensor.nanmean(dim=dim, keepdim=keepdim)
     denom = torch.where(torch.isnan(tensor), 0.0, weights.expand(tensor.shape)).sum(
         dim=dim, keepdim=keepdim
     )
-
     return (tensor * weights).nansum(dim=dim, keepdim=keepdim) / denom
 
 
 def weighted_std(
     tensor: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
 ) -> torch.Tensor:
     """Computes the weighted standard deviation across the specified list of dimensions.
@@ -90,7 +146,7 @@ def weighted_std(
 def weighted_mean_bias(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
 ) -> torch.Tensor:
     """Computes the mean bias across the specified list of dimensions assuming
@@ -115,7 +171,7 @@ def weighted_mean_bias(
 def root_mean_squared_error(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
 ) -> torch.Tensor:
     """
@@ -148,16 +204,16 @@ def gradient_magnitude(tensor: torch.Tensor, dim: Dimension = ()) -> torch.Tenso
 
 
 def weighted_mean_gradient_magnitude(
-    tensor: torch.Tensor, weights: Optional[torch.Tensor] = None, dim: Dimension = ()
+    tensor: torch.Tensor, weights: torch.Tensor | None = None, dim: Dimension = ()
 ) -> torch.Tensor:
     """Compute weighted mean of gradient magnitude across the specified dimensions."""
-    return weighted_mean(gradient_magnitude(tensor, dim), weights=weights, dim=dim)
+    return weighted_nanmean(gradient_magnitude(tensor, dim), weights=weights, dim=dim)
 
 
 def gradient_magnitude_percent_diff(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
 ) -> torch.Tensor:
     """Compute the percent difference of the weighted mean gradient magnitude across
@@ -171,7 +227,7 @@ def gradient_magnitude_percent_diff(
 def rmse_of_time_mean(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     time_dim: Dimension = 0,
     spatial_dims: Dimension = (-2, -1),
 ) -> torch.Tensor:
@@ -199,7 +255,7 @@ def rmse_of_time_mean(
 def time_and_global_mean_bias(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     time_dim: Dimension = 0,
     spatial_dims: Dimension = (-2, -1),
 ) -> torch.Tensor:

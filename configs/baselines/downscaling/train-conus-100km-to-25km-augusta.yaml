@@ -1,0 +1,103 @@
+# Parameters and timestep selection copied from
+# gs://vcm-ml-experiments/2025-03-10-pm-downscaling-models/train-fl-pr-100km-to-25km-pstd1.8-v3/train_config.yaml
+model:
+  out_names:
+    - PRATEsfc
+  in_names:
+    - PRATEsfc
+  loss:
+    type: MSE
+  module:
+    config:
+      model_channels: 64
+      attn_resolutions: [16]
+      channel_mult: [1, 2, 2, 2]
+    type: unet_diffusion_song
+  normalization:
+    coarse:
+      global_means_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD/stats/mean_full_field_25km.nc
+      global_stds_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD/stats/std_full_field_25km.nc
+      # TODO: calculate 100km stats, just using 25km for now
+      #global_means_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD/stats/mean_full_field_100km.nc
+      #global_stds_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD/stats/std_full_field_100km.nc
+    fine:
+      global_means_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD/stats/mean_full_field_25km.nc
+      global_stds_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD/stats/std_full_field_25km.nc
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+  p_mean: -1.2
+  p_std: 1.8
+  predict_residual: true
+  sigma_max: 150.0
+  sigma_min: 0.002
+  use_fine_topography: true
+optimization:
+  lr: 0.0001
+  optimizer_type: Adam
+ema:
+  decay: 0.999
+validate_using_ema: true
+train_data:
+  batch_size: 256
+  num_data_workers: 8
+  fine:
+    - data_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD
+      file_pattern: 25km.zarr
+      engine: zarr
+      subset:
+        interval_length: 6d
+        start: 0d
+        block_length: 7d
+  coarse:
+    - data_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        interval_length: 6d
+        start: 0d
+        block_length: 7d
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+  strict_ensemble: false
+validation_data:
+  batch_size: 256
+  num_data_workers: 8
+  fine:
+    - data_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD    # if using GCS data (Augusta cluster)
+      engine: zarr
+      file_pattern: 25km.zarr
+      subset:
+        interval_length: 1d
+        start: 6d
+        block_length: 7d
+  coarse:
+    - data_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD    # if using GCS data (Augusta cluster)
+      engine: zarr
+      file_pattern: 100km.zarr
+      subset:
+        interval_length: 1d
+        start: 6d
+        block_length: 7d
+  # FL Region
+  lat_extent:
+    start: 22.0
+    stop: 38.0
+  lon_extent:
+    start: 273.0
+    stop: 289.0
+  strict_ensemble: false
+max_epochs: 1000
+coarse_patch_extent_lat: 16
+coarse_patch_extent_lon: 16
+validate_interval: 10
+experiment_dir: /results
+save_checkpoints: True
+logging:
+  project: andrep-downscaling
+  entity: ai2cm
+  log_to_wandb: True
+generate_n_samples: 2

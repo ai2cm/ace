@@ -1,12 +1,11 @@
 import logging
 import warnings
-from typing import List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
 
 import torch
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
-from fme.core.dataset.getters import get_xarray_dataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
@@ -19,6 +18,7 @@ from fme.coupled.data_loading.data_typing import (
     CoupledDatasetItem,
     CoupledDatasetProperties,
 )
+from fme.coupled.data_loading.dataloader import CoupledDataLoader
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -31,26 +31,32 @@ from fme.coupled.requirements import (
 
 
 class CollateFn:
-    def __init__(self, horizontal_dims: List[str]):
-        self.horizontal_dims = horizontal_dims
+    def __init__(
+        self, ocean_horizontal_dims: list[str], atmosphere_horizontal_dims: list[str]
+    ):
+        self.ocean_horizontal_dims = ocean_horizontal_dims
+        self.atmosphere_horizontal_dims = atmosphere_horizontal_dims
 
-    def __call__(self, samples: List[CoupledDatasetItem]) -> CoupledBatchData:
+    def __call__(self, samples: list[CoupledDatasetItem]) -> CoupledBatchData:
         return CoupledBatchData.collate_fn(
             samples,
-            horizontal_dims=self.horizontal_dims,
+            ocean_horizontal_dims=self.ocean_horizontal_dims,
+            atmosphere_horizontal_dims=self.atmosphere_horizontal_dims,
         )
 
 
 def get_dataset(
     config: CoupledDatasetConfig, requirements: CoupledDataRequirements
-) -> Tuple[CoupledDataset, CoupledDatasetProperties]:
+) -> tuple[CoupledDataset, CoupledDatasetProperties]:
     ocean_reqs = requirements.ocean_requirements
     atmosphere_reqs = requirements.atmosphere_requirements
-    ocean, ocean_properties = get_xarray_dataset(
-        config.ocean, ocean_reqs.names, ocean_reqs.n_timesteps
+    ocean: torch.utils.data.Dataset
+    atmosphere: torch.utils.data.Dataset
+    ocean, ocean_properties = config.ocean.build(
+        ocean_reqs.names, ocean_reqs.n_timesteps
     )
-    atmosphere, atmosphere_properties = get_xarray_dataset(
-        config.atmosphere, atmosphere_reqs.names, atmosphere_reqs.n_timesteps
+    atmosphere, atmosphere_properties = config.atmosphere.build(
+        atmosphere_reqs.names, atmosphere_reqs.n_timesteps
     )
     properties = CoupledDatasetProperties(
         ocean.sample_start_times, ocean_properties, atmosphere_properties
@@ -68,9 +74,9 @@ def get_datasets(
     configs: Sequence[CoupledDatasetConfig],
     requirements: CoupledDataRequirements,
     strict: bool = True,
-) -> Tuple[torch.utils.data.ConcatDataset[CoupledDataset], CoupledDatasetProperties]:
+) -> tuple[torch.utils.data.ConcatDataset[CoupledDataset], CoupledDatasetProperties]:
     datasets = []
-    properties: Optional[CoupledDatasetProperties] = None
+    properties: CoupledDatasetProperties | None = None
     for coupled_data_config in configs:
         ds, prop = get_dataset(coupled_data_config, requirements)
         datasets.append(ds)
@@ -91,7 +97,7 @@ def get_datasets(
     return dataset, properties
 
 
-def get_data_loader(
+def get_gridded_data(
     config: CoupledDataLoaderConfig,
     train: bool,
     requirements: CoupledDataRequirements,
@@ -112,7 +118,7 @@ def get_data_loader(
     else:
         sampler = RandomSampler(dataset) if train else None
 
-    if properties.is_remote:
+    if config.zarr_engine_used:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         mp_context = "forkserver"
         persistent_workers = True
@@ -135,7 +141,12 @@ def get_data_loader(
         sampler=sampler,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=CollateFn(list(properties.atmosphere.horizontal_coordinates.dims)),
+        collate_fn=CollateFn(
+            ocean_horizontal_dims=list(properties.ocean.horizontal_coordinates.dims),
+            atmosphere_horizontal_dims=list(
+                properties.atmosphere.horizontal_coordinates.dims
+            ),
+        ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
         **kwargs,
@@ -149,7 +160,7 @@ def get_data_loader(
         )
 
     return GriddedData(
-        loader=dataloader,
+        loader=CoupledDataLoader(dataloader, sampler=sampler, dataset=dataset),
         properties=properties,
         sampler=sampler,
     )
@@ -159,9 +170,7 @@ def get_inference_data(
     config: InferenceDataLoaderConfig,
     total_coupled_steps: int,
     window_requirements: CoupledDataRequirements,
-    initial_condition: Union[
-        CoupledPrognosticState, CoupledPrognosticStateDataRequirements
-    ],
+    initial_condition: CoupledPrognosticState | CoupledPrognosticStateDataRequirements,
 ) -> InferenceGriddedData:
     dataset = InferenceDataset(
         config,
@@ -170,7 +179,7 @@ def get_inference_data(
     )
     properties = dataset.properties
 
-    if properties.is_remote:
+    if config.zarr_engine_used:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
         mp_context = "forkserver"

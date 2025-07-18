@@ -22,7 +22,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('healpix-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
+          key: v1-${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('requirements-healpix.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           python -m pip install uv
@@ -30,10 +30,10 @@ jobs:
           uv venv --python 3.11
           uv pip install -c constraints.txt -e .[dev]
           uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix]
-      - name: Run pytest
+      - name: Run pytest with code coverage
         run: |
           source .venv/bin/activate
-          make test
+          make test_cov
   cpu-very-fast-no-healpix:
     runs-on: ubuntu-latest
     steps:
@@ -47,7 +47,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
+          key: v1-${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           python -m pip install uv
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('healpix-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
+          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('requirements-healpix.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           sudo apt-get update

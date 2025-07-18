@@ -1,6 +1,27 @@
-from typing import Tuple
+from typing import Any
+
+import torch
 
 from .typing_ import EnsembleTensorDict, TensorDict, TensorMapping
+
+
+def assert_dict_allclose(a: dict[str, Any], b: dict[str, Any]):
+    """
+    Check if two (possibly nested) dictionaries which may contain tensors are close.
+
+    Non-tensor values are checked for equality.
+    """
+    if a.keys() != b.keys():
+        raise AssertionError(f"Keys do not match, got {a.keys()} and {b.keys()}")
+    for k in a.keys():
+        if isinstance(a[k], torch.Tensor) and isinstance(b[k], torch.Tensor):
+            torch.testing.assert_close(
+                a[k], b[k], msg=f"Tensors for key {k} are not close"
+            )
+        elif isinstance(a[k], dict) and isinstance(b[k], dict):
+            assert_dict_allclose(a[k], b[k])
+        elif a[k] != b[k]:
+            raise AssertionError(f"Values for key {k} are not equal")
 
 
 def add_ensemble_dim(d: TensorMapping, repeats: int = 1) -> EnsembleTensorDict:
@@ -67,7 +88,7 @@ def fold_sized_ensemble_dim(d: EnsembleTensorDict, n_ensemble: int) -> TensorDic
     return EnsembleTensorDict(reshaped)
 
 
-def fold_ensemble_dim(d: EnsembleTensorDict) -> Tuple[TensorDict, int]:
+def fold_ensemble_dim(d: EnsembleTensorDict) -> tuple[TensorDict, int]:
     """
     Take a tensor dict with an explicit ensemble dimension and fold it into a
     batch/sample dimension.
@@ -94,6 +115,8 @@ def repeat_interleave_batch_dim(data: TensorMapping, repeats: int) -> TensorDict
     the ensemble dimension, you would get an ensemble tensor dict with the data
     repeated across the ensemble dimension.
     """
+    if repeats == 1:
+        return dict(data)  # no-op
     return {k: v.repeat_interleave(repeats, dim=0) for k, v in data.items()}
 
 

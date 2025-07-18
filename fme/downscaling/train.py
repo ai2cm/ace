@@ -3,7 +3,10 @@ import contextlib
 import dataclasses
 import logging
 import os
-from typing import Optional, Union
+import shutil
+import time
+import uuid
+import warnings
 
 import dacite
 import torch
@@ -19,13 +22,18 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator, GenerationAggregator
-from fme.downscaling.datasets_new import DataLoaderConfig, GriddedData, PairedBatchData
+from fme.downscaling.datasets import (
+    PairedBatchData,
+    PairedDataLoaderConfig,
+    PairedGriddedData,
+)
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
     DownscalingModelConfig,
     Model,
 )
+from fme.downscaling.patching import paired_patch_generator_from_loader
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -38,18 +46,25 @@ def count_parameters(modules: torch.nn.ModuleList) -> int:
 
 
 def _save_checkpoint(trainer: "Trainer", path: str) -> None:
-    torch.save(
-        {
-            "model": trainer.model.get_state(),
-            "ema": trainer.ema.get_state(),
-            "optimization": trainer.optimization.get_state(),
-            "num_batches_seen": trainer.num_batches_seen,
-            "startEpoch": trainer.startEpoch,
-            "best_valid_loss": trainer.best_valid_loss,
-            "validate_using_ema": trainer.validate_using_ema,
-        },
-        path,
-    )
+    # save to a temporary file in case we get pre-empted during save
+    temporary_location = os.path.join(os.path.dirname(path), f".{uuid.uuid4()}.tmp")
+    try:
+        torch.save(
+            {
+                "model": trainer.model.get_state(),
+                "ema": trainer.ema.get_state(),
+                "optimization": trainer.optimization.get_state(),
+                "num_batches_seen": trainer.num_batches_seen,
+                "startEpoch": trainer.startEpoch,
+                "best_valid_loss": trainer.best_valid_loss,
+                "validate_using_ema": trainer.validate_using_ema,
+            },
+            temporary_location,
+        )
+        os.replace(temporary_location, path)
+    finally:
+        if os.path.exists(temporary_location):
+            os.remove(temporary_location)
 
 
 def restore_checkpoint(trainer: "Trainer") -> None:
@@ -59,8 +74,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     checkpoint = torch.load(
         trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
     )
-    trainer.model = trainer.model.from_state(checkpoint["model"])
+    trainer.model.module.load_state_dict(checkpoint["model"]["module"])
     trainer.optimization.load_state(checkpoint["optimization"])
+
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
     trainer.best_valid_loss = checkpoint["best_valid_loss"]
@@ -76,10 +92,10 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 class Trainer:
     def __init__(
         self,
-        model: Union[Model, DiffusionModel],
+        model: Model | DiffusionModel,
         optimization: Optimization,
-        train_data: GriddedData,
-        validation_data: GriddedData,
+        train_data: PairedGriddedData,
+        validation_data: PairedGriddedData,
         config: "TrainerConfig",
     ) -> None:
         self.model = model
@@ -94,9 +110,15 @@ class Trainer:
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
         self.config = config
+        self.patch_data = (
+            True
+            if (config.coarse_patch_extent_lat and config.coarse_patch_extent_lon)
+            else False
+        )
 
         self.startEpoch = 0
         self.segment_epochs = self.config.segment_epochs
+        self.resume_results_dir = config.resume_results_dir
 
         dist = Distributed.get_instance()
         if dist.is_root():
@@ -108,8 +130,8 @@ class Trainer:
                 os.makedirs(self.config.checkpoint_dir)
 
         self.best_valid_loss = float("inf")
-        self.epoch_checkpoint_path: Optional[str] = None
-        self.best_checkpoint_path: Optional[str] = None
+        self.epoch_checkpoint_path: str | None = None
+        self.best_checkpoint_path: str | None = None
         if self.config.checkpoint_dir is not None:
             self.epoch_checkpoint_path = os.path.join(
                 self.config.checkpoint_dir, "latest.ckpt"
@@ -121,11 +143,26 @@ class Trainer:
                 self.config.checkpoint_dir, "ema_ckpt.tar"
             )
 
+    def _get_batch_generator(
+        self, data: PairedGriddedData, random_offset: bool, shuffle: bool
+    ):
+        if self.patch_data:
+            batch_generator = paired_patch_generator_from_loader(
+                loader=data.loader,
+                coarse_yx_extent=data.coarse_shape,
+                coarse_yx_patch_extents=self.model.coarse_shape,
+                downscale_factor=self.model.downscale_factor,
+                random_offset=random_offset,
+                shuffle=shuffle,
+            )
+        else:
+            batch_generator = data.loader
+        return batch_generator
+
     def train_one_epoch(self) -> None:
         self.model.module.train()
-        include_positional_comparisons = _include_positional_comparisons(
-            self.config.train_data
-        )
+        include_positional_comparisons = False if self.patch_data else True
+
         train_aggregator = Aggregator(
             self.dims,
             self.model.downscale_factor,
@@ -133,9 +170,15 @@ class Trainer:
         )
         batch: PairedBatchData
         wandb = WandB.get_instance()
-        for batch in self.train_data.loader:
-            outputs = self.model.train_on_batch(batch, self.optimization)
+        train_batch_generator = self._get_batch_generator(
+            self.train_data, random_offset=True, shuffle=True
+        )
+        outputs = None
+        for i, batch in enumerate(train_batch_generator):
             self.num_batches_seen += 1
+            logging.info(f"Training on batch {i+1}")
+            outputs = self.model.train_on_batch(batch, self.optimization)
+            self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
                     outputs=outputs,
@@ -146,7 +189,9 @@ class Trainer:
                     {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
                     step=self.num_batches_seen,
                 )
-
+        if outputs is None:
+            raise RuntimeError("Empty training batch generator")
+        self.optimization.step_scheduler(outputs.loss.item())
         with torch.no_grad():
             wandb.log(
                 train_aggregator.get_wandb(prefix="train"),
@@ -181,9 +226,13 @@ class Trainer:
 
     def valid_one_epoch(self) -> float:
         self.model.module.eval()
-        include_positional_comparisons = _include_positional_comparisons(
-            self.config.validation_data
-        )
+        if (
+            self.patch_data
+            and self.validation_data.coarse_shape != self.model.coarse_shape
+        ):
+            include_positional_comparisons = False
+        else:
+            include_positional_comparisons = True
         with torch.no_grad(), self._validation_context():
             validation_aggregator = Aggregator(
                 self.dims,
@@ -196,7 +245,10 @@ class Trainer:
                 include_positional_comparisons=include_positional_comparisons,
             )
             batch: PairedBatchData
-            for batch in self.validation_data.loader:
+            validation_batch_generator = self._get_batch_generator(
+                self.validation_data, random_offset=False, shuffle=False
+            )
+            for batch in validation_batch_generator:
                 outputs = self.model.train_on_batch(batch, self.null_optimization)
                 validation_aggregator.record_batch(
                     outputs=outputs,
@@ -215,15 +267,16 @@ class Trainer:
                 )
 
         wandb = WandB.get_instance()
-
         validation_metrics = validation_aggregator.get_wandb(prefix="validation")
         generation_metrics = generation_aggregator.get_wandb(prefix="generation")
+
         wandb.log(
             {**generation_metrics, **validation_metrics},
             self.num_batches_seen,
         )
+        channel_mean_crps = _get_crps(generation_metrics)
 
-        return validation_metrics["validation/loss"]
+        return channel_mean_crps
 
     @property
     def resuming(self) -> bool:
@@ -231,27 +284,34 @@ class Trainer:
             return False
         return os.path.isfile(self.epoch_checkpoint_path)
 
-    def save_all_checkpoints(self, valid_loss: float) -> None:
-        if (
-            self.epoch_checkpoint_path is not None
-            and self.best_checkpoint_path is not None
-        ):
-            logging.info(f"Saving latest checkpoint")
+    def save_best_checkpoint(self, valid_loss: float) -> None:
+        if self.best_checkpoint_path is not None:
+            logging.info(f"Saving best checkpoint")
             if self.validate_using_ema:
                 best_checkpoint_context = self._ema_context
             else:
                 best_checkpoint_context = contextlib.nullcontext  # type: ignore
-
             if valid_loss < self.best_valid_loss:
-                logging.info(f"Saving best checkpoint")
+                logging.info("Saving best checkpoint")
                 self.best_valid_loss = valid_loss
                 with best_checkpoint_context():
                     _save_checkpoint(self, self.best_checkpoint_path)
+            else:
+                logging.info(
+                    "Validation loss did not improve, will not overwrite "
+                    "best checkpoint."
+                )
+        else:
+            raise ValueError("Best checkpoint path is not set")
 
+    def save_epoch_checkpoints(self) -> None:
+        if self.epoch_checkpoint_path is not None:
+            logging.info(f"Saving latest checkpoint")
             _save_checkpoint(self, self.epoch_checkpoint_path)
-
             with self._ema_context():
                 _save_checkpoint(self, self.ema_checkpoint_path)
+        else:
+            raise ValueError("Latest checkpoint path is not set")
 
     def _validate_current_epoch(self, epoch: int) -> bool:
         valid_frequency = self.config.validate_interval
@@ -264,6 +324,7 @@ class Trainer:
         logging.info("Running metrics on validation data.")
         self.valid_one_epoch()
         wandb = WandB.get_instance()
+        dist = Distributed.get_instance()
 
         if self.segment_epochs is None:
             segment_max_epochs = self.config.max_epochs
@@ -271,27 +332,39 @@ class Trainer:
             segment_max_epochs = min(
                 self.startEpoch + self.segment_epochs, self.config.max_epochs
             )
-
         for epoch in range(self.startEpoch, segment_max_epochs):
-            self.startEpoch = epoch
             logging.info(f"Training epoch: {epoch + 1}")
+            start_time = time.time()
             self.train_one_epoch()
+            train_end = time.time()
+
+            self.startEpoch = epoch + 1
             if self._validate_current_epoch(epoch):
                 logging.info("Running metrics on validation data.")
                 valid_loss = self.valid_one_epoch()
+                valid_end = time.time()
                 wandb.log({"epoch": epoch}, step=self.num_batches_seen)
-
-                dist = Distributed.get_instance()
                 if dist.is_root():
-                    self.save_all_checkpoints(valid_loss)
+                    self.save_best_checkpoint(valid_loss)
+            else:
+                valid_end = train_end
+            if dist.is_root():
+                self.save_epoch_checkpoints()
+            epoch_end = time.time()
+            timings = {
+                "epoch_train_seconds": train_end - start_time,
+                "epoch_valid_seconds": valid_end - train_end,
+                "epoch_total_seconds": epoch_end - start_time,
+            }
+            wandb.log(timings, step=self.num_batches_seen)
 
 
 @dataclasses.dataclass
 class TrainerConfig:
-    model: Union[DownscalingModelConfig, DiffusionModelConfig]
+    model: DownscalingModelConfig | DiffusionModelConfig
     optimization: OptimizationConfig
-    train_data: DataLoaderConfig
-    validation_data: DataLoaderConfig
+    train_data: PairedDataLoaderConfig
+    validation_data: PairedDataLoaderConfig
     max_epochs: int
     experiment_dir: str
     save_checkpoints: bool
@@ -299,23 +372,45 @@ class TrainerConfig:
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
-    segment_epochs: Optional[int] = None
+    segment_epochs: int | None = None
     validate_interval: int = 1
+    coarse_patch_extent_lat: int | None = None
+    coarse_patch_extent_lon: int | None = None
+    resume_results_dir: str | None = None
+
+    def __post_init__(self):
+        if (
+            self.coarse_patch_extent_lat is not None
+            and self.coarse_patch_extent_lon is None
+        ) or (
+            self.coarse_patch_extent_lat is None
+            and self.coarse_patch_extent_lon is not None
+        ):
+            raise ValueError(
+                "Either none or both of coarse_patch_extent_lat and "
+                "coarse_patch_extent_lon must be set."
+            )
 
     @property
     def checkpoint_dir(self) -> str:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
-        train_data: GriddedData = self.train_data.build(
+        train_data: PairedGriddedData = self.train_data.build(
             train=True, requirements=self.model.data_requirements
         )
-        validation_data: GriddedData = self.validation_data.build(
+        validation_data: PairedGriddedData = self.validation_data.build(
             train=False, requirements=self.model.data_requirements
         )
-
+        if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:
+            model_coarse_shape = (
+                self.coarse_patch_extent_lat,
+                self.coarse_patch_extent_lon,
+            )
+        else:
+            model_coarse_shape = train_data.coarse_shape
         downscaling_model = self.model.build(
-            train_data.coarse_shape,
+            model_coarse_shape,
             train_data.downscale_factor,
         )
 
@@ -343,17 +438,37 @@ class TrainerConfig:
         )
 
 
-def _include_positional_comparisons(config: DataLoaderConfig) -> bool:
-    if (
-        config.coarse_random_lat_cells is not None
-        or config.coarse_random_lon_cells is not None
-    ):
-        return False
-    return True
+def _get_crps(metrics, prefix="generation/metrics/crps"):
+    channel_crps = [v for k, v in metrics.items() if k.startswith(prefix)]
+
+    if len(channel_crps) != 1:
+        warnings.warn(
+            "CRPS metric used for checkpoint selection is computed on "
+            "denormalized outputs. If multiple outputs are present, "
+            "the mean CRPS will not be evenly weighted across outputs."
+        )
+    if len(channel_crps) == 0:
+        return float("inf")
+    else:
+        return sum(channel_crps) / len(channel_crps)
+
+
+def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
+    resuming_from_preempt = os.path.isfile(
+        os.path.join(experiment_dir, "checkpoints/latest.ckpt")
+    )
+    if not os.path.isdir(experiment_dir):
+        os.makedirs(experiment_dir, exist_ok=True)
+    if resume_results_dir is not None and not resuming_from_preempt:
+        if not os.path.isdir(resume_results_dir):
+            raise ValueError(
+                f"Existing results directory {resume_results_dir} does not exist."
+            )
+        shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
 
 
 def main(config_path: str):
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f)
 
     train_config: TrainerConfig = dacite.from_dict(
@@ -362,19 +477,24 @@ def main(config_path: str):
         config=dacite.Config(strict=True),
     )
 
+    if train_config.resume_results_dir is not None:
+        _resume_from_results_dir_if_not_preempted(
+            experiment_dir=train_config.experiment_dir,
+            resume_results_dir=train_config.resume_results_dir,
+        )
+    # Calling this after resuming from results dir so that the submitted config is saved
     prepare_directory(train_config.experiment_dir, config)
+
     train_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
     train_config.configure_wandb(notes=beaker_url)
-
     logging.info("Starting training")
     trainer = train_config.build()
 
     if trainer.resuming:
         logging.info(f"Resuming training from {trainer.epoch_checkpoint_path}")
         restore_checkpoint(trainer)
-
     logging.info(f"Number of parameters: {count_parameters(trainer.model.modules)}")
     trainer.train()
 

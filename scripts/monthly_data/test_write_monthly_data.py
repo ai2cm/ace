@@ -8,7 +8,8 @@ from write_monthly_data import Config, run
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.testing import DimSize, DimSizes
 from fme.ace.testing.fv3gfs_data import save_nd_netcdf
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 
 
@@ -32,7 +33,7 @@ def test_write_monthly_data(very_fast_only: bool, tmp_path: pathlib.Path):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
     all_names = ["a", "b"]
-    horizontal = [DimSize("grid_yt", 8), DimSize("grid_xt", 4)]
+    horizontal = [DimSize("lat", 8), DimSize("lon", 4)]
     dim_sizes = DimSizes(
         n_time=4 * 60,
         horizontal=horizontal,
@@ -47,7 +48,7 @@ def test_write_monthly_data(very_fast_only: bool, tmp_path: pathlib.Path):
     config = Config(
         experiment_dir=str(tmp_path),
         data_loader=DataLoaderConfig(
-            dataset=dataset,
+            dataset=ConcatDatasetConfig(concat=dataset),
             batch_size=1,
             num_data_workers=0,
         ),
@@ -59,4 +60,4 @@ def test_write_monthly_data(very_fast_only: bool, tmp_path: pathlib.Path):
         variable_names=all_names,
     )
     run(config)
-    xr.open_dataset(tmp_path / "monthly_mean_data.nc")
+    xr.open_dataset(tmp_path / "monthly_mean_data.nc", decode_timedelta=False)

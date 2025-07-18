@@ -1,7 +1,7 @@
 import datetime
 import unittest.mock
 from collections import namedtuple
-from typing import Callable, Iterable, Optional, Tuple
+from collections.abc import Callable, Iterable
 
 import numpy as np
 import pytest
@@ -11,7 +11,8 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.stepper import SingleModuleStepperConfig
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.data import SimpleInferenceData
 from fme.core.generics.inference import (
@@ -20,7 +21,6 @@ from fme.core.generics.inference import (
     get_record_to_wandb,
     run_inference,
 )
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.registry.module import ModuleSelector
@@ -32,7 +32,7 @@ SphericalData = namedtuple("SphericalData", ["data", "area_weights", "vertical_c
 
 
 def get_data(
-    names: Iterable[str], shape: Tuple[int, int, int, int, int]
+    names: Iterable[str], shape: tuple[int, int, int, int, int]
 ) -> SphericalData:
     data = {}
     n_lat = shape[2]
@@ -58,7 +58,7 @@ class MockLoader(torch.utils.data.DataLoader):
         shape: tuple,
         names: Iterable[str],
         n_windows: int,
-        time: Optional[xr.DataArray] = None,
+        time: xr.DataArray | None = None,
     ):
         device = fme.get_device()
         self._data = {n: torch.rand(*shape, device=device) for n in names}
@@ -115,7 +115,10 @@ def _get_stepper():
     )
 
     img_shape = spherical_data.data[in_names[0]].shape[2:]
-    gridded_operations = LatLonOperations(spherical_data.area_weights)
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(img_shape[0]),
+        lon=torch.zeros(img_shape[1]),
+    )
     vertical_coordinate = spherical_data.vertical_coord
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": ChannelSum()}),
@@ -128,10 +131,11 @@ def _get_stepper():
         loss=WeightedMappingLossConfig(),
     )
     stepper = config.get_stepper(
-        img_shape,
-        gridded_operations,
-        vertical_coordinate,
-        datetime.timedelta(seconds=1),
+        dataset_info=DatasetInfo(
+            horizontal_coordinates=horizontal_coordinate,
+            vertical_coordinate=vertical_coordinate,
+            timestep=datetime.timedelta(seconds=1),
+        ),
     )
     return stepper, spherical_data, time, in_names, out_names
 
@@ -298,9 +302,7 @@ class PlusOneStepper:
     def __init__(
         self,
         n_ic_timesteps: int,
-        derive_func: Optional[
-            Callable[[TensorMapping, TensorMapping], TensorDict]
-        ] = None,
+        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] | None = None,
     ):
         self.n_ic_timesteps = n_ic_timesteps
         if derive_func is None:
@@ -320,7 +322,7 @@ class PlusOneStepper:
         initial_condition: PrognosticState,
         forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[BatchData, PrognosticState]:
+    ) -> tuple[BatchData, PrognosticState]:
         ic_state = initial_condition.as_batch_data()
         n_forward_steps = forcing.time.shape[1] - self.n_ic_timesteps
         out_tensor = torch.zeros(

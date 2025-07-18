@@ -1,10 +1,11 @@
-from typing import Any, Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from omegaconf import OmegaConf
 
 
 def update_dict_with_dotlist(
-    base: Mapping[str, Any], dotlist: Optional[Sequence[str]] = None
+    base: Mapping[str, Any], dotlist: Sequence[str] | None = None
 ) -> Mapping[str, Any]:
     """Update a dictionary with a dotlist of key-value pairs.
 

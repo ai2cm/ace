@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-from typing import Dict, Tuple
 
 import numpy as np
 import torch
@@ -11,8 +10,8 @@ from fme.core.coordinates import (
     OptionalDepthCoordinate,
     OptionalHybridSigmaPressureCoordinate,
 )
-from fme.core.dataset.data_typing import Dataset, VariableMetadata
-from fme.core.dataset.xarray import DatasetProperties
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.typing_ import TensorDict
 
 
@@ -22,17 +21,18 @@ class CoupledCoords:
     Convenience wrapper for the coords in dict format.
     """
 
-    ocean_vertical: Dict[str, np.ndarray]
-    atmosphere_vertical: Dict[str, np.ndarray]
-    horizontal: Dict[str, np.ndarray]
+    ocean_vertical: dict[str, np.ndarray]
+    atmosphere_vertical: dict[str, np.ndarray]
+    ocean_horizontal: dict[str, np.ndarray]
+    atmosphere_horizontal: dict[str, np.ndarray]
 
     @property
-    def ocean(self) -> Dict[str, np.ndarray]:
-        return {**self.ocean_vertical, **self.horizontal}
+    def ocean(self) -> dict[str, np.ndarray]:
+        return {**self.ocean_vertical, **self.ocean_horizontal}
 
     @property
-    def atmosphere(self) -> Dict[str, np.ndarray]:
-        return {**self.atmosphere_vertical, **self.horizontal}
+    def atmosphere(self) -> dict[str, np.ndarray]:
+        return {**self.atmosphere_vertical, **self.atmosphere_horizontal}
 
 
 class CoupledVerticalCoordinate:
@@ -55,6 +55,26 @@ class CoupledVerticalCoordinate:
         )
 
 
+class CoupledHorizontalCoordinates:
+    def __init__(
+        self,
+        ocean: HorizontalCoordinates,
+        atmosphere: HorizontalCoordinates,
+    ):
+        self.ocean = ocean
+        self.atmosphere = atmosphere
+
+    def __eq__(self, other):
+        if not isinstance(other, CoupledHorizontalCoordinates):
+            return False
+        return self.ocean == other.ocean and self.atmosphere == other.atmosphere
+
+    def to(self, device: torch.device) -> "CoupledHorizontalCoordinates":
+        return CoupledHorizontalCoordinates(
+            ocean=self.ocean.to(device), atmosphere=self.atmosphere.to(device)
+        )
+
+
 class CoupledDatasetProperties:
     def __init__(
         self,
@@ -70,18 +90,21 @@ class CoupledDatasetProperties:
         assert isinstance(ocean_coord, OptionalDepthCoordinate)
         assert isinstance(atmos_coord, OptionalHybridSigmaPressureCoordinate)
         self._vertical_coordinate = CoupledVerticalCoordinate(ocean_coord, atmos_coord)
+        self._horizontal_coordinates = CoupledHorizontalCoordinates(
+            ocean.horizontal_coordinates, atmosphere.horizontal_coordinates
+        )
 
     @property
     def vertical_coordinate(self) -> CoupledVerticalCoordinate:
         return self._vertical_coordinate
 
     @property
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
-        return self.atmosphere.horizontal_coordinates
+    def horizontal_coordinates(self) -> CoupledHorizontalCoordinates:
+        return self._horizontal_coordinates
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
-        metadata: Dict[str, VariableMetadata] = {}
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
+        metadata: dict[str, VariableMetadata] = {}
         metadata.update(self.ocean.variable_metadata)
         metadata.update(self.atmosphere.variable_metadata)
         return metadata
@@ -103,7 +126,8 @@ class CoupledDatasetProperties:
         return CoupledCoords(
             ocean_vertical=self.vertical_coordinate.ocean.coords,
             atmosphere_vertical=self.vertical_coordinate.atmosphere.coords,
-            horizontal=dict(self.horizontal_coordinates.coords),
+            ocean_horizontal=dict(self.horizontal_coordinates.ocean.coords),
+            atmosphere_horizontal=dict(self.horizontal_coordinates.atmosphere.coords),
         )
 
     def to_device(self) -> "CoupledDatasetProperties":
@@ -128,15 +152,15 @@ class CoupledDatasetProperties:
 
 @dataclasses.dataclass
 class CoupledDatasetItem:
-    ocean: Tuple[TensorDict, xr.DataArray]
-    atmosphere: Tuple[TensorDict, xr.DataArray]
+    ocean: tuple[TensorDict, xr.DataArray]
+    atmosphere: tuple[TensorDict, xr.DataArray]
 
 
 class CoupledDataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        ocean: Dataset,
-        atmosphere: Dataset,
+        ocean: torch.utils.data.Dataset,
+        atmosphere: torch.utils.data.Dataset,
         properties: CoupledDatasetProperties,
         n_steps_fast: int,
     ):
@@ -169,7 +193,7 @@ class CoupledDataset(torch.utils.data.Dataset):
         self._n_steps_fast = n_steps_fast
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property
@@ -177,7 +201,7 @@ class CoupledDataset(torch.utils.data.Dataset):
         return self._properties.vertical_coordinate
 
     @property
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
+    def horizontal_coordinates(self) -> CoupledHorizontalCoordinates:
         return self._properties.horizontal_coordinates
 
     @property

@@ -1,6 +1,8 @@
 import dataclasses
 import datetime
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from collections.abc import Callable, Mapping
+from functools import partial
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -21,8 +23,8 @@ class PairedGlobalMeanAnnualAggregator:
         self,
         ops: GriddedOperations,
         timestep: datetime.timedelta,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        monthly_reference_data: Optional[xr.Dataset] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        monthly_reference_data: xr.Dataset | None = None,
     ):
         self._area_weighted_mean = ops.area_weighted_mean
         self.timestep = timestep
@@ -34,7 +36,7 @@ class PairedGlobalMeanAnnualAggregator:
             ops, timestep, variable_metadata
         )
         self._monthly_reference_data = monthly_reference_data
-        self._variable_reference_data: Dict[str, VariableReferenceData] = {}
+        self._variable_reference_data: dict[str, VariableReferenceData] = {}
 
     def _get_reference(self, name: str) -> Optional["VariableReferenceData"]:
         if self._monthly_reference_data is None:
@@ -42,8 +44,9 @@ class PairedGlobalMeanAnnualAggregator:
         if name not in self._variable_reference_data:
             if name not in self._monthly_reference_data:
                 return None
+            area_weighted_mean = partial(self._area_weighted_mean, name=name)
             self._variable_reference_data[name] = process_monthly_reference(
-                self._monthly_reference_data, self._area_weighted_mean, name
+                self._monthly_reference_data, area_weighted_mean, name
             )
         return self._variable_reference_data[name]
 
@@ -58,7 +61,7 @@ class PairedGlobalMeanAnnualAggregator:
         self._target_aggregator.record_batch(time, target_data)
         self._gen_aggregator.record_batch(time, gen_data)
 
-    def _get_gathered_means(self) -> Optional[Tuple[xr.Dataset, xr.Dataset]]:
+    def _get_gathered_means(self) -> tuple[xr.Dataset, xr.Dataset] | None:
         """
         Gather the mean target and generated data across all processes.
 
@@ -73,7 +76,7 @@ class PairedGlobalMeanAnnualAggregator:
         return target, gen
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         gathered = self._get_gathered_means()
         if gathered is None:  # not the root rank
             return {}
@@ -155,19 +158,20 @@ class GlobalMeanAnnualAggregator:
         self,
         ops: GriddedOperations,
         timestep: datetime.timedelta,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
-        self._area_weighted_mean = ops.area_weighted_mean
+        self._area_weighted_mean_dict = ops.area_weighted_mean_dict
         self.timestep = timestep
         self.variable_metadata = variable_metadata or {}
-        self._datasets: Optional[List[xr.Dataset]] = None
+        self._datasets: list[xr.Dataset] | None = None
 
     @torch.no_grad()
     def record_batch(self, time: xr.DataArray, data: TensorMapping):
         """Record a batch of data for computing time variability statistics."""
-        data_area_mean = {}
-        for name in data:
-            data_area_mean[name] = self._area_weighted_mean(data[name]).cpu()
+        data_area_mean = {
+            name: tensor.cpu()
+            for name, tensor in self._area_weighted_mean_dict(data).items()
+        }
         ds = to_dataset(data_area_mean, time)
 
         # must keep a separate dataset for each sample to avoid averaging across
@@ -189,7 +193,7 @@ class GlobalMeanAnnualAggregator:
                     .sum(),
                 )
 
-    def get_gathered_means(self) -> Optional[xr.Dataset]:
+    def get_gathered_means(self) -> xr.Dataset | None:
         """
         Gather the mean data across all processes.
 
@@ -217,7 +221,7 @@ class GlobalMeanAnnualAggregator:
         return data
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         ds = self.get_gathered_means()
         if ds is None:  # not the root rank
             return {}
@@ -311,7 +315,7 @@ def get_r2(da: xr.DataArray, reference: xr.DataArray) -> float:
 
 def _gather_sample_datasets(
     dist: Distributed, dataset: xr.Dataset
-) -> Optional[xr.Dataset]:
+) -> xr.Dataset | None:
     """
     Gather the dataset across all processes, concatenating on the sample dimension.
 

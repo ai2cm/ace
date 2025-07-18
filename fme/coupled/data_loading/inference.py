@@ -1,6 +1,5 @@
 import dataclasses
 from math import ceil
-from typing import Union
 
 import torch
 
@@ -9,7 +8,6 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
-from fme.core.dataset.xarray import get_xarray_dataset
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData
 from fme.coupled.data_loading.config import CoupledDatasetConfig
@@ -40,10 +38,20 @@ class InferenceDataLoaderConfig:
     """
 
     dataset: CoupledDatasetConfig
-    start_indices: Union[
-        InferenceInitialConditionIndices, ExplicitIndices, TimestampList
-    ]
+    start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList
     num_data_workers: int = 0
+
+    def __post_init__(self):
+        self._zarr_engine_used = any(
+            ds.zarr_engine_used for ds in self.dataset.data_configs
+        )
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        """
+        Whether any dataset uses the zarr engine.
+        """
+        return self._zarr_engine_used
 
     @property
     def n_initial_conditions(self) -> int:
@@ -59,15 +67,13 @@ class InferenceDataset(torch.utils.data.Dataset):
     ):
         ocean_reqs = requirements.ocean_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
-        ocean, ocean_properties = get_xarray_dataset(
-            config.dataset.ocean,
-            ocean_reqs.names,
-            ocean_reqs.n_timesteps,
+        ocean: torch.utils.data.Dataset
+        atmosphere: torch.utils.data.Dataset
+        ocean, ocean_properties = config.dataset.ocean.build(
+            ocean_reqs.names, ocean_reqs.n_timesteps
         )
-        atmosphere, atmosphere_properties = get_xarray_dataset(
-            config.dataset.atmosphere,
-            atmosphere_reqs.names,
-            atmosphere_reqs.n_timesteps,
+        atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
+            atmosphere_reqs.names, atmosphere_reqs.n_timesteps
         )
         properties = CoupledDatasetProperties(
             ocean.sample_start_times, ocean_properties, atmosphere_properties
@@ -101,7 +107,12 @@ class InferenceDataset(torch.utils.data.Dataset):
             samples.append(self._dataset[i_window_start])
         return CoupledBatchData.collate_fn(
             samples,
-            horizontal_dims=list(self.properties.horizontal_coordinates.dims),
+            ocean_horizontal_dims=list(
+                self.properties.horizontal_coordinates.ocean.dims
+            ),
+            atmosphere_horizontal_dims=list(
+                self.properties.horizontal_coordinates.atmosphere.dims
+            ),
         )
 
     def __getitem__(self, index) -> CoupledBatchData:

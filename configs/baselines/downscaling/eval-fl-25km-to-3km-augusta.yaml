@@ -1,0 +1,53 @@
+experiment_dir: /eval
+n_samples: 2
+model:
+  checkpoint_path: /checkpoints/best.ckpt
+data:
+  fine:
+    - data_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD
+      engine: zarr
+      file_pattern: 3km.zarr
+      subset:
+        interval_length: 1d
+        start: 6d
+        block_length: 7d
+  coarse:
+    - data_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD
+      engine: zarr
+      file_pattern: 25km.zarr
+      subset:
+        interval_length: 1d
+        start: 6d
+        block_length: 7d
+  lat_extent:
+    start: 22.0
+    stop: 38.0
+  lon_extent:
+    start: 273.0
+    stop: 289.0
+  batch_size: 32
+  num_data_workers: 2
+  strict_ensemble: False
+events:
+  - name: fl-convection
+    date: 2021-08-24T00:00
+    lat_extent:
+      start: 22.0
+      stop: 38.0
+    lon_extent:
+      start: 273.0
+      stop: 289.0
+  - name: fl-hurricane
+    date: 2020-07-11T00:00
+    lat_extent:
+      start: 22.0
+      stop: 38.0
+    lon_extent:
+      start: 273.0
+      stop: 289.0
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm

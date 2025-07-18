@@ -1,5 +1,4 @@
 import random
-from typing import List
 
 import numpy as np
 import pytest
@@ -118,7 +117,7 @@ def test_rotate_modifier_random_rotation():
     ],
 )
 def test_rotate_modifier_pattern(
-    name: str, additional_directional_names: List[str], match_expected: bool
+    name: str, additional_directional_names: list[str], match_expected: bool
 ):
     rotate_modifier = RotateModifier(
         rotate_probability=1.0,

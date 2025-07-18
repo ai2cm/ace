@@ -1,4 +1,4 @@
-from typing import Dict, List, Mapping, Optional, Tuple
+from collections.abc import Mapping
 
 import torch
 import xarray as xr
@@ -17,21 +17,21 @@ class SnapshotAggregator:
 
     _captions = {
         "full-field": (
-            "{name} one step full field for last sample; "
+            "{name} one step full field for first sample in last batch; "
             "(top) generated and (bottom) target [{units}]"
         ),
         "residual": (
-            "{name} one step residual (prediction - previous time) for last sample; "
-            "(top) generated and (bottom) target [{units}]"
+            "{name} one step residual (prediction - previous time) for first sample in "
+            "last batch; (top) generated and (bottom) target [{units}]"
         ),
         "error": (
             "{name} one step full field error (generated - target) "
-            "for last sample [{units}]"
+            "for first sample in last batch [{units}]"
         ),
     }
 
     def __init__(
-        self, dims: List[str], metadata: Optional[Mapping[str, VariableMetadata]] = None
+        self, dims: list[str], metadata: Mapping[str, VariableMetadata] | None = None
     ):
         """
         Args:
@@ -60,7 +60,7 @@ class SnapshotAggregator:
         self._target_data_norm = target_data_norm
         self._gen_data_norm = gen_data_norm
 
-    def _get_data(self) -> Tuple[TensorMapping, TensorMapping, TensorMapping]:
+    def _get_data(self) -> tuple[TensorMapping, TensorMapping, TensorMapping]:
         time_dim = 1
         input_time = 0
         target_time = 1
@@ -88,7 +88,7 @@ class SnapshotAggregator:
         return gen, target, input
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Image]:
+    def get_logs(self, label: str) -> dict[str, Image]:
         """
         Returns logs as can be reported to WandB.
 

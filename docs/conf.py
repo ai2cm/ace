@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 #
 # fme documentation build configuration file, created by
 # sphinx-quickstart on Fri Jun  9 13:47:02 2017.
@@ -209,6 +208,22 @@ texinfo_documents = [
 
 
 # -- Options for doctest -----------------------------------------------
+import doctest
+
+IGNORE_OUTPUT = doctest.register_optionflag("IGNORE_OUTPUT")
+
+OutputChecker = doctest.OutputChecker
+
+
+class CustomOutputChecker(OutputChecker):
+    def check_output(self, want, got, optionflags):
+        if IGNORE_OUTPUT & optionflags:
+            return True
+        return OutputChecker.check_output(self, want, got, optionflags)
+
+
+doctest.OutputChecker = CustomOutputChecker
+
 doctest_global_setup = """
 import fme
 """

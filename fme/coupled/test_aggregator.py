@@ -11,9 +11,11 @@ from fme.ace.aggregator.inference.test_evaluator import get_zero_time
 from fme.ace.data_loading.batch_data import PairedData
 from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.core.coordinates import DimSize, LatLonCoordinates
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.coupled.aggregator import InferenceEvaluatorAggregator, _combine_logs
 from fme.coupled.data_loading.batch_data import CoupledPairedData
+from fme.coupled.dataset_info import CoupledDatasetInfo
 
 TIMESTEP = datetime.timedelta(days=5)
 
@@ -125,12 +127,6 @@ def test_inference_logs_labels_exist(tmpdir):
     ny = 2
     nz = 3
 
-    horizontal_coordinates = LatLonCoordinates(
-        lon=torch.arange(nx),
-        lat=torch.arange(ny),
-        loaded_lon_name="lon",
-        loaded_lat_name="lat",
-    )
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     reference_time_means = xr.Dataset(
@@ -156,13 +152,17 @@ def test_inference_logs_labels_exist(tmpdir):
         ),
         n_ensemble=3,
     )
-    monthly_ds = xr.open_dataset(monthly_reference_data.data_filename)
-
+    monthly_ds = xr.open_dataset(
+        monthly_reference_data.data_filename, decode_timedelta=False
+    )
+    coord = LatLonCoordinates(lon=torch.arange(nx), lat=torch.arange(ny))
+    info = CoupledDatasetInfo(
+        ocean=DatasetInfo(horizontal_coordinates=coord, timestep=TIMESTEP),
+        atmosphere=DatasetInfo(horizontal_coordinates=coord, timestep=TIMESTEP),
+    )
     output_dir = pathlib.Path(tmpdir) / "output"
     agg = InferenceEvaluatorAggregator(
-        horizontal_coordinates=horizontal_coordinates,
-        ocean_timestep=TIMESTEP,
-        atmosphere_timestep=TIMESTEP,
+        dataset_info=info,
         n_timesteps_ocean=n_time,
         n_timesteps_atmosphere=n_time,
         initial_time=initial_time,
@@ -292,11 +292,13 @@ def test_inference_logs_labels_exist(tmpdir):
         assert ocean_file.exists()
         atmosphere_file = atmosphere_directory / f"{file_type}_diagnostics.nc"
         assert atmosphere_file.exists()
-    ocean_mean_dataset = xr.open_dataset(ocean_directory / "mean_diagnostics.nc")
+    ocean_mean_dataset = xr.open_dataset(
+        ocean_directory / "mean_diagnostics.nc", decode_timedelta=False
+    )
     assert "weighted_bias-ocean_var" in ocean_mean_dataset.data_vars
     assert ocean_mean_dataset["weighted_bias-ocean_var"].size == n_time
     atmosphere_mean_dataset = xr.open_dataset(
-        atmosphere_directory / "mean_diagnostics.nc"
+        atmosphere_directory / "mean_diagnostics.nc", decode_timedelta=False
     )
     assert "weighted_bias-atmos_var" in atmosphere_mean_dataset.data_vars
     assert atmosphere_mean_dataset["weighted_bias-atmos_var"].size == n_time

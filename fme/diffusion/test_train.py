@@ -35,8 +35,7 @@ def _get_test_yaml_files(
     out_variable_names,
     mask_name,
     n_forward_steps=1,
-    nettype="SphericalFourierNeuralOperatorNet",
-    stepper_checkpoint_file=None,
+    nettype="ConditionalSFNO",
     log_to_wandb=False,
     max_epochs=1,
     segment_epochs=1,
@@ -64,26 +63,21 @@ def _get_test_yaml_files(
   ocean:
     surface_temperature_name: {in_variable_names[0]}
     ocean_fraction_name: {mask_name}
-"""
-    existing_stepper_config = f"""
-  checkpoint_file: {stepper_checkpoint_file}
+  n_sigma_embedding_channels: 6
 """
 
-    if stepper_checkpoint_file:
-        stepper_config = existing_stepper_config
-    else:
-        stepper_config = new_stepper_config
+    stepper_config = new_stepper_config
 
     train_string = f"""
 train_loader:
   dataset:
-    - data_path: '{train_data_path}'
+      data_path: '{train_data_path}'
       spatial_dimensions: {spatial_dimensions_str}
   batch_size: 2
   num_data_workers: 0
 validation_loader:
   dataset:
-    - data_path: '{valid_data_path}'
+      data_path: '{valid_data_path}'
       spatial_dimensions: {spatial_dimensions_str}
   batch_size: 2
   num_data_workers: 0
@@ -108,7 +102,7 @@ inference:
       n_initial_conditions: 2
       interval: 1
   n_forward_steps: {inference_forward_steps}
-  forward_steps_in_memory: 2
+  forward_steps_in_memory: 4
 n_forward_steps: {n_forward_steps}
 max_epochs: {max_epochs}
 segment_epochs: {segment_epochs}
@@ -161,8 +155,6 @@ def get_sizes(
     spatial_dims: HorizontalCoordinates = LatLonCoordinates(
         lon=torch.Tensor(np.arange(32)),
         lat=torch.Tensor(np.arange(16)),
-        loaded_lat_name="grid_yt",
-        loaded_lon_name="grid_xt",
     ),
     n_time=3,
     nz_interface=3,
@@ -251,7 +243,7 @@ def _setup(
 @pytest.mark.parametrize(
     "nettype",
     [
-        "SphericalFourierNeuralOperatorNet",
+        "ConditionalSFNO",
     ],
 )
 def test_train_inline(tmp_path, nettype, very_fast_only: bool):

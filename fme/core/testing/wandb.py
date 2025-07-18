@@ -2,7 +2,8 @@ import collections
 import contextlib
 import random
 import string
-from typing import Any, Dict, List, Literal, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any, Literal
 
 from fme.core import wandb
 from fme.core.distributed import Distributed
@@ -12,9 +13,9 @@ class MockWandB:
     def __init__(self):
         self._enabled = False
         self._configured = False
-        self._logs: Dict[int, Dict[str, Any]] = collections.defaultdict(dict)
+        self._logs: dict[int, dict[str, Any]] = collections.defaultdict(dict)
         self._last_step = 0
-        self._id: Optional[str] = None
+        self._id: str | None = None
 
     def configure(self, log_to_wandb: bool):
         dist = Distributed.get_instance()
@@ -24,7 +25,7 @@ class MockWandB:
     def init(
         self,
         resumable: bool = False,
-        experiment_dir: Optional[str] = None,
+        experiment_dir: str | None = None,
         **kwargs,
     ):
         if not self._configured:
@@ -46,10 +47,10 @@ class MockWandB:
                         **kwargs,
                     )
             else:
-                pass
+                self._wandb_init(resume="never", **kwargs)
 
     def _wandb_init(
-        self, resume: Literal["must", "never"], id: Optional[str] = None, **kwargs
+        self, resume: Literal["must", "never"], id: str | None = None, **kwargs
     ):
         """
         Mocks the `wandb.init` behavior, specifically around initializing
@@ -72,7 +73,9 @@ class MockWandB:
                     )
             self._id = _mock_wandb_id()
 
-    def get_id(self) -> Optional[str]:
+    def get_id(self) -> str:
+        if self._id is None:
+            raise ValueError("mock wandb id is None")
         return self._id
 
     def set_id(self, id: str):
@@ -94,11 +97,11 @@ class MockWandB:
         if self._enabled:
             self._logs[step].update(data)
 
-    def get_logs(self) -> List[Dict[str, Any]]:
+    def get_logs(self) -> list[dict[str, Any]]:
         if len(self._logs) == 0:
             return []
         n_logs = max(self._logs.keys())
-        return_value: List[Dict[str, Any]] = [dict() for _ in range(n_logs + 1)]
+        return_value: list[dict[str, Any]] = [dict() for _ in range(n_logs + 1)]
         for step, log in self._logs.items():
             return_value[step] = log
         return return_value
@@ -118,6 +121,10 @@ class MockWandB:
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    @property
+    def configured(self) -> bool:
+        return self._configured
 
 
 @contextlib.contextmanager

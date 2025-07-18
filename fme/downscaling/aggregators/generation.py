@@ -1,24 +1,31 @@
-from typing import Any, Collection, List, Mapping, Optional, Union
+from collections.abc import Collection, Mapping
+from typing import Any
 
 import matplotlib.pyplot as plt
 import torch
+import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 
-from ..datasets_new import PairedBatchData
+from ..datasets import PairedBatchData
 from ..metrics_and_maths import compute_crps, filter_tensor_mapping
 from ..models import ModelOutputs
 from .main import (
     Aggregator,
     MeanComparison,
+    MeanMapAggregator,
     SumComparison,
-    _ensure_trailing_slash,
+    ensure_trailing_slash,
     interpolate,
 )
-from .shape_helpers import _check_batch_dims_for_recording, _fold_sample_dim
+from .shape_helpers import (
+    _check_batch_dims_for_recording,
+    _fold_sample_dim,
+    subselect_and_squeeze,
+)
 from .typing import _CoarseComparisonAggregator
 
 
@@ -55,14 +62,20 @@ class RelativeCRPSInterpAggregator:
         name: The name to use for the metric in the wandb output.
     """
 
-    def __init__(self, downscale_factor: int, name: str = "") -> None:
+    def __init__(
+        self,
+        downscale_factor: int,
+        name: str = "",
+        include_positional_comparisons: bool = True,
+    ) -> None:
         self.downscale_factor = downscale_factor
         self._prediction_crps = MeanComparison(_batch_mean_crps)
         self._interpolated_mae = MeanComparison(_batch_mean_mae_loss)
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
+        self._include_positional_comparisons = include_positional_comparisons
 
     def _interpolate(
-        self, data: TensorMapping, keys: Optional[Collection[str]] = None
+        self, data: TensorMapping, keys: Collection[str] | None = None
     ) -> TensorMapping:
         # Expect CRPS coarse to have sample dimension, so no adjustment needed
         keys = keys if keys is not None else data.keys()
@@ -107,11 +120,12 @@ class RelativeCRPSInterpAggregator:
         """
         Get the relative CRPS logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         ret = {}
         for k, v in self._get().items():
             v = v.cpu().numpy()
-            ret[f"{prefix}maps/{k}"] = self._plot_image(v, k)
+            if self._include_positional_comparisons:
+                ret[f"{prefix}maps/{k}"] = self._plot_image(v, k)
             ret[f"{prefix}metrics/{k}"] = v.mean()
         return ret
 
@@ -129,14 +143,14 @@ class LatentStepAggregator:
     """
 
     def __init__(self, name: str = "") -> None:
-        self._latent_steps: List[torch.Tensor] = []
-        self._name = _ensure_trailing_slash(name)
+        self._latent_steps: list[torch.Tensor] = []
+        self._name = ensure_trailing_slash(name)
 
     @torch.no_grad()
-    def record_batch(self, latent_steps: List[torch.Tensor]) -> None:
+    def record_batch(self, latent_steps: list[torch.Tensor]) -> None:
         self._latent_steps = latent_steps
 
-    def _get(self) -> List[Any]:
+    def _get(self) -> list[Any]:
         if len(self._latent_steps) == 0:
             return []
 
@@ -161,7 +175,7 @@ class LatentStepAggregator:
         """
         Get the latent step logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         return {f"{prefix}{self._name}": self._get()}
 
 
@@ -176,9 +190,15 @@ class SplitMapAndMetricLogs:
         name: The name to use for the maps in the wandb output.
     """
 
-    def __init__(self, agg: Union[MeanComparison, SumComparison], name: str) -> None:
+    def __init__(
+        self,
+        agg: MeanComparison | SumComparison,
+        name: str,
+        include_positional_comparisons: bool = True,
+    ) -> None:
         self._agg = agg
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
+        self._include_positional_comparisons = include_positional_comparisons
 
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
@@ -205,12 +225,13 @@ class SplitMapAndMetricLogs:
         Get the wandb output to log. The names of the output items are segmented
         into {prefix}/maps for 2D data,a nd {prefix}/metrics for single-value data.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         results = self._agg.get_wandb()
         ret = {}
         for k, v in results.items():
             if len(v.shape) > 1:
-                ret[f"{prefix}maps/{self._name}{k}"] = self._plot_map(v, k)
+                if self._include_positional_comparisons:
+                    ret[f"{prefix}maps/{self._name}{k}"] = self._plot_map(v, k)
                 ret[f"{prefix}metrics/{self._name}{k}"] = v.mean()
             else:
                 ret[f"{prefix}metrics/{self._name}{k}"] = v
@@ -238,12 +259,12 @@ class GenerationAggregator:
 
     def __init__(
         self,
-        dims: List[str],
+        dims: list[str],
         downscale_factor: int,
         n_histogram_bins: int = 300,
-        percentiles: Optional[List[float]] = None,
-        ssim_kwargs: Optional[Mapping[str, Any]] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        percentiles: list[float] | None = None,
+        ssim_kwargs: Mapping[str, Any] | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
     ) -> None:
         self._agg = Aggregator(
@@ -257,18 +278,29 @@ class GenerationAggregator:
         )
 
         # Non-folded sample dimension quantities
-        # Leaving maps here because validation/generation is not random subsets for now
         self._probabilistic_comparisons = [
-            SplitMapAndMetricLogs(MeanComparison(_batch_mean_crps), "crps"),
+            SplitMapAndMetricLogs(
+                MeanComparison(_batch_mean_crps), "crps", include_positional_comparisons
+            ),
         ]
 
-        self._probabilistic_coarse_comparisons: List[_CoarseComparisonAggregator] = [
-            RelativeCRPSInterpAggregator(downscale_factor, name="relative_crps_bicubic")
+        self._probabilistic_coarse_comparisons: list[_CoarseComparisonAggregator] = [
+            RelativeCRPSInterpAggregator(
+                downscale_factor,
+                name="relative_crps_bicubic",
+                include_positional_comparisons=include_positional_comparisons,
+            )
         ]
 
         self._latent_step_aggregator = LatentStepAggregator(
             name="maps/snapshot/latent_steps"
         )
+
+        self._single_sample_aggregators = []
+        if include_positional_comparisons:
+            self._single_sample_aggregators.append(
+                MeanMapAggregator(variable_metadata, name="single_sample_time_mean")
+            )
 
     @torch.no_grad()
     def record_batch(
@@ -287,7 +319,7 @@ class GenerationAggregator:
         self._latent_step_aggregator.record_batch(outputs.latent_steps)
 
         sample_dim = 1
-        folded_prediction, folded_target, folded_coarse = _fold_sample_dim(
+        folded_target, folded_prediction, folded_coarse = _fold_sample_dim(
             [target, prediction, coarse], sample_dim=sample_dim
         )
         folded_outputs = ModelOutputs(
@@ -299,6 +331,12 @@ class GenerationAggregator:
         )
         self._agg.record_batch(folded_outputs, folded_coarse, expanded_batch)
 
+        for aggregator in self._single_sample_aggregators:
+            aggregator.record_batch(
+                subselect_and_squeeze(target, sample_dim),
+                subselect_and_squeeze(prediction, sample_dim),
+            )
+
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
         Get the wandb output to log from all sub aggregators.
@@ -309,4 +347,18 @@ class GenerationAggregator:
         for coarse_comparison in self._probabilistic_coarse_comparisons:
             ret.update(coarse_comparison.get_wandb(prefix))
         ret.update(self._latent_step_aggregator.get_wandb(prefix))
+        for single_sample_record in self._single_sample_aggregators:
+            ret.update(single_sample_record.get_wandb(prefix))
+
         return ret
+
+    def get_dataset(self) -> xr.Dataset:
+        """
+        Get the dataset output from the underlying aggregator and
+        single sample aggregator.
+        """
+        ds = self._agg.get_dataset()
+        for agg in self._single_sample_aggregators:
+            if hasattr(agg, "get_dataset"):
+                ds = ds.merge(agg.get_dataset())
+        return ds

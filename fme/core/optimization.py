@@ -1,7 +1,8 @@
 import contextlib
 import dataclasses
 import itertools
-from typing import Any, Callable, Iterable, Literal, Mapping, Optional, Union
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -54,7 +55,7 @@ class CheckpointConfig:
     after_n_forward_steps: float = np.inf
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
-    def build(self, step: int) -> Union[Checkpoint, NoCheckpoint]:
+    def build(self, step: int) -> Checkpoint | NoCheckpoint:
         """
         Builds a checkpoint function.
 
@@ -82,7 +83,7 @@ class Optimization(OptimizationABC):
         kwargs: Mapping[str, Any],
         use_gradient_accumulation: bool = False,
         get_checkpoint: Callable[
-            [int], Union[Checkpoint, NoCheckpoint]
+            [int], Checkpoint | NoCheckpoint
         ] = lambda _: NoCheckpoint(),
     ):
         if optimizer_type == "FusedAdam":
@@ -93,7 +94,7 @@ class Optimization(OptimizationABC):
             raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
         if enable_automatic_mixed_precision:
-            self.gscaler: Optional[torch.amp.GradScaler] = torch.amp.GradScaler("cuda")
+            self.gscaler: torch.amp.GradScaler | None = torch.amp.GradScaler("cuda")
         else:
             self.gscaler = None
         self.scheduler = scheduler.build(self.optimizer, max_epochs)

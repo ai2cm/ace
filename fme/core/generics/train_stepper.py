@@ -1,10 +1,11 @@
 import abc
-from typing import Any, Dict, Generic, Type, TypeVar
+from typing import Any, Generic, TypeVar
 
 from torch import nn
 
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
+from fme.core.training_history import TrainingJob
 from fme.core.typing_ import TensorDict
 
 TO = TypeVar("TO", bound="TrainOutputABC")  # train output
@@ -40,16 +41,16 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
         pass
 
     @abc.abstractmethod
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         pass
 
     @abc.abstractmethod
-    def load_state(self, state: Dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass
 
     @classmethod
     @abc.abstractmethod
-    def from_state(cls: Type[SelfType], state: Dict[str, Any]) -> SelfType:
+    def from_state(cls: type[SelfType], state: dict[str, Any]) -> SelfType:
         pass
 
     @property
@@ -69,3 +70,7 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     def set_train(self) -> None:
         for module in self.modules:
             module.train()
+
+    @abc.abstractmethod
+    def update_training_history(self, training_job: TrainingJob) -> None:
+        pass

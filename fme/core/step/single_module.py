@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any
 
 import dacite
 import torch
@@ -19,12 +20,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step.step import (
-    InferenceDataProtocol,
-    StepABC,
-    StepConfigABC,
-    StepSelector,
-)
+from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -45,23 +41,24 @@ class SingleModuleStepConfig(StepConfigABC):
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
-        crps_training: Whether to use CRPS training for stochastic models.
+        crps_training: Unused, kept for backwards compatibility.
         residual_prediction: Whether to use residual prediction.
     """
 
     builder: ModuleSelector
-    in_names: List[str]
-    out_names: List[str]
+    in_names: list[str]
+    out_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
-    ocean: Optional[OceanConfig] = None
-    corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
+    ocean: OceanConfig | None = None
+    corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
-    next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
-    crps_training: bool = False
+    next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    crps_training: bool | None = None
     residual_prediction: bool = False
 
     def __post_init__(self):
+        self.crps_training = None  # unused, kept for backwards compatibility
         for name in self.next_step_forcing_names:
             if name not in self.in_names:
                 raise ValueError(
@@ -81,8 +78,8 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         if extra_names is None:
             extra_names = []
@@ -106,7 +103,7 @@ class SingleModuleStepConfig(StepConfigABC):
         return list(set(self.in_names).union(self.out_names))
 
     @property
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         """
         Names of variables required as inputs to `step`,
         either in `input` or `next_step_input_data`.
@@ -116,24 +113,32 @@ class SingleModuleStepConfig(StepConfigABC):
         else:
             return list(set(self.in_names).union(self.ocean.forcing_names))
 
-    def get_next_step_forcing_names(self) -> List[str]:
+    def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
         return self.next_step_forcing_names
 
     @property
-    def diagnostic_names(self) -> List[str]:
+    def diagnostic_names(self) -> list[str]:
         """Names of variables which are outputs only."""
         return list(set(self.out_names).difference(self.in_names))
 
     @property
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         return self.out_names
 
     @property
-    def loss_names(self) -> List[str]:
+    def next_step_input_names(self) -> list[str]:
+        """Names of variables provided in next_step_input_data."""
+        input_only_names = set(self.input_names).difference(self.output_names)
+        if self.ocean is None:
+            return list(input_only_names)
+        return list(input_only_names.union(self.ocean.forcing_names))
+
+    @property
+    def loss_names(self) -> list[str]:
         return self.output_names
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         """
         Replace the ocean model with a new one.
 
@@ -142,17 +147,18 @@ class SingleModuleStepConfig(StepConfigABC):
         """
         self.ocean = ocean
 
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         return self.ocean
 
     @classmethod
-    def _remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+    def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
         return state_copy
 
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ) -> "SingleModuleStep":
         logging.info("Initializing stepper from provided config")
         corrector = dataset_info.vertical_coordinate.build_corrector(
@@ -167,6 +173,7 @@ class SingleModuleStepConfig(StepConfigABC):
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
+            init_weights=init_weights,
         )
 
     def load(self):
@@ -184,10 +191,11 @@ class SingleModuleStep(StepABC):
     def __init__(
         self,
         config: SingleModuleStepConfig,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
+        init_weights: Callable[[list[nn.Module]], None],
     ):
         """
         Args:
@@ -196,16 +204,16 @@ class SingleModuleStep(StepABC):
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
-            init_weights: Whether to initialize the weights. Should pass False if
-                the weights are about to be overwritten by a checkpoint.
+            init_weights: Function to initialize the weights of the module.
         """
+        super().__init__()
         n_in_channels = len(config.in_names)
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
-            self.ocean: Optional[Ocean] = config.ocean.build(
+            self.ocean: Ocean | None = config.ocean.build(
                 config.in_names, config.out_names, timestep
             )
         else:
@@ -215,6 +223,7 @@ class SingleModuleStep(StepABC):
             n_out_channels=n_out_channels,
             img_shape=img_shape,
         ).to(get_device())
+        init_weights([self.module])
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
@@ -237,26 +246,16 @@ class SingleModuleStep(StepABC):
         return self._normalizer
 
     @property
-    def surface_temperature_name(self) -> Optional[str]:
+    def surface_temperature_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.surface_temperature_name
         return None
 
     @property
-    def ocean_fraction_name(self) -> Optional[str]:
+    def ocean_fraction_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
         return None
-
-    @property
-    def next_step_input_names(self) -> List[str]:
-        """Names of variables provided in next_step_input_data."""
-        input_only_names = set(self._config.input_names).difference(
-            self._config.output_names
-        )
-        if self.ocean is None:
-            return list(input_only_names)
-        return list(input_only_names.union(self.ocean.forcing_names))
 
     @property
     def modules(self) -> nn.ModuleList:
@@ -288,25 +287,22 @@ class SingleModuleStep(StepABC):
         Returns:
             The denormalized output data at the next time step.
         """
-        input_norm = self.normalizer.normalize(input)
-        input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-        output_tensor = wrapper(self.module)(input_tensor)
-        output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
-        if self._config.residual_prediction:
-            output_norm = add_names(input_norm, output_norm, self.prognostic_names)
-        output = self.normalizer.denormalize(output_norm)
-        if self._corrector is not None:
-            output = self._corrector(input, output, next_step_input_data)
-        if self.ocean is not None:
-            output = self.ocean(input, output, next_step_input_data)
-        return output
 
-    def validate_inference_data(self, data: InferenceDataProtocol):
-        if self._timestep != data.timestep:
-            raise ValueError(
-                f"Timestep of step object, {self._timestep}, does not "
-                f"match that of the inference data, {data.timestep}."
-            )
+        def network_call(input_norm: TensorDict) -> TensorDict:
+            input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            output_tensor = wrapper(self.module)(input_tensor)
+            return self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+
+        return step_with_adjustments(
+            input=input,
+            next_step_input_data=next_step_input_data,
+            network_calls=network_call,
+            normalizer=self.normalizer,
+            corrector=self._corrector,
+            ocean=self.ocean,
+            residual_prediction=self._config.residual_prediction,
+            prognostic_names=self.prognostic_names,
+        )
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
@@ -320,7 +316,7 @@ class SingleModuleStep(StepABC):
             "module": self.module.state_dict(),
         }
 
-    def load_state(self, state: Dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         """
         Load the state of the stepper.
 
@@ -332,3 +328,47 @@ class SingleModuleStep(StepABC):
             # for backwards compatibility with old checkpoints
             del module["module.device_buffer"]
         self.module.load_state_dict(module)
+
+
+def step_with_adjustments(
+    input: TensorMapping,
+    next_step_input_data: TensorMapping,
+    network_calls: Callable[[TensorDict], TensorDict],
+    normalizer: StandardNormalizer,
+    corrector: CorrectorABC,
+    ocean: Ocean | None,
+    residual_prediction: bool,
+    prognostic_names: list[str],
+) -> TensorDict:
+    """
+    Step the model forward one timestep given input data.
+
+    Args:
+        input: Mapping from variable name to tensor of shape
+            [n_batch, n_lat, n_lon] containing denormalized data from the
+            initial timestep. In practice this contains the ML inputs.
+        next_step_input_data: Mapping from variable name to tensor of shape
+            [n_batch, n_lat, n_lon] containing denormalized data from
+            the output timestep. In practice this contains the necessary data
+            at the output timestep for the ocean model and corrector.
+        network_calls: Callable[[TensorMapping], TensorDict] that takes a
+            normalized input and returns a normalized output.
+        normalizer: The normalizer to use.
+        corrector: The corrector to use at the end of each step.
+        ocean: The ocean model to use.
+        residual_prediction: Whether to use residual prediction.
+        prognostic_names: Names of prognostic variables.
+
+    Returns:
+        The denormalized output data at the next time step.
+    """
+    input_norm = normalizer.normalize(input)
+    output_norm = network_calls(input_norm)
+    if residual_prediction:
+        output_norm = add_names(input_norm, output_norm, prognostic_names)
+    output = normalizer.denormalize(output_norm)
+    if corrector is not None:
+        output = corrector(input, output, next_step_input_data)
+    if ocean is not None:
+        output = ocean(input, output, next_step_input_data)
+    return output

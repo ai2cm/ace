@@ -1,38 +1,44 @@
+import dataclasses
 import datetime
 import json
 import logging
 import os
+import re
 import warnings
 from collections import namedtuple
+from collections.abc import Mapping, Sequence
 from functools import lru_cache
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Literal
 from urllib.parse import urlparse
 
 import fsspec
 import numpy as np
 import torch
 import xarray as xr
+from xarray.coding.times import CFDatetimeCoder
 
 from fme.core.coordinates import (
     DepthCoordinate,
-    HEALPixCoordinates,
     HorizontalCoordinates,
     HybridSigmaPressureCoordinate,
-    LatLonCoordinates,
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
-from fme.core.device import get_device
+from fme.core.dataset.config import DatasetConfigABC
+from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.time import RepeatedInterval, TimeSlice
+from fme.core.dataset.utils import FillNaNsConfig
+from fme.core.mask_provider import MaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
-from .config import RepeatedInterval, TimeSlice, XarrayDataConfig
-from .data_typing import Dataset, VariableMetadata
+from .data_typing import VariableMetadata
 from .utils import (
     as_broadcasted_tensor,
-    get_horizontal_dimensions,
-    infer_horizontal_dimension_names,
+    get_horizontal_coordinates,
+    get_nonspacetime_dimensions,
     load_series_data,
+    load_series_data_zarr_async,
 )
 
 SLICE_NONE = slice(None)
@@ -49,7 +55,7 @@ VariableNames = namedtuple(
 
 
 def _get_vertical_coordinate(
-    ds: xr.Dataset, dtype: Optional[torch.dtype]
+    ds: xr.Dataset, dtype: torch.dtype | None
 ) -> VerticalCoordinate:
     """
     Get vertical coordinate from a dataset.
@@ -92,25 +98,32 @@ def _get_vertical_coordinate(
         )
 
     coordinate: VerticalCoordinate
+    surface_mask = None
     if len(idepth_list) > 0:
         if "mask_0" in ds.data_vars:
             mask_layers = {
                 name: torch.as_tensor(ds[name].values, dtype=dtype)
                 for name in ds.data_vars
-                if "mask_" in name
+                if re.match(r"mask_(\d+)$", name)
             }
             for name in mask_layers:
                 if "time" in ds[name].dims:
                     raise ValueError("The ocean mask must by time-independent.")
             stacker = Stacker({"mask": ["mask_"]})
             mask = stacker("mask", mask_layers)
+            if "surface_mask" in ds.data_vars:
+                if "time" in ds["surface_mask"].dims:
+                    raise ValueError("The surface mask must be time-independent.")
+                surface_mask = torch.as_tensor(ds["surface_mask"].values, dtype=dtype)
         else:
             logger.warning(
                 "Dataset does not contain a mask. Providing a DepthCoordinate with "
                 "mask set to 1 at all layers."
             )
             mask = torch.ones(len(idepth_list) - 1, dtype=dtype)
-        coordinate = DepthCoordinate(torch.as_tensor(idepth_list, dtype=dtype), mask)
+        coordinate = DepthCoordinate(
+            torch.as_tensor(idepth_list, dtype=dtype), mask, surface_mask
+        )
     elif len(ak_list) > 0 and len(bk_list) > 0:
         coordinate = HybridSigmaPressureCoordinate(
             ak=torch.as_tensor(ak_list, dtype=dtype),
@@ -123,7 +136,7 @@ def _get_vertical_coordinate(
     return coordinate
 
 
-def get_raw_times(paths: List[str], engine: str) -> List[np.ndarray]:
+def _get_raw_times(paths: list[str], engine: str) -> list[np.ndarray]:
     times = []
     for path in paths:
         with _open_xr_dataset(path, engine=engine) as ds:
@@ -131,9 +144,9 @@ def get_raw_times(paths: List[str], engine: str) -> List[np.ndarray]:
     return times
 
 
-def repeat_and_increment_time(
-    raw_times: List[np.ndarray], n_repeats: int, timestep: datetime.timedelta
-) -> List[np.ndarray]:
+def _repeat_and_increment_time(
+    raw_times: list[np.ndarray], n_repeats: int, timestep: datetime.timedelta
+) -> list[np.ndarray]:
     """Repeats and increments a collection of arrays of evenly spaced times."""
     n_timesteps = sum(len(times) for times in raw_times)
     timespan = timestep * n_timesteps
@@ -147,7 +160,7 @@ def repeat_and_increment_time(
     return repeated_and_incremented_time
 
 
-def get_cumulative_timesteps(time: List[np.ndarray]) -> np.ndarray:
+def _get_cumulative_timesteps(time: list[np.ndarray]) -> np.ndarray:
     """Returns a list of cumulative timesteps for each item in a time coordinate."""
     num_timesteps_per_file = [0]
     for time_coord in time:
@@ -155,7 +168,7 @@ def get_cumulative_timesteps(time: List[np.ndarray]) -> np.ndarray:
     return np.array(num_timesteps_per_file).cumsum()
 
 
-def get_file_local_index(index: int, start_indices: np.ndarray) -> Tuple[int, int]:
+def _get_file_local_index(index: int, start_indices: np.ndarray) -> tuple[int, int]:
     """
     Return a tuple of the index of the file containing the time point at `index`
     and the index of the time point within that file.
@@ -175,9 +188,9 @@ class StaticDerivedData:
 
     def __init__(self, coordinates: HorizontalCoordinates):
         self._coords = coordinates
-        self._x: Optional[torch.Tensor] = None
-        self._y: Optional[torch.Tensor] = None
-        self._z: Optional[torch.Tensor] = None
+        self._x: torch.Tensor | None = None
+        self._y: torch.Tensor | None = None
+        self._z: torch.Tensor | None = None
 
     def _get_xyz(self) -> TensorDict:
         if self._x is None or self._y is None or self._z is None:
@@ -264,7 +277,8 @@ def _open_xr_dataset(path: str, *args, **kwargs):
     return xr.open_dataset(
         path,
         *args,
-        use_cftime=True,
+        decode_times=CFDatetimeCoder(use_cftime=True),
+        decode_timedelta=False,
         mask_and_scale=False,
         cache=False,
         chunks=None,
@@ -291,81 +305,193 @@ def _open_file_fh_cached(path, **kwargs):
     )
 
 
-def _get_raw_paths(path, file_pattern):
+def get_raw_paths(path, file_pattern):
     fs = _get_fs(path)
     glob_paths = sorted(fs.glob(os.path.join(path, file_pattern)))
     raw_paths = _preserve_protocol(path, glob_paths)
     return raw_paths
 
 
-class DatasetProperties:
-    def __init__(
-        self,
-        variable_metadata: Dict[str, VariableMetadata],
-        vertical_coordinate: VerticalCoordinate,
-        horizontal_coordinates: HorizontalCoordinates,
-        timestep: datetime.timedelta,
-        is_remote: bool,
-    ):
-        self.variable_metadata = variable_metadata
-        self.vertical_coordinate = vertical_coordinate
-        self.horizontal_coordinates = horizontal_coordinates
-        self.timestep = timestep
-        self.is_remote = is_remote
+def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvider:
+    """
+    Get mask provider from a dataset.
 
-    def to_device(self) -> "DatasetProperties":
-        device = get_device()
-        return DatasetProperties(
-            self.variable_metadata,
-            self.vertical_coordinate.to(device),
-            self.horizontal_coordinates.to(device),
-            self.timestep,
-            self.is_remote,
+    If the dataset contains static variables that start with the string "mask_" or a
+    variable named "surface_mask", then these variables will be used to instantiate
+    a MaskProvider object. Otherwise, an empty MaskProvider is returned.
+
+    Args:
+        ds: Dataset to get vertical coordinates from.
+        dtype: Data type of the returned tensors. If None, the dtype is not
+            changed from the original in ds.
+    """
+    masks: dict[str, torch.Tensor] = {
+        name: torch.as_tensor(ds[name].values, dtype=dtype)
+        for name in ds.data_vars
+        if "mask_" in name
+    }
+    for name in masks:
+        if "time" in ds[name].dims:
+            raise ValueError("Masks must be time-independent.")
+    mask_provider = MaskProvider(masks)
+    logging.info(f"Initialized {mask_provider}.")
+    return mask_provider
+
+
+@dataclasses.dataclass
+class OverwriteConfig:
+    """Configuration to overwrite field values in XarrayDataset.
+
+    Parameters:
+        constant: Fill field with constant value.
+        multiply_scalar: Multiply field by scalar value.
+    """
+
+    constant: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    multiply_scalar: Mapping[str, float] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        key_overlap = set(self.constant.keys()) & set(self.multiply_scalar.keys())
+        if key_overlap:
+            raise ValueError(
+                "OverwriteConfig cannot have the same variable in both constant "
+                f"and multiply_scalar: {key_overlap}"
+            )
+
+    def apply(self, tensors: TensorDict) -> TensorDict:
+        for var, fill_value in self.constant.items():
+            data = tensors[var]
+            tensors[var] = torch.ones_like(data) * torch.tensor(
+                fill_value, dtype=data.dtype, device=data.device
+            )
+        for var, multiplier in self.multiply_scalar.items():
+            data = tensors[var]
+            tensors[var] = data * torch.tensor(
+                multiplier, dtype=data.dtype, device=data.device
+            )
+        return tensors
+
+    @property
+    def variables(self):
+        return set(self.constant.keys()) | set(self.multiply_scalar.keys())
+
+
+@dataclasses.dataclass
+class XarrayDataConfig(DatasetConfigABC):
+    """
+    Parameters:
+        data_path: Path to the data.
+        file_pattern: Glob pattern to match files in the data_path.
+        n_repeats: Number of times to repeat the dataset (in time). It is up
+            to the user to ensure that the input dataset to repeat results in
+            data that is reasonably continuous across repetitions.
+        engine: Backend used in xarray.open_dataset call.
+        spatial_dimensions: Specifies the spatial dimensions for the grid, default
+            is lat/lon. If 'latlon', it is assumed that the last two dimensions are
+            latitude and longitude, respectively. If 'healpix', it is assumed that the
+            last three dimensions are face, height, and width, respectively.
+        subset: Slice defining a subset of the XarrayDataset to load. This can
+            either be a `Slice` of integer indices or a `TimeSlice` of timestamps.
+            This feature is applied directly to the dataset samples. For example,
+            if the file(s) have the time coordinate (t0, t1, t2, t3) and
+            requirements.n_timesteps=2, then subset=Slice(stop=2) will
+            provide two samples: (t0, t1), (t1, t2).
+        infer_timestep: Whether to infer the timestep from the provided data.
+            This should be set to True (the default) for ACE training. It may
+            be useful to toggle this to False for applications like downscaling,
+            which do not depend on the timestep of the data and therefore lack
+            the additional requirement that the data be ordered and evenly
+            spaced in time. It must be set to True if n_repeats > 1 in order
+            to be able to infer the full time coordinate.
+        dtype: Data type to cast the data to. If None, no casting is done. It is
+            required that 'torch.{dtype}' is a valid dtype.
+        overwrite: Optional OverwriteConfig to overwrite loaded field values.
+        fill_nans: Optional FillNaNsConfig to fill NaNs with a constant value.
+        isel: Optional xarray isel arguments to be passed to the dataset. Will
+            raise ValueError if time is included here, since the subset argument
+            is used specifically for selecting times. Horizontal dimensions are
+            also not currently supported.
+
+    Examples:
+        If data is stored in a directory with multiple netCDF files which can be
+        concatenated along the time dimension, use:
+
+        >>> fme.ace.XarrayDataConfig(data_path="/some/directory", file_pattern="*.nc") # doctest: +IGNORE_OUTPUT
+
+        If data is stored in a single zarr store at ``/some/directory/dataset.zarr``,
+        use:
+
+        >>> fme.ace.XarrayDataConfig(
+        ...     data_path="/some/directory",
+        ...     file_pattern="dataset.zarr",
+        ...     engine="zarr"
+        ... ) # doctest: +IGNORE_OUTPUT
+    """  # noqa: E501
+
+    data_path: str
+    file_pattern: str = "*.nc"
+    n_repeats: int = 1
+    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    spatial_dimensions: Literal["healpix", "latlon"] = "latlon"
+    subset: Slice | TimeSlice | RepeatedInterval = dataclasses.field(
+        default_factory=Slice
+    )
+    infer_timestep: bool = True
+    dtype: str | None = "float32"
+    overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
+    fill_nans: FillNaNsConfig | None = None
+    isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
+
+    def _default_file_pattern_check(self):
+        if self.engine == "zarr" and self.file_pattern == "*.nc":
+            raise ValueError(
+                "The file pattern is set to the default NetCDF file pattern *.nc "
+                "but the engine is specified as 'zarr'. Please set "
+                "`XarrayDataConfig.file_pattern` to match the zarr filename."
+            )
+
+    @property
+    def torch_dtype(self) -> torch.dtype | None:
+        if self.dtype is None:
+            return None
+        else:
+            try:
+                torch_dtype = getattr(torch, self.dtype)
+            except AttributeError:
+                raise ValueError(f"Invalid dtype '{self.dtype}'")
+            if not isinstance(torch_dtype, torch.dtype):
+                raise ValueError(f"Invalid dtype '{self.dtype}'")
+        return torch_dtype
+
+    def __post_init__(self):
+        if self.n_repeats > 1 and not self.infer_timestep:
+            raise ValueError(
+                "infer_timestep must be True if n_repeats is greater than 1"
+            )
+        if self.spatial_dimensions not in ["latlon", "healpix"]:
+            raise ValueError(
+                f"unexpected spatial_dimensions {self.spatial_dimensions},"
+                " should be one of 'latlon' or 'healpix'"
+            )
+        self.torch_dtype  # check it can be retrieved
+        self._default_file_pattern_check()
+        self.zarr_engine_used = False
+        if self.engine == "zarr":
+            self.zarr_engine_used = True
+
+    def build(
+        self,
+        names: Sequence[str],
+        n_timesteps: int,
+    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+        return get_xarray_dataset(
+            self,
+            list(names),
+            n_timesteps,
         )
 
-    def update(self, other: "DatasetProperties"):
-        self.is_remote = self.is_remote or other.is_remote
-        if self.timestep != other.timestep:
-            raise ValueError("Inconsistent timesteps between datasets")
-        if self.variable_metadata != other.variable_metadata:
-            raise ValueError("Inconsistent metadata between datasets")
-        if self.vertical_coordinate != other.vertical_coordinate:
-            raise ValueError("Inconsistent vertical coordinates between datasets")
-        if self.horizontal_coordinates != other.horizontal_coordinates:
-            raise ValueError("Inconsistent horizontal coordinates between datasets")
 
-    def update_merged_dataset(self, other: "DatasetProperties"):
-        if isinstance(self.variable_metadata, dict):
-            self.variable_metadata.update(other.variable_metadata)
-        self.is_remote = self.is_remote or other.is_remote
-        if self.timestep != other.timestep:
-            raise ValueError("Inconsistent timesteps between datasets")
-        if self.horizontal_coordinates != other.horizontal_coordinates:
-            raise ValueError("Inconsistent horizontal coordinates between datasets")
-
-
-def get_xarray_dataset(
-    config: XarrayDataConfig, names: List[str], n_timesteps: int
-) -> Tuple["XarraySubset", DatasetProperties]:
-    dataset = XarrayDataset(config, names, n_timesteps)
-    properties = dataset.properties
-    index_slice = as_index_selection(config.subset, dataset)
-    dataset = XarraySubset(dataset, index_slice)
-    return dataset, properties
-
-
-def infer_available_variables(config: XarrayDataConfig):
-    """
-    Infer the available variables from a XarrayDataset.
-    """
-    paths = _get_raw_paths(config.data_path, config.file_pattern)
-    dataset = xr.open_dataset(
-        paths[0], decode_times=False, engine=config.engine, chunks=None
-    )
-    return dataset.data_vars
-
-
-class XarrayDataset(Dataset):
+class XarrayDataset(torch.utils.data.Dataset):
     """Load data from a directory of files matching a pattern using xarray. The
     number of contiguous timesteps to load for each sample is specified by the
     n_timesteps argument.
@@ -375,7 +501,9 @@ class XarrayDataset(Dataset):
     provide three samples: (t0, t1, t2), (t1, t2, t3), and (t2, t3, t4).
     """
 
-    def __init__(self, config: XarrayDataConfig, names: List[str], n_timesteps: int):
+    def __init__(
+        self, config: XarrayDataConfig, names: Sequence[str], n_timesteps: int
+    ):
         self._horizontal_coordinates: HorizontalCoordinates
         self._names = names
         self.path = config.data_path
@@ -385,28 +513,95 @@ class XarrayDataset(Dataset):
         self.spatial_dimensions = config.spatial_dimensions
         self.fill_nans = config.fill_nans
         self.subset_config = config.subset
-        self._raw_paths = _get_raw_paths(self.path, self.file_pattern)
+        self._raw_paths = get_raw_paths(self.path, self.file_pattern)
         if len(self._raw_paths) == 0:
             raise ValueError(
                 f"No files found matching '{self.path}/{self.file_pattern}'."
             )
         self.full_paths = self._raw_paths * config.n_repeats
-        self.n_steps = n_timesteps
+        self.sample_n_times = n_timesteps
         self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
-            self.full_paths[0], decode_times=False, engine=self.engine, chunks=None
+            self.full_paths[0],
+            decode_times=False,
+            decode_timedelta=False,
+            engine=self.engine,
+            chunks=None,
         )
+        self._mask_provider = _get_mask_provider(first_dataset, self.dtype)
         (
             self._horizontal_coordinates,
             self._static_derived_data,
+            _loaded_horizontal_dims,
         ) = self.configure_horizontal_coordinates(first_dataset)
         (
             self._time_dependent_names,
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
+
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self.overwrite = config.overwrite
+
+        self._nonspacetime_dims = get_nonspacetime_dimensions(
+            first_dataset, _loaded_horizontal_dims
+        )
+        self._shape_excluding_time = [
+            first_dataset.sizes[dim]
+            for dim in (self._nonspacetime_dims + _loaded_horizontal_dims)
+        ]
+        self._loaded_dims = ["time"] + self._nonspacetime_dims + _loaded_horizontal_dims
+        self.isel = {
+            dim: v if isinstance(v, int) else v.slice for dim, v in config.isel.items()
+        }
+        self._isel_tuple = tuple(
+            [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
+        )
+        self._check_isel_dimensions(first_dataset.sizes)
+
+    def _check_isel_dimensions(self, data_dim_sizes):
+        # Horizontal dimensions are not currently supported, as the current isel code
+        # does not adjust HorizonalCoordinates to match selection.
+        if "time" in self.isel:
+            raise ValueError("isel cannot be used to select time. Use subset instead.")
+
+        for dim, selection in self.isel.items():
+            if dim not in self._nonspacetime_dims:
+                raise ValueError(
+                    f"isel dimension {dim} must be a non-spacetime dimension "
+                    f"of the dataset ({self._nonspacetime_dims})."
+                )
+            max_isel_index = (
+                (selection.start or 0) if isinstance(selection, slice) else selection
+            )
+            if max_isel_index >= data_dim_sizes[dim]:
+                raise ValueError(
+                    f"isel index {max_isel_index} is out of bounds for dimension "
+                    f"{dim} with size {data_dim_sizes[dim]}."
+                )
+
+    @property
+    def _shape_excluding_time_after_selection(self):
+        final_shape = []
+        for orig_size, sel in zip(self._shape_excluding_time, self._isel_tuple):
+            # if selecting a single index, dimension is squeezed
+            # so it is not included in the final shape
+            if isinstance(sel, slice):
+                if sel.start is None and sel.stop is None and sel.step is None:
+                    final_shape.append(orig_size)
+                else:
+                    final_shape.append(len(range(*sel.indices(orig_size))))
+        return final_shape
+
+    @property
+    def dims(self) -> list[str]:
+        # Final dimensions of returned data after dims that are selected
+        # with a single index are dropped
+        final_dims = ["time"]
+        for dim, sel in zip(self._loaded_dims[1:], self._isel_tuple):
+            if isinstance(sel, slice):
+                final_dims.append(dim)
+        return final_dims
 
     @property
     def properties(self) -> DatasetProperties:
@@ -414,16 +609,13 @@ class XarrayDataset(Dataset):
             self._variable_metadata,
             self._vertical_coordinate,
             self._horizontal_coordinates,
+            self._mask_provider,
             self.timestep,
-            self.is_remote,
+            self._is_remote,
         )
 
     @property
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
-        return self._horizontal_coordinates
-
-    @property
-    def is_remote(self) -> bool:
+    def _is_remote(self) -> bool:
         protocol = _get_protocol(str(self.path))
         if not protocol or protocol == "file":
             return False
@@ -448,20 +640,20 @@ class XarrayDataset(Dataset):
 
     def _get_files_stats(self, n_repeats: int, infer_timestep: bool):
         logging.info(f"Opening data at {os.path.join(self.path, self.file_pattern)}")
-        raw_times = get_raw_times(self._raw_paths, engine=self.engine)
+        raw_times = _get_raw_times(self._raw_paths, engine=self.engine)
 
-        self._timestep: Optional[datetime.timedelta]
+        self._timestep: datetime.timedelta | None
         if infer_timestep:
-            self._timestep = get_timestep(np.concatenate(raw_times))
-            time_coord = repeat_and_increment_time(raw_times, n_repeats, self.timestep)
+            self._timestep = _get_timestep(np.concatenate(raw_times))
+            time_coord = _repeat_and_increment_time(raw_times, n_repeats, self.timestep)
         else:
             self._timestep = None
             time_coord = raw_times
 
-        cum_num_timesteps = get_cumulative_timesteps(time_coord)
+        cum_num_timesteps = _get_cumulative_timesteps(time_coord)
         self.start_indices = cum_num_timesteps[:-1]
         self.total_timesteps = cum_num_timesteps[-1]
-        self._n_initial_conditions = self.total_timesteps - self.n_steps + 1
+        self._n_initial_conditions = self.total_timesteps - self.sample_n_times + 1
         self._sample_start_times = xr.CFTimeIndex(
             np.concatenate(time_coord)[: self._n_initial_conditions]
         )
@@ -516,53 +708,21 @@ class XarrayDataset(Dataset):
 
     def configure_horizontal_coordinates(
         self, first_dataset
-    ) -> Tuple[HorizontalCoordinates, StaticDerivedData]:
+    ) -> tuple[HorizontalCoordinates, StaticDerivedData, list[str]]:
         horizontal_coordinates: HorizontalCoordinates
         static_derived_data: StaticDerivedData
-        dims = get_horizontal_dimensions(first_dataset, self.dtype)
 
-        if self.spatial_dimensions == "latlon":
-            lons = dims[0]
-            lats = dims[1]
-            names = infer_horizontal_dimension_names(first_dataset)
-            lon_name = names[0]
-            lat_name = names[1]
-            horizontal_coordinates = LatLonCoordinates(
-                lon=lons,
-                lat=lats,
-                loaded_lat_name=lat_name,
-                loaded_lon_name=lon_name,
-            )
-            static_derived_data = StaticDerivedData(horizontal_coordinates)
-        elif self.spatial_dimensions == "healpix":
-            face = dims[0]
-            height = dims[1]
-            width = dims[2]
-            horizontal_coordinates = HEALPixCoordinates(
-                face=face,
-                height=height,
-                width=width,
-            )
-            static_derived_data = StaticDerivedData(horizontal_coordinates)
-        else:
-            raise ValueError(
-                f"unexpected config.spatial_dimensions {self.spatial_dimensions},"
-                " should be one of 'latlon' or 'healpix'"
-            )
+        horizontal_coordinates, dim_names = get_horizontal_coordinates(
+            first_dataset, self.spatial_dimensions, self.dtype
+        )
+        static_derived_data = StaticDerivedData(horizontal_coordinates)
+
         coords_sizes = {
             coord_name: len(coord)
             for coord_name, coord in horizontal_coordinates.coords.items()
         }
         logging.info(f"Horizontal coordinate sizes are {coords_sizes}.")
-        return horizontal_coordinates, static_derived_data
-
-    @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
-        return self._variable_metadata
-
-    @property
-    def vertical_coordinate(self) -> VerticalCoordinate:
-        return self._vertical_coordinate
+        return horizontal_coordinates, static_derived_data, dim_names
 
     @property
     def timestep(self) -> datetime.timedelta:
@@ -587,8 +747,9 @@ class XarrayDataset(Dataset):
         """Return cftime index corresponding to start time of each sample."""
         return self._sample_start_times
 
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
-        """Return a sample of data spanning the timesteps [idx, idx + self.n_steps).
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
+        """Return a sample of data spanning the timesteps
+        [idx, idx + self.sample_n_times).
 
         Args:
             idx: Index of the sample to retrieve.
@@ -597,42 +758,62 @@ class XarrayDataset(Dataset):
             Tuple of a sample's data (i.e. a mapping from names to torch.Tensors) and
             its corresponding time coordinate.
         """
-        time_slice = slice(idx, idx + self.n_steps)
+        time_slice = slice(idx, idx + self.sample_n_times)
         return self.get_sample_by_time_slice(time_slice)
 
     def get_sample_by_time_slice(
         self, time_slice: slice
-    ) -> Tuple[TensorDict, xr.DataArray]:
-        input_file_idx, input_local_idx = get_file_local_index(
+    ) -> tuple[TensorDict, xr.DataArray]:
+        input_file_idx, input_local_idx = _get_file_local_index(
             time_slice.start, self.start_indices
         )
-        output_file_idx, output_local_idx = get_file_local_index(
+        output_file_idx, output_local_idx = _get_file_local_index(
             time_slice.stop - 1, self.start_indices
         )
 
         # get the sequence of observations
-        arrays: Dict[str, List[torch.Tensor]] = {}
+        arrays: dict[str, list[torch.Tensor]] = {}
         idxs = range(input_file_idx, output_file_idx + 1)
         total_steps = 0
         for i, file_idx in enumerate(idxs):
-            ds = self._open_file(file_idx)
             start = input_local_idx if i == 0 else 0
-            stop = output_local_idx if i == len(idxs) - 1 else len(ds["time"]) - 1
+            if i == len(idxs) - 1:
+                stop = output_local_idx
+            else:
+                stop = (
+                    self.start_indices[file_idx + 1] - self.start_indices[file_idx] - 1
+                )
+
             n_steps = stop - start + 1
+            shape = [n_steps] + self._shape_excluding_time_after_selection
             total_steps += n_steps
-            tensor_dict = load_series_data(
-                idx=start,
-                n_steps=n_steps,
-                ds=ds,
-                names=self._time_dependent_names,
-                time_dim="time",
-                spatial_dim_names=self._horizontal_coordinates.loaded_dims,
-                fill_nans=self.fill_nans,
-            )
+            if self.engine == "zarr":
+                tensor_dict = load_series_data_zarr_async(
+                    idx=start,
+                    n_steps=n_steps,
+                    path=self.full_paths[file_idx],
+                    names=self._time_dependent_names,
+                    final_dims=self.dims,
+                    final_shape=shape,
+                    fill_nans=self.fill_nans,
+                    nontime_selection=self._isel_tuple,
+                )
+            else:
+                ds = self._open_file(file_idx)
+                ds = ds.isel(**self.isel)
+                tensor_dict = load_series_data(
+                    idx=start,
+                    n_steps=n_steps,
+                    ds=ds,
+                    names=self._time_dependent_names,
+                    final_dims=self.dims,
+                    final_shape=shape,
+                    fill_nans=self.fill_nans,
+                )
+                ds.close()
+                del ds
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
-            ds.close()
-            del ds
 
         tensors: TensorDict = {}
         for n, tensor_list in arrays.items():
@@ -642,13 +823,13 @@ class XarrayDataset(Dataset):
         # load time-invariant variables from first dataset
         if len(self._time_invariant_names) > 0:
             ds = self._open_file(idxs[0])
-            dims = ["time"] + self._horizontal_coordinates.loaded_dims
-            shape = [total_steps] + [ds.sizes[dim] for dim in dims[1:]]
+            ds = ds.isel(**self.isel)
+            shape = [total_steps] + self._shape_excluding_time_after_selection
             for name in self._time_invariant_names:
                 variable = ds[name].variable
                 if self.fill_nans is not None:
                     variable = variable.fillna(self.fill_nans.value)
-                tensors[name] = as_broadcasted_tensor(variable, dims, shape)
+                tensors[name] = as_broadcasted_tensor(variable, self.dims, shape)
             ds.close()
             del ds
 
@@ -656,9 +837,7 @@ class XarrayDataset(Dataset):
         for name in self._static_derived_names:
             tensor = self._static_derived_data[name]
             horizontal_dims = [1] * tensor.ndim
-            tensors[name] = tensor.repeat((total_steps, *horizontal_dims)).to(
-                get_device()
-            )
+            tensors[name] = tensor.repeat((total_steps, *horizontal_dims))
 
         # cast to desired dtype
         tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}
@@ -673,78 +852,7 @@ class XarrayDataset(Dataset):
         return tensors, time
 
 
-class XarraySubset(torch.utils.data.Dataset):
-    def __init__(self, dataset: XarrayDataset, subset: Union[slice, np.ndarray]):
-        indices = np.arange(len(dataset))[subset]
-        logging.info(f"Subsetting dataset samples according to {subset}.")
-        self._dataset = torch.utils.data.Subset(dataset, indices)
-        self._sample_start_times = dataset.sample_start_times[indices]
-        self.properties = dataset.properties
-
-    def __len__(self):
-        return len(self._dataset)
-
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
-        return self._dataset[idx]
-
-    @property
-    def sample_start_times(self):
-        return self._sample_start_times
-
-    @property
-    def n_steps(self) -> int:
-        """The length of the time dimension of each sample."""
-        return self._dataset.dataset.n_steps
-
-
-class XarrayConcat(torch.utils.data.Dataset):
-    def __init__(self, datasets: Sequence[Union[XarrayDataset, XarraySubset]]):
-        self._dataset = torch.utils.data.ConcatDataset(datasets)
-        sample_start_times = datasets[0].sample_start_times
-        for dataset in datasets[1:]:
-            sample_start_times = sample_start_times.append(dataset.sample_start_times)
-            assert dataset.n_steps == datasets[0].n_steps
-        self._sample_start_times = sample_start_times
-        assert len(self._dataset) == len(sample_start_times)
-        self._n_steps = datasets[0].n_steps
-
-    def __len__(self):
-        return len(self._dataset)
-
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
-        return self._dataset[idx]
-
-    @property
-    def sample_start_times(self):
-        return self._sample_start_times
-
-    @property
-    def n_steps(self) -> int:
-        """The length of the time dimension of each sample."""
-        return self._n_steps
-
-
-def as_index_selection(
-    subset: Union[Slice, TimeSlice, RepeatedInterval], dataset: XarrayDataset
-) -> Union[slice, np.ndarray]:
-    """Converts a subset defined either as a Slice or TimeSlice into an index slice
-    based on time coordinate in provided dataset.
-    """
-    if isinstance(subset, Slice):
-        index_selection = subset.slice
-    elif isinstance(subset, TimeSlice):
-        index_selection = subset.slice(dataset.sample_start_times)
-    elif isinstance(subset, RepeatedInterval):
-        try:
-            index_selection = subset.get_boolean_mask(len(dataset), dataset.timestep)
-        except ValueError as e:
-            raise ValueError(f"Error when applying RepeatedInterval to dataset: {e}")
-    else:
-        raise TypeError(f"subset must be Slice or TimeSlice, got {type(subset)}")
-    return index_selection
-
-
-def get_timestep(time: np.ndarray) -> datetime.timedelta:
+def _get_timestep(time: np.ndarray) -> datetime.timedelta:
     """Computes the timestep of an array of a time coordinate array.
 
     Raises an error if the times are not separated by a positive constant
@@ -769,92 +877,84 @@ def get_timestep(time: np.ndarray) -> datetime.timedelta:
         )
 
 
-class MergedXarrayDataset:
-    def __init__(
-        self, datasets: Sequence[Union[XarrayDataset, XarraySubset, XarrayConcat]]
-    ):
-        self.datasets = datasets
+def _as_index_selection(
+    subset: Slice | TimeSlice | RepeatedInterval, dataset: XarrayDataset
+) -> slice | np.ndarray:
+    """Converts a subset defined either as a Slice or TimeSlice into an index slice
+    based on time coordinate in provided dataset.
+    """
+    if isinstance(subset, Slice):
+        index_selection = subset.slice
+    elif isinstance(subset, TimeSlice):
+        index_selection = subset.slice(dataset.sample_start_times)
+    elif isinstance(subset, RepeatedInterval):
+        try:
+            index_selection = subset.get_boolean_mask(len(dataset), dataset.timestep)
+        except ValueError as e:
+            raise ValueError(f"Error when applying RepeatedInterval to dataset: {e}")
+    else:
+        raise TypeError(f"subset must be Slice or TimeSlice, got {type(subset)}")
+    return index_selection
 
-        combined_names = [
-            item for dataset in self.datasets for item in dataset[0][0].keys()
-        ]
-        if len(combined_names) != len(set(combined_names)):
-            duplicates = list(
-                {item for item in combined_names if combined_names.count(item) > 1}
-            )
-            raise ValueError(
-                f"Variable names must be unique across merged datasets. \
-                    \nDuplicates found: {duplicates}"
-            )
-        for dataset in self.datasets:
-            if not dataset.sample_start_times.equals(
-                self.datasets[0].sample_start_times
-            ):
-                raise ValueError(
-                    "All datasets in a merged dataset must have the same sample "
-                    "start times."
+
+class XarraySubset(torch.utils.data.Dataset):
+    def __init__(self, dataset: XarrayDataset, subset: slice | np.ndarray):
+        indices = np.arange(len(dataset))[subset]
+        logging.info(f"Subsetting dataset samples according to {subset}.")
+        self._dataset = torch.utils.data.Subset(dataset, indices)
+        self._sample_start_times = dataset.sample_start_times[indices]
+        self._sample_n_times = dataset.sample_n_times
+        self.dims = dataset.dims
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
+        return self._dataset[idx]
+
+    @property
+    def sample_start_times(self):
+        return self._sample_start_times
+
+    @property
+    def sample_n_times(self) -> int:
+        """The length of the time dimension of each sample."""
+        return self._sample_n_times
+
+
+def get_xarray_dataset(
+    config: XarrayDataConfig, names: Sequence[str], n_timesteps: int
+) -> tuple["XarraySubset", DatasetProperties]:
+    dataset = XarrayDataset(config, names, n_timesteps)
+    properties = dataset.properties
+    index_slice = _as_index_selection(config.subset, dataset)
+    dataset = XarraySubset(dataset, index_slice)
+    return dataset, properties
+
+
+def get_xarray_datasets(
+    dataset_configs: Sequence[XarrayDataConfig],
+    names: Sequence[str],
+    n_timesteps: int,
+    strict: bool = True,
+) -> tuple[list[XarraySubset], DatasetProperties]:
+    datasets = []
+    properties: DatasetProperties | None = None
+    for config in dataset_configs:
+        dataset, new_properties = get_xarray_dataset(config, names, n_timesteps)
+        datasets.append(dataset)
+        if properties is None:
+            properties = new_properties
+        elif not strict:
+            try:
+                properties.update(new_properties)
+            except ValueError as e:
+                warnings.warn(
+                    f"Metadata for each ensemble member are not the same: {e}"
                 )
-            if not dataset.n_steps == self.datasets[0].n_steps:
-                raise ValueError(
-                    "All datasets in the merged datasets \
-                         must have the same number of steps."
-                )
+        else:
+            properties.update(new_properties)
+    if properties is None:
+        raise ValueError("At least one dataset must be provided.")
 
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
-        tensors = {}
-        for dataset in self.datasets:
-            ds_tensors, time = dataset[idx]
-            tensors.update(ds_tensors)
-        return tensors, time
-
-    def __len__(self) -> int:
-        return len(self.datasets[0])
-
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> Tuple[TensorDict, xr.DataArray]:
-        tensors: TensorDict = {}
-        for dataset in self.datasets:
-            ds_tensors, time = dataset.get_sample_by_time_slice(time_slice)
-            tensors.update(ds_tensors)
-        return tensors, time
-
-    @property
-    def all_times(self) -> xr.CFTimeIndex:
-        return self.datasets[0].all_times
-
-    @property
-    def properties(self) -> DatasetProperties:
-        data_properties = None
-        for dataset in self.datasets:
-            if data_properties is None:
-                data_properties = dataset.properties
-            else:
-                data_properties.update_merged_dataset(dataset.properties)
-        if data_properties is None:
-            raise ValueError("No dataset available to determine properties")
-        return data_properties
-
-    @property
-    def total_timesteps(self) -> int:
-        return self.datasets[0].total_timesteps
-
-
-def get_per_dataset_names(
-    dataset_configs: Mapping[str, Union[XarrayDataConfig, Sequence[XarrayDataConfig]]],
-    names: List[str],
-) -> Mapping[str, List[str]]:
-    merged_required_names = names.copy()
-    per_dataset_names = {}
-    for key, config in dataset_configs.items():
-        if isinstance(config, XarrayDataConfig):
-            current_source_variables = infer_available_variables(config)
-        elif isinstance(config, Sequence):
-            current_source_variables = infer_available_variables(config[0])
-        current_source_names = [
-            name for name in merged_required_names if name in current_source_variables
-        ]
-        per_dataset_names[key] = current_source_names
-        for name in current_source_names:
-            merged_required_names.remove(name)
-    return per_dataset_names
+    return datasets, properties

@@ -16,7 +16,7 @@
 
 import dataclasses
 import math
-from typing import Optional, Tuple
+from typing import Tuple
 
 import torch
 import torch.fft
@@ -50,11 +50,15 @@ class Context:
             three dimensions are (channels, height, width).
     """
 
-    embedding_scalar: torch.Tensor
-    embedding_2d: torch.Tensor
+    embedding_scalar: torch.Tensor | None
+    embedding_2d: torch.Tensor | None
 
     def __post_init__(self):
-        if self.embedding_2d.ndim != self.embedding_scalar.ndim + 2:
+        if (
+            self.embedding_scalar is not None
+            and self.embedding_2d is not None
+            and self.embedding_2d.ndim != self.embedding_scalar.ndim + 2
+        ):
             raise ValueError(
                 "embedding_2d must have 2 more dimensions than embedding_scalar"
             )
@@ -82,10 +86,10 @@ class ConditionalLayerNorm(nn.Module):
         self.embed_dim_2d = context_config.embed_dim_2d
         self.epsilon = epsilon
         if self.embed_dim_scalar > 0:
-            self.W_scale: Optional[nn.Linear] = nn.Linear(
+            self.W_scale: nn.Linear | None = nn.Linear(
                 self.embed_dim_scalar, self.n_channels
             )
-            self.W_bias: Optional[nn.Linear] = nn.Linear(
+            self.W_bias: nn.Linear | None = nn.Linear(
                 self.embed_dim_scalar, self.n_channels
             )
         else:
@@ -146,20 +150,28 @@ class ConditionalLayerNorm(nn.Module):
             The normalized tensor, of shape (batch_size, channels, height, width).
         """
         if self.W_scale is not None:
+            if context.embedding_scalar is None:
+                raise ValueError("embedding_scalar must be provided")
             scale: torch.Tensor = (
                 self.W_scale(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
             )
         else:
             scale = torch.ones_like(x)
         if self.W_scale_2d is not None:
+            if context.embedding_2d is None:
+                raise ValueError("embedding_2d must be provided")
             scale = scale + self.W_scale_2d(context.embedding_2d)
         if self.W_bias is not None:
+            if context.embedding_scalar is None:
+                raise ValueError("embedding_scalar must be provided")
             bias: torch.Tensor = (
                 self.W_bias(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
             )
         else:
             bias = torch.zeros_like(x)
         if self.W_bias_2d is not None:
+            if context.embedding_2d is None:
+                raise ValueError("embedding_2d must be provided")
             bias = bias + self.W_bias_2d(context.embedding_2d)
         if not self._global_layer_norm:
             x = x.transpose(1, -1)

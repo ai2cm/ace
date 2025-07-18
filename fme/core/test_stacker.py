@@ -1,60 +1,7 @@
 import pytest
 import torch
 
-from .stacker import Stacker, natural_sort, unstack
-
-
-@pytest.mark.parametrize(
-    "names, sorted_names",
-    [
-        (
-            ["a_1", "b_1", "c_1", "a_2"],
-            [
-                "a_1",
-                "a_2",
-                "b_1",
-                "c_1",
-            ],
-        ),
-        (
-            [
-                "a_0",
-                "a_1",
-                "a_12",
-                "a_2",
-            ],
-            [
-                "a_0",
-                "a_1",
-                "a_2",
-                "a_12",
-            ],
-        ),
-        (
-            [
-                "a_0001",
-                "a_0012",
-                "a_0002",
-            ],
-            [
-                "a_0001",
-                "a_0002",
-                "a_0012",
-            ],
-        ),
-        (
-            [
-                "ab1",
-                "aa10",
-                "aa2",
-            ],
-            ["aa2", "aa10", "ab1"],
-        ),
-    ],
-)
-def test_natural_sort(names, sorted_names):
-    assert natural_sort(names) == sorted_names
-
+from .stacker import Stacker, unstack
 
 _PREFIX_MAP = {"a": ["aa_", "ab_"], "b": ["b_", "bb_"], "c": ["ca", "cb"]}
 
@@ -68,7 +15,7 @@ _PREFIX_MAP = {"a": ["aa_", "ab_"], "b": ["b_", "bb_"], "c": ["ca", "cb"]}
             {"a": ["aa_0", "aa_1"], "b": ["b_00", "b_01"], "c": ["ca"]},
         ),
         (
-            ["ab_0", "ab_1", "bb_1", "bb_2", "cb"],
+            ["ab_1", "ab_0", "bb_1", "bb_2", "cb"],
             {"a": ["ab_0", "ab_1"], "b": (ValueError, "Missing level 0"), "c": ["cb"]},
         ),
         (
@@ -106,7 +53,7 @@ def test_get_all_level_names(prefix_map, data_names, expected_level_names):
             {"a": ["aa_0", "aa_1"], "b": ["b_00", "b_01"], "c": ["ca"]},
         ),
         (
-            ["ab_0", "ab_1", "bb_1", "bb_2", "cb"],
+            ["ab_0", "ab_1", "bb_2", "bb_1", "cb"],
             {"a": ["ab_0", "ab_1"], "c": ["cb"]},
         ),
         (
@@ -139,7 +86,7 @@ def test_stack_unstack(prefix_map, data_names, expected_level_names):
     "data_names, expected_prefix_map, expected_level_names",
     [
         (
-            ["aa_0", "aa_1", "b_00", "b_01", "b", "ca"],
+            ["aa_1", "aa_0", "b_00", "b_01", "b", "ca"],
             {"aa_": ["aa_"], "b_": ["b_"], "b": ["b"], "ca": ["ca"]},
             {"aa_": ["aa_0", "aa_1"], "b_": ["b_00", "b_01"], "b": ["b"], "ca": ["ca"]},
         ),

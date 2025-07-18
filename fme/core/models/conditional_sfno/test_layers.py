@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import pytest
 import torch
 
@@ -15,7 +13,7 @@ from .layers import ConditionalLayerNorm, Context, ContextConfig
 @pytest.mark.parametrize("img_shape", [(8, 16)])
 def test_conditional_layer_norm(
     n_channels: int,
-    img_shape: Tuple[int, int],
+    img_shape: tuple[int, int],
     global_layer_norm: bool,
     embed_dim_scalar: int,
     embed_dim_2d: int,

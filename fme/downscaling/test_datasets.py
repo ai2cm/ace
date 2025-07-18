@@ -1,109 +1,194 @@
-from typing import Tuple
+import dataclasses
 from unittest.mock import MagicMock
 
 import pytest
 import torch
 import xarray as xr
 
-from fme.ace.testing.fv3gfs_data import DimSizes, FV3GFSData
-from fme.core.coordinates import DimSize, LatLonCoordinates
-from fme.core.dataset.config import XarrayDataConfig
-from fme.core.dataset.data_typing import Dataset
-from fme.core.dataset.xarray import DatasetProperties
+from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.downscaling.datasets import (
     BatchData,
+    BatchedLatLonCoordinates,
+    BatchItem,
+    BatchItemDatasetAdapter,
     ClosedInterval,
+    ContiguousDistributedSampler,
     DataLoaderConfig,
+    FineCoarsePairedDataset,
     HorizontalSubsetDataset,
-    PairedBatchData,
-    PairedDataset,
-    _spatial_subset,
-    batch_data_to_paired_batch_data,
+    LatLonCoordinates,
+    PairedBatchItem,
+    PairedDataLoaderConfig,
+    XarrayEnsembleDataConfig,
+    _scale_slice,
+    _subset_horizontal,
 )
 from fme.downscaling.requirements import DataRequirements
+from fme.downscaling.test_train import data_paths_helper
+
+
+def test_ContiguousDistributedSampler():
+    dataset = list(range(20))
+    world_size = 4
+    samplers = [
+        ContiguousDistributedSampler(
+            dataset,
+            num_replicas=world_size,
+            rank=i,
+        )
+        for i in range(world_size)
+    ]
+    sampled = []
+    for sampler in samplers:
+        rank_batch = list(iter(sampler))
+        # assert sample elements are consecutive integers
+        assert all([b - a == 1 for a, b in zip(rank_batch[:-1], rank_batch[1:])])
+        sampled += rank_batch
+    assert sampled == dataset
 
 
 def random_named_tensor(var_names, shape):
     return {var_name: torch.rand(shape) for var_name in var_names}
 
 
-def data_array(time, dims=["sample"]):
-    return xr.DataArray([time], dims=dims)
+def data_array(time, dims=["time"]):
+    return xr.DataArray((time), dims=dims).squeeze()
 
 
-@pytest.mark.parametrize("n_examples", [1, 2])
-def test_downscaling_example_from_sample_tuples(n_examples):
-    shape_a = (1, 1, 8, 16)  # C x T x H x W
-    shape_b = (1, 1, 4, 8)
-    n_examples = 1
-    sample_tuples = [
+def get_example_latlon_coordinates(lat_dim=4, lon_dim=5):
+    return LatLonCoordinates(
+        lat=torch.linspace(0.0, 90.0, lat_dim),
+        lon=torch.linspace(0.0, 360.0, lon_dim),
+    )
+
+
+def get_example_data_tuples(num_items=3, lat_dim=8, lon_dim=16):
+    data = random_named_tensor(["x"], (lat_dim, lon_dim))
+    time = data_array([0])
+    return [
         (
-            random_named_tensor(["x"], shape_a),
-            random_named_tensor(["x"], shape_b),
-            data_array(0),
+            data,
+            time,
+            get_example_latlon_coordinates(lat_dim, lon_dim),
+            torch.randn(lat_dim, lon_dim),
         )
-        for _ in range(n_examples)
-    ]
-    result = BatchData.from_sample_tuples(sample_tuples)
-    assert result.fine["x"].shape == torch.Size((n_examples,) + shape_a)
-    assert result.coarse["x"].shape == torch.Size((n_examples,) + shape_b)
-    assert len(result.times) == n_examples
-
-
-@pytest.mark.parametrize("n_examples,index", [(1, 0), (2, 1)])
-def test_downscaling_dataset(n_examples, index):
-    """Tests getitem and len."""
-    data = [
-        (
-            random_named_tensor(["x"], (1, 1, 8, 16)),
-            data_array(0),
-        )
-        for _ in range(n_examples)
+        for _ in range(num_items)
     ]
 
-    dataset = PairedDataset(data, data)
-    data1, data2, dataset_times = dataset[index]
-    assert torch.equal(data1["x"], data2["x"])
-    assert all(dataset_times == data[index][1])
-    assert len(dataset) == n_examples
+
+def get_batch_items(num_items=3, lat_dim=8, lon_dim=16):
+    return [
+        BatchItem(*item)
+        for item in get_example_data_tuples(num_items, lat_dim, lon_dim)
+    ]
+
+
+def test_batched_latlon_coordinates_from_sequence():
+    coords = get_example_latlon_coordinates()
+    items = [coords] * 3
+
+    # Test from_sequence method
+    batched = BatchedLatLonCoordinates.from_sequence(items)
+
+    # Verify shape matches shapes
+    assert batched.lat.shape == (3, 4)  # batch_size=3, n_lat=4
+    assert batched.lon.shape == (3, 5)  # batch_size=3, n_lon=5
+    assert torch.allclose(batched.lat[0], coords.lat)
+    assert torch.allclose(batched.lon[1], coords.lon)
+
+    # Test dunder methods
+    assert len(batched) == 3
+    batched2 = BatchedLatLonCoordinates.from_sequence(items)
+    assert batched == batched2
+
+    item = batched[0]
+    assert isinstance(item, LatLonCoordinates)
+    assert torch.allclose(item.lat, coords.lat)
+    assert torch.allclose(item.lon, coords.lon)
+
+
+def test_batched_latlon_shape_inconsistent():
+    coords = get_example_latlon_coordinates()
+    # inconsistent shapes in join
+    mishaped_coord = LatLonCoordinates(
+        lat=torch.tensor(
+            [
+                0.0,
+                30.0,
+            ]
+        ),
+        lon=torch.tensor([0.0, 90.0, 180.0, 270.0, 360.0]),
+    )
+    with pytest.raises(RuntimeError):
+        BatchedLatLonCoordinates.from_sequence([coords, mishaped_coord])
+
+    # inconsistent leading dimensions
+    lat = torch.randn(3, 5, 6)
+    lon = torch.randn(5, 3, 12)
+    with pytest.raises(ValueError):
+        BatchedLatLonCoordinates(lat=lat, lon=lon)
+
+    # inconsistent leading dimensions
+    lat = torch.randn(5, 6)
+    lon = torch.randn(3, 5, 12)
+    with pytest.raises(ValueError):
+        BatchedLatLonCoordinates(lat=lat, lon=lon)
+
+    # fail on single dimensional input
+    lat = torch.randn(5)
+    lon = torch.randn(3, 12)
+    with pytest.raises(ValueError):
+        BatchedLatLonCoordinates(lat=lat, lon=lon)
+
+
+def test_batched_latlon_coordinates_area_weights():
+    # Create example coordinates
+    coords = get_example_latlon_coordinates()
+    items = [coords] * 3
+
+    # Test from_sequence method
+    batched = BatchedLatLonCoordinates.from_sequence(items)
+    area_weights = batched.area_weights
+    assert area_weights.shape == (3, 4, 5)
+
+
+def test_batch_item():
+    item = get_example_data_tuples(num_items=1)[0]
+    batch_item = BatchItem(*item)
+    batch_item.to_device()
+    # test unpack
+    data, time, latlon, topo = batch_item
+    assert isinstance(data, dict)
+    assert isinstance(time, xr.DataArray)
+    assert isinstance(latlon, LatLonCoordinates)
+    assert isinstance(topo, torch.Tensor)
 
 
 @pytest.mark.parametrize(
-    (
-        "fine_n_examples, fine_var_names, fine_time,"
-        "coarse_n_examples, coarse_var_names, coarse_time"
-    ),
+    "key, failing_value",
     [
-        pytest.param(1, ["x"], 0, 2, ["x"], 0, id="num_samples"),
-        pytest.param(1, ["x"], 0, 1, ["x"], 1, id="times"),
+        pytest.param("data", {"x": torch.randn(1, 8, 16)}, id="data_3D"),
+        pytest.param("time", data_array([0, 1]), id="time_2D"),
+        pytest.param(
+            "latlon_coordinates",
+            LatLonCoordinates(lat=torch.rand(2, 5), lon=torch.rand(10)),
+            id="lat_2D",
+        ),
+        pytest.param(
+            "latlon_coordinates",
+            LatLonCoordinates(lat=torch.rand(10), lon=torch.rand(2, 5)),
+            id="lon_2D",
+        ),
+        pytest.param("topography", torch.randn(1, 8, 16), id="topo_3D"),
     ],
 )
-def test_downscaling_dataset_validate(
-    fine_n_examples,
-    fine_var_names,
-    fine_time,
-    coarse_n_examples,
-    coarse_var_names,
-    coarse_time,
-):
-    all_data = []
-    for n_examples, var_names, times in [
-        (fine_n_examples, fine_var_names, fine_time),
-        (coarse_n_examples, coarse_var_names, coarse_time),
-    ]:
-        all_data.append(
-            [
-                (
-                    random_named_tensor(var_names, (1, 1, 8, 16)),
-                    data_array(times),
-                )
-                for _ in range(n_examples)
-            ]
-        )
-
-    fine_data, coarse_data = all_data
-    with pytest.raises(AssertionError):
-        PairedDataset(fine_data, coarse_data)
+def test_batch_item_validation(key, failing_value):
+    item = get_example_data_tuples(num_items=1)[0]
+    kwargs = dict(zip(["data", "time", "latlon_coordinates", "topography"], item))
+    kwargs[key] = failing_value
+    with pytest.raises(ValueError):
+        BatchItem(**kwargs)
 
 
 @pytest.mark.parametrize(
@@ -127,15 +212,17 @@ def test_horizontal_subset(
         {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
         xr.DataArray([0.0]),
     )
-    base_dataset = MagicMock(spec=Dataset)
+    base_dataset = MagicMock(spec=torch.utils.data.Dataset)
     properties = MagicMock(spec=DatasetProperties)
     properties.horizontal_coordinates = coords
+    topography = torch.randn(n_lat, n_lon)
     base_dataset.__getitem__.return_value = datum
     dataset = HorizontalSubsetDataset(
         dataset=base_dataset,
         properties=properties,
         lat_interval=ClosedInterval(float(lat_interval[0]), float(lat_interval[1])),
         lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
+        topography=topography,
     )
 
     subset, _ = dataset[0]
@@ -145,145 +232,402 @@ def test_horizontal_subset(
         expected_n_lat,
         expected_n_lon,
     )
+    assert dataset.subset_latlon_coordinates.lat.shape == (expected_n_lat,)
+    assert dataset.subset_latlon_coordinates.lon.shape == (expected_n_lon,)
+    assert dataset.subset_topography is not None
+    assert dataset.subset_topography.shape == (expected_n_lat, expected_n_lon)
+    assert torch.equal(
+        dataset.subset_topography, topography[:expected_n_lat, :expected_n_lon]
+    )
 
 
-def test_dataloader_build(tmp_path):
-    """Integration test that creates test data on disk."""
+def test_batch_data_from_sequence():
+    num_items = 3
+    items = get_batch_items(num_items=num_items)
+    batched = BatchData.from_sequence(items)
 
-    fine_path, coarse_path = tmp_path / "fine", tmp_path / "coarse"
-    fine_path.mkdir()
-    coarse_path.mkdir()
+    assert batched.data["x"].shape == (num_items, 8, 16)
+    assert torch.equal(batched.data["x"][0], items[0].data["x"])
 
-    coarse_names = ["x", "y", "coarse_only_input"]
-    fine_names = ["x", "y"]
-    num_timesteps = 10
-    fine_shape, coarse_shape = (64, 32), (32, 16)
-    num_vertical_levels = 1
-    fine_data, coarse_data = [
-        FV3GFSData(
-            path=path,
-            names=names,
-            dim_sizes=DimSizes(
-                num_timesteps,
-                [DimSize("grid_yt", h), DimSize("grid_xt", w)],
-                num_vertical_levels,
-            ),
-            time_varying_values=[float(i) for i in range(num_timesteps)],
-            timestep_days=0.25,
+    assert len(batched.time) == num_items
+    xr.testing.assert_equal(batched.time[0], items[0].time)
+
+    assert batched.latlon_coordinates.lat.shape == (num_items, 8)
+    assert batched.latlon_coordinates.lon.shape == (num_items, 16)
+    assert batched.topography is not None
+    assert batched.topography.shape == (num_items, 8, 16)
+    assert torch.equal(batched.topography[0], items[0].topography)
+
+    # Test no topography
+    data, times, lalo, _ = items[0]
+    no_topo = BatchItem(data, times, lalo, None)
+    items = [items[0], no_topo]
+    batched = BatchData.from_sequence(items)
+    assert batched.topography is None
+
+
+def test_batch_data_get_item():
+    batch_items = get_batch_items()
+    batched = BatchData.from_sequence(batch_items)
+    expected = BatchItem(*batch_items[0])
+    item = batched[0]
+    assert item == expected
+
+
+def test_batch_data_expand_and_fold():
+    batch_items = get_batch_items()
+    batched = BatchData.from_sequence(batch_items)
+    expanded = batched.expand_and_fold(10, 1, "generated_samples")
+
+    assert expanded.data["x"].shape == (30, 8, 16)
+    assert torch.equal(expanded.data["x"][9], batched.data["x"][0])
+    assert expanded.time.shape == (30,)
+    assert expanded.time[9].values == batched.time[0].values
+    assert expanded.latlon_coordinates.lat.shape == (30, 8)
+    assert expanded.latlon_coordinates.lon.shape == (30, 16)
+    assert expanded.topography.shape == (30, 8, 16)
+
+
+def get_mock_dataset(field_leading_dim=1):
+    # Mock dataset that returns (data, time) tuples
+    dataset = MagicMock()
+    dataset.__len__ = MagicMock(return_value=2)
+    dataset.__getitem__ = MagicMock(
+        return_value=(
+            {"x": torch.rand(field_leading_dim, 8, 16)},
+            data_array([0]),
         )
-        for (path, (h, w), names) in [
-            (fine_path, fine_shape, fine_names),
-            (coarse_path, coarse_shape, coarse_names),
-        ]
+    )
+    return dataset
+
+
+def test_batch_item_dataset_adapter():
+    dataset = get_mock_dataset()
+
+    # Create adapter with example coordinates
+    coords = get_example_latlon_coordinates()
+    topography = torch.rand(8, 16)
+    adapter = BatchItemDatasetAdapter(dataset, coords, topography)
+
+    # Test length matches underlying dataset
+    assert len(adapter) == 2
+
+    # Test returns BatchItem with correct attributes
+    item = adapter[0]
+    assert isinstance(item, BatchItem)
+    assert "x" in item.data
+    assert item.data["x"].shape == (8, 16)
+    assert item.time == 0
+    assert torch.equal(item.latlon_coordinates.lat, coords.lat)
+    assert torch.equal(item.latlon_coordinates.lon, coords.lon)
+    assert torch.equal(item.topography, topography)
+
+
+def test_batch_item_dataset_adapter_no_topography():
+    dataset = get_mock_dataset()
+    coords = get_example_latlon_coordinates()
+    adapter = BatchItemDatasetAdapter(dataset, coords, topography=None)
+
+    item = adapter[0]
+    assert item.topography is None
+
+
+def test_batch_item_dataset_adapter_validation():
+    # Test validation of input data dimensions
+    dataset = get_mock_dataset(field_leading_dim=2)
+
+    coords = get_example_latlon_coordinates()
+    adapter = BatchItemDatasetAdapter(dataset, coords)
+
+    with pytest.raises(ValueError, match="Expected 2D spatial data"):
+        _ = adapter[0]
+
+
+def test_paired_batch_item_validation():
+    fine_item = get_batch_items(num_items=1, lat_dim=8, lon_dim=16)[0]
+    coarse_item = get_batch_items(num_items=1, lat_dim=4, lon_dim=8)[0]
+    mismatched_dim_scales = get_batch_items(num_items=1, lat_dim=2, lon_dim=8)[0]
+    non_divisible_dim = get_batch_items(num_items=1, lat_dim=3, lon_dim=8)[0]
+
+    # This should work - times match
+    paired = PairedBatchItem(fine_item, coarse_item)
+
+    # Create coarse item with different time
+    coarse_time_mismatch = data_array([1])  # Different time
+    coarse_item_mismatch = BatchItem(
+        coarse_item.data, coarse_time_mismatch, coarse_item.latlon_coordinates
+    )
+
+    # This should raise ValueError due to time mismatch
+    with pytest.raises(ValueError):
+        PairedBatchItem(fine_item, coarse_item_mismatch)
+
+    with pytest.raises(ValueError):
+        PairedBatchItem(fine_item, mismatched_dim_scales)
+
+    with pytest.raises(ValueError):
+        PairedBatchItem(fine_item, non_divisible_dim)
+
+    # Test device movement
+    paired.to_device()
+
+
+def test_fine_coarse_paired_dataset():
+    # Create two identical mock datasets
+    dataset1 = get_mock_dataset()
+    dataset2 = get_mock_dataset()
+
+    coords = get_example_latlon_coordinates()
+    adapter1 = BatchItemDatasetAdapter(dataset1, coords)
+    adapter2 = BatchItemDatasetAdapter(dataset2, coords)
+
+    # Test with identical datasets - should pass
+    paired = FineCoarsePairedDataset(adapter1, adapter2)
+
+    # Test length matches underlying datasets
+    assert len(paired) == 2
+    paired[0]
+
+    # Create dataset with different length
+    dataset3 = get_mock_dataset()
+    dataset3.__len__.return_value = 3
+    adapter3 = BatchItemDatasetAdapter(dataset3, coords)
+    with pytest.raises(ValueError):
+        FineCoarsePairedDataset(adapter1, adapter3)
+
+
+@pytest.mark.parametrize(
+    "input_slice,expected",
+    [
+        pytest.param(slice(None), slice(None), id="none"),
+        pytest.param(slice(None, 5), slice(None, 10), id="start_none"),
+        pytest.param(slice(3, None), slice(6, None), id="stop_none"),
+        pytest.param(slice(2, 4), slice(4, 8), id="both"),
+    ],
+)
+def test_scale_slice(input_slice, expected):
+    scaled = _scale_slice(input_slice, scale=2)
+    assert scaled.start == expected.start
+    assert scaled.stop == expected.stop
+
+
+def test__subset_horizontal_component_consistency():
+    # Create example batch item with known dimensions and easy to check data
+    n_lat, n_lon = 5, 10
+    spatial = torch.arange(n_lon).repeat(n_lat, 1)
+    lat = torch.arange(n_lat)
+    lon = torch.arange(n_lon)
+    data = {"x": spatial}
+    topography = spatial
+
+    lat_ext = (1, 3)
+    lon_ext = (2, 5)
+
+    item = BatchItem(data, xr.DataArray(0), LatLonCoordinates(lat, lon), topography)
+    lat_slice = slice(*lat_ext)
+    lon_slice = slice(*lon_ext)
+    result = _subset_horizontal(item, lat_slice, lon_slice)
+
+    # check that subsetting applied equivalently to each BatchItem component
+    expected_lat = torch.arange(*lat_ext)
+    assert torch.equal(result.latlon_coordinates.lat, expected_lat)
+
+    expected_lon = torch.arange(*lon_ext)
+    assert torch.equal(result.latlon_coordinates.lon, expected_lon)
+
+    expected_data = torch.arange(*lon_ext).repeat(2, 1)
+    assert torch.equal(result.data["x"], expected_data)
+    assert torch.equal(result.topography, expected_data)
+
+
+def test_BatchData_slice_latlon():
+    sample_data = get_batch_items()
+    batch = BatchData.from_sequence(sample_data)
+
+    lat_slice = slice(1, 3)
+    lon_slice = slice(2, 5)
+    batch_slice = batch.latlon_slice(
+        lat_slice=lat_slice,
+        lon_slice=lon_slice,
+    )
+
+    assert torch.equal(
+        batch_slice.latlon_coordinates.lat,
+        batch.latlon_coordinates.lat[:, lat_slice],
+    )
+    assert torch.equal(
+        batch_slice.latlon_coordinates.lon,
+        batch.latlon_coordinates.lon[:, lon_slice],
+    )
+    assert torch.equal(
+        batch_slice.data["x"],
+        batch.data["x"][:, lat_slice, lon_slice],
+    )
+    assert torch.equal(
+        batch_slice.topography,
+        batch.topography[:, lat_slice, lon_slice],  # type: ignore
+    )
+
+
+def test_XarrayEnsembleDataConfig():
+    """Tests the XarrayEnsembleDataConfig class."""
+    n_ensemble_members = 5
+    base_config = XarrayDataConfig(
+        data_path="ensemble_dataset_path", n_repeats=3, spatial_dimensions="healpix"
+    )
+    ensemble_config = XarrayEnsembleDataConfig(
+        data_config=base_config,
+        ensemble_dim="sample",
+        n_ensemble_members=n_ensemble_members,
+    )
+    isel_sample_configs = [
+        dataclasses.replace(base_config, isel={"sample": i})
+        for i in range(n_ensemble_members)
     ]
-    batch_size = 2
-    config = DataLoaderConfig(
-        fine=[XarrayDataConfig(str(fine_data.data_path))],
-        coarse=[XarrayDataConfig(str(coarse_data.data_path))],
-        batch_size=batch_size,
-        num_data_workers=0,
+    assert ensemble_config.expand() == isel_sample_configs
+
+
+@pytest.mark.parametrize(
+    "fine_engine, coarse_engine, num_data_workers, expected",
+    [
+        ("netcdf4", "zarr", 0, None),
+        ("netcdf4", "netcdf4", 2, None),
+        ("netcdf4", "zarr", 2, "forkserver"),
+        ("zarr", "zarr", 2, "forkserver"),
+    ],
+)
+def test_DataLoaderConfig_mpcontext(
+    fine_engine, coarse_engine, num_data_workers, expected
+):
+    fine_config = XarrayDataConfig(
+        data_path="fine_dataset_path",
+        engine=fine_engine,
+        file_pattern="*.nc" if fine_engine == "netcdf4" else "a.zarr",
+    )
+    coarse_config = XarrayDataConfig(
+        data_path="coarse_dataset_path",
+        engine=coarse_engine,
+        file_pattern="*.nc" if coarse_engine == "netcdf4" else "a.zarr",
+    )
+    loader_config = PairedDataLoaderConfig(
+        fine=[fine_config],
+        coarse=[coarse_config],
+        batch_size=2,
+        num_data_workers=num_data_workers,
         strict_ensemble=False,
     )
+    assert loader_config._mp_context() == expected
 
-    loader = config.build(
-        True,
-        DataRequirements(fine_names, coarse_names, 1),
-        None,
+
+def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
+    # TODO: this test can be removed after future PRs add a no-target
+    # run script integration test that covers this functionality.
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    paths = data_paths_helper(tmp_path)
+    requirements = DataRequirements(
+        fine_names=[], coarse_names=["x"], n_timesteps=1, use_fine_topography=True
     )
-    assert len(loader.loader) == num_timesteps // batch_size
-    assert len(loader.loader.dataset) == num_timesteps  # type: ignore
-    assert loader.downscale_factor == 2
-    batch = next(iter(loader.loader))
-    for var_name in fine_names:
-        assert batch.fine[var_name].shape == (batch_size, *fine_shape)
-        assert batch.times.shape == (batch_size,)
-    for var_name in coarse_names:
-        assert batch.coarse[var_name].shape == (batch_size, *coarse_shape)
-        assert batch.times.shape == (batch_size,)
-
-
-def get_lat_lon_index_tensors(
-    n_lat: int, n_lon: int
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    lat_indices = torch.arange(n_lat)
-    lon_indices = torch.arange(n_lon)
-    lat_map = torch.broadcast_to(lat_indices[:, None], (n_lat, n_lon))
-    lon_map = torch.broadcast_to(lon_indices[None, :], (n_lat, n_lon))
-    return lat_map, lon_map
-
-
-def test_spatial_subset():
-    n_lat_coarse, n_lon_coarse = 8, 16
-    scale = 2
-    n_lat_fine, n_lon_fine = n_lat_coarse * scale, n_lon_coarse * scale
-    n_lat_coarse_subset, n_lon_coarse_subset = 4, 8
-    lat_coarse, lon_coarse = get_lat_lon_index_tensors(n_lat_coarse, n_lon_coarse)
-    lat_fine, lon_fine = get_lat_lon_index_tensors(n_lat_fine, n_lon_fine)
-    lat_fine, lon_fine = (
-        lat_fine / scale,
-        lon_fine / scale,
-    )  # so the indices are of the coarse grid
-
-    fine_batch = {
-        "i_lat": lat_fine[None, None, :, :],
-        "i_lon": lon_fine[None, None, :, :],
-    }
-    coarse_batch = {
-        "i_lat": lat_coarse[None, None, :, :],
-        "i_lon": lon_coarse[None, None, :, :],
-    }
-    fine_batch, coarse_batch = _spatial_subset(
-        fine_batch,
-        coarse_batch,
-        scale,
-        (n_lat_coarse, n_lon_coarse),
-        coarse_lat_extent=n_lat_coarse_subset,
-        coarse_lon_extent=n_lon_coarse_subset,
+    data_config = DataLoaderConfig(
+        data=[XarrayDataConfig(paths.coarse)],
+        batch_size=2,
+        num_data_workers=1,
+        strict_ensemble=False,
+        topography=XarrayDataConfig(paths.fine),
+        lat_extent=ClosedInterval(1, 4),
+        lon_extent=ClosedInterval(0, 3),
     )
-    assert fine_batch["i_lat"].shape == (
-        1,
-        1,
-        n_lat_coarse_subset * scale,
-        n_lon_coarse_subset * scale,
-    )
-    assert coarse_batch["i_lat"].shape == (
-        1,
-        1,
-        n_lat_coarse_subset,
-        n_lon_coarse_subset,
-    )
-    assert coarse_batch["i_lat"].min() == fine_batch["i_lat"].min()
-    assert coarse_batch["i_lon"].min() == fine_batch["i_lon"].min()
-    assert coarse_batch["i_lat"].max() == torch.floor(fine_batch["i_lat"].max())
-    assert coarse_batch["i_lon"].max() == torch.floor(fine_batch["i_lon"].max())
+    data = data_config.build(requirements=requirements)
+    batch = next(iter(data.loader))
+    assert batch.data["x"].shape == (2, 4, 4)
+    assert batch.topography.shape == (2, 8, 8)
 
 
-# TODO: remove this test when the function is removed
-def test_batch_data_to_paired_batch_data():
-    batch_data = BatchData(
-        fine=random_named_tensor(["x", "y"], (2, 8, 16)),
-        coarse=random_named_tensor(["x", "y"], (2, 4, 8)),
-        times=torch.tensor([0.0, 1.0]),
+@pytest.mark.parametrize(
+    "lat_interval,lon_interval,expected_n_lat,expected_n_lon",
+    [
+        pytest.param(("-inf", "inf"), (0, "inf"), 10, 10, id="no-bounds"),
+        pytest.param((1, 5), (0.0, "inf"), 5, 10, id="lat-bounds"),
+        pytest.param(("-inf", "inf"), (0.0, 5), 10, 6, id="lon-bounds"),
+        pytest.param((1, 5), (2, 4), 5, 3, id="lat-lon-bounds"),
+    ],
+)
+def test_horizontal_subset_topography_mask(
+    lat_interval, lon_interval, expected_n_lat, expected_n_lon
+):
+    n_lat, n_lon = 10, 10
+    batch_size, n_timesteps = 2, 1
+    topography_downscale_factor = 2
+
+    coords = LatLonCoordinates(
+        lat=torch.linspace(0.0, 9, n_lat), lon=torch.linspace(0.0, 9, n_lon)
     )
 
-    paired_batch_data = batch_data_to_paired_batch_data(batch_data)
-    assert isinstance(paired_batch_data, PairedBatchData)
-    assert torch.equal(paired_batch_data.fine.data["x"], batch_data.fine["x"])
-    assert torch.equal(paired_batch_data.coarse.data["y"], batch_data.coarse["y"])
-
-    topography = torch.rand(8, 16)
-    paired_batch_data = batch_data_to_paired_batch_data(
-        batch_data, fine_topography=topography
+    datum = (
+        {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
+        xr.DataArray([0.0]),
     )
-    assert paired_batch_data.fine.topography is not None
-    assert paired_batch_data.fine.topography.shape == (2, 8, 16)
-    assert torch.equal(paired_batch_data.fine.topography[-1], topography)
+    base_dataset = MagicMock(spec=torch.utils.data.Dataset)
+    properties = MagicMock(spec=DatasetProperties)
+    properties.horizontal_coordinates = coords
+    topography = torch.randn(
+        n_lat * topography_downscale_factor, n_lon * topography_downscale_factor
+    )
+    base_dataset.__getitem__.return_value = datum
+    dataset = HorizontalSubsetDataset(
+        dataset=base_dataset,
+        properties=properties,
+        lat_interval=ClosedInterval(float(lat_interval[0]), float(lat_interval[1])),
+        lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
+        topography=topography,
+    )
+    subset_topography: torch.Tensor = dataset.subset_topography
+    assert subset_topography.shape[0] == topography_downscale_factor * expected_n_lat
+    assert subset_topography.shape[1] == topography_downscale_factor * expected_n_lon
 
-    # test 2D topography input requirement
-    with pytest.raises(ValueError):
-        batch_data_to_paired_batch_data(
-            batch_data,
-            fine_topography=torch.rand(
-                4,
-            ),
+    # When topography is higher resolution than data, the mask indices should
+    # correctly reflect the downscaling factor
+    topography_mask_lat = dataset._topography_mask[0].squeeze()
+    topography_mask_lon = dataset._topography_mask[1].squeeze()
+    data_mask_lat = dataset.mask_indices.lat
+    data_mask_lon = dataset.mask_indices.lon
+    assert topography_mask_lat[0] == data_mask_lat[0] * topography_downscale_factor
+    assert (
+        topography_mask_lat[-1] == (data_mask_lat[-1] * topography_downscale_factor) + 1
+    )
+    assert topography_mask_lon[0] == data_mask_lon[0] * topography_downscale_factor
+    assert (
+        topography_mask_lon[-1] == (data_mask_lon[-1] * topography_downscale_factor) + 1
+    )
+
+
+def test_BatchData_slice_latlon_higher_topography_res():
+    topography_downscale_factor = 2
+    lat_dim, lon_dim = 8, 16
+
+    data_tuples = get_example_data_tuples(10, lat_dim, lon_dim)
+    batch_items = []
+    for item in data_tuples:
+        data, time, coords = item[0], item[1], item[2]
+        topography = torch.randn(
+            lat_dim * topography_downscale_factor, lon_dim * topography_downscale_factor
         )
+        batch_items.append(BatchItem(data, time, coords, topography))
+
+    batch = BatchData.from_sequence(batch_items)
+
+    lat_slice = slice(1, 3)
+    lon_slice = slice(2, 5)
+    batch_slice = batch.latlon_slice(
+        lat_slice=lat_slice,
+        lon_slice=lon_slice,
+    )
+
+    assert torch.equal(
+        batch_slice.topography,
+        batch.topography[
+            :,
+            _scale_slice(lat_slice, topography_downscale_factor),
+            _scale_slice(lon_slice, topography_downscale_factor),
+        ],  # type: ignore
+    )

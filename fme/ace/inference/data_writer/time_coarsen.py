@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, Protocol, Tuple
+from typing import Protocol
 
 import torch
 import xarray as xr
@@ -11,8 +11,8 @@ TIME_DIM = 1  # sample, time, lat, lon
 class _PairedDataWriter(Protocol):
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+        prediction: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -25,7 +25,7 @@ class _PairedDataWriter(Protocol):
 class _DataWriter(Protocol):
     def append_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        data: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -83,8 +83,8 @@ class PairedTimeCoarsen:
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+        prediction: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -118,7 +118,7 @@ class TimeCoarsen:
 
     def append_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        data: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -136,11 +136,11 @@ class TimeCoarsen:
 
 
 def coarsen_batch(
-    data: Dict[str, torch.Tensor],
+    data: dict[str, torch.Tensor],
     start_timestep: int,
     batch_time: xr.DataArray,
     coarsen_factor: int,
-) -> Tuple[Dict[str, torch.Tensor], int, xr.DataArray]:
+) -> tuple[dict[str, torch.Tensor], int, xr.DataArray]:
     data_coarsened = _coarsen_tensor_dict(data, coarsen_factor)
     start_timestep = start_timestep // coarsen_factor
     batch_time_coarsened = batch_time.coarsen({TIME_DIM_NAME: coarsen_factor}).mean()
@@ -148,8 +148,8 @@ def coarsen_batch(
 
 
 def _coarsen_tensor_dict(
-    tensor_dict: Dict[str, torch.Tensor], coarsen_factor: int
-) -> Dict[str, torch.Tensor]:
+    tensor_dict: dict[str, torch.Tensor], coarsen_factor: int
+) -> dict[str, torch.Tensor]:
     """Coarsen each tensor along a given axis by a given factor."""
     coarsened_tensor_dict = {}
     for name, tensor in tensor_dict.items():

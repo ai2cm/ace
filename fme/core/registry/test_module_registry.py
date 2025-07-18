@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Iterable, List, Tuple
+from collections.abc import Iterable
 
 import dacite
 import pytest
@@ -9,7 +9,7 @@ from .module import ModuleConfig, ModuleSelector
 
 
 class MockModule(torch.nn.Module):
-    def __init__(self, param_shapes: Iterable[Tuple[int, ...]]):
+    def __init__(self, param_shapes: Iterable[tuple[int, ...]]):
         super().__init__()
         for i, shape in enumerate(param_shapes):
             setattr(self, f"param{i}", torch.nn.Parameter(torch.randn(shape)))
@@ -18,7 +18,7 @@ class MockModule(torch.nn.Module):
 @ModuleSelector.register("mock")
 @dataclasses.dataclass
 class MockModuleBuilder(ModuleConfig):
-    param_shapes: List[Tuple[int, ...]]
+    param_shapes: list[tuple[int, ...]]
 
     def build(self, n_in_channels, n_out_channels, img_shape):
         return MockModule(self.param_shapes)

@@ -1,4 +1,5 @@
-from typing import Any, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -43,8 +44,8 @@ class ConvNeXtBlock(torch.nn.Module):
         n_layers: int = 1,
         activation: torch.nn.Module = CappedGELU,
         pad: str = "circular",
-        norm: Optional[str] = "instance",
-        norm_kwargs: Optional[Mapping[str, Any]] = None,
+        norm: str | None = "instance",
+        norm_kwargs: Mapping[str, Any] | None = None,
         upscale_factor: int = 4,
     ):
         super().__init__()

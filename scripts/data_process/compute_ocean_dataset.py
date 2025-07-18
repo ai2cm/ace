@@ -356,7 +356,10 @@ def compute_lazy_dataset(
         urls.append(zarr_path)
         with fs.open(zarr_path) as f:
             ds_static = xr.open_dataset(
-                zarr_path, engine="zarr", backend_kwargs=backend_kwargs
+                zarr_path,
+                decode_timedelta=False,
+                engine="zarr",
+                backend_kwargs=backend_kwargs,
             )[config.ocean_static.names]
         ds_static = config.ocean_static.rename(ds_static)
         ds = xr.merge([ds, ds_static])

@@ -3,8 +3,8 @@ import os
 import pathlib
 import subprocess
 import unittest.mock
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, Sequence, Tuple
 from unittest.mock import MagicMock
 
 import cftime
@@ -16,6 +16,7 @@ import xarray as xr
 import yaml
 
 from fme.core.optimization import NullOptimization
+from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -29,30 +30,27 @@ def test_trainer(tmp_path):
     mock_config.experiment_dir = str(tmp_path / "experiment_dir")
     mock_config.checkpoint_dir = str(tmp_path / "checkpoint_dir")
 
+    mock_data = MagicMock()
+    mock_data.coarse_shape = [64, 64]
+
+    mock_model = MagicMock()
+    mock_model.coarse_shape = [16, 16]
+    mock_model.downscale_factor = 2
+
     trainer = Trainer(
-        model=MagicMock(),
+        model=mock_model,
         optimization=MagicMock(),
-        train_data=MagicMock(),
-        validation_data=MagicMock(),
+        train_data=mock_data,
+        validation_data=mock_data,
         config=mock_config,
     )
 
-    with unittest.mock.patch(
-        "fme.downscaling.aggregators.Aggregator.get_wandb"
-    ) as mock_agg_get_wandb:
-        with unittest.mock.patch(
-            "fme.downscaling.aggregators.GenerationAggregator.get_wandb"
-        ) as mock_gen_agg_get_wandb:
-            with mock_wandb():
-                trainer.train_one_epoch()
-                trainer.valid_one_epoch()
-
-    mock_agg_get_wandb.assert_called()
-    mock_gen_agg_get_wandb.assert_called()
+    with pytest.raises(RuntimeError):
+        trainer.train_one_epoch()
 
 
 def create_test_data_on_disk(
-    filename: Path, dim_sizes, variable_names, coords_override: Dict[str, xr.DataArray]
+    filename: Path, dim_sizes, variable_names, coords_override: dict[str, xr.DataArray]
 ) -> Path:
     data_vars = {}
     for name in variable_names:
@@ -86,7 +84,7 @@ def create_test_data_on_disk(
 
 
 def data_paths_helper(tmp_path) -> FineResCoarseResPair[str]:
-    dim_sizes = FineResCoarseResPair[Dict[str, int]](
+    dim_sizes = FineResCoarseResPair[dict[str, int]](
         fine={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
         coarse={"time": NUM_TIMESTEPS, "lat": 8, "lon": 8},
     )
@@ -138,14 +136,14 @@ def stats_data_paths(tmp_path):
 def _create_config_dict(
     train_paths: FineResCoarseResPair[str],
     valid_paths: FineResCoarseResPair[str],
-    stats_paths: Tuple[Path],
+    stats_paths: tuple[Path],
     tmp_path: Path,
 ):
     # load from file containing all test default values
     file_path = (
         f"{os.path.dirname(os.path.abspath(__file__))}/configs/test_train_config.yaml"
     )
-    with open(file_path, "r") as file:
+    with open(file_path) as file:
         config = yaml.safe_load(file)
 
     experiment_dir = tmp_path / "output"
@@ -158,8 +156,6 @@ def _create_config_dict(
     config["validation_data"]["coarse"] = [
         {"data_path": str(valid_paths.coarse), "subset": {"stop": 2}}
     ]
-    config["train_data"]["coarse_random_lat_cells"] = 4
-    config["train_data"]["coarse_random_lon_cells"] = 4
 
     config["experiment_dir"] = str(experiment_dir)
     config["save_checkpoints"] = True
@@ -171,7 +167,7 @@ def _create_config_dict(
     return config
 
 
-def _update_model_type(trainer_config: Dict, module_type: str):
+def _update_model_type(trainer_config: dict, module_type: str):
     """Inplace update of trainer_config model type"""
 
     if "diffusion" in module_type:
@@ -193,7 +189,7 @@ def _update_model_type(trainer_config: Dict, module_type: str):
 
 
 def _update_in_out_names(
-    trainer_config: Dict, in_names: Sequence[str], out_names: Sequence[str]
+    trainer_config: dict, in_names: Sequence[str], out_names: Sequence[str]
 ):
     """Inplace update of trainer_config input and output variables"""
     trainer_config["model"]["in_names"] = in_names
@@ -202,7 +198,7 @@ def _update_in_out_names(
 
 
 def _store_config(
-    tmp_path: Path, trainer_config: Dict, filename: str = "train-config.yaml"
+    tmp_path: Path, trainer_config: dict, filename: str = "train-config.yaml"
 ) -> str:
     outpath = tmp_path / filename
     with open(outpath, "w") as f:
@@ -300,15 +296,24 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
             trainer1.model.modules.parameters(), trainer2.model.modules.parameters()
         )
     )
-
+    trainer1.startEpoch = 3
     tmp_path.mkdir(exist_ok=True)
-    trainer1.save_all_checkpoints(float("-inf"))
+    trainer1.train_one_epoch()
+    trainer1.save_epoch_checkpoints()
     restore_checkpoint(trainer2)
     assert all(
         torch.equal(p1, p2)
         for p1, p2 in zip(
             trainer1.model.modules.parameters(), trainer2.model.modules.parameters()
         )
+    )
+    assert trainer2.startEpoch == 3
+
+    compare_restored_parameters(
+        trainer1.model.modules.parameters(),
+        trainer2.model.modules.parameters(),
+        trainer1.optimization.optimizer,
+        trainer2.optimization.optimizer,
     )
 
 
@@ -378,7 +383,8 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
             # set the id so that we can check it matches what's in the experiment dir
             wandb.set_id(id)
             main(config_segment_two_path)
-            assert 2 == len(
+            # resumes at epoch 1 since epoch 0 completed in previous segment
+            assert 1 == len(
                 [log["epoch"] for log in wandb.get_logs() if "epoch" in log]
             )
             mock.assert_called()

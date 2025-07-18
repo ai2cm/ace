@@ -42,7 +42,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 8
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - ocean:
         data_path: /climate-default/2025-02-12-cm4-piControl-ocean-200yr-dataset/monthly-netcdfs
@@ -59,7 +60,8 @@ train_loader:
           stop_time: '0306-01-01'
 validation_loader:
   batch_size: 16
-  num_data_workers: 8
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - ocean:
         data_path: /climate-default/2025-02-12-cm4-piControl-ocean-200yr-dataset/monthly-netcdfs

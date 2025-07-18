@@ -21,7 +21,7 @@ inference:
         - '2015-01-01T00:00:00'
     dataset:
       data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-    num_data_workers: 32
+    num_data_workers: 4
   aggregator:
     log_histograms: true
 logging:
@@ -32,7 +32,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 32
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
       subset:
@@ -46,7 +47,8 @@ train_loader:
         start_time: '2021-01-01'
 validation_loader:
   batch_size: 128
-  num_data_workers: 32
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
       subset:

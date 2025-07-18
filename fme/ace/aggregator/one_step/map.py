@@ -1,4 +1,4 @@
-from typing import Dict, List, Mapping, Optional, Tuple
+from collections.abc import Mapping
 
 import torch
 import xarray as xr
@@ -27,7 +27,7 @@ class MapAggregator:
     }
 
     def __init__(
-        self, dims: List[str], metadata: Optional[Mapping[str, VariableMetadata]] = None
+        self, dims: list[str], metadata: Mapping[str, VariableMetadata] | None = None
     ):
         """
         Args:
@@ -66,7 +66,7 @@ class MapAggregator:
                 self._gen_data[name] = gen_data[name].mean(dim=0)
         self._n_batches += 1
 
-    def _get_data(self) -> Tuple[TensorMapping, TensorMapping]:
+    def _get_data(self) -> tuple[TensorMapping, TensorMapping]:
         dist = Distributed.get_instance()
         time_dim = 0
         # note that we are only using the first timestep
@@ -98,7 +98,7 @@ class MapAggregator:
         return gen, target
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Image]:
+    def get_logs(self, label: str) -> dict[str, Image]:
         """
         Returns logs as can be reported to WandB.
 

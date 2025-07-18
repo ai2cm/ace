@@ -66,6 +66,7 @@ class SpectralConvS2(nn.Module):
         decomposition_kwargs=dict(),
         bias=False,
         use_tensorly=True,
+        filter_residual: bool = False,
     ):  # pragma: no cover
         super(SpectralConvS2, self).__init__()
 
@@ -78,12 +79,11 @@ class SpectralConvS2(nn.Module):
         self.modes_lat = self.inverse_transform.lmax
         self.modes_lon = self.inverse_transform.mmax
 
-        self.scale_residual = (
+        self._round_trip_residual = filter_residual or (
             (self.forward_transform.nlat != self.inverse_transform.nlat)
             or (self.forward_transform.nlon != self.inverse_transform.nlon)
             or (self.forward_transform.grid != self.inverse_transform.grid)
         )
-
         # Make sure we are using a Complex Factorized Tensor
         if factorization is None:
             factorization = "Dense"  # No factorization
@@ -167,7 +167,7 @@ class SpectralConvS2(nn.Module):
 
         with torch.amp.autocast("cuda", enabled=False):
             x = self.forward_transform(x)
-            if self.scale_residual:
+            if self._round_trip_residual:
                 x = x.contiguous()
                 residual = self.inverse_transform(x)
                 residual = residual.to(dtype)

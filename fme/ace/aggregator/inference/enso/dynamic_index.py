@@ -1,8 +1,9 @@
 import abc
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
+from typing import Any, ClassVar
 
 import cftime
 import numpy as np
@@ -31,9 +32,9 @@ class Region(abc.ABC):
 class LatLonRegion(Region):
     lat: torch.Tensor
     lon: torch.Tensor
-    lat_bounds: Tuple[float, float]
-    lon_bounds: Tuple[float, float]
-    horizontal_dims: ClassVar[Tuple[int, int]] = (LAT_DIM, LON_DIM)
+    lat_bounds: tuple[float, float]
+    lon_bounds: tuple[float, float]
+    horizontal_dims: ClassVar[tuple[int, int]] = (LAT_DIM, LON_DIM)
 
     def __post_init__(self):
         lat_mask = (
@@ -49,6 +50,36 @@ class LatLonRegion(Region):
     @property
     def regional_weights(self) -> torch.Tensor:
         return self._regional_weights
+
+
+def compute_nino34_index_power_spectrum(
+    data: xr.DataArray,
+    fs=1,
+    time_dim: int = TIME_DIM,
+    sample_dim: int = SAMPLE_DIM,
+):
+    """
+    Compute the power spectrum of the input data.
+
+    Args:
+        data: A tensor of size n_time_steps containing the data.
+        fs: The sampling frequency, defaults to 1 sample per month.
+        time_dim: Time dimension index
+        sample_dim: Sample dimension index
+    """
+    if len(data.shape) == 2:
+        uhat = np.fft.rfft(data, axis=time_dim)
+        power = np.abs(uhat) ** 2
+        power = power.mean(axis=sample_dim)
+    else:
+        raise ValueError(
+            f"Expected indicies to be of shape (sample, time) when calculating \
+                nino 3.4 index power spectrum, got {data.shape}"
+        )
+    n_samples = data.shape[time_dim]
+    freqs = np.fft.rfftfreq(n_samples, d=1 / fs)
+    freqs_per_year = freqs / fs * 12.0
+    return freqs_per_year, power
 
 
 class RegionalIndexAggregator:
@@ -76,9 +107,9 @@ class RegionalIndexAggregator:
         self._regional_mean = regional_mean
         self._running_mean_n_months = running_mean_n_months
         self._raw_indices: TensorDict = {}
-        self._raw_index_times: Optional[xr.DataArray] = None
-        self._calendar: Optional[str] = None
-        self._already_logged: List[str] = []
+        self._raw_index_times: xr.DataArray | None = None
+        self._calendar: str | None = None
+        self._already_logged: list[str] = []
 
     def record_batch(self, time: xr.DataArray, data: TensorMapping) -> None:
         for sst_name in self.sea_surface_temperature_names:
@@ -130,7 +161,7 @@ class RegionalIndexAggregator:
 
     def _get_gathered_index(
         self, index: torch.Tensor, years: torch.Tensor, months: torch.Tensor
-    ) -> Optional[xr.DataArray]:
+    ) -> xr.DataArray | None:
         dist = Distributed.get_instance()
         if dist.world_size > 1:
             gathered_index, gathered_years, gathered_months = (
@@ -152,9 +183,9 @@ class RegionalIndexAggregator:
 
     def _to_index_data_array(
         self,
-        indices: List[torch.Tensor],
-        years: List[torch.Tensor],
-        months: List[torch.Tensor],
+        indices: list[torch.Tensor],
+        years: list[torch.Tensor],
+        months: list[torch.Tensor],
     ) -> xr.DataArray:
         index_data_arrays = []
         for index, year, month in zip(indices, years, months):
@@ -178,7 +209,7 @@ class RegionalIndexAggregator:
             )
         return xr.concat(index_data_arrays, dim="sample")
 
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         indices = self.get_indices()
         plots = {}
         for sst_name in self.sea_surface_temperature_names:
@@ -195,6 +226,24 @@ class RegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 plots[f"{sst_name}_nino34_index"] = fig
+        for sst_name in self.sea_surface_temperature_names:
+            if (
+                sst_name in indices
+                and indices[sst_name].dropna("time").sizes["time"] > 1
+            ):
+                freq, power_spectrum = compute_nino34_index_power_spectrum(
+                    indices.dropna("time")[sst_name]
+                )
+                fig, ax = plt.subplots(1, 1)
+                ax.plot(freq, power_spectrum, label="predicted ensemble mean")
+                ax.set_title("Power Spectrum of Nino3.4 Index")
+                ax.set_xlabel("Frequency [cycles/year]")
+                ax.set_ylabel("Power [K**2]")
+                ax.set(yscale="log")
+                ax.legend()
+                fig.tight_layout()
+                plots[f"{sst_name}_nino34_index_power_spectrum"] = fig
+
         if len(label) > 0:
             label = label + "/"
         return {f"{label}{k}": v for k, v in plots.items()}
@@ -227,7 +276,7 @@ class PairedRegionalIndexAggregator:
         self._target_aggregator.record_batch(time=time, data=target_data)
         self._prediction_aggregator.record_batch(time=time, data=gen_data)
 
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         target_indices = self._target_aggregator.get_indices()
         prediction_indices = self._prediction_aggregator.get_indices()
         plots = {}
@@ -262,7 +311,28 @@ class PairedRegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 plots[f"{sst_name}_nino34_index"] = fig
-
+        for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
+            if (
+                sst_name in prediction_indices
+                and prediction_indices[sst_name].dropna("time").sizes["time"] > 1
+            ):
+                freq, prediction_power_spectrum = compute_nino34_index_power_spectrum(
+                    prediction_indices.dropna("time")[sst_name]
+                )
+                freq, target_power_spectrum = compute_nino34_index_power_spectrum(
+                    target_indices.dropna("time")[sst_name]
+                )
+                fig, ax = plt.subplots(1, 1)
+                ax.plot(
+                    freq, prediction_power_spectrum, label="predicted ensemble mean"
+                )
+                ax.plot(freq, target_power_spectrum, label="target", color="orange")
+                ax.set_title("Power Spectrum of Nino3.4 Index")
+                ax.set_xlabel("Frequency [cycles/year]")
+                ax.set(yscale="log")
+                ax.legend()
+                fig.tight_layout()
+                plots[f"{sst_name}_nino34_index_power_spectrum"] = fig
         if len(label) > 0:
             label = label + "/"
 
@@ -346,7 +416,7 @@ def running_monthly_mean(
     n_months: int,
     time_dim: int = TIME_DIM,
     sample_dim: int = SAMPLE_DIM,
-) -> Tuple[torch.Tensor, UniqueMonths]:
+) -> tuple[torch.Tensor, UniqueMonths]:
     """Compute an n-month running mean of the input data.
 
     First compute the monthly mean of the data, then compute the running mean.

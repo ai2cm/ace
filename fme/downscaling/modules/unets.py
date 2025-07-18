@@ -197,6 +197,8 @@ class UNetBlock(torch.nn.Module):
 class PositionalEmbedding(torch.nn.Module):
     def __init__(self, num_channels, max_positions=10000, endpoint=False):
         super().__init__()
+        if num_channels % 2 != 0:
+            raise ValueError("num_channels must be even")
         self.num_channels = num_channels
         self.max_positions = max_positions
         self.endpoint = endpoint
@@ -228,6 +230,32 @@ class FourierEmbedding(torch.nn.Module):
 # Equations". Equivalent to the original implementation by Song et al.,
 # available at https://github.com/yang-song/score_sde_pytorch
 
+def check_level_compatibility(
+        img_resolution: int,
+        channel_mult: List[int],
+        attn_resolutions: List[int],
+):
+
+    matched_attn = set()
+    for i in range(len(channel_mult)):
+        res = img_resolution >> i
+        if res == 0:
+            raise ValueError(
+                "Image resolution is not divisible by the number of number of"
+                " levels in the U-Net architecture specified by channel_mult"
+                f" {channel_mult}."
+            )
+        if res in attn_resolutions:
+            matched_attn.add(res)
+
+    if matched_attn != set(attn_resolutions):
+        raise ValueError(
+            "Requested attn_resolutions are not compatible with the input"
+            f" image resolution. Matched attention resolutions {matched_attn}"
+            f" but requested {attn_resolutions}."
+        )
+
+
 class SongUNet(torch.nn.Module):
     def __init__(self,
         img_resolution,                     # Image resolution at input/output.
@@ -253,6 +281,7 @@ class SongUNet(torch.nn.Module):
         assert embedding_type in ['fourier', 'positional']
         assert encoder_type in ['standard', 'skip', 'residual']
         assert decoder_type in ['standard', 'skip']
+        check_level_compatibility(img_resolution, channel_mult, attn_resolutions)
 
         super().__init__()
         self.label_dropout = label_dropout
@@ -372,10 +401,16 @@ class NonDivisibleShapeError(ValueError):
 
 
 def validate_shape(x_shape: Tuple[int, int], levels: int):
+    """
+    Validates that the input shape is divisible by the number of downsampling levels.
+
+    Note that the SongUnet does not downsample the first level, so the
+    number of downsamplings considered is the len of channel_mult - 1.
+    """
     next_shape = (x_shape[0] // 2, x_shape[1] // 2)
     if next_shape[0] * next_shape[1] * 4 != x_shape[0] * x_shape[1]:
         raise NonDivisibleShapeError(f"Shape {x_shape} is not divisible by {levels} levels")
-    elif levels > 1:
+    elif levels > 2:
         try:
             validate_shape(next_shape, levels - 1)
         except NonDivisibleShapeError:
@@ -405,6 +440,7 @@ class DhariwalUNet(torch.nn.Module):
         dropout             = 0.10,         # List of resolutions with self-attention.
         label_dropout       = 0,            # Dropout probability of class labels for classifier-free guidance.
     ):
+        check_level_compatibility(img_resolution, channel_mult, attn_resolutions)
         super().__init__()
         self.label_dropout = label_dropout
         emb_channels = model_channels * channel_mult_emb

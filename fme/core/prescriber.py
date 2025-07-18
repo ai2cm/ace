@@ -1,5 +1,4 @@
 import dataclasses
-from typing import List
 
 from fme.core.masking import replace_on_mask
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -38,7 +37,7 @@ class PrescriberConfig:
                 f"{self.mask_value}."
             )
 
-    def build(self, in_names: List[str], out_names: List[str]):
+    def build(self, in_names: list[str], out_names: list[str]):
         if not (self.prescribed_name in in_names and self.prescribed_name in out_names):
             raise ValueError(
                 "Variables which are being prescribed in masked regions must be in"
@@ -88,10 +87,8 @@ class Prescriber:
         for name, named_tensors in [("gen", gen), ("target", target)]:
             if self.prescribed_name not in named_tensors:
                 raise ValueError(
-                    (
-                        f'Prescribed variable "{self.prescribed_name}" '
-                        f'is missing from "{name}"'
-                    )
+                    f'Prescribed variable "{self.prescribed_name}" '
+                    f'is missing from "{name}"'
                 )
 
         if self.interpolate:
@@ -112,9 +109,9 @@ class Prescriber:
         return {**gen, self.prescribed_name: output}
 
     @property
-    def prescribed_names(self) -> List[str]:
+    def prescribed_names(self) -> list[str]:
         return [self.prescribed_name]
 
     @property
-    def mask_names(self) -> List[str]:
+    def mask_names(self) -> list[str]:
         return [self.mask_name]

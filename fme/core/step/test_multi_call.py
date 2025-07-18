@@ -1,6 +1,5 @@
 import dataclasses
 import unittest.mock
-from typing import List, Optional
 
 import pytest
 import torch
@@ -41,7 +40,7 @@ def test_multi_call(include_multi_call_in_loss: bool):
     )
 
     with unittest.mock.patch.object(MockStep, "step", side_effect=_step):
-        step = config.get_step(DatasetInfo())
+        step = config.get_step(DatasetInfo(), lambda x: None)
         assert step.output_names == ["b", "c", "c_doubled_co2"]
         if include_multi_call_in_loss:
             assert step.loss_names == ["b", "c", "c_doubled_co2"]
@@ -207,8 +206,8 @@ def test_loss_normalizer_uses_extra_stats_names(include_multi_call_in_loss: bool
     }
 
     def _get_loss_normalizer(
-        extra_names: Optional[List[str]],
-        extra_residual_scaled_names: Optional[List[str]],
+        extra_names: list[str] | None,
+        extra_residual_scaled_names: list[str] | None,
     ):
         base_names = ["a", "b", "c", "d"]
         if extra_names is None:

@@ -1,7 +1,8 @@
+import copy
 import datetime
+from collections.abc import Iterable, Mapping, Sequence
 from math import ceil
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import cftime
 import numpy as np
@@ -9,6 +10,7 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.utils import (
     DIM_INFO_HEALPIX,
     DIM_INFO_LATLON,
@@ -44,9 +46,10 @@ class PairedMonthlyDataWriter:
         n_samples: int,
         n_timesteps: int,
         timestep: datetime.timedelta,
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
     ):
         n_months = months_for_timesteps(n_timesteps, timestep)
         self._target_writer = MonthlyDataWriter(
@@ -57,6 +60,7 @@ class PairedMonthlyDataWriter:
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
+            dataset_metadata=dataset_metadata,
         )
         self._prediction_writer = MonthlyDataWriter(
             path=path,
@@ -66,12 +70,13 @@ class PairedMonthlyDataWriter:
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
+            dataset_metadata=dataset_metadata,
         )
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+        prediction: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -100,9 +105,10 @@ class MonthlyDataWriter:
         label: str,
         n_samples: int,
         n_months: int,
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
     ):
         """
         Args:
@@ -115,10 +121,9 @@ class MonthlyDataWriter:
                 If None, all predicted variables will be saved.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
+            dataset_metadata: Metadata for the dataset.
         """
-        if label != "":
-            label = "_" + label
-        filename = str(Path(path) / f"monthly_mean{label}.nc")
+        filename = str(Path(path) / f"monthly_mean_{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata
         self.coords = coords
@@ -141,7 +146,10 @@ class MonthlyDataWriter:
         )
         self.dataset.variables[VALID_TIME].units = TIME_UNITS
         self.dataset.variables[COUNTS][:] = 0
-
+        dataset_metadata = copy.copy(dataset_metadata)
+        dataset_metadata.title = f"ACE monthly {label} data file"
+        for key, value in dataset_metadata.as_flat_str_dict().items():
+            self.dataset.setncattr(key, value)
         self._init_years = np.full([n_samples], -1, dtype=int)
         self._init_months = np.full([n_samples], -1, dtype=int)
         self._dataset_dims_created = False
@@ -151,7 +159,7 @@ class MonthlyDataWriter:
         years: np.ndarray,
         months: np.ndarray,
         calendar: str,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         reference_date = cftime.datetime(1970, 1, 1, calendar=calendar)
         if self._init_years[0] == -1:
             self._init_years[:] = years
@@ -200,7 +208,7 @@ class MonthlyDataWriter:
 
     def append_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        data: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -266,7 +274,7 @@ class MonthlyDataWriter:
                         variable_name
                     ].long_name = self.variable_metadata[variable_name].long_name
                 self.dataset.variables[variable_name].coordinates = " ".join(
-                    [INIT_TIME, VALID_TIME]
+                    [INIT_TIME, VALID_TIME, COUNTS]
                 )
 
             array = data[variable_name].cpu().numpy()
@@ -378,7 +386,7 @@ def get_days_since_reference(
     calendar_year = years[:, None] + (months[:, None] + months_elapsed[None, :]) // 12
     days_since_reference = np.zeros_like(calendar_month, dtype=np.int64)
     for i in range(calendar_month.shape[0]):
-        dates_sample = xr.cftime_range(
+        dates_sample = xr.date_range(
             cftime.datetime(
                 calendar_year[i, 0], calendar_month[i, 0] + 1, 1, calendar=calendar
             ),
@@ -387,6 +395,7 @@ def get_days_since_reference(
             ),
             freq="MS",
             calendar=calendar,
+            use_cftime=True,
         )
         days_since_reference[i, :] = (
             dates_sample.values - reference_date

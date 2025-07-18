@@ -9,6 +9,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.mask_provider import MaskProvider
 
 
 @pytest.mark.parametrize(
@@ -156,10 +157,10 @@ def test_depth_coordinate_integral_raises():
 @pytest.mark.parametrize(
     "idepth, mask, expected",
     [
-        (torch.tensor([1, 2, 3]), torch.tensor([1, 1]), torch.tensor(3)),
-        (torch.tensor([1, 2, 3]), torch.tensor([1, 0]), torch.tensor(1)),
-        (torch.tensor([1, 2, 3]), torch.tensor([0, 0]), torch.tensor(0)),
-        (torch.tensor([1, 2, 4]), torch.tensor([1, 1]), torch.tensor(5)),
+        (torch.tensor([1, 2, 3]), torch.tensor([1, 1]), torch.tensor(3.0)),
+        (torch.tensor([1, 2, 3]), torch.tensor([1, 0]), torch.tensor(1.0)),
+        (torch.tensor([1, 2, 3]), torch.tensor([0, 0]), torch.tensor(float("nan"))),
+        (torch.tensor([1, 2, 4]), torch.tensor([1, 1]), torch.tensor(5.0)),
     ],
     ids=[
         "mask is all ones",
@@ -171,7 +172,7 @@ def test_depth_coordinate_integral_raises():
 def test_depth_integral_1d_data(idepth, mask, expected):
     data = torch.arange(1, len(idepth))
     result = DepthCoordinate(idepth, mask).depth_integral(data)
-    torch.testing.assert_close(result, expected)
+    torch.testing.assert_close(result, expected, equal_nan=True)
 
 
 def test_depth_integral_3d_data():
@@ -184,9 +185,58 @@ def test_depth_integral_3d_data():
     )
     depth_0 = idepth[1] - idepth[0]
     depth_1 = idepth[2] - idepth[1]
-    expected = data[:, :, 0] * depth_0 + data[:, :, 1] * depth_1
+    expected = (data[:, :, 0] * depth_0 + data[:, :, 1] * depth_1).float()
     result = DepthCoordinate(idepth, mask).depth_integral(data)
     torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parametrize(
+    "name, level",
+    [
+        ("sfc_level", 0),
+        ("depth_0", 0),
+        ("depth_3", 3),
+    ],
+)
+def test_depth_get_mask_tensor_for(name, level):
+    idepth = torch.arange(end=5)
+    mask = torch.arange(end=4)
+    coord = DepthCoordinate(idepth, mask)
+    assert coord.get_mask_tensor_for(name) == level
+
+
+def test_depth_returns_surface_mask_if_specified():
+    idepth = torch.arange(end=5)
+    mask = torch.arange(end=4)
+    surface_mask = torch.tensor([4])
+    coord_sfc_mask = DepthCoordinate(idepth, mask, surface_mask)
+    coord_no_sfc_mask = DepthCoordinate(idepth, mask)
+    assert coord_sfc_mask.get_mask_tensor_for("sfc_level") == surface_mask[0]
+    assert coord_no_sfc_mask.get_mask_tensor_for("sfc_level") == mask[0]
+
+
+def test_masked_lat_lon_ops_from_coords():
+    lat = torch.tensor([0.0, 0.0, 0.0])
+    lon = torch.tensor([0.0])
+    mask = torch.tensor([[1], [0], [1]])
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    mask_provider = MaskProvider(masks={"mask_0": mask})
+    gridded_ops = coords.get_gridded_operations(mask_provider=mask_provider)
+    input_ = torch.tensor([[1.0], [-10.0], [3.0]])
+    result = gridded_ops.area_weighted_mean(input_, name="T_0")
+    torch.testing.assert_close(result, torch.tensor(2.0))
+
+
+def test_healpix_ops_raises_value_error_with_mask():
+    face = torch.arange(12)
+    height = torch.arange(16)
+    width = torch.arange(16)
+    healpix_coords = HEALPixCoordinates(face=face, height=height, width=width)
+    mask_provider = MaskProvider(masks={"mask_0": torch.tensor([1, 0, 1])})
+
+    expected_msg = "HEALPixCoordinates does not support a mask"
+    with pytest.raises(NotImplementedError, match=expected_msg):
+        healpix_coords.get_gridded_operations(mask_provider=mask_provider)
 
 
 @pytest.mark.parametrize("pad", [True, False])

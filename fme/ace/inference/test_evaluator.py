@@ -1,9 +1,11 @@
 import dataclasses
 import datetime
+import logging
 import os
 import pathlib
 import tempfile
-from typing import Iterable, List, Optional
+from collections.abc import Iterable
+from unittest.mock import patch
 
 import dacite
 import numpy as np
@@ -23,17 +25,23 @@ from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
     StepperOverrideConfig,
     main,
+    resolve_variable_metadata,
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepperConfig, Stepper, TrainOutput
 from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
-from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.coordinates import (
+    DimSize,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+)
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
@@ -54,16 +62,16 @@ class PlusOne(torch.nn.Module):
 
 def save_plus_one_stepper(
     path: pathlib.Path,
-    in_names: List[str],
-    out_names: List[str],
+    in_names: list[str],
+    out_names: list[str],
     mean: float,
     std: float,
-    data_shape: List[int],
-    normalization_names: Optional[Iterable[str]] = None,
+    data_shape: list[int],
+    normalization_names: Iterable[str] | None = None,
     timestep: datetime.timedelta = TIMESTEP,
     nz_interface: int = 7,
     ocean=None,
-    multi_call: Optional[MultiCallConfig] = None,
+    multi_call: MultiCallConfig | None = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -96,24 +104,33 @@ def save_plus_one_stepper(
             ocean=ocean,
             multi_call=multi_call,
         )
-        area = torch.ones(data_shape[-2:], device=get_device())
+        horizontal_coordinate = LatLonCoordinates(
+            lat=torch.zeros(data_shape[-2]), lon=torch.zeros(data_shape[-1])
+        )
         vertical_coordinate = HybridSigmaPressureCoordinate(
             ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
         )
-        stepper = config.get_stepper(
-            img_shape=(data_shape[-2], data_shape[-1]),
-            gridded_operations=LatLonOperations(area),
+        variable_metadata = {
+            out_names[0]: VariableMetadata(
+                units="cm",
+                long_name="an output variable",
+            ),
+        }  # attach metadata to this output var to validate that persists in stepper
+        dataset_info = DatasetInfo(
+            horizontal_coordinates=horizontal_coordinate,
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
+            variable_metadata=variable_metadata,
+        )
+        stepper = config.get_stepper(
+            dataset_info=dataset_info,
         )
         torch.save({"stepper": stepper.get_state()}, path)
         mean_filename.unlink()
         std_filename.unlink()
 
 
-def validate_stepper_ocean(
-    stepper: Stepper, expected_ocean_config: Optional[OceanConfig]
-):
+def validate_stepper_ocean(stepper: Stepper, expected_ocean_config: OceanConfig | None):
     assert isinstance(stepper._step_obj, MultiCallStep)
     assert isinstance(stepper._step_obj._wrapped_step, SingleModuleStep)
     assert stepper._step_obj._wrapped_step._config.ocean == expected_ocean_config
@@ -132,7 +149,7 @@ def validate_stepper_ocean(
 
 
 def validate_stepper_multi_call(
-    stepper: Stepper, expected_multi_call_config: Optional[MultiCallConfig]
+    stepper: Stepper, expected_multi_call_config: MultiCallConfig | None
 ):
     assert isinstance(stepper._step_obj, MultiCallStep)
     assert isinstance(stepper._step_obj._wrapped_step, SingleModuleStep)
@@ -148,7 +165,7 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
     out_names = ["var"]
     stepper_path = DIR / "stepper_test_data"
 
-    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
     dim_sizes = DimSizes(
         n_time=8,
         horizontal=horizontal,
@@ -191,7 +208,7 @@ def test_inference_plus_one_model(
     out_names = ["var"]
     stepper_path = tmp_path / "stepper"
 
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
         horizontal=horizontal,
@@ -234,7 +251,8 @@ def inference_helper(
     stepper_path,
     timestep: datetime.timedelta,
     save_monthly_files: bool = True,
-    derived_names: List[str] = [],
+    derived_names: list[str] = [],
+    allow_incompatible_dataset_info: bool = True,  # stepper checkpoint has arbitrary info  # noqa: E501
 ):
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     all_names = list(set(in_names).union(out_names))
@@ -288,6 +306,7 @@ def inference_helper(
             save_monthly_files=save_monthly_files,
         ),
         forward_steps_in_memory=1,
+        allow_incompatible_dataset=allow_incompatible_dataset_info,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -316,7 +335,9 @@ def inference_helper(
                 assert log[f"inference/mean/weighted_rmse/{var}"] == 0.0
                 assert log[f"inference/mean/weighted_bias/{var}"] == 0.0
 
-    var = list(set(in_names).difference(forcing_names))[0]
+    example_output_var = out_names[0]
+    # for all data written out, this example variable should have the same metadata
+    # as the stepper, not the dataset on disk
 
     if not use_prediction_data:
         initial_condition_ds = xr.open_dataset(
@@ -324,7 +345,7 @@ def inference_helper(
         )
         for dim_name in ["lat", "lon"]:
             assert dim_name in initial_condition_ds.dims
-            assert dim_name in initial_condition_ds.data_vars[var].dims
+            assert dim_name in initial_condition_ds.data_vars[example_output_var].dims
             assert dim_name in initial_condition_ds.coords
 
     prediction_ds = xr.open_dataset(
@@ -335,13 +356,19 @@ def inference_helper(
     assert len(prediction_ds["time"]) == config.n_forward_steps
     for i in range(config.n_forward_steps - 1):
         np.testing.assert_allclose(
-            prediction_ds[var].isel(time=i).values + 1,
-            prediction_ds[var].isel(time=i + 1).values,
+            prediction_ds[example_output_var].isel(time=i).values + 1,
+            prediction_ds[example_output_var].isel(time=i + 1).values,
         )
-        assert not np.any(np.isnan(prediction_ds[var].isel(time=i + 1).values))
+        assert not np.any(
+            np.isnan(prediction_ds[example_output_var].isel(time=i + 1).values)
+        )
 
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
+    assert prediction_ds[out_names[0]].attrs == {
+        "units": "cm",
+        "long_name": "an output variable",
+    }
 
     if use_prediction_data:
         assert not os.path.exists(tmp_path / "restart.nc")
@@ -351,8 +378,8 @@ def inference_helper(
             tmp_path / "restart.nc", decode_timedelta=False, decode_times=False
         )
         np.testing.assert_allclose(
-            prediction_ds[var].isel(time=-1).values,
-            restart_ds[var].values,
+            prediction_ds[example_output_var].isel(time=-1).values,
+            restart_ds[example_output_var].values,
         )
 
         ic_ds = xr.open_dataset(
@@ -360,56 +387,79 @@ def inference_helper(
             decode_timedelta=False,
             decode_times=False,
         )
-        np.testing.assert_allclose(ic_ds[var].values, 0.0)
+        np.testing.assert_allclose(ic_ds[example_output_var].values, 0.0)
 
-    metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
-    assert var in metric_ds.data_vars
-    assert metric_ds.data_vars[var].attrs["units"] == "m"
-    assert metric_ds.data_vars[var].attrs["long_name"] == f"ensemble mean of {var}"
-    assert f"rmse_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"rmse_{var}"].attrs["units"] == "m"
-    assert (
-        metric_ds.data_vars[f"rmse_{var}"].attrs["long_name"]
-        == f"root mean squared error of {var}"
+    metric_ds = xr.open_dataset(
+        tmp_path / "reduced_autoregressive_predictions.nc", decode_timedelta=False
     )
-    assert f"bias_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"bias_{var}"].attrs["units"] == "m"
-    assert f"min_err_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"min_err_{var}"].attrs["units"] == "m"
-    assert f"max_err_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"max_err_{var}"].attrs["units"] == "m"
-    assert f"gen_var_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"gen_var_{var}"].attrs["units"] == ""
+    assert example_output_var in metric_ds.data_vars
+    assert metric_ds.data_vars[example_output_var].attrs["units"] == "cm"
     assert (
-        metric_ds.data_vars[f"gen_var_{var}"].attrs["long_name"]
-        == f"prediction variance of {var} as fraction of target variance"
+        metric_ds.data_vars[example_output_var].attrs["long_name"]
+        == f"ensemble mean of an output variable"
+    )
+    assert f"rmse_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"rmse_{example_output_var}"].attrs["units"] == "cm"
+    assert (
+        metric_ds.data_vars[f"rmse_{example_output_var}"].attrs["long_name"]
+        == f"root mean squared error of an output variable"
+    )
+    assert f"bias_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"bias_{example_output_var}"].attrs["units"] == "cm"
+    assert f"min_err_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"min_err_{example_output_var}"].attrs["units"] == "cm"
+    assert f"max_err_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"max_err_{example_output_var}"].attrs["units"] == "cm"
+    assert f"gen_var_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"gen_var_{example_output_var}"].attrs["units"] == ""
+    assert (
+        metric_ds.data_vars[f"gen_var_{example_output_var}"].attrs["long_name"]
+        == f"prediction variance of an output variable as fraction of target variance"
     )
     assert "lat" in metric_ds.coords
     assert "lon" in metric_ds.coords
 
-    time_mean_diagnostics = xr.open_dataset(tmp_path / "time_mean_diagnostics.nc")
+    time_mean_diagnostics = xr.open_dataset(
+        tmp_path / "time_mean_diagnostics.nc", decode_timedelta=False
+    )
     actual_var_names = sorted([str(k) for k in time_mean_diagnostics.keys()])
     assert len(actual_var_names) == 2 * len(all_out_names)
-    assert f"bias_map-{var}" in actual_var_names
-    assert time_mean_diagnostics.data_vars[f"bias_map-{var}"].attrs["units"] == "m"
-    assert f"gen_map-{var}" in actual_var_names
-    assert time_mean_diagnostics.data_vars[f"gen_map-{var}"].attrs["units"] == "m"
+    assert f"bias_map-{example_output_var}" in actual_var_names
+    assert (
+        time_mean_diagnostics.data_vars[f"bias_map-{example_output_var}"].attrs["units"]
+        == "cm"
+    )
+    assert f"gen_map-{example_output_var}" in actual_var_names
+    assert (
+        time_mean_diagnostics.data_vars[f"gen_map-{example_output_var}"].attrs["units"]
+        == "cm"
+    )
     assert len(time_mean_diagnostics.coords) == 2
     assert "lat" in time_mean_diagnostics.coords
     assert "lon" in time_mean_diagnostics.coords
 
-    zonal_mean_diagnostics = xr.open_dataset(tmp_path / "zonal_mean_diagnostics.nc")
+    zonal_mean_diagnostics = xr.open_dataset(
+        tmp_path / "zonal_mean_diagnostics.nc", decode_timedelta=False
+    )
     actual_var_names = sorted([str(k) for k in zonal_mean_diagnostics.keys()])
     assert len(actual_var_names) == 2 * len(all_out_names)
-    assert f"error-{var}" in actual_var_names
-    assert zonal_mean_diagnostics.data_vars[f"error-{var}"].attrs["units"] == "m"
-    assert f"gen-{var}" in actual_var_names
-    assert zonal_mean_diagnostics.data_vars[f"gen-{var}"].attrs["units"] == ""
+    assert f"error-{example_output_var}" in actual_var_names
+    assert (
+        zonal_mean_diagnostics.data_vars[f"error-{example_output_var}"].attrs["units"]
+        == "cm"
+    )
+    assert f"gen-{example_output_var}" in actual_var_names
+    assert (
+        zonal_mean_diagnostics.data_vars[f"gen-{example_output_var}"].attrs["units"]
+        == ""
+    )
     assert len(zonal_mean_diagnostics.coords) == 1
     assert "lat" in zonal_mean_diagnostics.coords
 
     for source in ["target", "prediction"]:
-        histograms = xr.open_dataset(tmp_path / f"histograms_{source}.nc")
+        histograms = xr.open_dataset(
+            tmp_path / f"histograms_{source}.nc", decode_timedelta=False
+        )
         actual_var_names = sorted([str(k) for k in histograms.keys()])
         # NOTE: target histograms include forcing variables
         n_vars = (
@@ -418,19 +468,22 @@ def inference_helper(
             else len(all_out_names) + len(forcing_names)
         )
         assert len(actual_var_names) == 2 * n_vars
-        assert var in actual_var_names
-        assert histograms.data_vars[var].attrs["units"] == "count"
-        assert f"{var}_bin_edges" in actual_var_names
-        assert histograms.data_vars[f"{var}_bin_edges"].attrs["units"] == "m"
-        var_counts_per_timestep = histograms[var].sum(dim=["bin"])
+        assert example_output_var in actual_var_names
+        assert histograms.data_vars[example_output_var].attrs["units"] == "count"
+        assert f"{example_output_var}_bin_edges" in actual_var_names
+        assert (
+            histograms.data_vars[f"{example_output_var}_bin_edges"].attrs["units"]
+            == "cm"
+        )
+        var_counts_per_timestep = histograms[example_output_var].sum(dim=["bin"])
         same_count_each_timestep = np.all(
             var_counts_per_timestep.values == var_counts_per_timestep.values[0]
         )
         assert same_count_each_timestep
     if monthly_reference_filename is not None:
-        assert f"inference/annual/{var}" in wandb_logs[-1]
-        assert f"inference/annual/r2_gen_{var}" in wandb_logs[-1]
-        assert f"inference/annual/r2_target_{var}" in wandb_logs[-1]
+        assert f"inference/annual/{example_output_var}" in wandb_logs[-1]
+        assert f"inference/annual/r2_gen_{example_output_var}" in wandb_logs[-1]
+        assert f"inference/annual/r2_target_{example_output_var}" in wandb_logs[-1]
     assert "inference/total_steps_per_second" in wandb_logs[-1]
 
 
@@ -446,7 +499,7 @@ def test_inference_writer_boundaries(
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
 
-    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
 
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
@@ -478,6 +531,7 @@ def test_inference_writer_boundaries(
             time_coarsen=None,
         ),
         forward_steps_in_memory=forward_steps_in_memory,
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -527,7 +581,7 @@ def test_inference_writer_boundaries(
 
     prediction_ds = prediction_ds.isel(sample=0)
     target_ds = target_ds.isel(sample=0)
-    ds = xr.open_dataset(data.data_filename)
+    ds = xr.open_dataset(data.data_filename, decode_timedelta=False)
 
     for i in range(0, n_forward_steps):
         # metrics logs includes IC while saved data does not
@@ -581,7 +635,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
 
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
 
     dim_sizes = DimSizes(
         n_time=9,
@@ -619,6 +673,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             time_coarsen=TimeCoarsenConfig(coarsen_factor=coarsen_factor),
             save_histogram_files=True,
         ),
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -632,12 +687,16 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
     assert (
         len(prediction_ds["time"]) == n_coarsened_timesteps
     ), "raw predictions time dimension size"
-    metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
+    metric_ds = xr.open_dataset(
+        tmp_path / "reduced_autoregressive_predictions.nc", decode_timedelta=False
+    )
     assert (
         metric_ds.sizes["timestep"] == n_coarsened_timesteps
     ), "reduced predictions time dimension size"
     for source in ["target", "prediction"]:
-        histograms = xr.open_dataset(tmp_path / f"histograms_{source}.nc")
+        histograms = xr.open_dataset(
+            tmp_path / f"histograms_{source}.nc", decode_timedelta=False
+        )
         assert (
             histograms.sizes["time"] == n_coarsened_timesteps
         ), "histograms time dimension size"
@@ -651,9 +710,9 @@ def test_compute_derived_quantities(has_required_fields):
     def _make_data():
         vars = ["a"]
         if has_required_fields:
-            additional_fields = [
-                "specific_total_water_{}".format(i) for i in range(nz)
-            ] + ["PRESsfc"]
+            additional_fields = [f"specific_total_water_{i}" for i in range(nz)] + [
+                "PRESsfc"
+            ]
             vars += additional_fields
         return {
             var: torch.randn(
@@ -729,7 +788,7 @@ def test_derived_metrics_run_without_errors(
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
 
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
 
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
@@ -767,6 +826,7 @@ def test_derived_metrics_run_without_errors(
         prediction_loader=None,
         data_writer=DataWriterConfig(save_prediction_files=True),
         forward_steps_in_memory=1,
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -781,7 +841,9 @@ def test_derived_metrics_run_without_errors(
     assert "inference/mean_norm/weighted_rmse/total_water_path" not in inference_logs[0]
     assert "inference/time_mean_norm/rmse/total_water_path" not in inference_logs[-1]
 
-    ds = xr.open_dataset(tmp_path / "autoregressive_predictions.nc")
+    ds = xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    )
     assert "units" in ds["total_water_path"].attrs
     assert "long_name" in ds["total_water_path"].attrs
 
@@ -830,7 +892,7 @@ def test_inference_override(tmp_path: pathlib.Path):
     stepper_path = tmp_path / "stepper"
     n_forward_steps = 8
 
-    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
         horizontal=horizontal,
@@ -872,6 +934,7 @@ def test_inference_override(tmp_path: pathlib.Path):
         data_writer=DataWriterConfig(save_prediction_files=True, time_coarsen=None),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
     stepper = config.load_stepper()
     validate_stepper_ocean(stepper, ocean_override)
@@ -887,8 +950,8 @@ def test_inference_override(tmp_path: pathlib.Path):
 
 def validate_stepper_config(
     stepper_config: StepperConfig,
-    expected_ocean_config: Optional[OceanConfig],
-    expected_multi_call_config: Optional[MultiCallConfig],
+    expected_ocean_config: OceanConfig | None,
+    expected_multi_call_config: MultiCallConfig | None,
 ):
     assert isinstance(stepper_config.step._step_config_instance, MultiCallStepConfig)
     assert isinstance(
@@ -904,7 +967,13 @@ def validate_stepper_config(
     )
 
 
-def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
+@pytest.mark.parametrize(
+    "use_correct_timestep",
+    [True, False],
+)
+def test_inference_timestep_mismatch_error(
+    tmp_path: pathlib.Path, use_correct_timestep: bool
+):
     """Test that inference with a model trained with a different timestep than
     the forcing data raises an error.
     """
@@ -912,7 +981,7 @@ def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
     out_names = ["var"]
     stepper_path = tmp_path / "stepper_test_data"
 
-    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
     dim_sizes = DimSizes(n_time=8, horizontal=horizontal, nz_interface=2)
     std = 1.0
     save_plus_one_stepper(
@@ -926,17 +995,33 @@ def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
     )
     use_prediction_data = False
     n_forward_steps = 2
-    with pytest.raises(ValueError, match="Timestep of step object"):
-        inference_helper(
-            tmp_path,
-            in_names,
-            out_names,
-            use_prediction_data,
-            dim_sizes,
-            n_forward_steps,
-            stepper_path,
-            timestep=datetime.timedelta(days=20),
-        )
+    if use_correct_timestep:
+        with pytest.raises(ValueError) as err:
+            inference_helper(
+                tmp_path,
+                in_names,
+                out_names,
+                use_prediction_data,
+                dim_sizes,
+                n_forward_steps,
+                stepper_path,
+                timestep=TIMESTEP,
+                allow_incompatible_dataset_info=False,
+            )
+        assert "timestep is not compatible" not in str(err.value)
+    else:
+        with pytest.raises(ValueError, match="timestep is not compatible"):
+            inference_helper(
+                tmp_path,
+                in_names,
+                out_names,
+                use_prediction_data,
+                dim_sizes,
+                n_forward_steps,
+                stepper_path,
+                timestep=datetime.timedelta(days=20),
+                allow_incompatible_dataset_info=False,
+            )
 
 
 def test_inference_includes_diagnostics(tmp_path: pathlib.Path):
@@ -946,7 +1031,7 @@ def test_inference_includes_diagnostics(tmp_path: pathlib.Path):
     in_names = ["prog", "forcing_var", "DSWRFtoa"]
     out_names = ["prog", "ULWRFtoa", "USWRFtoa"]
     stepper_path = tmp_path / "stepper"
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
     use_prediction_data = False
     n_forward_steps = 2
     dim_sizes = DimSizes(
@@ -992,7 +1077,58 @@ def test_inference_includes_diagnostics(tmp_path: pathlib.Path):
     assert "forcing_var" not in ds
     # assert only prognostic variables are in initial condition and restart files
     for filename in ["initial_condition.nc", "restart.nc"]:
-        ds = xr.open_dataset(tmp_path / filename)
+        ds = xr.open_dataset(tmp_path / filename, decode_timedelta=False)
         assert "USWRFtoa" not in ds
         assert "forcing_var" not in ds
         assert "prog" in ds
+
+
+@pytest.mark.parametrize(
+    ["stepper_metadata", "dataset_metadata"],
+    [
+        pytest.param(
+            {"foo": VariableMetadata("m", "first definition of foo")},
+            {"foo": VariableMetadata("mm", "second definition of foo")},
+            id="different_metadata",
+        ),
+        pytest.param(
+            {},
+            {"foo": VariableMetadata("mm", "second definition of foo")},
+            id="datset_has_metadata",
+        ),
+        pytest.param({}, {}, id="neither_have_metadata"),
+    ],
+)
+@patch(
+    "fme.ace.inference.evaluator.get_default_variable_metadata",
+    return_value={"foo": VariableMetadata("cm", "third definition of foo")},
+)
+@patch("fme.ace.inference.evaluator.get_derived_variable_metadata", return_value={})
+def test_resolve_variable_metadata(
+    mock_get_derived_variable_metadata,
+    mock_get_default_variable_metadata,
+    stepper_metadata,
+    dataset_metadata,
+    caplog,
+):
+    with caplog.at_level(logging.WARNING):
+        variable_metadata = resolve_variable_metadata(
+            dataset_metadata=dataset_metadata,
+            stepper_metadata=stepper_metadata,
+            stepper_all_names=["foo"],
+        )
+    if "foo" in stepper_metadata:
+        assert "foo" not in caplog.text
+        assert variable_metadata == {
+            "foo": VariableMetadata("m", "first definition of foo")
+        }
+    elif "foo" in dataset_metadata:
+        assert "foo" not in caplog.text
+        assert variable_metadata == {
+            "foo": VariableMetadata("mm", "second definition of foo")
+        }
+    else:
+        assert "foo" in caplog.text
+        assert variable_metadata == {
+            "foo": VariableMetadata("cm", "third definition of foo")
+        }

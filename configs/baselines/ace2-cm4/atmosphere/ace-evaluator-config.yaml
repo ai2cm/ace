@@ -14,7 +14,7 @@ loader:
      - '0311-01-01T06:00:00'
   dataset:
     data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
-  num_data_workers: 8
+  num_data_workers: 4
 aggregator:
   log_zonal_mean_images: false
 data_writer:

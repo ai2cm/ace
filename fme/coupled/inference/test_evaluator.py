@@ -1,7 +1,6 @@
 import dataclasses
 import inspect
 import pathlib
-from typing import List
 
 import pytest
 import torch
@@ -9,20 +8,17 @@ import xarray as xr
 import yaml
 
 from fme.ace.inference.data_writer.main import DataWriterConfig
-from fme.core.coordinates import DepthCoordinate, HybridSigmaPressureCoordinate
-from fme.core.dataset.config import XarrayDataConfig
-from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import mock_wandb
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.config import CoupledDatasetConfig
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
 from fme.coupled.data_loading.test_data_loader import create_coupled_data_on_disk
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.inference.data_writer import CoupledDataWriterConfig
 from fme.coupled.inference.evaluator import (
     InferenceEvaluatorConfig,
@@ -31,13 +27,14 @@ from fme.coupled.inference.evaluator import (
     main,
 )
 from fme.coupled.stepper import CoupledStepperConfig
-from fme.coupled.test_stepper import get_stepper_config
+from fme.coupled.test_stepper import CoupledDatasetInfoBuilder, get_stepper_config
 
 
 def test_standalone_checkpoints_config_init_args():
+    ignore_args = ["parameter_init"]
     stepper_config_init_args = set(
         inspect.signature(CoupledStepperConfig.__init__).parameters.keys()
-    )
+    ).difference(ignore_args)
     init_args = set(
         inspect.signature(
             StandaloneComponentCheckpointsConfig.__init__
@@ -51,12 +48,11 @@ def test_standalone_checkpoints_config_init_args():
 
 def save_coupled_stepper(
     base_dir: pathlib.Path,
-    ocean_in_names: List[str],
-    ocean_out_names: List[str],
-    atmos_in_names: List[str],
-    atmos_out_names: List[str],
-    data_shape: List[int],
-    nz_interface: int = 7,
+    ocean_in_names: list[str],
+    ocean_out_names: list[str],
+    atmos_in_names: list[str],
+    atmos_out_names: list[str],
+    dataset_info: CoupledDatasetInfo,
     sst_name_in_ocean_data: str = "sst",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
@@ -75,29 +71,9 @@ def save_coupled_stepper(
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
     )
-    img_shape = (data_shape[-2], data_shape[-1])
-    area = torch.ones(*img_shape, device=get_device())
-    ocean_vertical_coordinate = DepthCoordinate(
-        idepth=torch.arange(nz_interface, device=get_device()),
-        mask=torch.ones(*img_shape, nz_interface - 1),
-    )
-    atmos_vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(nz_interface, device=get_device()),
-        bk=torch.arange(nz_interface, device=get_device()),
-    )
     if save_standalone_component_checkpoints:
-        ocean_stepper = config.ocean.stepper.get_stepper(
-            img_shape=img_shape,
-            gridded_operations=LatLonOperations(area),
-            vertical_coordinate=ocean_vertical_coordinate,
-            timestep=config.ocean_timestep,
-        )
-        atmos_stepper = config.atmosphere.stepper.get_stepper(
-            img_shape=img_shape,
-            gridded_operations=LatLonOperations(area),
-            vertical_coordinate=atmos_vertical_coordinate,
-            timestep=config.atmosphere_timestep,
-        )
+        ocean_stepper = config.ocean.stepper.get_stepper(dataset_info.ocean)
+        atmos_stepper = config.atmosphere.stepper.get_stepper(dataset_info.atmosphere)
         ocean_path = base_dir / "ocean.pt"
         atmos_path = base_dir / "atmos.pt"
         torch.save({"stepper": ocean_stepper.get_state()}, ocean_path)
@@ -113,14 +89,7 @@ def save_coupled_stepper(
             ),
             sst_name=sst_name_in_ocean_data,
         )
-    coupled_stepper = config.get_stepper(
-        img_shape=img_shape,
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=CoupledVerticalCoordinate(
-            ocean=ocean_vertical_coordinate,
-            atmosphere=atmos_vertical_coordinate,
-        ),
-    )
+    coupled_stepper = config.get_stepper(dataset_info)
     coupled_path = base_dir / "coupled.pt"
     torch.save({"stepper": coupled_stepper.get_state()}, coupled_path)
     return str(coupled_path)
@@ -175,17 +144,24 @@ def test_evaluator_inference(
         n_levels_ocean=1,
         n_levels_atmosphere=1,
     )
-
+    dataset_info = CoupledDatasetInfoBuilder(
+        vcoord=mock_data.vcoord,
+        hcoord=mock_data.hcoord,
+        ocean_timestep=mock_data.ocean.timestep,
+        atmos_timestep=mock_data.atmosphere.timestep,
+        ocean_mask_provider=mock_data.ocean.mask_provider,
+        atmos_mask_provider=mock_data.atmosphere.mask_provider,
+    ).dataset_info
     checkpoint_path = save_coupled_stepper(
         tmp_path,
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmos_in_names=atmos_in_names,
         atmos_out_names=atmos_out_names,
-        data_shape=mock_data.img_shape,
+        dataset_info=dataset_info,
         save_standalone_component_checkpoints=save_standalone_component_checkpoints,
-        ocean_timedelta=mock_data.ocean_timedelta,
-        atmosphere_timedelta=mock_data.atmosphere_timedelta,
+        ocean_timedelta=mock_data.ocean.timedelta,
+        atmosphere_timedelta=mock_data.atmosphere.timedelta,
     )
 
     config = InferenceEvaluatorConfig(
@@ -195,9 +171,9 @@ def test_evaluator_inference(
         logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
         loader=InferenceDataLoaderConfig(
             dataset=CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path=mock_data.ocean_dir),
+                ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
                 atmosphere=XarrayDataConfig(
-                    data_path=mock_data.atmosphere_dir,
+                    data_path=mock_data.atmosphere.data_dir,
                     subset=Slice(start=1),
                 ),
             ),
@@ -231,8 +207,8 @@ def test_evaluator_inference(
 
     ocean_output_path = tmp_path / "ocean" / "autoregressive_predictions.nc"
     atmos_output_path = tmp_path / "atmosphere" / "autoregressive_predictions.nc"
-    ds_ocean = xr.open_dataset(ocean_output_path)
-    ds_atmos = xr.open_dataset(atmos_output_path)
+    ds_ocean = xr.open_dataset(ocean_output_path, decode_timedelta=False)
+    ds_atmos = xr.open_dataset(atmos_output_path, decode_timedelta=False)
 
     # vertical coordinates are not written out
     assert "lat" in ds_ocean.coords

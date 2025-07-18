@@ -1,22 +1,25 @@
 import dataclasses
 import datetime
 import os
-from typing import List, Optional, Tuple
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import torch
 
 from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.one_step.main import OneStepAggregator
 from fme.ace.data_loading.config import DataLoaderConfig
-from fme.ace.data_loading.getters import get_data_loader, get_inference_data
+from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.train.train_config import InlineInferenceConfig
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.ema import EMAConfig, EMATracker
-from fme.core.generics.trainer import EndOfBatchCallback
+from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.timing import GlobalTimer
 from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.diffusion.stepper import DiffusionStepper, DiffusionStepperConfig
@@ -52,11 +55,14 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        checkpoint_every_n_batches: How often to save checkpoints.
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
+        evaluate_before_training: Whether to run validation and inline inference before
+            any training is done.
     """
 
     train_loader: DataLoaderConfig
@@ -74,11 +80,17 @@ class TrainConfig:
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
     validate_using_ema: bool = False
-    checkpoint_save_epochs: Optional[Slice] = None
-    ema_checkpoint_save_epochs: Optional[Slice] = None
+    checkpoint_save_epochs: Slice | None = None
+    ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
-    segment_epochs: Optional[int] = None
+    checkpoint_every_n_batches: int = 1000
+    segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
+    evaluate_before_training: bool = False
+
+    def __post_init__(self):
+        if self.n_forward_steps != 1:
+            raise NotImplementedError("Only n_forward_steps=1 is currently supported")
 
     @property
     def inference_n_forward_steps(self) -> int:
@@ -102,8 +114,10 @@ class TrainConfig:
         """
         return os.path.join(self.experiment_dir, "output")
 
-    def get_inference_epochs(self) -> List[int]:
-        return list(range(0, self.max_epochs))[self.inference.epochs.slice]
+    def get_inference_epochs(self) -> list[int]:
+        start_epoch = 0 if self.evaluate_before_training else 1
+        all_epochs = list(range(start_epoch, self.max_epochs + 1))
+        return all_epochs[self.inference.epochs.slice]
 
 
 class TrainBuilders:
@@ -127,7 +141,7 @@ class TrainBuilders:
 
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.train_loader,
             requirements=data_requirements,
             train=True,
@@ -135,7 +149,7 @@ class TrainBuilders:
 
     def get_validation_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.validation_loader,
             requirements=data_requirements,
             train=False,
@@ -156,7 +170,7 @@ class TrainBuilders:
 
     def get_stepper(
         self,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         gridded_operations: GriddedOperations,
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
@@ -172,10 +186,32 @@ class TrainBuilders:
         return self.config.ema.build(modules)
 
     def get_end_of_batch_ops(
-        self, modules: List[torch.nn.Module]
+        self,
+        modules: list[torch.nn.Module],
+        base_weights: list[Mapping[str, Any]] | None,
     ) -> EndOfBatchCallback:
-        base_weights = self.config.stepper.get_base_weights()
         if base_weights is not None:
             copy_after_batch = self.config.copy_weights_after_batch
             return lambda: copy_after_batch.apply(weights=base_weights, modules=modules)
         return lambda: None
+
+    def get_end_of_epoch_ops(
+        self,
+        stepper: DiffusionStepper,
+        validation_data: GriddedData,
+        get_validation_aggregator: Callable[[], OneStepAggregator],
+    ) -> EndOfEpochCallback:
+        def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
+            aggregator = get_validation_aggregator()
+            with torch.no_grad(), GlobalTimer():
+                for batch in validation_data.loader:
+                    stepped = stepper.generate_on_batch(
+                        batch,
+                        compute_derived_variables=True,
+                    )
+                    aggregator.record_batch(
+                        batch=stepped,
+                    )
+            return aggregator.get_logs(label="generation")
+
+        return end_of_epoch_ops

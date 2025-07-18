@@ -1,6 +1,6 @@
 """Pure functions, e.g. metrics and math functions that are useful for downscaling."""
 
-from typing import Callable, Collection, Tuple
+from collections.abc import Callable, Collection
 
 import torch
 
@@ -78,7 +78,7 @@ def min_max_normalization(
 
 def _normalize_tensors(
     x: torch.Tensor, y: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     min_ = torch.min(x.min(), y.min())
     max_ = torch.max(x.max(), y.max())
     return min_max_normalization(x, min_, max_), min_max_normalization(x, min_, max_)
@@ -168,9 +168,7 @@ def compute_mae_error(
         sample_dim: The dimension of `prediction` corresponding to sample.
     """
     sample_mae_estimate = get_sample_mae_estimate(prediction, sample_dim)
-    truth_mae = torch.abs(target.unsqueeze(sample_dim) - prediction).mean(
-        axis=sample_dim
-    )
+    truth_mae = torch.abs(target - prediction).mean(axis=sample_dim)
     return truth_mae - sample_mae_estimate
 
 
@@ -279,4 +277,4 @@ def compute_rank(
         prediction: The prediction tensor.
         sample_dim: The dimension of `prediction` corresponding to sample.
     """
-    return prediction <= target.sum(dim=sample_dim)
+    return (prediction <= target).sum(dim=sample_dim)

@@ -1,20 +1,10 @@
 import abc
 import dataclasses
-import datetime
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    List,
-    Optional,
-    Protocol,
-    Set,
-    Type,
-    TypeVar,
-    cast,
-    final,
-)
+import warnings
+from collections.abc import Callable
+
+# we use Type to distinguish from type attr of StepSelector
+from typing import Any, ClassVar, Type, TypeVar, cast, final  # noqa: UP035
 
 import torch
 from torch import nn
@@ -34,8 +24,17 @@ class StepConfigABC(abc.ABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ) -> "StepABC":
         """
+        Args:
+            dataset_info: Information about the training dataset.
+            init_weights: Function to initialize the weights of the step before
+                wrapping in DistributedDataParallel. This is particularly useful
+                when freezing parameters, as the DistributedDataParallel will
+                otherwise expect frozen weights to have gradients, and will
+                raise an exception.
+
         Returns:
             The state of the stepper.
         """
@@ -47,39 +46,47 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         pass
 
     @property
     @abc.abstractmethod
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         """
         Names of variables output by the step.
         """
         pass
 
     @property
+    @abc.abstractmethod
+    def next_step_input_names(self) -> list[str]:
+        """
+        Names of variables required in next_step_input_data for .step.
+        """
+        pass
+
+    @property
     @final
-    def prognostic_names(self) -> List[str]:
+    def prognostic_names(self) -> list[str]:
         return list(set(self.input_names).intersection(self.output_names))
 
     @property
     @abc.abstractmethod
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         """
         Names of variables to be included in the loss function.
         """
         pass
 
     @abc.abstractmethod
-    def get_next_step_forcing_names(self) -> List[str]:
+    def get_next_step_forcing_names(self) -> list[str]:
         pass
 
     @abc.abstractmethod
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         """
         Args:
@@ -93,11 +100,11 @@ class StepConfigABC(abc.ABC):
         """
 
     @abc.abstractmethod
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         pass
 
     @abc.abstractmethod
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         pass
 
     @abc.abstractmethod
@@ -114,7 +121,7 @@ T = TypeVar("T", bound=StepConfigABC)
 @dataclasses.dataclass
 class StepSelector(StepConfigABC):
     type: str
-    config: Dict[str, Any]
+    config: dict[str, Any]
     registry: ClassVar[Registry] = Registry()
 
     def __post_init__(self):
@@ -127,36 +134,56 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.n_ic_timesteps
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:
+    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:  # noqa: UP006
         return cls.registry.register(name)
 
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None] = lambda x: None,
     ) -> "StepABC":
-        return self._step_config_instance.get_step(dataset_info)
+        """
+        Args:
+            dataset_info: Information about the training dataset.
+            init_weights: Function to initialize the weights of the step before
+                wrapping in DistributedDataParallel. This is particularly useful
+                when freezing parameters, as the DistributedDataParallel will
+                otherwise expect frozen weights to have gradients, and will
+                raise an exception.
+
+        Returns:
+            The state of the stepper.
+        """
+        return self._step_config_instance.get_step(dataset_info, init_weights)
 
     @classmethod
-    def get_available_types(cls) -> Set[str]:
+    def get_available_types(cls) -> set[str]:
         """This class method is used to expose all available types of Steps."""
         return set(cls(type="", config={}).registry._types.keys())
 
-    def get_next_step_forcing_names(self) -> List[str]:
+    def get_next_step_forcing_names(self) -> list[str]:
         return self._step_config_instance.get_next_step_forcing_names()
 
     @property
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         return self._step_config_instance.input_names
 
     @property
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         """
         Names of variables output by the step.
         """
         return self._step_config_instance.output_names
 
     @property
-    def loss_names(self) -> List[str]:
+    def next_step_input_names(self) -> list[str]:
+        """
+        Names of variables required in next_step_input_data for .step.
+        """
+        return self._step_config_instance.next_step_input_names
+
+    @property
+    def loss_names(self) -> list[str]:
         """
         Names of variables to be included in the loss function.
         """
@@ -164,19 +191,19 @@ class StepSelector(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         return self._step_config_instance.get_loss_normalizer(
             extra_names=extra_names,
             extra_residual_scaled_names=extra_residual_scaled_names,
         )
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         self._step_config_instance.replace_ocean(ocean)
         self.config = dataclasses.asdict(self._step_config_instance)
 
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         return self._step_config_instance.get_ocean()
 
     def load(self):
@@ -184,13 +211,7 @@ class StepSelector(StepConfigABC):
         self.config = dataclasses.asdict(self._step_config_instance)
 
 
-class InferenceDataProtocol(Protocol):
-    @property
-    def timestep(self) -> datetime.timedelta:
-        pass
-
-
-class StepABC(abc.ABC):
+class StepABC(abc.ABC, nn.Module):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
     @property
@@ -201,8 +222,8 @@ class StepABC(abc.ABC):
     @final
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         return self.config.get_loss_normalizer(
             extra_names=extra_names,
@@ -216,27 +237,27 @@ class StepABC(abc.ABC):
 
     @property
     @final
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         return self.config.input_names
 
     @property
     @final
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         return self.config.output_names
 
     @property
     @final
-    def prognostic_names(self) -> List[str]:
+    def prognostic_names(self) -> list[str]:
         return self.config.prognostic_names
 
     @property
     @final
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         return self.config.loss_names
 
     @property
     @abc.abstractmethod
-    def modules(self) -> torch.nn.ModuleList:
+    def modules(self) -> nn.ModuleList:
         pass
 
     @property
@@ -245,22 +266,22 @@ class StepABC(abc.ABC):
         pass
 
     @property
-    @abc.abstractmethod
-    def next_step_input_names(self) -> List[str]:
+    @final
+    def next_step_input_names(self) -> list[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
-        pass
+        return self.config.next_step_input_names
 
     @property
     @final
-    def next_step_forcing_names(self) -> List[str]:
+    def next_step_forcing_names(self) -> list[str]:
         """Names of input variables which come from the output timestep."""
         return self.config.get_next_step_forcing_names()
 
     @property
     @abc.abstractmethod
-    def surface_temperature_name(self) -> Optional[str]:
+    def surface_temperature_name(self) -> str | None:
         """
         Name of the surface temperature variable, if one is available.
         """
@@ -268,16 +289,9 @@ class StepABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def ocean_fraction_name(self) -> Optional[str]:
+    def ocean_fraction_name(self) -> str | None:
         """
         Name of the ocean fraction variable, if one is available.
-        """
-        pass
-
-    @abc.abstractmethod
-    def validate_inference_data(self, data: InferenceDataProtocol):
-        """
-        Validate the inference data.
         """
         pass
 
@@ -290,7 +304,7 @@ class StepABC(abc.ABC):
 
     @abc.abstractmethod
     def step(
-        self,
+        self: SelfType,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
@@ -314,8 +328,29 @@ class StepABC(abc.ABC):
         """
         pass
 
+    @final
+    def forward(
+        self, input: TensorMapping, next_step_input_data: TensorMapping
+    ) -> TensorDict:
+        return self.step(input, next_step_input_data)
+
+    @final
+    def export(
+        self: SelfType,
+        input: TensorMapping,
+        next_step_input_data: TensorMapping,
+    ) -> torch.export.ExportedProgram:
+        """
+        Script the step function.
+        """
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=".*does not reference an nn.Module.*"
+            )
+            return torch.export.export(self, (input, next_step_input_data))
+
     @abc.abstractmethod
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         """
         Returns:
             The state of the step object as expected by load_state,
@@ -324,7 +359,7 @@ class StepABC(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def load_state(self, state: Dict[str, Any]):
+    def load_state(self, state: dict[str, Any]):
         """
         Load the state of the step object.
         """

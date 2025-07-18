@@ -1,24 +1,22 @@
 import dataclasses
 import datetime
 import os
-from typing import List, Optional, Tuple
 
 import torch
 
-from fme.core.dataset.config import Slice
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
-from fme.coupled.data_loading.getters import get_data_loader, get_inference_data
+from fme.coupled.data_loading.getters import get_gridded_data, get_inference_data
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -34,9 +32,7 @@ class InlineInferenceConfig:
         n_coupled_steps: number of coupled forward steps to take
         coupled_steps_in_memory: number of coupled forward steps to take before
             re-reading data from disk
-        epochs: epochs on which to run inference, where the first epoch is
-            defined as epoch 0 (unlike in logs which show epochs as starting
-            from 1). By default runs inference every epoch.
+        epochs: epochs on which to run inference. By default runs inference every epoch.
         aggregator: configuration of inline coupled inference aggregator.
     """
 
@@ -100,11 +96,14 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        checkpoint_every_n_batches: How often to save checkpoints.
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
+        evaluate_before_training: Whether to run validation and inline inference before
+            any training is done.
 
     """
 
@@ -123,11 +122,13 @@ class TrainConfig:
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
     validate_using_ema: bool = False
-    checkpoint_save_epochs: Optional[Slice] = None
-    ema_checkpoint_save_epochs: Optional[Slice] = None
+    checkpoint_save_epochs: Slice | None = None
+    ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
-    segment_epochs: Optional[int] = None
+    checkpoint_every_n_batches: int = 1000
+    segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
+    evaluate_before_training: bool = True
 
     @property
     def n_forward_steps(self) -> int:
@@ -149,8 +150,10 @@ class TrainConfig:
     def inference_n_coupled_steps(self) -> int:
         return self.inference.n_coupled_steps
 
-    def get_inference_epochs(self) -> List[int]:
-        return list(range(0, self.max_epochs))[self.inference.epochs.slice]
+    def get_inference_epochs(self) -> list[int]:
+        start_epoch = 0 if self.evaluate_before_training else 1
+        all_epochs = list(range(start_epoch, self.max_epochs + 1))
+        return all_epochs[self.inference.epochs.slice]
 
 
 class TrainBuilders:
@@ -174,7 +177,7 @@ class TrainBuilders:
 
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.train_loader,
             requirements=data_requirements,
             train=True,
@@ -182,7 +185,7 @@ class TrainBuilders:
 
     def get_validation_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.validation_loader,
             requirements=data_requirements,
             train=False,
@@ -207,28 +210,13 @@ class TrainBuilders:
     def ocean_timestep(self) -> datetime.timedelta:
         return self.config.stepper.ocean_timestep
 
-    def get_stepper(
-        self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: CoupledVerticalCoordinate,
-        timestep: datetime.timedelta,
-    ) -> CoupledStepper:
-        if timestep != self.config.stepper.timestep:
-            raise ValueError(
-                f"The ocean stepper config timedelta {self.config.stepper.timestep} "
-                f"doesn't match the data's timedelta of {timestep}."
-            )
-        return self.config.stepper.get_stepper(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-        )
+    def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledStepper:
+        return self.config.stepper.get_stepper(dataset_info)
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)
 
     def get_end_of_batch_ops(
-        self, modules: List[torch.nn.Module]
+        self, modules: list[torch.nn.Module]
     ) -> EndOfBatchCallback:
         return lambda: None

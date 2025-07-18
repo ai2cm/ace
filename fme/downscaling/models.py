@@ -1,6 +1,7 @@
 import dataclasses
 import logging
-from typing import Any, List, Mapping, Optional, Tuple, Union
+from collections.abc import Mapping
+from typing import Any
 
 import dacite
 import torch
@@ -11,8 +12,9 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
+from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.datasets_new import PairedBatchData
+from fme.downscaling.datasets import PairedBatchData
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -26,13 +28,7 @@ class ModelOutputs:
     prediction: TensorDict
     target: TensorDict
     loss: torch.Tensor
-    latent_steps: List[torch.Tensor] = dataclasses.field(default_factory=list)
-
-
-def _tensor_mapping_to_device(
-    tensor_mapping: TensorMapping, device: torch.device
-) -> TensorMapping:
-    return {k: v.to(device) for k, v in tensor_mapping.items()}
+    latent_steps: list[torch.Tensor] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -41,7 +37,7 @@ class PairedNormalizationConfig:
     coarse: NormalizationConfig
 
     def build(
-        self, in_names: List[str], out_names: List[str]
+        self, in_names: list[str], out_names: list[str]
     ) -> FineResCoarseResPair[StandardNormalizer]:
         return FineResCoarseResPair[StandardNormalizer](
             coarse=self.coarse.build(list(set(in_names).union(out_names))),
@@ -62,8 +58,8 @@ class PairedNormalizationConfig:
 class DownscalingModelConfig:
     module: ModuleRegistrySelector
     loss: LossConfig
-    in_names: List[str]
-    out_names: List[str]
+    in_names: list[str]
+    out_names: list[str]
     normalization: PairedNormalizationConfig
     use_fine_topography: bool = False
 
@@ -77,11 +73,11 @@ class DownscalingModelConfig:
 
     def build(
         self,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build(reduction="mean")
+        loss = self.loss.build(reduction="mean", gridded_operations=None)
         n_in_channels = len(self.in_names)
 
         if self.use_fine_topography:
@@ -128,7 +124,7 @@ class Model:
         module: torch.nn.Module,
         normalizer: FineResCoarseResPair[StandardNormalizer],
         loss: torch.nn.Module,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
         config: DownscalingModelConfig,
     ) -> None:
@@ -155,7 +151,7 @@ class Model:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        optimization: Union[Optimization, NullOptimization],
+        optimization: Optimization | NullOptimization,
     ) -> ModelOutputs:
         return self._run_on_batch(batch, optimization)
 
@@ -176,7 +172,7 @@ class Model:
     def _run_on_batch(
         self,
         batch: PairedBatchData,
-        optimizer: Union[Optimization, NullOptimization],
+        optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
 
@@ -260,8 +256,8 @@ class DiffusionModelConfig:
 
     module: DiffusionModuleRegistrySelector
     loss: LossConfig
-    in_names: List[str]
-    out_names: List[str]
+    in_names: list[str]
+    out_names: list[str]
     normalization: PairedNormalizationConfig
     p_mean: float
     p_std: float
@@ -282,11 +278,11 @@ class DiffusionModelConfig:
 
     def build(
         self,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ) -> "DiffusionModel":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build("none")
+        loss = self.loss.build(reduction="none", gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
         # https://en.wikipedia.org/wiki/Standard_score
@@ -345,13 +341,62 @@ def _repeat_batch_by_samples(tensor: torch.Tensor, n_samples: int) -> torch.Tens
     return tensor.repeat_interleave(dim=0, repeats=n_samples)
 
 
-def _separate_interleaved_samples(
-    tensor: torch.Tensor, n_batch: int, n_samples: int
-) -> torch.Tensor:
+def _separate_interleaved_samples(tensor: torch.Tensor, n_samples: int) -> torch.Tensor:
     """
     Reshape an interleaved tensor to have a leading [batch, sample, ...] dimension.
     """
+    if tensor.shape[0] % n_samples != 0:
+        raise ValueError(
+            "The interleaved batch+sample dimension of the tensor must be divisible "
+            "by n_samples."
+        )
+    n_batch = tensor.shape[0] // n_samples
     return tensor.reshape(n_batch, n_samples, *tensor.shape[1:])
+
+
+@dataclasses.dataclass
+class ConditionedTarget:
+    """
+    A class to hold the conditioned targets and the loss weighting.
+
+    Attributes:
+        latents: The normalized targets with noise added.
+        sigma: The noise level.
+        weight: The loss weighting.
+    """
+
+    latents: torch.Tensor
+    sigma: torch.Tensor
+    weight: torch.Tensor
+
+
+def condition_with_noise_for_training(
+    targets_norm: torch.Tensor,
+    p_std: float,
+    p_mean: float,
+    sigma_data: float,
+) -> ConditionedTarget:
+    """
+    Condition the targets with noise for training.
+
+    Args:
+        targets_norm: The normalized targets.
+        p_std: The standard deviation of the noise distribution used during training.
+        p_mean: The mean of the noise distribution used during training.
+        sigma_data: The standard deviation of the data,
+            used to determine loss weighting.
+
+    Returns:
+        The conditioned targets and the loss weighting.
+    """
+    rnd_normal = randn([targets_norm.shape[0], 1, 1, 1], device=targets_norm.device)
+    # This is taken from EDM's original implementation in EDMLoss:
+    # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
+    sigma = (rnd_normal * p_std + p_mean).exp()
+    weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
+    noise = randn_like(targets_norm) * sigma
+    latents = targets_norm + noise
+    return ConditionedTarget(latents=latents, sigma=sigma, weight=weight)
 
 
 class DiffusionModel:
@@ -361,7 +406,7 @@ class DiffusionModel:
         module: torch.nn.Module,
         normalizer: FineResCoarseResPair[StandardNormalizer],
         loss: torch.nn.Module,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
     ) -> None:
@@ -396,9 +441,18 @@ class DiffusionModel:
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
 
+    def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
+        """
+        Calculate the fine shape based on the coarse shape and downscale factor.
+        """
+        return (
+            coarse_shape[0] * self.downscale_factor,
+            coarse_shape[1] * self.downscale_factor,
+        )
+
     def _get_input_from_coarse(
-        self, coarse: TensorMapping, topography: Optional[torch.Tensor]
-    ) -> TensorMapping:
+        self, coarse: TensorMapping, topography: torch.Tensor | None
+    ) -> torch.Tensor:
         inputs = filter_tensor_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
             self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
@@ -422,24 +476,14 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        optimizer: Union[Optimization, NullOptimization],
+        optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_ = self._get_input_from_coarse(coarse, batch.fine.topography)
+        inputs_norm = self._get_input_from_coarse(coarse, batch.fine.topography)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
-
-        rnd_normal = torch.randn(
-            [targets_norm.shape[0], 1, 1, 1], device=targets_norm.device
-        )
-        # This is taken from EDM's original implementation in EDMLoss:
-        # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
-        sigma = (rnd_normal * self.config.p_std + self.config.p_mean).exp()
-        weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
-        noise = torch.randn_like(targets_norm) * sigma
-        latents = targets_norm + noise
 
         if self.config.predict_residual:
             base_prediction = interpolate(
@@ -452,10 +496,17 @@ class DiffusionModel:
                 self.downscale_factor,
             )
             targets_norm = targets_norm - base_prediction
-            latents = latents - base_prediction
 
-        denoised_norm = self.module(latents, inputs_, sigma)
-        loss = torch.mean(weight * self.loss(targets_norm, denoised_norm))
+        conditioned_target = condition_with_noise_for_training(
+            targets_norm, self.config.p_std, self.config.p_mean, self.sigma_data
+        )
+
+        denoised_norm = self.module(
+            conditioned_target.latents, inputs_norm, conditioned_target.sigma
+        )
+        loss = torch.mean(
+            conditioned_target.weight * self.loss(denoised_norm, targets_norm)
+        )
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
 
@@ -471,26 +522,27 @@ class DiffusionModel:
         )
 
     @torch.no_grad()
-    def generate_on_batch(
+    def _generate(
         self,
-        batch: PairedBatchData,
+        coarse_data: TensorMapping,
+        fine_topography: torch.Tensor | None,
         n_samples: int = 1,
-    ) -> ModelOutputs:
-        coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_ = self._get_input_from_coarse(coarse, batch.fine.topography)
-
-        targets_norm = self.out_packer.pack(
-            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
-        )
-
-        n_batch = targets_norm.shape[0]
-        # expand samples and fold to [batch * n_samples, output_channels, height, width]
+    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        inputs_ = self._get_input_from_coarse(coarse_data, fine_topography)
+        # expand samples and fold to
+        # [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
-        targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
-        latents = torch.randn_like(targets_norm)
+        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
+
+        outputs_shape = (
+            inputs_.shape[0],
+            len(self.out_packer.names),
+            *self._get_fine_shape(coarse_input_shape),
+        )
+        latents = torch.randn(outputs_shape).to(device=get_device())
 
         logging.info("Running EDM sampler...")
-        samples_norm, latent_steps = edm_sampler(
+        generated_norm, latent_steps = edm_sampler(
             self.module,
             latents,
             inputs_,
@@ -505,27 +557,57 @@ class DiffusionModel:
             base_prediction = interpolate(
                 self.out_packer.pack(
                     self.normalizer.coarse.normalize(
-                        {k: coarse[k] for k in self.out_packer.names}
+                        {k: coarse_data[k] for k in self.out_packer.names}
                     ),
                     axis=self._channel_axis,
                 ),
                 self.downscale_factor,
             )
-            samples_norm += _repeat_batch_by_samples(base_prediction, n_samples)
+            generated_norm = generated_norm + _repeat_batch_by_samples(
+                base_prediction, n_samples
+            )
 
-        loss = self.loss(targets_norm, samples_norm)
+        generated_norm_reshaped = _separate_interleaved_samples(
+            generated_norm, n_samples
+        )
+        generated = self.normalizer.fine.denormalize(
+            self.out_packer.unpack(generated_norm_reshaped, axis=self._channel_axis)
+        )
+        return generated, generated_norm, latent_steps
 
-        samples_norm_reshaped = _separate_interleaved_samples(
-            samples_norm, n_batch, n_samples
+    @torch.no_grad()
+    def generate_on_batch_no_target(
+        self,
+        coarse_data: TensorMapping,
+        fine_topography: torch.Tensor | None,
+        n_samples: int = 1,
+    ) -> TensorDict:
+        generated, _, _ = self._generate(coarse_data, fine_topography, n_samples)
+        return generated
+
+    @torch.no_grad()
+    def generate_on_batch(
+        self,
+        batch: PairedBatchData,
+        n_samples: int = 1,
+    ) -> ModelOutputs:
+        coarse, fine = batch.coarse.data, batch.fine.data
+
+        generated, generated_norm, latent_steps = self._generate(
+            coarse, batch.fine.topography, n_samples
         )
-        samples = self.normalizer.fine.denormalize(
-            self.out_packer.unpack(samples_norm_reshaped, axis=self._channel_axis)
+
+        targets_norm = self.out_packer.pack(
+            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
+        targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
+
         targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
+        loss = self.loss(generated_norm, targets_norm)
         return ModelOutputs(
-            prediction=samples, target=targets, loss=loss, latent_steps=latent_steps
+            prediction=generated, target=targets, loss=loss, latent_steps=latent_steps
         )
 
     def get_state(self) -> Mapping[str, Any]:

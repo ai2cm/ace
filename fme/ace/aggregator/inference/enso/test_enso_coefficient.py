@@ -1,6 +1,5 @@
 import datetime
 from contextlib import contextmanager
-from typing import Type
 
 import numpy as np
 import pytest
@@ -15,7 +14,7 @@ from .enso_coefficient import OVERLAP_THRESHOLD, EnsoCoefficientEvaluatorAggrega
 
 @contextmanager
 def change_aggregator_enso_index(
-    aggregator: Type[EnsoCoefficientEvaluatorAggregator], new_index: xr.DataArray
+    aggregator: type[EnsoCoefficientEvaluatorAggregator], new_index: xr.DataArray
 ):
     """
     Temporarily change the class attribute enso index for testing purposes.
@@ -40,11 +39,12 @@ def _get_data(
     n_lon: int,
     calendar: str = "julian",
 ):
-    time = xr.cftime_range(
+    time = xr.date_range(
         start="2000-01-01",
         periods=n_times,
         freq="6h",
         calendar=calendar,
+        use_cftime=True,
     )
     enso_index = xr.DataArray(
         _data_generator(scale, n_times), dims=["time"], coords={"time": time}

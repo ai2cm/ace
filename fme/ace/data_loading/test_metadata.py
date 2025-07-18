@@ -1,5 +1,5 @@
 import datetime
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 import cftime
 import numpy as np
@@ -7,10 +7,11 @@ import pytest
 import xarray as xr
 
 from fme.ace.data_loading.config import DataLoaderConfig
-from fme.ace.data_loading.getters import get_data_loader
+from fme.ace.data_loading.getters import get_gridded_data
 from fme.ace.requirements import DataRequirements
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.xarray import XarrayDataConfig
 
 
 def _coord_value(name, size):
@@ -26,12 +27,12 @@ def _coord_value(name, size):
 
 def _save_netcdf(
     filename,
-    variable_metadata: Mapping[str, Optional[VariableMetadata]],
+    variable_metadata: Mapping[str, VariableMetadata | None],
     num_members=1,
     dim_sizes=None,
 ):
     if dim_sizes is None:
-        dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
+        dim_sizes = {"time": 3, "lat": 16, "lon": 32}
     data_vars = {}
     for name in variable_metadata:
         data = np.random.randn(*list(dim_sizes.values()))
@@ -96,13 +97,15 @@ def test_metadata(tmp_path, variable_metadata, n_ensemble_members):
         _save_netcdf(path / "data.nc", variable_metadata)
 
     config = DataLoaderConfig(
-        dataset=[XarrayDataConfig(data_path=str(path)) for path in paths],
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=str(path)) for path in paths]
+        ),
         batch_size=1,
         num_data_workers=0,
     )
     var_names = list(variable_metadata.keys())
     requirements = DataRequirements(names=var_names, n_timesteps=2)
-    data = get_data_loader(config=config, train=True, requirements=requirements)
+    data = get_gridded_data(config=config, train=True, requirements=requirements)
     target_metadata = {
         name: variable_metadata[name]
         for name in variable_metadata

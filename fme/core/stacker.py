@@ -1,32 +1,12 @@
 import re
-from typing import Iterable, List, Mapping, Optional, Union
+from collections.abc import Iterable, Mapping
 
 import torch
 
 from fme.core.typing_ import TensorMapping
 
 
-def natural_sort(alist: List[str]) -> List[str]:
-    """Sort to alphabetical order but with numbers sorted
-    numerically, e.g. a11 comes after a2. See [1] and [2].
-
-    [1] https://stackoverflow.com/questions/11150239/natural-sorting
-    [2] https://en.wikipedia.org/wiki/Natural_sort_order
-    """
-
-    def convert(text: str) -> Union[str, int]:
-        if text.isdigit():
-            return int(text)
-        else:
-            return text.lower()
-
-    def alphanum_key(item: str) -> List[Union[str, int]]:
-        return [convert(c) for c in re.split("([0-9]+)", item)]
-
-    return sorted(alist, key=alphanum_key)
-
-
-def unstack(tensor: torch.Tensor, names: List[str], dim: int = -1) -> TensorMapping:
+def unstack(tensor: torch.Tensor, names: list[str], dim: int = -1) -> TensorMapping:
     """Unstack a 3D variable to a dictionary of 2D variables.
 
     Args:
@@ -39,8 +19,7 @@ def unstack(tensor: torch.Tensor, names: List[str], dim: int = -1) -> TensorMapp
     """
     if len(names) != tensor.size(dim):
         raise ValueError(
-            f"Received {len(names)} names, but 3D tensor has "
-            f"{tensor.size(-1)} levels."
+            f"Received {len(names)} names, but 3D tensor has {tensor.size(-1)} levels."
         )
     if len(names) == 1:
         return {names[0]: tensor.select(dim=dim, index=0)}
@@ -56,7 +35,7 @@ class Stacker:
 
     def __init__(
         self,
-        prefix_map: Optional[Mapping[str, List[str]]] = None,
+        prefix_map: Mapping[str, list[str]] | None = None,
     ):
         """
         Args:
@@ -65,7 +44,7 @@ class Stacker:
                 and lists of possible names or prefix variants (e.g., ["PRESsfc", "PS"]
                 or ["air_temperature_", "T_"]) found in the data.
         """
-        self._prefix_map: Optional[Mapping[str, List[str]]] = prefix_map
+        self._prefix_map: Mapping[str, list[str]] | None = prefix_map
 
     def infer_prefix_map(self, names: Iterable[str]):
         """
@@ -93,7 +72,7 @@ class Stacker:
         return self._prefix_map is not None
 
     @property
-    def prefix_map(self) -> Mapping[str, List[str]]:
+    def prefix_map(self) -> Mapping[str, list[str]]:
         """Mapping which defines the correspondence between an arbitrary set of
         "standard" names (e.g., "surface_pressure" or "air_temperature") and
         lists of possible names or prefix variants (e.g., ["PRESsfc", "PS"] or
@@ -107,10 +86,10 @@ class Stacker:
         return self._prefix_map
 
     @property
-    def standard_names(self) -> List[str]:
+    def standard_names(self) -> list[str]:
         return list(self.prefix_map.keys())
 
-    def get_all_level_names(self, standard_name: str, data: TensorMapping) -> List[str]:
+    def get_all_level_names(self, standard_name: str, data: TensorMapping) -> list[str]:
         """Get the names of all variables in the data that match one of the
         prefixes associated with the given standard name. If the standard name
         corresponds to a 3D variable, returns all vertical level names in their
@@ -158,7 +137,7 @@ class Stacker:
             f"among the data names {list(data.keys())}."
         )
 
-    def _natural_sort_names(self, prefix: str, data: TensorMapping) -> List[str]:
+    def _natural_sort_names(self, prefix: str, data: TensorMapping) -> list[str]:
         names = [field_name for field_name in data if field_name.startswith(prefix)]
 
         levels = []
@@ -178,4 +157,4 @@ class Stacker:
         if len(names) == 0:
             raise KeyError(prefix)
 
-        return natural_sort(names)
+        return sorted(names, key=lambda name: levels[names.index(name)])

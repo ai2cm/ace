@@ -1,9 +1,11 @@
+import collections
 import dataclasses
-from typing import List, Optional
+import re
+from collections.abc import Callable
+from typing import Literal, Protocol, runtime_checkable
 
 import torch
 
-from fme.core.stacker import Stacker, unstack
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -29,48 +31,66 @@ def replace_on_mask(
     )
 
 
+@runtime_checkable
+class HasGetMaskTensorFor(Protocol):
+    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
+
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
+        """Get the mask for a specific variable name."""
+        ...
+
+    def to(self, device: str) -> "HasGetMaskTensorFor": ...
+
+
 @dataclasses.dataclass
 class StaticMaskingConfig:
     """
-    Replace static masked regions with a fill value, with handling for both 2D and 3D
-    variables.
+    Replace static masked regions with a fill value.
 
     Parameters:
-        variable_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
-            to mask, which are used to build a variable Stacker.
         mask_value: Value of the mask variable in masked regions. Either 0 or 1.
-        fill_value: The constant fill value to use outside of masked regions.
+        fill_value: A float fill value to use outside of masked regions. Can also be
+            "mean", in which case the normalizer means are used as channel-specific
+            fill values.
+        exclude_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
+            to exclude when applying the mask.
+
     """
 
     mask_value: int
-    fill_value: float = 0.0
-    variable_names_and_prefixes: Optional[List[str]] = None
+    fill_value: Literal["mean"] | float = 0.0
+    exclude_names_and_prefixes: list[str] | None = None
 
     def __post_init__(self):
         if self.mask_value not in [0, 1]:
             raise ValueError(
-                "mask_value must be either 0 or 1, but got " f"{self.mask_value}"
+                f"mask_value must be either 0 or 1, but got {self.mask_value}"
             )
 
-    def build(
-        self,
-        mask_2d: Optional[torch.Tensor] = None,
-        mask_3d: Optional[torch.Tensor] = None,
-    ):
+    def build(self, mask: HasGetMaskTensorFor, means: TensorMapping | None = None):
         """
-        Build Masking from config and 2D/3D masks. At least one of mask_2d
-        and mask_3d must be non-null.
-
-        mask_2d: 2D mask with shape (n_lat, n_lon).
-        mask_3d: 3D mask with shape (n_lat, n_lon, n_levels).
+        Build StaticMasking.
 
         """
+        if isinstance(self.fill_value, float):
+            return StaticMasking(
+                mask_value=self.mask_value,
+                fill_value=collections.defaultdict(
+                    lambda: torch.as_tensor(self.fill_value)
+                ),
+                mask=mask,
+                exclude_names_and_prefixes=self.exclude_names_and_prefixes,
+            )
+        if means is None:
+            raise ValueError(
+                "fill_values mapping required by build unless configured "
+                "fill_value is a float."
+            )
         return StaticMasking(
             mask_value=self.mask_value,
-            fill_value=self.fill_value,
-            mask_2d=mask_2d,
-            mask_3d=mask_3d,
-            variable_names_and_prefixes=self.variable_names_and_prefixes,
+            fill_value=means,
+            mask=mask,
+            exclude_names_and_prefixes=self.exclude_names_and_prefixes,
         )
 
 
@@ -78,32 +98,38 @@ class StaticMasking:
     def __init__(
         self,
         mask_value: int,
-        fill_value: float,
-        mask_2d: Optional[torch.Tensor] = None,
-        mask_3d: Optional[torch.Tensor] = None,
-        variable_names_and_prefixes: Optional[List[str]] = None,
+        fill_value: float | TensorMapping,
+        mask: HasGetMaskTensorFor,
+        exclude_names_and_prefixes: list[str] | None = None,
     ):
-        if mask_2d is None and mask_3d is None:
-            raise ValueError("Either mask_2d or mask_3d must be provided to Masking.")
-        if mask_2d is not None and len(mask_2d.shape) != 2:
-            raise ValueError(
-                f"Expected mask_2d with 2 dimensions, but got shape: {mask_2d.shape}"
+        if isinstance(fill_value, float):
+            fill_mapping: TensorMapping = collections.defaultdict(
+                lambda: torch.as_tensor(fill_value)
             )
-        if mask_3d is not None and len(mask_3d.shape) != 3:
-            raise ValueError(
-                f"Expected mask_3d with 3 dimensions, but got shape: {mask_3d.shape}"
-            )
-        self._mask_value = mask_value
-        self._fill_value = fill_value
-        # add convenience 3rd dimension to
-        self._mask_2d = None if mask_2d is None else mask_2d.unsqueeze(-1)
-        self._mask_3d = mask_3d
-        if variable_names_and_prefixes is None:
-            self._stacker = Stacker()
         else:
-            self._stacker = Stacker(
-                {name: [name] for name in variable_names_and_prefixes}
-            )
+            fill_mapping = fill_value
+        self._fill_mapping = fill_mapping
+        self._mask_value = mask_value
+        self._mask = mask
+        self._exclude_regex = self._build_regex(exclude_names_and_prefixes)
+
+    def _build_regex(self, names_and_prefixes: list[str] | None) -> str | None:
+        if names_and_prefixes:
+            regex = []
+            for name in names_and_prefixes:
+                if name.endswith("_"):
+                    regex.append(rf"^{name}\d+$")
+                elif not re.match(r".+_\d+$", name):
+                    regex.append(f"^{name}$")
+                    regex.append(rf"^{name}_\d+$")
+                else:
+                    regex.append(rf"^{name}$")
+            return r"|".join(regex)
+        return None
+
+    def _masks(self, name: str):
+        exclude = self._exclude_regex and re.match(self._exclude_regex, name)
+        return not exclude
 
     def __call__(self, data: TensorMapping) -> TensorDict:
         """
@@ -113,34 +139,32 @@ class StaticMasking:
             data: The data to mask.
 
         """
-        if not self._stacker.has_prefix_map:
-            self._stacker.infer_prefix_map(data.keys())
         data_: TensorDict = {**data}
-        for name in self._stacker.standard_names:
-            stacked = self._stacker(name, data)
-            mask = None
-            if stacked.size(-1) > 1:  # 3D masking
-                mask = self._mask_3d
-                error_msg = (
-                    f"{name[:-1]} is a 3D variable with shape {stacked.shape} "
-                    "but Masking wasn't initialized with a 3D mask."
-                )
-            else:  # 2D masking
-                mask = self._mask_2d
-                stacked = stacked
-                error_msg = (
-                    f"{name} is a 2D variable with shape {stacked.squeeze().shape} "
-                    "but Masking wasn't initialized with a 2D mask."
-                )
+        for name, tensor in data_.items():
+            if not self._masks(name):
+                continue
+            mask = self._mask.get_mask_tensor_for(name)
             if mask is None:
-                raise RuntimeError(error_msg)
-            fill = torch.full_like(stacked, self._fill_value)
+                continue
+            try:
+                fill_value = self._fill_mapping[name]
+            except KeyError as err:
+                raise KeyError(
+                    "StaticMasking was initialized with a fill_value mapping "
+                    f"but the mapping is missing key '{name}'."
+                ) from err
+            fill = torch.full_like(tensor, fill_value)
+            mask = mask.expand(fill.shape)
             masked = replace_on_mask(
-                original=stacked,
+                original=tensor,
                 replacement=fill,
                 mask=mask,
                 mask_value=self._mask_value,
             )
-            level_names = self._stacker.get_all_level_names(name, data)
-            data_.update(unstack(masked, level_names, dim=-1))
+            data_[name] = masked
         return data_
+
+
+class NullMasking:
+    def __call__(self, data: TensorMapping) -> TensorDict:
+        return dict(data)

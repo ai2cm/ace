@@ -1,5 +1,6 @@
 import abc
-from typing import Generic, Iterable, Protocol, Sized, TypeVar
+from collections.abc import Iterable, Sized
+from typing import Generic, Protocol, TypeVar
 
 T = TypeVar("T", covariant=True)
 
@@ -59,6 +60,13 @@ class GriddedDataABC(abc.ABC, Generic[T]):
 
     @abc.abstractmethod
     def set_epoch(self, epoch: int): ...
+
+    @abc.abstractmethod
+    def subset_loader(self, start_batch: int) -> DataLoader[T]:
+        """
+        Subset the loader to skip the first `start_batch` batches.
+        """
+        ...
 
     @abc.abstractmethod
     def log_info(self, name: str):

@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Any, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 import torch.optim.lr_scheduler
 
@@ -15,12 +16,12 @@ class SchedulerConfig:
         kwargs: Keyword arguments to pass to the scheduler constructor.
     """
 
-    type: Optional[str] = None
+    type: str | None = None
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
     def build(
         self, optimizer, max_epochs
-    ) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
+    ) -> torch.optim.lr_scheduler._LRScheduler | None:
         """
         Build the scheduler.
         """

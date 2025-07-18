@@ -4,17 +4,22 @@ import pathlib
 import tempfile
 import unittest
 import unittest.mock
-from typing import Callable, List, Optional, Tuple
+from collections.abc import Callable
 
 import dacite
 import pytest
 import torch
+import torch._dynamo.exc
+from torch import nn
 
 import fme
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
+from fme.ace.step.fcn2 import FCN2Config, FCN2Selector, FCN2StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.distributed import DummyWrapper
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
@@ -25,10 +30,12 @@ from fme.core.typing_ import TensorDict
 
 from .radiation import SeparateRadiationStepConfig
 
+DEFAULT_IMG_SHAPE = (45, 90)
+
 
 def get_network_and_loss_normalization_config(
-    names: List[str],
-    dir: Optional[pathlib.Path] = None,
+    names: list[str],
+    dir: pathlib.Path | None = None,
 ) -> NetworkAndLossNormalizationConfig:
     if dir is None:
         return NetworkAndLossNormalizationConfig(
@@ -47,7 +54,7 @@ def get_network_and_loss_normalization_config(
 
 
 def get_separate_radiation_config(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> SeparateRadiationStepConfig:
     normalization = get_network_and_loss_normalization_config(
         names=[
@@ -88,7 +95,7 @@ def get_separate_radiation_config(
 
 
 def get_separate_radiation_selector(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> StepSelector:
     return StepSelector(
         type="separate_radiation",
@@ -97,7 +104,7 @@ def get_separate_radiation_selector(
 
 
 def get_single_module_selector(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> StepSelector:
     normalization = get_network_and_loss_normalization_config(
         names=[
@@ -128,8 +135,199 @@ def get_single_module_selector(
     )
 
 
+def get_single_module_noise_conditioned_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_shared",
+            "forcing_rad",
+            "diagnostic_main",
+            "diagnostic_rad",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="isotropic",
+                            num_layers=2,
+                            local_blocks=[0],
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def get_single_module_with_atmosphere_corrector_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    in_names = [
+        "DSWRFtoa",
+        "HGTsfc",
+        "air_temperature_0",
+        "air_temperature_1",
+        "air_temperature_2",
+        "air_temperature_3",
+        "air_temperature_4",
+        "air_temperature_5",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "specific_total_water_2",
+        "specific_total_water_3",
+        "specific_total_water_4",
+        "specific_total_water_5",
+        "PRESsfc",
+        "PRATEsfc",
+    ]
+    out_names = [
+        "air_temperature_0",
+        "air_temperature_1",
+        "air_temperature_2",
+        "air_temperature_3",
+        "air_temperature_4",
+        "air_temperature_5",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "specific_total_water_2",
+        "specific_total_water_3",
+        "specific_total_water_4",
+        "specific_total_water_5",
+        "PRESsfc",
+        "PRATEsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "ULWRFsfc",
+        "ULWRFtoa",
+        "DLWRFsfc",
+        "DSWRFsfc",
+        "USWRFtoa",
+        "USWRFsfc",
+        "tendency_of_total_water_path_due_to_advection",
+    ]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names).union(out_names)),
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                corrector=AtmosphereCorrectorConfig(
+                    conserve_dry_air=True,
+                    zero_global_mean_moisture_advection=True,
+                    moisture_budget_correction="advection_and_precipitation",
+                    force_positive_names=["PRATEsfc"],
+                    total_energy_budget_correction=EnergyBudgetConfig(
+                        "constant_temperature"
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def get_fcn2_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    forcing_names = [
+        "DSWRFtoa",
+        "HGTsfc",
+    ]
+    atmosphere_prognostic_names = [
+        "air_temperature",
+        "specific_total_water",
+    ]
+    atmosphere_diagnostic_names = [
+        "radiative_heating",
+    ]
+    atmosphere_levels = 6
+    surface_prognostic_names = [
+        "PRESsfc",
+    ]
+    surface_diagnostic_names = [
+        "PRATEsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "ULWRFsfc",
+        "ULWRFtoa",
+        "DLWRFsfc",
+        "DSWRFsfc",
+        "USWRFtoa",
+        "USWRFsfc",
+        "tendency_of_total_water_path_due_to_advection",
+    ]
+    atmosphere_packed_names = []
+    for i in range(atmosphere_levels):
+        atmosphere_packed_names.append(f"air_temperature_{i}")
+        atmosphere_packed_names.append(f"specific_total_water_{i}")
+        atmosphere_packed_names.append(f"radiative_heating_{i}")
+    normalization = get_network_and_loss_normalization_config(
+        names=list(
+            set(forcing_names)
+            .union(atmosphere_packed_names)
+            .union(surface_prognostic_names)
+            .union(surface_diagnostic_names)
+        ),
+        dir=dir,
+    )
+    step_config = FCN2StepConfig(
+        builder=FCN2Selector(
+            type="FCN2",
+            config=FCN2Config(
+                scale_factor=1,
+                atmo_embed_dim=2,
+                surf_embed_dim=2,
+                aux_embed_dim=2,
+                num_layers=2,
+            ),
+        ),
+        forcing_names=forcing_names,
+        atmosphere_prognostic_names=atmosphere_prognostic_names,
+        atmosphere_diagnostic_names=atmosphere_diagnostic_names,
+        atmosphere_levels=atmosphere_levels,
+        surface_prognostic_names=surface_prognostic_names,
+        surface_diagnostic_names=surface_diagnostic_names,
+        normalization=normalization,
+        corrector=AtmosphereCorrectorConfig(
+            conserve_dry_air=True,
+            zero_global_mean_moisture_advection=True,
+            moisture_budget_correction="advection_and_precipitation",
+            force_positive_names=["PRATEsfc"],
+            total_energy_budget_correction=EnergyBudgetConfig("constant_temperature"),
+        ),
+    )
+    return StepSelector(
+        type="FCN2",
+        config=dataclasses.asdict(step_config),
+    )
+
+
 def get_multi_call_selector(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> StepSelector:
     return StepSelector(
         type="multi_call",
@@ -152,8 +350,11 @@ def get_multi_call_selector(
 SEPARATE_RADIATION_CONFIG = get_separate_radiation_config()
 
 SELECTOR_GETTERS = [
+    get_fcn2_selector,
+    get_single_module_with_atmosphere_corrector_selector,
     get_separate_radiation_selector,
     get_single_module_selector,
+    get_single_module_noise_conditioned_selector,
     get_multi_call_selector,
 ]
 
@@ -163,6 +364,22 @@ SELECTOR_CONFIG_CASES = [
         id=getter.__name__,
     )
     for getter in SELECTOR_GETTERS
+]
+
+EXPORTABLE_SELECTOR_CONFIG_CASES = [
+    # Some configs use th.DiscreteContinuousConvS2 layers
+    # which currently do not support export, see
+    # https://github.com/NVIDIA/torch-harmonics/issues/73
+    pytest.param(
+        getter(),
+        id=getter.__name__,
+    )
+    for getter in [
+        get_single_module_with_atmosphere_corrector_selector,
+        get_separate_radiation_selector,
+        get_single_module_selector,
+        get_multi_call_selector,
+    ]
 ]
 
 HAS_NEXT_STEP_FORCING_NAME_CASES = [
@@ -188,7 +405,7 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_tensor_dict(
-    names: List[str], img_shape: Tuple[int, ...], n_samples: int
+    names: list[str], img_shape: tuple[int, int], n_samples: int
 ) -> TensorDict:
     data_dict = {}
     device = fme.get_device()
@@ -201,25 +418,31 @@ def get_tensor_dict(
     return data_dict
 
 
-def get_step(selector: StepSelector, img_shape: Tuple[int, int]) -> StepABC:
+def get_step(
+    selector: StepSelector,
+    img_shape: tuple[int, int],
+    init_weights: Callable[[list[nn.Module]], None] = lambda _: None,
+) -> StepABC:
     device = fme.get_device()
-    area = torch.ones(img_shape, device=device)
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(img_shape[0], device=device),
+        lon=torch.zeros(img_shape[1], device=device),
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
+        ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
     )
     dataset_info = DatasetInfo(
-        img_shape=img_shape,
-        gridded_operations=LatLonOperations(area),
+        horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    return selector.get_step(dataset_info)
+    return selector.get_step(dataset_info, init_weights)
 
 
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
 def test_next_step_forcing_names_is_forcing(config: StepSelector):
     data = dataclasses.asdict(config)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     step = get_step(config, img_shape)
     forcing_names = set(step.input_names).difference(step.output_names)
     data["config"]["next_step_forcing_names"] = [list(forcing_names)[0]]
@@ -229,7 +452,7 @@ def test_next_step_forcing_names_is_forcing(config: StepSelector):
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
 def test_next_step_forcing_names_is_prognostic(config: StepSelector):
     data = dataclasses.asdict(config)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     step = get_step(config, img_shape)
     prognostic_names = set(step.output_names).intersection(step.input_names)
     name = list(prognostic_names)[0]
@@ -243,7 +466,7 @@ def test_next_step_forcing_names_is_prognostic(config: StepSelector):
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
 def test_next_step_forcing_names_is_diagnostic(config: StepSelector):
     data = dataclasses.asdict(config)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     step = get_step(config, img_shape)
     diagnostic_names = set(step.output_names).difference(step.input_names)
     name = list(diagnostic_names)[0]
@@ -257,7 +480,7 @@ def test_next_step_forcing_names_is_diagnostic(config: StepSelector):
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
 def test_step_applies_wrapper(config: StepSelector):
     torch.manual_seed(0)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     n_samples = 5
     step = get_step(config, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
@@ -276,12 +499,51 @@ def test_step_applies_wrapper(config: StepSelector):
         wrapper.assert_any_call(module)
 
 
+@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+def test_step_initializes_weights(config: StepSelector):
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    init_weights = unittest.mock.MagicMock(side_effect=lambda x: x)
+    step = get_step(config, img_shape, init_weights)
+    assert init_weights.called
+    call_args, call_kwargs = init_weights.call_args
+    assert len(call_args) == 1
+    assert len(call_kwargs) == 0
+    assert isinstance(call_args[0], list | nn.ModuleList)
+    assert len(call_args[0]) == len(step.modules)
+    for i, module in enumerate(step.modules):
+        assert isinstance(module, DummyWrapper)
+        assert call_args[0][i] is module.module
+
+
+@pytest.mark.parametrize("config", EXPORTABLE_SELECTOR_CONFIG_CASES)
+def test_export_step(config: StepSelector, very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 5
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    unscripted_output = step.step(input_data, next_step_input_data)
+    for name in step.output_names:
+        # informative check for nan values
+        torch.testing.assert_close(unscripted_output[name], unscripted_output[name])
+    exported = step.export(input_data, next_step_input_data)
+    output = exported.module()(input_data, next_step_input_data)
+    for name in step.output_names:
+        torch.testing.assert_close(output[name], unscripted_output[name])
+
+
 @pytest.mark.parametrize(
     "get_config",
     SELECTOR_GETTERS,
 )
 def test_load_config(
-    get_config: Callable[[Optional[pathlib.Path]], StepSelector],
+    get_config: Callable[[pathlib.Path | None], StepSelector],
 ):
     non_path_config: StepSelector = get_config(
         None
@@ -293,7 +555,7 @@ def test_load_config(
         get_scalar_dataset(all_names, fill_value=1.1).to_netcdf(temp_path / "stds.nc")
         config = get_config(temp_path)
         config.load()
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     step = get_step(config, img_shape)
     normalizer = step.normalizer
     assert normalizer.means.keys() == all_names
@@ -307,7 +569,7 @@ def test_load_config(
     SELECTOR_GETTERS,
 )
 def test_load_is_required_for_path_config(
-    get_config: Callable[[Optional[pathlib.Path]], StepSelector],
+    get_config: Callable[[pathlib.Path | None], StepSelector],
 ):
     non_path_config: StepSelector = get_config(
         None
@@ -318,6 +580,6 @@ def test_load_is_required_for_path_config(
         get_scalar_dataset(all_names, fill_value=0.1).to_netcdf(temp_path / "means.nc")
         get_scalar_dataset(all_names, fill_value=1.1).to_netcdf(temp_path / "stds.nc")
         config = get_config(temp_path)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     with pytest.raises(FileNotFoundError):
         get_step(config, img_shape)

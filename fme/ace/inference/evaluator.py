@@ -1,9 +1,11 @@
 import dataclasses
+import datetime
 import logging
 import os
-from typing import Callable, Optional, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import dacite
+import numpy as np
 import torch
 
 import fme
@@ -11,10 +13,11 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.getters import get_inference_data
-from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
+from fme.ace.inference.default_metadata import get_default_variable_metadata
 from fme.ace.inference.loop import DeriverABC, run_dataset_comparison
 from fme.ace.stepper import (
     Stepper,
@@ -24,6 +27,8 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -50,6 +55,51 @@ def validate_time_coarsen_config(
         )
 
 
+def resolve_variable_metadata(
+    dataset_metadata: Mapping[str, VariableMetadata],
+    stepper_metadata: Mapping[str, VariableMetadata],
+    stepper_all_names: Sequence[str],
+) -> dict[str, VariableMetadata]:
+    """
+    Resolve variable metadata by merging from the following sources: derived variables,
+    the dataset, the stepper, and finally a set of defaults. If there are conflicts on
+    variable metadata values, preference is given first to values from the stepper,
+    then from the dataset, and finally from default values.
+
+    Note that if not saved with the stepper, the variable metadata is not guaranteed to
+    be the same as that in the dataset used for training the stepper.
+
+    Args:
+        dataset_metadata: Metadata from the dataset.
+        stepper_metadata: Metadata from the stepper.
+        stepper_all_names: Variable names associated with the stepper.
+
+    Returns:
+        A mappping of variable names to metadata.
+    """
+    default_metadata = get_default_variable_metadata(version="era5_v1")
+    names_from_default = (
+        set(stepper_all_names) - (dataset_metadata.keys() | stepper_metadata.keys())
+    ) & default_metadata.keys()
+    if names_from_default:
+        logging.warning(
+            "Variable metadata for the following stepper variables were not found in "
+            "the variable metadata of the forcing dataset or stepper: "
+            f"{names_from_default}. Using default values for these variables instead. "
+            "Users should ensure that the default values are consistent with the "
+            "training dataset of the stepper."
+        )
+    resolved_metadata = (
+        default_metadata | dict(dataset_metadata) | dict(stepper_metadata)
+    )
+    resolved_metadata = {
+        name: resolved_metadata[name]
+        for name in stepper_all_names
+        if name in resolved_metadata
+    }
+    return get_derived_variable_metadata() | resolved_metadata
+
+
 @dataclasses.dataclass
 class InferenceEvaluatorConfig:
     """
@@ -71,6 +121,11 @@ class InferenceEvaluatorConfig:
         aggregator: Configuration for inference evaluator aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        allow_incompatible_dataset: If True, allow the forcing dataset used
+            for inference to be incompatible with the dataset used for stepper training.
+            This should be used with caution, as it may allow the stepper to make
+            scientifically invalid predictions, but it can allow running inference with
+            incorrectly formatted or missing grid information.
     """
 
     experiment_dir: str
@@ -78,7 +133,7 @@ class InferenceEvaluatorConfig:
     checkpoint_path: str
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
-    prediction_loader: Optional[InferenceDataLoaderConfig] = None
+    prediction_loader: InferenceDataLoaderConfig | None = None
     forward_steps_in_memory: int = 1
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
@@ -86,7 +141,8 @@ class InferenceEvaluatorConfig:
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
-    stepper_override: Optional[StepperOverrideConfig] = None
+    stepper_override: StepperOverrideConfig | None = None
+    allow_incompatible_dataset: bool = False
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -100,7 +156,7 @@ class InferenceEvaluatorConfig:
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def configure_wandb(
-        self, env_vars: Optional[dict] = None, resumable: bool = False, **kwargs
+        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
     ):
         config = to_flat_dict(dataclasses.asdict(self))
         self.logging.configure_wandb(
@@ -115,19 +171,24 @@ class InferenceEvaluatorConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
-    def get_data_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
-        variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    def get_data_writer(
+        self,
+        timestep: datetime.timedelta,
+        variable_metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+    ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             n_initial_conditions=self.loader.n_initial_conditions,
             n_timesteps=self.n_forward_steps,
-            timestep=data.timestep,
+            timestep=timestep,
             variable_metadata=variable_metadata,
-            coords=data.coords,
+            coords=coords,
+            dataset_metadata=DatasetMetadata.from_env(),
         )
 
 
-def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
+def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
         data_class=InferenceEvaluatorConfig,
@@ -188,7 +249,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     logging.info(f"Current device is {fme.get_device()}")
 
     stepper_config = config.load_stepper_config()
-    logging.info("Loading inference data")
+    logging.info("Initializing data loader")
     window_requirements = stepper_config.get_evaluation_window_data_requirements(
         n_forward_steps=config.forward_steps_in_memory
     )
@@ -204,26 +265,42 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     stepper = config.load_stepper()
     stepper.set_eval()
-    stepper.validate_inference_data(data)
+
+    if not config.allow_incompatible_dataset:
+        try:
+            stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
+        except IncompatibleDatasetInfo as err:
+            raise IncompatibleDatasetInfo(
+                "Inference dataset is not compatible with dataset used for stepper "
+                "training. Set allow_incompatible_dataset to True to ignore this "
+                f"error. The incompatiblity found was: {str(err)}"
+            ) from err
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     for batch in data.loader:
         initial_time = batch.time.isel(time=0)
         break
-    variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    variable_metadata = resolve_variable_metadata(
+        dataset_metadata=data.variable_metadata,
+        stepper_metadata=stepper.training_variable_metadata,
+        stepper_all_names=stepper_config.all_names,
+    )
+    dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
     aggregator = aggregator_config.build(
-        horizontal_coordinates=data.horizontal_coordinates,
-        timestep=data.timestep,
+        dataset_info=dataset_info,
         record_step_20=config.n_forward_steps >= 20,
         n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
-        variable_metadata=variable_metadata,
         initial_time=initial_time,
         channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
         output_dir=config.experiment_dir,
     )
 
-    writer = config.get_data_writer(data)
+    writer = config.get_data_writer(
+        timestep=data.timestep,
+        variable_metadata=variable_metadata,
+        coords=data.coords,
+    )
 
     timer.stop()
     logging.info("Starting inference")

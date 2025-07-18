@@ -1,5 +1,6 @@
+import logging
 import os
-from typing import Callable, List, Optional, Union
+from collections.abc import Callable
 
 import torch.distributed
 from torch.nn import SyncBatchNorm
@@ -8,7 +9,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from fme.core.device import get_device, using_gpu
 
-singleton: Optional["Distributed"] = None
+logger = logging.getLogger(__name__)
 
 
 class DummyWrapper(torch.nn.Module):
@@ -86,6 +87,22 @@ class Distributed:
             distributed = False
         return distributed
 
+    def get_sampler(
+        self,
+        dataset: torch.utils.data.Dataset,
+        shuffle: bool,
+        seed: int = 0,
+        drop_last: bool = False,
+    ) -> torch.utils.data.Sampler:
+        return torch.utils.data.DistributedSampler(
+            dataset,
+            shuffle=shuffle,
+            num_replicas=self.world_size,
+            rank=self.rank,
+            seed=seed,
+            drop_last=drop_last,
+        )
+
     def local_batch_size(self, batch_size: int) -> int:
         """
         Get the local batch size for the current process.
@@ -138,7 +155,7 @@ class Distributed:
             torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX)
         return tensor
 
-    def gather(self, tensor: torch.Tensor) -> Optional[List[torch.Tensor]]:
+    def gather(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
         """
         Gather a tensor from all processes to the root process.
 
@@ -154,7 +171,7 @@ class Distributed:
             A list of tensors, where the i-th element is the tensor
                 from the i-th process.
         """
-        gather_list: Optional[List[torch.Tensor]] = None
+        gather_list: list[torch.Tensor] | None = None
         if self.rank == 0:
             gather_list = [tensor] + [
                 torch.empty_like(tensor) for _ in range(self.world_size - 1)
@@ -166,7 +183,7 @@ class Distributed:
     def gather_irregular(
         self,
         tensor: torch.Tensor,
-    ) -> Optional[List[torch.Tensor]]:
+    ) -> list[torch.Tensor] | None:
         """
         Gather a tensor from all processes to the root process. The rank tensors
         may have diferent dimension lengths, but must have the same number of
@@ -218,14 +235,25 @@ class Distributed:
         else:
             return DummyWrapper(module)
 
+    def barrier(self):
+        """
+        Wait for all processes to reach this point.
+        """
+        if self._distributed:
+            logger.debug(f"Barrier on rank {self.rank}")
+            torch.distributed.barrier()
+
+
+singleton: Distributed | None = None
+
 
 def gather_irregular(
     tensor: torch.Tensor,
     reduce_max: Callable[[torch.Tensor], torch.tensor],
-    gather: Callable[[torch.Tensor], Optional[List[torch.Tensor]]],
+    gather: Callable[[torch.Tensor], list[torch.Tensor] | None],
     is_distributed: bool = False,
-    fill_value: Union[float, int] = 0.0,
-) -> Optional[List[torch.Tensor]]:
+    fill_value: float | int = 0.0,
+) -> list[torch.Tensor] | None:
     """
     Gather a tensor from all processes to the root process. The rank tensors
     may have diferent dimension lengths, but must have the same number of dimensions.
@@ -275,8 +303,8 @@ def gather_irregular(
 
 def pad_tensor_at_end(
     tensor: torch.Tensor,
-    dimension_difference: List[int],
-    fill_value: Union[float, int] = 0.0,
+    dimension_difference: list[int],
+    fill_value: float | int = 0.0,
 ):
     """Pad tensor by specified amount at end of each dimension.
     Note that `pad` format is in reverse dimension order.

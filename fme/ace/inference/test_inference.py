@@ -3,7 +3,6 @@
 import dataclasses
 import datetime
 import pathlib
-from typing import List
 
 import cftime
 import numpy as np
@@ -12,7 +11,6 @@ import torch
 import xarray as xr
 import yaml
 
-import fme
 from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
@@ -35,9 +33,11 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset_info import DatasetInfo
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
+from fme.core.ocean import OceanConfig
 from fme.core.testing import mock_wandb
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -50,11 +50,12 @@ class PlusOne(torch.nn.Module):
 
 def save_stepper(
     path: pathlib.Path,
-    in_names: List[str],
-    out_names: List[str],
+    in_names: list[str],
+    out_names: list[str],
     mean: float,
     std: float,
-    data_shape: List[int],
+    horizontal_coords: dict[str, xr.DataArray],
+    nz_interface: int,
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
@@ -66,16 +67,31 @@ def save_stepper(
             means={name: mean for name in all_names},
             stds={name: std for name in all_names},
         ),
+        ocean=OceanConfig(
+            surface_temperature_name="sst",
+            ocean_fraction_name="ocean_fraction",
+        ),
     )
-    area = torch.ones(data_shape[-2:], device=fme.get_device())
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.tensor(horizontal_coords["lat"].values, dtype=torch.float32),
+        lon=torch.tensor(horizontal_coords["lon"].values, dtype=torch.float32),
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
+        ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
     )
-    stepper = config.get_stepper(
-        img_shape=(data_shape[-2], data_shape[-1]),
-        gridded_operations=LatLonOperations(area),
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=timestep,
+        variable_metadata={
+            "prog": VariableMetadata(
+                units="m",
+                long_name="a prognostic variable",
+            ),
+        },
+    )
+    stepper = config.get_stepper(
+        dataset_info=dataset_info,
     )
     torch.save({"stepper": stepper.get_state()}, path)
 
@@ -84,15 +100,23 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     forward_steps_in_memory = 2
     # NOTE: number of inputs and outputs has to be the same for the PlusOne
     # stepper module to work properly
-    in_names = ["prog", "forcing_var", "DSWRFtoa"]
-    out_names = ["prog", "ULWRFtoa", "USWRFtoa"]
+    in_names = ["prog", "sst", "forcing_var", "DSWRFtoa"]
+    out_names = ["prog", "sst", "ULWRFtoa", "USWRFtoa"]
     stepper_path = tmp_path / "stepper"
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    nz_interface = 4
 
     dim_sizes = DimSizes(
         n_time=9,
         horizontal=horizontal,
         nz_interface=4,
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=["forcing_var", "DSWRFtoa", "sst", "ocean_fraction"],
+        dim_sizes=dim_sizes,
+        timestep_days=0.25,
+        save_vertical_coordinate=False,
     )
     save_stepper(
         stepper_path,
@@ -100,14 +124,8 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         out_names=out_names,
         mean=0.0,
         std=1.0,
-        data_shape=dim_sizes.shape_nd,
-    )
-    data = FV3GFSData(
-        path=tmp_path,
-        names=["forcing_var", "DSWRFtoa"],
-        dim_sizes=dim_sizes,
-        timestep_days=0.25,
-        save_vertical_coordinate=False,
+        horizontal_coords=data.horizontal_coords,
+        nz_interface=nz_interface,
     )
     dims = ["sample", "lat", "lon"]
     initial_condition = xr.Dataset(
@@ -115,7 +133,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
             "prog": xr.DataArray(
                 np.random.rand(2, 16, 32).astype(np.float32), dims=dims
             ),
-            "forcing": xr.DataArray(
+            "sst": xr.DataArray(
                 np.random.rand(2, 16, 32).astype(np.float32), dims=dims
             ),
             "DSWRFtoa": xr.DataArray(
@@ -152,6 +170,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         initial_condition=InitialConditionConfig(path=str(initial_condition_path)),
         forcing_loader=forcing_loader,
         data_writer=DataWriterConfig(save_prediction_files=True),
+        allow_incompatible_dataset=False,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -179,12 +198,23 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
                     assert metric in wandb_logs[i]
                     assert wandb_logs[i][metric] == val
 
-    ds = xr.open_dataset(tmp_path / "autoregressive_predictions.nc")
+    ds = xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    )
     # prognostic in
     assert "prog" in ds
+    assert ds["prog"].attrs == {  # this should come from the stepper metadata
+        "units": "m",
+        "long_name": "a prognostic variable",
+    }
     # diags in
     assert "ULWRFtoa" in ds
+    assert ds["ULWRFtoa"].attrs == {  # this should come from default metadata
+        "units": "W/m**2",
+        "long_name": "Upward LW radiative flux at TOA",
+    }
     assert "USWRFtoa" in ds
+
     # derived in
     assert "net_energy_flux_toa_into_atmosphere" in ds
     assert "units" in ds.net_energy_flux_toa_into_atmosphere.attrs
@@ -199,11 +229,11 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     np.testing.assert_allclose(
         ds["prog"].isel(time=1).values, ds["prog"].isel(time=0).values + 1, rtol=1e-6
     )
-    saved_data = xr.open_dataset(data.data_filename)
+    saved_data = xr.open_dataset(data.data_filename, decode_timedelta=False)
     ops = LatLonCoordinates(
-        lat=torch.as_tensor(saved_data["grid_yt"].values.astype(np.float32)),
-        lon=torch.as_tensor(saved_data["grid_xt"].values.astype(np.float32)),
-    ).gridded_operations
+        lat=torch.as_tensor(saved_data["lat"].values.astype(np.float32)),
+        lon=torch.as_tensor(saved_data["lon"].values.astype(np.float32)),
+    ).get_gridded_operations()
     # check that inference logs match raw output
     for i in range(1, config.n_forward_steps + 1):
         for log_name in wandb_logs[i]:

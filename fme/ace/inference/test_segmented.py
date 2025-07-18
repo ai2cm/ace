@@ -6,7 +6,6 @@ import os
 import pathlib
 import tempfile
 import unittest.mock
-from typing import List
 
 import cftime
 import numpy as np
@@ -26,9 +25,13 @@ from fme.ace.inference.inference import (
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
-from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
-from fme.core.dataset.config import XarrayDataConfig
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.coordinates import (
+    DimSize,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+)
+from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.dataset_info import DatasetInfo
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
 
@@ -42,11 +45,11 @@ class PlusOne(torch.nn.Module):
 
 def save_stepper(
     path: pathlib.Path,
-    in_names: List[str],
-    out_names: List[str],
+    in_names: list[str],
+    out_names: list[str],
     mean: float,
     std: float,
-    data_shape: List[int],
+    data_shape: list[int],
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
@@ -59,15 +62,18 @@ def save_stepper(
             stds={name: std for name in all_names},
         ),
     )
-    area = torch.ones(data_shape[-2:], device=fme.get_device())
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(data_shape[-2]), lon=torch.zeros(data_shape[-1])
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
     stepper = config.get_stepper(
-        img_shape=(data_shape[-2], data_shape[-1]),
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=timestep,
+        dataset_info=DatasetInfo(
+            horizontal_coordinates=horizontal_coordinate,
+            vertical_coordinate=vertical_coordinate,
+            timestep=timestep,
+        ),
     )
     torch.save({"stepper": stepper.get_state()}, path)
 
@@ -81,7 +87,7 @@ def test_inference_segmented_entrypoint():
         in_names = ["prog", "forcing_var"]
         out_names = ["prog", "diagnostic_var"]
         stepper_path = tmp_path / "stepper"
-        horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+        horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
 
         dim_sizes = DimSizes(
             n_time=18,
@@ -138,6 +144,7 @@ def test_inference_segmented_entrypoint():
             ),
             forcing_loader=forcing_loader,
             data_writer=DataWriterConfig(save_prediction_files=True),
+            allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info  # noqa: E501
         )
 
         # run one segment of 3 steps
@@ -165,10 +172,12 @@ def test_inference_segmented_entrypoint():
 
         # assert each segment generated output of correct duration
         ds_two_segments_0 = xr.open_dataset(
-            run_dir / "segment_0000" / "autoregressive_predictions.nc"
+            run_dir / "segment_0000" / "autoregressive_predictions.nc",
+            decode_timedelta=False,
         )
         ds_two_segments_1 = xr.open_dataset(
-            run_dir / "segment_0001" / "autoregressive_predictions.nc"
+            run_dir / "segment_0001" / "autoregressive_predictions.nc",
+            decode_timedelta=False,
         )
         assert len(ds_two_segments_0.time) == len(ds_two_segments_1.time)
 
@@ -176,11 +185,12 @@ def test_inference_segmented_entrypoint():
         # 3-step run. Before comparing, drop init_time and time coordinates, since
         # we don't expect these to match.
         ds_one_segment = xr.open_dataset(
-            tmp_path / "non_segmented_run" / "autoregressive_predictions.nc"
+            tmp_path / "non_segmented_run" / "autoregressive_predictions.nc",
+            decode_timedelta=False,
         )
         ds_two_segments_1 = ds_two_segments_1.drop_vars(["init_time", "time"])
         ds_one_segment = ds_one_segment.drop_vars(["init_time", "time"])
-        xr.testing.assert_identical(
+        xr.testing.assert_equal(
             ds_two_segments_1, ds_one_segment.isel(time=slice(3, None))
         )
 

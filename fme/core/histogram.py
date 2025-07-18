@@ -1,7 +1,8 @@
 import collections
 import logging
 from collections import namedtuple
-from typing import Dict, List, Literal, Mapping, Optional, Set, Tuple, Union
+from collections.abc import Mapping
+from typing import Literal
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -17,7 +18,7 @@ EPSILON = 1.0e-6
 
 def trim_zero_bins(
     counts: np.ndarray, bin_edges: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Trim bins with zero counts from the edges of the histogram.
 
@@ -81,7 +82,7 @@ class DynamicHistogram:
         """
         self._n_times = n_times
         self._n_bins = n_bins
-        self.bin_edges: Optional[np.ndarray] = None
+        self.bin_edges: np.ndarray | None = None
         self.counts = np.zeros((n_times, n_bins), dtype=np.int64)
         self._epsilon: float = EPSILON
 
@@ -174,15 +175,21 @@ class ComparedDynamicHistograms:
     variable plotted on the same axis.
     """
 
-    def __init__(self, n_bins: int, percentiles: Optional[List[float]] = None) -> None:
+    def __init__(
+        self,
+        n_bins: int,
+        percentiles: list[float] | None = None,
+        compute_percentile_frac: bool = False,
+    ) -> None:
         self.n_bins = n_bins
         percentiles = [99.9999] if percentiles is None else percentiles
         self.percentiles = [p for p in percentiles]
-        self.target_histograms: Optional[Mapping[str, DynamicHistogram]] = None
-        self.prediction_histograms: Optional[Mapping[str, DynamicHistogram]] = None
-        self._nan_masks: Optional[Mapping[str, Optional[torch.Tensor]]] = None
+        self.target_histograms: Mapping[str, DynamicHistogram] | None = None
+        self.prediction_histograms: Mapping[str, DynamicHistogram] | None = None
+        self._nan_masks: Mapping[str, torch.Tensor] | None = None
         self._time_dim = -2
-        self._variables: Set[str] = set()
+        self._variables: set[str] = set()
+        self._compute_percentile_frac = compute_percentile_frac
 
     def _check_overlapping_keys(self, target: TensorMapping, prediction: TensorMapping):
         if not self._variables:
@@ -255,10 +262,10 @@ class ComparedDynamicHistograms:
 
     def _get_histograms(
         self,
-    ) -> Dict[str, Dict[Literal["target", "prediction"], _Histogram]]:
+    ) -> dict[str, dict[Literal["target", "prediction"], _Histogram]]:
         if self.target_histograms is None or self.prediction_histograms is None:
             raise ValueError("No data has been added to the histogram")
-        return_dict: Dict[str, Dict[Literal["target", "prediction"], _Histogram]] = (
+        return_dict: dict[str, dict[Literal["target", "prediction"], _Histogram]] = (
             collections.defaultdict(dict)
         )
         for k in self.target_histograms:
@@ -276,7 +283,7 @@ class ComparedDynamicHistograms:
         return return_dict
 
     def _plot_histogram(
-        self, target_histogram: Optional[_Histogram], prediction_histogram
+        self, target_histogram: _Histogram | None, prediction_histogram
     ) -> matplotlib.figure.Figure:
         fig, ax = plt.subplots()
         for histogram, label, line_style, color in zip(
@@ -302,8 +309,8 @@ class ComparedDynamicHistograms:
         plt.tight_layout()
         return fig
 
-    def get_wandb(self) -> Dict[str, float]:
-        return_dict: Dict[str, Union[matplotlib.figure.Figure, float]] = {}
+    def get_wandb(self) -> dict[str, float]:
+        return_dict: dict[str, matplotlib.figure.Figure | float] = {}
 
         for field_name, histograms in self._get_histograms().items():
             target = histograms.get("target")
@@ -321,6 +328,14 @@ class ComparedDynamicHistograms:
                     return_dict[f"prediction/{p}th-percentile/{field_name}"] = quantile(
                         prediction.bin_edges, prediction.counts, p / 100.0
                     )
+                    if self._compute_percentile_frac and target is not None:
+                        return_dict[
+                            f"prediction_frac_of_target/{p}th-percentile/{field_name}"
+                        ] = (
+                            return_dict[f"prediction/{p}th-percentile/{field_name}"]
+                            / return_dict[f"target/{p}th-percentile/{field_name}"]
+                        )
+
         return return_dict
 
     def _get_single_dataset(

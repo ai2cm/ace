@@ -1,5 +1,4 @@
 import os
-from typing import Tuple, Type, Union
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,10 +26,10 @@ class LinearDownscaling(torch.nn.Module):
     def __init__(
         self,
         factor: int,
-        fine_img_shape: Tuple[int, int],
+        fine_img_shape: tuple[int, int],
         n_channels: int = 1,
     ):
-        super(LinearDownscaling, self).__init__()
+        super().__init__()
         self.img_shape = fine_img_shape
         self.n_channels = n_channels
         height, width = fine_img_shape
@@ -53,7 +52,7 @@ class LinearDownscaling(torch.nn.Module):
 
 class DummyModule(torch.nn.Module):
     def __init__(self):
-        super(DummyModule, self).__init__()
+        super().__init__()
 
     def forward(self, x):
         return x
@@ -199,18 +198,18 @@ def test_serialization(tmp_path):
     )
 
 
-@pytest.mark.parametrize("predict_residual", [True, False])
-@pytest.mark.parametrize("use_fine_topography", [True, False])
-def test_diffusion_model_train_and_generate(predict_residual, use_fine_topography):
-    fine_shape = (16, 32)
-    coarse_shape = (8, 16)
-    downscale_factor = 2
+def _get_diffusion_model(
+    coarse_shape,
+    downscale_factor,
+    predict_residual=True,
+    use_fine_topography=True,
+):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
 
-    model = DiffusionModelConfig(
+    return DiffusionModelConfig(
         module=DiffusionModuleRegistrySelector(
             "unet_diffusion_song", {"model_channels": 4}
         ),
@@ -227,6 +226,21 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
     ).build(coarse_shape, downscale_factor)
+
+
+@pytest.mark.parametrize("predict_residual", [True, False])
+@pytest.mark.parametrize("use_fine_topography", [True, False])
+def test_diffusion_model_train_and_generate(predict_residual, use_fine_topography):
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        predict_residual=predict_residual,
+        use_fine_topography=use_fine_topography,
+    )
+
+    assert model._get_fine_shape(coarse_shape) == fine_shape
 
     batch_size = 2
     if use_fine_topography:
@@ -263,7 +277,7 @@ def test_interleaved_samples_round_trip():
     batch = torch.concat([torch.ones(1, 5), torch.ones(1, 5) * 2], dim=0)
     with_combined_samples = _repeat_batch_by_samples(batch, n_samples)
     with_batch_sample_dims = _separate_interleaved_samples(
-        with_combined_samples, batch_size, n_samples
+        with_combined_samples, n_samples
     )
     assert with_batch_sample_dims.shape == (batch_size, n_samples, 5)
     assert torch.equal(batch, with_batch_sample_dims[:, 0])
@@ -329,8 +343,8 @@ def test_model_error_cases(model_config):
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
 
-    model_class: Union[Type[DownscalingModelConfig], Type[DiffusionModelConfig]]
-    selector: Union[Type[ModuleRegistrySelector], Type[DiffusionModuleRegistrySelector]]
+    model_class: type[DownscalingModelConfig] | type[DiffusionModelConfig]
+    selector: type[ModuleRegistrySelector] | type[DiffusionModuleRegistrySelector]
     if model_config == "deterministic":
         model_class = DownscalingModelConfig
         selector = ModuleRegistrySelector
@@ -391,3 +405,65 @@ def test_model_error_cases(model_config):
     batch.fine.topography = None
     with pytest.raises(ValueError):
         model.generate_on_batch(batch)
+
+
+def test_DiffusionModel_generate_on_batch_no_target():
+    fine_shape = (32, 32)
+    coarse_shape = (16, 16)
+    downscale_factor = 2
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        predict_residual=True,
+        use_fine_topography=True,
+    )
+
+    batch_size = 2
+    topography = torch.ones(batch_size, *fine_shape, device=get_device())
+
+    n_generated_samples = 2
+
+    coarse_batch = get_mock_batch([batch_size, *coarse_shape])
+    samples = model.generate_on_batch_no_target(
+        coarse_batch.data,
+        fine_topography=topography,
+        n_samples=n_generated_samples,
+    )
+
+    assert samples["x"].shape == (
+        batch_size,
+        n_generated_samples,
+        *fine_shape,
+    )
+
+
+def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
+    # We currently require an input coarse shape for accounting, but the model
+    # can handle arbitrary input sizes
+
+    coarse_shape = (16, 16)
+    downscale_factor = 2
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        predict_residual=True,
+        use_fine_topography=True,
+    )
+    n_ensemble = 2
+    batch_size = 2
+
+    for alternative_input_shape in [(8, 8), (32, 32)]:
+        fine_shape = tuple(dim * downscale_factor for dim in alternative_input_shape)
+        topography = torch.ones(batch_size, *fine_shape, device=get_device())
+        coarse_batch = get_mock_batch([batch_size, *alternative_input_shape])
+        samples = model.generate_on_batch_no_target(
+            coarse_batch.data,
+            fine_topography=topography,
+            n_samples=n_ensemble,
+        )
+
+        assert samples["x"].shape == (
+            batch_size,
+            n_ensemble,
+            *fine_shape,
+        )

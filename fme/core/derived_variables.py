@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import Callable, Dict, MutableMapping, Optional, Tuple
+from collections.abc import Callable, MutableMapping
 
 import torch
 
@@ -13,18 +13,18 @@ DerivedVariableFunc = Callable[[AtmosphereData, datetime.timedelta], torch.Tenso
 
 
 _DERIVED_VARIABLE_REGISTRY: MutableMapping[
-    str, Tuple[DerivedVariableFunc, VariableMetadata]
+    str, tuple[DerivedVariableFunc, VariableMetadata]
 ] = {}
 
 
-def get_derived_variable_metadata() -> Dict[str, VariableMetadata]:
+def get_derived_variable_metadata() -> dict[str, VariableMetadata]:
     return {
         **get_atmosphere_derived_variable_metadata(),
         **get_ocean_derived_variable_metadata(),
     }
 
 
-def get_atmosphere_derived_variable_metadata() -> Dict[str, VariableMetadata]:
+def get_atmosphere_derived_variable_metadata() -> dict[str, VariableMetadata]:
     return {
         label: metadata for label, (_, metadata) in _DERIVED_VARIABLE_REGISTRY.items()
     }
@@ -113,8 +113,7 @@ def net_energy_flux_sfc_into_atmosphere(
     )
 )
 def net_energy_flux_into_atmospheric_column(
-    data: AtmosphereData,
-    timestep: datetime.timedelta,
+    data: AtmosphereData, timestep: datetime.timedelta
 ):
     return data.net_energy_flux_into_atmosphere
 
@@ -162,13 +161,18 @@ def implied_tendency_of_total_energy_ace2_path_due_to_advection(
     return implied_column_heating
 
 
+@register(VariableMetadata("m/s", "Windspeed at 10m above surface"))
+def windspeed_at_10m(data: AtmosphereData, timestep: datetime.timedelta):
+    return data.windspeed_at_10m
+
+
 def _compute_derived_variable(
     data: TensorDict,
-    vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
+    vertical_coordinate: HasAtmosphereVerticalIntegral | None,
     timestep: datetime.timedelta,
     label: str,
     derived_variable_func: DerivedVariableFunc,
-    forcing_data: Optional[TensorDict] = None,
+    forcing_data: TensorDict | None = None,
 ) -> TensorDict:
     """Computes a derived variable and adds it to the given data.
 
@@ -214,9 +218,9 @@ def _compute_derived_variable(
 
 def compute_derived_quantities(
     data: TensorDict,
-    vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
+    vertical_coordinate: HasAtmosphereVerticalIntegral | None,
     timestep: datetime.timedelta,
-    forcing_data: Optional[TensorDict] = None,
+    forcing_data: TensorDict | None = None,
 ) -> TensorDict:
     """Computes all derived quantities from the given data."""
     for label in _DERIVED_VARIABLE_REGISTRY:

@@ -1,18 +1,19 @@
 import os
 import unittest.mock
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import pytest
 import yaml
 
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import evaluator
-from fme.downscaling.datasets_new import DataLoaderConfig
+from fme.downscaling.datasets import PairedDataLoaderConfig
 from fme.downscaling.models import (
     DiffusionModelConfig,
     DownscalingModelConfig,
@@ -36,13 +37,20 @@ def create_evaluator_config(tmp_path, model: Mapping[str, Any], n_samples: int):
     file_path = f"{this_file}/configs/test_evaluator_config.yaml"
     experiment_dir = tmp_path / "output"
     experiment_dir.mkdir()
-    with open(file_path, "r") as file:
+    with open(file_path) as file:
         config = yaml.safe_load(file)
     config["data"]["fine"] = [{"data_path": str(paths.fine)}]
     config["data"]["coarse"] = [{"data_path": str(paths.coarse)}]
     config["experiment_dir"] = str(experiment_dir)
     config["model"] = model
     config["n_samples"] = n_samples
+    config["events"] = [
+        {
+            "name": "test_event",
+            "date": "2000-01-01T00:00",
+            "n_samples": n_samples,
+        }
+    ]
 
     out_path = tmp_path / "evaluator-config.yaml"
     with open(out_path, "w") as file:
@@ -115,26 +123,34 @@ def get_trainer_model_config(model_type: str):
     "evaluator_model_config, model_type, num_samples",
     [
         pytest.param(
-            {"checkpoint": "unused value"},
+            {"checkpoint_path": "unused value"},
             "deterministic",
             1,
             id="checkpoint_deterministic_model",
         ),
         pytest.param(
-            {"checkpoint": "unused value"},
+            {"checkpoint_path": "unused value"},
             "diffusion",
             1,
             id="checkpoint_diffusion_model_single_sample",
         ),
         pytest.param(
-            {"checkpoint": "unused value"},
+            {"checkpoint_path": "unused value"},
             "diffusion",
             2,
             id="checkpoint_diffusion_model_multiple_samples",
         ),
     ],
 )
-def test_evaluator_runs(tmp_path, evaluator_model_config, model_type, num_samples):
+def test_evaluator_runs(
+    tmp_path,
+    evaluator_model_config,
+    model_type,
+    num_samples,
+    very_fast_only: bool,
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     """Check that evaluator runs with different models."""
     evaluator_config_path = create_evaluator_config(
         tmp_path, evaluator_model_config, num_samples
@@ -144,11 +160,11 @@ def test_evaluator_runs(tmp_path, evaluator_model_config, model_type, num_sample
 
     trainer_model_config = get_trainer_model_config(model_type)
 
-    if "checkpoint" in evaluator_model_config:
-        with open(evaluator_config_path, "r") as file:
+    if "checkpoint_path" in evaluator_model_config:
+        with open(evaluator_config_path) as file:
             config = yaml.safe_load(file)
 
-        data_loader_config = DataLoaderConfig(
+        data_loader_config = PairedDataLoaderConfig(
             fine=[XarrayDataConfig(paths.fine)],
             coarse=[XarrayDataConfig(paths.coarse)],
             batch_size=2,
@@ -166,10 +182,10 @@ def test_evaluator_runs(tmp_path, evaluator_model_config, model_type, num_sample
             logging=LoggingConfig(),
         ).build()
 
-        trainer.save_all_checkpoints(float("-inf"))
+        trainer.save_epoch_checkpoints()
 
         with open(evaluator_config_path, "w") as file:
-            config["model"] = {"checkpoint": trainer.epoch_checkpoint_path}
+            config["model"] = {"checkpoint_path": trainer.epoch_checkpoint_path}
             yaml.dump(config, file)
 
     with unittest.mock.patch(

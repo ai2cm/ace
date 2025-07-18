@@ -1,19 +1,22 @@
 import copy
 import dataclasses
+import datetime
 import logging
 import os
-from typing import Literal, Optional, Sequence, Union
+from collections.abc import Mapping, Sequence
+from typing import Literal
 
 import dacite
+import numpy as np
 import torch
 import xarray as xr
+from xarray.coding.times import CFDatetimeCoder
 
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator.inference import InferenceAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.getters import get_forcing_data
-from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -21,6 +24,7 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
@@ -29,15 +33,16 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.derived_variables import get_derived_variable_metadata
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
 
-from .evaluator import validate_time_coarsen_config
+from .evaluator import resolve_variable_metadata, validate_time_coarsen_config
 
-StartIndices = Union[InferenceInitialConditionIndices, ExplicitIndices, TimestampList]
+StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
 
 
 @dataclasses.dataclass
@@ -61,10 +66,15 @@ class InitialConditionConfig:
 
     path: str
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
-    start_indices: Optional[StartIndices] = None
+    start_indices: StartIndices | None = None
 
     def get_dataset(self) -> xr.Dataset:
-        ds = xr.open_dataset(self.path, engine=self.engine, use_cftime=True)
+        ds = xr.open_dataset(
+            self.path,
+            engine=self.engine,
+            decode_times=CFDatetimeCoder(use_cftime=True),
+            decode_timedelta=False,
+        )
         return self._subselect_initial_conditions(ds)
 
     def _subselect_initial_conditions(self, ds: xr.Dataset) -> xr.Dataset:
@@ -143,6 +153,11 @@ class InferenceConfig:
         aggregator: Configuration for inference aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        allow_incompatible_dataset: If True, allow the dataset used for inference
+            to be incompatible with the dataset used for stepper training. This should
+            be used with caution, as it may allow the stepper to make scientifically
+            invalid predictions, but it can allow running inference with incorrectly
+            formatted or missing grid information.
     """
 
     experiment_dir: str
@@ -158,7 +173,8 @@ class InferenceConfig:
     aggregator: InferenceAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceAggregatorConfig()
     )
-    stepper_override: Optional[StepperOverrideConfig] = None
+    stepper_override: StepperOverrideConfig | None = None
+    allow_incompatible_dataset: bool = False
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -172,7 +188,7 @@ class InferenceConfig:
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def configure_wandb(
-        self, env_vars: Optional[dict] = None, resumable: bool = False, **kwargs
+        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
     ):
         config = to_flat_dict(dataclasses.asdict(self))
         self.logging.configure_wandb(
@@ -187,23 +203,29 @@ class InferenceConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
-    def get_data_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
-        variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    def get_data_writer(
+        self,
+        n_initial_conditions: int,
+        timestep: datetime.timedelta,
+        coords: Mapping[str, np.ndarray],
+        variable_metadata: Mapping[str, VariableMetadata],
+    ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
-            n_initial_conditions=data.n_initial_conditions,
+            n_initial_conditions=n_initial_conditions,
             n_timesteps=self.n_forward_steps,
-            timestep=data.timestep,
+            timestep=timestep,
             variable_metadata=variable_metadata,
-            coords=data.coords,
+            coords=coords,
+            dataset_metadata=DatasetMetadata.from_env(),
         )
 
 
 def main(
     yaml_config: str,
-    segments: Optional[int] = None,
-    override_dotlist: Optional[Sequence[str]] = None,
+    segments: int | None = None,
+    override_dotlist: Sequence[str] | None = None,
 ):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
@@ -248,7 +270,7 @@ def run_inference_from_config(config: InferenceConfig):
     )
     stepper = config.load_stepper()
     stepper.set_eval()
-    logging.info("Initializing forcing data loaded")
+    logging.info("Initializing forcing data loader")
     data = get_forcing_data(
         config=config.forcing_loader,
         total_forward_steps=config.n_forward_steps,
@@ -257,18 +279,34 @@ def run_inference_from_config(config: InferenceConfig):
         surface_temperature_name=stepper.surface_temperature_name,
         ocean_fraction_name=stepper.ocean_fraction_name,
     )
-    stepper.validate_inference_data(data)
+    if not config.allow_incompatible_dataset:
+        try:
+            stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
+        except IncompatibleDatasetInfo as err:
+            raise IncompatibleDatasetInfo(
+                "Inference dataset is not compatible with dataset used for stepper "
+                "training. Set allow_incompatible_dataset to True to ignore this "
+                f"error. The incompatiblity found was: {str(err)}"
+            ) from err
 
-    variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    variable_metadata = resolve_variable_metadata(
+        dataset_metadata=data.variable_metadata,
+        stepper_metadata=stepper.training_variable_metadata,
+        stepper_all_names=stepper_config.all_names,
+    )
+    dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
     aggregator = config.aggregator.build(
-        horizontal_coordinates=data.horizontal_coordinates,
+        dataset_info=dataset_info,
         n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
-        timestep=data.timestep,
-        variable_metadata=variable_metadata,
         output_dir=config.experiment_dir,
     )
 
-    writer = config.get_data_writer(data)
+    writer = config.get_data_writer(
+        n_initial_conditions=data.n_initial_conditions,
+        timestep=data.timestep,
+        coords=data.coords,
+        variable_metadata=variable_metadata,
+    )
 
     timer.stop()
     logging.info("Starting inference")

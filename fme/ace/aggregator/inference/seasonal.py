@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Dict, Mapping, Optional, Union, cast
+from collections.abc import Mapping
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -18,12 +19,12 @@ class SeasonalAggregator:
     def __init__(
         self,
         ops: GriddedOperations,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         self._area_weighted_mean = ops.area_weighted_mean
         self._variable_metadata = variable_metadata
-        self._target_dataset: Optional[xr.Dataset] = None
-        self._gen_dataset: Optional[xr.Dataset] = None
+        self._target_dataset: xr.Dataset | None = None
+        self._gen_dataset: xr.Dataset | None = None
 
     @torch.no_grad()
     def record_batch(
@@ -43,29 +44,29 @@ class SeasonalAggregator:
         if self._target_dataset is None:
             self._target_dataset = target_ds.groupby(
                 target_ds.valid_time.dt.season
-            ).sum(dim="stacked_sample_time")
+            ).sum(dim="stacked_sample_time", skipna=False)
         else:
             self._target_dataset = _add_dataarray(
                 self._target_dataset,
                 target_ds.groupby(target_ds.valid_time.dt.season).sum(
-                    dim="stacked_sample_time"
+                    dim="stacked_sample_time", skipna=False
                 ),
             )
 
         if self._gen_dataset is None:
             self._gen_dataset = gen_ds.groupby(gen_ds.valid_time.dt.season).sum(
-                dim="stacked_sample_time"
+                dim="stacked_sample_time", skipna=False
             )
         else:
             self._gen_dataset = _add_dataarray(
                 self._gen_dataset,
                 gen_ds.groupby(gen_ds.valid_time.dt.season).sum(
-                    dim="stacked_sample_time"
+                    dim="stacked_sample_time", skipna=False
                 ),
             )
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         if self._target_dataset is None or self._gen_dataset is None:
             raise ValueError("No data has been recorded yet.")
         dist = Distributed.get_instance()
@@ -86,8 +87,8 @@ class SeasonalAggregator:
         target = cast(xr.Dataset, target / target["counts"])  # type: ignore
         gen = cast(xr.Dataset, gen / gen["counts"])  # type: ignore
         bias = gen - target
-        plots: Dict[str, Image] = {}
-        metric_logs: Dict[str, float] = {}
+        plots: dict[str, Image] = {}
+        metric_logs: dict[str, float] = {}
 
         for name in gen.data_vars.keys():
             if name == "counts":
@@ -151,6 +152,7 @@ class SeasonalAggregator:
 
             mse_tensor = self._area_weighted_mean(
                 torch.as_tensor(bias[name].values ** 2),
+                name=name,
             )
             for i, season in enumerate(bias[name].season.values):
                 rmse = float(mse_tensor[i].sqrt().numpy())
@@ -164,7 +166,7 @@ class SeasonalAggregator:
 
         if len(label) > 0:
             label = label + "/"
-        logs: Dict[str, Union[Image, float]] = {}
+        logs: dict[str, Image | float] = {}
         logs.update({f"{label}{name}": plots[name] for name in plots.keys()})
         logs.update({f"{label}{name}": val for name, val in metric_logs.items()})
         return logs
@@ -199,7 +201,7 @@ def get_r2(da: xr.DataArray, target: xr.DataArray) -> float:
     return float(1 - SS_pred / SS_ref)
 
 
-def _reduce_datasets(dist: Distributed, dataset: xr.Dataset) -> Optional[xr.Dataset]:
+def _reduce_datasets(dist: Distributed, dataset: xr.Dataset) -> xr.Dataset | None:
     """
     Add the dataset across all processes.
 

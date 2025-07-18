@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 import logging
-from typing import Tuple, Union
 
 import numpy as np
 import pytest
@@ -18,9 +17,9 @@ from fme.ace.models.healpix.healpix_layers import HEALPixPadding
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
 from fme.ace.stepper import SingleModuleStepperConfig
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HEALPixCoordinates, HybridSigmaPressureCoordinate
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import NormalizationConfig
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -146,12 +145,7 @@ def insolation_data():
     return generate_insolation_data
 
 
-@pytest.mark.parametrize(
-    "shape",
-    [
-        pytest.param((8, 16)),
-    ],
-)
+@pytest.mark.parametrize("shape", [pytest.param((8, 16))])
 def test_hpx_init(shape):
     in_channels = 7
     out_channels = 7
@@ -196,16 +190,19 @@ def test_hpx_init(shape):
             )
         ),
     }
-    area = th.ones((1, 16, 32)).to(device)
+    horizontal_coordinates = HEALPixCoordinates(
+        th.arange(12), th.arange(8), th.arange(8)
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=th.arange(7), bk=th.arange(7)
     ).to(device)
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
-        img_shape=shape,
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
+        dataset_info=DatasetInfo(
+            horizontal_coordinates=horizontal_coordinates,
+            vertical_coordinate=vertical_coordinate,
+            timestep=TIMESTEP,
+        ),
     )
     assert len(stepper.modules) == 1
     assert type(stepper.modules[0].module) is HEALPixRecUNet
@@ -767,8 +764,8 @@ def test_UNetDecoder_reset():
 
 
 def compare_output(
-    output_1: Union[th.Tensor, Tuple[th.Tensor, ...]],
-    output_2: Union[th.Tensor, Tuple[th.Tensor, ...]],
+    output_1: th.Tensor | tuple[th.Tensor, ...],
+    output_2: th.Tensor | tuple[th.Tensor, ...],
     rtol: float = 1e-5,
     atol: float = 1e-5,
 ) -> bool:
@@ -801,7 +798,7 @@ def compare_output(
             else:
                 if not out_1 == out_2:
                     return False
-    elif isinstance(output_1, (list, tuple)) and isinstance(output_2, (list, tuple)):
+    elif isinstance(output_1, list | tuple) and isinstance(output_2, list | tuple):
         if len(output_1) != len(output_2):
             print(
                 f"Length mismatch: output_1 {len(output_1)}, output_2 {len(output_2)}"
