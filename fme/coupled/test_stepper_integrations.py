@@ -1,6 +1,7 @@
 import pathlib
 from unittest.mock import Mock
 
+import pytest
 import torch
 
 import fme
@@ -126,7 +127,10 @@ def test_stepper_gradient_accumulation_integration():
     assert ocean_module.mock_caller.call_count == 2
 
 
-def test_stepper_parameter_init_integration(tmp_path: pathlib.Path):
+@pytest.mark.parametrize("from_coupled_stepper_state", [True, False])
+def test_stepper_parameter_init_integration(
+    tmp_path: pathlib.Path, from_coupled_stepper_state: bool
+):
     ocean_in_names = ["o_prog", "o_sfc_temp", "o_mask", "a_diag1"]
     ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag1", "o_diag2"]
     atmos_in_names = ["a_prog1", "a_prog2", "a_sfc_temp", "ocean_frac", "o_prog"]
@@ -153,12 +157,26 @@ def test_stepper_parameter_init_integration(tmp_path: pathlib.Path):
             type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
         ),
     )
-    ocean_stepper = config.ocean.stepper.get_stepper(dataset_info.ocean)
-    atmos_stepper = config.atmosphere.stepper.get_stepper(dataset_info.atmosphere)
-    ocean_path = tmp_path / "ocean.pt"
-    atmos_path = tmp_path / "atmos.pt"
-    torch.save({"stepper": ocean_stepper.get_state()}, ocean_path)
-    torch.save({"stepper": atmos_stepper.get_state()}, atmos_path)
+    if from_coupled_stepper_state:
+        # mimic CoupledStepper pretraining
+        pretrained_coupled_stepper = config.get_stepper(dataset_info)
+        ckpt_path = str(tmp_path / "ckpt.pt")
+        ocean_path = None
+        atmos_path = None
+        torch.save({"stepper": pretrained_coupled_stepper.get_state()}, ckpt_path)
+        ocean_state = pretrained_coupled_stepper.ocean.modules.state_dict()
+        atmos_state = pretrained_coupled_stepper.atmosphere.modules.state_dict()
+    else:
+        # mimic separate Stepper pretraining runs
+        ocean_stepper = config.ocean.stepper.get_stepper(dataset_info.ocean)
+        atmos_stepper = config.atmosphere.stepper.get_stepper(dataset_info.atmosphere)
+        ckpt_path = None
+        ocean_path = str(tmp_path / "ocean.pt")
+        atmos_path = str(tmp_path / "atmos.pt")
+        torch.save({"stepper": ocean_stepper.get_state()}, ocean_path)
+        torch.save({"stepper": atmos_stepper.get_state()}, atmos_path)
+        ocean_state = ocean_stepper.modules.state_dict()
+        atmos_state = atmos_stepper.modules.state_dict()
     config = get_stepper_config(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
@@ -175,16 +193,13 @@ def test_stepper_parameter_init_integration(tmp_path: pathlib.Path):
         atmosphere_builder=ModuleSelector(
             type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
         ),
-        ocean_parameter_init=ParameterInitializationConfig(
-            weights_path=str(ocean_path)
-        ),
+        ocean_parameter_init=ParameterInitializationConfig(weights_path=ocean_path),
         atmosphere_parameter_init=ParameterInitializationConfig(
-            weights_path=str(atmos_path)
+            weights_path=atmos_path
         ),
+        checkpoint_path=ckpt_path,
     )
     coupled_stepper = config.get_stepper(dataset_info)
-    ocean_state = ocean_stepper.modules.state_dict()
-    atmos_state = atmos_stepper.modules.state_dict()
     coupled_ocean_state = coupled_stepper.ocean.modules.state_dict()
     coupled_atmos_state = coupled_stepper.atmosphere.modules.state_dict()
     for name, param in ocean_state.items():
