@@ -1,0 +1,2 @@
+group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|override|retries
+ft-1y8prir2-20ep-cosine_annealing|ace-samudra-coupled-cm4|1y8prir2|best_inference_ckpt|skip|urgent|ceres|5
