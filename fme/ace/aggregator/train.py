@@ -31,7 +31,9 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         Args:
             label: Label to prepend to all log keys.
         """
-        logs = {f"{label}/mean/loss": self._loss / self._n_batches}
+        logs = {}
+        if self._n_batches > 0:
+            logs[f"{label}/mean/loss"] = self._loss / self._n_batches
         dist = Distributed.get_instance()
         for key in sorted(logs.keys()):
             logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())

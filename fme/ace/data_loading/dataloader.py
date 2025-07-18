@@ -1,7 +1,7 @@
 import abc
 import logging
 from collections.abc import Callable, Iterator
-from typing import Any, final
+from typing import Any, Generic, TypeVar, final
 
 import numpy as np
 import torch
@@ -117,10 +117,16 @@ class DataLoaderABC(abc.ABC):
         pass
 
 
-class TorchDataLoader(DataLoaderABC):
+T = TypeVar("T")
+
+
+class GenericTorchDataLoader(Generic[T]):
+    SelfType = TypeVar("SelfType", bound="GenericTorchDataLoader")
+
+    @final
     def __init__(
         self,
-        loader: torch.utils.data.DataLoader[BatchData],
+        loader: torch.utils.data.DataLoader[T],
         sampler: torch.utils.data.Sampler,
         dataset: torch.utils.data.Dataset[tuple[TensorDict, xr.DataArray]],
     ):
@@ -135,37 +141,48 @@ class TorchDataLoader(DataLoaderABC):
         self._sampler = sampler
         self._dataset = dataset
 
-    def __iter__(self) -> Iterator[BatchData]:
+    @final
+    def __iter__(self) -> Iterator[T]:
         return iter(self._loader)
 
+    @final
     def __len__(self) -> int:
         return len(self._loader)
 
-    def __next__(self) -> BatchData:
+    @final
+    def __next__(self) -> T:
         return next(self._loader)
 
     @property
+    @final
     def batch_size(self) -> int:
         return self._loader.batch_size
 
     @property
+    @final
     def n_samples(self) -> int:
         return len(self) * self.batch_size
 
+    @final
     def log_info(self, name: str):
         logging.info(f"{name} data: {self.n_samples} samples, {len(self)} batches")
         logging.info(f"{name} data: first sample's initial time: {self._first_time}")
         logging.info(f"{name} data: last sample's initial time: {self._last_time}")
 
     @property
+    @final
     def _first_time(self) -> Any:
         return self._dataset[0][1].values[0]
 
     @property
+    @final
     def _last_time(self) -> Any:
         return self._dataset[-1][1].values[0]
 
-    def subset(self, start: int) -> "TorchDataLoader":
+    @final
+    def subset(self: SelfType, start: int) -> SelfType:
+        if start == 0:
+            return self
         # how many *examples* to drop, not batches
         n_skip = start * self._loader.batch_size
 
@@ -189,15 +206,20 @@ class TorchDataLoader(DataLoaderABC):
             multiprocessing_context=self._loader.multiprocessing_context,
             persistent_workers=self._loader.persistent_workers,
         )
-        return TorchDataLoader(
+        return self.__class__(
             sub_loader,
             sampler=sub_sampler,
             dataset=sub_ds,
         )
 
+    @final
     def set_epoch(self, epoch: int):
         if isinstance(self._sampler, torch.utils.data.DistributedSampler):
             self._sampler.set_epoch(epoch)
+
+
+class TorchDataLoader(GenericTorchDataLoader[BatchData], DataLoaderABC):
+    pass
 
 
 def random_columns_no_replacement(N, M, seed=None):

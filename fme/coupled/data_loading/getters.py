@@ -18,6 +18,7 @@ from fme.coupled.data_loading.data_typing import (
     CoupledDatasetItem,
     CoupledDatasetProperties,
 )
+from fme.coupled.data_loading.dataloader import CoupledDataLoader
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -159,7 +160,7 @@ def get_gridded_data(
         )
 
     return GriddedData(
-        loader=dataloader,
+        loader=CoupledDataLoader(dataloader, sampler=sampler, dataset=dataset),
         properties=properties,
         sampler=sampler,
     )
