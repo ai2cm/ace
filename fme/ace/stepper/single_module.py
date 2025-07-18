@@ -17,6 +17,10 @@ from fme.ace.requirements import DataRequirements, PrognosticStateDataRequiremen
 from fme.ace.stepper.parameter_init import (
     ParameterInitializationConfig,
     ParameterInitializer,
+    StepperWeightsAndHistory,
+    Weights,
+    WeightsAndHistoryLoader,
+    null_weights_and_history,
 )
 from fme.core.coordinates import (
     NullPostProcessFn,
@@ -59,11 +63,10 @@ from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
-Weights = list[Mapping[str, Any]]
-StepperWeightsAndHistory = tuple[Weights, TrainingHistory]
 
-
-def _load_weights_and_history(path: str) -> StepperWeightsAndHistory:
+def load_weights_and_history(path: str | None) -> StepperWeightsAndHistory:
+    if path is None:
+        return null_weights_and_history()
     stepper = load_stepper(path)
     return_weights: Weights = []
     for module in stepper.modules:
@@ -182,23 +185,19 @@ class SingleModuleStepperConfig:
         self.load()
         return dataclasses.asdict(self)
 
-    def get_parameter_initializer(self) -> ParameterInitializer:
-        """
-        Get the parameter initializer for this stepper configuration.
-        """
-        return self.parameter_init.build(
-            load_weights_and_history=_load_weights_and_history
-        )
-
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
         apply_parameter_init: bool = True,
+        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
     ) -> "Stepper":
         """
         Args:
             dataset_info: Information about the training dataset.
             apply_parameter_init: Whether to apply parameter initialization.
+            load_weights_and_history: Function for loading weights and history.
+                Default implementation loads a Trainer checkpoint containing
+                a Stepper.
         """
         logging.info("Initializing stepper from provided legacy config")
         normalizer = self.normalization.build(self.normalize_names)
@@ -216,6 +215,7 @@ class SingleModuleStepperConfig:
         return new_config.get_stepper(
             dataset_info=dataset_info,
             apply_parameter_init=apply_parameter_init,
+            load_weights_and_history=load_weights_and_history,
         )
 
     def get_ocean(self) -> OceanConfig | None:
@@ -466,14 +466,11 @@ class ExistingStepperConfig:
             n_forward_steps
         )
 
-    def get_parameter_initializer(self) -> ParameterInitializer:
-        """Get a parameter initializer for this stepper configuration."""
-        return self._stepper_config.get_parameter_initializer()
-
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
         apply_parameter_init: bool = True,
+        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
     ):
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
         return Stepper.from_state(self._load_checkpoint()["stepper"])
@@ -723,16 +720,23 @@ class StepperConfig:
         dataset_info: DatasetInfo,
         apply_parameter_init: bool = True,
         training_history: TrainingHistory | None = None,
+        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
     ):
         """
         Args:
             dataset_info: Information about the training dataset.
             apply_parameter_init: Whether to apply parameter initialization.
             training_history: History of the stepper's training jobs.
+            load_weights_and_history: Function for loading weights and history.
+                Default implementation loads a Trainer checkpoint containing
+                a Stepper.
+
         """
         logging.info("Initializing stepper from provided config")
         if apply_parameter_init:
-            parameter_initializer = self.get_parameter_initializer()
+            parameter_initializer = self.get_parameter_initializer(
+                load_weights_and_history
+            )
         else:
             parameter_initializer = ParameterInitializer()
         step = self.step.get_step(
@@ -875,12 +879,15 @@ class StepperConfig:
         self.step, new_state = replace_multi_call(self.step, multi_call, state)
         return new_state
 
-    def get_parameter_initializer(self) -> ParameterInitializer:
+    def get_parameter_initializer(
+        self,
+        load_weights_and_history: WeightsAndHistoryLoader,
+    ) -> ParameterInitializer:
         """
         Get the parameter initializer for this stepper configuration.
         """
         return self.parameter_init.build(
-            load_weights_and_history=_load_weights_and_history
+            load_weights_and_history=load_weights_and_history
         )
 
 
