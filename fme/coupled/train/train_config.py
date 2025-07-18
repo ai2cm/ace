@@ -96,6 +96,7 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        checkpoint_every_n_batches: How often to save checkpoints.
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
@@ -124,6 +125,7 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
+    checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = True

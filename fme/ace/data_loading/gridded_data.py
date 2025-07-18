@@ -76,13 +76,18 @@ class GriddedData(GriddedDataABC[BatchData]):
 
     @property
     def loader(self) -> DataLoader[BatchData]:
+        return self._get_gpu_loader(self._loader)
+
+    def subset_loader(self, start_batch: int) -> DataLoader[BatchData]:
+        return self._get_gpu_loader(self._loader.subset(start_batch))
+
+    def _get_gpu_loader(
+        self, base_loader: DataLoader[BatchData]
+    ) -> DataLoader[BatchData]:
         def modify_and_on_device(batch: BatchData) -> BatchData:
             return self._modifier(batch).to_device()
 
-        return SizedMap(modify_and_on_device, self._loader)
-
-    def subset_loader(self, start: int) -> DataLoader[BatchData]:
-        return self._loader.subset(start)
+        return SizedMap(modify_and_on_device, base_loader)
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
