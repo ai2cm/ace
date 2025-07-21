@@ -22,6 +22,7 @@ from .main import (
 from .shape_helpers import (
     _check_all_datasets_compatible_sample_dim,
     _check_batch_dims_for_recording,
+    upsample_tensor,
 )
 
 
@@ -316,3 +317,9 @@ def test__get_spectrum_metrics():
     assert spectrum_metrics["positive_norm_bias/x"] == 0.6
     assert spectrum_metrics["negative_norm_bias/x"] == -0.2
     assert spectrum_metrics["mean_abs_norm_bias/x"] == 0.8
+
+
+def test_upsample_tensor():
+    t = torch.tensor([[1, 2], [3, 4]])
+    expected = torch.tensor([[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 4, 4], [3, 3, 4, 4]])
+    assert torch.equal(expected, upsample_tensor(t, 2))
