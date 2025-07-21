@@ -643,7 +643,6 @@ class MeanMapAggregator:
                 prefix=spectra_prefix,
             )
             spectra.update(spectrum_metrics)
-            print(spectra.keys())
         return metrics, maps, spectra
 
     _captions = {
