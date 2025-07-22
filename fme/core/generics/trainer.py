@@ -255,6 +255,7 @@ class Trainer:
         self._ema = build_ema(stepper.modules)
         self._do_gc_collect = do_gc_collect
         self._in_ema_context = False
+        self._started_training = False
 
         def on_terminate(signum, frame):
             if self._current_epoch_num_batches_seen > 0:
@@ -262,6 +263,10 @@ class Trainer:
                     logging.info(
                         "In EMA context during interrupt, not saving "
                         "restart checkpoints as it is unsafe to do so"
+                    )
+                elif not self._started_training:
+                    logging.info(
+                        "Not saving restart checkpoints as training has not started"
                     )
                 else:
                     self._save_restart_checkpoints()
@@ -420,6 +425,7 @@ class Trainer:
                 f"Subsetted train loader created, has {len(epoch_data)} batches"
             )
 
+        self._started_training = True
         current_time = time.time()
         for batch in epoch_data:
             with GlobalTimer():
