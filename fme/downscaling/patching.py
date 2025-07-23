@@ -351,6 +351,28 @@ class PatchPredictor:
         )
         return outputs
 
+    @torch.no_grad()
+    def generate_on_batch_no_target(
+        self,
+        batch: BatchData,
+        n_samples: int = 1,
+    ) -> TensorDict:
+        coarse_patch_generator = generate_patched_data(
+            batch,
+            self._coarse_patches,
+        )
+        predictions = []
+        for patch in coarse_patch_generator:
+            predictions.append(
+                self.model.generate_on_batch_no_target(
+                    coarse_data=patch.data,
+                    fine_topography=patch.topography,
+                    n_samples=n_samples,
+                )
+            )
+        prediction = composite_patch_predictions(predictions, self._fine_patches)
+        return prediction
+
 
 def _divide_into_slices(full_size: int, patch_size: int, overlap: int) -> list[slice]:
     # Size covered by N patches = patch_size * N - (N-1)*overlap
