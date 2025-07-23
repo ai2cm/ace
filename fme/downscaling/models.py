@@ -169,6 +169,16 @@ class Model:
             result.target[k] = v.unsqueeze(1)
         return result
 
+    def generate_on_batch_no_target(
+        self,
+        coarse_data: TensorMapping,
+        fine_topography: torch.Tensor | None,
+        n_samples: int = 1,
+    ) -> TensorDict:
+        raise NotImplementedError(
+            "This method is not implemented for the base Model class. "
+        )
+
     def _run_on_batch(
         self,
         batch: PairedBatchData,
