@@ -59,10 +59,13 @@ class DummyModule(torch.nn.Module):
 
 
 # returns paired batch data mock
-def get_mock_batch(shape):
+def get_mock_batch(shape, topography_scale_factor: int = 1):
     batch = MagicMock()
     batch.data = {"x": torch.ones(*shape, device=get_device())}
-
+    topography_shape = tuple(
+        [shape[0]] + [dim * topography_scale_factor for dim in shape[1:]]
+    )
+    batch.topography = torch.ones(*topography_shape, device=get_device())
     return batch
 
 
@@ -419,14 +422,14 @@ def test_DiffusionModel_generate_on_batch_no_target():
     )
 
     batch_size = 2
-    topography = torch.ones(batch_size, *fine_shape, device=get_device())
 
     n_generated_samples = 2
 
-    coarse_batch = get_mock_batch([batch_size, *coarse_shape])
+    coarse_batch = get_mock_batch(
+        [batch_size, *coarse_shape], topography_scale_factor=downscale_factor
+    )
     samples = model.generate_on_batch_no_target(
-        coarse_batch.data,
-        fine_topography=topography,
+        coarse_batch,
         n_samples=n_generated_samples,
     )
 
@@ -454,11 +457,12 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
 
     for alternative_input_shape in [(8, 8), (32, 32)]:
         fine_shape = tuple(dim * downscale_factor for dim in alternative_input_shape)
-        topography = torch.ones(batch_size, *fine_shape, device=get_device())
-        coarse_batch = get_mock_batch([batch_size, *alternative_input_shape])
+        coarse_batch = get_mock_batch(
+            [batch_size, *alternative_input_shape],
+            topography_scale_factor=downscale_factor,
+        )
         samples = model.generate_on_batch_no_target(
-            coarse_batch.data,
-            fine_topography=topography,
+            coarse_batch,
             n_samples=n_ensemble,
         )
 
