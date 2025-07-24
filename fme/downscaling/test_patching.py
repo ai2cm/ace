@@ -5,7 +5,6 @@ import xarray as xr
 
 from fme.core.device import get_device
 from fme.core.packer import Packer
-from fme.core.typing_ import TensorMapping
 from fme.downscaling.aggregators.shape_helpers import upsample_tensor
 from fme.downscaling.datasets import (
     BatchData,
@@ -125,15 +124,13 @@ class DummyModel:
             prediction=prediction_data, target=prediction_data, loss=torch.tensor(1.0)
         )
 
-    def generate_on_batch_no_target(
-        self, coarse_data: TensorMapping, fine_topography: torch.Tensor, n_samples=1
-    ):
+    def generate_on_batch_no_target(self, batch: BatchData, n_samples=1):
         prediction_data = {
             k: upsample_tensor(
                 v.unsqueeze(1).expand(-1, n_samples, -1, -1),
                 upsample_factor=self.downscale_factor,
             )
-            for k, v in coarse_data.items()
+            for k, v in batch.data.items()
         }
         return prediction_data
 
