@@ -19,3 +19,6 @@ BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|1|01K10187CYTFFGSAR0Z22Y554F|tra
 BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|2|01K101VYATDW0XF0G7ZC31YN3H|training|best_inference_ckpt
 BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|2|01K101VYATDW0XF0G7ZC31YN3H|training|best_ckpt
 BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|2|01K101VYATDW0XF0G7ZC31YN3H|training|ckpt
+BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|3|01K11JEQB9DNB8AP2YB1S6MNDG|training|best_inference_ckpt
+BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|3|01K11JEQB9DNB8AP2YB1S6MNDG|training|best_ckpt
+BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|3|01K11JEQB9DNB8AP2YB1S6MNDG|training|ckpt
