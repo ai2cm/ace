@@ -1,3 +1,6 @@
 BK-Samudra-E3SM-with-coupled-ocean-data-train-fine-tune-rs1|1|01K0D955VTZ3KQ6A25V30XETVN|trained|best_inference_ckpt
 BK-Samudra-E3SM-with-coupled-ocean-data-train-fine-tune-rs1|1|01K0D955VTZ3KQ6A25V30XETVN|skip|best_ckpt
 BK-Samudra-E3SM-with-coupled-ocean-data-train-fine-tune-rs1|1|01K0D955VTZ3KQ6A25V30XETVN|skip|ckpt
+BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|1|01K0ZECMTFW4CVTFGHT1P39B0X|training|best_inference_ckpt
+BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|1|01K0ZECMTFW4CVTFGHT1P39B0X|training|best_ckpt
+BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|1|01K0ZECMTFW4CVTFGHT1P39B0X|training|ckpt
