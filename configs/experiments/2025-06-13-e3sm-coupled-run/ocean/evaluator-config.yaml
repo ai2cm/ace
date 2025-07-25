@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_forward_steps: 1460
+n_forward_steps: 40
 forward_steps_in_memory: 40
 checkpoint_path: /ckpt.tar
 logging:
@@ -18,6 +18,9 @@ loader:
       file_pattern: 2025-07-11-E3SMv3-piControl-100yr-coupled-ocean.zarr
       engine: zarr
     - data_path: /climate-default
+      file_pattern: 2025-07-24-E3SMv3-piControl-100yr-mask-zos.zarr
+      engine: zarr
+    - data_path: /climate-default
       file_pattern: 2025-06-11-E3SM-piControl-ocean-ice-19-levs-fix-mask.zarr
       engine: zarr
     - data_path: /climate-default
@@ -25,7 +28,7 @@ loader:
       engine: zarr
   num_data_workers: 1
 data_writer:
-  save_prediction_files: false
+  save_prediction_files: true
   save_monthly_files: true
 aggregator:
   log_histograms: true
