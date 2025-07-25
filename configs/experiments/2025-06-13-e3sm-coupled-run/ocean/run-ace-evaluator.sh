@@ -45,8 +45,11 @@ while read TRAIN_EXPER; do
         --description "${DESCRIPTION}" \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
-        --priority normal \
-        --cluster ai2/triton-cirrascale \
+        --priority low \
+        --cluster ai2/jupiter-cirrascale-2 \
+        --cluster ai2/saturn-cirrascale \
+        --cluster ai2/ceres-cirrascale \
+        --cluster ai2/neptune-cirrascale \
         --weka climate-default:/climate-default \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
