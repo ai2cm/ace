@@ -514,7 +514,7 @@ class Trainer:
             )
         logging.info(
             f"Starting validation step for model trained for "
-            "{self._epochs_trained} epochs"
+            f"{self._epochs_trained} epochs"
         )
         self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_validation_aggregator()
@@ -543,7 +543,7 @@ class Trainer:
             )
         logging.info(
             f"Starting inference step for model trained for "
-            "{self._epochs_trained} epochs"
+            f"{self._epochs_trained} epochs"
         )
         logging.info("Starting inline inference run")
         return inference_one_epoch(
