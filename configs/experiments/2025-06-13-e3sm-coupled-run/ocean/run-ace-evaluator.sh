@@ -24,7 +24,7 @@ while read TRAIN_EXPER; do
         continue
     fi
 
-    EXISTING_RESULTS_DATASET=$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-2].result' | grep "beaker" | cut -d'"' -f4)
+    EXISTING_RESULTS_DATASET=$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4)
     echo
     echo "Launching evaluator job:"
     echo " - Group: ${JOB_GROUP}"
