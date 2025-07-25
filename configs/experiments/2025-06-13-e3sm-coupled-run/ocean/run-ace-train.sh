@@ -27,7 +27,7 @@ for RS in $(seq 4 $N_RANDOM_SEED_RUNS); do
     # don't log validation maps
     OVERRIDE_ARGS="${GROUP_OVERRIDE_ARGS} validation_aggregator.log_snapshots=false validation_aggregator.log_mean_maps=false"
     if [ $RS -gt 1 ]; then
-        PRIORITY="urgent"
+        PRIORITY="low"
         ALLOW_DIRTY=--allow-dirty # needed since experiments.txt will be updated
     else
         PRIORITY="low"
