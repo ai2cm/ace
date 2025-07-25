@@ -20,7 +20,7 @@ STATS_DATA=elynn/2025-07-24-E3SMv3-piControl-ocean-stats
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=2
+N_RANDOM_SEED_RUNS=4
 
 for RS in $(seq 2 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
