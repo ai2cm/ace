@@ -164,6 +164,7 @@ stepper:
       - LHFLX
       - SHFLX
       in_names:
+      - zos
       - TAUX
       - TAUY
       - surface_precipitation_rate
@@ -253,6 +254,7 @@ stepper:
       - vo_17
       - vo_18
       out_names:
+      - zos
       - sst
       - so_0
       - so_1

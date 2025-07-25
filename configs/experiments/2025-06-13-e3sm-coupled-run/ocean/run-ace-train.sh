@@ -12,15 +12,15 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-Samudra-E3SM-with-coupled-ocean-data" # should be the same as the evaluator run job group
+JOB_GROUP="BK-Samudra-E3SM-with-coupled-ocean-data-and-zos" # should be the same as the evaluator run job group
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
-STATS_DATA=elynn/2025-06-13-E3SM-piControl-ocean-with-atmos-sfc-var-stats-include-sfc-wind-stress
+STATS_DATA=elynn/2025-07-24-E3SMv3-piControl-ocean-stats
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=2
+N_RANDOM_SEED_RUNS=1
 
 for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
@@ -30,7 +30,7 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
         PRIORITY="low"
         ALLOW_DIRTY=--allow-dirty # needed since experiments.txt will be updated
     else
-        PRIORITY="low"
+        PRIORITY="urgent"
         ALLOW_DIRTY=
     fi
     if [[ -n "${OVERRIDE_ARGS}" ]]; then
@@ -44,10 +44,10 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --name $JOB_NAME \
           --description "Saumdra E3SM training RS${RS}" \
           --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-          --workspace ai2/ace \
+          --workspace ai2/climate-ceres \
           --priority $PRIORITY \
           --preemptible \
-          --cluster ai2/jupiter-cirrascale-2 \
+          --cluster ai2/ceres-cirrascale \
           --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$BEAKER_USERNAME \
           --env WANDB_NAME=$JOB_NAME \
