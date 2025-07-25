@@ -20,9 +20,9 @@ STATS_DATA=elynn/2025-07-24-E3SMv3-piControl-ocean-stats
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=2
+N_RANDOM_SEED_RUNS=1
 
-for RS in $(seq 2 $N_RANDOM_SEED_RUNS); do
+for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
     # don't log validation maps
     OVERRIDE_ARGS="${GROUP_OVERRIDE_ARGS} validation_aggregator.log_snapshots=false validation_aggregator.log_mean_maps=false"
@@ -30,7 +30,7 @@ for RS in $(seq 2 $N_RANDOM_SEED_RUNS); do
         PRIORITY="low"
         ALLOW_DIRTY=--allow-dirty # needed since experiments.txt will be updated
     else
-        PRIORITY="low"
+        PRIORITY="urgent"
         ALLOW_DIRTY=
     fi
     if [[ -n "${OVERRIDE_ARGS}" ]]; then
@@ -44,10 +44,10 @@ for RS in $(seq 2 $N_RANDOM_SEED_RUNS); do
           --name $JOB_NAME \
           --description "Saumdra E3SM training RS${RS}" \
           --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-          --workspace ai2/ace \
+          --workspace ai2/climate-ceres \
           --priority $PRIORITY \
           --preemptible \
-          --cluster ai2/jupiter-cirrascale-2 \
+          --cluster ai2/ceres-cirrascale \
           --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$BEAKER_USERNAME \
           --env WANDB_NAME=$JOB_NAME \

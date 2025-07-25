@@ -95,8 +95,6 @@ optimization:
   kwargs:
     weight_decay: 0.01
 stepper:
-  parameter_init:
-    weights_path: /ocean_ckpt.tar
   loss:
     type: MSE
   input_masking:
