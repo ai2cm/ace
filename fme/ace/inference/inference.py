@@ -234,12 +234,13 @@ def main(
         config=dacite.Config(strict=True),
     )
     prepare_directory(config.experiment_dir, config_data)
-    if segments is None:
-        with GlobalTimer():
-            return run_inference_from_config(config)
-    else:
-        config.configure_logging(log_filename="inference_out.log")
-        run_segmented_inference(config, segments)
+    with torch.no_grad():
+        if segments is None:
+            with GlobalTimer():
+                return run_inference_from_config(config)
+        else:
+            config.configure_logging(log_filename="inference_out.log")
+            run_segmented_inference(config, segments)
 
 
 def run_inference_from_config(config: InferenceConfig):

@@ -319,7 +319,7 @@ def _write(
 
     data_arrays = {}
     for name in data.data:
-        array = maybe_squeeze(data.data[name]).cpu().numpy()
+        array = maybe_squeeze(data.data[name]).detach().cpu().numpy()
         data_arrays[name] = xr.DataArray(array, dims=dims_to_write)
         if name in variable_metadata:
             data_arrays[name].attrs = {
