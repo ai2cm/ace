@@ -472,7 +472,7 @@ def test_run_inference_simple(
     mock_writer = get_mock_writer()
     mock_aggregator = get_mock_aggregator(n_ic_timesteps)
 
-    with GlobalTimer():
+    with GlobalTimer(), torch.no_grad():
         with mock_wandb() as wandb:
             wandb.configure(log_to_wandb=True)
             record_logs = unittest.mock.MagicMock(
