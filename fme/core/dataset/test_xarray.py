@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+import os
 from collections import namedtuple
 from collections.abc import Iterable
 
@@ -19,25 +20,23 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     NullVerticalCoordinate,
 )
-from fme.core.dataset.concat import XarrayConcat
-from fme.core.dataset.config import (
-    FillNaNsConfig,
-    OverwriteConfig,
-    RepeatedInterval,
-    TimeSlice,
-    XarrayDataConfig,
-)
-from fme.core.dataset.getters import get_dataset, get_xarray_dataset
+from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.merged import MergedXarrayDataset
-from fme.core.dataset.subset import XarraySubset
+from fme.core.dataset.time import RepeatedInterval, TimeSlice
+from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import (
+    GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD,
+    OverwriteConfig,
+    XarrayDataConfig,
     XarrayDataset,
+    XarraySubset,
     _get_cumulative_timesteps,
     _get_file_local_index,
     _get_raw_times,
     _get_timestep,
     _get_vertical_coordinate,
     _repeat_and_increment_time,
+    get_xarray_dataset,
 )
 from fme.core.typing_ import Slice
 
@@ -1163,3 +1162,23 @@ def test_concat_of_XarrayConcat(mock_monthly_netcdfs):
     concat, _ = get_dataset([config, config], names, n_timesteps)
     concat2 = XarrayConcat(datasets=[concat, concat])
     assert len(concat2) == 16
+
+
+def test_parallel__get_raw_times(tmpdir):
+    times_per_file = 2
+    n_files = GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD + 1
+    n_times = n_files * times_per_file
+
+    times = xr.date_range("2000", freq="6h", periods=n_times, use_cftime=True)
+    da = xr.DataArray(range(len(times)), dims=["time"], coords=[times], name="foo")
+    ds = da.to_dataset()
+
+    paths = []
+    for i in range(n_files):
+        path = os.path.join(tmpdir, f"file_{i}.nc")
+        time_slice = slice(times_per_file * i, times_per_file * (i + 1))
+        ds.isel(time=time_slice).to_netcdf(path)
+        paths.append(path)
+
+    result = np.concatenate(_get_raw_times(paths, engine="netcdf4"))
+    np.testing.assert_equal(result, times)

@@ -40,7 +40,7 @@ def test_multi_call(include_multi_call_in_loss: bool):
     )
 
     with unittest.mock.patch.object(MockStep, "step", side_effect=_step):
-        step = config.get_step(DatasetInfo())
+        step = config.get_step(DatasetInfo(), lambda x: None)
         assert step.output_names == ["b", "c", "c_doubled_co2"]
         if include_multi_call_in_loss:
             assert step.loss_names == ["b", "c", "c_doubled_co2"]

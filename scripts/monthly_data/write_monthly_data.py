@@ -11,11 +11,7 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.batch_data import BatchData, default_collate
-from fme.ace.data_loading.config import (
-    ConcatDatasetConfig,
-    DataLoaderConfig,
-    MergeDatasetConfig,
-)
+from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
@@ -26,8 +22,10 @@ from fme.core.coordinates import (
     AtmosphericDeriveFn,
     OptionalHybridSigmaPressureCoordinate,
 )
-from fme.core.dataset.getters import get_datasets, get_merged_datasets
+from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.merged import MergeDatasetConfig, get_merged_datasets
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.xarray import get_xarray_datasets
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -62,7 +60,7 @@ def get_data_loaders(
         )
     datasets: torch.utils.data.Dataset
     if isinstance(config.dataset, ConcatDatasetConfig):
-        datasets, properties = get_datasets(
+        datasets, properties = get_xarray_datasets(
             config.dataset.concat, requirements.names, requirements.n_timesteps
         )
     elif isinstance(config.dataset, MergeDatasetConfig):
@@ -70,7 +68,6 @@ def get_data_loaders(
             config.dataset,
             requirements.names,
             requirements.n_timesteps,
-            strict=config.strict_ensemble,
         )
 
     data_loaders = []

@@ -2,9 +2,9 @@
 
 set -e
 
-JOB_NAME="ace2-cm4-atmosphere-train"
-JOB_GROUP="ace2-cm4-atmosphere"
-CONFIG_FILENAME="ace-train-config.yaml"
+JOB_NAME="ace2-cm4-lsm"
+JOB_GROUP="ace2-cm4-lsm"
+CONFIG_FILENAME="ace-train-config-lsmv0.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -33,7 +33,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset andrep/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr:/statsdata \
+    --dataset troya/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr:/statsdata \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
     --weka climate-default:/climate-default \

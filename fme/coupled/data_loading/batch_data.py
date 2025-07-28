@@ -77,7 +77,8 @@ class CoupledBatchData:
     def collate_fn(
         cls,
         samples: Sequence[CoupledDatasetItem],
-        horizontal_dims: list[str],
+        ocean_horizontal_dims: list[str],
+        atmosphere_horizontal_dims: list[str],
         sample_dim_name: str = "sample",
     ) -> "CoupledBatchData":
         """
@@ -87,11 +88,13 @@ class CoupledBatchData:
 
         """
         ocean_data = BatchData.from_sample_tuples(
-            [x.ocean for x in samples], sample_dim_name=sample_dim_name
+            [x.ocean for x in samples],
+            horizontal_dims=ocean_horizontal_dims,
+            sample_dim_name=sample_dim_name,
         )
         atmosphere_data = BatchData.from_sample_tuples(
             [x.atmosphere for x in samples],
-            horizontal_dims=horizontal_dims,
+            horizontal_dims=atmosphere_horizontal_dims,
             sample_dim_name=sample_dim_name,
         )
         return CoupledBatchData.new_on_cpu(ocean_data, atmosphere_data)

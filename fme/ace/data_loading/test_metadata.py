@@ -6,11 +6,12 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from fme.ace.data_loading.config import ConcatDatasetConfig, DataLoaderConfig
-from fme.ace.data_loading.getters import get_data_loader
+from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.getters import get_gridded_data
 from fme.ace.requirements import DataRequirements
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.xarray import XarrayDataConfig
 
 
 def _coord_value(name, size):
@@ -104,7 +105,7 @@ def test_metadata(tmp_path, variable_metadata, n_ensemble_members):
     )
     var_names = list(variable_metadata.keys())
     requirements = DataRequirements(names=var_names, n_timesteps=2)
-    data = get_data_loader(config=config, train=True, requirements=requirements)
+    data = get_gridded_data(config=config, train=True, requirements=requirements)
     target_metadata = {
         name: variable_metadata[name]
         for name in variable_metadata

@@ -21,6 +21,9 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "sea_ice_volume": ["sea_ice_volume"],
         "ocean_sea_ice_fraction": ["ocean_sea_ice_fraction"],
         "land_fraction": ["land_fraction"],
+        "net_downward_surface_heat_flux": ["hfds"],
+        "geothermal_heat_flux": ["hfgeou"],
+        "sea_surface_fraction": ["sea_surface_fraction"],
     }
 )
 
@@ -146,9 +149,29 @@ class OceanData:
         )
 
     @property
+    def sea_surface_fraction(self) -> torch.Tensor:
+        """Returns the sea surface fraction."""
+        return self._get("sea_surface_fraction")
+
+    @property
+    def net_downward_surface_heat_flux(self) -> torch.Tensor:
+        """Net heat flux downward across the ocean surface (below the sea-ice)."""
+        return self._get("net_downward_surface_heat_flux")
+
+    @property
+    def geothermal_heat_flux(self) -> torch.Tensor:
+        """Geothermal heat flux."""
+        return self._get("geothermal_heat_flux")
+
+    @property
     def sea_ice_fraction(self) -> torch.Tensor:
         """Returns the sea ice fraction."""
-        return self._get("sea_ice_fraction")
+        try:
+            return self._get("sea_ice_fraction")
+        except KeyError:
+            land_fraction = self.land_fraction
+            ocean_sea_ice_fraction = self.ocean_sea_ice_fraction
+            return ocean_sea_ice_fraction * (1 - land_fraction)
 
     @property
     def land_fraction(self) -> torch.Tensor:
@@ -159,3 +182,10 @@ class OceanData:
     def ocean_sea_ice_fraction(self) -> torch.Tensor:
         """Returns the sea ice fraction as a proportion of the sea surface."""
         return self._get("ocean_sea_ice_fraction")
+
+    @property
+    def ocean_fraction(self) -> torch.Tensor:
+        """Returns the dynamic ocean fraction, computed from the sea ice
+        fraction and land fraction.
+        """
+        return 1 - self.land_fraction - self.sea_ice_fraction

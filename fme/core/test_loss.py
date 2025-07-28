@@ -22,7 +22,7 @@ from fme.core.packer import Packer
 @pytest.mark.parametrize("global_mean_type", [None, "LpLoss"])
 def test_loss_builds_and_runs(global_mean_type):
     config = LossConfig(global_mean_type=global_mean_type)
-    area = torch.randn(10, 10, device=get_device())
+    area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     loss = config.build(
         reduction="mean",
         gridded_operations=LatLonOperations(area),
@@ -87,7 +87,7 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
     config = LossConfig(
         global_mean_type="LpLoss", global_mean_weight=global_mean_weight
     )
-    area = torch.randn(10, 10, device=get_device())
+    area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     loss = config.build(
         reduction="mean",
         gridded_operations=LatLonOperations(area),
@@ -125,7 +125,7 @@ def test_loss_fails_when_gridded_operations_not_provided(
 
 def test_global_mean_loss():
     torch.manual_seed(0)
-    area = torch.randn(10, 10, device=get_device())
+    area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     loss = GlobalMeanLoss(
         LatLonOperations(area).area_weighted_mean, loss=torch.nn.MSELoss()
     )
@@ -147,7 +147,7 @@ def test_area_weighted_mse():
     torch.manual_seed(0)
     x = torch.rand(10, 10).to(get_device())
     target = torch.rand(10, 10).to(get_device())
-    area = torch.rand(10, 10).to(get_device())
+    area = torch.rand(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     area_weighted_mse = AreaWeightedMSELoss(LatLonOperations(area).area_weighted_mean)
     result = area_weighted_mse(x, target)
     expected = metrics.weighted_mean(

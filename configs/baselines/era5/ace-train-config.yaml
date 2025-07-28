@@ -21,7 +21,7 @@ inference:
         - '1996-11-15T00:00:00'
     dataset:
       data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-    num_data_workers: 4
+    num_data_workers: 16
   aggregator:
     log_histograms: true
     time_mean_reference_data: /statsdata/time-mean.nc
@@ -33,7 +33,7 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 4
+  num_data_workers: 16
   prefetch_factor: 4
   dataset:
     concat:
@@ -49,7 +49,7 @@ train_loader:
         start_time: '2021-01-01'
 validation_loader:
   batch_size: 128
-  num_data_workers: 4
+  num_data_workers: 16
   prefetch_factor: 4
   dataset:
     data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
@@ -57,6 +57,7 @@ validation_loader:
       start_time: '1996-01-01'
       stop_time: '1997-12-31'
 optimization:
+  use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: FusedAdam
@@ -87,16 +88,14 @@ stepper:
     type: single_module
     config:
       builder:
-        type: SphericalFourierNeuralOperatorNet
+        type: NoiseConditionedSFNO
         config:
           embed_dim: 384
+          noise_embed_dim: 0
           filter_type: linear
-          hard_thresholding_fraction: 1.0
           use_mlp: true
-          normalization_layer: instance_norm
           num_layers: 8
           operator_type: dhconv
-          scale_factor: 1
           separable: false
           spectral_layers: 3
           spectral_transform: sht

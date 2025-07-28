@@ -17,9 +17,9 @@ The example assumes you are running in a directory structure like:
        ├── data2.nc  # can have any number of netCDF files
        └── ...
 
-The ``.nc`` files correspond to data files like ``2021010100.nc`` in the `Zenodo repository`_, while ``ckpt.tar`` corresponds to a file like ``ace_ckpt.tar`` in that repository.
+The ``.nc`` files correspond to data files like ``training_validation_data/training_validation/1940010100.nc`` in the `ACE2-ERA5 Hugging Face page`_, while ``ckpt.tar`` corresponds to a file like ``ace2_era5_ckpt.tar`` in that repository.
 
-.. _Zenodo repository: https://zenodo.org/doi/10.5281/zenodo.10791086
+.. _ACE2-ERA5 Hugging Face page: https://huggingface.co/allenai/ACE2-ERA5
 
 .. literalinclude:: evaluator-config.yaml
    :language: yaml

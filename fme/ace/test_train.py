@@ -33,7 +33,7 @@ from fme.ace.registry.test_hpx import (
     recurrent_block_config,
     up_sampling_block_config,
 )
-from fme.ace.stepper.single_module import SingleModuleStepperConfig
+from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
@@ -42,14 +42,19 @@ from fme.ace.testing import (
 )
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import InlineInferenceConfig, TrainBuilders, TrainConfig
+from fme.ace.train.train_config import (
+    InlineInferenceConfig,
+    TrainBuilders,
+    TrainConfig,
+    WeatherEvaluationConfig,
+)
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
     LatLonCoordinates,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.generics.trainer import (
     _restore_checkpoint,
     count_parameters,
@@ -57,12 +62,14 @@ from fme.core.generics.trainer import (
 )
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice
@@ -93,6 +100,8 @@ def _get_test_yaml_files(
     crps_training=False,
     save_per_epoch_diagnostics=False,
     log_validation_maps=False,
+    skip_inline_inference=False,
+    time_buffer=1,
 ):
     input_time_size = 1
     output_time_size = 1
@@ -174,58 +183,11 @@ def _get_test_yaml_files(
         project="fme",
         entity="ai2cm",
     )
-
-    train_config = TrainConfig(
-        train_loader=DataLoaderConfig(
-            dataset=XarrayDataConfig(
-                data_path=str(train_data_path),
-                spatial_dimensions=spatial_dimensions_str,
-            ),
-            batch_size=2,
-            num_data_workers=0,
-        ),
-        validation_loader=DataLoaderConfig(
-            dataset=XarrayDataConfig(
-                data_path=str(valid_data_path),
-                spatial_dimensions=spatial_dimensions_str,
-            ),
-            batch_size=2,
-            num_data_workers=0,
-        ),
-        optimization=OptimizationConfig(
-            use_gradient_accumulation=True,
-            optimizer_type="Adam",
-            lr=0.001,
-            kwargs=dict(weight_decay=0.01),
-            scheduler=SchedulerConfig(
-                type="CosineAnnealingLR",
-                kwargs=dict(T_max=1),
-            ),
-        ),
-        stepper=SingleModuleStepperConfig(
-            crps_training=crps_training,
-            in_names=in_variable_names,
-            out_names=out_variable_names,
-            normalization=NormalizationConfig(
-                global_means_path=str(global_means_path),
-                global_stds_path=str(global_stds_path),
-            ),
-            residual_normalization=NormalizationConfig(
-                global_means_path=str(global_means_path),
-                global_stds_path=str(global_stds_path),
-            ),
-            loss=WeightedMappingLossConfig(type="MSE"),
-            builder=ModuleSelector(
-                type=nettype,
-                config=net_config,
-            ),
-            ocean=OceanConfig(
-                surface_temperature_name=in_variable_names[0],
-                ocean_fraction_name=mask_name,
-            ),
-            corrector=corrector_config,
-        ),
-        inference=InlineInferenceConfig(
+    if skip_inline_inference:
+        inline_inference_config = None
+        weather_evaluation_config = None
+    else:
+        inline_inference_config = InlineInferenceConfig(
             aggregator=InferenceEvaluatorAggregatorConfig(
                 monthly_reference_data=(
                     str(monthly_data_filename)
@@ -246,7 +208,94 @@ def _get_test_yaml_files(
             ),
             n_forward_steps=inference_forward_steps,
             forward_steps_in_memory=2,
+        )
+        weather_evaluation_config = WeatherEvaluationConfig(
+            aggregator=InferenceEvaluatorAggregatorConfig(
+                monthly_reference_data=(
+                    str(monthly_data_filename)
+                    if monthly_data_filename is not None
+                    else None
+                ),
+            ),
+            loader=InferenceDataLoaderConfig(
+                dataset=XarrayDataConfig(
+                    data_path=str(valid_data_path),
+                    spatial_dimensions=spatial_dimensions_str,
+                ),
+                start_indices=InferenceInitialConditionIndices(
+                    first=0,
+                    n_initial_conditions=2,
+                    interval=1,
+                ),
+            ),
+            n_forward_steps=inference_forward_steps,
+            forward_steps_in_memory=2,
+        )
+
+    train_config = TrainConfig(
+        train_loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(train_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+            ),
+            batch_size=2,
+            num_data_workers=0,
+            time_buffer=time_buffer,
+            sample_with_replacement=10,
         ),
+        validation_loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(valid_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+            ),
+            batch_size=2,
+            num_data_workers=0,
+        ),
+        optimization=OptimizationConfig(
+            use_gradient_accumulation=True,
+            optimizer_type="Adam",
+            lr=0.001,
+            kwargs=dict(weight_decay=0.01),
+            scheduler=SchedulerConfig(
+                type="CosineAnnealingLR",
+                kwargs=dict(T_max=1),
+            ),
+        ),
+        stepper=StepperConfig(
+            loss=WeightedMappingLossConfig(type="MSE"),
+            crps_training=crps_training,
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        crps_training=crps_training,
+                        in_names=in_variable_names,
+                        out_names=out_variable_names,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                global_means_path=str(global_means_path),
+                                global_stds_path=str(global_stds_path),
+                            ),
+                            residual=NormalizationConfig(
+                                global_means_path=str(global_means_path),
+                                global_stds_path=str(global_stds_path),
+                            ),
+                        ),
+                        builder=ModuleSelector(
+                            type=nettype,
+                            config=net_config,
+                        ),
+                        ocean=OceanConfig(
+                            surface_temperature_name=in_variable_names[0],
+                            ocean_fraction_name=mask_name,
+                        ),
+                        corrector=corrector_config,
+                    )
+                ),
+            ),
+        ),
+        inference=inline_inference_config,
+        weather_evaluation=weather_evaluation_config,
         n_forward_steps=n_forward_steps,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
@@ -324,6 +373,8 @@ def _setup(
     save_per_epoch_diagnostics=False,
     crps_training=False,
     log_validation_maps=False,
+    skip_inline_inference=False,
+    time_buffer=1,
 ):
     if not path.exists():
         path.mkdir()
@@ -410,6 +461,8 @@ def _setup(
         crps_training=crps_training,
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
         log_validation_maps=log_validation_maps,
+        skip_inline_inference=skip_inline_inference,
+        time_buffer=time_buffer,
     )
     return train_config_filename, inference_config_filename
 
@@ -505,6 +558,12 @@ def test_train_and_inference(
         tmp_path / "results" / "training_checkpoints" / "best_inference_ckpt.tar"
     )
     assert best_checkpoint_path.exists()
+    checkpoint_training_history = torch.load(best_checkpoint_path, weights_only=False)[
+        "stepper"
+    ].get("training_history")
+    assert checkpoint_training_history is not None
+    assert len(checkpoint_training_history) == 1
+    assert "git_sha" in checkpoint_training_history[0].keys()
     assert best_inference_checkpoint_path.exists()
     n_ic_timesteps = 1
     n_forward_steps = 6
@@ -719,3 +778,32 @@ def test_epoch_checkpoint_enabled(checkpoint_save_epochs, expected_save_epochs):
 def test_count_parameters(module_list, expected_num_parameters):
     num_parameters = count_parameters(module_list)
     assert num_parameters == expected_num_parameters
+
+
+def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    nettype = "SphericalFourierNeuralOperatorNet"
+    crps_training = False
+    log_validation_maps = False
+    train_config, inference_config = _setup(
+        tmp_path,
+        nettype,
+        log_to_wandb=True,
+        timestep_days=20,
+        n_time=int(366 * 3 / 20 + 1),
+        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        use_healpix=(nettype == "HEALPixRecUNet"),
+        crps_training=crps_training,
+        save_per_epoch_diagnostics=True,
+        log_validation_maps=log_validation_maps,
+        skip_inline_inference=True,
+        time_buffer=2,
+    )
+    with mock_wandb() as wandb:
+        train_main(
+            yaml_config=train_config,
+        )
+        wandb_logs = wandb.get_logs()
+    assert np.isinf(wandb_logs[-1]["best_inference_error"])
+    assert not any("inference/" in key for key in wandb_logs[-1])

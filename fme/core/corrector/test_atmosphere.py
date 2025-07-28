@@ -91,7 +91,7 @@ def test_force_no_global_mean_moisture_advection():
     data = {
         "tendency_of_total_water_path_due_to_advection": torch.rand(size=(3, 2, 5, 5)),
     }
-    area_weights = 1.0 + torch.rand(size=(5, 5))
+    area_weights = 1.0 + torch.rand(size=(5, 1)).broadcast_to(size=(5, 5))
     original_mean = metrics.weighted_mean(
         data["tendency_of_total_water_path_due_to_advection"],
         weights=area_weights,
@@ -129,7 +129,9 @@ def test_force_conserve_dry_air(size: tuple[int, ...], use_area: bool):
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     )
     if use_area:
-        area_weights: torch.Tensor | None = 1.0 + torch.rand(size=(size[-2], size[-1]))
+        area_weights: torch.Tensor | None = 1.0 + torch.rand(
+            size=(size[-2], 1)
+        ).broadcast_to(size=size[-2:])
     else:
         area_weights = None
     if area_weights is not None:
@@ -209,7 +211,9 @@ def test_force_conserve_moisture(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     )
     if use_area:
-        ops: GriddedOperations = LatLonOperations(1.0 + torch.rand(size=(5, 5)))
+        ops: GriddedOperations = LatLonOperations(
+            1.0 + torch.rand(size=(5, 1)).broadcast_to(size=(5, 5))
+        )
     else:
         ops = HEALPixOperations()
     data["tendency_of_total_water_path_due_to_advection"] -= ops.area_weighted_mean(
@@ -328,7 +332,9 @@ def _get_corrector_test_input(tensor_shape):
 def test__force_conserve_total_energy(negative_pressure: bool):
     tensor_shape = (5, 5)
 
-    ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
     timestep = datetime.timedelta(seconds=3600)
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
         tensor_shape
@@ -397,7 +403,9 @@ def test__force_conserve_total_energy(negative_pressure: bool):
 def test__force_conserve_energy_doesnt_clobber():
     tensor_shape = (5, 5)
 
-    ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
     timestep = datetime.timedelta(seconds=3600)
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
         tensor_shape
@@ -429,7 +437,9 @@ def test_corrector_integration():
     tensor_shape = (5, 5)
     test_input = _get_corrector_test_input(tensor_shape)
     input_data, gen_data, forcing_data, vertical_coord = test_input
-    ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
     timestep = datetime.timedelta(seconds=3600)
     corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
     corrector(input_data, gen_data, forcing_data)

@@ -6,9 +6,8 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import NullOptimization
@@ -105,7 +104,10 @@ def _get_stepper_config(
 def test_integration_with_stepper():
     img_shape = (5, 5)
     full_shape = (1, 3, *img_shape)
-    gridded_ops = LatLonOperations(torch.ones(img_shape, device=fme.get_device()))
+    horizontal_coord = LatLonCoordinates(
+        torch.zeros(img_shape[0], device=fme.get_device()),
+        torch.zeros(img_shape, device=fme.get_device()),
+    )
     vertical_coord = HybridSigmaPressureCoordinate(
         torch.tensor([1.0], device=fme.get_device()),
         torch.tensor([0.0], device=fme.get_device()),
@@ -131,8 +133,7 @@ def test_integration_with_stepper():
     assert set(config.all_names) == expected_all_names
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(
-            img_shape=img_shape,
-            gridded_operations=gridded_ops,
+            horizontal_coordinates=horizontal_coord,
             vertical_coordinate=vertical_coord,
             timestep=timestep,
         ),
@@ -182,8 +183,7 @@ def test_integration_with_stepper():
     )
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(
-            img_shape=img_shape,
-            gridded_operations=gridded_ops,
+            horizontal_coordinates=horizontal_coord,
             vertical_coordinate=vertical_coord,
             timestep=timestep,
         ),

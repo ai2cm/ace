@@ -8,8 +8,48 @@ from torch.utils.data import DataLoader
 
 from fme.core.device import get_device
 from fme.core.typing_ import TensorDict
-from fme.downscaling.datasets import BatchData, PairedBatchData, PairedBatchItem
+from fme.downscaling.datasets import (
+    BatchData,
+    BatchItem,
+    PairedBatchData,
+    PairedBatchItem,
+)
 from fme.downscaling.models import DiffusionModel, Model, ModelOutputs
+
+
+@dataclasses.dataclass
+class MultipatchConfig:
+    """
+    Configuration to enable predictions on multiple patches for evaluation.
+
+    Args:
+        divide_generation: enables the patched prediction of the full
+            input data extent for generation.
+        composite_prediction: if True, recombines the smaller prediction
+            regions into the original full region as a single sample.
+        coarse_horizontal_overlap: number of pixels to overlap in the
+            coarse data.
+    """
+
+    divide_generation: bool = False
+    composite_prediction: bool = False
+    coarse_horizontal_overlap: int = 1
+
+    @property
+    def needs_patch_data_generator(self):
+        # If final predictions are not composited together, the BatchData is divided
+        # into patches before being passed to the top level no-target generation call.
+        # If final predictions are composited together, the BatchData is divided
+        # into patches within the PatchPredictor's generation method.
+        if self.divide_generation and not self.composite_prediction:
+            return True
+        return False
+
+    @property
+    def needs_patch_predictor(self):
+        if self.divide_generation and self.composite_prediction:
+            return True
+        return False
 
 
 @dataclasses.dataclass
@@ -152,6 +192,41 @@ def _paired_shuffle(a: list, b: list) -> tuple[list, list]:
     indices = list(range(len(a)))
     random.shuffle(indices)
     return [a[i] for i in indices], [b[i] for i in indices]
+
+
+def patch_generator_from_loader(
+    loader: DataLoader[BatchItem],
+    yx_extent: tuple[int, int],
+    yx_patch_extents: tuple[int, int],
+    overlap: int = 0,
+    drop_partial_patches: bool = True,
+    random_offset: bool = False,
+) -> Generator[BatchData, None, None]:
+    for batch in loader:
+        # get_patches is called at each iteration so that each batch has a different
+        # random offset if this option is enabled.
+        y_random_offset = (
+            _random_offset(full_size=yx_extent[0], patch_size=yx_patch_extents[0])
+            if random_offset
+            else 0
+        )
+        x_random_offset = (
+            _random_offset(full_size=yx_extent[1], patch_size=yx_patch_extents[1])
+            if random_offset
+            else 0
+        )
+        patches = get_patches(
+            yx_extents=yx_extent,
+            yx_patch_extents=yx_patch_extents,
+            overlap=overlap,
+            drop_partial_patches=drop_partial_patches,
+            y_offset=y_random_offset,
+            x_offset=x_random_offset,
+        )
+        yield from generate_patched_data(
+            batch,
+            patches=patches,
+        )
 
 
 def paired_patch_generator_from_loader(
@@ -350,6 +425,27 @@ class PatchPredictor:
             loss=loss,
         )
         return outputs
+
+    @torch.no_grad()
+    def generate_on_batch_no_target(
+        self,
+        batch: BatchData,
+        n_samples: int = 1,
+    ) -> TensorDict:
+        coarse_patch_generator = generate_patched_data(
+            batch,
+            self._coarse_patches,
+        )
+        predictions = []
+        for patch in coarse_patch_generator:
+            predictions.append(
+                self.model.generate_on_batch_no_target(
+                    batch=patch,
+                    n_samples=n_samples,
+                )
+            )
+        prediction = composite_patch_predictions(predictions, self._fine_patches)
+        return prediction
 
 
 def _divide_into_slices(full_size: int, patch_size: int, overlap: int) -> list[slice]:

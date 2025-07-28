@@ -53,6 +53,8 @@ import contextlib
 import gc
 import logging
 import os
+import signal
+import sys
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -69,6 +71,7 @@ from fme.core.generics.inference import run_inference
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
+from fme.core.training_history import TrainingJob
 from fme.core.typing_ import Slice
 from fme.core.wandb import WandB
 
@@ -108,6 +111,9 @@ class TrainConfigProtocol(Protocol):
 
     @property
     def log_train_every_n_batches(self) -> int: ...
+
+    @property
+    def checkpoint_every_n_batches(self) -> int: ...
 
     @property
     def segment_epochs(self) -> int | None: ...
@@ -172,6 +178,18 @@ class CheckpointPaths:
         return os.path.join(self.checkpoint_dir, f"ema_ckpt_{epoch:04d}.tar")
 
 
+def chain_signal_handler(sig, handler):
+    prev_handler = signal.getsignal(sig)
+
+    def on_sig(signum, frame):
+        handler(signum, frame)
+        if callable(prev_handler):
+            prev_handler(signum, frame)
+        sys.exit(0)
+
+    signal.signal(sig, on_sig)
+
+
 class Trainer:
     def __init__(
         self,
@@ -188,8 +206,8 @@ class Trainer:
         do_gc_collect: bool = True,
     ):
         logging.info(f"Current device is {fme.get_device()}")
-        self.dist = Distributed.get_instance()
-        if self.dist.is_root():
+        dist = Distributed.get_instance()
+        if dist.is_root():
             if not os.path.isdir(config.experiment_dir):
                 os.makedirs(config.experiment_dir)
             if not os.path.isdir(config.checkpoint_dir):
@@ -206,15 +224,17 @@ class Trainer:
 
         self.num_batches_seen = 0
         self._start_epoch = 0
-        self._epoch = self._start_epoch
-        self.num_batches_seen = 0
+        self._epochs_trained = self._start_epoch
+        self._current_epoch_num_batches_seen = 0
         self._best_validation_loss = torch.inf
         self._best_inference_error = torch.inf
 
         self.stepper = stepper
+        self.stepper.update_training_history(TrainingJob.from_env())
+
         self.optimization = build_optimization(stepper.modules)
-        self._end_of_batch_ops = end_of_batch_callback
-        self._end_of_epoch_ops = end_of_epoch_callback
+        self._end_of_batch_callback = end_of_batch_callback
+        self._end_of_epoch_callback = end_of_epoch_callback
         self._no_optimization = NullOptimization()
         self._aggregator_builder = aggregator_builder
 
@@ -234,6 +254,28 @@ class Trainer:
         self._inference_data = inference_data
         self._ema = build_ema(stepper.modules)
         self._do_gc_collect = do_gc_collect
+        self._in_ema_context = False
+        self._started_training = False
+
+        def on_terminate(signum, frame):
+            if self._current_epoch_num_batches_seen > 0:
+                if self._in_ema_context:
+                    logging.info(
+                        "In EMA context during interrupt, not saving "
+                        "restart checkpoints as it is unsafe to do so"
+                    )
+                elif not self._started_training:
+                    logging.info(
+                        "Not saving restart checkpoints as training has not started"
+                    )
+                else:
+                    self._save_restart_checkpoints()
+
+        chain_signal_handler(signal.SIGTERM, on_terminate)
+        chain_signal_handler(signal.SIGINT, on_terminate)
+
+    def set_end_of_epoch_callback(self, end_of_epoch_callback: EndOfEpochCallback):
+        self._end_of_epoch_callback = end_of_epoch_callback
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -241,8 +283,9 @@ class Trainer:
 
     def train(self):
         logging.info("Starting Training Loop...")
+        dist = Distributed.get_instance()
 
-        self._epoch = self._start_epoch
+        self._epochs_trained = self._start_epoch
         inference_epochs = self.config.get_inference_epochs()
         if self.config.segment_epochs is None:
             segment_max_epochs = self.config.max_epochs
@@ -251,10 +294,10 @@ class Trainer:
                 self._start_epoch + self.config.segment_epochs, self.config.max_epochs
             )
 
-        if self.config.evaluate_before_training and self._epoch == 0:
+        if self.config.evaluate_before_training and self._epochs_trained == 0:
             logging.info("Starting validation before training")
             valid_logs = self.validate_one_epoch()
-            if self._epoch in inference_epochs:
+            if self._epochs_trained in inference_epochs:
                 logging.info("Starting inline inference before training")
                 inference_logs = self.inference_one_epoch()
             else:
@@ -262,35 +305,31 @@ class Trainer:
             valid_loss = valid_logs["val/mean/loss"]
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
-            all_logs = valid_logs | inference_logs | {"epoch": self._epoch}
+            all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 
-        while self._epoch < segment_max_epochs:
-            self._epoch += 1
+        while self._epochs_trained < segment_max_epochs:
             if self._do_gc_collect:
                 # garbage collect to avoid CUDA error in some contexts
                 # https://github.com/pytorch/pytorch/issues/67978#issuecomment-1661986812  # noqa: E501
                 gc.collect()
-            logging.info(f"Epoch: {self._epoch}")
-            self.train_data.set_epoch(self._epoch)
-
+            logging.info(
+                f"Beginning epoch after {self._epochs_trained} complete epochs"
+            )
             start_time = time.time()
-            logging.info(f"Starting training step on epoch {self._epoch}")
             train_logs = self.train_one_epoch()
             train_end = time.time()
-            logging.info(f"Starting validation step on epoch {self._epoch}")
             valid_logs = self.validate_one_epoch()
             valid_end = time.time()
-            if self._epoch in inference_epochs:
-                logging.info(f"Starting inference step on epoch {self._epoch}")
+            if self._epochs_trained in inference_epochs:
                 inference_logs = self.inference_one_epoch()
                 inference_end: float | None = time.time()
             else:
                 inference_logs = {}
                 inference_end = None
 
-            train_loss = train_logs["train/mean/loss"]
+            train_loss = train_logs.get("train/mean/loss")
             valid_loss = valid_logs["val/mean/loss"]
             inference_error = inference_logs.get(
                 "inference/time_mean_norm/rmse/channel_mean", None
@@ -299,19 +338,20 @@ class Trainer:
             lr = self.optimization.learning_rate
             self.optimization.step_scheduler(valid_loss)
 
-            if self.dist.is_root():
-                if self.config.save_checkpoint:
-                    logging.info(f"Saving checkpoints for epoch {self._epoch}")
-                    self.save_all_checkpoints(valid_loss, inference_error)
-
             time_elapsed = time.time() - start_time
-            logging.info(f"Time taken for epoch {self._epoch} is {time_elapsed} sec")
-            logging.info(f"Train loss: {train_loss}. Valid loss: {valid_loss}")
+            logging.info(
+                f"Time taken for epoch {self._epochs_trained} is {time_elapsed} sec"
+            )
+            if train_loss is not None:
+                logging.info(f"Train loss: {train_loss}")
+            else:
+                logging.info("No train loss available")
+            logging.info(f"Valid loss: {valid_loss}")
             if inference_error is not None:
                 logging.info(f"Inference error: {inference_error}")
 
-            with self._validation_context():
-                additional_logs = self._end_of_epoch_ops(self._epoch)
+            with self.validation_context():
+                additional_logs = self._end_of_epoch_callback(self._epochs_trained)
 
             logging.info("Logging to wandb")
             all_logs = {
@@ -321,7 +361,7 @@ class Trainer:
                 **additional_logs,
                 **{
                     "lr": lr,
-                    "epoch": self._epoch,
+                    "epoch": self._epochs_trained,
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
                     "epoch_total_seconds": time_elapsed,
@@ -334,37 +374,67 @@ class Trainer:
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 
+            if dist.is_root():
+                if self.config.save_checkpoint:
+                    logging.info(f"Saving checkpoints for epoch {self._epochs_trained}")
+                    self.save_all_checkpoints(valid_loss, inference_error)
+
+    def _log_first_batch_metrics(self):
+        wandb = WandB.get_instance()
+        dist = Distributed.get_instance()
+        with torch.no_grad(), GlobalTimer():
+            batch = next(iter(self.train_data.loader))
+            stepped = self.stepper.train_on_batch(
+                batch,
+                optimization=self._no_optimization,
+            )
+
+            if self.config.log_train_every_n_batches > 0:
+                with torch.no_grad():
+                    metrics = {
+                        f"batch_{name}": dist.reduce_mean(metric)
+                        for name, metric in sorted(stepped.get_metrics().items())
+                    }
+                wandb.log(metrics, step=self.num_batches_seen)
+
     def train_one_epoch(self):
         """Train for one epoch and return logs from TrainAggregator."""
+        logging.info(
+            f"Starting training step for model trained for {self._epochs_trained} "
+            "complete epochs"
+        )
+        self.train_data.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
+        dist = Distributed.get_instance()
         names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0")
         aggregator = self._aggregator_builder.get_train_aggregator()
         n_samples_seen_since_logging = 0
         self.stepper.set_train()
         if self.num_batches_seen == 0:
             # Before training, log the loss on the first batch.
-            with torch.no_grad(), GlobalTimer():
-                batch = next(iter(self.train_data.loader))
-                stepped = self.stepper.train_on_batch(
-                    batch,
-                    optimization=self._no_optimization,
-                )
+            self._log_first_batch_metrics()
+        if self._current_epoch_num_batches_seen > 0:
+            logging.info(
+                "Subsetting train loader sampler to skip first "
+                f"{self._current_epoch_num_batches_seen} batches since these were "
+                "already processed for this epoch in a previous training run."
+            )
+        epoch_data = self.train_data.subset_loader(self._current_epoch_num_batches_seen)
+        if self._current_epoch_num_batches_seen > 0:
+            logging.info(
+                f"Subsetted train loader created, has {len(epoch_data)} batches"
+            )
 
-                if self.config.log_train_every_n_batches > 0:
-                    with torch.no_grad():
-                        metrics = {
-                            f"batch_{name}": self.dist.reduce_mean(metric)
-                            for name, metric in sorted(stepped.get_metrics().items())
-                        }
-                    wandb.log(metrics, step=self.num_batches_seen)
+        self._started_training = True
         current_time = time.time()
-        for batch in self.train_data.loader:
+        for batch in epoch_data:
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
             aggregator.record_batch(stepped)
-            self._end_of_batch_ops()
+            self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
             self.num_batches_seen += 1
+            self._current_epoch_num_batches_seen += 1
             n_samples_seen_since_logging += self.train_data.batch_size
             if (
                 self.config.log_train_every_n_batches > 0
@@ -372,7 +442,7 @@ class Trainer:
             ):
                 with torch.no_grad():
                     metrics = {
-                        f"batch_{name}": self.dist.reduce_mean(metric)
+                        f"batch_{name}": dist.reduce_mean(metric)
                         for name, metric in sorted(stepped.get_metrics().items())
                     }
                 duration = time.time() - current_time
@@ -383,11 +453,34 @@ class Trainer:
                 metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
                 n_samples_seen_since_logging = 0
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._epoch:04d}")
+            if (
+                dist.is_root()
+                and self.config.checkpoint_every_n_batches > 0
+                and self.num_batches_seen % self.config.checkpoint_every_n_batches == 0
+            ):
+                self._save_restart_checkpoints()
+        self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
+        # we will save restart checkpoints again after validation/inference
+        # are recorded to wandb
+        self._epochs_trained += 1
+        self._current_epoch_num_batches_seen = 0
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
         return aggregator.get_logs(label="train")
 
+    def _save_restart_checkpoints(self):
+        logging.info(
+            f"Saving latest checkpoint model trained for {self._epochs_trained} "
+            f"complete epochs and {self._current_epoch_num_batches_seen} additional "
+            f"batches, or {self.num_batches_seen} total batches"
+        )
+        self.save_checkpoint(
+            self.paths.latest_checkpoint_path,
+            ema_checkpoint_path=self.paths.ema_checkpoint_path,
+            include_optimization=True,
+        )
+
     @contextlib.contextmanager
-    def _validation_context(self):
+    def validation_context(self):
         """
         The context for running validation.
 
@@ -406,17 +499,27 @@ class Trainer:
         A context where the stepper uses the EMA model.
         """
         self._ema.store(parameters=self.stepper.modules.parameters())
+        self._in_ema_context = True
         self._ema.copy_to(model=self.stepper.modules)
         try:
             yield
         finally:
             self._ema.restore(parameters=self.stepper.modules.parameters())
+            self._in_ema_context = False
 
     def validate_one_epoch(self):
+        if self._current_epoch_num_batches_seen > 0:
+            raise RuntimeError(
+                "Validation should only be called after a full epoch has been trained"
+            )
+        logging.info(
+            f"Starting validation step for model trained for "
+            "{self._epochs_trained} epochs"
+        )
         self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_validation_aggregator()
         logging.info("Starting loop over validation data")
-        with torch.no_grad(), self._validation_context(), GlobalTimer():
+        with torch.no_grad(), self.validation_context(), GlobalTimer():
             for batch in self.valid_data.loader:
                 stepped = self.stepper.train_on_batch(
                     batch,
@@ -427,35 +530,52 @@ class Trainer:
                     batch=stepped,
                 )
         logging.info("Starting flush of reduced diagnostics to disk")
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._epoch:04d}")
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
         logging.info("Getting validation aggregator logs")
         return aggregator.get_logs(label="val")
 
-    def inference_one_epoch(self):
-        self.stepper.set_eval()
-        aggregator = self._aggregator_builder.get_inference_aggregator()
-        logging.info("Starting inline inference run")
-        with torch.no_grad(), self._validation_context(), GlobalTimer():
-            run_inference(
-                predict=self.stepper.predict_paired,
-                data=self._inference_data,
-                aggregator=aggregator,
+    def inference_one_epoch(
+        self,
+    ):
+        if self._current_epoch_num_batches_seen > 0:
+            raise RuntimeError(
+                "Inference should only be called after a full epoch has been trained"
             )
-        logging.info("Starting flush of reduced diagnostics to disk")
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._epoch:04d}")
-        logging.info("Getting inline inference aggregator logs")
-        logs = aggregator.get_summary_logs()
-        return {f"inference/{k}": v for k, v in logs.items()}
+        logging.info(
+            f"Starting inference step for model trained for "
+            "{self._epochs_trained} epochs"
+        )
+        logging.info("Starting inline inference run")
+        return inference_one_epoch(
+            stepper=self.stepper,
+            validation_context=self.validation_context,
+            dataset=self._inference_data,
+            aggregator=self._aggregator_builder.get_inference_aggregator(),
+            label="inference",
+            epoch=self._epochs_trained,
+        )
 
-    def save_checkpoint(self, checkpoint_path, include_optimization=False):
+    def save_checkpoint(
+        self,
+        checkpoint_path: str,
+        ema_checkpoint_path: str | None = None,
+        include_optimization: bool = False,
+    ):
         # save to a temporary file in case we get pre-empted during save
         temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
         )
+        if ema_checkpoint_path is not None:
+            ema_temporary_location: str | None = os.path.join(
+                os.path.dirname(ema_checkpoint_path), f".{uuid.uuid4()}.tmp"
+            )
+        else:
+            ema_temporary_location = None
         try:
             data = {
                 "num_batches_seen": self.num_batches_seen,
-                "epoch": self._epoch,
+                "current_epoch_num_batches_seen": self._current_epoch_num_batches_seen,
+                "epoch": self._epochs_trained,
                 "best_validation_loss": self._best_validation_loss,
                 "best_inference_error": self._best_inference_error,
                 "stepper": self.stepper.get_state(),
@@ -463,11 +583,28 @@ class Trainer:
             }
             if include_optimization:
                 data["optimization"] = self.optimization.get_state()
+            if ema_temporary_location is not None:
+                with self._ema_context():
+                    ema_data = dict(
+                        data,
+                        stepper=self.stepper.get_state(),
+                        ema=self._ema.get_state(),
+                    )
+                    # never include optimization in EMA checkpoint
+                    if "optimization" in ema_data:
+                        ema_data.pop("optimization")
+                    torch.save(ema_data, ema_temporary_location)
             torch.save(data, temporary_location)
+            if ema_temporary_location is not None and ema_checkpoint_path is not None:
+                os.replace(ema_temporary_location, ema_checkpoint_path)
             os.replace(temporary_location, checkpoint_path)
         finally:
             if os.path.exists(temporary_location):
                 os.remove(temporary_location)
+            if ema_temporary_location is not None and os.path.exists(
+                ema_temporary_location
+            ):
+                os.remove(ema_temporary_location)
 
     def restore_checkpoint(self, checkpoint_path, ema_checkpoint_path):
         """
@@ -518,26 +655,43 @@ class Trainer:
             if save_best_checkpoint:
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
-        logging.info(f"Saving latest checkpoint to {self.paths.latest_checkpoint_path}")
-        self.save_checkpoint(
-            self.paths.latest_checkpoint_path, include_optimization=True
-        )
-        with self._ema_context():
-            logging.info(
-                f"Saving latest EMA checkpoint to {self.paths.ema_checkpoint_path}"
-            )
-            self.save_checkpoint(self.paths.ema_checkpoint_path)
-        if self._epoch_checkpoint_enabled(self._epoch):
-            epoch_checkpoint_path = self.paths.epoch_checkpoint_path(self._epoch)
-            logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
-            self.save_checkpoint(epoch_checkpoint_path)
-        if self._ema_epoch_checkpoint_enabled(self._epoch):
+        self._save_restart_checkpoints()
+
+        if self._ema_epoch_checkpoint_enabled(self._epochs_trained):
             ema_epoch_checkpoint_path = self.paths.ema_epoch_checkpoint_path(
-                self._epoch
+                self._epochs_trained
             )
             logging.info(f"Saving EMA epoch checkpoint to {ema_epoch_checkpoint_path}")
             with self._ema_context():
                 self.save_checkpoint(ema_epoch_checkpoint_path)
+        if self._epoch_checkpoint_enabled(self._epochs_trained):
+            epoch_checkpoint_path = self.paths.epoch_checkpoint_path(
+                self._epochs_trained
+            )
+            logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
+            self.save_checkpoint(epoch_checkpoint_path)
+
+
+def inference_one_epoch(
+    stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+    validation_context: Callable[[], contextlib.AbstractContextManager],
+    dataset: InferenceDataABC[PS, FD],
+    aggregator: InferenceAggregatorABC[PS, SD],
+    label: str,
+    epoch: int,
+):
+    stepper.set_eval()
+    with torch.no_grad(), validation_context(), GlobalTimer():
+        run_inference(
+            predict=stepper.predict_paired,
+            data=dataset,
+            aggregator=aggregator,
+        )
+    logging.info("Starting flush of reduced diagnostics to disk")
+    aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
+    logging.info("Getting inline inference aggregator logs")
+    logs = aggregator.get_summary_logs()
+    return {f"{label}/{k}": v for k, v in logs.items()}
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
@@ -547,6 +701,9 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     trainer.stepper.load_state(checkpoint["stepper"])
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
+    trainer._current_epoch_num_batches_seen = checkpoint[
+        "current_epoch_num_batches_seen"
+    ]
     trainer._start_epoch = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]

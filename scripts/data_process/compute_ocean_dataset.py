@@ -1,7 +1,5 @@
 """
-Utils for CM4 ocean data preprocessing. This script relies on a fork of the
-m2lines/ocean_emulators repo:
-https://github.com/jpdunc23/ocean_emulators/tree/cm4-preprocessing.
+Utils for CM4 ocean data preprocessing. This script relies on a m2lines/ocean_emulators.
 
 The 200-year pre-industrial control simulation ocean preprocessing ran in about
 6 hours on LEAP's 2i2c JupyterHub in the default "notebook" conda environment
@@ -14,7 +12,7 @@ import dataclasses
 import os
 import pdb
 import sys
-from typing import IO, Any, Mapping, Optional, Protocol, Sequence, Tuple, Union
+from typing import IO, Any, Literal, Mapping, Optional, Protocol, Sequence, Tuple, Union
 
 import click
 import dacite
@@ -23,7 +21,11 @@ import numpy as np
 import xarray as xr
 import xpartition  # noqa
 import yaml
-from compute_dataset import ChunkingConfig, StandardDimMapping
+from compute_dataset import (
+    ChunkingConfig,
+    StandardDimMapping,
+    clear_compressors_encoding,
+)
 from dask.diagnostics import ProgressBar
 from dask.distributed import Client, LocalCluster
 from get_stats import StatsConfig
@@ -43,6 +45,7 @@ class OceanStandardNameMapping(StandardDimMapping):
     vertical_dim: str = "lev"
     vertical_idim: str = "ilev"
     rotation_angle: str = "angle"
+    area: str = "grid_area"
     sea_water_x_velocity: str = "uo"
     sea_water_y_velocity: str = "vo"
     sea_water_salinity: str = "so"
@@ -54,8 +57,15 @@ class OceanStandardNameMapping(StandardDimMapping):
     sea_ice_y_velocity: str = "VI"
     sea_ice_modeled: str = "EXT"
     sea_ice_fraction: str = "sea_ice_fraction"
+    sea_ice_thickness: str = "HI"
+    sea_ice_volume: str = "sea_ice_volume"
+    land_fraction: str = "land_fraction"
     wetmask: str = "wetmask"
     ocean_layer_thickness: str = "layer_thickness"
+    cell_area: str = "areacello"
+    surface_mask: str = "mask_2d"
+    sea_surface_fraction: str = "sea_surface_fraction"
+    sea_floor_depth: str = "deptho"
 
     def __post_init__(self):
         self.full_field_dims = [self.longitude_dim, self.latitude_dim, self.time_dim]
@@ -75,6 +85,16 @@ class OceanStandardNameMapping(StandardDimMapping):
             self.sea_water_y_velocity,
             self.sea_water_salinity,
             self.sea_water_potential_temperature,
+        )
+
+    @property
+    def unfiltered_vars(self) -> Sequence[str]:
+        return (
+            self.cell_area,
+            self.land_fraction,
+            self.sea_ice_fraction,
+            self.sea_surface_fraction,
+            self.sea_floor_depth,
         )
 
 
@@ -109,20 +129,21 @@ class CoarseningConfig:
 
 
 @dataclasses.dataclass
-class OceanStaticConfig:
-    """Configuration for static ocean data.
+class StaticDataConfig:
+    """Configuration for temporally static data.
 
     Attributes:
-        zarr: name of zarr with the static ocean data.
+        zarr: name of zarr with the static data.
         names: names of variables to extract from the zarr.
         renaming: (optional) mapping of names in dataset to renamed output.
-
-
+        grid: (optional) the grid that the static data is defined on.
     """
 
     zarr: str
     names: Sequence[str]
+    zarr_directory: Optional[str] = None
     renaming: Mapping[str, str] = dataclasses.field(default_factory=dict)
+    grid: Literal["original", "target"] = "original"
 
     def rename(self, ds: xr.Dataset):
         return _rename(ds, self.renaming)
@@ -187,11 +208,16 @@ class OceanDatasetComputationConfig:
         nc_mosaic_path: path to nc file for grid mosaic with variables needed by
             ocean_emulators.simulation_processing.gfdl_om4.convert_super_grid.
         nc_target_grid_path: path to nc file for target grid.
-        ocean_static_zarr: (optional) name of zarr with static ocean data.
+        ocean_static: (optional) config for zarr with static ocean data.
+        land_static: (optional) config for zarr with static land data.
         renaming: (optional) mapping of names in dataset to renamed output.
         standard_names: (optional) mapping of standard names to corresponding
             names of variables in the dataset.
         chunking: (optional) config for dask chunking.
+        sharding: (optional) mapping of standard dimension names to desired
+            output shard sizes. Defaults to a shard size of 360 along the time
+            dimension. If None, then an unsharded zarr store will be written
+            with chunks as specified in ``chunking``.
     """
 
     ocean_zarr: str
@@ -200,12 +226,18 @@ class OceanDatasetComputationConfig:
     nc_mosaic_path: str
     nc_target_grid_path: str
     coarsen: Optional[CoarseningConfig] = None
-    ocean_static: Optional[OceanStaticConfig] = None
+    ocean_static: Optional[StaticDataConfig] = None
+    land_static: Optional[StaticDataConfig] = None
     renaming: Mapping[str, str] = dataclasses.field(default_factory=dict)
     standard_names: OceanStandardNameMapping = dataclasses.field(
         default_factory=OceanStandardNameMapping
     )
-    chunking: ChunkingConfig = dataclasses.field(default_factory=ChunkingConfig)
+    chunking: ChunkingConfig = dataclasses.field(
+        default_factory=lambda: ChunkingConfig(time_dim=1)
+    )
+    sharding: ChunkingConfig = dataclasses.field(
+        default_factory=lambda: ChunkingConfig(time_dim=360)
+    )
     ocean_dataset_nc_files: str = ""
     ocean_dataset_monthly_layer_thickness_files: str = ""
     compute_e3sm_surface_downward_heat_flux: bool = False
@@ -216,6 +248,24 @@ class OceanDatasetComputationConfig:
 
     def rename(self, ds: xr.Dataset):
         return _rename(ds, self.renaming)
+
+
+def insert_nans_on_land_surface(ds, standard_names: OceanStandardNameMapping):
+    """
+    Insert NaNs on land surface for all variables except for
+    land fraction, masks, or sea surface fraction.
+    """
+    sfc_mask = ds[standard_names.surface_mask]
+    for name in ds.data_vars:
+        if name == "land_fraction" or "mask_" in name or "idepth_" in name:
+            continue
+        else:
+            ds[name] = ds[name].where(sfc_mask > 0)
+    if standard_names.sea_surface_fraction in ds.data_vars:
+        ds[standard_names.sea_surface_fraction] = ds[
+            standard_names.sea_surface_fraction
+        ].fillna(0.0)
+    return ds
 
 
 class FileSystemProtocol(Protocol):
@@ -331,7 +381,9 @@ def compute_lazy_dataset(
             lon_dim: -1,
         }
     )
-
+    if ocean_names.cell_area in ds.coords:
+        # 'areacello' is added back by horizontal_regrid
+        ds = ds.reset_coords(ocean_names.cell_area, drop=True)
     urls = [
         om_zarr_path,
         sis_zarr_path,
@@ -351,8 +403,11 @@ def compute_lazy_dataset(
         )
         ds = xr.merge([ds, ds_coarsen])
 
+    target_grid_ds_list = []
+
     if config.ocean_static is not None:
-        zarr_path = os.path.join(run_directory, config.ocean_static.zarr)
+        zarr_dir = config.ocean_static.zarr_directory or run_directory
+        zarr_path = os.path.join(zarr_dir, config.ocean_static.zarr)
         urls.append(zarr_path)
         with fs.open(zarr_path) as f:
             ds_static = xr.open_dataset(
@@ -362,7 +417,24 @@ def compute_lazy_dataset(
                 backend_kwargs=backend_kwargs,
             )[config.ocean_static.names]
         ds_static = config.ocean_static.rename(ds_static)
-        ds = xr.merge([ds, ds_static])
+        if config.ocean_static.grid == "original":
+            ds = xr.merge([ds, ds_static])
+        else:
+            target_grid_ds_list.append(ds_static)
+
+    if config.land_static is not None:
+        zarr_dir = config.land_static.zarr_directory or run_directory
+        zarr_path = os.path.join(zarr_dir, config.land_static.zarr)
+        urls.append(zarr_path)
+        with fs.open(zarr_path) as f:
+            ds_static = xr.open_dataset(
+                zarr_path, engine="zarr", backend_kwargs=backend_kwargs
+            )[config.land_static.names]
+        ds_static = config.land_static.rename(ds_static)
+        if config.land_static.grid == "original":
+            ds = xr.merge([ds, ds_static])
+        else:
+            target_grid_ds_list.append(ds_static)
 
     idepth_data = {}
 
@@ -390,10 +462,20 @@ def compute_lazy_dataset(
         ds[varname_x] = x_rotated.astype(np.float32)
         ds[varname_y] = y_rotated.astype(np.float32)
 
-    # spatial filtering
-    ds = spatially_filter(
-        ds, ds[ocean_names.wetmask], depth_dim=vdim, y_dim=lat_dim, x_dim=lon_dim
-    )
+    # spatial filtering, exluding surface fractions
+    unfiltered_vars = [
+        var for var in ocean_names.unfiltered_vars if var in ds.data_vars
+    ]
+    if len(unfiltered_vars) > 0:
+        ds_unfiltered = ds[unfiltered_vars]
+        ds_filtered = spatially_filter(
+            ds.drop_vars(unfiltered_vars),
+            ds[ocean_names.wetmask],
+            depth_dim=vdim,
+            y_dim=lat_dim,
+            x_dim=lon_dim,
+        )
+        ds = xr.merge([ds_unfiltered, ds_filtered])
 
     # regrid
     with fs.open(config.nc_target_grid_path) as f:
@@ -412,15 +494,25 @@ def compute_lazy_dataset(
             "grid_latt": "lat",
         }
     )
+
     # fill nans in sea_ice_fraction to be
     # consistent with ocean fraction in ocean_emulators
     if ocean_names.sea_ice_fraction in ds.data_vars:
         ds[ocean_names.sea_ice_fraction] = ds[ocean_names.sea_ice_fraction].fillna(0.0)
+
     ds_regridded = horizontal_regrid(ds, ds_target_grid).astype("float32")
-    if ocean_names.sea_ice_fraction in ds_regridded.data_vars:
-        ds_regridded[ocean_names.sea_ice_fraction] = ds_regridded[
-            ocean_names.sea_ice_fraction
-        ].fillna(0.0)
+    if ocean_names.cell_area in ds_regridded.coords:
+        # make cell area a data variable
+        ds_regridded = ds_regridded.reset_coords(ocean_names.cell_area)
+
+    hcoords = {
+        lon_dim: ds_regridded[lon_dim],
+        lat_dim: ds_regridded[lat_dim],
+    }
+    for ds_target_grid in target_grid_ds_list:
+        ds_target_grid = ds_target_grid.assign_coords(hcoords)
+        ds_regridded = xr.merge([ds_regridded, ds_target_grid])
+
     print(f"Regridded size: {ds_regridded.nbytes / 1e9:.1f} GB")
 
     ds = ds_regridded
@@ -446,19 +538,55 @@ def compute_lazy_dataset(
             long_name = ds[var].long_name
             ds[f"{var}_{i}"] = ds[var].isel({vdim: i})
             ds[f"{var}_{i}"].attrs["long_name"] = long_name + f" level-{i}"
+    ds["mask_2d"] = ds["mask"].isel({vdim: 0})
 
     ds = ds.drop_vars(vars_3d)
     ds = ds.drop_dims(vdim)
     ds = ds.reset_coords(drop=True)
     ds = xr.merge([ds, idepth_ds])
 
+    # post-process sea_ice_fraction
+    if ocean_names.sea_ice_fraction in ds.data_vars:
+        # # replace land with NaNs
+        mask = ds["mask_0"]
+        sea_ice_frac = ds[ocean_names.sea_ice_fraction]
+        ds[ocean_names.sea_ice_fraction] = sea_ice_frac.where(mask > 0, float("nan"))
+
+    if ocean_names.sea_ice_thickness in ds.data_vars:
+        # thickness 0 where ever sea ice fraction is 0
+        sea_ice_frac = ds[ocean_names.sea_ice_fraction]
+        thickness_in_m = ds[ocean_names.sea_ice_thickness].where(sea_ice_frac > 0, 0.0)
+        # replace land with NaNs
+        mask = ds["mask_0"]
+        thickness_in_m = thickness_in_m.where(mask > 0, float("nan"))
+        ds[ocean_names.sea_ice_thickness] = thickness_in_m
+        # compute sea ice volume
+        if ocean_names.cell_area in ds.data_vars:
+            area_in_m2 = ds[ocean_names.cell_area]
+            ice_volume = thickness_in_m * area_in_m2 * sea_ice_frac / 1000**3
+            ice_volume.attrs["long_name"] = "ice volume"
+            ice_volume.attrs["units"] = "1000 km^3"
+            ds[ocean_names.sea_ice_volume] = ice_volume
+        else:
+            print(
+                "Warning: cell area not found. Sea ice volume won't"
+                "be added to the dataset."
+            )
+
     # add 'sst' variable in degrees Kelvin
     ds["sst"] = ds[ocean_names.surface_temperature].copy() + 273.15
     ds["sst"].attrs["long_name"] = "Sea surface temperature"
     ds["sst"].attrs["units"] = "K"
 
-    chunks = config.chunking.get_chunks(ocean_names)
-    ds = ds.chunk(chunks)
+    ds = insert_nans_on_land_surface(ds, standard_names=ocean_names)
+
+    if config.sharding is None:
+        outer_chunks = config.chunking.get_chunks(ocean_names)
+    else:
+        outer_chunks = config.sharding.get_chunks(ocean_names)
+
+    ds = ds.chunk(outer_chunks)
+
     ds.attrs["history"] = (
         "Dataset computed by full-model/scripts/data_process"
         "/compute_ocean_dataset.py"
@@ -505,10 +633,16 @@ def main(
         run_directory=run_directory,
         fs=config.filesystem,
     )
+    standard_names = config.dataset_computation.standard_names
+    if config.sharding is None:
+        inner_chunks = None
+    else:
+        inner_chunks = config.chunking.get_chunks(standard_names)
 
     if subsample:
         ds = ds.isel(time=slice(None, 73))
 
+    ds = clear_compressors_encoding(ds)
     print(f"Output dataset size is {ds.nbytes / 1e9} GB")
 
     if debug:
@@ -516,7 +650,7 @@ def main(
             print(ds)
     else:
         n_partitions = config.n_split
-        ds.partition.initialize_store(output_store)
+        ds.partition.initialize_store(output_store, inner_chunks=inner_chunks)
         for i in range(n_partitions):
             print(f"Writing segment {i + 1} / {n_partitions}")
             with ProgressBar():

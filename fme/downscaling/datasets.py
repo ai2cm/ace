@@ -11,11 +11,10 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.dataset.concat import XarrayConcat
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.dataset.getters import get_dataset
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import get_device, move_tensordict_to_device, using_gpu
 from fme.core.distributed import Distributed
 from fme.core.metrics import spherical_area_weights
@@ -88,6 +87,33 @@ def get_normalized_topography(
         raise ValueError(f"unexpected shape {topography.shape} for topography")
     topography_normalized = (topography - topography.mean()) / topography.std()
     return topography_normalized
+
+
+def _get_topography_downscale_factor(
+    topography_shape: tuple[int, int], data_coords_shape: tuple[int, int]
+):
+    if len(topography_shape) != 2 or len(data_coords_shape) != 2:
+        raise ValueError(
+            f"Expected 2D shapes for topography {topography_shape} and "
+            f"data coordinates {data_coords_shape}, got {len(topography_shape)}D "
+            f"and {len(data_coords_shape)}D."
+        )
+    if (
+        topography_shape[0] % data_coords_shape[0] != 0
+        or topography_shape[1] % data_coords_shape[1] != 0
+    ):
+        raise ValueError(
+            f"Topography shape {topography_shape} must be evenly "
+            f"divisible by horizontal shape {data_coords_shape}"
+        )
+    topography_downscale_factor = topography_shape[0] // data_coords_shape[0]
+    if topography_downscale_factor != topography_shape[1] // data_coords_shape[1]:
+        raise ValueError(
+            f"Topography shape {topography_shape} must have the same scale factor "
+            "between lat and lon dimensions as data coordinates "
+            f"shape {data_coords_shape}"
+        )
+    return topography_downscale_factor
 
 
 @dataclasses.dataclass
@@ -310,23 +336,42 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             lon=coords.lon[self.mask_indices.lon],
         )
         self._area_weights = self._latlon_coordinates.area_weights
-
-        if topography is not None:
-            shape = (
-                coords.lat.numel(),
-                coords.lon.numel(),
+        self._full_topography = topography
+        self._full_shape = (
+            coords.lat.numel(),
+            coords.lon.numel(),
+        )
+        if self._full_topography is not None:
+            self._topography_mask = self._get_topography_mask(
+                self.mask_indices,
+                self._full_topography.shape,
+                self._full_shape,
             )
-            if topography.shape != shape:
-                raise ValueError(
-                    f"Topography shape {topography.shape} does not match "
-                    f"horizontal coordinates shape {shape}"
-                )
-            self._topography = topography[
-                self.mask_indices.lat.unsqueeze(1),
-                self.mask_indices.lon.unsqueeze(0),
-            ]
         else:
-            self._topography = None
+            self._topography_mask = None
+
+    def _get_topography_mask(
+        self, data_mask_indices, topography_shape, data_coords_shape
+    ):
+        """
+        Topography is allowed to be higher resolution than the data,
+        as a common use case is to load fine topography as an input
+        when loading coarse input data.
+        """
+        topography_downscale_factor = _get_topography_downscale_factor(
+            topography_shape, data_coords_shape
+        )
+        lat_mask = torch.arange(
+            (data_mask_indices.lat[0]) * topography_downscale_factor,
+            (data_mask_indices.lat[-1] + 1) * topography_downscale_factor,
+        )
+        lon_mask = torch.arange(
+            (data_mask_indices.lon[0]) * topography_downscale_factor,
+            (data_mask_indices.lon[-1] + 1) * topography_downscale_factor,
+        )
+        mask = (lat_mask.unsqueeze(1), lon_mask.unsqueeze(0))
+
+        return mask
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
@@ -346,7 +391,10 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
 
     @property
     def subset_topography(self) -> torch.Tensor | None:
-        return self._topography
+        if self._full_topography is not None:
+            return self._full_topography[*self._topography_mask]
+        else:
+            return None
 
     def __len__(self):
         return len(self.dataset)
@@ -532,6 +580,22 @@ class SizedMap(Generic[T, U], Sized, Iterable[U]):
 @dataclasses.dataclass
 class GriddedData:
     _loader: torch.utils.data.DataLoader
+    shape: tuple[int, int]
+    dims: list[str]
+    variable_metadata: Mapping[str, VariableMetadata]
+    all_times: xr.CFTimeIndex
+
+    @property
+    def loader(self) -> DataLoader[BatchItem]:
+        def on_device(batch: BatchItem) -> BatchItem:
+            return batch.to_device()
+
+        return SizedMap(on_device, self._loader)
+
+
+@dataclasses.dataclass
+class PairedGriddedData:
+    _loader: torch.utils.data.DataLoader
     coarse_shape: tuple[int, int]
     downscale_factor: int
     dims: list[str]
@@ -616,6 +680,12 @@ class BatchData:
         leading_dim = self._validate()
         self._len = leading_dim[0]
         self._horizontal_shape = self[0].horizontal_shape
+        if self.topography is not None:
+            self._topography_downscale_factor = _get_topography_downscale_factor(
+                self.topography.shape[-2:], self._horizontal_shape
+            )
+        else:
+            self._topography_downscale_factor = None
 
     @property
     def horizontal_shape(self) -> tuple[int, int]:
@@ -711,7 +781,9 @@ class BatchData:
             dims=self.latlon_coordinates.dims,
         )
         if self.topography is not None:
-            sliced_topo = self.topography[..., lat_slice, lon_slice]
+            topo_lat_slice = _scale_slice(lat_slice, self._topography_downscale_factor)
+            topo_lon_slice = _scale_slice(lon_slice, self._topography_downscale_factor)
+            sliced_topo = self.topography[..., topo_lat_slice, topo_lon_slice]
         else:
             sliced_topo = None
         return BatchData(
@@ -817,6 +889,170 @@ class ContiguousDistributedSampler(DistributedSampler):
 @dataclasses.dataclass
 class DataLoaderConfig:
     """
+    Configuration for loading downscaling data for generation.
+    Input coarse dataset will be processed into batches, usually with
+    a horizontal extent to define a portion of the full domain for use in
+    generation.
+    If the model requires topography, the dataset to use should be specified
+    in the `topography` field. Topography data may be at higher resolution than
+    the data, e.g. when fine topography is loaded as an input.
+
+    Args:
+        coarse: The dataset configuration.
+        batch_size: The batch size to use for the dataloader.
+        num_data_workers: The number of data workers to use for the dataloader.
+            (For multi-GPU runtime, it's the number of workers per GPU.)
+        strict_ensemble: Whether to enforce that the datasets to be concatened
+            have the same dimensions and coordinates.
+        topography: The dataset configuration for the topography data.
+            If None, no topography data will be loaded.
+        lat_extent: The latitude extent to use for the dataset specified in
+            degrees (-90, 90).  The extent is inclusive, so the start and
+            stop values are included in the extent.
+        lon_extent: The longitude extent to use for the dataset specified in
+            degrees (0, 360). The extent is inclusive, so the start and
+            stop values are included in the extent.
+        repeat: The number of times to repeat the underlying xarray dataset
+            time dimension.  Useful to include longer sequences of small
+            data for testing.
+    """
+
+    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
+    batch_size: int
+    num_data_workers: int
+    strict_ensemble: bool
+    topography: XarrayDataConfig | None = None
+    lat_extent: ClosedInterval = dataclasses.field(
+        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+    )
+    lon_extent: ClosedInterval = dataclasses.field(
+        default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
+    )
+    repeat: int = 1
+
+    @property
+    def full_config(self) -> Sequence[XarrayDataConfig]:
+        # Expands any XarrayEnsembleDataConfig so it is converted
+        # to the equivalent sequence of XarrayDataConfig.
+        all_configs = []
+        for config in self.coarse:
+            if isinstance(config, XarrayEnsembleDataConfig):
+                all_configs += config.expand()
+            else:
+                all_configs.append(config)
+        return all_configs
+
+    @property
+    def mp_context(self):
+        context = None
+        if self.num_data_workers == 0:
+            return None
+        for config in self.full_config:
+            if config.engine == "zarr":
+                context = "forkserver"
+        return context
+
+    def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
+        return XarrayConcat([dataset] * self.repeat)
+
+    def get_xarray_dataset(
+        self,
+        names: list[str],
+        n_timesteps: int,
+    ) -> tuple[XarrayConcat, DatasetProperties]:
+        return get_dataset(
+            self.full_config,
+            names,
+            n_timesteps,
+            strict=self.strict_ensemble,
+        )
+
+    def build_batchitem_dataset(
+        self,
+        dataset: XarrayConcat,
+        properties: DatasetProperties,
+        requires_topography: bool,
+    ) -> BatchItemDatasetAdapter:
+        # n_timesteps is hardcoded to 1 for downscaling, so the sample_start_times
+        # are the full time range for the dataset
+        if dataset.sample_n_times != 1:
+            raise ValueError(
+                "Downscaling data loading should always have n_timesteps=1 "
+                "in model data requirements."
+                f" Got {dataset.sample_n_times} instead."
+            )
+        dataset = self._repeat_if_requested(dataset)
+
+        if requires_topography:
+            if self.topography is None:
+                raise ValueError(
+                    "Topography is required for this model, but no topography "
+                    "dataset was specified in the configuration."
+                )
+            else:
+                topography = get_normalized_topography([self.topography])
+        else:
+            topography = None
+
+        dataset_subset = HorizontalSubsetDataset(
+            dataset,
+            properties=properties,
+            lat_interval=self.lat_extent,
+            lon_interval=self.lon_extent,
+            topography=topography,
+        )
+        return BatchItemDatasetAdapter(
+            dataset_subset,
+            dataset_subset.subset_latlon_coordinates,
+            properties=properties,
+            topography=dataset_subset.subset_topography,
+        )
+
+    def build(
+        self,
+        requirements: DataRequirements,
+        dist: Distributed | None = None,
+    ) -> GriddedData:
+        xr_dataset, properties = self.get_xarray_dataset(
+            names=requirements.coarse_names, n_timesteps=1
+        )
+        dataset = self.build_batchitem_dataset(
+            dataset=xr_dataset,
+            properties=properties,
+            requires_topography=requirements.use_fine_topography,
+        )
+        all_times = xr_dataset.sample_start_times
+        if dist is None:
+            dist = Distributed.get_instance()
+        # Shuffle is not used for generation, it is set to False.
+        sampler = (
+            ContiguousDistributedSampler(dataset) if dist.is_distributed() else None
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=dist.local_batch_size(int(self.batch_size)),
+            num_workers=self.num_data_workers,
+            shuffle=False,
+            sampler=sampler,
+            drop_last=True,
+            collate_fn=BatchData.from_sequence,
+            pin_memory=using_gpu(),
+            multiprocessing_context=self.mp_context,
+            persistent_workers=True if self.num_data_workers > 0 else False,
+        )
+        example = dataset[0]
+        return GriddedData(
+            dataloader,
+            shape=example.horizontal_shape,
+            dims=example.latlon_coordinates.dims,
+            variable_metadata=dataset.variable_metadata,
+            all_times=all_times,
+        )
+
+
+@dataclasses.dataclass
+class PairedDataLoaderConfig:
+    """
     Configuration for loading downscaling datasets.  The input fine and
     coarse Xarray datasets will be processed into batches, usually with
     a horizontal extent to define a portion of the full domain for use in
@@ -864,6 +1100,18 @@ class DataLoaderConfig:
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
 
+    def _mp_context(self):
+        mp_context = None
+        if self.num_data_workers == 0:
+            return None
+        for config in self.fine:
+            if config.engine == "zarr":
+                mp_context = "forkserver"
+        for config in self.coarse_full_config:
+            if config.engine == "zarr":
+                mp_context = "forkserver"
+        return mp_context
+
     @property
     def coarse_full_config(self) -> Sequence[XarrayDataConfig]:
         # Expands the coarse dataset configs so that any XarrayEnsembleDataConfig
@@ -881,7 +1129,7 @@ class DataLoaderConfig:
         train: bool,
         requirements: DataRequirements,
         dist: Distributed | None = None,
-    ) -> GriddedData:
+    ) -> PairedGriddedData:
         if dist is None:
             dist = Distributed.get_instance()
 
@@ -963,15 +1211,6 @@ class DataLoaderConfig:
         else:
             sampler = None
 
-        if properties_coarse.is_remote or properties_fine.is_remote:
-            # GCSFS and S3FS are not fork-safe, so we need to use forkserver
-            # these settings also work in the case of one or both datasets being local
-            mp_context = "forkserver"
-            persistent_workers = True
-        else:
-            mp_context = None
-            persistent_workers = False
-
         dataloader = DataLoader(
             dataset,
             batch_size=dist.local_batch_size(int(self.batch_size)),
@@ -981,8 +1220,8 @@ class DataLoaderConfig:
             drop_last=True,
             pin_memory=using_gpu(),
             collate_fn=PairedBatchData.from_sequence,
-            multiprocessing_context=mp_context,
-            persistent_workers=persistent_workers,
+            multiprocessing_context=self._mp_context(),
+            persistent_workers=True if self.num_data_workers > 0 else False,
         )
 
         example = dataset[0]
@@ -999,7 +1238,7 @@ class DataLoaderConfig:
             **dataset_coarse_subset.variable_metadata,
         }
 
-        return GriddedData(
+        return PairedGriddedData(
             dataloader,
             example.coarse.horizontal_shape,
             example.downscale_factor,

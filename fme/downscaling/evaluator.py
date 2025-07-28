@@ -11,7 +11,7 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dataset.config import TimeSlice
+from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -21,9 +21,9 @@ from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, SampleAggregator
 from fme.downscaling.datasets import (
     ClosedInterval,
-    DataLoaderConfig,
-    GriddedData,
     PairedBatchData,
+    PairedDataLoaderConfig,
+    PairedGriddedData,
 )
 from fme.downscaling.models import (
     DiffusionModel,
@@ -33,7 +33,11 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.patching import PatchPredictor, paired_patch_generator_from_loader
+from fme.downscaling.patching import (
+    MultipatchConfig,
+    PatchPredictor,
+    paired_patch_generator_from_loader,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -140,7 +144,7 @@ class CheckpointModelConfig:
 class Evaluator:
     def __init__(
         self,
-        data: GriddedData,
+        data: PairedGriddedData,
         model: Model | DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
@@ -201,7 +205,7 @@ class EventEvaluator:
     def __init__(
         self,
         event_name: str,
-        data: GriddedData,
+        data: PairedGriddedData,
         model: Model | DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
@@ -245,25 +249,6 @@ class EventEvaluator:
 
 
 @dataclasses.dataclass
-class MultipatchConfig:
-    """
-    Configuration to enable predictions on multiple patches for evaluation.
-
-    Args:
-        divide_evaluation: enables the patched prediction of the full
-            input data extent for evaluation.
-        composite_prediction: if True, recombines the smaller prediction
-            regions into the original full region as a single sample.
-        coarse_horizontal_overlap: number of pixels to overlap in the
-            coarse data.
-    """
-
-    divide_evaluation: bool = False
-    composite_prediction: bool = False
-    coarse_horizontal_overlap: int = 1
-
-
-@dataclasses.dataclass
 class EventConfig:
     name: str
     date: str
@@ -277,8 +262,8 @@ class EventConfig:
     date_format: str = "%Y-%m-%dT%H:%M"
 
     def get_gridded_data(
-        self, base_data_config: DataLoaderConfig, requirements: DataRequirements
-    ) -> GriddedData:
+        self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
+    ) -> PairedGriddedData:
         # Event evaluation only load the first snapshot.
         # Filling the slice stop isn't necessary but guards against
         # future code trying to iterate over the entire dataloader.
@@ -311,7 +296,7 @@ class EventConfig:
 class EvaluatorConfig:
     model: CheckpointModelConfig
     experiment_dir: str
-    data: DataLoaderConfig
+    data: PairedDataLoaderConfig
     logging: LoggingConfig
     n_samples: int = 4
     patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
@@ -334,7 +319,7 @@ class EvaluatorConfig:
 
         model = self.model.build()
         evaluator_model: Model | DiffusionModel | PatchPredictor
-        if self.patch.divide_evaluation and self.patch.composite_prediction:
+        if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
                 model,
                 dataset.coarse_shape,
@@ -343,7 +328,7 @@ class EvaluatorConfig:
         else:
             evaluator_model = model
 
-        if self.patch.divide_evaluation and not self.patch.composite_prediction:
+        if self.patch.divide_generation and not self.patch.composite_prediction:
             patch_data = True
         else:
             patch_data = False

@@ -8,9 +8,20 @@ import xarray as xr
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregator
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 
 TIMESTEP = datetime.timedelta(hours=6)
+
+
+def get_ds_info(nx: int, ny: int) -> DatasetInfo:
+    return DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lon=torch.arange(nx),
+            lat=torch.arange(ny),
+        ),
+        timestep=TIMESTEP,
+    )
 
 
 def get_zero_time(shape, dims):
@@ -22,15 +33,11 @@ def test_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
-    horizontal_coordinates = LatLonCoordinates(
-        lon=torch.arange(nx),
-        lat=torch.arange(ny),
-    )
+    ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     agg = InferenceEvaluatorAggregator(
-        horizontal_coordinates=horizontal_coordinates,
-        timestep=TIMESTEP,
+        dataset_info=ds_info,
         n_timesteps=n_time,
         initial_time=initial_time,
         record_step_20=True,
@@ -103,14 +110,10 @@ def test_inference_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
-    horizontal_coordinates = LatLonCoordinates(
-        lon=torch.arange(nx),
-        lat=torch.arange(ny),
-    )
+    ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
-        horizontal_coordinates=horizontal_coordinates,
-        timestep=TIMESTEP,
+        dataset_info=ds_info,
         n_timesteps=n_time,
         initial_time=initial_time,
         record_step_20=True,
@@ -158,14 +161,10 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     windows.
     """
     nx, ny = 4, 4
-    horizontal_coordinates = LatLonCoordinates(
-        lon=torch.arange(nx),
-        lat=torch.arange(ny),
-    )
+    ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
-        horizontal_coordinates=horizontal_coordinates,
-        timestep=TIMESTEP,
+        dataset_info=ds_info,
         n_timesteps=window_len * n_windows,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
@@ -194,14 +193,10 @@ def test_inference_logs_length(window_len: int, n_windows: int):
 
 def test_flush_diagnostics(tmpdir):
     nx, ny, n_sample, n_time = 2, 2, 10, 21
-    horizontal_coordinates = LatLonCoordinates(
-        lon=torch.arange(nx),
-        lat=torch.arange(ny),
-    )
+    ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
     agg = InferenceEvaluatorAggregator(
-        horizontal_coordinates=horizontal_coordinates,
-        timestep=TIMESTEP,
+        dataset_info=ds_info,
         n_timesteps=n_time,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
@@ -236,13 +231,12 @@ def test_flush_diagnostics(tmpdir):
 
 
 def test_agg_raises_without_output_dir():
-    lat_lon_coordinates = LatLonCoordinates(torch.arange(2), torch.arange(2))
+    ds_info = get_ds_info(nx=2, ny=2)
     with pytest.raises(
         ValueError, match="Output directory must be set to save diagnostics"
     ):
         InferenceEvaluatorAggregator(
-            horizontal_coordinates=lat_lon_coordinates,
-            timestep=TIMESTEP,
+            dataset_info=ds_info,
             n_timesteps=1,
             initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
             normalize=lambda x: dict(x),

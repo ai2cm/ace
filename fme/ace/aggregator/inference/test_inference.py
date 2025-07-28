@@ -7,8 +7,9 @@ import xarray as xr
 
 from fme.ace.aggregator.inference import InferenceAggregator
 from fme.ace.data_loading.batch_data import PairedData
-from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
+
+from .test_evaluator import get_ds_info
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -22,13 +23,8 @@ def test_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
-    lat, lon = torch.linspace(-90, 90, ny), torch.linspace(-180, 180, nx)
-    agg = InferenceAggregator(
-        LatLonCoordinates(lat, lon).to(device=get_device()),
-        n_time,
-        datetime.timedelta(days=365),
-        save_diagnostics=False,
-    )
+    ds_info = get_ds_info(nx, ny)
+    agg = InferenceAggregator(ds_info, n_time, save_diagnostics=False)
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
@@ -61,7 +57,7 @@ def test_logs_labels_exist_with_reference_time_means():
     n_time = 22
     nx = 2
     ny = 2
-    lat, lon = torch.linspace(-90, 90, ny), torch.linspace(-180, 180, nx)
+    ds_info = get_ds_info(nx, ny)
     reference_time_means = xr.Dataset(
         {
             "a": xr.DataArray(
@@ -71,9 +67,8 @@ def test_logs_labels_exist_with_reference_time_means():
         }
     )
     agg = InferenceAggregator(
-        LatLonCoordinates(lat, lon).to(device=get_device()),
+        ds_info,
         n_time,
-        datetime.timedelta(seconds=1),
         time_mean_reference_data=reference_time_means,
         save_diagnostics=False,
     )
@@ -116,16 +111,8 @@ def test_logs_labels_exist_with_reference_time_means():
 
 def test_flush_diagnostics(tmpdir):
     nx, ny, n_sample, n_time = 2, 2, 10, 21
-    horizontal_coordinates = LatLonCoordinates(
-        lon=torch.arange(nx),
-        lat=torch.arange(ny),
-    )
-    agg = InferenceAggregator(
-        horizontal_coordinates.to(device=get_device()),
-        n_time,
-        TIMESTEP,
-        output_dir=tmpdir,
-    )
+    ds_info = get_ds_info(nx, ny)
+    agg = InferenceAggregator(ds_info, n_time, output_dir=tmpdir)
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
@@ -146,14 +133,13 @@ def test_flush_diagnostics(tmpdir):
 
 
 def test_agg_raises_without_output_dir():
-    lat_lon_coordinates = LatLonCoordinates(torch.arange(2), torch.arange(2))
+    ds_info = get_ds_info(nx=2, ny=2)
     with pytest.raises(
         ValueError, match="Output directory must be set to save diagnostics"
     ):
         InferenceAggregator(
-            lat_lon_coordinates,
+            ds_info,
             n_timesteps=1,
-            timestep=TIMESTEP,
             save_diagnostics=True,
             output_dir=None,
         )

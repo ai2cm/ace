@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import logging
 import os
+import shutil
 import time
 import uuid
 import warnings
@@ -21,7 +22,11 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator, GenerationAggregator
-from fme.downscaling.datasets import DataLoaderConfig, GriddedData, PairedBatchData
+from fme.downscaling.datasets import (
+    PairedBatchData,
+    PairedDataLoaderConfig,
+    PairedGriddedData,
+)
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -89,8 +94,8 @@ class Trainer:
         self,
         model: Model | DiffusionModel,
         optimization: Optimization,
-        train_data: GriddedData,
-        validation_data: GriddedData,
+        train_data: PairedGriddedData,
+        validation_data: PairedGriddedData,
         config: "TrainerConfig",
     ) -> None:
         self.model = model
@@ -113,6 +118,7 @@ class Trainer:
 
         self.startEpoch = 0
         self.segment_epochs = self.config.segment_epochs
+        self.resume_results_dir = config.resume_results_dir
 
         dist = Distributed.get_instance()
         if dist.is_root():
@@ -138,7 +144,7 @@ class Trainer:
             )
 
     def _get_batch_generator(
-        self, data: GriddedData, random_offset: bool, shuffle: bool
+        self, data: PairedGriddedData, random_offset: bool, shuffle: bool
     ):
         if self.patch_data:
             batch_generator = paired_patch_generator_from_loader(
@@ -326,7 +332,6 @@ class Trainer:
             segment_max_epochs = min(
                 self.startEpoch + self.segment_epochs, self.config.max_epochs
             )
-
         for epoch in range(self.startEpoch, segment_max_epochs):
             logging.info(f"Training epoch: {epoch + 1}")
             start_time = time.time()
@@ -358,8 +363,8 @@ class Trainer:
 class TrainerConfig:
     model: DownscalingModelConfig | DiffusionModelConfig
     optimization: OptimizationConfig
-    train_data: DataLoaderConfig
-    validation_data: DataLoaderConfig
+    train_data: PairedDataLoaderConfig
+    validation_data: PairedDataLoaderConfig
     max_epochs: int
     experiment_dir: str
     save_checkpoints: bool
@@ -371,6 +376,7 @@ class TrainerConfig:
     validate_interval: int = 1
     coarse_patch_extent_lat: int | None = None
     coarse_patch_extent_lon: int | None = None
+    resume_results_dir: str | None = None
 
     def __post_init__(self):
         if (
@@ -390,10 +396,10 @@ class TrainerConfig:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
-        train_data: GriddedData = self.train_data.build(
+        train_data: PairedGriddedData = self.train_data.build(
             train=True, requirements=self.model.data_requirements
         )
-        validation_data: GriddedData = self.validation_data.build(
+        validation_data: PairedGriddedData = self.validation_data.build(
             train=False, requirements=self.model.data_requirements
         )
         if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:
@@ -447,6 +453,20 @@ def _get_crps(metrics, prefix="generation/metrics/crps"):
         return sum(channel_crps) / len(channel_crps)
 
 
+def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
+    resuming_from_preempt = os.path.isfile(
+        os.path.join(experiment_dir, "checkpoints/latest.ckpt")
+    )
+    if not os.path.isdir(experiment_dir):
+        os.makedirs(experiment_dir, exist_ok=True)
+    if resume_results_dir is not None and not resuming_from_preempt:
+        if not os.path.isdir(resume_results_dir):
+            raise ValueError(
+                f"Existing results directory {resume_results_dir} does not exist."
+            )
+        shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
+
+
 def main(config_path: str):
     with open(config_path) as f:
         config = yaml.safe_load(f)
@@ -457,19 +477,24 @@ def main(config_path: str):
         config=dacite.Config(strict=True),
     )
 
+    if train_config.resume_results_dir is not None:
+        _resume_from_results_dir_if_not_preempted(
+            experiment_dir=train_config.experiment_dir,
+            resume_results_dir=train_config.resume_results_dir,
+        )
+    # Calling this after resuming from results dir so that the submitted config is saved
     prepare_directory(train_config.experiment_dir, config)
+
     train_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
     train_config.configure_wandb(notes=beaker_url)
-
     logging.info("Starting training")
     trainer = train_config.build()
 
     if trainer.resuming:
         logging.info(f"Resuming training from {trainer.epoch_checkpoint_path}")
         restore_checkpoint(trainer)
-
     logging.info(f"Number of parameters: {count_parameters(trainer.model.modules)}")
     trainer.train()
 

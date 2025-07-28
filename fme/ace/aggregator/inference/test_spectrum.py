@@ -10,16 +10,22 @@ from fme.ace.aggregator.inference.spectrum import (
     get_positive_and_negative_power_bias,
     get_smallest_scale_power_bias,
 )
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.metrics import spherical_power_spectrum
 
 DEVICE = fme.get_device()
+
+
+def get_gridded_operations(nlat: int, nlon: int):
+    return LatLonOperations(torch.ones(nlat, nlon))
 
 
 def test_spherical_power_spectrum_aggregator():
     nlat = 8
     nlon = 16
     grid = "legendre-gauss"
-    agg = SphericalPowerSpectrumAggregator(nlat, nlon, grid=grid)
+    gridded_operations = get_gridded_operations(nlat, nlon)
+    agg = SphericalPowerSpectrumAggregator(gridded_operations)
     data = {"a": torch.randn(2, 2, nlat, nlon, device=fme.get_device())}
     data2 = {"a": torch.randn(2, 3, nlat, nlon, device=fme.get_device())}
     agg.record_batch(data)
@@ -38,7 +44,10 @@ def test_spherical_power_spectrum_aggregator():
 def test_paired_spherical_power_spectrum_aggregator(report_plot: bool):
     nlat = 8
     nlon = 16
-    agg = PairedSphericalPowerSpectrumAggregator(nlat, nlon, report_plot=report_plot)
+    gridded_operations = get_gridded_operations(nlat, nlon)
+    agg = PairedSphericalPowerSpectrumAggregator(
+        gridded_operations, report_plot=report_plot
+    )
     data = {"a": torch.randn(2, 3, nlat, nlon, device=fme.get_device())}
     agg.record_batch(data, data, None, None)
     result = agg.get_logs("spectrum")

@@ -10,15 +10,16 @@ import dacite
 import pytest
 import torch
 import torch._dynamo.exc
+from torch import nn
 
 import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn2 import FCN2Config, FCN2Selector, FCN2StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
-from fme.core.coordinates import HybridSigmaPressureCoordinate
-from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.distributed import DummyWrapper
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
@@ -156,6 +157,7 @@ def get_single_module_noise_conditioned_selector(
                         NoiseConditionedSFNOBuilder(
                             embed_dim=4,
                             noise_embed_dim=4,
+                            noise_type="isotropic",
                             num_layers=2,
                             local_blocks=[0],
                         )
@@ -239,7 +241,9 @@ def get_single_module_with_atmosphere_corrector_selector(
                     zero_global_mean_moisture_advection=True,
                     moisture_budget_correction="advection_and_precipitation",
                     force_positive_names=["PRATEsfc"],
-                    total_energy_budget_correction="constant_temperature",
+                    total_energy_budget_correction=EnergyBudgetConfig(
+                        "constant_temperature"
+                    ),
                 ),
             ),
         ),
@@ -313,7 +317,7 @@ def get_fcn2_selector(
             zero_global_mean_moisture_advection=True,
             moisture_budget_correction="advection_and_precipitation",
             force_positive_names=["PRATEsfc"],
-            total_energy_budget_correction="constant_temperature",
+            total_energy_budget_correction=EnergyBudgetConfig("constant_temperature"),
         ),
     )
     return StepSelector(
@@ -401,7 +405,7 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_tensor_dict(
-    names: list[str], img_shape: tuple[int, ...], n_samples: int
+    names: list[str], img_shape: tuple[int, int], n_samples: int
 ) -> TensorDict:
     data_dict = {}
     device = fme.get_device()
@@ -414,19 +418,25 @@ def get_tensor_dict(
     return data_dict
 
 
-def get_step(selector: StepSelector, img_shape: tuple[int, int]) -> StepABC:
+def get_step(
+    selector: StepSelector,
+    img_shape: tuple[int, int],
+    init_weights: Callable[[list[nn.Module]], None] = lambda _: None,
+) -> StepABC:
     device = fme.get_device()
-    area = torch.ones(img_shape, device=device)
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(img_shape[0], device=device),
+        lon=torch.zeros(img_shape[1], device=device),
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
     )
     dataset_info = DatasetInfo(
-        img_shape=img_shape,
-        gridded_operations=LatLonOperations(area),
+        horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    return selector.get_step(dataset_info)
+    return selector.get_step(dataset_info, init_weights)
 
 
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
@@ -487,6 +497,23 @@ def test_step_applies_wrapper(config: StepSelector):
     assert wrapper.call_count == multi_calls * len(step.modules)
     for module in step.modules:
         wrapper.assert_any_call(module)
+
+
+@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+def test_step_initializes_weights(config: StepSelector):
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    init_weights = unittest.mock.MagicMock(side_effect=lambda x: x)
+    step = get_step(config, img_shape, init_weights)
+    assert init_weights.called
+    call_args, call_kwargs = init_weights.call_args
+    assert len(call_args) == 1
+    assert len(call_kwargs) == 0
+    assert isinstance(call_args[0], list | nn.ModuleList)
+    assert len(call_args[0]) == len(step.modules)
+    for i, module in enumerate(step.modules):
+        assert isinstance(module, DummyWrapper)
+        assert call_args[0][i] is module.module
 
 
 @pytest.mark.parametrize("config", EXPORTABLE_SELECTOR_CONFIG_CASES)

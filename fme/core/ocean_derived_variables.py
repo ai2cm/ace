@@ -129,9 +129,4 @@ def sea_ice_fraction(
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
     """Compute the sea ice fraction."""
-    try:
-        return data.sea_ice_fraction
-    except KeyError:
-        land_fraction = data.land_fraction
-        ocean_sea_ice_fraction = data.ocean_sea_ice_fraction
-        return ocean_sea_ice_fraction * (1 - land_fraction)
+    return data.sea_ice_fraction

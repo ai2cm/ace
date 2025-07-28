@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -60,11 +60,13 @@ class ZonalMeanAggregator:
 
     def __init__(
         self,
+        zonal_mean: Callable[[torch.Tensor], torch.Tensor],
         n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         """
         Args:
+            zonal_mean: Function that computes the zonal mean of a tensor.
             n_timesteps: Number of timesteps of inference that will be run.
             variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
@@ -81,6 +83,7 @@ class ZonalMeanAggregator:
         self._n_batches = torch.zeros(
             n_timesteps, dtype=torch.int32, device=get_device()
         )[None, :, None]  # sample, time, lat
+        self._zonal_mean = zonal_mean
 
     def record_batch(
         self,
@@ -90,7 +93,6 @@ class ZonalMeanAggregator:
         gen_data_norm: TensorMapping,
         i_time_start: int,
     ):
-        lon_dim = 3
         if self._target_data is None:
             self._target_data = self._initialize_zeros_zonal_mean_from_batch(
                 target_data, self._n_timesteps
@@ -105,10 +107,10 @@ class ZonalMeanAggregator:
         # we can average along longitude without area weighting
         for name, tensor in target_data.items():
             if name in self._target_data:
-                self._target_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
+                self._target_data[name][:, time_slice, :] += self._zonal_mean(tensor)
         for name, tensor in gen_data.items():
             if name in self._gen_data:
-                self._gen_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
+                self._gen_data[name][:, time_slice, :] += self._zonal_mean(tensor)
         self._n_batches[:, time_slice, :] += 1
 
     def _get_data(self) -> dict[str, _RawData]:

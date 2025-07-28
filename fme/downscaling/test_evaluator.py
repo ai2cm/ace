@@ -6,14 +6,14 @@ from typing import Any
 import pytest
 import yaml
 
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import evaluator
-from fme.downscaling.datasets import DataLoaderConfig
+from fme.downscaling.datasets import PairedDataLoaderConfig
 from fme.downscaling.models import (
     DiffusionModelConfig,
     DownscalingModelConfig,
@@ -164,7 +164,7 @@ def test_evaluator_runs(
         with open(evaluator_config_path) as file:
             config = yaml.safe_load(file)
 
-        data_loader_config = DataLoaderConfig(
+        data_loader_config = PairedDataLoaderConfig(
             fine=[XarrayDataConfig(paths.fine)],
             coarse=[XarrayDataConfig(paths.coarse)],
             batch_size=2,

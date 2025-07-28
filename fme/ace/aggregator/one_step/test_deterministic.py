@@ -2,7 +2,7 @@ import torch
 
 from fme.ace.aggregator.one_step.deterministic import OneStepDeterministicAggregator
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.device import get_device
+from fme.core.dataset_info import DatasetInfo
 
 
 def test__get_loss_scaled_mse_components():
@@ -14,8 +14,9 @@ def test__get_loss_scaled_mse_components():
     lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
     # keep area weights ones for simplicity
     lat_lon_coordinates._area_weights = torch.ones(nx, ny)
+    ds_info = DatasetInfo(horizontal_coordinates=lat_lon_coordinates)
     agg = OneStepDeterministicAggregator(
-        lat_lon_coordinates.to(device=get_device()),
+        ds_info,
         loss_scaling=loss_scaling,
         save_diagnostics=False,
     )

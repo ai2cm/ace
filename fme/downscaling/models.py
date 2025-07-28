@@ -14,7 +14,7 @@ from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.datasets import PairedBatchData
+from fme.downscaling.datasets import BatchData, PairedBatchData
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -168,6 +168,15 @@ class Model:
         for k, v in result.target.items():
             result.target[k] = v.unsqueeze(1)
         return result
+
+    def generate_on_batch_no_target(
+        self,
+        batch: BatchData,
+        n_samples: int = 1,
+    ) -> TensorDict:
+        raise NotImplementedError(
+            "This method is not implemented for the base Model class. "
+        )
 
     def _run_on_batch(
         self,
@@ -341,12 +350,16 @@ def _repeat_batch_by_samples(tensor: torch.Tensor, n_samples: int) -> torch.Tens
     return tensor.repeat_interleave(dim=0, repeats=n_samples)
 
 
-def _separate_interleaved_samples(
-    tensor: torch.Tensor, n_batch: int, n_samples: int
-) -> torch.Tensor:
+def _separate_interleaved_samples(tensor: torch.Tensor, n_samples: int) -> torch.Tensor:
     """
     Reshape an interleaved tensor to have a leading [batch, sample, ...] dimension.
     """
+    if tensor.shape[0] % n_samples != 0:
+        raise ValueError(
+            "The interleaved batch+sample dimension of the tensor must be divisible "
+            "by n_samples."
+        )
+    n_batch = tensor.shape[0] // n_samples
     return tensor.reshape(n_batch, n_samples, *tensor.shape[1:])
 
 
@@ -437,6 +450,15 @@ class DiffusionModel:
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
 
+    def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
+        """
+        Calculate the fine shape based on the coarse shape and downscale factor.
+        """
+        return (
+            coarse_shape[0] * self.downscale_factor,
+            coarse_shape[1] * self.downscale_factor,
+        )
+
     def _get_input_from_coarse(
         self, coarse: TensorMapping, topography: torch.Tensor | None
     ) -> torch.Tensor:
@@ -509,26 +531,27 @@ class DiffusionModel:
         )
 
     @torch.no_grad()
-    def generate_on_batch(
+    def _generate(
         self,
-        batch: PairedBatchData,
+        coarse_data: TensorMapping,
+        fine_topography: torch.Tensor | None,
         n_samples: int = 1,
-    ) -> ModelOutputs:
-        coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_ = self._get_input_from_coarse(coarse, batch.fine.topography)
-
-        targets_norm = self.out_packer.pack(
-            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
-        )
-
-        n_batch = targets_norm.shape[0]
-        # expand samples and fold to [batch * n_samples, output_channels, height, width]
+    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        inputs_ = self._get_input_from_coarse(coarse_data, fine_topography)
+        # expand samples and fold to
+        # [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
-        targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
-        latents = randn_like(targets_norm)
+        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
+
+        outputs_shape = (
+            inputs_.shape[0],
+            len(self.out_packer.names),
+            *self._get_fine_shape(coarse_input_shape),
+        )
+        latents = torch.randn(outputs_shape).to(device=get_device())
 
         logging.info("Running EDM sampler...")
-        samples_norm, latent_steps = edm_sampler(
+        generated_norm, latent_steps = edm_sampler(
             self.module,
             latents,
             inputs_,
@@ -543,27 +566,56 @@ class DiffusionModel:
             base_prediction = interpolate(
                 self.out_packer.pack(
                     self.normalizer.coarse.normalize(
-                        {k: coarse[k] for k in self.out_packer.names}
+                        {k: coarse_data[k] for k in self.out_packer.names}
                     ),
                     axis=self._channel_axis,
                 ),
                 self.downscale_factor,
             )
-            samples_norm += _repeat_batch_by_samples(base_prediction, n_samples)
+            generated_norm = generated_norm + _repeat_batch_by_samples(
+                base_prediction, n_samples
+            )
 
-        loss = self.loss(samples_norm, targets_norm)
+        generated_norm_reshaped = _separate_interleaved_samples(
+            generated_norm, n_samples
+        )
+        generated = self.normalizer.fine.denormalize(
+            self.out_packer.unpack(generated_norm_reshaped, axis=self._channel_axis)
+        )
+        return generated, generated_norm, latent_steps
 
-        samples_norm_reshaped = _separate_interleaved_samples(
-            samples_norm, n_batch, n_samples
+    @torch.no_grad()
+    def generate_on_batch_no_target(
+        self,
+        batch: BatchData,
+        n_samples: int = 1,
+    ) -> TensorDict:
+        generated, _, _ = self._generate(batch.data, batch.topography, n_samples)
+        return generated
+
+    @torch.no_grad()
+    def generate_on_batch(
+        self,
+        batch: PairedBatchData,
+        n_samples: int = 1,
+    ) -> ModelOutputs:
+        coarse, fine = batch.coarse.data, batch.fine.data
+
+        generated, generated_norm, latent_steps = self._generate(
+            coarse, batch.fine.topography, n_samples
         )
-        samples = self.normalizer.fine.denormalize(
-            self.out_packer.unpack(samples_norm_reshaped, axis=self._channel_axis)
+
+        targets_norm = self.out_packer.pack(
+            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
+        targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
+
         targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
+        loss = self.loss(generated_norm, targets_norm)
         return ModelOutputs(
-            prediction=samples, target=targets, loss=loss, latent_steps=latent_steps
+            prediction=generated, target=targets, loss=loss, latent_steps=latent_steps
         )
 
     def get_state(self) -> Mapping[str, Any]:
