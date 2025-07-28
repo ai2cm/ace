@@ -202,7 +202,7 @@ class RawDataWriter:
                     [INIT_TIME, VALID_TIME]
                 )
 
-            data_numpy = data[variable_name].cpu().numpy()
+            data_numpy = data[variable_name].detach().cpu().numpy()
             # Append the data to the variables
             self.dataset.variables[variable_name][
                 :,
