@@ -44,7 +44,7 @@ from fme.ace.stepper.parameter_init import (
     FrozenParameterConfig,
     ParameterInitializationConfig,
 )
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, StepSelector
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
@@ -60,6 +60,11 @@ from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import SchedulerConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.core.step import (
+    MultiCallStepConfig,
+    SeparateRadiationStepConfig,
+    SingleModuleStepConfig,
+)
 from fme.core.typing_ import Slice
 
 from . import step
