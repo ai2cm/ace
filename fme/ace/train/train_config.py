@@ -33,6 +33,7 @@ from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.rand import set_seed
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
 from fme.core.weight_ops import CopyWeightsConfig
 
@@ -167,6 +168,9 @@ class TrainConfig:
             If None, no weather evaluation is run. Weather evaluation is not
             used to select checkpoints, but is used to provide metrics.
         n_forward_steps: Number of forward steps to take gradient over.
+        seed: Random seed for reproducibility. If set, is used for all types of
+            randomization, including data shuffling and model initialization.
+            If unset, weight initialization is not reproducible but data shuffling is.
         copy_weights_after_batch: Configuration for copying weights from the
             base model to the training model after each batch.
         ema: Configuration for exponential moving average of model weights.
@@ -204,6 +208,7 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig | None
     n_forward_steps: int
+    seed: int | None = None
     copy_weights_after_batch: list[CopyWeightsConfig] = dataclasses.field(
         default_factory=list
     )
@@ -227,6 +232,10 @@ class TrainConfig:
                 "SingleModuleStepperConfig is deprecated. Use StepperConfig instead.",
                 DeprecationWarning,
             )
+
+    def set_random_seed(self):
+        if self.seed is not None:
+            set_seed(self.seed)
 
     @property
     def inference_n_forward_steps(self) -> int:

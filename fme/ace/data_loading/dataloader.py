@@ -8,6 +8,7 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
+from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict
 
 
@@ -291,12 +292,13 @@ class SlidingWindowDataLoader(DataLoaderABC):
         return self
 
     def _init_shuffle_indices(self):
+        dist = Distributed.get_instance()
         if self._shuffle:
             self._shuffle_indices = torch.from_numpy(
                 random_columns_no_replacement(
                     self._n_skipped_input_batches + self._input_loader_len,
                     self._n_new_batches,
-                    seed=self._epoch,
+                    seed=self._epoch + dist.get_seed(),
                 )
             )
         else:
