@@ -63,6 +63,7 @@ class Distributed:
             self._distributed = self._init_distributed()
         else:
             self._distributed = False
+        self._seed = 0
 
     def _init_distributed(self):
         if "RANK" in os.environ:  # we were executed with torchrun
@@ -91,7 +92,6 @@ class Distributed:
         self,
         dataset: torch.utils.data.Dataset,
         shuffle: bool,
-        seed: int = 0,
         drop_last: bool = False,
     ) -> torch.utils.data.Sampler:
         return torch.utils.data.DistributedSampler(
@@ -99,7 +99,7 @@ class Distributed:
             shuffle=shuffle,
             num_replicas=self.world_size,
             rank=self.rank,
-            seed=seed,
+            seed=self._seed,
             drop_last=drop_last,
         )
 
@@ -242,6 +242,18 @@ class Distributed:
         if self._distributed:
             logger.debug(f"Barrier on rank {self.rank}")
             torch.distributed.barrier()
+
+    def set_seed(self, seed: int):
+        """
+        Set the random seed.
+        """
+        self._seed = seed
+
+    def get_seed(self) -> int:
+        """
+        Get the random seed.
+        """
+        return self._seed
 
 
 singleton: Distributed | None = None
