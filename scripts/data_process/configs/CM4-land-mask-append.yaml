@@ -1,0 +1,14 @@
+variable_sources:
+  derived/lsm_masks.zarr:
+    - mask_column_soil_moisture
+    - mask_downward_longwave_radiative_flux
+    - mask_net_surface_longwave_radiative_flux
+    - mask_total_land_column_energy_without_rivers
+    - mask_temperature_of_soil_layer_0
+    - mask_temperature_of_soil_layer_1
+    - mask_temperature_of_soil_layer_2
+    - mask_temperature_of_soil_layer_3
+    - mask_total_moisture_content_of_soil_layer_0
+    - mask_total_moisture_content_of_soil_layer_1
+    - mask_total_moisture_content_of_soil_layer_2
+    - mask_total_moisture_content_of_soil_layer_3
