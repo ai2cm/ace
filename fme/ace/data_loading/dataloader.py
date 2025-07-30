@@ -286,7 +286,10 @@ class SlidingWindowDataLoader(DataLoaderABC):
         # reset the iterator state
         self._loaditer = iter(self._loader)
         self._i_batch = self._n_skipped_input_batches
-        self._current_batch = next(self._loaditer)
+        try:
+            self._current_batch = next(self._loaditer)
+        except StopIteration:
+            return iter([])
         self._counter = self._skip_first_n_output_batches
         self._init_shuffle_indices()
         return self
