@@ -33,6 +33,7 @@ from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.rand import set_seed
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
 from fme.core.weight_ops import CopyWeightsConfig
 
@@ -167,6 +168,9 @@ class TrainConfig:
             If None, no weather evaluation is run. Weather evaluation is not
             used to select checkpoints, but is used to provide metrics.
         n_forward_steps: Number of forward steps to take gradient over.
+        seed: Random seed for reproducibility. If set, is used for all types of
+            randomization, including data shuffling and model initialization.
+            If unset, weight initialization is not reproducible but data shuffling is.
         copy_weights_after_batch: Configuration for copying weights from the
             base model to the training model after each batch.
         ema: Configuration for exponential moving average of model weights.
@@ -181,6 +185,9 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        checkpoint_every_n_batches: How often to save latest checkpoint during training.
+            If 0 is given, checkpoints will not be saved based on batch progress,
+            only other factors like pre-emption or being at the end of an epoch.
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
@@ -201,6 +208,7 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig | None
     n_forward_steps: int
+    seed: int | None = None
     copy_weights_after_batch: list[CopyWeightsConfig] = dataclasses.field(
         default_factory=list
     )
@@ -210,6 +218,7 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
+    checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
     validation_aggregator: OneStepAggregatorConfig = dataclasses.field(
@@ -223,6 +232,10 @@ class TrainConfig:
                 "SingleModuleStepperConfig is deprecated. Use StepperConfig instead.",
                 DeprecationWarning,
             )
+
+    def set_random_seed(self):
+        if self.seed is not None:
+            set_seed(self.seed)
 
     @property
     def inference_n_forward_steps(self) -> int:

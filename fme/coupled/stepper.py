@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import logging
+import pathlib
 from collections.abc import Callable, Generator, Iterable
 from typing import Any, Literal
 
@@ -19,7 +20,15 @@ from fme.ace.stepper import (
     process_prediction_generator_list,
     stack_list_of_tensor_dicts,
 )
+from fme.ace.stepper.parameter_init import (
+    StepperWeightsAndHistory,
+    Weights,
+    WeightsAndHistoryLoader,
+)
 from fme.ace.stepper.single_module import SingleModuleStepperConfig, StepperConfig
+from fme.ace.stepper.single_module import (
+    load_weights_and_history as load_uncoupled_weights_and_history,
+)
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
@@ -111,15 +120,66 @@ class CoupledOceanFractionConfig:
         return OceanData({land_frac_name: land_frac, sea_ice_frac_name: sea_ice_frac})
 
 
+def _load_stepper_weights_and_history_factory(
+    stepper: Stepper,
+) -> WeightsAndHistoryLoader:
+    def load_stepper_weights_and_history(*_) -> StepperWeightsAndHistory:
+        return_weights: Weights = []
+        for module in stepper.modules:
+            return_weights.append(module.state_dict())
+        return return_weights, stepper.training_history
+
+    return load_stepper_weights_and_history
+
+
+@dataclasses.dataclass
+class CoupledParameterInitConfig:
+    """
+    Enables component parameter initialization via a coupled stepper checkpoint.
+
+    The default behavior when checkpoint_path is None is to rely on the
+    component steppers' parameter initialization config to load uncoupled
+    component checkpoints, if provided. When checkpoint_path is non-None, the
+    component steppers' ParameterInitializationConfig.weights_path must be None.
+
+    Parameters:
+        checkpoint_path: Path to a coupled stepper checkpoint.
+    """
+
+    checkpoint_path: str | None = None
+
+    def build_weights_and_history_loaders(self) -> "CoupledWeightsAndHistoryLoaders":
+        if self.checkpoint_path is None:
+            return CoupledWeightsAndHistoryLoaders(
+                ocean=load_uncoupled_weights_and_history,
+                atmosphere=load_uncoupled_weights_and_history,
+            )
+        coupled_stepper = load_coupled_stepper(self.checkpoint_path)
+        return CoupledWeightsAndHistoryLoaders(
+            ocean=_load_stepper_weights_and_history_factory(coupled_stepper.ocean),
+            atmosphere=_load_stepper_weights_and_history_factory(
+                coupled_stepper.atmosphere
+            ),
+        )
+
+
+@dataclasses.dataclass
+class CoupledWeightsAndHistoryLoaders:
+    ocean: WeightsAndHistoryLoader
+    atmosphere: WeightsAndHistoryLoader
+    training_history: TrainingHistory | None = None
+
+
 @dataclasses.dataclass
 class CoupledStepperConfig:
-    """Configuration for a coupled atmosphere-ocean stepper. From a common
-    initial condition time the atmosphere steps first and takes as many steps as
-    fit in a single ocean step, while being forced by the ocean's initial
-    condition SST. The ocean then steps forward once, receiving required
-    forcings from the atmosphere-generated output as averages over its step
-    window. This completes a single "coupled step". For subsequent coupled
-    steps, the generated SST from the ocean forces the atmosphere's steps.
+    """
+    Configuration for a coupled atmosphere-ocean stepper. From a common initial
+    condition time the atmosphere steps first and takes as many steps as fit in
+    a single ocean step, while being forced by the ocean's initial condition
+    SST. The ocean then steps forward once, receiving required forcings from the
+    atmosphere-generated output as averages over its step window. This completes
+    a single "coupled step". For subsequent coupled steps, the generated SST
+    from the ocean forces the atmosphere's steps.
 
     For example, with an atmosphere:ocean step size ratio of 2:1, the following
     sequence results in 2 coupled steps (4 atmosphere steps and 2 ocean steps):
@@ -143,6 +203,7 @@ class CoupledStepperConfig:
             ocean fraction to replace the ocean fraction variable specified in the
             atmosphere's OceanConfig. If the atmosphere uses the ocean fraction as
             an ML forcing, the generated ocean fraction is also passed as an input.
+        parameter_init: The parameter initialization configuration.
 
     """
 
@@ -150,6 +211,9 @@ class CoupledStepperConfig:
     atmosphere: ComponentConfig
     sst_name: str = "sst"
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
+    parameter_init: CoupledParameterInitConfig = dataclasses.field(
+        default_factory=lambda: CoupledParameterInitConfig()
+    )
 
     def __post_init__(self):
         self._validate_component_configs()
@@ -278,6 +342,17 @@ class CoupledStepperConfig:
         return self._ocean_to_atmosphere_forcing_names
 
     def _validate_component_configs(self):
+        # validate parameter_init
+        if self.parameter_init.checkpoint_path is not None:
+            if (
+                self.atmosphere.stepper.parameter_init.weights_path is not None
+                or self.ocean.stepper.parameter_init.weights_path is not None
+            ):
+                raise ValueError(
+                    "Please specify CoupledParameterInitConfig.checkpoint_path or the "
+                    "component Steppers' ParameterInitializationConfig.weights_path, "
+                    "but not both."
+                )
         # validate atmosphere's OceanConfig
         atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
         if atmosphere_ocean_config is None:
@@ -405,6 +480,7 @@ class CoupledStepperConfig:
     def _get_ocean_stepper(
         self,
         dataset_info: DatasetInfo,
+        load_weights_and_history: WeightsAndHistoryLoader,
     ) -> Stepper:
         if dataset_info.timestep != self.ocean_timestep:
             raise ValueError(
@@ -413,11 +489,14 @@ class CoupledStepperConfig:
             )
         return self.ocean.stepper.get_stepper(
             dataset_info=dataset_info,
+            apply_parameter_init=True,
+            load_weights_and_history=load_weights_and_history,
         )
 
     def _get_atmosphere_stepper(
         self,
         dataset_info: DatasetInfo,
+        load_weights_and_history: WeightsAndHistoryLoader,
     ) -> Stepper:
         if dataset_info.timestep != self.atmosphere_timestep:
             raise ValueError(
@@ -427,6 +506,8 @@ class CoupledStepperConfig:
             )
         return self.atmosphere.stepper.get_stepper(
             dataset_info=dataset_info,
+            apply_parameter_init=True,
+            load_weights_and_history=load_weights_and_history,
         )
 
     def get_stepper(
@@ -434,11 +515,16 @@ class CoupledStepperConfig:
         dataset_info: CoupledDatasetInfo,
     ):
         logging.info("Initializing coupler")
+        loaders = self.parameter_init.build_weights_and_history_loaders()
         return CoupledStepper(
             config=self,
-            ocean=self._get_ocean_stepper(dataset_info=dataset_info.ocean),
+            ocean=self._get_ocean_stepper(
+                dataset_info=dataset_info.ocean,
+                load_weights_and_history=loaders.ocean,
+            ),
             atmosphere=self._get_atmosphere_stepper(
-                dataset_info=dataset_info.atmosphere
+                dataset_info=dataset_info.atmosphere,
+                load_weights_and_history=loaders.atmosphere,
             ),
             dataset_info=dataset_info,
         )
@@ -634,12 +720,6 @@ class CoupledStepperTrainLoss:
         return None
 
 
-@dataclasses.dataclass
-class CoupledTrainingHistory:
-    ocean: TrainingHistory
-    atmosphere: TrainingHistory
-
-
 class CoupledStepper(
     TrainStepperABC[
         CoupledPrognosticState,
@@ -664,7 +744,6 @@ class CoupledStepper(
             ocean: The ocean stepper.
             atmosphere: The atmosphere stepper.
             dataset_info: The CoupledDatasetInfo.
-
         """
         if ocean.n_ic_timesteps != 1 or atmosphere.n_ic_timesteps != 1:
             raise ValueError("Only n_ic_timesteps = 1 is currently supported.")
@@ -727,13 +806,6 @@ class CoupledStepper(
     def n_inner_steps(self) -> int:
         """Number of atmosphere steps per ocean step."""
         return self._config.n_inner_steps
-
-    @property
-    def training_history(self) -> CoupledTrainingHistory:
-        return CoupledTrainingHistory(
-            ocean=self.ocean.training_history,
-            atmosphere=self.atmosphere.training_history,
-        )
 
     @property
     def _ocean_forcing_exogenous_names(self) -> list[str]:
@@ -1222,4 +1294,19 @@ class CoupledStepper(
                 ocean=ocean.training_dataset_info,
                 atmosphere=atmosphere.training_dataset_info,
             )
-        return cls(config, ocean, atmosphere, dataset_info)
+        return cls(
+            config=config,
+            ocean=ocean,
+            atmosphere=atmosphere,
+            dataset_info=dataset_info,
+        )
+
+
+def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
+    logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
+    checkpoint = torch.load(
+        checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
+    stepper = CoupledStepper.from_state(checkpoint["stepper"])
+
+    return stepper

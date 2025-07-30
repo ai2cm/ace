@@ -33,6 +33,7 @@ from fme.coupled.stepper import (
     CoupledOceanFractionConfig,
     CoupledStepper,
     CoupledStepperConfig,
+    load_coupled_stepper,
 )
 
 
@@ -89,6 +90,7 @@ class StandaloneComponentCheckpointsConfig:
             ocean=ocean.training_dataset_info,
             atmosphere=atmosphere.training_dataset_info,
         )
+
         return CoupledStepper(
             config=self.load_stepper_config(),
             ocean=ocean,
@@ -152,13 +154,7 @@ def load_stepper(
         )
         return checkpoint_path.load_stepper()
 
-    logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
-    stepper = CoupledStepper.from_state(checkpoint["stepper"])
-
-    return stepper
+    return load_coupled_stepper(checkpoint_path)
 
 
 @dataclasses.dataclass
@@ -264,7 +260,7 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         config=dacite.Config(strict=True),
     )
     prepare_directory(config.experiment_dir, config_data)
-    with GlobalTimer():
+    with GlobalTimer(), torch.no_grad():
         return run_evaluator_from_config(config)
 
 

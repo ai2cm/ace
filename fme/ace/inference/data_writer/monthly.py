@@ -277,7 +277,7 @@ class MonthlyDataWriter:
                     [INIT_TIME, VALID_TIME, COUNTS]
                 )
 
-            array = data[variable_name].cpu().numpy()
+            array = data[variable_name].detach().cpu().numpy()
 
             # Add the data to the variable totals
             # Have to extract the data and write it back as `.at` does not play nicely

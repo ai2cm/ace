@@ -11,7 +11,8 @@ from fme.core.weight_ops import overwrite_weights
 from fme.core.wildcard import apply_by_wildcard, wildcard_match
 
 Weights = list[Mapping[str, Any]]
-StepperWeightsAndHistory = tuple[Weights, TrainingHistory]
+StepperWeightsAndHistory = tuple[Weights | None, TrainingHistory]
+WeightsAndHistoryLoader = Callable[[str | None], StepperWeightsAndHistory]
 
 
 @dataclasses.dataclass
@@ -25,7 +26,9 @@ class FrozenParameterConfig:
     in either the include or exclude list, or
     an exception will be raised.
 
-    An exception is raised if a parameter is included by both lists.
+    An exception is raised if a parameter is matched by both lists, or if
+    a rule in one of the lists is not matched by any parameters in the model
+    (including if it is already matched by an earlier rule).
 
     Parameters:
         include: list of parameter names to freeze (set requires_grad = False)
@@ -50,7 +53,9 @@ class FrozenParameterConfig:
                 )
 
     def apply(self, model: nn.Module):
-        apply_by_wildcard(model, _freeze_weight, self.include, self.exclude)
+        apply_by_wildcard(
+            model, _freeze_weight, self.include, self.exclude, raise_if_unused=True
+        )
 
 
 def _freeze_weight(module: nn.Module, name: str):
@@ -132,7 +137,7 @@ class ParameterInitializationConfig:
 
     def build(
         self,
-        load_weights_and_history: Callable[[str], StepperWeightsAndHistory],
+        load_weights_and_history: WeightsAndHistoryLoader,
     ) -> "ParameterInitializer":
         """
         Build a ParameterInitializer instance with the current configuration.
@@ -146,13 +151,17 @@ class ParameterInitializationConfig:
         )
 
 
+def null_weights_and_history(*_) -> StepperWeightsAndHistory:
+    return None, TrainingHistory()
+
+
 @dataclasses.dataclass
 class ParameterInitializer:
     config: ParameterInitializationConfig = dataclasses.field(
         default_factory=ParameterInitializationConfig
     )
-    load_weights_and_history: Callable[[str], StepperWeightsAndHistory] = (
-        dataclasses.field(default=lambda _: ([], TrainingHistory()))
+    load_weights_and_history: WeightsAndHistoryLoader = dataclasses.field(
+        default=null_weights_and_history,
     )
 
     def __post_init__(self):
@@ -161,7 +170,7 @@ class ParameterInitializer:
 
     @property
     def base_weights(self) -> Weights | None:
-        if self.config.weights_path is not None and self._base_weights is None:
+        if self._base_weights is None and self._training_history is None:
             self._base_weights, self._training_history = self.load_weights_and_history(
                 self.config.weights_path
             )
@@ -169,7 +178,7 @@ class ParameterInitializer:
 
     @property
     def training_history(self) -> TrainingHistory | None:
-        if self.config.weights_path is not None and self._training_history is None:
+        if self.base_weights is None and self._training_history is None:
             self._base_weights, self._training_history = self.load_weights_and_history(
                 self.config.weights_path
             )
@@ -192,16 +201,15 @@ class ParameterInitializer:
             modules: a list of nn.Modules to initialize
         """
         filled_parameters = self._filled_parameters(len(modules))
-        if self.config.weights_path is not None:
-            if self.base_weights is not None:
-                for module, state_dict, classification in zip(
-                    modules, self.base_weights, filled_parameters
-                ):
-                    overwrite_weights(
-                        state_dict,
-                        module,
-                        exclude_parameters=classification.exclude,
-                    )
+        if self.base_weights is not None:
+            for module, state_dict, classification in zip(
+                modules, self.base_weights, filled_parameters
+            ):
+                overwrite_weights(
+                    state_dict,
+                    module,
+                    exclude_parameters=classification.exclude,
+                )
 
     def freeze_weights(self, modules: list[nn.Module]):
         """

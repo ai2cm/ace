@@ -31,9 +31,10 @@ from fme.coupled.test_stepper import CoupledDatasetInfoBuilder, get_stepper_conf
 
 
 def test_standalone_checkpoints_config_init_args():
+    ignore_args = ["parameter_init"]
     stepper_config_init_args = set(
         inspect.signature(CoupledStepperConfig.__init__).parameters.keys()
-    )
+    ).difference(ignore_args)
     init_args = set(
         inspect.signature(
             StandaloneComponentCheckpointsConfig.__init__

@@ -33,7 +33,11 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.patching import PatchPredictor, paired_patch_generator_from_loader
+from fme.downscaling.patching import (
+    MultipatchConfig,
+    PatchPredictor,
+    paired_patch_generator_from_loader,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -245,25 +249,6 @@ class EventEvaluator:
 
 
 @dataclasses.dataclass
-class MultipatchConfig:
-    """
-    Configuration to enable predictions on multiple patches for evaluation.
-
-    Args:
-        divide_evaluation: enables the patched prediction of the full
-            input data extent for evaluation.
-        composite_prediction: if True, recombines the smaller prediction
-            regions into the original full region as a single sample.
-        coarse_horizontal_overlap: number of pixels to overlap in the
-            coarse data.
-    """
-
-    divide_evaluation: bool = False
-    composite_prediction: bool = False
-    coarse_horizontal_overlap: int = 1
-
-
-@dataclasses.dataclass
 class EventConfig:
     name: str
     date: str
@@ -334,7 +319,7 @@ class EvaluatorConfig:
 
         model = self.model.build()
         evaluator_model: Model | DiffusionModel | PatchPredictor
-        if self.patch.divide_evaluation and self.patch.composite_prediction:
+        if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
                 model,
                 dataset.coarse_shape,
@@ -343,7 +328,7 @@ class EvaluatorConfig:
         else:
             evaluator_model = model
 
-        if self.patch.divide_evaluation and not self.patch.composite_prediction:
+        if self.patch.divide_generation and not self.patch.composite_prediction:
             patch_data = True
         else:
             patch_data = False

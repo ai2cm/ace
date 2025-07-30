@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from copy import copy
 from typing import Any
 
@@ -16,6 +16,9 @@ from fme.ace.stepper import TrainOutput
 from fme.ace.stepper.parameter_init import (
     ParameterInitializationConfig,
     ParameterInitializer,
+    StepperWeightsAndHistory,
+    Weights,
+    null_weights_and_history,
 )
 from fme.core.coordinates import (
     AtmosphericDeriveFn,
@@ -49,11 +52,10 @@ from fme.downscaling.modules.unets import Linear, PositionalEmbedding, silu
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
-Weights = list[Mapping[str, Any]]
-StepperWeightsAndHistory = tuple[Weights, TrainingHistory]
 
-
-def _load_weights_and_history(path: str) -> StepperWeightsAndHistory:
+def _load_weights_and_history(path: str | None) -> StepperWeightsAndHistory:
+    if path is None:
+        return null_weights_and_history()
     stepper = load_stepper(path)
     return_weights: Weights = []
     for module in stepper.modules:

@@ -898,7 +898,7 @@ class DataLoaderConfig:
     the data, e.g. when fine topography is loaded as an input.
 
     Args:
-        data: The dataset configuration.
+        coarse: The dataset configuration.
         batch_size: The batch size to use for the dataloader.
         num_data_workers: The number of data workers to use for the dataloader.
             (For multi-GPU runtime, it's the number of workers per GPU.)
@@ -917,7 +917,7 @@ class DataLoaderConfig:
             data for testing.
     """
 
-    data: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
+    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
@@ -935,7 +935,7 @@ class DataLoaderConfig:
         # Expands any XarrayEnsembleDataConfig so it is converted
         # to the equivalent sequence of XarrayDataConfig.
         all_configs = []
-        for config in self.data:
+        for config in self.coarse:
             if isinstance(config, XarrayEnsembleDataConfig):
                 all_configs += config.expand()
             else:

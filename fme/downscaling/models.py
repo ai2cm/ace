@@ -14,7 +14,7 @@ from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.datasets import PairedBatchData
+from fme.downscaling.datasets import BatchData, PairedBatchData
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -168,6 +168,15 @@ class Model:
         for k, v in result.target.items():
             result.target[k] = v.unsqueeze(1)
         return result
+
+    def generate_on_batch_no_target(
+        self,
+        batch: BatchData,
+        n_samples: int = 1,
+    ) -> TensorDict:
+        raise NotImplementedError(
+            "This method is not implemented for the base Model class. "
+        )
 
     def _run_on_batch(
         self,
@@ -578,11 +587,10 @@ class DiffusionModel:
     @torch.no_grad()
     def generate_on_batch_no_target(
         self,
-        coarse_data: TensorMapping,
-        fine_topography: torch.Tensor | None,
+        batch: BatchData,
         n_samples: int = 1,
     ) -> TensorDict:
-        generated, _, _ = self._generate(coarse_data, fine_topography, n_samples)
+        generated, _, _ = self._generate(batch.data, batch.topography, n_samples)
         return generated
 
     @torch.no_grad()

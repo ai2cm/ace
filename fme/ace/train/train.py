@@ -266,5 +266,6 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config = dacite.from_dict(
         data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
     )
+    config.set_random_seed()
     prepare_directory(config.experiment_dir, config_data)
     run_train_from_config(config)

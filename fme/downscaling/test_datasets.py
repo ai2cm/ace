@@ -529,7 +529,7 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
         fine_names=[], coarse_names=["x"], n_timesteps=1, use_fine_topography=True
     )
     data_config = DataLoaderConfig(
-        data=[XarrayDataConfig(paths.coarse)],
+        coarse=[XarrayDataConfig(paths.coarse)],
         batch_size=2,
         num_data_workers=1,
         strict_ensemble=False,

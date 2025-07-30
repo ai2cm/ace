@@ -62,6 +62,13 @@ class GriddedDataABC(abc.ABC, Generic[T]):
     def set_epoch(self, epoch: int): ...
 
     @abc.abstractmethod
+    def subset_loader(self, start_batch: int) -> DataLoader[T]:
+        """
+        Subset the loader to skip the first `start_batch` batches.
+        """
+        ...
+
+    @abc.abstractmethod
     def log_info(self, name: str):
         """
         Report information about the data using logging.info.

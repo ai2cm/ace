@@ -16,6 +16,7 @@ from fme.coupled.data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
 )
+from fme.coupled.data_loading.dataloader import CoupledDataLoader
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
 
@@ -25,14 +26,13 @@ CoupledImageShapes = namedtuple("CoupledImageShapes", ("ocean", "atmosphere"))
 class GriddedData(GriddedDataABC[CoupledBatchData]):
     def __init__(
         self,
-        loader: DataLoader[CoupledBatchData],
+        loader: CoupledDataLoader,
         properties: CoupledDatasetProperties,
         sampler: torch.utils.data.Sampler | None = None,
     ):
         """
         Args:
-            loader: torch DataLoader, which returns batches of type
-                TensorMapping where keys indicate variable name.
+            loader: Provides coupled batch data.
                 Each tensor has shape
                 [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
             properties: Properties of the dataset, including variable metadata and
@@ -49,10 +49,18 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
 
     @property
     def loader(self) -> DataLoader[CoupledBatchData]:
-        def to_device(x: CoupledBatchData) -> CoupledBatchData:
-            return x.to_device()
+        return self._get_gpu_loader(self._loader)
 
-        return SizedMap(to_device, self._loader)
+    def subset_loader(self, start_batch: int) -> DataLoader[CoupledBatchData]:
+        return self._get_gpu_loader(self._loader.subset(start_batch))
+
+    def _get_gpu_loader(
+        self, base_loader: DataLoader[CoupledBatchData]
+    ) -> DataLoader[CoupledBatchData]:
+        def modify_and_on_device(batch: CoupledBatchData) -> CoupledBatchData:
+            return batch.to_device()
+
+        return SizedMap(modify_and_on_device, base_loader)
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
@@ -100,11 +108,11 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
 
     @property
     def n_samples(self) -> int:
-        return len(self._loader.dataset)  # type: ignore
+        return self._loader.n_samples
 
     @property
     def n_batches(self) -> int:
-        return len(self._loader)  # type: ignore
+        return len(self._loader)
 
     @property
     def batch_size(self) -> int:

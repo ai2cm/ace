@@ -5,6 +5,7 @@ import xarray as xr
 
 from fme.core.device import get_device
 from fme.core.packer import Packer
+from fme.downscaling.aggregators.shape_helpers import upsample_tensor
 from fme.downscaling.datasets import (
     BatchData,
     BatchedLatLonCoordinates,
@@ -114,7 +115,7 @@ class DummyModel:
         self.modules = []
         self.out_packer = Packer(["x"])
 
-    def generate_on_batch(self, batch, n_samples=1):
+    def generate_on_batch(self, batch: PairedBatchData, n_samples=1):
         prediction_data = {
             k: v.unsqueeze(1).expand(-1, n_samples, -1, -1)
             for k, v in batch.fine.data.items()
@@ -122,6 +123,16 @@ class DummyModel:
         return ModelOutputs(
             prediction=prediction_data, target=prediction_data, loss=torch.tensor(1.0)
         )
+
+    def generate_on_batch_no_target(self, batch: BatchData, n_samples=1):
+        prediction_data = {
+            k: upsample_tensor(
+                v.unsqueeze(1).expand(-1, n_samples, -1, -1),
+                upsample_factor=self.downscale_factor,
+            )
+            for k, v in batch.data.items()
+        }
+        return prediction_data
 
 
 def get_paired_test_data(
@@ -176,7 +187,7 @@ def get_paired_test_data(
         pytest.param((3, 3), id="partial_patch"),
     ],
 )
-def test_SpatialCompositePredictor(patch_size_coarse):
+def test_SpatialCompositePredictor_generate_on_batch(patch_size_coarse):
     batch_size = 3
     coarse_extent = (4, 4)
     paired_batch_data = get_paired_test_data(
@@ -334,3 +345,29 @@ def test_paired_patches_shuffle(shuffle):
         assert not torch.equal(data0, data1)
     else:
         assert torch.equal(data0, data1)
+
+
+@pytest.mark.parametrize(
+    "patch_size_coarse",
+    [
+        pytest.param((2, 2), id="no_partial_patch"),
+        pytest.param((3, 3), id="partial_patch"),
+    ],
+)
+def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse):
+    batch_size = 3
+    coarse_extent = (4, 4)
+    paired_batch_data = get_paired_test_data(
+        *coarse_extent, downscale_factor=2, batch_size=batch_size
+    )
+    predictor = PatchPredictor(
+        DummyModel(coarse_shape=patch_size_coarse, downscale_factor=2),  # type: ignore
+        coarse_extent,
+        coarse_horizontal_overlap=1,
+    )
+    n_samples_generate = 2
+    coarse_batch_data = paired_batch_data.coarse
+    prediction = predictor.generate_on_batch_no_target(
+        coarse_batch_data, n_samples=n_samples_generate
+    )
+    assert prediction["x"].shape == (batch_size, n_samples_generate, 8, 8)

@@ -43,6 +43,7 @@ from .data_loading.data_typing import (
 from .stepper import (
     ComponentConfig,
     CoupledOceanFractionConfig,
+    CoupledParameterInitConfig,
     CoupledStepper,
     CoupledStepperConfig,
 )
@@ -441,6 +442,48 @@ def test_config_ocean_diag_to_atmos_forcing_error():
         _ = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
 
 
+def test_config_parameter_init_error():
+    mock_param_init = Mock()
+    mock_param_init.weights_path = "ckpt.pt"
+    atmosphere = ComponentConfig(
+        timedelta="6h",
+        stepper=SingleModuleStepperConfig(
+            builder=Mock(),
+            in_names=["a", "f"],
+            out_names=["a"],
+            normalization=Mock(),
+            loss=Mock(),
+            ocean=OceanConfig(
+                surface_temperature_name="a",
+                ocean_fraction_name="f",
+            ),
+            parameter_init=mock_param_init,
+        ),
+    )
+    ocean = ComponentConfig(
+        timedelta="5D",
+        stepper=SingleModuleStepperConfig(
+            builder=Mock(),
+            in_names=["sst"],
+            out_names=["sst"],
+            normalization=Mock(),
+            loss=Mock(),
+            parameter_init=mock_param_init,
+        ),
+    )
+    mock_coupled_param_init = Mock()
+    mock_coupled_param_init.checkpoint_path = "ckpt.pt"
+    with pytest.raises(
+        ValueError,
+        match="Please specify CoupledParameterInitConfig",
+    ):
+        _ = CoupledStepperConfig(
+            atmosphere=atmosphere,
+            ocean=ocean,
+            parameter_init=mock_coupled_param_init,
+        )
+
+
 SphericalData = namedtuple(
     "SphericalData",
     [
@@ -531,6 +574,7 @@ def get_stepper_config(
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
     ocean_parameter_init: ParameterInitializationConfig | None = None,
     atmosphere_parameter_init: ParameterInitializationConfig | None = None,
+    checkpoint_path: str | None = None,
 ):
     if ocean_parameter_init is None:
         ocean_parameter_init = ParameterInitializationConfig()
@@ -593,6 +637,7 @@ def get_stepper_config(
         ),
         sst_name=sst_name_in_ocean_data,
         ocean_fraction_prediction=ocean_fraction_prediction,
+        parameter_init=CoupledParameterInitConfig(checkpoint_path=checkpoint_path),
     )
     return config
 
