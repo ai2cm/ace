@@ -459,7 +459,8 @@ class Trainer:
                 and self.num_batches_seen % self.config.checkpoint_every_n_batches == 0
             ):
                 self._save_restart_checkpoints()
-        self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
+        if dist.is_root():
+            self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
         # we will save restart checkpoints again after validation/inference
         # are recorded to wandb
         self._epochs_trained += 1
@@ -563,6 +564,8 @@ class Trainer:
         ema_checkpoint_path: str | None = None,
         include_optimization: bool = False,
     ):
+        if not Distributed.get_instance().is_root():
+            raise RuntimeError("Only the root process should save checkpoints")
         # save to a temporary file in case we get pre-empted during save
         temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
