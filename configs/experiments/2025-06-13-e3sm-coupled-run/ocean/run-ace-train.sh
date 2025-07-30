@@ -12,17 +12,17 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-Samudra-E3SM-with-coupled-ocean-data-and-zos" # should be the same as the evaluator run job group
+JOB_GROUP="2025-07-30-BK-Samudra-E3SM-baseline-config-updated-stats" # should be the same as the evaluator run job group
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
-STATS_DATA=elynn/2025-07-24-E3SMv3-piControl-ocean-stats
+STATS_DATA=elynn/2025-07-30-e3smv3-piControl-coupled-ocean-stats-combined
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
 N_RANDOM_SEED_RUNS=4
 
-for RS in $(seq 4 $N_RANDOM_SEED_RUNS); do
+for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
     # don't log validation maps
     OVERRIDE_ARGS="${GROUP_OVERRIDE_ARGS} validation_aggregator.log_snapshots=false validation_aggregator.log_mean_maps=false"
@@ -48,6 +48,9 @@ for RS in $(seq 4 $N_RANDOM_SEED_RUNS); do
           --priority $PRIORITY \
           --preemptible \
           --cluster ai2/jupiter-cirrascale-2 \
+          --cluster ai2/ceres-cirrascale \
+          --cluster ai2/neptune-cirrascale \
+          --cluster ai2/saturn-cirrascale \
           --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$BEAKER_USERNAME \
           --env WANDB_NAME=$JOB_NAME \

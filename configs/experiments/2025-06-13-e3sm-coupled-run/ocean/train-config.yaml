@@ -117,6 +117,16 @@ stepper:
     fill_value: 0.0
     exclude_names_and_prefixes:
       - land_fraction
+      - sea_surface_fraction
+      - TAUX
+      - TAUY
+      - surface_precipitation_rate
+      - surface_upward_longwave_flux
+      - surface_upward_shortwave_flux
+      - FLDS
+      - FSDS
+      - LHFLX
+      - SHFLX
   step:
     type: single_module
     config:
@@ -166,6 +176,9 @@ stepper:
           - so_16
           - so_17
           - so_18
+          sea_ice_fraction_correction:
+            sea_ice_fraction_name: ocean_sea_ice_fraction
+            land_fraction_name: land_fraction
       next_step_forcing_names:
       - TAUX
       - TAUY
