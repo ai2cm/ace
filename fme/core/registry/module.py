@@ -116,5 +116,4 @@ class ModuleSelector:
     @classmethod
     def get_available_types(cls):
         """This class method is used to expose all available types of Modules."""
-        module = nn.Identity()
-        return cls(type="prebuilt", config={"module": module}).registry._types.keys()
+        return cls.registry._types.keys()

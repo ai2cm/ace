@@ -159,7 +159,7 @@ class StepSelector(StepConfigABC):
     @classmethod
     def get_available_types(cls) -> set[str]:
         """This class method is used to expose all available types of Steps."""
-        return set(cls(type="", config={}).registry._types.keys())
+        return set(cls.registry._types.keys())
 
     def get_next_step_forcing_names(self) -> list[str]:
         return self._step_config_instance.get_next_step_forcing_names()
