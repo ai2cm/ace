@@ -471,7 +471,9 @@ class Trainer:
         logging.info(
             f"Saving latest checkpoint model trained for {self._epochs_trained} "
             f"complete epochs and {self._current_epoch_num_batches_seen} additional "
-            f"batches, or {self.num_batches_seen} total batches"
+            f"batches, or {self.num_batches_seen} total batches, with "
+            f"best_validation_loss {self._best_validation_loss} and "
+            f"best_inference_error {self._best_inference_error}"
         )
         self.save_checkpoint(
             self.paths.latest_checkpoint_path,
