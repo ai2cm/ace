@@ -365,8 +365,10 @@ class Trainer:
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
                     "epoch_total_seconds": time_elapsed,
-                    "best_val_loss": self._best_validation_loss,
-                    "best_inference_error": self._best_inference_error,
+                    "best_val_loss": min(valid_loss, self._best_validation_loss),
+                    "best_inference_error": min(
+                        inference_error or torch.inf, self._best_inference_error
+                    ),
                 },
             }
             if inference_end is not None:
@@ -424,7 +426,7 @@ class Trainer:
             logging.info(
                 f"Subsetted train loader created, has {len(epoch_data)} batches"
             )
-
+        self._last_saved_num_batches_seen = self.num_batches_seen
         self._started_training = True
         current_time = time.time()
         for batch in epoch_data:
@@ -459,7 +461,8 @@ class Trainer:
                 and self.num_batches_seen % self.config.checkpoint_every_n_batches == 0
             ):
                 self._save_restart_checkpoints()
-        if dist.is_root():
+                self._last_saved_num_batches_seen = self.num_batches_seen
+        if dist.is_root() and self.num_batches_seen > self._last_saved_num_batches_seen:
             self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
         # we will save restart checkpoints again after validation/inference
         # are recorded to wandb
