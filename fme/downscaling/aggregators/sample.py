@@ -6,6 +6,7 @@ import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.distributed import Distributed
@@ -67,6 +68,7 @@ class SampleAggregator:
     mind when using large sample generation / batch sizes.  Intended for
     single-event evaluation over a single patch, not for large-scale
     evaluation.
+    This aggregator is designed to be used on data with batch size 1.
     """
 
     def __init__(
@@ -83,9 +85,24 @@ class SampleAggregator:
         self._latlon_coordinates = latlon_coordinates
         self._sample_dim = 1
         self._dist = Distributed.get_instance()
+        self._gathered_samples: dict[str, torch.Tensor] | None = None
+
+    def _validate_batch_size(self, samples: TensorMapping) -> None:
+        """
+        Validates that the batch size of the samples is 1.
+        """
+        for k, v in samples.items():
+            if len(v.shape) != 4:
+                raise ValueError(
+                    f"Expected 4d tensor for {k} with dims (batch, sample, lat, lon), "
+                    f"got tensor with shape {v.shape}."
+                )
+            if v.shape[0] != 1:
+                raise ValueError(f"Expected batch size of 1 for {k}, got {v.shape[0]}")
 
     @torch.no_grad()
     def record_batch(self, samples: TensorMapping) -> None:
+        self._validate_batch_size(samples)
         for k, v in samples.items():
             self._samples[k].append(v)
 
@@ -142,7 +159,7 @@ class SampleAggregator:
 
     def _get_sample_rank_histogram(self, samples: torch.Tensor, key: str) -> Image:
         rank = compute_rank(self._target[key].cpu(), samples)
-        nsamples = samples.shape[1]
+        nsamples = samples.shape[self._sample_dim]
         bins = np.arange(-0.5, nsamples + 0.6, 1)
         fig = plt.figure()
         plt.hist(rank.flatten(), bins=bins)
@@ -182,26 +199,63 @@ class SampleAggregator:
             f"rank_histogram/{key}": rank_histogram,
         }
 
+    @property
+    def gathered_samples(self):
+        """
+        Gathers all samples from all GPUs into CPU memory.
+        """
+        if self._gathered_samples is not None:
+            return self._gathered_samples
+        else:
+            gathered_samples = {}
+            for k, v in self._samples.items():
+                samples = torch.concat(v, dim=self._sample_dim)
+                gathered_tensor = self._dist.gather(samples)
+                if gathered_tensor is not None:
+                    gathered_samples[k] = torch.concat(
+                        gathered_tensor, dim=self._sample_dim
+                    ).cpu()
+            self._gathered_samples = gathered_samples
+            return self._gathered_samples
+
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         ret = {}
-        for k, v in self._samples.items():
-            samples = torch.concat(v, dim=self._sample_dim)
-            gathered_samples = self._dist.gather(samples)
+        for k, tensor in self.gathered_samples.items():
             cmap, vmin, vmax = _get_cmap_and_limits(self._target[k])
             plot_kwargs = dict(cmap=cmap, vmin=vmin, vmax=vmax)
 
             # subselection of image plots
-            if gathered_samples is not None:
-                gathered_samples = torch.concat(
-                    gathered_samples, dim=self._sample_dim
-                ).cpu()
+            if self.gathered_samples is not None:
                 ret[f"generation_samples/{k}"] = self._get_sample_plots(
-                    gathered_samples, k, **plot_kwargs
+                    tensor, k, **plot_kwargs
                 )
-                ret.update(
-                    self._get_sample_ensemble_plots(gathered_samples, k, **plot_kwargs)
-                )
+                ret.update(self._get_sample_ensemble_plots(tensor, k, **plot_kwargs))
                 ret.update(self._get_target_and_coarse_plots(k, **plot_kwargs))
         prefix = ensure_trailing_slash(prefix)
         ret = {f"{prefix}{k}": v for k, v in ret.items()}
         return ret
+
+    def get_dataset(self) -> xr.Dataset:
+        latgrid, longrid = self._latlon_coordinates.fine.meshgrid
+        lat, lon = latgrid.cpu().numpy()[:, 0], longrid.cpu().numpy()[0, :]
+        ds = xr.Dataset()
+
+        for k, v in self.gathered_samples.items():
+            nsamples = v.shape[self._sample_dim]
+            # Remove batch dimension before saving
+            data = v.squeeze()
+            ds[f"{k}_predicted"] = xr.DataArray(
+                data,
+                dims=["sample", "lat", "lon"],
+                coords={
+                    "lat": lat,
+                    "lon": lon,
+                    "sample": np.arange(nsamples),
+                },
+            )
+            ds[f"{k}_target"] = xr.DataArray(
+                self._target[k].squeeze().cpu().numpy(),
+                dims=["lat", "lon"],
+                coords={"lat": lat, "lon": lon},
+            )
+        return ds
