@@ -102,6 +102,8 @@ class SampleAggregator:
 
     @torch.no_grad()
     def record_batch(self, samples: TensorMapping) -> None:
+        if self._gathered_samples is not None:
+            raise RuntimeError("Cannot record new samples after gathering samples. ")
         self._validate_batch_size(samples)
         for k, v in samples.items():
             self._samples[k].append(v)
@@ -225,12 +227,11 @@ class SampleAggregator:
             plot_kwargs = dict(cmap=cmap, vmin=vmin, vmax=vmax)
 
             # subselection of image plots
-            if self.gathered_samples is not None:
-                ret[f"generation_samples/{k}"] = self._get_sample_plots(
-                    tensor, k, **plot_kwargs
-                )
-                ret.update(self._get_sample_ensemble_plots(tensor, k, **plot_kwargs))
-                ret.update(self._get_target_and_coarse_plots(k, **plot_kwargs))
+            ret[f"generation_samples/{k}"] = self._get_sample_plots(
+                tensor, k, **plot_kwargs
+            )
+            ret.update(self._get_sample_ensemble_plots(tensor, k, **plot_kwargs))
+            ret.update(self._get_target_and_coarse_plots(k, **plot_kwargs))
         prefix = ensure_trailing_slash(prefix)
         ret = {f"{prefix}{k}": v for k, v in ret.items()}
         return ret
