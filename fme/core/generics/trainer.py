@@ -68,6 +68,7 @@ from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
+from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
@@ -429,6 +430,7 @@ class Trainer:
         self._last_saved_num_batches_seen = self.num_batches_seen
         self._started_training = True
         current_time = time.time()
+        metrics_aggregator = MetricsAggregator()
         for batch in epoch_data:
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
@@ -438,15 +440,16 @@ class Trainer:
             self.num_batches_seen += 1
             self._current_epoch_num_batches_seen += 1
             n_samples_seen_since_logging += self.train_data.batch_size
+            metrics_aggregator.record(stepped.get_metrics())
             if (
                 self.config.log_train_every_n_batches > 0
                 and self.num_batches_seen % self.config.log_train_every_n_batches == 0
             ):
-                with torch.no_grad():
-                    metrics = {
-                        f"batch_{name}": dist.reduce_mean(metric)
-                        for name, metric in sorted(stepped.get_metrics().items())
-                    }
+                metrics = {
+                    f"batch_{name}": value
+                    for name, value in metrics_aggregator.get_metrics().items()
+                }
+                metrics_aggregator.clear()
                 duration = time.time() - current_time
                 current_time = time.time()
                 samples_per_second = n_samples_seen_since_logging / duration
