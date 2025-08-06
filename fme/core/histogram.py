@@ -15,6 +15,15 @@ from fme.core.typing_ import TensorMapping
 
 EPSILON = 1.0e-6
 
+_Histogram = namedtuple("_Histogram", ["counts", "bin_edges"])
+
+
+def _add_trailing_slash(s):
+    if len(s) == 0 or s.endswith("/"):
+        return s
+    else:
+        return s + "/"
+
 
 def trim_zero_bins(
     counts: np.ndarray, bin_edges: np.ndarray
@@ -167,7 +176,112 @@ class DynamicHistogram:
         self.counts = new_counts
 
 
-_Histogram = namedtuple("_Histogram", ["counts", "bin_edges"])
+class DynamicHistogramAggregator:
+    def __init__(
+        self,
+        n_bins: int,
+        percentiles: list[float] | None = None,
+        nan_masks: Mapping[str, torch.Tensor] | None = None,
+    ) -> None:
+        self.n_bins = n_bins
+        self.percentiles = [99.9999] if percentiles is None else percentiles
+        self.histograms: Mapping[str, DynamicHistogram] | None = None
+        self.nan_masks = nan_masks
+        self._time_dim = -2
+
+    def set_nan_masks(self, data: TensorMapping):
+        if self.nan_masks is None:
+            # assume the final two dimensions are the spatial dimensions and the
+            # spatial pattern of NaNs is the same for all samples & time, but
+            # can vary by variable
+            ndim = next(iter(data.values())).ndim
+            index = (slice(0, 1),) * (ndim - 2) + (slice(None), slice(None))
+            self.nan_masks = {
+                k: v[index].isnan() if torch.any(v[index].isnan()) else None
+                for k, v in data.items()
+            }
+
+    def _remove_nans(self, key: str, value: torch.Tensor):
+        if self.nan_masks is None:
+            raise ValueError(
+                "record_batch must be called at least once before removing NaNs"
+            )
+        nan_mask = self.nan_masks[key]
+        if nan_mask is not None:
+            mask = ~nan_mask.to(value.device).expand(*value.shape)
+            value = torch.masked_select(value, mask)
+        else:
+            value = value.flatten()
+        return value.unsqueeze(0)
+
+    @torch.no_grad()
+    def record_batch(self, data: TensorMapping):
+        self.set_nan_masks(data)
+        if self.histograms is None:
+            self.histograms = {
+                k: DynamicHistogram(n_times=1, n_bins=self.n_bins) for k in data.keys()
+            }
+        for k in data:
+            # no matter what data shape is given, combine it all into one histogram
+            value = self._remove_nans(k, data[k])
+            self.histograms[k].add(value)
+
+    def get_histograms(self) -> dict[str, _Histogram]:
+        if self.histograms is None:
+            raise ValueError("No data has been added to the histogram")
+        return_dict: dict[str, _Histogram] = {}
+        for k, histogram in self.histograms.items():
+            counts, bin_edges = trim_zero_bins(
+                histogram.counts.squeeze(self._time_dim),
+                histogram.bin_edges,
+            )
+            return_dict[k] = _Histogram(counts, bin_edges)
+        return return_dict
+
+    def get_dataset(self) -> xr.Dataset:
+        if self.histograms is None:
+            raise ValueError("No data has been added to the histogram")
+        data = {}
+        for var_name, histogram in self.histograms.items():
+            data[var_name] = xr.DataArray(
+                histogram.counts[0, :],
+                dims=("bin",),
+            )
+            data[f"{var_name}_bin_edges"] = xr.DataArray(
+                histogram.bin_edges,
+                dims=("bin_edges",),
+            )
+        return xr.Dataset(data)
+
+    def _plot_histogram(self, histogram: _Histogram) -> matplotlib.figure.Figure:
+        fig, ax = plt.subplots()
+        normalized_counts = _normalize_histogram(histogram.counts, histogram.bin_edges)
+        ax.step(
+            histogram.bin_edges[:-1],
+            normalized_counts,
+            "-",
+            where="post",
+        )
+        ax.set(yscale="log")
+        plt.tight_layout()
+        return fig
+
+    def get_wandb(
+        self, prefix: str = ""
+    ) -> dict[str, float | matplotlib.figure.Figure]:
+        return_dict = {}
+        histograms = self.get_histograms()
+        prefix = _add_trailing_slash(prefix)
+
+        for field_name, histogram in histograms.items():
+            fig = self._plot_histogram(histogram)
+            return_dict[field_name] = fig
+            plt.close(fig)
+            for p in self.percentiles:
+                return_dict[f"{prefix}{p}th-percentile/{field_name}"] = quantile(
+                    histogram.bin_edges, histogram.counts, p / 100.0
+                )
+        return return_dict
 
 
 class ComparedDynamicHistograms:
@@ -184,8 +298,8 @@ class ComparedDynamicHistograms:
         self.n_bins = n_bins
         percentiles = [99.9999] if percentiles is None else percentiles
         self.percentiles = [p for p in percentiles]
-        self.target_histograms: Mapping[str, DynamicHistogram] | None = None
-        self.prediction_histograms: Mapping[str, DynamicHistogram] | None = None
+        self.target_aggregator: DynamicHistogramAggregator | None = None
+        self.prediction_aggregator: DynamicHistogramAggregator | None = None
         self._nan_masks: Mapping[str, torch.Tensor] | None = None
         self._time_dim = -2
         self._variables: set[str] = set()
@@ -208,78 +322,49 @@ class ComparedDynamicHistograms:
                 f"current: {current_variables}"
             )
 
+    def _initialize_histogram_aggs(self, target_data: TensorMapping):
+        if self._variables is None:
+            raise RuntimeError(
+                "_check_overlapping_keys must be called to get variable set "
+                "before initializing histograms."
+            )
+        if self.target_aggregator is None:
+            self.target_aggregator = DynamicHistogramAggregator(
+                n_bins=self.n_bins, percentiles=self.percentiles
+            )
+            self.target_aggregator.set_nan_masks(target_data)
+        if self.prediction_aggregator is None:
+            self.prediction_aggregator = DynamicHistogramAggregator(
+                n_bins=self.n_bins,
+                percentiles=self.percentiles,
+                # nan_masks are defined using the target data
+                nan_masks=self.target_aggregator.nan_masks,
+            )
+
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping):
         self._check_overlapping_keys(target, prediction)
-
         target = {k: v for k, v in target.items() if k in self._variables}
         prediction = {k: v for k, v in prediction.items() if k in self._variables}
-        if self._nan_masks is None:
-            # assume the final two dimensions are the spatial dimensions and the
-            # spatial pattern of NaNs is the same for all samples & time, but
-            # can vary by variable
-            ndim = next(iter(target.values())).ndim
-            index = (slice(0, 1),) * (ndim - 2) + (slice(None), slice(None))
-            self._nan_masks = {
-                k: v[index].isnan() if torch.any(v[index].isnan()) else None
-                for k, v in target.items()
-                if k in self._variables
-            }
-
-        if self.target_histograms is None or self.prediction_histograms is None:
-            self.target_histograms = {}
-            for k in target:
-                self.target_histograms[k] = DynamicHistogram(
-                    n_times=1,
-                    n_bins=self.n_bins,
-                )
-            self.prediction_histograms = {}
-            for k in prediction:
-                self.prediction_histograms[k] = DynamicHistogram(
-                    n_times=1,
-                    n_bins=self.n_bins,
-                )
-        for k in target:
-            # no matter what data shape is given, combine it all into one histogram
-            value = self._remove_nans(k, target[k])
-            self.target_histograms[k].add(value)
-        for k in prediction:
-            value = self._remove_nans(k, prediction[k])
-            self.prediction_histograms[k].add(value)
-
-    def _remove_nans(self, key: str, value: torch.Tensor):
-        if self._nan_masks is None:
-            raise ValueError(
-                "record_batch must be called at least once before removing NaNs"
-            )
-        nan_mask = self._nan_masks[key]
-        if nan_mask is not None:
-            mask = ~nan_mask.to(value.device).expand(*value.shape)
-            value = torch.masked_select(value, mask)
-        else:
-            value = value.flatten()
-        return value.unsqueeze(0)
+        self._initialize_histogram_aggs(target_data=target)
+        assert self.target_aggregator is not None
+        self.target_aggregator.record_batch(target)
+        assert self.prediction_aggregator is not None
+        self.prediction_aggregator.record_batch(prediction)
 
     def _get_histograms(
         self,
     ) -> dict[str, dict[Literal["target", "prediction"], _Histogram]]:
-        if self.target_histograms is None or self.prediction_histograms is None:
+        if self.target_aggregator is None or self.prediction_aggregator is None:
             raise ValueError("No data has been added to the histogram")
         return_dict: dict[str, dict[Literal["target", "prediction"], _Histogram]] = (
             collections.defaultdict(dict)
         )
-        for k in self.target_histograms:
-            counts, bin_edges = trim_zero_bins(
-                self.target_histograms[k].counts.squeeze(self._time_dim),
-                self.target_histograms[k].bin_edges,
-            )
-            return_dict[k]["target"] = _Histogram(counts, bin_edges)
-        for k in self.prediction_histograms:
-            counts, bin_edges = trim_zero_bins(
-                self.prediction_histograms[k].counts.squeeze(self._time_dim),
-                self.prediction_histograms[k].bin_edges,
-            )
-            return_dict[k]["prediction"] = _Histogram(counts, bin_edges)
+        target_histograms = self.target_aggregator.get_histograms()
+        prediction_histograms = self.prediction_aggregator.get_histograms()
+        for k in self._variables:
+            return_dict[k]["target"] = target_histograms[k]
+            return_dict[k]["prediction"] = prediction_histograms[k]
         return return_dict
 
     def _plot_histogram(
@@ -338,26 +423,11 @@ class ComparedDynamicHistograms:
 
         return return_dict
 
-    def _get_single_dataset(
-        self, histograms: Mapping[str, DynamicHistogram]
-    ) -> xr.Dataset:
-        data = {}
-        for var_name, histogram in histograms.items():
-            data[var_name] = xr.DataArray(
-                histogram.counts[0, :],
-                dims=("bin",),
-            )
-            data[f"{var_name}_bin_edges"] = xr.DataArray(
-                histogram.bin_edges,
-                dims=("bin_edges",),
-            )
-        return xr.Dataset(data)
-
     def get_dataset(self) -> xr.Dataset:
-        if self.target_histograms is None or self.prediction_histograms is None:
+        if self.target_aggregator is None or self.prediction_aggregator is None:
             raise ValueError("No data has been added to the histogram")
-        target_dataset = self._get_single_dataset(self.target_histograms)
-        prediction_dataset = self._get_single_dataset(self.prediction_histograms)
+        target_dataset = self.target_aggregator.get_dataset()
+        prediction_dataset = self.prediction_aggregator.get_dataset()
         for missing_target_name in set(prediction_dataset.data_vars) - set(
             target_dataset.data_vars
         ):
