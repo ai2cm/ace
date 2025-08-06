@@ -17,6 +17,7 @@ from fme.ace.inference.data_writer.main import (
     PairedDataWriter,
 )
 from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
+from fme.ace.inference.data_writer.subselect import SubselectWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.core.device import get_device
 
@@ -442,6 +443,16 @@ class TestDataWriter:
                 (n_samples, n_timesteps // coarsen_factor, 4, 5), device=device
             ),
         }
+
+        region_config = SubselectWriterConfig(
+            label="test_region.nc",
+            names=["pressure"],
+            lat_extent=(1, 2),
+            lon_extent=(1, 3),
+            latitude_name="lat",
+            longitude_name="lon",
+        )
+
         writer = DataWriter(
             str(tmp_path),
             n_initial_conditions=n_samples,
@@ -453,6 +464,7 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             save_names=None,
             time_coarsen=TimeCoarsenConfig(coarsen_factor),
+            subselection=[region_config],
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
@@ -521,6 +533,11 @@ class TestDataWriter:
             }
             assert ds.attrs["title"] == "ACE monthly predictions data file"
             assert ds.attrs["source.inference_version"] == "1.0"
+
+        with xr.open_dataset(tmp_path / "test_region.nc") as ds:
+            assert "pressure" in ds
+            assert "temp" not in ds
+            assert ds.pressure.shape[-2:] == (2, 3)
 
 
 @pytest.mark.parametrize(

@@ -27,7 +27,17 @@ class TimeSlice:
     stop_time: str | None = None
     step: int | None = None
 
+    def as_raw_slice(self) -> slice:
+        """
+        Return the raw slice object without applying it to a time index.
+        E.g., directly as a selection method for an xarray object.
+        """
+        return slice(self.start_time, self.stop_time, self.step)
+
     def slice(self, time: xr.CFTimeIndex) -> slice:
+        """
+        Return a slice object with indexing based on the provided time index.
+        """
         return time.slice_indexer(self.start_time, self.stop_time, self.step)
 
 
