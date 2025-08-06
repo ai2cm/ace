@@ -8,6 +8,7 @@ import torch
 from fme.core.histogram import (
     ComparedDynamicHistograms,
     DynamicHistogram,
+    DynamicHistogramAggregator,
     _normalize_histogram,
 )
 
@@ -226,3 +227,42 @@ def test_compared_dynamic_histogram_with_nans_record_batch():
     wandb_result = histogram.get_wandb()
     assert not np.isnan(wandb_result["target/99.0th-percentile/x"])
     assert not np.isnan(wandb_result["prediction/99.0th-percentile/x"])
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        pytest.param((2, 8, 16), id="no_time_dim"),
+        pytest.param((2, 1, 8, 16), id="time_dim"),
+    ],
+)
+@pytest.mark.parametrize("percentiles", [[], [99.0], [99.0, 99.99]])
+def test_dynamic_histogram_aggregator(shape, percentiles):
+    n_bins = 300
+    histogram = DynamicHistogramAggregator(n_bins, percentiles=percentiles)
+    prediction = {"x": torch.rand(*shape), "y": torch.rand(*shape)}
+    histogram.record_batch(prediction)
+    wandb_result = histogram.get_wandb()
+
+    percentile_names = []
+    for p in percentiles:
+        for var_name in ("x", "y"):
+            percentile_names.append(f"{p}th-percentile/{var_name}")
+
+    assert sorted(list(wandb_result.keys())) == sorted(
+        [
+            "x",
+            "y",
+        ]
+        + percentile_names
+    )
+    for var_name in ["x", "y"]:
+        assert isinstance(wandb_result[f"{var_name}"], matplotlib.figure.Figure)
+        for p in percentiles:
+            assert isinstance(wandb_result[f"{p}th-percentile/{var_name}"], float)
+
+    ds = histogram.get_dataset()
+    for var in ["x", "y"]:
+        assert var in ds
+        assert f"{var}_bin_edges" in ds
+        assert len(ds[var]) == n_bins
