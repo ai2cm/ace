@@ -2,6 +2,8 @@ import dataclasses
 import datetime
 import os
 import pathlib
+import unittest
+import unittest.mock
 from collections import namedtuple
 from collections.abc import Iterable, Mapping
 from typing import Literal
@@ -330,6 +332,62 @@ def test_train_on_batch_crps_loss():
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, 2, n_steps + 1, 5, 5)
+
+
+@pytest.mark.parametrize("optimize_last_step_only", [True, False])
+def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
+    torch.manual_seed(0)
+
+    forward_calls_grad_enabled = []
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            forward_calls_grad_enabled.append(torch.is_grad_enabled())
+            return x + 1
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        optimize_last_step_only=optimize_last_step_only,
+        n_ensemble=2,
+        loss=WeightedMappingLossConfig(
+            type="EnsembleLoss",
+            kwargs={
+                "crps_weight": 0.1,
+                "energy_score_weight": 0.9,
+            },
+        ),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    optimization = unittest.mock.Mock(wraps=NullOptimization())
+    stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    if optimize_last_step_only:
+        assert len(optimization.accumulate_loss.call_args_list) == 1
+        assert forward_calls_grad_enabled[-1]
+        assert not any(forward_calls_grad_enabled[:-1])
+    else:
+        assert len(optimization.accumulate_loss.call_args_list) == n_steps
+        assert all(forward_calls_grad_enabled)
 
 
 def test_train_on_batch_with_prescribed_ocean():

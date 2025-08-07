@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import datetime
 import logging
@@ -638,6 +639,7 @@ class StepperConfig:
     Parameters:
         step: The step configuration.
         loss: The loss configuration.
+        optimize_last_step_only: Whether to optimize only the last step.
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
@@ -651,6 +653,7 @@ class StepperConfig:
     loss: WeightedMappingLossConfig = dataclasses.field(
         default_factory=lambda: WeightedMappingLossConfig()
     )
+    optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
     crps_training: bool = False
     parameter_init: ParameterInitializationConfig = dataclasses.field(
@@ -1433,17 +1436,31 @@ class Stepper(
             optimization,
         )
         output_list: list[EnsembleTensorDict] = []
-        for step, gen_step in enumerate(output_generator):
-            gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
-            output_list.append(gen_step)
-            # Note: here we examine the loss for a single timestep,
-            # not a single model call (which may contain multiple timesteps).
-            target_step = add_ensemble_dim(
-                {k: v.select(self.TIME_DIM, step) for k, v in target_data.data.items()}
+        output_iterator = iter(output_generator)
+        for step in range(n_forward_steps):
+            optimize_step = (
+                step == n_forward_steps - 1 or not self._config.optimize_last_step_only
             )
-            step_loss = self.loss_obj(gen_step, target_step)
-            metrics[f"loss_step_{step}"] = step_loss.detach()
-            optimization.accumulate_loss(step_loss)
+            if optimize_step:
+                context = contextlib.nullcontext()
+            else:
+                context = torch.no_grad()
+            with context:
+                gen_step = next(output_iterator)
+                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                output_list.append(gen_step)
+                # Note: here we examine the loss for a single timestep,
+                # not a single model call (which may contain multiple timesteps).
+                target_step = add_ensemble_dim(
+                    {
+                        k: v.select(self.TIME_DIM, step)
+                        for k, v in target_data.data.items()
+                    }
+                )
+                step_loss = self.loss_obj(gen_step, target_step)
+                metrics[f"loss_step_{step}"] = step_loss.detach()
+            if optimize_step:
+                optimization.accumulate_loss(step_loss)
         return output_list
 
     def update_training_history(self, training_job: TrainingJob) -> None:
