@@ -1,6 +1,7 @@
 import argparse
 import dataclasses
 import logging
+from datetime import datetime, timedelta
 
 import dacite
 import torch
@@ -9,19 +10,66 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
+from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.no_target import NoTargetAggregator
-from fme.downscaling.datasets import DataLoaderConfig, GriddedData
-from fme.downscaling.evaluator import CheckpointModelConfig, DiffusionModel, Model
+from fme.downscaling.datasets import ClosedInterval, DataLoaderConfig, GriddedData
+from fme.downscaling.evaluator import CheckpointModelConfig
+from fme.downscaling.models import DiffusionModel, Model
 from fme.downscaling.patching import (
     MultipatchConfig,
     PatchPredictor,
     patch_generator_from_loader,
 )
+from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
+
+
+@dataclasses.dataclass
+class EventConfig:
+    name: str
+    date: str
+    lat_extent: ClosedInterval = dataclasses.field(
+        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+    )
+    lon_extent: ClosedInterval = dataclasses.field(
+        default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
+    )
+    n_samples: int = 64
+    date_format: str = "%Y-%m-%dT%H:%M"
+    save_generated_samples: bool = False
+
+    @property
+    def _time_selection_slice(self) -> TimeSlice:
+        """Returns a TimeSlice containing only the first 6h time(s).
+        Event evaluation only load the first snapshot.
+        Filling the slice stop isn't necessary but guards against
+        future code trying to iterate over the entire dataloader.
+        """
+        _stop = (
+            datetime.strptime(self.date, self.date_format) + timedelta(hours=6)
+        ).strftime(self.date_format)
+        return TimeSlice(self.date, _stop)
+
+    def get_gridded_data(
+        self, base_data_config: DataLoaderConfig, requirements: DataRequirements
+    ) -> GriddedData:
+        event_coarse = dataclasses.replace(
+            base_data_config.full_config[0], subset=self._time_selection_slice
+        )
+        n_processes = Distributed.get_instance().world_size
+        event_data_config = dataclasses.replace(
+            base_data_config,
+            coarse=[event_coarse],
+            repeat=n_processes,
+            batch_size=n_processes,
+            lat_extent=self.lat_extent,
+            lon_extent=self.lon_extent,
+        )
+        return event_data_config.build(requirements=requirements)
 
 
 class Downscaler:
