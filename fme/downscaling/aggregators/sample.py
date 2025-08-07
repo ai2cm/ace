@@ -61,7 +61,7 @@ def _get_caption(key: str, data: torch.Tensor) -> str:
     return caption
 
 
-class SampleAggregator:
+class PairedSampleAggregator:
     """
     Aggregates samples generated in parallel across GPUs for visualization.
     This aggregator collects many samples into CPU memory, so keep that in
