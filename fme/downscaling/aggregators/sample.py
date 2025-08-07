@@ -63,7 +63,7 @@ def _get_caption(key: str, data: torch.Tensor) -> str:
 
 class SampleAggregator:
     """
-    Aggregates paired samples generated in parallel across GPUs for visualization.
+    Aggregates generated samples generated in parallel across GPUs for visualization.
     This aggregator collects many samples into CPU memory, so keep that in
     mind when using large sample generation / batch sizes.  Intended for
     single-event evaluation over a single patch, not for large-scale
@@ -230,7 +230,8 @@ class SampleAggregator:
 
 class PairedSampleAggregator:
     """
-    Aggregates paired samples generated in parallel across GPUs for visualization.
+    Aggregates generated samples and paired targets generated in parallel
+    across GPUs for visualization.
     This aggregator collects many samples into CPU memory, so keep that in
     mind when using large sample generation / batch sizes.  Intended for
     single-event evaluation over a single patch, not for large-scale
