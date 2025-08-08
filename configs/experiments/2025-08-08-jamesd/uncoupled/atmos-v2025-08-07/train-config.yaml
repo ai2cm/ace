@@ -119,11 +119,11 @@ stepper:
           spectral_transform: sht
       normalization:
         network:
-          global_means_path: /statsdata/centering.nc
-          global_stds_path: /statsdata/scaling-full-field.nc
+          global_means_path: /atmos_stats/centering.nc
+          global_stds_path: /atmos_stats/scaling-full-field.nc
         residual:
-          global_means_path: /statsdata/centering.nc
-          global_stds_path: /statsdata/scaling-residual.nc
+          global_means_path: /atmos_stats/centering.nc
+          global_stds_path: /atmos_stats/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction

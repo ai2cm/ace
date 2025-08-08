@@ -4,7 +4,7 @@ set -e
 
 if [[ "$#" -ne 1 ]]; then
   echo "Usage: $0 <config_subdirectory>"
-  echo "  - <config_subdirectory>: Subdirectory containing the 'ace-train-config.yaml' to use."
+  echo "  - <config_subdirectory>: Subdirectory containing the 'train-config.yaml' to use."
   exit 1
 fi
 
@@ -15,7 +15,7 @@ CONFIG_SUBDIR=$1
 SCRIPT_DIR=$(git rev-parse --show-prefix)
 
 # Construct the full path to the specified configuration file.
-CONFIG_FILENAME="ace-train-config.yaml"
+CONFIG_FILENAME="train-config.yaml"
 CONFIG_PATH="$SCRIPT_DIR/$CONFIG_SUBDIR/$CONFIG_FILENAME"
 
 # Since we use a service account API key for wandb, we use the beaker username to set the wandb username.
@@ -27,6 +27,7 @@ N_GPUS=4
 
 # FIXME: this needs to be per-task configurable
 ATMOS_STATS_DATA=jamesd/2025-08-07-cm4-piControl-200yr-coupled-stats-atmosphere
+OCEAN_STATS_DATA=jamesd/2025-06-03-cm4-piControl-200yr-coupled-stats-ocean
 
 # Change to the repo root so paths are valid no matter where we run the script from.
 cd "$REPO_ROOT"
@@ -47,7 +48,7 @@ while read TRAINING; do
     JOB_GROUP="${GROUP}"
     JOB_NAME="${JOB_GROUP}-train"
     declare -a CLUSTER_ARGS
-    if [[ "$CLUSTER" == "titan" ]];then
+    if [[ "$CLUSTER" == "titan" ]]; then
         CLUSTER_ARGS=(
             --workspace ai2/climate-titan
             --cluster ai2/titan-cirrascale
@@ -69,7 +70,7 @@ while read TRAINING; do
     fi
 
     echo
-    echo "Launching ACE training job:"
+    echo "Launching uncoupled training job:"
     echo " - Job name: ${JOB_NAME}"
     echo " - Config: ${CONFIG_PATH}"
     echo " - Priority: ${PRIORITY}"
@@ -87,7 +88,7 @@ while read TRAINING; do
     EXPERIMENT_ID=$(
         gantry run \
             --name $JOB_NAME \
-            --description "Run ACE2-CM4 uncoupled pretraining" \
+            --description "Run uncoupled pretraining: ${JOB_GROUP}" \
             --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
             --priority $PRIORITY \
             --preemptible \
@@ -101,7 +102,8 @@ while read TRAINING; do
             --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-            --dataset $ATMOS_STATS_DATA:/statsdata \
+            --dataset $ATMOS_STATS_DATA:/atmos_stats \
+            --dataset $OCEAN_STATS_DATA:/ocean_stats \
             --gpus $N_GPUS \
             --shared-memory 800GiB \
             --budget ai2/climate \
