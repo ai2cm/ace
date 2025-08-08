@@ -17,8 +17,7 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.no_target import NoTargetAggregator
 from fme.downscaling.datasets import ClosedInterval, DataLoaderConfig, GriddedData
-from fme.downscaling.evaluator import CheckpointModelConfig
-from fme.downscaling.models import DiffusionModel, Model
+from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, Model
 from fme.downscaling.patching import (
     MultipatchConfig,
     PatchPredictor,
