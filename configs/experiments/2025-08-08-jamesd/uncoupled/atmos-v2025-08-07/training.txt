@@ -1,2 +1,2 @@
-group|skip_or_train|priority|cluster|retries|override_args
-v2025-08-07-interpolate_sst-sst_from_ts-rs1|train|urgent|titan|10
+group|skip_or_train|priority|cluster|n_gpus|retries|override_args
+v2025-08-07-interpolate_sst-sst_from_ts-rs1|train|urgent|titan|4|400GiB|10

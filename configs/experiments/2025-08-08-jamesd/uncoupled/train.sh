@@ -23,8 +23,6 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-N_GPUS=4
-
 # FIXME: this needs to be per-task configurable
 ATMOS_STATS_DATA=jamesd/2025-08-07-cm4-piControl-200yr-coupled-stats-atmosphere
 OCEAN_STATS_DATA=jamesd/2025-06-03-cm4-piControl-200yr-coupled-stats-ocean
@@ -34,11 +32,13 @@ cd "$REPO_ROOT"
 
 while read TRAINING; do
     GROUP=$(echo "$TRAINING" | cut -d"|" -f1)
-    STATUS=$(echo "$TRAINING" | cut -d"|" -f8)
-    PRIORITY=$(echo "$TRAINING" | cut -d"|" -f9)
-    CLUSTER=$(echo "$TRAINING" | cut -d"|" -f10)
-    RETRIES=$(echo "$TRAINING" | cut -d"|" -f11)
-    OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f12)
+    STATUS=$(echo "$TRAINING" | cut -d"|" -f2)
+    PRIORITY=$(echo "$TRAINING" | cut -d"|" -f3)
+    CLUSTER=$(echo "$TRAINING" | cut -d"|" -f4)
+    N_GPUS=$(echo "$TRAINING" | cut -d"|" -f5)
+    SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f6)
+    RETRIES=$(echo "$TRAINING" | cut -d"|" -f7)
+    OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f8)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -53,13 +53,11 @@ while read TRAINING; do
             --workspace ai2/climate-titan
             --cluster ai2/titan-cirrascale
         )
-        N_GPUS=4
     else
         CLUSTER_ARGS=(
             --workspace ai2/climate-ceres
             --cluster ai2/ceres-cirrascale
         )
-        N_GPUS=8
     fi
 
     # get the template from the config subdir
@@ -104,8 +102,8 @@ while read TRAINING; do
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             --dataset $ATMOS_STATS_DATA:/atmos_stats \
             --dataset $OCEAN_STATS_DATA:/ocean_stats \
-            --gpus $N_GPUS \
-            --shared-memory 800GiB \
+            --gpus "${N_GPUS}" \
+            --shared-memory "${SHARED_MEM}" \
             --budget ai2/climate \
             --no-conda \
             --install "pip install --no-deps ." \
