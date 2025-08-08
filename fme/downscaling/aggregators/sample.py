@@ -215,7 +215,7 @@ class SampleAggregator:
         for k, v in self.gathered_samples.items():
             nsamples = v.shape[self._sample_dim]
             # Remove batch dimension before saving
-            data = v.squeeze()
+            data = v.squeeze(0)
             ds[f"{k}_predicted"] = xr.DataArray(
                 data,
                 dims=["sample", "lat", "lon"],
