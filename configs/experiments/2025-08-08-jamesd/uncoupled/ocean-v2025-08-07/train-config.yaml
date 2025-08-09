@@ -11,7 +11,7 @@ inference:
   loader:
     start_indices:
       times:
-      - '0151-01-08T12:00:00'
+      - '0151-01-03T12:00:00'
       - '0171-01-03T12:00:00'
       - '0191-01-03T12:00:00'
       - '0211-01-03T12:00:00'
@@ -50,19 +50,16 @@ train_loader:
       file_pattern: 2025-08-07-cm4-piControl-200yr-coupled-ocean.zarr
       engine: zarr
       subset:
-        start_time: '0151-01-08T12:00:00'
         stop_time: '0306-01-01'
     - data_path: /climate-default
       file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
       engine: zarr
       subset:
-        start_time: '0151-01-08T12:00:00'
         stop_time: '0306-01-01'
     - data_path: /climate-default
       file_pattern: 2025-08-07-cm4-piControl-200yr-5daily-sfc-flux.zarr
       engine: zarr
       subset:
-        start_time: '0151-01-08T12:00:00' # no earlier time
         stop_time: '0306-01-01'
 validation_loader:
   batch_size: 16
