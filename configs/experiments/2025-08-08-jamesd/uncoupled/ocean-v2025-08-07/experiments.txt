@@ -6,3 +6,5 @@ v2025-08-07-mnsf-fpHI-nfs8-rs1|01K26EVVTPW3G1R56FTTH57A4D|training|best_inferenc
 v2025-08-07-mnsf-fpHI-rs1|01K26JNR8SYEN3JMDS2XB4Y7CC|training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-07-mnsf-fpHI-nfs8-rs1|01K26JP4VFTJAN11ZKGC731339|training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-07-mnsf-fpHI-rs1|01K26NBG6W5YC93WWVW46Q6709|training|best_inference_ckpt|normal|--not-preemptible
