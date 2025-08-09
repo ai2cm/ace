@@ -1,6 +1,6 @@
 # these are convenient to have installed for ad-hoc analysis but are not requirements of the "fme" package
 Bottleneck
-beaker-gantry>=1.17.1
+beaker-gantry==2.0.2
 beaker-py
 bokeh>=3.1.0
 dask[distributed]
