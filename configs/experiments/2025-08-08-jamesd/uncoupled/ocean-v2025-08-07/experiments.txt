@@ -22,3 +22,5 @@ v2025-08-07-mnsf-fpHI-rs1|01K27VAPVF2R726C003BGKB50P|training|best_inference_ckp
 v2025-08-07-mnsf-fpHI-nfs8-rs1|01K27VB3JSE5EJP3KFRKR03CGN|training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-07-mnsf-fpHI-rs1||training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-07-mnsf-fpHI-rs1|01K27WA3ZE31WYT1VEK0E2M6A3|training|best_inference_ckpt|normal|--not-preemptible
