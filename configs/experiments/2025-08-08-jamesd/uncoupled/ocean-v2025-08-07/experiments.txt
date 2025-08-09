@@ -1,0 +1,2 @@
+
+v2025-08-07-mnsf-fpHI-rs1|01K26EVG68W11KY33Z6QBNE2PR|training|best_inference_ckpt|normal|--not-preemptible
