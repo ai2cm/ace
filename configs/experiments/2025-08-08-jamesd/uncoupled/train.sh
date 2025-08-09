@@ -119,7 +119,7 @@ while read TRAINING; do
     } >> "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
 
     git add "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
-    git commit -m"Update atmos/${CONFIG_SUBDIR}/experiments.txt"
+    git commit -m"Update uncoupled/${CONFIG_SUBDIR}/experiments.txt"
     git push origin "${GIT_BRANCH}"
 
 done <"${SCRIPT_DIR}/${CONFIG_SUBDIR}/training.txt"
