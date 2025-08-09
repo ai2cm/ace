@@ -33,7 +33,6 @@ inference:
     num_data_workers: 16
   aggregator:
     log_histograms: true
-    time_mean_reference_data: /ocean_stats/time-mean.nc
 logging:
   log_to_screen: true
   log_to_wandb: true
