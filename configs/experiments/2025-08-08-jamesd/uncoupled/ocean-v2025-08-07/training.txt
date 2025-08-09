@@ -1,2 +1,3 @@
 group|skip_or_train|priority|cluster|n_gpus|retries|override_args
 v2025-08-07-mnsf-fpHI-rs1|train|urgent|ceres|4|400GiB
+v2025-08-07-mnsf-fpHI-nfs8-rs1|train|urgent|ceres|4|400GiB
