@@ -107,7 +107,7 @@ while read TRAINING; do
             --budget ai2/climate \
             --no-conda \
             --install "pip install --no-deps ." \
-            -- torchrun --nproc_per_node $N_GPUS -m fme.coupled.train "$CONFIG_PATH" $OVERRIDE |
+            -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train "$CONFIG_PATH" $OVERRIDE |
             tee /dev/tty |
             grep beaker.org |
             cut -d/ -f5
