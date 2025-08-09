@@ -7,7 +7,7 @@ max_epochs: 50 # this is about equivalent to the amount of trainign for ACE2-ERA
 n_forward_steps: 2
 inference:
   n_forward_steps: 29200
-  forward_steps_in_memory: 40
+  forward_steps_in_memory: 50
   loader:
     start_indices:
       times:
@@ -29,7 +29,8 @@ inference:
         engine: zarr
     num_data_workers: 16
   aggregator:
-    log_histograms: false
+    log_histograms: true
+    time_mean_reference_data: /atmos_stats/time-mean.nc
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -55,7 +56,7 @@ train_loader:
         start_time: '0151-03-01T12:00:00' # earlier times nan
         stop_time: '0306-01-01T06:00:00'
 validation_loader:
-  batch_size: 128
+  batch_size: 64
   num_data_workers: 16
   prefetch_factor: 4
   dataset:
@@ -104,16 +105,14 @@ stepper:
     type: single_module
     config:
       builder:
-        type: SphericalFourierNeuralOperatorNet
+        type: NoiseConditionedSFNO
         config:
           embed_dim: 384
+          noise_embed_dim: 0
           filter_type: linear
-          hard_thresholding_fraction: 1.0
           use_mlp: true
-          normalization_layer: instance_norm
           num_layers: 8
           operator_type: dhconv
-          scale_factor: 1
           separable: false
           spectral_layers: 3
           spectral_transform: sht
