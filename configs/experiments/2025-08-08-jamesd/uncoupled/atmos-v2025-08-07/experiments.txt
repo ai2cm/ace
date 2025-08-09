@@ -6,3 +6,5 @@ v2025-08-07-ts_uncoupled-rs1||training|best_inference_ckpt|normal|--not-preempti
 v2025-08-07-ts_uncoupled-rs1|01K262VMKY8M125JRZ22S1WQ74|training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-07-ts_uncoupled-rs1|01K26480CKHVX1ARXNRQ0CEY4K|training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-07-ts_uncoupled-rs1|01K2652M7FP3AFRN8FMCMM4T9B|training|best_inference_ckpt|normal|--not-preemptible
