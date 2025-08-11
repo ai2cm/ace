@@ -2,6 +2,7 @@ runs:
   2025-07-17-CM4-piControl-ocean-1deg-200yr: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
 data_output_directory: gs://leap-scratch/jpdunc23
 dataset_computation:
+  shift_timestamps_to_avg_interval_midpoint: true
   ocean_zarr: ocean_5daily.zarr
   ice_zarr: ice_5daily.zarr
   ocean_static:
