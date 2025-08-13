@@ -27,11 +27,6 @@ GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ATMOS_STATS_DATA=jamesd/2025-08-07-cm4-piControl-200yr-coupled-stats-atmosphere
 OCEAN_STATS_DATA=jamesd/2025-08-07-cm4-piControl-200yr-coupled-stats-ocean
 
-if [[ "$CONFIG_SUBDIR" == "ft" ]] || [[ "$CONFIG_SUBDIR" == "fto" ]]; then
-    echo "FIXME: incorrect statsdata, exiting"
-    exit 1
-fi
-
 # Change to the repo root so paths are valid no matter where we run the script from.
 cd "$REPO_ROOT"
 
@@ -41,18 +36,18 @@ TEMPLATE_CONFIG_FILENAME="finetune-config-template.yaml"
 # get the template from the config subdir
 TEMPLATE_CONFIG_PATH="$SCRIPT_DIR/$CONFIG_SUBDIR/$TEMPLATE_CONFIG_FILENAME"
 
-while read PRETRAINING; do
-    GROUP=$(echo "$PRETRAINING" | cut -d"|" -f1)
-    WANDB_PROJECT=$(echo "$PRETRAINING" | cut -d"|" -f2)
-    WANDB_ID=$(echo "$PRETRAINING" | cut -d"|" -f3)
-    CKPT_TYPE=$(echo "$PRETRAINING" | cut -d"|" -f4)
-    STATUS=$(echo "$PRETRAINING" | cut -d"|" -f5)
-    PRIORITY=$(echo "$PRETRAINING" | cut -d"|" -f6)
-    CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f7)
-    N_GPUS=$(echo "$TRAINING" | cut -d"|" -f8)
-    SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f9)
-    RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f10)
-    OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f11)
+while read FINETUNING; do
+    GROUP=$(echo "$FINETUNING" | cut -d"|" -f1)
+    WANDB_PROJECT=$(echo "$FINETUNING" | cut -d"|" -f2)
+    WANDB_ID=$(echo "$FINETUNING" | cut -d"|" -f3)
+    CKPT_TYPE=$(echo "$FINETUNING" | cut -d"|" -f4)
+    STATUS=$(echo "$FINETUNING" | cut -d"|" -f5)
+    PRIORITY=$(echo "$FINETUNING" | cut -d"|" -f6)
+    CLUSTER=$(echo "$FINETUNING" | cut -d"|" -f7)
+    N_GPUS=$(echo "$FINETUNING" | cut -d"|" -f8)
+    SHARED_MEM=$(echo "$FINETUNING" | cut -d"|" -f9)
+    RETRIES=$(echo "$FINETUNING" | cut -d"|" -f10)
+    OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f11)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -101,7 +96,7 @@ while read PRETRAINING; do
     echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
-    echo " - GPUs: ${GPUS}"
+    echo " - GPUs: ${N_GPUS}"
     echo " - Shared memory: ${SHARED_MEM}"
     echo " - Override: ${OVERRIDE_ARGS}"
 

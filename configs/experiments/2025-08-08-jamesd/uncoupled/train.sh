@@ -73,7 +73,7 @@ while read TRAINING; do
     echo " - Config: ${CONFIG_PATH}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
-    echo " - GPUs: ${GPUS}"
+    echo " - GPUs: ${N_GPUS}"
     echo " - Shared memory: ${SHARED_MEM}"
     echo " - Override: ${OVERRIDE_ARGS}"
 
