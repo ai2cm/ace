@@ -103,6 +103,8 @@ while read PRETRAINING; do
     echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
+    echo " - GPUs: ${GPUS}"
+    echo " - Shared memory: ${SHARED_MEM}"
     echo " - Override: ${OVERRIDE_ARGS}"
 
     python -m fme.ace.validate_config "$CONFIG_PATH" --config_type train $OVERRIDE
