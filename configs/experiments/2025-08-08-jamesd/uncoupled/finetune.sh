@@ -119,7 +119,6 @@ while read FINETUNING; do
             --retries $RETRIES \
             "${CLUSTER_ARGS[@]}" \
             --weka climate-default:/climate-default \
-            --env NCCL_DEBUG=INFO \
             --env WANDB_USERNAME=$BEAKER_USERNAME \
             --env WANDB_NAME=$JOB_NAME \
             --env WANDB_JOB_TYPE=training \
