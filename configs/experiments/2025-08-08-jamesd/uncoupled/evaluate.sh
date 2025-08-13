@@ -56,7 +56,7 @@ while read TRAIN_EXPER; do
 
     EXISTING_RESULTS_DATASET=$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4)
     echo
-    echo "Launching evaluator job:"
+    echo "Launching uncoupled evaluator job:"
     echo " - Config path: ${CONFIG_PATH}"
     echo " - Group: ${JOB_GROUP}"
     echo " - Checkpoint: ${CKPT}"
@@ -68,12 +68,12 @@ while read TRAIN_EXPER; do
 
     echo
 
-    python -m fme.coupled.validate_config --config_type evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
+    python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
 
     echo $JOB_NAME
     gantry run \
         --name $JOB_NAME \
-        --description 'Run ACE coupled evaluator' \
+        --description 'Run uncoupled evaluator' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/climate-ceres \
         --priority $PRIORITY \
@@ -93,6 +93,6 @@ while read TRAIN_EXPER; do
         --budget ai2/climate \
         --no-conda \
         --install "pip install --no-deps ." \
-        -- python -I -m fme.coupled.evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
+        -- python -I -m fme.ace.evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
     echo
 done <"${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
