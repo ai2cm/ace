@@ -15,13 +15,13 @@ loader:
   dataset:
     merge:
     - data_path: /climate-default
-      file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-ocean.zarr
+      file_pattern: 2025-08-07-cm4-piControl-200yr-coupled-ocean.zarr
       engine: zarr
     - data_path: /climate-default
-      file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+      file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
       engine: zarr
     - data_path: /climate-default
-      file_pattern: 2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3/data.zarr
+      file_pattern: 2025-08-07-cm4-piControl-200yr-5daily-sfc-flux.zarr
       engine: zarr
   num_data_workers: 1
 data_writer:
