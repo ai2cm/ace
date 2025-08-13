@@ -218,6 +218,8 @@ class OceanDatasetComputationConfig:
             output shard sizes. Defaults to a shard size of 360 along the time
             dimension. If None, then an unsharded zarr store will be written
             with chunks as specified in ``chunking``.
+        shift_timestamps_to_avg_interval_midpoint: If True, shift time axis labels
+            backwards by half the ocean step size.
     """
 
     ocean_zarr: str
@@ -245,9 +247,33 @@ class OceanDatasetComputationConfig:
     ocean_vertical_target_interface_levels: list = dataclasses.field(
         default_factory=list
     )
+    shift_timestamps_to_avg_interval_midpoint: bool = False
 
     def rename(self, ds: xr.Dataset):
         return _rename(ds, self.renaming)
+
+    def shift_timestamps(self, ds: xr.Dataset):
+        """
+        Shifts the time coordinate to the midpoint of the averaging interval.
+
+        This is useful for models where the timestamp represents the end of an
+        averaging period. This method shifts it to the middle of that period.
+
+        Args:
+            ds: The input xarray.Dataset with a 'time' coordinate.
+
+        Returns:
+            A new xr.Dataset with shifted timestamps if the config flag
+            is True, otherwise the original dataset.
+
+        """
+        if self.shift_timestamps_to_avg_interval_midpoint:
+            time_coord = ds[self.standard_names.time_dim]
+            dt = (time_coord.values[1] - time_coord.values[0]) / 2
+            new_coord = time_coord - dt
+            new_coord.attrs["long_name"] = "time, avg interval midpoint"
+            ds = ds.assign_coords(time=new_coord)
+        return ds
 
 
 def insert_nans_on_land_surface(ds, standard_names: OceanStandardNameMapping):
@@ -596,6 +622,7 @@ def compute_lazy_dataset(
     drop_dims = [x for x in list(ds.dims) if x not in ocean_names.full_field_dims]
     ds = ds.drop_dims(drop_dims)
     ds = config.rename(ds)
+    ds = config.shift_timestamps(ds)
 
     return ds
 

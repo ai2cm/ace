@@ -1,9 +1,9 @@
 runs:
-  2025-08-06-X-SHiELD-AMIP-1deg-8layer-11yr: gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control
+  2025-08-08-X-SHiELD-AMIP-1deg-8layer-11yr: gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control
 data_output_directory: gs://vcm-ml-intermediate
 stats:
-  output_directory: gs://vcm-ml-intermediate/2025-08-06-X-SHiELD-AMIP-1deg-8layer-11yr-stats
-  beaker_dataset: 2025-08-06-X-SHiELD-AMIP-1deg-8layer-11yr-stats
+  output_directory: gs://vcm-ml-intermediate/2025-08-08-X-SHiELD-AMIP-1deg-8layer-11yr-stats
+  beaker_dataset: 2025-08-08-X-SHiELD-AMIP-1deg-8layer-11yr-stats
   start_date: "2014-01-01T06:00:00"  # Ignore first year as spin-up.
   end_date: "2024-01-01T00:00:00"  # Span exactly 10 years (note datetime string indexing is inclusive).
   data_type: FV3GFS
@@ -18,6 +18,11 @@ dataset_computation:
     - [49, 58]
     - [58, 67]
     - [67, 79]
+  renaming:
+    specific_humidity_at_two_meters: Q2m
+    air_temperature_at_two_meters: TMP2m
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
   variable_sources:
     fluxes_2d.zarr:
       - PRATEsfc
