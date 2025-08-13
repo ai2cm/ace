@@ -1,2 +1,2 @@
 group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|override
-v2025-08-07-ts_uncoupled-rs1-finetune|ace2-cm4-atmos-noLSM|wyuyy6st|best_inference_ckpt|train|urgent|titan|4|400GiB|10
+v2025-08-07-ts_uncoupled-rs1-finetune|ace2-cm4-atmos-noLSM|wyuyy6st|best_inference_ckpt|train|urgent|titan|4|600GiB|3
