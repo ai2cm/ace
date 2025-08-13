@@ -75,13 +75,11 @@ while read PRETRAINING; do
             --workspace ai2/climate-titan
             --cluster ai2/titan-cirrascale
         )
-        N_GPUS=4
     else
         CLUSTER_ARGS=(
             --workspace ai2/climate-ceres
             --cluster ai2/ceres-cirrascale
         )
-        N_GPUS=8
     fi
 
     bash $SCRIPT_DIR/create_finetune_config.sh \
@@ -114,11 +112,12 @@ while read PRETRAINING; do
         git commit -m"${JOB_NAME}"
         git push origin "${GIT_BRANCH}"
     fi
+    echo
 
     EXPERIMENT_ID=$(
         gantry run \
             --name $JOB_NAME \
-            --description "Run ACE uncoupled fine-tuning: ${JOB_GROUP}" \
+            --description "Run uncoupled fine-tuning: ${JOB_GROUP}" \
             --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
             --priority $PRIORITY \
             --preemptible \
