@@ -76,7 +76,6 @@ while read TRAINING; do
     echo " - GPUs: ${GPUS}"
     echo " - Shared memory: ${SHARED_MEM}"
     echo " - Override: ${OVERRIDE_ARGS}"
-    echo
 
     python -m fme.ace.validate_config "$CONFIG_PATH" --config_type train $OVERRIDE
 
@@ -85,6 +84,7 @@ while read TRAINING; do
         git commit -m"${JOB_NAME}"
         git push origin "${GIT_BRANCH}"
     fi
+    echo
 
     EXPERIMENT_ID=$(
         gantry run \
