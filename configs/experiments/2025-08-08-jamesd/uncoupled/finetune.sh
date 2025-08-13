@@ -49,8 +49,10 @@ while read PRETRAINING; do
     STATUS=$(echo "$PRETRAINING" | cut -d"|" -f5)
     PRIORITY=$(echo "$PRETRAINING" | cut -d"|" -f6)
     CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f7)
-    RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f8)
-    OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f9)
+    N_GPUS=$(echo "$TRAINING" | cut -d"|" -f8)
+    SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f9)
+    RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f10)
+    OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f11)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -94,10 +96,10 @@ while read PRETRAINING; do
     fi
 
     echo
-    echo "Launching coupled fine-tuning job:"
+    echo "Launching uncoupled fine-tuning job:"
     echo " - Job name: ${JOB_NAME}"
     echo " - Config: ${CONFIG_PATH}"
-    echo " - Coupled pretraining experiment ID: ${EXPER_ID}"
+    echo " - Pretraining experiment ID: ${EXPER_ID}"
     echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
@@ -114,7 +116,7 @@ while read PRETRAINING; do
     EXPERIMENT_ID=$(
         gantry run \
             --name $JOB_NAME \
-            --description "Run ACE coupled fine-tuning" \
+            --description "Run ACE uncoupled fine-tuning: ${JOB_GROUP}" \
             --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
             --priority $PRIORITY \
             --preemptible \
@@ -132,8 +134,8 @@ while read PRETRAINING; do
             --dataset $ATMOS_STATS_DATA:/atmos_stats \
             --dataset $OCEAN_STATS_DATA:/ocean_stats \
             --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/"$CKPT_TYPE".tar:/ckpt.tar \
-            --gpus $N_GPUS \
-            --shared-memory 800GiB \
+            --gpus "${N_GPUS}" \
+            --shared-memory "${SHARED_MEM}" \
             --budget ai2/climate \
             --no-conda \
             --install "pip install --no-deps ." \
