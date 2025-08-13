@@ -12,3 +12,5 @@ v2025-08-07-ts_uncoupled-rs1|01K2652M7FP3AFRN8FMCMM4T9B|training|best_inference_
 v2025-08-07-ts_uncoupled-rs1-finetune|||training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-07-ts_uncoupled-rs1-finetune|||training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-07-ts_uncoupled-rs1-finetune||01K2GRH48YE2MY2026DESK9F5H|training|best_inference_ckpt|normal|--not-preemptible
