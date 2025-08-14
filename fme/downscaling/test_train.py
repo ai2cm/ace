@@ -78,7 +78,9 @@ def create_test_data_on_disk(
         data_vars[f"bk_{i}"] = float(i + 1)
 
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
-    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+    unlimited_dims = ["time"] if "time" in ds.dims else None
+
+    ds.to_netcdf(filename, unlimited_dims=unlimited_dims, format="NETCDF4_CLASSIC")
 
     return filename
 

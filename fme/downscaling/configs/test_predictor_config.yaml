@@ -13,8 +13,7 @@ model:
 # model:
 #   checkpoint: /will/be/overwritten
 data:
-  topography:
-    data_path: /will/be/overwritten
+  topography: /will/be/overwritten
   coarse:
     - data_path: /will/be/overwritten
   batch_size: 2
