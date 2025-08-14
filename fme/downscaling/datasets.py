@@ -14,7 +14,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
 from fme.core.device import get_device, move_tensordict_to_device, using_gpu
 from fme.core.distributed import Distributed
 from fme.core.metrics import spherical_area_weights
@@ -64,33 +64,21 @@ class XarrayEnsembleDataConfig:
         return configs
 
 
-def get_normalized_topography(
-    configs: Sequence[XarrayDataConfig],
-) -> torch.Tensor:
-    """
-    Load the topography data from the specified path and return the normalized
-    height of the topography values.
-
-    Args:
-        configs: Sequence of dataset configs corresponding to the desired
-            topography data.
-
-    Returns:
-        The normalized height of the topography of shape (latitude, longitude).
-    """
-    topography_name = "HGTsfc"
-    dataset, _ = get_dataset(configs, [topography_name], n_timesteps=1)
-    example, _ = dataset[0]
-    topography = example[topography_name]
-    topography = topography.squeeze()
+def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
+    if path.endswith(".zarr"):
+        topography = xr.open_zarr(path, mask_and_scale=False)[topography_name]
+    else:
+        topography = xr.open_dataset(path, mask_and_scale=False)[topography_name]
+    if "time" in topography.dims:
+        topography = topography.isel(time=0).squeeze()
     if len(topography.shape) != 2:
         raise ValueError(f"unexpected shape {topography.shape} for topography")
     topography_normalized = (topography - topography.mean()) / topography.std()
-    return topography_normalized
+    return torch.tensor(topography_normalized.values)
 
 
 def _get_topography_downscale_factor(
-    topography_shape: tuple[int, int], data_coords_shape: tuple[int, int]
+    topography_shape: tuple[int, ...], data_coords_shape: tuple[int, ...]
 ):
     if len(topography_shape) != 2 or len(data_coords_shape) != 2:
         raise ValueError(
@@ -921,7 +909,7 @@ class DataLoaderConfig:
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
-    topography: XarrayDataConfig | None = None
+    topography: str | None = None
     lat_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(-90.0, 90.0)
     )
@@ -990,7 +978,7 @@ class DataLoaderConfig:
                     "dataset was specified in the configuration."
                 )
             else:
-                topography = get_normalized_topography([self.topography])
+                topography = get_normalized_topography(self.topography)
         else:
             topography = None
 
@@ -1082,6 +1070,9 @@ class PairedDataLoaderConfig:
         repeat: The number of times to repeat the underlying xarray dataset
             time dimension.  Useful to include longer sequences of small
             data for testing.
+        topography: Optional path to dataset to load for topography. If not
+            provided and model has requires_topography=True, the data loader
+            will default to trying to load the variable from the fine data.
     """
 
     fine: Sequence[XarrayDataConfig]
@@ -1096,6 +1087,7 @@ class PairedDataLoaderConfig:
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
     )
     repeat: int = 1
+    topography: str | None = None
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
@@ -1162,7 +1154,22 @@ class PairedDataLoaderConfig:
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
 
         if requirements.use_fine_topography:
-            fine_topography = get_normalized_topography(self.fine)
+            if self.topography is None:
+                fine_topography = get_normalized_topography(
+                    get_raw_paths(self.fine[0].data_path, self.fine[0].file_pattern)[0]
+                )
+            else:
+                fine_topography = get_normalized_topography(self.topography)
+            if (
+                _get_topography_downscale_factor(
+                    fine_topography.shape, properties_fine.horizontal_coordinates.shape
+                )
+                != 1
+            ):
+                raise ValueError(
+                    f"Fine topography shape {fine_topography.shape} does not match "
+                    f"fine data shape {properties_fine.horizontal_coordinates.shape}."
+                )
         else:
             fine_topography = None
 

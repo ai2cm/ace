@@ -65,7 +65,7 @@ def create_predictor_config(tmp_path, n_samples: int):
     experiment_dir.mkdir()
     with open(file_path) as file:
         config = yaml.safe_load(file)
-    config["data"]["topography"] = {"data_path": str(paths.fine)}
+    config["data"]["topography"] = f"{paths.fine}/data.nc"
     config["data"]["coarse"] = [{"data_path": str(paths.coarse)}]
     config["experiment_dir"] = str(experiment_dir)
     config["model"] = {
