@@ -12,11 +12,11 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-E3SMv3-atmosphere-threshold-sst-interpolate-false"
+JOB_GROUP="BK-E3SMv3-atmosphere-spatial-filter-scale-4"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
-STATS_DATA=elynn/2025-06-27-E3SMv3-coupled-piControl-atmosphere-stats-with-wind-stress
+STATS_DATA=elynn/2025-08-13-E3SMv3-piControl-100yr-coupled-stats-atmosphere
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
@@ -50,6 +50,8 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --priority $PRIORITY \
           --preemptible \
           --cluster ai2/jupiter-cirrascale-2 \
+          --cluster ai2/titan-cirrascale \
+          --cluster ai2/ceres-cirrascale \
           --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$BEAKER_USERNAME \
           --env WANDB_NAME="${JOB_NAME}" \
