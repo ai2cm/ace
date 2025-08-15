@@ -199,6 +199,7 @@ class Evaluator:
             ds.to_netcdf(
                 f"{self.experiment_dir}/evaluator_maps_and_metrics.nc", mode="w"
             )
+        logging.info(f"Evaluation complete. Results saved to {self.experiment_dir}.")
 
 
 class EventEvaluator:
@@ -209,6 +210,7 @@ class EventEvaluator:
         model: Model | DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
+        save_generated_samples: bool = False,
     ) -> None:
         self.event_name = event_name
         self.data = data
@@ -217,6 +219,7 @@ class EventEvaluator:
         self.n_samples = n_samples
         self.dist = Distributed.get_instance()
         self._max_sample_group = 8
+        self.save_generated_samples = save_generated_samples
 
     def run(self):
         logging.info(f"Running {self.event_name} event evaluation")
@@ -245,6 +248,16 @@ class EventEvaluator:
         to_log = sample_agg.get_wandb()
         wandb = WandB.get_instance()
         wandb.log({f"{self.event_name}/{k}": v for k, v in to_log.items()}, step=0)
+
+        if self.save_generated_samples:
+            ds = sample_agg.get_dataset()
+            if self.dist.is_root():
+                # no slashes allowed in netcdf variable names
+                ds = ds.rename({k: k.replace("/", "_") for k in ds.data_vars})
+                ds.to_netcdf(f"{self.experiment_dir}/{self.event_name}.nc", mode="w")
+            logging.info(
+                f"{self.n_samples} generated samples saved for {self.event_name}"
+            )
         torch.cuda.empty_cache()
 
 
@@ -260,6 +273,7 @@ class EventConfig:
     )
     n_samples: int = 64
     date_format: str = "%Y-%m-%dT%H:%M"
+    save_generated_samples: bool = False
 
     def get_gridded_data(
         self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
@@ -369,6 +383,7 @@ class EvaluatorConfig:
             model=evaluator_model,
             experiment_dir=self.experiment_dir,
             n_samples=event_config.n_samples,
+            save_generated_samples=event_config.save_generated_samples,
         )
 
     def build(self) -> list[Evaluator | EventEvaluator]:
