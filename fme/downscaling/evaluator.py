@@ -19,7 +19,7 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, SampleAggregator
-from fme.downscaling.datasets import (
+from fme.downscaling.data import (
     ClosedInterval,
     PairedBatchData,
     PairedDataLoaderConfig,
