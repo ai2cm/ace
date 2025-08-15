@@ -19,8 +19,8 @@ from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
+from fme.downscaling.data import PairedBatchData
 
-from ..datasets import PairedBatchData
 from ..metrics_and_maths import (
     compute_zonal_power_spectrum,
     filter_tensor_mapping,

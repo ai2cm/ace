@@ -8,12 +8,7 @@ from torch.utils.data import DataLoader
 
 from fme.core.device import get_device
 from fme.core.typing_ import TensorDict
-from fme.downscaling.datasets import (
-    BatchData,
-    BatchItem,
-    PairedBatchData,
-    PairedBatchItem,
-)
+from fme.downscaling.data import BatchData, BatchItem, PairedBatchData, PairedBatchItem
 from fme.downscaling.models import DiffusionModel, Model, ModelOutputs
 
 

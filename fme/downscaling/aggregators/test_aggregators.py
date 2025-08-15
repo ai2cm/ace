@@ -7,9 +7,9 @@ from fme.core import get_device, metrics
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
+from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatchData
 
 from .. import metrics_and_maths
-from ..datasets import BatchData, BatchedLatLonCoordinates, PairedBatchData
 from ..models import ModelOutputs
 from .generation import GenerationAggregator
 from .main import (
