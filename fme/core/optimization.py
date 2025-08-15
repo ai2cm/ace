@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
 import itertools
+import warnings
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Literal
 
@@ -75,7 +76,11 @@ class Optimization(OptimizationABC):
     def __init__(
         self,
         parameters: Iterable[torch.nn.Parameter],
-        optimizer_type: Literal["Adam", "FusedAdam"],
+        optimizer_type: Literal[
+            "Adam",
+            "FusedAdam",
+            "AdamW",
+        ],
         lr: float,
         max_epochs: int,
         scheduler: SchedulerConfig,
@@ -90,6 +95,8 @@ class Optimization(OptimizationABC):
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
         elif optimizer_type == "Adam":
             self.optimizer = torch.optim.Adam(parameters, lr=lr, **kwargs)
+        elif optimizer_type == "AdamW":
+            self.optimizer = torch.optim.AdamW(parameters, lr=lr, **kwargs)
         else:
             raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
@@ -224,7 +231,7 @@ class OptimizationConfig:
             your stepper (e.g. Stepper) for more details.
     """
 
-    optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
+    optimizer_type: Literal["Adam", "AdamW", "FusedAdam"] = "Adam"
     lr: float = 0.001
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     enable_automatic_mixed_precision: bool = False
@@ -235,6 +242,13 @@ class OptimizationConfig:
     checkpoint: CheckpointConfig = dataclasses.field(
         default_factory=lambda: CheckpointConfig()
     )
+
+    def __post_init__(self):
+        if self.optimizer_type == "FusedAdam":
+            warnings.warn(
+                "FusedAdam is deprecated. Use AdamW with fused=True in kwargs instead.",
+                DeprecationWarning,
+            )
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])

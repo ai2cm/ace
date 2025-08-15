@@ -47,7 +47,8 @@ validation_loader:
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  optimizer_type: Adam  # can switch to FusedAdam if using GPU
+  optimizer_type: AdamW
+  # can also set kwargs: fused: true for performance if using GPU
 stepper:
   loss:
     type: MSE
