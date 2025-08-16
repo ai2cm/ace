@@ -1,0 +1,89 @@
+experiment_dir: /results
+save_checkpoint: true
+checkpoint_every_n_batches: 3000
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 20 # this is about equivalent to the amount of trainign for ACE2-ERA5/ACE2-SHiELD
+n_forward_steps: 2
+inference:
+  n_forward_steps: 29200
+  forward_steps_in_memory: 50
+  loader:
+    start_indices:
+      times:
+        - '0151-01-03T12:00:00' # earlier times nan
+        - '0171-01-01T06:00:00'
+        - '0191-01-01T06:00:00'
+        - '0211-01-01T06:00:00'
+        - '0231-01-01T06:00:00'
+        - '0251-01-01T06:00:00'
+        - '0271-01-01T06:00:00'
+        - '0291-01-01T06:00:00'
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-08-14-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+    num_data_workers: 32
+  aggregator:
+    log_histograms: true
+    time_mean_reference_data: /atmos_stats/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 32
+  prefetch_factor: 2
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-08-14-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+      engine: zarr
+      subset:
+        start_time: '0151-03-01T12:00:00' # earlier times nan
+        stop_time: '0306-01-01T06:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      engine: zarr
+      subset:
+        start_time: '0151-03-01T12:00:00' # earlier times nan
+        stop_time: '0306-01-01T06:00:00'
+validation_loader:
+  batch_size: 64
+  num_data_workers: 32
+  prefetch_factor: 2
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-08-14-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+      engine: zarr
+      subset:
+        start_time: '0306-01-01T06:00:00'
+        stop_time: '0311-01-01T06:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      engine: zarr
+      subset:
+        start_time: '0306-01-01T06:00:00'
+        stop_time: '0311-01-01T06:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.00001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+  scheduler:
+    type: CosineAnnealingLR
+stepper:
+  parameter_init:
+    weights_path: /ckpt.tar

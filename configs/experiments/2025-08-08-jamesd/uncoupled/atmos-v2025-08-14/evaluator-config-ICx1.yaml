@@ -1,0 +1,29 @@
+experiment_dir: /results
+n_forward_steps: 58300
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+     - '0311-01-01T06:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-08-14-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      engine: zarr
+  num_data_workers: 4
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: true
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
