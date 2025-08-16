@@ -59,8 +59,9 @@ validation_loader:
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  optimizer_type: FusedAdam
+  optimizer_type: AdamW
   kwargs:
+    fused: true
     weight_decay: 0.01
 stepper:
   residual_prediction: true
