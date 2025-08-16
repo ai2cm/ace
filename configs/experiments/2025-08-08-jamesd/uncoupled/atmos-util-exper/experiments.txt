@@ -1,0 +1,2 @@
+
+nw8_pf8-inf_nw1-sh600-ts_uncoupled|01K2TN5T5NG2GQB6KW1QMFCPRD|training|best_inference_ckpt|normal|--not-preemptible
