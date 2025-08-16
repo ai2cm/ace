@@ -152,13 +152,13 @@ stepper:
       - DSWRFtoa
       in_names:
       - land_fraction
+      - lake_fraction
       - ocean_fraction
       - sea_ice_fraction
       - DSWRFtoa
       - HGTsfc
       - PRESsfc
       - surface_temperature
-      - TMP2m
       - Q2m
       - UGRD10m
       - VGRD10m
