@@ -153,6 +153,7 @@ stepper:
           sea_ice_fraction_correction:
             sea_ice_fraction_name: ocean_sea_ice_fraction
             land_fraction_name: land_fraction
+            sea_ice_thickness_name: HI
             remove_negative_ocean_fraction: false
       next_step_forcing_names:
       - DLWRFsfc
@@ -175,6 +176,9 @@ stepper:
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
       - land_fraction
+      - sea_surface_fraction
+      - deptho
+      - hfgeou
       - sst
       - zos
       - so_0

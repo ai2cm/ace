@@ -1,0 +1,2 @@
+group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|override_args
+v2025-08-14-mnsf-correctHI-rs1|skip|urgent|titan|2|200GiB
