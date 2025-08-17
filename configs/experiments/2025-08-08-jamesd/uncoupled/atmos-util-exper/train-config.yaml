@@ -4,7 +4,7 @@ checkpoint_every_n_batches: 3000
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 2
+max_epochs: 3
 n_forward_steps: 2
 inference:
   n_forward_steps: 29200
@@ -57,9 +57,9 @@ train_loader:
         start_time: '0151-03-01T12:00:00' # earlier times nan
         stop_time: '0306-01-01T06:00:00'
 validation_loader:
-  batch_size: 64
-  num_data_workers: 32
-  prefetch_factor: 2
+  batch_size: 64 # 114 / 4 ~ 29 batches per GPU
+  num_data_workers: 8 # 29 / 8 ~ 4 batches per data worker
+  prefetch_factor: 4
   dataset:
     merge:
     - data_path: /climate-default
