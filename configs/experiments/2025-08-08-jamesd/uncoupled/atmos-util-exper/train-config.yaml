@@ -39,7 +39,7 @@ logging:
   project: coupled-emulator
   entity: ai2cm
 train_loader:
-  batch_size: 16
+  batch_size: 16 # 14129 / 4 ~ 3533 batches per GPU
   num_data_workers: 32
   prefetch_factor: 2
   dataset:
