@@ -10,3 +10,5 @@ nw8_pf8-val_nw8_pf4-inf_nw1-sh600-ts_uncoupled|01K2TPG1217F39ACCAGZG5S3GV|traini
 nw16_pf4-val_nw8_pf4-inf_nw1-sh600-ts_uncoupled|01K2TPGCQVJV7VPMY36A8X4SS4|training|best_inference_ckpt|normal|--not-preemptible
 
 nw32_pf2-val_nw8_pf4-inf_nw1-sh600-ts_uncoupled|01K2TPGR1REJ2897A9F15T3WC6|training|best_inference_ckpt|normal|--not-preemptible
+
+nw16_pf4-val_nw8_pf4-inf_nw16-sh600-ts_uncoupled|01K2V48GCDM8Y6BJRHMWQBMCG5|training|best_inference_ckpt|normal|--not-preemptible
