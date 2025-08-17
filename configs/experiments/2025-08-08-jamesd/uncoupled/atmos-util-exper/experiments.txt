@@ -6,3 +6,5 @@ nw16_pf4-inf_nw1-sh600-ts_uncoupled|01K2TN65K35F03360D43C2KKYX|training|best_inf
 nw32_pf2-inf_nw1-sh600-ts_uncoupled|01K2TN6H5BFH8PMJS8MYNJAC7B|training|best_inference_ckpt|normal|--not-preemptible
 
 nw8_pf8-val_nw8_pf4-inf_nw1-sh600-ts_uncoupled|01K2TPG1217F39ACCAGZG5S3GV|training|best_inference_ckpt|normal|--not-preemptible
+
+nw16_pf4-val_nw8_pf4-inf_nw1-sh600-ts_uncoupled|01K2TPGCQVJV7VPMY36A8X4SS4|training|best_inference_ckpt|normal|--not-preemptible
