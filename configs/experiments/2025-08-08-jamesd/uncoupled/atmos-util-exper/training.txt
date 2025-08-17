@@ -1,5 +1,5 @@
 group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|override_args
-nw16_pf4-val_nw8_pf4-inf_nw16-sh600|training|urgent|titan|4|200GiB|1|train_loader.num_data_workers=16 train_loader.prefetch_factor=4
-nw4_pf16-val_nw8_pf4-inf_nw16-sh600|train|urgent|titan|4|200GiB|1|train_loader.num_data_workers=4 train_loader.prefetch_factor=16
-nw32_pf2-val_nw8_pf4-inf_nw16-sh600|train|urgent|titan|4|200GiB|1|train_loader.num_data_workers=32 train_loader.prefetch_factor=2
-nw8_pf8-val_nw8_pf4-inf_nw16-sh600|skip|urgent|titan|4|200GiB|1|train_loader.num_data_workers=8 train_loader.prefetch_factor=8
+nw16_pf4-val_nw8_pf4-inf_nw16-sh600|training|urgent|titan|4|600GiB|1|train_loader.num_data_workers=16 train_loader.prefetch_factor=4
+nw4_pf16-val_nw8_pf4-inf_nw16-sh600|train|urgent|titan|4|600GiB|1|train_loader.num_data_workers=4 train_loader.prefetch_factor=16
+nw32_pf2-val_nw8_pf4-inf_nw16-sh400|train|urgent|titan|4|400GiB|1|train_loader.num_data_workers=32 train_loader.prefetch_factor=2
+nw8_pf8-val_nw8_pf4-inf_nw16-sh400|skip|urgent|titan|4|400GiB|1|train_loader.num_data_workers=8 train_loader.prefetch_factor=8
