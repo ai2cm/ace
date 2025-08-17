@@ -30,7 +30,7 @@ inference:
       - data_path: /climate-default
         file_pattern: 2025-08-07-cm4-piControl-200yr-5daily-sfc-flux.zarr
         engine: zarr
-    num_data_workers: 1
+    num_data_workers: 16
   aggregator:
     log_histograms: true
 logging:
