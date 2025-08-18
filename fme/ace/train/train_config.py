@@ -153,9 +153,7 @@ class TrainConfig:
     Arguments:
         train_loader: Configuration for the training data loader.
         validation_loader: Configuration for the validation data loader.
-        stepper: Configuration for the stepper. SingleModuleStepperConfig is
-            deprecated and will be removed in a future version. Use StepperConfig
-            instead.
+        stepper: Configuration for the stepper.
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
@@ -200,7 +198,7 @@ class TrainConfig:
 
     train_loader: DataLoaderConfig
     validation_loader: DataLoaderConfig
-    stepper: SingleModuleStepperConfig | ExistingStepperConfig | StepperConfig
+    stepper: ExistingStepperConfig | StepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
