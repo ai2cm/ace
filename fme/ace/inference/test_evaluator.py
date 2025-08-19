@@ -28,7 +28,7 @@ from fme.ace.inference.evaluator import (
     resolve_variable_metadata,
 )
 from fme.ace.registry import ModuleSelector
-from fme.ace.stepper import SingleModuleStepperConfig, Stepper, TrainOutput
+from fme.ace.stepper import Stepper, TrainOutput
 from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
@@ -44,10 +44,11 @@ from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.logging_utils import LoggingConfig
 from fme.core.multi_call import MultiCallConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.step.multi_call import MultiCallStep, MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.testing import mock_wandb
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
@@ -93,16 +94,35 @@ def save_plus_one_stepper(
         xr.Dataset({name: xr.DataArray(std) for name in normalization_names}).to_netcdf(
             std_filename
         )
-        config = SingleModuleStepperConfig(
-            builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
-            in_names=in_names,
-            out_names=out_names,
-            normalization=NormalizationConfig(
-                global_means_path=str(mean_filename),
-                global_stds_path=str(std_filename),
+        config = StepperConfig(
+            step=StepSelector(
+                type="multi_call",
+                config=dataclasses.asdict(
+                    MultiCallStepConfig(
+                        wrapped_step=StepSelector(
+                            type="single_module",
+                            config=dataclasses.asdict(
+                                SingleModuleStepConfig(
+                                    builder=ModuleSelector(
+                                        type="prebuilt", config={"module": PlusOne()}
+                                    ),
+                                    in_names=in_names,
+                                    out_names=out_names,
+                                    normalization=NetworkAndLossNormalizationConfig(
+                                        network=NormalizationConfig(
+                                            means={name: mean for name in all_names},
+                                            stds={name: std for name in all_names},
+                                        ),
+                                    ),
+                                    ocean=ocean,
+                                ),
+                            ),
+                        ),
+                        config=multi_call,
+                        include_multi_call_in_loss=False,
+                    ),
+                ),
             ),
-            ocean=ocean,
-            multi_call=multi_call,
         )
         horizontal_coordinate = LatLonCoordinates(
             lat=torch.zeros(data_shape[-2]), lon=torch.zeros(data_shape[-1])

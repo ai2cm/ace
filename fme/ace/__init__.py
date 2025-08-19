@@ -80,7 +80,6 @@ from .train.train_config import (
     InlineInferenceConfig,
     LoggingConfig,
     OptimizationConfig,
-    SingleModuleStepperConfig,
     TrainConfig,
 )
 
