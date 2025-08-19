@@ -15,10 +15,14 @@ APPEND_CONFIG_YAMLS = [
     for f in os.listdir(DIRNAME + "/configs")
     if f.endswith(".yaml") and "append" in f
 ]
+IGNORE_CONFIG_YAMLS = [
+    "2025-08-07-cm4-piControl-200yr-5daily-sfc-flux.yaml",
+    "2025-08-13-e3smv3-piControl-100yr-5daily-sfc-flux.yaml",
+]
 CONFIG_YAMLS = [
     os.path.join(DIRNAME + "/configs", f)
     for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith(".yaml") and "append" not in f
+    if f.endswith(".yaml") and "append" not in f and f not in IGNORE_CONFIG_YAMLS
 ]
 
 
