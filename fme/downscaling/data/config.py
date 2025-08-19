@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
@@ -12,7 +13,6 @@ from fme.core.distributed import Distributed
 from fme.downscaling.data.datasets import (
     BatchData,
     BatchItemDatasetAdapter,
-    ClosedInterval,
     ContiguousDistributedSampler,
     FineCoarsePairedDataset,
     GriddedData,
@@ -22,6 +22,7 @@ from fme.downscaling.data.datasets import (
     get_normalized_topography,
     get_topography_downscale_factor,
 )
+from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
 
 
@@ -197,6 +198,10 @@ class DataLoaderConfig:
         xr_dataset, properties = self.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
         )
+        if not isinstance(properties.horizontal_coordinates, LatLonCoordinates):
+            raise ValueError(
+                "Downscaling data loader only supports datasets with latlon coords."
+            )
         dataset = self.build_batchitem_dataset(
             dataset=xr_dataset,
             properties=properties,
@@ -333,6 +338,15 @@ class PairedDataLoaderConfig:
             strict=self.strict_ensemble,
         )
 
+        # Ensure that bounds for subselecting on latlon grids return fine grid data
+        # that aligns with the coarse grid.
+        if not isinstance(
+            properties_coarse.horizontal_coordinates, LatLonCoordinates
+        ) or not isinstance(properties_fine.horizontal_coordinates, LatLonCoordinates):
+            raise ValueError(
+                "Downscaling data loader only supports datasets with latlon coords."
+            )
+
         # n_timesteps is hardcoded to 1 for downscaling, so the sample_start_times
         # are the full time range for the dataset
         if dataset_fine.sample_n_times != 1:
@@ -366,13 +380,25 @@ class PairedDataLoaderConfig:
         else:
             fine_topography = None
 
+        # Ensure fine data subselection lines up exactly with coarse data
+        fine_lat_extent = adjust_fine_coord_range(
+            self.lat_extent,
+            full_coarse_coord=properties_coarse.horizontal_coordinates.lat,
+            full_fine_coord=properties_fine.horizontal_coordinates.lat,
+        )
+        fine_lon_extent = adjust_fine_coord_range(
+            self.lon_extent,
+            full_coarse_coord=properties_coarse.horizontal_coordinates.lon,
+            full_fine_coord=properties_fine.horizontal_coordinates.lon,
+        )
+
         # TODO: horizontal subsetting should probably live in the XarrayDatast level
         # Subset to overall horizontal domain
         dataset_fine_subset = HorizontalSubsetDataset(
             dataset_fine,
             properties=properties_fine,
-            lat_interval=self.lat_extent,
-            lon_interval=self.lon_extent,
+            lat_interval=fine_lat_extent,
+            lon_interval=fine_lon_extent,
             topography=fine_topography,
         )
 

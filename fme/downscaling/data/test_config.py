@@ -8,7 +8,7 @@ from fme.downscaling.data.config import (
     PairedDataLoaderConfig,
     XarrayEnsembleDataConfig,
 )
-from fme.downscaling.data.datasets import ClosedInterval
+from fme.downscaling.data.utils import ClosedInterval
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.test_train import data_paths_helper
 
@@ -65,8 +65,9 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
     )
     data = data_config.build(requirements=requirements)
     batch = next(iter(data.loader))
-    assert batch.data["x"].shape == (2, 4, 4)
-    assert batch.topography.shape == (2, 8, 8)
+    # lat/lon midpoints are on (0.5, 1.5, ...)
+    assert batch.data["x"].shape == (2, 3, 3)
+    assert batch.topography.shape == (2, 6, 6)
 
 
 def test_XarrayEnsembleDataConfig():

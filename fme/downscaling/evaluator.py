@@ -18,7 +18,7 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators import GenerationAggregator, SampleAggregator
+from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
 from fme.downscaling.data import (
     ClosedInterval,
     PairedBatchData,
@@ -225,7 +225,7 @@ class EventEvaluator:
         logging.info(f"Running {self.event_name} event evaluation")
         batch: PairedBatchData = next(iter(self.data.loader))
 
-        sample_agg = SampleAggregator(
+        sample_agg = PairedSampleAggregator(
             target=batch[0].fine.data,
             coarse=batch[0].coarse.data,
             latlon_coordinates=FineResCoarseResPair(

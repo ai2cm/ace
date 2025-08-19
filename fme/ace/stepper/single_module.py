@@ -154,133 +154,12 @@ class SingleModuleStepperConfig:
                     "was provided."
                 )
 
-    def load(self):
-        self.normalization.load()
-        if self.loss_normalization is not None:
-            self.loss_normalization.load()
-        if self.residual_normalization is not None:
-            self.residual_normalization.load()
-
-    @property
-    def n_ic_timesteps(self) -> int:
-        return 1
-
-    def get_evaluation_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return DataRequirements(
-            names=self.all_names,
-            n_timesteps=self._window_steps_required(n_forward_steps),
-        )
-
-    def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
-        return PrognosticStateDataRequirements(
-            names=self.prognostic_names,
-            n_timesteps=self.n_ic_timesteps,
-        )
-
-    def _window_steps_required(self, n_forward_steps: int) -> int:
-        return n_forward_steps + self.n_ic_timesteps
-
-    def get_state(self):
-        self.load()
-        return dataclasses.asdict(self)
-
-    def get_stepper(
-        self,
-        dataset_info: DatasetInfo,
-        apply_parameter_init: bool = True,
-        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
-    ) -> "Stepper":
-        """
-        Args:
-            dataset_info: Information about the training dataset.
-            apply_parameter_init: Whether to apply parameter initialization.
-            load_weights_and_history: Function for loading weights and history.
-                Default implementation loads a Trainer checkpoint containing
-                a Stepper.
-        """
-        logging.info("Initializing stepper from provided legacy config")
-        normalizer = self.normalization.build(self.normalize_names)
-        combined_normalization_config = NetworkAndLossNormalizationConfig(
-            network=self.normalization,
-            loss=self.loss_normalization,
-            residual=self.residual_normalization,
-        )
-        loss_normalizer = combined_normalization_config.get_loss_normalizer(
-            self.normalize_names, residual_scaled_names=self.prognostic_names
-        )
-        new_config = self.to_stepper_config(
-            normalizer=normalizer, loss_normalizer=loss_normalizer
-        )
-        return new_config.get_stepper(
-            dataset_info=dataset_info,
-            apply_parameter_init=apply_parameter_init,
-            load_weights_and_history=load_weights_and_history,
-        )
-
-    def get_ocean(self) -> OceanConfig | None:
-        return self.ocean
-
     @classmethod
     def from_state(cls, state) -> "SingleModuleStepperConfig":
         state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
-
-    @property
-    def input_names(self) -> list[str]:
-        return self.in_names
-
-    @property
-    def output_names(self) -> list[str]:
-        return self.out_names
-
-    @property
-    def all_names(self):
-        """Names of all variables required, including auxiliary ones."""
-        extra_names = []
-        if self.ocean is not None:
-            extra_names.extend(self.ocean.forcing_names)
-        if self.multi_call is not None:
-            extra_names.extend(self.multi_call.names)
-        all_names = list(set(self.in_names).union(self.out_names).union(extra_names))
-        return all_names
-
-    @property
-    def normalize_names(self):
-        """Names of variables which require normalization. I.e. inputs/outputs."""
-        extra_names = []
-        if self.multi_call is not None:
-            extra_names.extend(self.multi_call.names)
-        return list(set(self.in_names).union(self.out_names).union(extra_names))
-
-    @property
-    def input_only_names(self) -> list[str]:
-        """Names of variables which are inputs only."""
-        return list(set(self.all_names) - set(self.out_names))
-
-    @property
-    def prognostic_names(self) -> list[str]:
-        """Names of variables which both inputs and outputs."""
-        return list(set(self.out_names).intersection(self.in_names))
-
-    @property
-    def loss_names(self) -> list[str]:
-        extra_names = []
-        if self.multi_call is not None:
-            extra_names.extend(self.multi_call.names)
-        return list(set(self.out_names).union(extra_names))
-
-    @property
-    def diagnostic_names(self) -> list[str]:
-        """Names of variables which are outputs only."""
-        extra_names = []
-        if self.multi_call is not None:
-            extra_names = self.multi_call.names
-        out_names = list(set(self.out_names).union(extra_names))
-        return list(set(out_names).difference(self.in_names))
 
     @classmethod
     def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
@@ -417,12 +296,6 @@ class SingleModuleStepperConfig:
             crps_training=self.crps_training,
             residual_prediction=self.residual_prediction,
         )
-
-    def replace_multi_call(self, multi_call: MultiCallConfig | None):
-        self.multi_call = multi_call
-
-    def replace_ocean(self, ocean: OceanConfig | None):
-        self.ocean = ocean
 
 
 @dataclasses.dataclass
@@ -891,6 +764,12 @@ class StepperConfig:
         """
         return self.parameter_init.build(
             load_weights_and_history=load_weights_and_history
+        )
+
+    @classmethod
+    def from_state(cls, state) -> "StepperConfig":
+        return dacite.from_dict(
+            data_class=cls, data=state, config=dacite.Config(strict=True)
         )
 
 

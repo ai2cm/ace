@@ -1,6 +1,5 @@
 import dataclasses
 import os
-import warnings
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -24,7 +23,7 @@ from fme.ace.requirements import (
     NullDataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.ace.stepper import ExistingStepperConfig, SingleModuleStepperConfig, Stepper
+from fme.ace.stepper import ExistingStepperConfig, Stepper
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
@@ -153,9 +152,7 @@ class TrainConfig:
     Arguments:
         train_loader: Configuration for the training data loader.
         validation_loader: Configuration for the validation data loader.
-        stepper: Configuration for the stepper. SingleModuleStepperConfig is
-            deprecated and will be removed in a future version. Use StepperConfig
-            instead.
+        stepper: Configuration for the stepper.
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
@@ -200,7 +197,7 @@ class TrainConfig:
 
     train_loader: DataLoaderConfig
     validation_loader: DataLoaderConfig
-    stepper: SingleModuleStepperConfig | ExistingStepperConfig | StepperConfig
+    stepper: ExistingStepperConfig | StepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
@@ -225,13 +222,6 @@ class TrainConfig:
         default_factory=lambda: OneStepAggregatorConfig()
     )
     evaluate_before_training: bool = False
-
-    def __post_init__(self):
-        if isinstance(self.stepper, SingleModuleStepperConfig):
-            warnings.warn(
-                "SingleModuleStepperConfig is deprecated. Use StepperConfig instead.",
-                DeprecationWarning,
-            )
 
     def set_random_seed(self):
         if self.seed is not None:

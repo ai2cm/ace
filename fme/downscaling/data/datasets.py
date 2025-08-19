@@ -18,6 +18,7 @@ from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.metrics import spherical_area_weights
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.data.utils import (
+    ClosedInterval,
     check_leading_dim,
     expand_and_fold_tensor,
     scale_slice,
@@ -68,18 +69,6 @@ def get_topography_downscale_factor(
             f"shape {data_coords_shape}"
         )
     return topography_downscale_factor
-
-
-@dataclasses.dataclass
-class ClosedInterval:
-    start: float
-    stop: float
-
-    def __post_init__(self):
-        assert self.start < self.stop  # Do not allow empty, start = stop
-
-    def __contains__(self, value: float):
-        return self.start <= value <= self.stop
 
 
 @dataclasses.dataclass

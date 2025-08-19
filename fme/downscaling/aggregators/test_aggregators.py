@@ -19,6 +19,7 @@ from .main import (
     SnapshotAggregator,
     _get_spectrum_metrics,
 )
+from .no_target import NoTargetAggregator, TimeSeriesAggregator
 from .shape_helpers import (
     _check_all_datasets_compatible_sample_dim,
     _check_batch_dims_for_recording,
@@ -144,6 +145,35 @@ def test_snapshot_runs():
     snapshot._get()
 
 
+@pytest.mark.parametrize("batch_size", (1, 8))
+def test_time_series_aggregator(batch_size):
+    n_batches = 3
+    n_samples, height, width = 3, 4, 5
+    downscale_factor = 2
+    aggregator = TimeSeriesAggregator()
+    for n in range(n_batches):
+        data = {
+            "x": torch.rand(
+                batch_size,
+                n_samples,
+                height * downscale_factor,
+                width * downscale_factor,
+            ),
+            "y": torch.rand(
+                batch_size,
+                n_samples,
+                height * downscale_factor,
+                width * downscale_factor,
+            ),
+        }
+        times = xr.DataArray(list(range(n * batch_size, (n + 1) * batch_size)))
+        aggregator.record_batch(prediction=data, coarse=data, time=times)
+    ds = aggregator.get_dataset()
+    assert set(ds.dims) == {"time", "generated_sample"}
+    assert len(ds.time) == n_batches * batch_size
+    assert len(ds.generated_sample) == n_samples
+
+
 @pytest.mark.parametrize("n_steps", (1, 2))
 def test_map_aggregator(n_steps: int):
     batch_size, height, width = 3, 4, 5
@@ -233,6 +263,13 @@ def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
         )
         aggregator.get_wandb(prefix="test")
         aggregator.get_dataset()
+
+        no_target_aggregator = NoTargetAggregator(downscale_factor=downscale_factor)
+        no_target_aggregator.record_batch(
+            prediction=prediction, coarse=coarse, time=batch.fine.time
+        )
+        no_target_aggregator.get_wandb(prefix="test_no_target")
+        no_target_aggregator.get_dataset()
 
 
 @pytest.mark.parametrize("valid_shape", [(2, 4, 8), (2, 3, 4, 8)])

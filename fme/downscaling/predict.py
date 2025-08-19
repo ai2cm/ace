@@ -77,7 +77,7 @@ class Downscaler:
             )
 
     def run(self):
-        aggregator = NoTargetAggregator()
+        aggregator = NoTargetAggregator(downscale_factor=self.model.downscale_factor)
         for i, batch in enumerate(self.batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
@@ -88,7 +88,7 @@ class Downscaler:
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.data.items()}
-                aggregator.record_batch(prediction, coarse)
+                aggregator.record_batch(prediction, coarse, time=batch.time)
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()
         wandb.log(logs, step=0)
