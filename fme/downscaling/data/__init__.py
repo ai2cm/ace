@@ -3,9 +3,9 @@ from .datasets import (
     BatchData,
     BatchedLatLonCoordinates,
     BatchItem,
-    ClosedInterval,
     GriddedData,
     PairedBatchData,
     PairedBatchItem,
     PairedGriddedData,
 )
+from .utils import ClosedInterval
