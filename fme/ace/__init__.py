@@ -38,13 +38,16 @@ from fme.ace.registry.hpx import (
     UNetDecoderConfig,
     UNetEncoderConfig,
 )
+from fme.ace.registry.land_net import LandNetBuilder
+from fme.ace.registry.m2lines import SamudraBuilder
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO
 from fme.ace.stepper import StepperOverrideConfig
 from fme.ace.stepper.parameter_init import (
     FrozenParameterConfig,
     ParameterInitializationConfig,
 )
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, StepSelector
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
@@ -60,6 +63,11 @@ from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import SchedulerConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.core.step import (
+    MultiCallStepConfig,
+    SeparateRadiationStepConfig,
+    SingleModuleStepConfig,
+)
 from fme.core.typing_ import Slice
 
 from . import step
@@ -72,7 +80,6 @@ from .train.train_config import (
     InlineInferenceConfig,
     LoggingConfig,
     OptimizationConfig,
-    SingleModuleStepperConfig,
     TrainConfig,
 )
 

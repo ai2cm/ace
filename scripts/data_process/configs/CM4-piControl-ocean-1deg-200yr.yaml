@@ -1,18 +1,31 @@
 runs:
-  2024-11-11-CM4-ocean-200yr-preprocessed: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
-data_output_directory: gs://leap-scratch/elynnwu
+  2025-07-17-CM4-piControl-ocean-1deg-200yr: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
+data_output_directory: gs://leap-scratch/jpdunc23
 dataset_computation:
+  shift_timestamps_to_avg_interval_midpoint: true
   ocean_zarr: ocean_5daily.zarr
   ice_zarr: ice_5daily.zarr
   ocean_static:
-      zarr: ocean_static.zarr
-      names:
-      - wet
-      - hfgeou
-      renaming:
-        xh: x
-        yh: y
-        wet: sea_surface_fraction
+    zarr: ocean_static.zarr
+    names:
+    - wet
+    - hfgeou
+    - areacello
+    - deptho
+    renaming:
+      xh: x
+      yh: y
+      wet: sea_surface_fraction
+  land_static:
+    zarr: land_static.zarr
+    zarr_directory: s3://emulators/ai2_colab/2025-04-04-CM4-1pctCO2-simulation/gaussian_grid_180_by_360
+    names:
+      - land_fraction
+    renaming:
+      # ensure matching x/y dim names before finally renaming back to lat/lon
+      lon: x
+      lat: y
+    grid: target # already 1 degree
   nc_grid_path: s3://emulators/ai2_colab/2024-11-11-static-data/ocean_static_no_mask_table.nc
   nc_mosaic_path: s3://emulators/ai2_colab/2024-11-11-static-data/ocean_hgrid.nc
   nc_target_grid_path: s3://emulators/ai2_colab/2024-11-11-static-data/gaussian_grid_180_by_360.nc

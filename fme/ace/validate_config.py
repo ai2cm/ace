@@ -7,7 +7,7 @@ import yaml
 
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig
 from fme.ace.inference.inference import InferenceConfig
-from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.train.train_config import TrainConfig
 from fme.core.config import update_dict_with_dotlist
 
@@ -75,7 +75,7 @@ if __name__ == "__main__":
         except dacite.exceptions.UnionMatchError as err:
             if "checkpoint_path" not in config_data["stepper"]:
                 dacite.from_dict(
-                    data_class=SingleModuleStepperConfig,
+                    data_class=StepperConfig,
                     data=config_data["stepper"],
                     config=dacite.Config(strict=True),
                 )

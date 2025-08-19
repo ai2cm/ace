@@ -1,7 +1,7 @@
 from .single_module import (
     ExistingStepperConfig,
-    SingleModuleStepperConfig,
     Stepper,
+    StepperConfig,
     StepperOverrideConfig,
     TrainOutput,
     load_stepper,

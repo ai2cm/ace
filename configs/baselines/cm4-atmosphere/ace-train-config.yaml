@@ -1,26 +1,53 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 120
-n_forward_steps: 2
 ema:
   decay: 0.999
+max_epochs: 50 # this is about equivalent to the amount of trainign for ACE2-ERA5/ACE2-SHiELD
+n_forward_steps: 2
 inference:
-  n_forward_steps: 7300
-  forward_steps_in_memory: 40
+  n_forward_steps: 7300 # 5 years
+  forward_steps_in_memory: 50
   loader:
     start_indices:
       times:
-        - '1996-01-01T00:00:00'
-        - '1996-02-15T00:00:00'
-        - '1996-04-01T00:00:00'
-        - '1996-05-15T00:00:00'
-        - '1996-07-01T00:00:00'
-        - '1996-08-15T00:00:00'
-        - '1996-10-01T00:00:00'
-        - '1996-11-15T00:00:00'
+        # total of 120 years with 5yr rollouts
+        - "0301-01-01T06:00:00"
+        - "0301-03-01T00:00:00"
+        - "0301-04-29T00:00:00"
+        - "0301-06-26T18:00:00"
+        - "0301-08-24T18:00:00"
+        - "0301-10-22T12:00:00"
+        - "0301-12-20T12:00:00"
+        - "0302-02-17T06:00:00"
+        - "0302-04-17T06:00:00"
+        - "0302-06-15T00:00:00"
+        - "0302-08-13T00:00:00"
+        - "0302-10-10T18:00:00"
+        - "0302-12-08T18:00:00"
+        - "0303-02-05T12:00:00"
+        - "0303-04-05T12:00:00"
+        - "0303-06-03T06:00:00"
+        - "0303-08-01T06:00:00"
+        - "0303-09-29T00:00:00"
+        - "0303-11-27T00:00:00"
+        - "0304-01-24T18:00:00"
+        - "0304-03-24T18:00:00"
+        - "0304-05-22T12:00:00"
+        - "0304-07-20T12:00:00"
+        - "0304-09-17T06:00:00"
+        - "0304-11-15T06:00:00"
+        - "0305-01-13T00:00:00"
+        - "0305-03-13T00:00:00"
+        - "0305-05-10T18:00:00"
+        - "0305-07-08T18:00:00"
+        - "0305-09-05T12:00:00"
+        - "0305-11-03T12:00:00"
+        - "0306-01-01T06:00:00"
     dataset:
-      data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+      data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      engine: zarr
     num_data_workers: 4
   aggregator:
     log_histograms: true
@@ -29,38 +56,36 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace
+  project: ace2-cm4
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 4
+  num_data_workers: 16
   prefetch_factor: 4
   dataset:
-    concat:
-    - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-      subset:
-        stop_time: '1995-12-31'
-    - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-      subset:
-        start_time: '2011-01-01'
-        stop_time: '2019-12-31'
-    - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-      subset:
-        start_time: '2021-01-01'
-validation_loader:
-  batch_size: 128
-  num_data_workers: 4
-  prefetch_factor: 4
-  dataset:
-    data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+    data_path: /climate-default
+    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+    engine: zarr
     subset:
-      start_time: '1996-01-01'
-      stop_time: '1997-12-31'
+      stop_time: '0301-01-01T06:00:00'
+validation_loader:
+  batch_size: 64
+  num_data_workers: 16
+  prefetch_factor: 4
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+    engine: zarr
+    subset:
+      start_time: '0301-01-01T06:00:00'
+      stop_time: '0311-01-01T06:00:00'
 optimization:
+  use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  optimizer_type: FusedAdam
+  optimizer_type: AdamW
   kwargs:
+    fused: true
     weight_decay: 0.01
 stepper:
   loss:
@@ -87,16 +112,14 @@ stepper:
     type: single_module
     config:
       builder:
-        type: SphericalFourierNeuralOperatorNet
+        type: NoiseConditionedSFNO
         config:
           embed_dim: 384
+          noise_embed_dim: 0
           filter_type: linear
-          hard_thresholding_fraction: 1.0
           use_mlp: true
-          normalization_layer: instance_norm
           num_layers: 8
           operator_type: dhconv
-          scale_factor: 1
           separable: false
           spectral_layers: 3
           spectral_transform: sht
@@ -138,7 +161,6 @@ stepper:
       - sea_ice_fraction
       - DSWRFtoa
       - HGTsfc
-      - global_mean_co2
       - PRESsfc
       - surface_temperature
       - TMP2m
@@ -228,3 +250,6 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
+      # ocean coupling variables (diagnostic for now)
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress

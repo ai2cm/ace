@@ -1,7 +1,9 @@
 import dataclasses
 import datetime
+import functools
 import json
 import logging
+import multiprocessing
 import os
 import re
 import warnings
@@ -42,6 +44,7 @@ from .utils import (
 )
 
 SLICE_NONE = slice(None)
+GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD = 12
 logger = logging.getLogger(__name__)
 
 VariableNames = namedtuple(
@@ -136,12 +139,23 @@ def _get_vertical_coordinate(
     return coordinate
 
 
+def _get_raw_times_single_file(path: str, engine: str | None = None) -> np.array:
+    with _open_xr_dataset(path, engine=engine) as ds:
+        return ds.time.values
+
+
 def _get_raw_times(paths: list[str], engine: str) -> list[np.ndarray]:
-    times = []
-    for path in paths:
-        with _open_xr_dataset(path, engine=engine) as ds:
-            times.append(ds.time.values)
-    return times
+    function = functools.partial(_get_raw_times_single_file, engine=engine)
+
+    # Only parallelize if we are loading from a reasonable number of files; this
+    # helps speed up data loading tests, which otherwise would be slowed by the
+    # overhead of setting up a pool.
+    if len(paths) > GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD:
+        processes = min(multiprocessing.cpu_count(), len(paths))
+        with multiprocessing.Pool(processes) as pool:
+            return pool.map(function, paths)
+    else:
+        return list(map(function, paths))
 
 
 def _repeat_and_increment_time(

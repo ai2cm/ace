@@ -196,7 +196,7 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         config=dacite.Config(strict=True),
     )
     prepare_directory(config.experiment_dir, config_data)
-    with GlobalTimer():
+    with GlobalTimer(), torch.no_grad():
         return run_evaluator_from_config(config)
 
 

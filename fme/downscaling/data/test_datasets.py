@@ -1,4 +1,3 @@
-import dataclasses
 from unittest.mock import MagicMock
 
 import pytest
@@ -6,26 +5,54 @@ import torch
 import xarray as xr
 
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.xarray import XarrayDataConfig
-from fme.downscaling.datasets import (
+from fme.downscaling.data.datasets import (
     BatchData,
     BatchedLatLonCoordinates,
     BatchItem,
     BatchItemDatasetAdapter,
-    ClosedInterval,
     ContiguousDistributedSampler,
-    DataLoaderConfig,
     FineCoarsePairedDataset,
     HorizontalSubsetDataset,
     LatLonCoordinates,
     PairedBatchItem,
-    PairedDataLoaderConfig,
-    XarrayEnsembleDataConfig,
-    _scale_slice,
     _subset_horizontal,
 )
-from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.test_train import data_paths_helper
+from fme.downscaling.data.utils import (
+    ClosedInterval,
+    adjust_fine_coord_range,
+    scale_slice,
+)
+
+
+def _fine_midpoints(coarse_edges, downscale_factor):
+    fine_mids = []
+    for start, end in zip(coarse_edges[:-1], coarse_edges[1:]):
+        fine_edges = torch.linspace(start, end, downscale_factor + 1)
+        mids = (fine_edges[:-1] + fine_edges[1:]) / 2
+        fine_mids.append(mids)
+    return torch.concatenate(fine_mids)
+
+
+@pytest.mark.parametrize(
+    "downscale_factor, lat_range",
+    [
+        (2, ClosedInterval(1, 6)),
+        (3, ClosedInterval(1, 6)),
+        (4, ClosedInterval(0.7, 4)),
+        (3, ClosedInterval(0.7, 4)),
+    ],
+)
+def test_adjust_fine_coord_range(downscale_factor, lat_range):
+    coarse_edges = torch.linspace(0, 6, 7)
+    coarse_lat = _fine_midpoints(coarse_edges, 1)
+    fine_lat = _fine_midpoints(coarse_edges, downscale_factor)
+    new_lat_range = adjust_fine_coord_range(
+        lat_range, full_coarse_coord=coarse_lat, full_fine_coord=fine_lat
+    )
+    subsel_fine_lat = torch.tensor([lat for lat in fine_lat if lat in new_lat_range])
+    subsel_coarse_lat = torch.tensor([lat for lat in coarse_lat if lat in lat_range])
+    assert len(subsel_fine_lat) % len(subsel_coarse_lat) == 0
+    assert len(subsel_fine_lat) / len(subsel_coarse_lat) == downscale_factor
 
 
 def test_ContiguousDistributedSampler():
@@ -406,7 +433,7 @@ def test_fine_coarse_paired_dataset():
     ],
 )
 def test_scale_slice(input_slice, expected):
-    scaled = _scale_slice(input_slice, scale=2)
+    scaled = scale_slice(input_slice, scale=2)
     assert scaled.start == expected.start
     assert scaled.stop == expected.stop
 
@@ -467,80 +494,6 @@ def test_BatchData_slice_latlon():
         batch_slice.topography,
         batch.topography[:, lat_slice, lon_slice],  # type: ignore
     )
-
-
-def test_XarrayEnsembleDataConfig():
-    """Tests the XarrayEnsembleDataConfig class."""
-    n_ensemble_members = 5
-    base_config = XarrayDataConfig(
-        data_path="ensemble_dataset_path", n_repeats=3, spatial_dimensions="healpix"
-    )
-    ensemble_config = XarrayEnsembleDataConfig(
-        data_config=base_config,
-        ensemble_dim="sample",
-        n_ensemble_members=n_ensemble_members,
-    )
-    isel_sample_configs = [
-        dataclasses.replace(base_config, isel={"sample": i})
-        for i in range(n_ensemble_members)
-    ]
-    assert ensemble_config.expand() == isel_sample_configs
-
-
-@pytest.mark.parametrize(
-    "fine_engine, coarse_engine, num_data_workers, expected",
-    [
-        ("netcdf4", "zarr", 0, None),
-        ("netcdf4", "netcdf4", 2, None),
-        ("netcdf4", "zarr", 2, "forkserver"),
-        ("zarr", "zarr", 2, "forkserver"),
-    ],
-)
-def test_DataLoaderConfig_mpcontext(
-    fine_engine, coarse_engine, num_data_workers, expected
-):
-    fine_config = XarrayDataConfig(
-        data_path="fine_dataset_path",
-        engine=fine_engine,
-        file_pattern="*.nc" if fine_engine == "netcdf4" else "a.zarr",
-    )
-    coarse_config = XarrayDataConfig(
-        data_path="coarse_dataset_path",
-        engine=coarse_engine,
-        file_pattern="*.nc" if coarse_engine == "netcdf4" else "a.zarr",
-    )
-    loader_config = PairedDataLoaderConfig(
-        fine=[fine_config],
-        coarse=[coarse_config],
-        batch_size=2,
-        num_data_workers=num_data_workers,
-        strict_ensemble=False,
-    )
-    assert loader_config._mp_context() == expected
-
-
-def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
-    # TODO: this test can be removed after future PRs add a no-target
-    # run script integration test that covers this functionality.
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-    paths = data_paths_helper(tmp_path)
-    requirements = DataRequirements(
-        fine_names=[], coarse_names=["x"], n_timesteps=1, use_fine_topography=True
-    )
-    data_config = DataLoaderConfig(
-        data=[XarrayDataConfig(paths.coarse)],
-        batch_size=2,
-        num_data_workers=1,
-        strict_ensemble=False,
-        topography=XarrayDataConfig(paths.fine),
-        lat_extent=ClosedInterval(1, 4),
-        lon_extent=ClosedInterval(0, 3),
-    )
-    data = data_config.build(requirements=requirements)
-    batch = next(iter(data.loader))
-    assert batch.data["x"].shape == (2, 4, 4)
-    assert batch.topography.shape == (2, 8, 8)
 
 
 @pytest.mark.parametrize(
@@ -627,7 +580,7 @@ def test_BatchData_slice_latlon_higher_topography_res():
         batch_slice.topography,
         batch.topography[
             :,
-            _scale_slice(lat_slice, topography_downscale_factor),
-            _scale_slice(lon_slice, topography_downscale_factor),
+            scale_slice(lat_slice, topography_downscale_factor),
+            scale_slice(lon_slice, topography_downscale_factor),
         ],  # type: ignore
     )

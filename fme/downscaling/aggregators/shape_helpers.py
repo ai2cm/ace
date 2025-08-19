@@ -1,6 +1,22 @@
+import torch
+
 from fme.core.typing_ import TensorDict, TensorMapping
 
 from ..models import ModelOutputs
+
+
+def get_data_dim(tensor_data: TensorMapping) -> int:
+    keys, ndims = [], []
+    for key, tensor in tensor_data.items():
+        ndims.append(len(tensor.shape))
+        keys.append(key)
+        if len(ndims) > 1 and ndims[-1] != ndims[-2]:
+            raise ValueError(
+                "Datasets must all have same number of dimensions. "
+                f"Found different ndims {ndims[-1], ndims[-2]} "
+                f"for keys {keys[-1], keys[-2]}."
+            )
+    return ndims[-1]
 
 
 def _check_all_datasets_compatible_sample_dim(
@@ -101,3 +117,19 @@ def subselect_and_squeeze(data: TensorDict, dim: int) -> TensorDict:
     for key, value in data.items():
         squeezed[key] = value.select(dim, 0).squeeze(dim)
     return squeezed
+
+
+def upsample_tensor(x: torch.Tensor, upsample_factor: int) -> torch.Tensor:
+    """
+    Upsample a 2D tensor by a factor of b using repeating (no interpolation).
+
+    Args:
+        x (torch.Tensor): Input tensor of shape (n, n)
+        upsample_factor (int): Upsampling factor
+
+    Returns:
+        torch.Tensor: Upsampled tensor of shape (n*upsample_factor, n*upsample_factor)
+    """
+    x = torch.repeat_interleave(x, upsample_factor, dim=-2)
+    x = torch.repeat_interleave(x, upsample_factor, dim=-1)
+    return x

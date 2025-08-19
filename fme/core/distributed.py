@@ -63,6 +63,7 @@ class Distributed:
             self._distributed = self._init_distributed()
         else:
             self._distributed = False
+        self._seed = 0
 
     def _init_distributed(self):
         if "RANK" in os.environ:  # we were executed with torchrun
@@ -91,7 +92,6 @@ class Distributed:
         self,
         dataset: torch.utils.data.Dataset,
         shuffle: bool,
-        seed: int = 0,
         drop_last: bool = False,
     ) -> torch.utils.data.Sampler:
         return torch.utils.data.DistributedSampler(
@@ -99,7 +99,7 @@ class Distributed:
             shuffle=shuffle,
             num_replicas=self.world_size,
             rank=self.rank,
-            seed=seed,
+            seed=self._seed,
             drop_last=drop_last,
         )
 
@@ -243,6 +243,18 @@ class Distributed:
             logger.debug(f"Barrier on rank {self.rank}")
             torch.distributed.barrier()
 
+    def set_seed(self, seed: int):
+        """
+        Set the random seed.
+        """
+        self._seed = seed
+
+    def get_seed(self) -> int:
+        """
+        Get the random seed.
+        """
+        return self._seed
+
 
 singleton: Distributed | None = None
 
@@ -256,10 +268,11 @@ def gather_irregular(
 ) -> list[torch.Tensor] | None:
     """
     Gather a tensor from all processes to the root process. The rank tensors
-    may have diferent dimension lengths, but must have the same number of dimensions.
-    temporarily padded with `fill_value` where its dimension length is smaller than the
-    maxmimum dimension length, but the padding is removed prior to returning the
-    gathered tensors.
+    may have different dimension lengths, but must have the same number of dimensions.
+
+    To accomplish this, the tensor is temporarily padded with `fill_value` where
+    its dimension length is smaller than the maximum dimension length for the purpose of
+    communication, and the padding is removed prior to returning the gathered tensors.
 
     Args:
         tensor: The tensor to gather.

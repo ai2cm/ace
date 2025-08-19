@@ -16,6 +16,7 @@ climate model emulators, such as the Ai2 Climate Emulator.
    gcs_access
    builder
    modules
+   steps
    api
 
 Indices and tables

@@ -3,6 +3,7 @@ import datetime
 import warnings
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TypeAlias
 
 import numpy as np
 import torch
@@ -16,10 +17,11 @@ from .dataset_metadata import DatasetMetadata
 from .histograms import PairedHistogramDataWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
 from .raw import PairedRawDataWriter, RawDataWriter
+from .subselect import SubselectWriter, SubselectWriterConfig
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .video import PairedVideoDataWriter
 
-PairedSubwriter = (
+PairedSubwriter: TypeAlias = (
     PairedRawDataWriter
     | PairedVideoDataWriter
     | PairedHistogramDataWriter
@@ -27,7 +29,7 @@ PairedSubwriter = (
     | PairedMonthlyDataWriter
 )
 
-Subwriter = MonthlyDataWriter | RawDataWriter | TimeCoarsen
+Subwriter: TypeAlias = MonthlyDataWriter | RawDataWriter | TimeCoarsen | SubselectWriter
 
 
 @dataclasses.dataclass
@@ -45,7 +47,9 @@ class DataWriterConfig:
         names: Names of variables to save in the prediction, histogram, and monthly
             netCDF files.
         save_histogram_files: Enable writing of netCDF files containing histograms.
-        time_coarsen: Configuration for time coarsening of written outputs.
+        time_coarsen: Configuration for time coarsening of written outputs to the
+            raw data writer, histogram writer, and video writer.
+        subselection: Configurations for subselection data writers.
     """
 
     log_extended_video_netcdfs: bool = False
@@ -54,6 +58,7 @@ class DataWriterConfig:
     names: Sequence[str] | None = None
     save_histogram_files: bool = False
     time_coarsen: TimeCoarsenConfig | None = None
+    subselection: list[SubselectWriterConfig] | None = None
 
     def __post_init__(self):
         if (
@@ -129,6 +134,7 @@ class DataWriterConfig:
             save_names=self.names,
             time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
+            subselection=self.subselection,
         )
 
 
@@ -319,7 +325,7 @@ def _write(
 
     data_arrays = {}
     for name in data.data:
-        array = maybe_squeeze(data.data[name]).cpu().numpy()
+        array = maybe_squeeze(data.data[name]).detach().cpu().numpy()
         data_arrays[name] = xr.DataArray(array, dims=dims_to_write)
         if name in variable_metadata:
             data_arrays[name].attrs = {
@@ -346,6 +352,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         save_names: Sequence[str] | None,
         dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
+        subselection: list[SubselectWriterConfig] | None = None,
     ):
         """
         Args:
@@ -363,6 +370,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 and monthly netCDF files.
             dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of raw outputs.
+            subselection: Configurations for subselection data writers.
         """
         self._writers: list[Subwriter] = []
         if "face" in coords:
@@ -403,6 +411,18 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                     dataset_metadata=dataset_metadata,
                 )
             )
+
+        if subselection is not None:
+            for writer_config in subselection:
+                self._writers.append(
+                    writer_config.build(
+                        experiment_dir=path,
+                        n_initial_conditions=n_initial_conditions,
+                        variable_metadata=variable_metadata,
+                        coords=coords,
+                        dataset_metadata=dataset_metadata,
+                    )
+                )
 
         self.path = path
         self.variable_metadata = variable_metadata

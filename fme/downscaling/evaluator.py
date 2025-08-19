@@ -18,8 +18,8 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators import GenerationAggregator, SampleAggregator
-from fme.downscaling.datasets import (
+from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
+from fme.downscaling.data import (
     ClosedInterval,
     PairedBatchData,
     PairedDataLoaderConfig,
@@ -33,7 +33,11 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.patching import PatchPredictor, paired_patch_generator_from_loader
+from fme.downscaling.patching import (
+    MultipatchConfig,
+    PatchPredictor,
+    paired_patch_generator_from_loader,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -195,6 +199,7 @@ class Evaluator:
             ds.to_netcdf(
                 f"{self.experiment_dir}/evaluator_maps_and_metrics.nc", mode="w"
             )
+        logging.info(f"Evaluation complete. Results saved to {self.experiment_dir}.")
 
 
 class EventEvaluator:
@@ -205,6 +210,7 @@ class EventEvaluator:
         model: Model | DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
+        save_generated_samples: bool = False,
     ) -> None:
         self.event_name = event_name
         self.data = data
@@ -213,12 +219,13 @@ class EventEvaluator:
         self.n_samples = n_samples
         self.dist = Distributed.get_instance()
         self._max_sample_group = 8
+        self.save_generated_samples = save_generated_samples
 
     def run(self):
         logging.info(f"Running {self.event_name} event evaluation")
         batch: PairedBatchData = next(iter(self.data.loader))
 
-        sample_agg = SampleAggregator(
+        sample_agg = PairedSampleAggregator(
             target=batch[0].fine.data,
             coarse=batch[0].coarse.data,
             latlon_coordinates=FineResCoarseResPair(
@@ -241,26 +248,17 @@ class EventEvaluator:
         to_log = sample_agg.get_wandb()
         wandb = WandB.get_instance()
         wandb.log({f"{self.event_name}/{k}": v for k, v in to_log.items()}, step=0)
+
+        if self.save_generated_samples:
+            ds = sample_agg.get_dataset()
+            if self.dist.is_root():
+                # no slashes allowed in netcdf variable names
+                ds = ds.rename({k: k.replace("/", "_") for k in ds.data_vars})
+                ds.to_netcdf(f"{self.experiment_dir}/{self.event_name}.nc", mode="w")
+            logging.info(
+                f"{self.n_samples} generated samples saved for {self.event_name}"
+            )
         torch.cuda.empty_cache()
-
-
-@dataclasses.dataclass
-class MultipatchConfig:
-    """
-    Configuration to enable predictions on multiple patches for evaluation.
-
-    Args:
-        divide_evaluation: enables the patched prediction of the full
-            input data extent for evaluation.
-        composite_prediction: if True, recombines the smaller prediction
-            regions into the original full region as a single sample.
-        coarse_horizontal_overlap: number of pixels to overlap in the
-            coarse data.
-    """
-
-    divide_evaluation: bool = False
-    composite_prediction: bool = False
-    coarse_horizontal_overlap: int = 1
 
 
 @dataclasses.dataclass
@@ -275,6 +273,7 @@ class EventConfig:
     )
     n_samples: int = 64
     date_format: str = "%Y-%m-%dT%H:%M"
+    save_generated_samples: bool = False
 
     def get_gridded_data(
         self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
@@ -334,7 +333,7 @@ class EvaluatorConfig:
 
         model = self.model.build()
         evaluator_model: Model | DiffusionModel | PatchPredictor
-        if self.patch.divide_evaluation and self.patch.composite_prediction:
+        if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
                 model,
                 dataset.coarse_shape,
@@ -343,7 +342,7 @@ class EvaluatorConfig:
         else:
             evaluator_model = model
 
-        if self.patch.divide_evaluation and not self.patch.composite_prediction:
+        if self.patch.divide_generation and not self.patch.composite_prediction:
             patch_data = True
         else:
             patch_data = False
@@ -384,6 +383,7 @@ class EvaluatorConfig:
             model=evaluator_model,
             experiment_dir=self.experiment_dir,
             n_samples=event_config.n_samples,
+            save_generated_samples=event_config.save_generated_samples,
         )
 
     def build(self) -> list[Evaluator | EventEvaluator]:

@@ -1,18 +1,25 @@
 """The registry also performs configuration set up so it needs to be tested."""
 
 import copy
+import dataclasses
 import datetime
 from pathlib import Path
 from unittest import mock
 
+import dacite
 import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper import SingleModuleStepperConfig, Stepper, parameter_init
+from fme.ace.stepper import Stepper, StepperConfig, parameter_init
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
+from fme.core.loss import WeightedMappingLossConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.registry.module import ModuleSelector
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.training_history import TrainingHistory
 from fme.core.typing_ import TensorMapping
 from fme.core.wildcard import wildcard_match
@@ -35,23 +42,28 @@ def get_dataset_info(img_shape=(16, 32)) -> DatasetInfo:
 
 
 def test_builder_with_weights_loads_same_state(tmpdir):
-    sfno_config_data = {
-        "type": "SphericalFourierNeuralOperatorNet",
-        "config": {
-            "num_layers": 2,
-            "embed_dim": 3,
-        },
-    }
-    stepper_config_data = {
-        "builder": sfno_config_data,
-        "in_names": ["x"],
-        "out_names": ["x"],
-        "normalization": {
-            "means": {"x": np.random.randn(1).item()},
-            "stds": {"x": np.random.randn(1).item()},
-        },
-    }
-    stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
+    stepper_config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="SphericalFourierNeuralOperatorNet",
+                        config={"num_layers": 2, "embed_dim": 3},
+                    ),
+                    in_names=["x"],
+                    out_names=["x"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"x": np.random.randn(1).item()},
+                            stds={"x": np.random.randn(1).item()},
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        loss=WeightedMappingLossConfig(),
+    )
     stepper = stepper_config.get_stepper(dataset_info=get_dataset_info())
     torch.save(
         {
@@ -62,19 +74,16 @@ def test_builder_with_weights_loads_same_state(tmpdir):
     parameter_init_config = parameter_init.ParameterInitializationConfig(
         weights_path=str(tmpdir / "weights.ckpt"),
     )
+    stepper_config_data = dataclasses.asdict(stepper_config)
     with_builder_stepper_config_data = {
-        "builder": sfno_config_data,
-        "in_names": ["x"],
-        "out_names": ["x"],
-        "normalization": {
-            "means": {"x": np.random.randn(1).item()},
-            "stds": {"x": np.random.randn(1).item()},
-        },
+        **stepper_config_data,
         "parameter_init": parameter_init_config,
     }
     dataset_info = get_dataset_info()
-    with_builder_stepper = SingleModuleStepperConfig.from_state(
-        with_builder_stepper_config_data
+    with_builder_stepper = dacite.from_dict(
+        StepperConfig,
+        with_builder_stepper_config_data,
+        config=dacite.Config(strict=True),
     ).get_stepper(dataset_info=dataset_info)
     assert len(with_builder_stepper.modules) == 1
     assert_same_state(
@@ -152,13 +161,13 @@ def test_builder_with_weights_sfno_init(
     dataset_info = get_dataset_info(img_shape=built_shape)
     if expect_exception:
         with pytest.raises(ValueError):
-            with_builder_stepper = SingleModuleStepperConfig.from_state(
+            with_builder_stepper = StepperConfig.from_state(
                 with_builder_stepper_config_data
             ).get_stepper(
                 dataset_info=dataset_info,
             )
     else:
-        with_builder_stepper = SingleModuleStepperConfig.from_state(
+        with_builder_stepper = StepperConfig.from_state(
             with_builder_stepper_config_data
         ).get_stepper(
             dataset_info=dataset_info,
@@ -185,29 +194,36 @@ def get_config(
     extra_built_layer: bool,
     tmpdir: Path,
 ):
-    sfno_config_data = {
-        "type": "SphericalFourierNeuralOperatorNet",
-        "config": {
-            "num_layers": 2,
-            "embed_dim": 3,
-            "scale_factor": 1,
-        },
-    }
-    stepper_config_data = {
-        "builder": sfno_config_data,
-        "in_names": ["x"],
-        "out_names": ["x"],
-        "normalization": {
-            "means": {"x": np.random.randn(1).item()},
-            "stds": {"x": np.random.randn(1).item()},
-        },
-    }
-    stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
+    num_layers = 2
+    stepper_config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="SphericalFourierNeuralOperatorNet",
+                        config={"num_layers": num_layers, "embed_dim": 3},
+                    ),
+                    in_names=["x"],
+                    out_names=["x"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"x": np.random.randn(1).item()},
+                            stds={"x": np.random.randn(1).item()},
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        loss=WeightedMappingLossConfig(),
+    )
     dataset_info = get_dataset_info(img_shape=loaded_shape)
     stepper = stepper_config.get_stepper(dataset_info=dataset_info)
-    built_sfno_config_data = copy.deepcopy(sfno_config_data)
+    built_sfno_config_data = copy.deepcopy(
+        stepper_config.step.config["builder"]["config"]
+    )
     if extra_built_layer:
-        built_sfno_config_data["config"]["num_layers"] += 1  # type: ignore
+        built_sfno_config_data["num_layers"] += 1
     torch.save(
         {
             "stepper": stepper.get_state(),
@@ -217,16 +233,31 @@ def get_config(
     parameter_init_config = parameter_init.ParameterInitializationConfig(
         weights_path=str(tmpdir / "weights.ckpt"),
     )
-    with_builder_stepper_config_data = {
-        "builder": built_sfno_config_data,
-        "in_names": ["x"],
-        "out_names": ["x"],
-        "normalization": {
-            "means": {"x": np.random.randn(1).item()},
-            "stds": {"x": np.random.randn(1).item()},
-        },
-        "parameter_init": parameter_init_config,
-    }
+    with_builder_stepper_config_data = dataclasses.asdict(
+        StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config=built_sfno_config_data,
+                        ),
+                        in_names=["x"],
+                        out_names=["x"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"x": np.random.randn(1).item()},
+                                stds={"x": np.random.randn(1).item()},
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            loss=WeightedMappingLossConfig(),
+            parameter_init=parameter_init_config,
+        )
+    )
     return (
         with_builder_stepper_config_data,
         dataset_info,
@@ -239,7 +270,7 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     with_builder_stepper_config_data, dataset_info, stepper = get_config(
         loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir
     )
-    with_builder_stepper = SingleModuleStepperConfig.from_state(
+    with_builder_stepper = StepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(dataset_info=dataset_info)
     stepper_state = with_builder_stepper.get_state()

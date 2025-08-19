@@ -73,6 +73,7 @@ def get_dataset(
 class ConcatDatasetConfig(DatasetConfigABC):
     """
     Configuration for concatenating multiple datasets.
+
     Parameters:
         concat: List of XarrayDataConfig objects to concatenate.
         strict: Whether to enforce that the datasets to be concatenated
