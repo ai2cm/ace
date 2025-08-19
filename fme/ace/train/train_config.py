@@ -1,6 +1,5 @@
 import dataclasses
 import os
-import warnings
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -24,7 +23,7 @@ from fme.ace.requirements import (
     NullDataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.ace.stepper import ExistingStepperConfig, SingleModuleStepperConfig, Stepper
+from fme.ace.stepper import ExistingStepperConfig, Stepper
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
@@ -223,13 +222,6 @@ class TrainConfig:
         default_factory=lambda: OneStepAggregatorConfig()
     )
     evaluate_before_training: bool = False
-
-    def __post_init__(self):
-        if isinstance(self.stepper, SingleModuleStepperConfig):
-            warnings.warn(
-                "SingleModuleStepperConfig is deprecated. Use StepperConfig instead.",
-                DeprecationWarning,
-            )
 
     def set_random_seed(self):
         if self.seed is not None:

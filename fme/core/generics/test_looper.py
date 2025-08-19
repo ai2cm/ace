@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 import unittest.mock
 from collections import namedtuple
@@ -10,7 +11,7 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper.single_module import StepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -22,8 +23,10 @@ from fme.core.generics.inference import (
     run_inference,
 )
 from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.testing.wandb import mock_wandb
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -120,13 +123,24 @@ def _get_stepper():
         lon=torch.zeros(img_shape[1]),
     )
     vertical_coordinate = spherical_data.vertical_coord
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": ChannelSum()}),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means=get_scalar_data(all_names, 0.0),
-            stds=get_scalar_data(all_names, 1.0),
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": ChannelSum()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(all_names, 0.0),
+                            stds=get_scalar_data(all_names, 1.0),
+                        ),
+                    ),
+                ),
+            ),
         ),
         loss=WeightedMappingLossConfig(),
     )
