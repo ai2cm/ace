@@ -19,6 +19,7 @@ from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
+from fme.downscaling.aggregators.adapters import ComparedDynamicHistogramsAdapter
 from fme.downscaling.data import PairedBatchData
 
 from ..metrics_and_maths import (
@@ -267,43 +268,6 @@ class MeanComparison:
         return {
             f"{prefix}{self._name}{k}": v.cpu().numpy() for k, v in self.get().items()
         }
-
-
-class ComparedDynamicHistogramsAdapter:
-    """
-    Adapter to use ComparedDynamicHistograms with the naming and prefix
-    scheme used by downscaling aggregators.
-
-    Args:
-        histograms: The ComparedDynamicHistograms object to adapt.
-        name: The name to use for the histograms in the wandb output.
-    """
-
-    def __init__(self, histograms: ComparedDynamicHistograms, name: str = "") -> None:
-        self._histograms = histograms
-        self._name = ensure_trailing_slash(name)
-
-    @torch.no_grad()
-    def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
-        """
-        Record the histograms for the current batch comparison.
-        """
-        self._histograms.record_batch(target, prediction)
-
-    def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
-        """
-        Get the histogram logs for wandb.
-        """
-        prefix = ensure_trailing_slash(prefix)
-        histograms = self._histograms.get_wandb()
-        return {f"{prefix}{self._name}{k}": v for k, v in histograms.items()}
-
-    def get_dataset(self) -> dict[str, Any]:
-        """
-        Get the histogram dataset.
-        """
-        ds = self._histograms.get_dataset()
-        return xr.Dataset({f"{self._name}{k}": v for k, v in ds.items()})
 
 
 def _compute_zonal_mean_power_spectrum(x):
