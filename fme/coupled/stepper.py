@@ -25,7 +25,7 @@ from fme.ace.stepper.parameter_init import (
     Weights,
     WeightsAndHistoryLoader,
 )
-from fme.ace.stepper.single_module import SingleModuleStepperConfig, StepperConfig
+from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.stepper.single_module import (
     load_weights_and_history as load_uncoupled_weights_and_history,
 )
@@ -66,7 +66,7 @@ class ComponentConfig:
     """
 
     timedelta: str
-    stepper: StepperConfig | SingleModuleStepperConfig
+    stepper: StepperConfig
     loss_contributions: LossContributionsConfig = dataclasses.field(
         default_factory=lambda: LossContributionsConfig()
     )
@@ -1283,9 +1283,9 @@ class CoupledStepper(
 
     @classmethod
     def from_state(cls, state) -> "CoupledStepper":
-        config = CoupledStepperConfig.from_state(state["config"])
         ocean = Stepper.from_state(state["ocean_state"])
         atmosphere = Stepper.from_state(state["atmosphere_state"])
+        config = CoupledStepperConfig.from_state(state["config"])
         if "dataset_info" in state:
             dataset_info = CoupledDatasetInfo.from_state(state["dataset_info"])
         else:
