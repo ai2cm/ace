@@ -10,7 +10,6 @@ from fme.downscaling.data.datasets import (
     BatchedLatLonCoordinates,
     BatchItem,
     BatchItemDatasetAdapter,
-    ClosedInterval,
     ContiguousDistributedSampler,
     FineCoarsePairedDataset,
     HorizontalSubsetDataset,
@@ -18,7 +17,42 @@ from fme.downscaling.data.datasets import (
     PairedBatchItem,
     _subset_horizontal,
 )
-from fme.downscaling.data.utils import scale_slice
+from fme.downscaling.data.utils import (
+    ClosedInterval,
+    adjust_fine_coord_range,
+    scale_slice,
+)
+
+
+def _fine_midpoints(coarse_edges, downscale_factor):
+    fine_mids = []
+    for start, end in zip(coarse_edges[:-1], coarse_edges[1:]):
+        fine_edges = torch.linspace(start, end, downscale_factor + 1)
+        mids = (fine_edges[:-1] + fine_edges[1:]) / 2
+        fine_mids.append(mids)
+    return torch.concatenate(fine_mids)
+
+
+@pytest.mark.parametrize(
+    "downscale_factor, lat_range",
+    [
+        (2, ClosedInterval(1, 6)),
+        (3, ClosedInterval(1, 6)),
+        (4, ClosedInterval(0.7, 4)),
+        (3, ClosedInterval(0.7, 4)),
+    ],
+)
+def test_adjust_fine_coord_range(downscale_factor, lat_range):
+    coarse_edges = torch.linspace(0, 6, 7)
+    coarse_lat = _fine_midpoints(coarse_edges, 1)
+    fine_lat = _fine_midpoints(coarse_edges, downscale_factor)
+    new_lat_range = adjust_fine_coord_range(
+        lat_range, full_coarse_coord=coarse_lat, full_fine_coord=fine_lat
+    )
+    subsel_fine_lat = torch.tensor([lat for lat in fine_lat if lat in new_lat_range])
+    subsel_coarse_lat = torch.tensor([lat for lat in coarse_lat if lat in lat_range])
+    assert len(subsel_fine_lat) % len(subsel_coarse_lat) == 0
+    assert len(subsel_fine_lat) / len(subsel_coarse_lat) == downscale_factor
 
 
 def test_ContiguousDistributedSampler():
