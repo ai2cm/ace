@@ -47,13 +47,13 @@ train_loader:
       file_pattern: 2025-08-07-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
       engine: zarr
       subset:
-        start_time: '0151-03-01T12:00:00' # earlier times nan
+        start_time: '0151-01-03T12:00:00' # earlier times nan
         stop_time: '0306-01-01T06:00:00'
     - data_path: /climate-default
       file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
       engine: zarr
       subset:
-        start_time: '0151-03-01T12:00:00' # earlier times nan
+        start_time: '0151-01-03T12:00:00' # earlier times nan
         stop_time: '0306-01-01T06:00:00'
 validation_loader:
   batch_size: 64
