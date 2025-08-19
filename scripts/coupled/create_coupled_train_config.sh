@@ -15,13 +15,8 @@ beaker dataset fetch ${EXISTING_RESULTS_OCEAN_DATASET} --prefix config.yaml
 mv ./config.yaml ./ocean-config.yaml
 sed -i 's/statsdata/ocean_stats/g' ./ocean-config.yaml
 
-# first try to get sea_ice_fraction_name as from legacy SingleModuleStepper config
-SIC_NAME=$(yq '.stepper.corrector.config.sea_ice_fraction_correction.sea_ice_fraction_name' ocean-config.yaml)
-
-if [[ "$SIC_NAME" == "null" ]]; then
-    # try using StepSelector config style
-    SIC_NAME=$(yq '.stepper.step.config.corrector.config.sea_ice_fraction_correction.sea_ice_fraction_name' ./ocean-config.yaml)
-fi
+# try to get sea_ice_fraction_name from step config
+SIC_NAME=$(yq '.stepper.step.config.corrector.config.sea_ice_fraction_correction.sea_ice_fraction_name' ./ocean-config.yaml)
 
 if [[ "$SIC_NAME" == "null" ]]; then
     echo "Failed to extract sea_ice_fraction_name from the ocean config"
