@@ -4,7 +4,7 @@ set -e
 
 if [[ "$#" -ne 1 ]]; then
   echo "Usage: $0 <config_subdirectory>"
-  echo "  - <config_subdirectory>: Subdirectory containing the 'train-config.yaml' to use."
+  echo "  - <config_subdirectory>: Subdirectory containing the 'finetune-config.yaml' to use."
   exit 1
 fi
 
@@ -15,7 +15,7 @@ CONFIG_SUBDIR=$1
 SCRIPT_DIR=$(git rev-parse --show-prefix)
 
 # Construct the full path to the specified configuration file.
-CONFIG_FILENAME="train-config.yaml"
+CONFIG_FILENAME="finetune-config.yaml"
 CONFIG_PATH="$SCRIPT_DIR/$CONFIG_SUBDIR/$CONFIG_FILENAME"
 
 # Since we use a service account API key for wandb, we use the beaker username to set the wandb username.
@@ -24,21 +24,30 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # FIXME: this needs to be per-task configurable
-ATMOS_STATS_DATA=jamesd/2025-08-14-cm4-piControl-200yr-coupled-stats-atmosphere
-OCEAN_STATS_DATA=jamesd/2025-08-14-cm4-piControl-200yr-coupled-stats-ocean
+ATMOS_STATS_DATA=jamesd/2025-08-07-cm4-piControl-200yr-coupled-stats-atmosphere
+OCEAN_STATS_DATA=jamesd/2025-08-07-cm4-piControl-200yr-coupled-stats-ocean
 
 # Change to the repo root so paths are valid no matter where we run the script from.
 cd "$REPO_ROOT"
 
-while read TRAINING; do
-    GROUP=$(echo "$TRAINING" | cut -d"|" -f1)
-    STATUS=$(echo "$TRAINING" | cut -d"|" -f2)
-    PRIORITY=$(echo "$TRAINING" | cut -d"|" -f3)
-    CLUSTER=$(echo "$TRAINING" | cut -d"|" -f4)
-    N_GPUS=$(echo "$TRAINING" | cut -d"|" -f5)
-    SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f6)
-    RETRIES=$(echo "$TRAINING" | cut -d"|" -f7)
-    OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f8)
+
+TEMPLATE_CONFIG_FILENAME="finetune-config-template.yaml"
+
+# get the template from the config subdir
+TEMPLATE_CONFIG_PATH="$SCRIPT_DIR/$CONFIG_SUBDIR/$TEMPLATE_CONFIG_FILENAME"
+
+while read FINETUNING; do
+    GROUP=$(echo "$FINETUNING" | cut -d"|" -f1)
+    WANDB_PROJECT=$(echo "$FINETUNING" | cut -d"|" -f2)
+    WANDB_ID=$(echo "$FINETUNING" | cut -d"|" -f3)
+    CKPT_TYPE=$(echo "$FINETUNING" | cut -d"|" -f4)
+    STATUS=$(echo "$FINETUNING" | cut -d"|" -f5)
+    PRIORITY=$(echo "$FINETUNING" | cut -d"|" -f6)
+    CLUSTER=$(echo "$FINETUNING" | cut -d"|" -f7)
+    N_GPUS=$(echo "$FINETUNING" | cut -d"|" -f8)
+    SHARED_MEM=$(echo "$FINETUNING" | cut -d"|" -f9)
+    RETRIES=$(echo "$FINETUNING" | cut -d"|" -f10)
+    OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f11)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -47,6 +56,14 @@ while read TRAINING; do
     fi
     JOB_GROUP="${GROUP}"
     JOB_NAME="${JOB_GROUP}-train"
+    EXPER_ID=$(
+        python $REPO_ROOT/scripts/wandb/wandb_to_beaker_experiment.py \
+            --project "$WANDB_PROJECT" --wandb_id "$WANDB_ID"
+    )
+    EXISTING_RESULTS_DATASET=$(
+        beaker experiment get $EXPER_ID --format json |
+            jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4
+    )
     declare -a CLUSTER_ARGS
     if [[ "$CLUSTER" == "titan" ]]; then
         CLUSTER_ARGS=(
@@ -60,6 +77,11 @@ while read TRAINING; do
         )
     fi
 
+    bash $REPO_ROOT/scripts/coupled/create_coupled_finetune_config.sh \
+        "$EXISTING_RESULTS_DATASET" \
+        "$TEMPLATE_CONFIG_PATH" \
+        "$CONFIG_PATH"
+
     if [[ -n "${OVERRIDE_ARGS}" ]]; then
         OVERRIDE="--override ${OVERRIDE_ARGS}"
     else
@@ -67,16 +89,18 @@ while read TRAINING; do
     fi
 
     echo
-    echo "Launching uncoupled training job:"
+    echo "Launching uncoupled fine-tuning job:"
     echo " - Job name: ${JOB_NAME}"
     echo " - Config: ${CONFIG_PATH}"
+    echo " - Coupled pretraining experiment ID: ${EXPER_ID}"
+    echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
     echo " - GPUs: ${N_GPUS}"
     echo " - Shared memory: ${SHARED_MEM}"
     echo " - Override: ${OVERRIDE_ARGS}"
 
-    python -m fme.ace.validate_config "$CONFIG_PATH" --config_type train $OVERRIDE
+    python -m fme.coupled.validate_config "$CONFIG_PATH" --config_type train $OVERRIDE
 
     if git status --porcelain "$CONFIG_PATH" | grep -q .; then
         git add "$CONFIG_PATH"
@@ -88,7 +112,7 @@ while read TRAINING; do
     EXPERIMENT_ID=$(
         gantry run \
             --name $JOB_NAME \
-            --description "Run uncoupled pretraining: ${JOB_GROUP}" \
+            --description "Run uncoupled fine-tuning: ${JOB_GROUP}" \
             --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
             --priority $PRIORITY \
             --preemptible \
@@ -104,12 +128,13 @@ while read TRAINING; do
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             --dataset $ATMOS_STATS_DATA:/atmos_stats \
             --dataset $OCEAN_STATS_DATA:/ocean_stats \
+            --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/"$CKPT_TYPE".tar:/ckpt.tar \
             --gpus "${N_GPUS}" \
             --shared-memory "${SHARED_MEM}" \
             --budget ai2/climate \
             --no-conda \
             --install "pip install --no-deps ." \
-            -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train "$CONFIG_PATH" $OVERRIDE |
+            -- torchrun --nproc_per_node "${N_GPUS}" -m fme.coupled.train "$CONFIG_PATH" $OVERRIDE |
             tee /dev/tty |
             grep beaker.org |
             cut -d/ -f5
@@ -117,11 +142,11 @@ while read TRAINING; do
 
     # remove or change 'training' once completed in order to submit an evaluator job
     { echo;
-      echo "${JOB_GROUP}|${EXPERIMENT_ID}|training|best_inference_ckpt|normal|--not-preemptible";
+      echo "${JOB_GROUP}|${JOB_TAG}|${EXPERIMENT_ID}|training|best_inference_ckpt|normal|--not-preemptible";
     } >> "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
 
     git add "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
-    git commit -m"Update uncoupled/${CONFIG_SUBDIR}/experiments.txt"
+    git commit -m"Update coupled/${CONFIG_SUBDIR}/experiments.txt"
     git push origin "${GIT_BRANCH}"
 
-done <"${SCRIPT_DIR}/${CONFIG_SUBDIR}/training.txt"
+done <"${SCRIPT_DIR}/${CONFIG_SUBDIR}/finetuning.txt"
