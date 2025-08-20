@@ -160,9 +160,6 @@ stepper:
       - HGTsfc
       - PRESsfc
       - surface_temperature
-      - Q2m
-      - UGRD10m
-      - VGRD10m
       - air_temperature_0
       - air_temperature_1
       - air_temperature_2
@@ -198,10 +195,6 @@ stepper:
       out_names:
       - PRESsfc
       - surface_temperature
-      - TMP2m
-      - Q2m
-      - UGRD10m
-      - VGRD10m
       - air_temperature_0
       - air_temperature_1
       - air_temperature_2
@@ -246,6 +239,8 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
+      - TMP2m
+      - Q2m
       # ocean coupling variables (diagnostic for now)
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
