@@ -33,6 +33,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.ocean import Ocean, OceanConfig
 from fme.core.ocean_data import OceanData
 from fme.core.optimization import NullOptimization
 from fme.core.tensors import add_ensemble_dim
@@ -210,6 +211,7 @@ class CoupledStepperConfig:
     ocean: ComponentConfig
     atmosphere: ComponentConfig
     sst_name: str = "sst"
+    sst_is_snapshot: bool = False
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
     parameter_init: CoupledParameterInitConfig = dataclasses.field(
         default_factory=lambda: CoupledParameterInitConfig()
@@ -298,14 +300,19 @@ class CoupledStepperConfig:
         return self.ocean_timestep // self.atmosphere_timestep
 
     @property
+    def atmosphere_ocean_config(self) -> OceanConfig:
+        """The OceanConfig defined in the atmosphere StepperConfig."""
+        return self._atmosphere_ocean_config
+
+    @property
     def ocean_fraction_name(self) -> str:
         """Name of the ocean fraction field in the atmosphere data."""
-        return self._atmosphere_ocean_config.ocean_fraction_name
+        return self.atmosphere_ocean_config.ocean_fraction_name
 
     @property
     def surface_temperature_name(self) -> str:
         """Name of the surface temperature field in the atmosphere data."""
-        return self._atmosphere_ocean_config.surface_temperature_name
+        return self.atmosphere_ocean_config.surface_temperature_name
 
     @property
     def ocean_next_step_forcing_names(self) -> list[str]:
@@ -365,7 +372,6 @@ class CoupledStepperConfig:
                 "The atmosphere stepper 'ocean' config cannot use 'slab' for "
                 "coupled emulation."
             )
-
         # validate compatibility of ocean and atmosphere timestep sizes
         ocean_timestep = pd.Timedelta(self.ocean.timedelta).to_pytimedelta()
         atmosphere_timestep = pd.Timedelta(self.atmosphere.timedelta).to_pytimedelta()
@@ -754,6 +760,11 @@ class CoupledStepper(
         self._dataset_info = dataset_info
         self._ocean_mask_provider = dataset_info.ocean_mask_provider
 
+        sst_prescriber: Ocean | None = self.atmosphere.ocean
+        if sst_prescriber is None:
+            raise ValueError("Atmosphere must have an Ocean interface.")
+        self._sst_prescriber: Ocean = sst_prescriber
+
         ocean_loss = self._config.get_ocean_loss(
             self.ocean.loss_obj,
             ocean.TIME_DIM,
@@ -826,6 +837,39 @@ class CoupledStepper(
     @property
     def _ocean_to_atmosphere_forcing_names(self) -> list[str]:
         return self._config.ocean_to_atmosphere_forcing_names
+
+    def _prescribe_ic_sst(
+        self,
+        atmos_ic_state: PrognosticState,
+        forcing_ic_batch: BatchData,
+    ) -> PrognosticState:
+        """Prescribe the initial condition SST state on the surface_temperature
+        initial condition field.
+
+        atmos_ic_state: The atmosphere prognostic state to be updated.
+
+        forcing_ic_state: The corresponding forcing state at the same time,
+            which should be output from _get_atmosphere_forcings.
+
+        """
+        ts_name = self._config.surface_temperature_name
+        assert np.all(atmos_ic_state.as_batch_data().time == forcing_ic_batch.time)
+        atmos_ic_data = atmos_ic_state.as_batch_data().data
+        forcing_ic_data = forcing_ic_batch.data
+        assert ts_name in atmos_ic_data
+        assert ts_name in forcing_ic_data
+        assert self._config.ocean_fraction_name in forcing_ic_data
+        atmos_ic_data = self._sst_prescriber(
+            input_data=forcing_ic_data,
+            gen_data=atmos_ic_data,
+            target_data=forcing_ic_data,
+        )
+        return PrognosticState(
+            BatchData(
+                data=atmos_ic_data,
+                time=forcing_ic_batch.time,
+            )
+        )
 
     def _forcings_from_ocean_with_ocean_fraction(
         self,
@@ -1005,6 +1049,14 @@ class CoupledStepper(
                 ),
                 time=atmos_window.time,
             )
+            if self._config.sst_is_snapshot:
+                # prescribe the initial condition SST state
+                atmos_ic_state = self._prescribe_ic_sst(
+                    atmos_ic_state,
+                    atmos_forcings.select_time_slice(
+                        slice(None, self.atmosphere.n_ic_timesteps)
+                    ),
+                )
             atmos_generator = self.atmosphere.get_prediction_generator(
                 atmos_ic_state,
                 atmos_forcings,
