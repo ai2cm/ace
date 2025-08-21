@@ -11,7 +11,7 @@ inference:
   loader:
     start_indices:
       times:
-      - '0421-01-01T06:00:00'
+      - '0421-01-03T12:00:00'
       - '0431-01-01T06:00:00'
       - '0441-01-01T06:00:00'
       - '0451-01-01T06:00:00'
@@ -71,20 +71,20 @@ validation_loader:
       file_pattern: 2025-08-13-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
       engine: zarr
       subset:
-        start_time: '0401-01-01T06:00:00'
-        stop_time: '0406-01-01T06:00:00'
+        start_time: '0402-01-01T06:00:00'
+        stop_time: '0407-01-01T06:00:00'
     - data_path: /climate-default
       file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
       engine: zarr
       subset:
-        start_time: '0401-01-01T06:00:00'
-        stop_time: '0406-01-01T06:00:00'
+        start_time: '0402-01-01T06:00:00'
+        stop_time: '0407-01-01T06:00:00'
     - data_path: /climate-default
       file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
       engine: zarr
       subset:
-        start_time: '0401-01-01T06:00:00'
-        stop_time: '0406-01-01T06:00:00'
+        start_time: '0402-01-01T06:00:00'
+        stop_time: '0407-01-01T06:00:00'
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
