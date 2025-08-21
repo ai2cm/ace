@@ -40,8 +40,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 8
-  prefetch_factor: 8
+  num_data_workers: 32
+  prefetch_factor: 2
   dataset:
     merge:
     - data_path: /climate-default

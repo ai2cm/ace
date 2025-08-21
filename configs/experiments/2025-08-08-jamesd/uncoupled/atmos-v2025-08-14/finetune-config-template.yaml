@@ -28,7 +28,7 @@ inference:
       - data_path: /climate-default
         file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
         engine: zarr
-    num_data_workers: 32
+    num_data_workers: 16
   aggregator:
     log_histograms: true
     time_mean_reference_data: /atmos_stats/time-mean.nc
@@ -58,8 +58,8 @@ train_loader:
         stop_time: '0306-01-01T06:00:00'
 validation_loader:
   batch_size: 64
-  num_data_workers: 32
-  prefetch_factor: 2
+  num_data_workers: 8
+  prefetch_factor: 4
   dataset:
     merge:
     - data_path: /climate-default
