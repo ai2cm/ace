@@ -149,7 +149,7 @@ while read FINETUNING; do
 
     # remove or change 'training' once completed in order to submit an evaluator job
     { echo;
-      echo "${JOB_GROUP}|${JOB_TAG}|${EXPERIMENT_ID}|training|best_inference_ckpt|normal|--not-preemptible";
+      echo "${JOB_GROUP}|${EXPERIMENT_ID}|training|best_inference_ckpt|normal|--not-preemptible";
     } >> "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
 
     git add "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
