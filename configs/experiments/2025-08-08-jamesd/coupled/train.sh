@@ -44,7 +44,8 @@ while read PRETRAINING; do
     N_GPUS=$(echo "$PRETRAINING" | cut -d"|" -f11)
     SHARED_MEM=$(echo "$PRETRAINING" | cut -d"|" -f12)
     RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f13)
-    OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f14)
+    WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f14)
+    OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f15)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -71,13 +72,19 @@ while read PRETRAINING; do
     )
     declare -a CLUSTER_ARGS
     if [[ "$CLUSTER" == "titan" ]]; then
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/climate-titan
+        fi
         CLUSTER_ARGS=(
-            --workspace ai2/climate-titan
+            --workspace "$WORKSPACE"
             --cluster ai2/titan-cirrascale
         )
     else
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/climate-ceres
+        fi
         CLUSTER_ARGS=(
-            --workspace ai2/climate-ceres
+            --workspace "$WORKSPACE"
             --cluster ai2/ceres-cirrascale
         )
     fi
