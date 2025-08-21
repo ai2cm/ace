@@ -47,7 +47,8 @@ while read FINETUNING; do
     N_GPUS=$(echo "$FINETUNING" | cut -d"|" -f8)
     SHARED_MEM=$(echo "$FINETUNING" | cut -d"|" -f9)
     RETRIES=$(echo "$FINETUNING" | cut -d"|" -f10)
-    OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f11)
+    WORKSPACE=$(echo "$TRAINING" | cut -d"|" -f11)
+    OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f12)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -66,15 +67,29 @@ while read FINETUNING; do
     )
     declare -a CLUSTER_ARGS
     if [[ "$CLUSTER" == "titan" ]]; then
-        CLUSTER_ARGS=(
-            --workspace ai2/climate-titan
-            --cluster ai2/titan-cirrascale
-        )
+        if [[ -n "$WORKSPACE" ]]; then
+            CLUSTER_ARGS=(
+                --workspace "$WORKSPACE"
+                --cluster ai2/titan-cirrascale
+            )
+        else
+            CLUSTER_ARGS=(
+                --workspace ai2/climate-titan
+                --cluster ai2/titan-cirrascale
+            )
+        fi
     else
-        CLUSTER_ARGS=(
-            --workspace ai2/climate-ceres
-            --cluster ai2/ceres-cirrascale
-        )
+        if [[ -n "$WORKSPACE" ]]; then
+            CLUSTER_ARGS=(
+                --workspace "$WORKSPACE"
+                --cluster ai2/ceres-cirrascale
+            )
+        else
+            CLUSTER_ARGS=(
+                --workspace ai2/climate-ceres
+                --cluster ai2/ceres-cirrascale
+            )
+        fi
     fi
 
     bash $SCRIPT_DIR/create_finetune_config.sh \

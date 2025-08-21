@@ -38,7 +38,8 @@ while read TRAINING; do
     N_GPUS=$(echo "$TRAINING" | cut -d"|" -f5)
     SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f6)
     RETRIES=$(echo "$TRAINING" | cut -d"|" -f7)
-    OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f8)
+    WORKSPACE=$(echo "$TRAINING" | cut -d"|" -f8)
+    OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f9)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -49,15 +50,29 @@ while read TRAINING; do
     JOB_NAME="${JOB_GROUP}-train"
     declare -a CLUSTER_ARGS
     if [[ "$CLUSTER" == "titan" ]]; then
-        CLUSTER_ARGS=(
-            --workspace ai2/climate-titan
-            --cluster ai2/titan-cirrascale
-        )
+        if [[ -n "$WORKSPACE" ]]; then
+            CLUSTER_ARGS=(
+                --workspace "$WORKSPACE"
+                --cluster ai2/titan-cirrascale
+            )
+        else
+            CLUSTER_ARGS=(
+                --workspace ai2/climate-titan
+                --cluster ai2/titan-cirrascale
+            )
+        fi
     else
-        CLUSTER_ARGS=(
-            --workspace ai2/climate-ceres
-            --cluster ai2/ceres-cirrascale
-        )
+        if [[ -n "$WORKSPACE" ]]; then
+            CLUSTER_ARGS=(
+                --workspace "$WORKSPACE"
+                --cluster ai2/ceres-cirrascale
+            )
+        else
+            CLUSTER_ARGS=(
+                --workspace ai2/climate-ceres
+                --cluster ai2/ceres-cirrascale
+            )
+        fi
     fi
 
     if [[ -n "${OVERRIDE_ARGS}" ]]; then
