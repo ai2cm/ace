@@ -50,29 +50,21 @@ while read TRAINING; do
     JOB_NAME="${JOB_GROUP}-train"
     declare -a CLUSTER_ARGS
     if [[ "$CLUSTER" == "titan" ]]; then
-        if [[ -n "$WORKSPACE" ]]; then
-            CLUSTER_ARGS=(
-                --workspace "$WORKSPACE"
-                --cluster ai2/titan-cirrascale
-            )
-        else
-            CLUSTER_ARGS=(
-                --workspace ai2/climate-titan
-                --cluster ai2/titan-cirrascale
-            )
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/climate-titan
         fi
+        CLUSTER_ARGS=(
+            --workspace "$WORKSPACE"
+            --cluster ai2/titan-cirrascale
+        )
     else
-        if [[ -n "$WORKSPACE" ]]; then
-            CLUSTER_ARGS=(
-                --workspace "$WORKSPACE"
-                --cluster ai2/ceres-cirrascale
-            )
-        else
-            CLUSTER_ARGS=(
-                --workspace ai2/climate-ceres
-                --cluster ai2/ceres-cirrascale
-            )
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/climate-ceres
         fi
+        CLUSTER_ARGS=(
+            --workspace "$WORKSPACE"
+            --cluster ai2/ceres-cirrascale
+        )
     fi
 
     if [[ -n "${OVERRIDE_ARGS}" ]]; then
@@ -89,6 +81,7 @@ while read TRAINING; do
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
     echo " - GPUs: ${N_GPUS}"
     echo " - Shared memory: ${SHARED_MEM}"
+    echo " - Workspace: ${WORKSPACE}"
     echo " - Override: ${OVERRIDE_ARGS}"
 
     python -m fme.ace.validate_config "$CONFIG_PATH" --config_type train $OVERRIDE

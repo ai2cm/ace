@@ -67,29 +67,21 @@ while read FINETUNING; do
     )
     declare -a CLUSTER_ARGS
     if [[ "$CLUSTER" == "titan" ]]; then
-        if [[ -n "$WORKSPACE" ]]; then
-            CLUSTER_ARGS=(
-                --workspace "$WORKSPACE"
-                --cluster ai2/titan-cirrascale
-            )
-        else
-            CLUSTER_ARGS=(
-                --workspace ai2/climate-titan
-                --cluster ai2/titan-cirrascale
-            )
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/climate-titan
         fi
+        CLUSTER_ARGS=(
+            --workspace "$WORKSPACE"
+            --cluster ai2/titan-cirrascale
+        )
     else
-        if [[ -n "$WORKSPACE" ]]; then
-            CLUSTER_ARGS=(
-                --workspace "$WORKSPACE"
-                --cluster ai2/ceres-cirrascale
-            )
-        else
-            CLUSTER_ARGS=(
-                --workspace ai2/climate-ceres
-                --cluster ai2/ceres-cirrascale
-            )
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/climate-ceres
         fi
+        CLUSTER_ARGS=(
+            --workspace "$WORKSPACE"
+            --cluster ai2/ceres-cirrascale
+        )
     fi
 
     bash $SCRIPT_DIR/create_finetune_config.sh \
