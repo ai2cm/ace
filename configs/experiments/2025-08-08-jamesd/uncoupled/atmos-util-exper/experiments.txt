@@ -22,3 +22,5 @@ nw32_pf2-val_nw8_pf4-inf_nw16-sh600|01K2V8EER1MHSZA3GF1KPAP4YV|training|best_inf
 nw4_pf16-val_nw8_pf4-inf_nw16-sh600|01K2VCR1D7R3Q49D873Y50Q7CZ|training|best_inference_ckpt|normal|--not-preemptible
 
 nw32_pf2-val_nw8_pf4-inf_nw16-sh400|01K2VCRD519YMATQQW1ES5PV1C|training|best_inference_ckpt|normal|--not-preemptible
+
+nw8_pf8|01K371ST6A0BWH32721N5WR70M|training|best_inference_ckpt|normal|--not-preemptible
