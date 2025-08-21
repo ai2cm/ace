@@ -52,20 +52,20 @@ train_data:
     engine: zarr
     subset:
       start: 0
-      stop: 10
+      stop: 16
   coarse:
   - data_path:  /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 100km.zarr
     engine: zarr
     subset:
       start: 0
-      stop: 10
+      stop: 16
   lat_extent:
     start: -66.0
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 32 #128 for 8 gpus
+  batch_size: 16 #128 for 8 gpus
   num_data_workers: 8
   fine:
   - data_path:  /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -73,14 +73,14 @@ validation_data:
     file_pattern: 3km.zarr
     subset:
       start: 20
-      stop: 30
+      stop: 36
   coarse:
   - data_path:  /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
     subset:
       start: 20
-      stop: 30
+      stop: 36
   lat_extent:
     start: 22.0
     stop: 50.0
