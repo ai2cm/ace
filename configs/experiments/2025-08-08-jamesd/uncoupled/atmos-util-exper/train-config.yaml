@@ -1,10 +1,10 @@
 experiment_dir: /results
 save_checkpoint: true
-checkpoint_every_n_batches: 3000
+checkpoint_every_n_batches: 1000
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 2
+max_epochs: 10
 n_forward_steps: 2
 inference:
   n_forward_steps: 29200
@@ -30,13 +30,12 @@ inference:
         engine: zarr
     num_data_workers: 16
   aggregator:
-    log_histograms: true
-    time_mean_reference_data: /atmos_stats/time-mean.nc
+    log_histograms: false
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: coupled-emulator
+  project: ace2-cm4-atmos-noLSM
   entity: ai2cm
 train_loader:
   batch_size: 16 # 14129 / 4 ~ 3533 batches per GPU
@@ -60,6 +59,7 @@ validation_loader:
   batch_size: 64 # 114 / 4 ~ 29 batches per GPU
   num_data_workers: 8 # 29 / 8 ~ 4 batches per data worker
   prefetch_factor: 4
+  time_buffer: 30
   dataset:
     merge:
     - data_path: /climate-default
