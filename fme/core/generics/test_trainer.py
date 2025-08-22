@@ -969,7 +969,7 @@ def test_save_best_inference_epoch_ckpts(tmp_path: str):
     assert best_inference_checkpoint["epoch"] == 3
 
 
-def test_retain_best_inference_ckpts_disabled(tmp_path: str):
+def test_save_best_inference_epoch_ckpts_disabled(tmp_path: str):
     """Test that when save_best_inference_epoch_checkpoints is False, no
     epoch-specific checkpoints are saved."""
     max_epochs = 3
