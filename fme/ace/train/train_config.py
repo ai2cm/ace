@@ -193,6 +193,9 @@ class TrainConfig:
         validation_aggregator: Configuration for the validation aggregator.
         evaluate_before_training: Whether to run validation and inline inference before
             any training is done.
+        save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
+            for each epoch where best_inference_error achieves a new minimum.
+            Checkpoints are saved as best_inference_ckpt_XXXX.tar.
     """
 
     train_loader: DataLoaderConfig
@@ -222,6 +225,7 @@ class TrainConfig:
         default_factory=lambda: OneStepAggregatorConfig()
     )
     evaluate_before_training: bool = False
+    save_best_inference_epoch_checkpoints: bool = False
 
     def set_random_seed(self):
         if self.seed is not None:
