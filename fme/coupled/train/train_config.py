@@ -106,7 +106,7 @@ class TrainConfig:
             any training is done.
         retain_best_inference_checkpoints: Whether to save a separate checkpoint for
             each epoch where best_inference_error achieves a new minimum. Checkpoints
-            are saved as best_inference_ckpt_epochXXXX.tar.
+            are saved as best_inference_ckpt_XXXX.tar.
 
     """
 
