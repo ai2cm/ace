@@ -67,7 +67,6 @@ class StandaloneComponentCheckpointsConfig:
     ocean: StandaloneComponentConfig
     atmosphere: StandaloneComponentConfig
     sst_name: str = "sst"
-    sst_is_snapshot: bool = False
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
 
     def load_stepper_config(self) -> CoupledStepperConfig:
@@ -81,7 +80,6 @@ class StandaloneComponentCheckpointsConfig:
                 stepper=load_single_stepper_config(self.atmosphere.path),
             ),
             sst_name=self.sst_name,
-            sst_is_snapshot=self.sst_is_snapshot,
             ocean_fraction_prediction=self.ocean_fraction_prediction,
         )
 

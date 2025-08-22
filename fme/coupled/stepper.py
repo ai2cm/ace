@@ -211,7 +211,6 @@ class CoupledStepperConfig:
     ocean: ComponentConfig
     atmosphere: ComponentConfig
     sst_name: str = "sst"
-    sst_is_snapshot: bool = False
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
     parameter_init: CoupledParameterInitConfig = dataclasses.field(
         default_factory=lambda: CoupledParameterInitConfig()
@@ -1049,14 +1048,13 @@ class CoupledStepper(
                 ),
                 time=atmos_window.time,
             )
-            if self._config.sst_is_snapshot:
-                # prescribe the initial condition SST state
-                atmos_ic_state = self._prescribe_ic_sst(
-                    atmos_ic_state,
-                    atmos_forcings.select_time_slice(
-                        slice(None, self.atmosphere.n_ic_timesteps)
-                    ),
-                )
+            # prescribe the initial condition SST state
+            atmos_ic_state = self._prescribe_ic_sst(
+                atmos_ic_state,
+                atmos_forcings.select_time_slice(
+                    slice(None, self.atmosphere.n_ic_timesteps)
+                ),
+            )
             atmos_generator = self.atmosphere.get_prediction_generator(
                 atmos_ic_state,
                 atmos_forcings,
