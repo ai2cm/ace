@@ -908,7 +908,7 @@ def test_evaluate_before_training(tmp_path: str):
                 assert logs[train_loss_name] == train_losses[i - 1]
 
 
-def test_retain_best_inference_ckpts(tmp_path: str):
+def test_save_best_inference_epoch_ckpts(tmp_path: str):
     """Test that save_best_inference_epoch_checkpoints saves epoch-specific
     checkpoints."""
     max_epochs = 3
