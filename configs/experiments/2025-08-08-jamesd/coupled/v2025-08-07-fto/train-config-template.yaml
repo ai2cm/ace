@@ -137,7 +137,6 @@ stepper:
     land_fraction_name: land_fraction
     sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
   sst_name: sst
-  sst_is_snapshot: true
   ocean:
     timedelta: 5D
     stepper:
