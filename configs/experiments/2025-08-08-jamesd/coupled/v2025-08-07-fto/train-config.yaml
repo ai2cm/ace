@@ -1,5 +1,6 @@
 experiment_dir: /results
 save_checkpoint: true
+retain_best_inference_checkpoints: true
 checkpoint_every_n_batches: 120
 validate_using_ema: true
 ema:
