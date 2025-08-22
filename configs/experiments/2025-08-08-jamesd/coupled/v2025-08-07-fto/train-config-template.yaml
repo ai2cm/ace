@@ -1,6 +1,7 @@
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 120
+save_best_inference_epoch_checkpoints: true
 validate_using_ema: true
 ema:
   decay: 0.999
@@ -27,7 +28,7 @@ inference:
       atmosphere:
         merge:
         - data_path: /climate-default
-          file_pattern: 2025-08-07-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+          file_pattern: 2025-08-07-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
           engine: zarr
           subset:
             # NOTE: this is required to align the atmosphere and ocean start times
@@ -79,7 +80,7 @@ train_loader:
       atmosphere:
         merge:
         - data_path: /climate-default
-          file_pattern: 2025-08-07-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+          file_pattern: 2025-08-07-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
           engine: zarr
           subset:
             start_time: '0151-01-03T12:00:00' # earlier times nan
@@ -112,7 +113,7 @@ validation_loader:
       atmosphere:
         merge:
         - data_path: /climate-default
-          file_pattern: 2025-08-07-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+          file_pattern: 2025-08-07-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
           engine: zarr
           subset:
             start_time: '0306-01-03T12:00:00'
