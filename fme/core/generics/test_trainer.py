@@ -218,7 +218,7 @@ class Config:
     ema_checkpoint_save_epochs: Slice | None = None
     segment_epochs: int | None = None
     evaluate_before_training: bool = False
-    save_all_best_inference_checkpoints: bool = False
+    save_best_inference_epoch_checkpoints: bool = False
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
@@ -321,7 +321,7 @@ def get_trainer(
     evaluate_before_training: bool = False,
     checkpoint_every_n_batches: int = 0,
     n_train_batches: int = 100,
-    save_all_best_inference_checkpoints: bool = False,
+    save_best_inference_epoch_checkpoints: bool = False,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -390,7 +390,7 @@ def get_trainer(
         max_epochs=max_epochs,
         validate_using_ema=validate_using_ema,
         evaluate_before_training=evaluate_before_training,
-        save_all_best_inference_checkpoints=save_all_best_inference_checkpoints,
+        save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
     )
     aggregator_builder = AggregatorBuilder(
         train_losses=train_losses,
@@ -909,7 +909,7 @@ def test_evaluate_before_training(tmp_path: str):
 
 
 def test_retain_best_inference_ckpts(tmp_path: str):
-    """Test that save_all_best_inference_checkpoints saves epoch-specific
+    """Test that save_best_inference_epoch_checkpoints saves epoch-specific
     checkpoints."""
     max_epochs = 3
     n_train_batches = 5
@@ -927,7 +927,7 @@ def test_retain_best_inference_ckpts(tmp_path: str):
         inference_losses=inference_losses,
         n_train_batches=n_train_batches,
         validate_using_ema=False,
-        save_all_best_inference_checkpoints=True,
+        save_best_inference_epoch_checkpoints=True,
     )
 
     trainer.train()
@@ -970,7 +970,7 @@ def test_retain_best_inference_ckpts(tmp_path: str):
 
 
 def test_retain_best_inference_ckpts_disabled(tmp_path: str):
-    """Test that when save_all_best_inference_checkpoints is False, no
+    """Test that when save_best_inference_epoch_checkpoints is False, no
     epoch-specific checkpoints are saved."""
     max_epochs = 3
     n_train_batches = 5
@@ -988,7 +988,7 @@ def test_retain_best_inference_ckpts_disabled(tmp_path: str):
         inference_losses=inference_losses,
         n_train_batches=n_train_batches,
         validate_using_ema=False,
-        save_all_best_inference_checkpoints=False,
+        save_best_inference_epoch_checkpoints=False,
     )
 
     trainer.train()
