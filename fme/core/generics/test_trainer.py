@@ -218,6 +218,7 @@ class Config:
     ema_checkpoint_save_epochs: Slice | None = None
     segment_epochs: int | None = None
     evaluate_before_training: bool = False
+    retain_best_inference_checkpoints: bool = False
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
@@ -320,6 +321,7 @@ def get_trainer(
     evaluate_before_training: bool = False,
     checkpoint_every_n_batches: int = 0,
     n_train_batches: int = 100,
+    retain_best_inference_checkpoints: bool = False,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -388,6 +390,7 @@ def get_trainer(
         max_epochs=max_epochs,
         validate_using_ema=validate_using_ema,
         evaluate_before_training=evaluate_before_training,
+        retain_best_inference_checkpoints=retain_best_inference_checkpoints,
     )
     aggregator_builder = AggregatorBuilder(
         train_losses=train_losses,
@@ -903,3 +906,102 @@ def test_evaluate_before_training(tmp_path: str):
                 assert train_loss_name not in logs
             else:
                 assert logs[train_loss_name] == train_losses[i - 1]
+
+
+def test_retain_best_inference_ckpts(tmp_path: str):
+    """Test that retain_best_inference_checkpoints saves epoch-specific
+    checkpoints."""
+    max_epochs = 3
+    n_train_batches = 5
+
+    # set up losses where inference improves at epochs 1 and 3 but not 2
+    train_losses = np.array([0.5, 0.4, 0.3])
+    val_losses = np.array([0.6, 0.5, 0.4])
+    inference_losses = np.array([0.3, 0.4, 0.2])
+
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        train_losses=train_losses,
+        validation_losses=val_losses,
+        inference_losses=inference_losses,
+        n_train_batches=n_train_batches,
+        validate_using_ema=False,
+        retain_best_inference_checkpoints=True,
+    )
+
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+
+    # check that standard checkpoints exist
+    assert os.path.exists(paths.latest_checkpoint_path)
+    assert os.path.exists(paths.best_checkpoint_path)
+    assert os.path.exists(paths.best_inference_checkpoint_path)
+
+    # check for checkpoints
+    assert os.path.exists(
+        paths.best_inference_epoch_checkpoint_path(1)
+    ), "Should save epoch 1"
+    assert not os.path.exists(
+        paths.best_inference_epoch_checkpoint_path(2)
+    ), "Should not save epoch 2"
+    assert os.path.exists(
+        paths.best_inference_epoch_checkpoint_path(3)
+    ), "Should save epoch 3"
+
+    epoch1_checkpoint = torch.load(
+        paths.best_inference_epoch_checkpoint_path(1), weights_only=False
+    )
+    assert epoch1_checkpoint["epoch"] == 1
+    assert epoch1_checkpoint["best_inference_error"] == 0.3
+
+    epoch3_checkpoint = torch.load(
+        paths.best_inference_epoch_checkpoint_path(3), weights_only=False
+    )
+    assert epoch3_checkpoint["epoch"] == 3
+    assert epoch3_checkpoint["best_inference_error"] == 0.2
+
+    best_inference_checkpoint = torch.load(
+        paths.best_inference_checkpoint_path, weights_only=False
+    )
+    assert best_inference_checkpoint["best_inference_error"] == 0.2
+    assert best_inference_checkpoint["epoch"] == 3
+
+
+def test_retain_best_inference_ckpts_disabled(tmp_path: str):
+    """Test that when retain_best_inference_checkpoints is False, no
+    epoch-specific checkpoints are saved."""
+    max_epochs = 3
+    n_train_batches = 5
+
+    # set up losses
+    train_losses = np.array([0.5, 0.4, 0.3])
+    val_losses = np.array([0.6, 0.5, 0.4])
+    inference_losses = np.array([0.3, 0.2, 0.1])
+
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        train_losses=train_losses,
+        validation_losses=val_losses,
+        inference_losses=inference_losses,
+        n_train_batches=n_train_batches,
+        validate_using_ema=False,
+        retain_best_inference_checkpoints=False,
+    )
+
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+
+    # check that standard checkpoints exist
+    assert os.path.exists(paths.latest_checkpoint_path)
+    assert os.path.exists(paths.best_checkpoint_path)
+    assert os.path.exists(paths.best_inference_checkpoint_path)
+
+    # check that checkpoints weren't saved
+    for epoch in range(1, max_epochs + 1):
+        assert not os.path.exists(
+            paths.best_inference_epoch_checkpoint_path(epoch)
+        ), f"Should not save best_inference_ckpt_{epoch}.tar when disabled"
