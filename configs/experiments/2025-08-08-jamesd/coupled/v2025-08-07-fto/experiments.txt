@@ -4,3 +4,5 @@ fto-v2025-08-07-ts_uncoupled-ocn_pt_nfs8|01K37CP9JZE0VQ7ZY03PVN6CNT|training|bes
 fto-v2025-08-07-ocn_pt_nfs8|01K3815QY3TMRRWHG90R8FJ2BD|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v2025-08-07-ocn_pt_nfs8|01K395V0BDWT1TK7J280F3X26V|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v2025-08-07-ocn_pt_nfs8|01K39ARSSA4F90J2ZKP6HX2EH2|training|best_inference_ckpt|normal|--not-preemptible
