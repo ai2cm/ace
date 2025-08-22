@@ -104,7 +104,7 @@ class TrainConfig:
             training, validation and inline inference aggregators.
         evaluate_before_training: Whether to run validation and inline inference before
             any training is done.
-        retain_best_inference_checkpoints: Whether to save a separate checkpoint for
+        save_all_best_inference_checkpoints: Whether to save a separate checkpoint for
             each epoch where best_inference_error achieves a new minimum. Checkpoints
             are saved as best_inference_ckpt_XXXX.tar.
 
@@ -132,7 +132,7 @@ class TrainConfig:
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = True
-    retain_best_inference_checkpoints: bool = False
+    save_all_best_inference_checkpoints: bool = False
 
     @property
     def n_forward_steps(self) -> int:

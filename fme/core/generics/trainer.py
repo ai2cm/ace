@@ -129,7 +129,7 @@ class TrainConfigProtocol(Protocol):
     def evaluate_before_training(self) -> bool: ...
 
     @property
-    def retain_best_inference_checkpoints(self) -> bool: ...
+    def save_all_best_inference_checkpoints(self) -> bool: ...
 
     def get_inference_epochs(self) -> list[int]: ...
 
@@ -671,7 +671,7 @@ class Trainer:
                 self.save_checkpoint(self.paths.best_inference_checkpoint_path)
 
                 # Save epoch-specific best inference checkpoint if configured
-                if self.config.retain_best_inference_checkpoints:
+                if self.config.save_all_best_inference_checkpoints:
                     best_inference_epoch_path = (
                         self.paths.best_inference_epoch_checkpoint_path(
                             self._epochs_trained
