@@ -4,7 +4,7 @@ checkpoint_every_n_batches: 3000
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 50 # this is about equivalent to the amount of trainign for ACE2-ERA5/ACE2-SHiELD
+max_epochs: 50
 n_forward_steps: 2
 inference:
   n_forward_steps: 29200
@@ -40,8 +40,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 32
-  prefetch_factor: 2
+  num_data_workers: 8
+  prefetch_factor: 8
   dataset:
     merge:
     - data_path: /climate-default
