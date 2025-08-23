@@ -41,9 +41,8 @@ logging:
   project: ace-samudra-cm4
   entity: ai2cm
 train_loader:
-  batch_size: 16 # 707 / 2 ~ 354 batches per GPU
-  num_data_workers: 32 # 354 / 32 ~ 12 batches per data worker
-  prefetch_factor: 4
+  batch_size: 16 # 707 / 8 ~ 89 batches per GPU
+  num_data_workers: 16 # 89 / 16 ~ 6 batches per data worker
   dataset:
     merge:
     - data_path: /climate-default
@@ -62,9 +61,8 @@ train_loader:
       subset:
         stop_time: '0306-01-01'
 validation_loader:
-  batch_size: 16 # 22 / 2 = 11 batches per GPU
-  num_data_workers: 4 # 11 / 4 ~ 3 batches per data_worker
-  prefetch_factor: 3
+  batch_size: 16 # 22 / 8 ~ 3 batches per GPU
+  num_data_workers: 8 # 3 / 4 ~ 3 batches per data_worker
   dataset:
     merge:
     - data_path: /climate-default
