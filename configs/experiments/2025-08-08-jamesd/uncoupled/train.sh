@@ -24,8 +24,8 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # FIXME: this needs to be per-task configurable
-ATMOS_STATS_DATA=jamesd/2025-08-14-cm4-piControl-200yr-coupled-stats-atmosphere
-OCEAN_STATS_DATA=jamesd/2025-08-14-cm4-piControl-200yr-coupled-stats-ocean
+ATMOS_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-atmosphere
+OCEAN_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean
 
 # Change to the repo root so paths are valid no matter where we run the script from.
 cd "$REPO_ROOT"

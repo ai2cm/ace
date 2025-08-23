@@ -15,7 +15,7 @@ loader:
   dataset:
     merge:
     - data_path: /climate-default
-      file_pattern: 2025-08-14-cm4-piControl-200yr-coupled-ocean.zarr
+      file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
       engine: zarr
     - data_path: /climate-default
       file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr

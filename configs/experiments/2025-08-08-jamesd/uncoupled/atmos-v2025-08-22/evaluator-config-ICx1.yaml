@@ -15,7 +15,7 @@ loader:
   dataset:
     merge:
     - data_path: /climate-default
-      file_pattern: 2025-08-14-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+      file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
       engine: zarr
     - data_path: /climate-default
       file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr

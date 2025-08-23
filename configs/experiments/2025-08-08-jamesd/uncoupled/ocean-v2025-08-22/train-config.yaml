@@ -22,7 +22,7 @@ inference:
     dataset:
       merge:
       - data_path: /climate-default
-        file_pattern: 2025-08-14-cm4-piControl-200yr-coupled-ocean.zarr
+        file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
         engine: zarr
       - data_path: /climate-default
         file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
@@ -46,7 +46,7 @@ train_loader:
   dataset:
     merge:
     - data_path: /climate-default
-      file_pattern: 2025-08-14-cm4-piControl-200yr-coupled-ocean.zarr
+      file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
       engine: zarr
       subset:
         stop_time: '0306-01-01'
@@ -67,7 +67,7 @@ validation_loader:
   dataset:
     merge:
     - data_path: /climate-default
-      file_pattern: 2025-08-14-cm4-piControl-200yr-coupled-ocean.zarr
+      file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
       engine: zarr
       subset:
         start_time: '0306-01-01'

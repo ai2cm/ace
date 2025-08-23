@@ -19,8 +19,8 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 # FIXME: this needs to be per-task configurable
-ATMOS_STATS_DATA=jamesd/2025-08-14-cm4-piControl-200yr-coupled-stats-atmosphere
-OCEAN_STATS_DATA=jamesd/2025-08-14-cm4-piControl-200yr-coupled-stats-ocean
+ATMOS_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-atmosphere
+OCEAN_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean
 
 # Change to the repo root so paths are valid no matter where we run the script from.
 cd "$REPO_ROOT"
