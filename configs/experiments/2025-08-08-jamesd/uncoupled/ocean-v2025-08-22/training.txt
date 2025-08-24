@@ -1,2 +1,3 @@
 group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|override_args
-v2025-08-22-mnsf-correctHI-rs1|train|urgent|ceres|8|400GiB|3
+v2025-08-22-mnsf-correctHI-rs1|training|urgent|ceres|8|400GiB|3
+v2025-08-22-mnsf-correctHI-nfs8-rs1|train|urgent|ceres|8|400GiB|3|n_forward_steps=8 max_epochs=75
