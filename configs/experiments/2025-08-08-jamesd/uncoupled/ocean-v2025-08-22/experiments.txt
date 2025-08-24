@@ -8,3 +8,5 @@ v2025-08-22-mnsf-correctHI-rs1-finetune|01K3CBRSDVSJFZBQS3WXSGQBYM|training|best
 v2025-08-22-mnsf-correctHI-rs1-finetune|01K3D4WV12YY53DKMJ9VD6MBKN|training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-22-mnsf-correctHI-rs1-finetune|01K3D5RZS4FCY5APBCRT6Q3GJC|training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-22-mnsf-correctHI-nfs8-rs1||training|best_inference_ckpt|normal|--not-preemptible
