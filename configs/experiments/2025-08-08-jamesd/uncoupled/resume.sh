@@ -76,7 +76,6 @@ while read RESUMING; do
     echo "Resuming uncoupled training job:"
     echo " - Job name: ${JOB_NAME}"
     echo " - Original experiment ID: ${EXPER_ID}"
-    echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
     echo " - Workspace: ${WORKSPACE}"
@@ -104,6 +103,7 @@ while read RESUMING; do
             --dataset $ATMOS_STATS_DATA:/atmos_stats \
             --dataset $OCEAN_STATS_DATA:/ocean_stats \
             --dataset "$EXISTING_RESULTS_DATASET:/existing-results" \
+            --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/ckpt.tar:/ckpt.tar \
             --gpus "${N_GPUS}" \
             --shared-memory "${SHARED_MEM}" \
             --budget ai2/climate \
