@@ -13,10 +13,11 @@ CONFIG_SUBDIR=$1
 
 # Get the absolute directory where this script is located.
 SCRIPT_DIR=$(git rev-parse --show-prefix)
-REPO_ROOT=$(git rev-parse --show-toplevel)
 
 # Since we use a service account API key for wandb, we use the beaker username to set the wandb username.
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+REPO_ROOT=$(git rev-parse --show-toplevel)
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # FIXME: this needs to be per-task configurable
 ATMOS_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-atmosphere
@@ -25,104 +26,103 @@ OCEAN_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean
 # Change to the repo root so paths are valid no matter where we run the script from.
 cd "$REPO_ROOT"
 
-RESUMING_FILE="${SCRIPT_DIR}/${CONFIG_SUBDIR}/resuming.txt"
-
 while read RESUMING; do
-    GROUP=$(echo "$FINETUNING" | cut -d"|" -f1)
-    WANDB_PROJECT=$(echo "$FINETUNING" | cut -d"|" -f2)
-    WANDB_ID=$(echo "$FINETUNING" | cut -d"|" -f3)
-    STATUS=$(echo "$FINETUNING" | cut -d"|" -f4)
-    PRIORITY=$(echo "$FINETUNING" | cut -d"|" -f5)
-    CLUSTER=$(echo "$FINETUNING" | cut -d"|" -f6)
-    N_GPUS=$(echo "$FINETUNING" | cut -d"|" -f7)
-    SHARED_MEM=$(echo "$FINETUNING" | cut -d"|" -f8)
-    RETRIES=$(echo "$FINETUNING" | cut -d"|" -f9)
-    OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f10)
-    if [[ "$STATUS" != "resume" ]]; then
-        echo "Skipping experiment ID ${EXPER_ID} with status '${STATUS}'."
-        echo
+    GROUP=$(echo "$RESUMING" | cut -d"|" -f1)
+    WANDB_PROJECT=$(echo "$RESUMING" | cut -d"|" -f2)
+    WANDB_ID=$(echo "$RESUMING" | cut -d"|" -f3)
+    STATUS=$(echo "$RESUMING" | cut -d"|" -f4)
+    PRIORITY=$(echo "$RESUMING" | cut -d"|" -f5)
+    CLUSTER=$(echo "$RESUMING" | cut -d"|" -f6)
+    N_GPUS=$(echo "$RESUMING" | cut -d"|" -f7)
+    SHARED_MEM=$(echo "$RESUMING" | cut -d"|" -f8)
+    RETRIES=$(echo "$RESUMING" | cut -d"|" -f9)
+    OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f10)
+    if [[ "$STATUS" != "train" ]]; then
         continue
     fi
     if [[ -z $RETRIES ]]; then
         RETRIES=0
     fi
-
+    JOB_GROUP="${GROUP}"
+    JOB_NAME="${JOB_GROUP}-train"
     EXPER_ID=$(
         python $REPO_ROOT/scripts/wandb/wandb_to_beaker_experiment.py \
           --project "$WANDB_PROJECT" --wandb_id "$WANDB_ID"
     )
-    # Get the results dataset from the last job of the experiment
     EXISTING_RESULTS_DATASET=$(
         beaker experiment get $EXPER_ID --format json |
           jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4
     )
-    if [[ -z "$EXISTING_RESULTS_DATASET" || "$EXISTING_RESULTS_DATASET" == "null" ]]; then
-          echo "ERROR: Could not find results dataset for experiment ${EXPER_ID}. Skipping."
-          echo
-          continue
-    fi
     declare -a CLUSTER_ARGS
-    if [[ "$CLUSTER" == "jupiter" ]]; then
+    if [[ "$CLUSTER" == "titan" ]]; then
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/climate-titan
+        fi
         CLUSTER_ARGS=(
-            --workspace ai2/ace
-            --cluster ai2/jupiter-cirrascale-2
+            --workspace "$WORKSPACE"
+            --cluster ai2/titan-cirrascale
         )
-    elif [[ "$CLUSTER" == "ceres" ]]; then
+    else
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/climate-ceres
+        fi
         CLUSTER_ARGS=(
-            --workspace ai2/ace # Or a ceres-specific workspace if you have one
+            --workspace "$WORKSPACE"
             --cluster ai2/ceres-cirrascale
         )
-    else
-        echo "ERROR: Unknown cluster '${CLUSTER}' for experiment ${EXPER_ID}. Skipping."
-        echo
-        continue
-    fi
-
-    if [[ -n "${OVERRIDE_ARGS}" ]]; then
-        OVERRIDE="--override ${OVERRIDE_ARGS}"
-    else
-        OVERRIDE=""
     fi
 
     echo
     echo "Resuming uncoupled training job:"
     echo " - Job name: ${JOB_NAME}"
-    echo " - Original Experiment ID: ${EXPER_ID}"
+    echo " - Original experiment ID: ${EXPER_ID}"
+    echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
-    echo " - Cluster: ${CLUSTER}"
+    echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
+    echo " - Workspace: ${WORKSPACE}"
     echo " - GPUs: ${N_GPUS}"
     echo " - Shared memory: ${SHARED_MEM}"
-    echo " - New max epochs: ${NEW_MAX_EPOCHS}"
-    echo " - Additional overrides: ${OVERRIDE_ARGS:-None}"
-    echo
+    echo " - Override: ${OVERRIDE_ARGS}"
 
-    gantry run \
-        --name "$JOB_NAME" \
-        --description "Resume uncoupled pretraining: ${JOB_GROUP}" \
-        --beaker-image annak/fme-deps-only-d51944c4 \
-        --priority "$PRIORITY" \
-        --preemptible \
-        "${CLUSTER_ARGS[@]}" \
-        --weka climate-default:/climate-default \
-        --budget ai2/climate \
-        --env WANDB_USERNAME=$WANDB_USERNAME \
-        --env WANDB_JOB_TYPE=training \
-        --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-        --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
-        --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset jamesd/2025-03-18-cm4-piControl-ocean-atmos-5daily-stats:/statsdata \
-        --dataset "$EXISTING_RESULTS_DATASET:/existing-results" \
-        --gpus "$N_GPUS" \
-        --shared-memory "$SHARED_MEM" \
-        --no-conda \
-        --install "pip install --no-deps ." \
-        -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train /existing-results/config.yaml \
-        --override "${ALL_OVERRIDES[@]}"
+    EXPERIMENT_ID=$(
+        gantry run \
+            --name "$JOB_NAME" \
+            --description "Resume uncoupled pretraining: ${JOB_GROUP}" \
+            --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
+            --priority "$PRIORITY" \
+            --preemptible \
+            --retries $RETRIES \
+            "${CLUSTER_ARGS[@]}" \
+            --weka climate-default:/climate-default \
+            --env WANDB_USERNAME=$BEAKER_USERNAME \
+            --env WANDB_NAME=$JOB_NAME \
+            --env WANDB_JOB_TYPE=training \
+            --env WANDB_RUN_GROUP=$JOB_GROUP \
+            --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+            --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+            --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+            --dataset $ATMOS_STATS_DATA:/atmos_stats \
+            --dataset $OCEAN_STATS_DATA:/ocean_stats \
+            --dataset "$EXISTING_RESULTS_DATASET:/existing-results" \
+            --gpus "${N_GPUS}" \
+            --shared-memory "${SHARED_MEM}" \
+            --budget ai2/climate \
+            --no-conda \
+            --install "pip install --no-deps ." \
+            -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train /existing-results/config.yaml \
+            --override existing_results_dir=/existing-results "${OVERRIDE_ARGS[@]}" |
+            tee /dev/tty |
+            grep beaker.org |
+            cut -d/ -f5
+    )
 
-    echo "Job submitted for ${EXPER_ID}."
-    echo "-----------------------------------------------------"
-    echo
-    sleep 1
-done <"$RESUMING_FILE"
+    # remove or change 'training' once completed in order to submit an evaluator job
+    { echo;
+      echo "${JOB_GROUP}|${EXPERIMENT_ID}|training|best_inference_ckpt|normal|--not-preemptible";
+    } >> "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
 
-echo "All specified experiments have been processed."
+    git add "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
+    git commit -m"Update uncoupled/${CONFIG_SUBDIR}/experiments.txt"
+    git push origin "${GIT_BRANCH}"
+
+done <"${SCRIPT_DIR}/${CONFIG_SUBDIR}/resuming.txt"

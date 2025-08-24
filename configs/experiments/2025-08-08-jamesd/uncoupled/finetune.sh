@@ -4,7 +4,7 @@ set -e
 
 if [[ "$#" -ne 1 ]]; then
   echo "Usage: $0 <config_subdirectory>"
-  echo "  - <config_subdirectory>: Subdirectory containing the 'finetune-config.yaml' to use."
+  echo "  - <config_subdirectory>: Subdirectory containing the 'finetune-config-template.yaml' to use."
   exit 1
 fi
 
@@ -103,6 +103,7 @@ while read FINETUNING; do
     echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
+    echo " - Workspace: ${WORKSPACE}"
     echo " - GPUs: ${N_GPUS}"
     echo " - Shared memory: ${SHARED_MEM}"
     echo " - Override: ${OVERRIDE_ARGS}"
