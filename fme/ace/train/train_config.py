@@ -196,6 +196,7 @@ class TrainConfig:
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
+        existing_results_dir: Directory where existing results are saved.
     """
 
     train_loader: DataLoaderConfig
@@ -226,6 +227,7 @@ class TrainConfig:
     )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    existing_results_dir: str | None = None
 
     def set_random_seed(self):
         if self.seed is not None:
