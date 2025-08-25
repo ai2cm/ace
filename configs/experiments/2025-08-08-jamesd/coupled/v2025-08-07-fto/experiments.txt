@@ -1,3 +1,3 @@
-group|exper_id|status|ckpt_type|priority|premptible_flag
+group|exper_id|status|ckpt_type|priority|premptible_flag|override|exper_job_idx
 fto-v2025-08-07-ts_uncoupled-ocn_pt_nfs8|01K37CP9JZE0VQ7ZY03PVN6CNT|training|best_inference_ckpt|normal|--not-preemptible
-fto-v2025-08-07-ocn_pt_nfs8|01K39ARSSA4F90J2ZKP6HX2EH2|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+fto-v2025-08-07-ocn_pt_nfs8|01K39ARSSA4F90J2ZKP6HX2EH2|run_ICx1|best_inference_ckpt|normal|--not-preemptible||-2

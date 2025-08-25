@@ -27,6 +27,7 @@ while read TRAIN_EXPER; do
     PRIORITY=$(echo "$TRAIN_EXPER" | cut -d"|" -f5)
     PREEMPTIBLE=$(echo "$TRAIN_EXPER" | cut -d"|" -f6)
     OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
+    EXISTING_RESULTS_INDEX=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
     # Check if STATUS starts with "run_"
     if [[ ! "$STATUS" =~ ^run_ ]]; then
         continue
@@ -53,8 +54,13 @@ while read TRAIN_EXPER; do
     if [[ -z $PREEMPTIBLE ]]; then
         PREEMPTIBLE=--not-preemptible
     fi
+    if [[ -z $EXISTING_RESULTS_INDEX ]]; then
+        EXISTING_RESULTS_INDEX=-1
+    fi
 
-    EXISTING_RESULTS_DATASET=$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4)
+    EXISTING_RESULTS_DATASET=$(beaker experiment get "$EXPER_ID" --format json | \
+        jq -r --argjson idx "$EXISTING_RESULTS_INDEX" '.[].jobs[$idx].result.beaker')
+
     echo
     echo "Launching coupled evaluator job:"
     echo " - Config path: ${CONFIG_PATH}"
