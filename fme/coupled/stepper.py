@@ -568,6 +568,9 @@ class CoupledStepperConfig:
         state_copy = state.copy()
         if "sst_mask_name" in state_copy:
             del state_copy["sst_mask_name"]
+        if "sst_is_snapshot" in state_copy:
+            # FIXME: don't merge
+            del state_copy["sst_is_snapshot"]
         return state_copy
 
 
