@@ -176,7 +176,8 @@ class Trainer:
         outputs = None
         for i, batch in enumerate(train_batch_generator):
             self.num_batches_seen += 1
-            logging.info(f"Training on batch {i+1}")
+            if i % 10 == 0:
+                logging.info(f"Training on batch {i+1}")
             outputs = self.model.train_on_batch(batch, self.optimization)
             self.ema(self.model.modules)
             with torch.no_grad():
