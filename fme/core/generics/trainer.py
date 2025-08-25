@@ -102,6 +102,9 @@ class TrainConfigProtocol(Protocol):
     def checkpoint_dir(self) -> str: ...
 
     @property
+    def resume_results_dir(self) -> str | None: ...
+
+    @property
     def max_epochs(self) -> int: ...
 
     @property

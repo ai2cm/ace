@@ -227,7 +227,7 @@ class TrainConfig:
     )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
-    existing_results_dir: str | None = None
+    resume_results_dir: str | None = None
 
     def set_random_seed(self):
         if self.seed is not None:

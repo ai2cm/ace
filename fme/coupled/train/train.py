@@ -162,5 +162,7 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         data=data,
         config=dacite.Config(strict=True),
     )
-    prepare_directory(train_config.experiment_dir, data)
+    prepare_directory(
+        train_config.experiment_dir, data, train_config.resume_results_dir
+    )
     run_train_from_config(train_config)
