@@ -1,7 +1,8 @@
 import dataclasses
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import Any, TypeVar
 
+import cftime
 import numpy as np
 import torch
 import xarray as xr
@@ -61,6 +62,56 @@ class BatchData:
     horizontal_dims: list[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
+
+    @classmethod
+    def new_for_testing(
+        cls,
+        names: Iterable[str],
+        n_samples: int = 2,
+        n_timesteps: int = 10,
+        t_initial: cftime.datetime = cftime.datetime(2020, 1, 1),
+        freq="6h",
+        calendar="julian",
+        img_shape: tuple[int, ...] = (9, 18),
+        horizontal_dims: list[str] = ["lat", "lon"],
+        device: torch.device | None = None,
+    ) -> "BatchData":
+        """
+        Create a new batch data object for testing.
+
+        Args:
+            names: The names of the variables to create.
+            n_samples: The number of samples to create.
+            n_timesteps: The number of timesteps to create.
+            t_initial: The initial time.
+            freq: The frequency of the time steps.
+            calendar: The calendar of the time steps.
+            img_shape: The shape of the horizontal dimensions of the data.
+            horizontal_dims: The horizontal dimensions of the data.
+            device: The device to create the data on. By default, the device is
+                determined by the global device specified by get_device().
+        """
+        if device is None:
+            device = get_device()
+        time = xr.DataArray(
+            data=xr.date_range(
+                start=t_initial,
+                periods=n_timesteps,
+                freq=freq,
+                calendar=calendar,
+                use_cftime=True,
+            ),
+            dims=["time"],
+        ).drop_vars(["time"])
+        sample_times = xr.concat([time] * n_samples, dim="sample")
+        return BatchData(
+            data={
+                k: torch.randn(n_samples, n_timesteps, *img_shape).to(device)
+                for k in names
+            },
+            time=sample_times,
+            horizontal_dims=horizontal_dims,
+        )
 
     @property
     def dims(self) -> list[str]:
