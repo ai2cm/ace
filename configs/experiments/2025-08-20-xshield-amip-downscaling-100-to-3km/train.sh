@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-short-test"
+JOB_NAME="xshield-downscaling-100km-to-3km-sample-w-repl-16"
 CONFIG_FILENAME="config-train.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -28,10 +28,10 @@ IMAGE=01JWJ96JMF89D812JS159VF37N
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km training global' \
-    --workspace ai2/climate-titan \
-    --priority urgent \
+    --workspace ai2/downscaling \
+    --priority normal \
     --preemptible \
-    --cluster ai2/titan-cirrascale \
+    --cluster ai2/ceres-cirrascale \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
