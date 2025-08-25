@@ -196,7 +196,11 @@ class TrainConfig:
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
-        existing_results_dir: Directory where existing results are saved.
+        resume_results_dir: Directory where an existing results directory is mounted to
+            resume from, including logging to the same WandB job. When provided and
+            experiment_dir has no training_checkpoints subdirectory, then it is assumed
+            that this is a new run to resume a previously completed run and
+            resume_results_dir is recursively copied to experiment_dir.
     """
 
     train_loader: DataLoaderConfig

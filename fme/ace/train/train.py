@@ -256,6 +256,8 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         env_vars=env_vars,
         notes=beaker_url,
     )
+    if config.resume_results_dir is not None:
+        logging.info(f"Resuming training from results in {config.resume_results_dir}")
     trainer = build_trainer(builders, config)
     trainer.train()
     logging.info(f"DONE ---- rank {dist.rank}")
@@ -267,5 +269,7 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
     )
     config.set_random_seed()
-    prepare_directory(config.experiment_dir, config_data, config.resume_results_dir)
+    config.resume_results_dir = prepare_directory(
+        config.experiment_dir, config_data, config.resume_results_dir
+    )
     run_train_from_config(config)
