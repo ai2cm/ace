@@ -267,13 +267,13 @@ class SeparateRadiationStep(StepABC):
         self.radiation_out_packer = Packer(config.radiation_out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
-            self.ocean: Ocean | None = config.ocean.build(
+            self._ocean: Ocean | None = config.ocean.build(
                 config.input_names,
                 config.output_names,
                 timestep,
             )
         else:
-            self.ocean = None
+            self._ocean = None
         self.module: nn.Module = config.builder.build(
             n_in_channels=len(config.main_in_names),
             n_out_channels=len(config.main_out_names),
@@ -310,6 +310,10 @@ class SeparateRadiationStep(StepABC):
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
         return None
+
+    @property
+    def ocean(self) -> Ocean | None:
+        return self._ocean
 
     @property
     def normalizer(self) -> StandardNormalizer:

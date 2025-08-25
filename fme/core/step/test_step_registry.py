@@ -44,6 +44,10 @@ class MockStep(StepABC):
     def ocean_fraction_name(self):
         return None
 
+    @property
+    def ocean(self):
+        return None
+
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
 

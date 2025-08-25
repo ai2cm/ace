@@ -347,11 +347,11 @@ class FCN2Step(StepABC):
         self.surface_output_packer = Packer(config.surface_output_names)
         self._normalizer = normalizer
         if config.ocean is not None:
-            self.ocean: Ocean | None = config.ocean.build(
+            self._ocean: Ocean | None = config.ocean.build(
                 config.in_names, config.out_names, timestep
             )
         else:
-            self.ocean = None
+            self._ocean = None
         module: nn.Module = config.builder.build(
             n_atmo_channels=len(config.atmosphere_prognostic_names)
             + len(config.atmosphere_diagnostic_names),
@@ -397,6 +397,10 @@ class FCN2Step(StepABC):
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
         return None
+
+    @property
+    def ocean(self) -> Ocean | None:
+        return self._ocean
 
     @property
     def modules(self) -> nn.ModuleList:
