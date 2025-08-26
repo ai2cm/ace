@@ -162,7 +162,7 @@ class AggregatorBuilder(
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
-        return TrainAggregator()
+        return TrainAggregator(operations=self.dataset_info.gridded_operations)
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(

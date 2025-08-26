@@ -206,7 +206,7 @@ class AggregatorBuilder(
         self.validation_config = validation_config
 
     def get_train_aggregator(self) -> TrainAggregator:
-        return TrainAggregator()
+        return TrainAggregator(operations=self.dataset_info.gridded_operations)
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return self.validation_config.build(
