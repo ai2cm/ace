@@ -852,8 +852,8 @@ class CoupledStepper(
         assert ts_name in atmos_ic_data
         assert ts_name in forcing_ic_data
         assert self._config.ocean_fraction_name in forcing_ic_data
-        atmos_ic_data = self.atmosphere.call_ocean(
-            input_data=forcing_ic_data,
+        atmos_ic_data = self.atmosphere.prescribe_sst(
+            mask_data=forcing_ic_data,
             gen_data=atmos_ic_data,
             target_data=forcing_ic_data,
         )
@@ -861,6 +861,7 @@ class CoupledStepper(
             BatchData(
                 data=atmos_ic_data,
                 time=forcing_ic_batch.time,
+                labels=forcing_ic_batch.labels,
             )
         )
 

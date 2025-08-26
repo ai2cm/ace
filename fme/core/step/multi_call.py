@@ -9,7 +9,7 @@ from torch import nn
 from fme.core.dataset_info import DatasetInfo
 from fme.core.multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.normalizer import StandardNormalizer
-from fme.core.ocean import Ocean, OceanConfig
+from fme.core.ocean import OceanConfig
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -273,9 +273,13 @@ class MultiCallStep(StepABC):
     def ocean_fraction_name(self) -> str | None:
         return self._wrapped_step.ocean_fraction_name
 
-    @property
-    def ocean(self) -> Ocean | None:
-        return self._wrapped_step.ocean
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        return self._wrapped_step.prescribe_sst(mask_data, gen_data, target_data)
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()

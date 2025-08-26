@@ -9,6 +9,7 @@ from torch import nn
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.ocean import OceanConfig
+from fme.core.typing_ import TensorDict, TensorMapping
 
 from .step import StepABC, StepConfigABC, StepSelector
 
@@ -44,9 +45,13 @@ class MockStep(StepABC):
     def ocean_fraction_name(self):
         return None
 
-    @property
-    def ocean(self):
-        return None
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        raise NotImplementedError()
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)

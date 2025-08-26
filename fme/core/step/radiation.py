@@ -267,13 +267,13 @@ class SeparateRadiationStep(StepABC):
         self.radiation_out_packer = Packer(config.radiation_out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
-            self._ocean: Ocean | None = config.ocean.build(
+            self.ocean: Ocean | None = config.ocean.build(
                 config.input_names,
                 config.output_names,
                 timestep,
             )
         else:
-            self._ocean = None
+            self.ocean = None
         self.module: nn.Module = config.builder.build(
             n_in_channels=len(config.main_in_names),
             n_out_channels=len(config.main_out_names),
@@ -311,9 +311,18 @@ class SeparateRadiationStep(StepABC):
             return self._config.ocean.ocean_fraction_name
         return None
 
-    @property
-    def ocean(self) -> Ocean | None:
-        return self._ocean
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        if self.ocean is None:
+            raise RuntimeError(
+                "The Ocean interface is missing but required for calling "
+                "prescribe_sst."
+            )
+        return self.ocean.prescriber(mask_data, gen_data, target_data)
 
     @property
     def normalizer(self) -> StandardNormalizer:

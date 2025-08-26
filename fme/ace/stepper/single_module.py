@@ -969,15 +969,13 @@ class Stepper(
     def ocean_fraction_name(self) -> str | None:
         return self._step_obj.ocean_fraction_name
 
-    def call_ocean(
+    def prescribe_sst(
         self,
-        input_data: TensorMapping,
+        mask_data: TensorMapping,
         gen_data: TensorMapping,
         target_data: TensorMapping,
     ) -> TensorDict:
-        if self._step_obj.ocean is None:
-            raise RuntimeError("Step object has no Ocean interface.")
-        return self._step_obj.ocean(input_data, gen_data, target_data)
+        return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
     @property
     def training_dataset_info(self) -> DatasetInfo:

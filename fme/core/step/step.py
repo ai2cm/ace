@@ -11,7 +11,7 @@ from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
-from fme.core.ocean import Ocean, OceanConfig
+from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -295,11 +295,15 @@ class StepABC(abc.ABC, nn.Module):
         """
         pass
 
-    @property
     @abc.abstractmethod
-    def ocean(self) -> Ocean | None:
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
         """
-        The Step's Ocean interface, if one is available.
+        Prescribe target_data SST onto gen_data according to mask_data.
         """
         pass
 
