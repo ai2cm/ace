@@ -26,7 +26,7 @@ loader:
         subset:
           start_time: '0151-01-03T12:00:00' # earlier times nan
       - data_path: /climate-default
-        file_pattern: 2025-08-22-cm4-piControl-200yr-ocean.zarr
+        file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
         engine: zarr
         subset:
           start_time: '0151-01-03T12:00:00' # earlier times nan
