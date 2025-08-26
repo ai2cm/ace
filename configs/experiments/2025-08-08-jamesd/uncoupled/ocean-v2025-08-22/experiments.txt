@@ -14,3 +14,5 @@ v2025-08-22-mnsf-correctHI-nfs8-rs1||training|best_inference_ckpt|normal|--not-p
 v2025-08-22-mnsf-correctHI-nfs8-rs1|01K3DBQT6S6D2QF3YZEB2CDRD5|training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-22-mnsf-correctHI-nfs8-rs1-finetune|01K3J68WC82YHZW2DC06FCCJ84|training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-22-mnsf-correctHI-nfs8-rs1-finetune|01K3J6CPM3NHH1VVJJPKVVBVEF|training|best_inference_ckpt|normal|--not-preemptible
