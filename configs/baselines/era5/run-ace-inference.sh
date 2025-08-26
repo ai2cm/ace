@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME_BASE="test-small-output-ace2-era5-inference"
+JOB_NAME="test-small-output-ace2-era5-inference"
 EXISTING_RESULTS_DATASET="01K013CYF8HX12KJK91YJ8MM92"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -13,15 +13,14 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
+python -m fme.ace.validate_config --config_type inference $CONFIG_PATH
 
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
     --description 'Run ACE evaluator' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
+    --workspace ai2/downscaling \
     --priority normal \
-    --not-preemptible \
     --cluster ai2/saturn-cirrascale \
     --cluster ai2/ceres-cirrascale \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
@@ -37,4 +36,5 @@ cd $REPO_ROOT && gantry run \
     --budget ai2/climate \
     --no-conda \
     --install "pip install --no-deps ." \
+    --allow-dirty \
     -- python -I -m fme.ace.inference $CONFIG_PATH
