@@ -47,7 +47,7 @@ while read FINETUNING; do
     N_GPUS=$(echo "$FINETUNING" | cut -d"|" -f8)
     SHARED_MEM=$(echo "$FINETUNING" | cut -d"|" -f9)
     RETRIES=$(echo "$FINETUNING" | cut -d"|" -f10)
-    WORKSPACE=$(echo "$TRAINING" | cut -d"|" -f11)
+    WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f11)
     OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f12)
     if [[ "$STATUS" != "train" ]]; then
         continue
