@@ -1041,6 +1041,7 @@ class CoupledStepper(
                     ocean_ic_state.as_batch_data().data,
                 ),
                 time=atmos_window.time,
+                labels=atmos_window.labels,
             )
             # prescribe the initial condition SST state
             atmos_ic_state = self._prescribe_ic_sst(
@@ -1085,6 +1086,7 @@ class CoupledStepper(
                     ocean_window.data, atmos_gen, atmos_data_forcings.data
                 ),
                 time=ocean_window.time,
+                labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
             ocean_step = next(
@@ -1115,6 +1117,7 @@ class CoupledStepper(
                     time=atmos_window.time.isel(
                         time=slice(-self.atmosphere.n_ic_timesteps, None)
                     ),
+                    labels=atmos_window.labels,
                 )
             )
             ocean_ic_state = PrognosticState(
@@ -1126,6 +1129,7 @@ class CoupledStepper(
                         }
                     ),
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
+                    labels=ocean_window.labels,
                 )
             )
 
@@ -1138,11 +1142,13 @@ class CoupledStepper(
             [x.data for x in output_list if x.realm == "atmosphere"],
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
+            labels=forcing_data.atmosphere_data.labels,
         )
         ocean_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "ocean"],
             time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
+            labels=forcing_data.ocean_data.labels,
         )
         return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmos_data)
 

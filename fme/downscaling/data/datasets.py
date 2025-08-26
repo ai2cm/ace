@@ -342,8 +342,8 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, key):
-        batch, times = self.dataset[key]
+    def __getitem__(self, key) -> tuple[TensorMapping, xr.DataArray, set[str]]:
+        batch, times, _ = self.dataset[key]
         batch = {
             k: v[
                 ...,
@@ -352,7 +352,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             ]
             for k, v in batch.items()
         }
-        return batch, times
+        return batch, times, self._properties.all_labels
 
 
 class BatchItemDatasetAdapter(torch.utils.data.Dataset):
@@ -376,7 +376,7 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         return len(self._dataset)
 
     def __getitem__(self, idx) -> BatchItem:
-        fields, time = self._dataset[idx]
+        fields, time, _ = self._dataset[idx]
         fields = {k: v.squeeze() for k, v in fields.items()}
         field_example = next(iter(fields.values()))
 

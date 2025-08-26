@@ -34,6 +34,10 @@ from fme.ace.registry.test_hpx import (
     up_sampling_block_config,
 )
 from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLengthProbabilities,
+    TimeLengthProbability,
+)
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
@@ -264,6 +268,12 @@ def _get_test_yaml_files(
         stepper=StepperConfig(
             loss=WeightedMappingLossConfig(type="MSE"),
             crps_training=crps_training,
+            train_n_forward_steps=TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+                ]
+            ),
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -296,7 +306,6 @@ def _get_test_yaml_files(
         ),
         inference=inline_inference_config,
         weather_evaluation=weather_evaluation_config,
-        n_forward_steps=n_forward_steps,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
         save_checkpoint=True,

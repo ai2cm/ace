@@ -152,8 +152,8 @@ class CoupledDatasetProperties:
 
 @dataclasses.dataclass
 class CoupledDatasetItem:
-    ocean: tuple[TensorDict, xr.DataArray]
-    atmosphere: tuple[TensorDict, xr.DataArray]
+    ocean: tuple[TensorDict, xr.DataArray, set[str]]
+    atmosphere: tuple[TensorDict, xr.DataArray, set[str]]
 
 
 class CoupledDataset(torch.utils.data.Dataset):
