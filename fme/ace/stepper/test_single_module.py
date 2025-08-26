@@ -128,6 +128,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
             np.zeros((n_samples, n_time)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
     )
     return SphericalData(data, area_weights, vertical_coord)
 
@@ -818,6 +819,7 @@ def test_stepper_corrector(
     batch_data = BatchData.new_on_cpu(
         data=data,
         time=time,
+        labels=[set() for _ in range(time.shape[0])],
     ).to_device()
     # run the stepper on the data
     with torch.no_grad():
@@ -1009,6 +1011,7 @@ def get_data_for_predict(
             np.zeros((n_samples, 1)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
     ).get_start(
         prognostic_names=["a"],
         n_ic_timesteps=1,
@@ -1021,6 +1024,7 @@ def get_data_for_predict(
             np.zeros((n_samples, n_steps + 1)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
     )
     return input_data, forcing_data
 
@@ -1144,7 +1148,8 @@ def test_prepend_initial_condition():
     }
     ic = BatchData.new_on_device(
         data=ic_data,
-        time=xr.DataArray(np.zeros((3, 1)), dims=["sample", "time"]),
+        time=xr.DataArray(np.zeros((batch_size, 1)), dims=["sample", "time"]),
+        labels=[set() for _ in range(batch_size)],
     ).get_start(
         prognostic_names=["a", "b"],
         n_ic_timesteps=1,
@@ -1352,6 +1357,8 @@ def get_regression_stepper_and_data(
             np.zeros((n_samples, n_forward_steps + 1)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
+        horizontal_dims=["lat", "lon"],
     )
     return stepper, data
 

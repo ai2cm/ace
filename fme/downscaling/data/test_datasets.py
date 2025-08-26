@@ -235,13 +235,15 @@ def test_horizontal_subset(
         lat=torch.linspace(0.0, 1.0, n_lat), lon=torch.linspace(0.0, 1.0, n_lon)
     )
 
-    datum = (
+    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str]] = (
         {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
         xr.DataArray([0.0]),
+        set(),
     )
     base_dataset = MagicMock(spec=torch.utils.data.Dataset)
     properties = MagicMock(spec=DatasetProperties)
     properties.horizontal_coordinates = coords
+    properties.all_labels = MagicMock(spec=set)
     topography = torch.randn(n_lat, n_lon)
     base_dataset.__getitem__.return_value = datum
     dataset = HorizontalSubsetDataset(
@@ -252,7 +254,8 @@ def test_horizontal_subset(
         topography=topography,
     )
 
-    subset, _ = dataset[0]
+    subset, _, labels = dataset[0]
+    assert labels is properties.all_labels
     assert subset["x"].shape == (
         batch_size,
         n_timesteps,
@@ -323,6 +326,7 @@ def get_mock_dataset(field_leading_dim=1):
         return_value=(
             {"x": torch.rand(field_leading_dim, 8, 16)},
             data_array([0]),
+            set(),
         )
     )
     return dataset
@@ -516,9 +520,10 @@ def test_horizontal_subset_topography_mask(
         lat=torch.linspace(0.0, 9, n_lat), lon=torch.linspace(0.0, 9, n_lon)
     )
 
-    datum = (
+    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str]] = (
         {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
         xr.DataArray([0.0]),
+        set(),
     )
     base_dataset = MagicMock(spec=torch.utils.data.Dataset)
     properties = MagicMock(spec=DatasetProperties)
