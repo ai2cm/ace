@@ -3,7 +3,6 @@ import random
 import numpy as np
 import pytest
 import torch
-import xarray as xr
 
 from fme.ace.data_loading.augmentation import RotateModifier
 from fme.ace.data_loading.batch_data import BatchData
@@ -19,14 +18,11 @@ def test_rotate_modifier_all_rotation():
     )
     n_lat = 8
     n_lon = 16
-    batch = BatchData(
-        data={
-            "UGRD": torch.randn(1, 2, n_lat, n_lon),
-            "VGRD": torch.randn(1, 2, n_lat, n_lon),
-            "PS": torch.randn(1, 2, n_lat, n_lon),
-        },
-        time=xr.DataArray(np.zeros((1, 2)), dims=["sample", "time"]),
-        horizontal_dims=["lat", "lon"],
+    batch = BatchData.new_for_testing(
+        names=["UGRD", "VGRD", "PS"],
+        n_samples=1,
+        n_timesteps=2,
+        img_shape=(n_lat, n_lon),
     )
     rotated_batch = rotate_modifier(batch)
     assert rotated_batch.data["UGRD"].shape == (1, 2, n_lat, n_lon)
@@ -41,14 +37,11 @@ def test_rotate_modifier_no_rotation():
     )
     n_lat = 8
     n_lon = 16
-    batch = BatchData(
-        data={
-            "UGRD": torch.randn(1, 2, n_lat, n_lon),
-            "VGRD": torch.randn(1, 2, n_lat, n_lon),
-            "PS": torch.randn(1, 2, n_lat, n_lon),
-        },
-        time=xr.DataArray(np.zeros((1, 2)), dims=["sample", "time"]),
-        horizontal_dims=["lat", "lon"],
+    batch = BatchData.new_for_testing(
+        names=["UGRD", "VGRD", "PS"],
+        n_samples=1,
+        n_timesteps=2,
+        img_shape=(n_lat, n_lon),
     )
     rotated_batch = rotate_modifier(batch)
     assert rotated_batch.data["UGRD"].shape == (1, 2, n_lat, n_lon)
@@ -64,14 +57,11 @@ def test_rotate_modifier_random_rotation():
     )
     n_lat = 8
     n_lon = 16
-    batch = BatchData(
-        data={
-            "UGRD": torch.randn(40, 2, n_lat, n_lon),
-            "VGRD": torch.randn(40, 2, n_lat, n_lon),
-            "PS": torch.randn(40, 2, n_lat, n_lon),
-        },
-        time=xr.DataArray(np.zeros((40, 2)), dims=["sample", "time"]),
-        horizontal_dims=["lat", "lon"],
+    batch = BatchData.new_for_testing(
+        names=["UGRD", "VGRD", "PS"],
+        n_samples=40,
+        n_timesteps=2,
+        img_shape=(n_lat, n_lon),
     )
     rotated_batch = rotate_modifier(batch)
     assert rotated_batch.data.keys() == batch.data.keys()
