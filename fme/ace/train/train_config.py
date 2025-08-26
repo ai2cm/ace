@@ -165,7 +165,8 @@ class TrainConfig:
         weather_evaluation: Configuration for weather evaluation.
             If None, no weather evaluation is run. Weather evaluation is not
             used to select checkpoints, but is used to provide metrics.
-        n_forward_steps: Number of forward steps to take gradient over.
+        n_forward_steps: Number of forward steps during training. Cannot be given
+            at the same time as train_n_forward_steps in StepperConfig.
         train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
@@ -209,7 +210,7 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig | None
-    n_forward_steps: int
+    n_forward_steps: int | None = None
     train_aggregator: TrainAggregatorConfig = dataclasses.field(
         default_factory=lambda: TrainAggregatorConfig(spherical_power_spectrum=False)
     )
@@ -231,6 +232,17 @@ class TrainConfig:
     )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+
+    def __post_init__(self):
+        if (
+            isinstance(self.stepper, StepperConfig)
+            and self.stepper.train_n_forward_steps is not None
+            and self.n_forward_steps is not None
+        ):
+            raise ValueError(
+                "stepper.train_n_forward_steps may not be given at the same time as "
+                "n_forward_steps at the top level"
+            )
 
     def set_random_seed(self):
         if self.seed is not None:
@@ -275,8 +287,8 @@ class TrainBuilders:
         self.config = config
 
     def _get_train_window_data_requirements(self) -> DataRequirements:
-        return self.config.stepper.get_evaluation_window_data_requirements(
-            self.config.n_forward_steps
+        return self.config.stepper.get_train_window_data_requirements(
+            default_n_forward_steps=self.config.n_forward_steps
         )
 
     def _get_evaluation_window_data_requirements(self) -> DataRequirements:

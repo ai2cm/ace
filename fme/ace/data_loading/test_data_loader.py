@@ -665,6 +665,7 @@ def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
     initial_condition = BatchData.new_on_cpu(
         data={"foo": torch.randn(1, 1, 1, 1), "foo2": torch.randn(1, 1, 1, 1)},
         time=xr.DataArray(time_values, dims=["sample", "time"]),
+        labels=[set()],
     )
     data = get_forcing_data(
         config,

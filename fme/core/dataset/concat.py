@@ -43,7 +43,7 @@ class XarrayConcat(torch.utils.data.Dataset):
     def __len__(self):
         return len(self._dataset)
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
         return self._dataset[idx]
 
     @property

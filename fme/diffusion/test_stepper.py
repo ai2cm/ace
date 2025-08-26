@@ -45,7 +45,6 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
         names=names,
         n_samples=n_samples,
         n_timesteps=n_time,
-        img_shape=(9, 18),
     )
     return SphericalData(data, area_weights, vertical_coord)
 
@@ -194,8 +193,10 @@ def test_train_on_batch_with_prescribed_ocean():
     assert isinstance(stepped.target_data["b"], torch.Tensor)
 
 
-def test_reloaded_stepper_gives_different_prediction():
+def test_reloaded_stepper_gives_different_prediction(very_fast_only: bool):
     torch.manual_seed(0)
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     config = DiffusionStepperConfig(
         builder=ModuleSelector(type="ConditionalSFNO", config={"scale_factor": 1}),
         in_names=["a", "b"],
