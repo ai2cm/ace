@@ -160,7 +160,11 @@ def get_gridded_data(
         )
 
     return GriddedData(
-        loader=CoupledDataLoader(dataloader, sampler=sampler, dataset=dataset),
+        loader=CoupledDataLoader(
+            dataloader,
+            sampler=sampler,
+            dataset=dataset,
+        ),
         properties=properties,
         sampler=sampler,
     )

@@ -691,6 +691,8 @@ def get_data(
             np.zeros((n_samples, n_time)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_time)],
+        horizontal_dims=["lat", "lon"],
     )
     return SphericalData(data, horizontal_coords, vertical_coord)
 
