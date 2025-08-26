@@ -91,7 +91,7 @@ class InitialConditionConfig:
 
 
 def get_initial_condition(
-    ds: xr.Dataset, prognostic_names: Sequence[str]
+    ds: xr.Dataset, prognostic_names: Sequence[str], labels: list[str]
 ) -> PrognosticState:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
@@ -101,6 +101,8 @@ def get_initial_condition(
             as variables, and they must each have shape (n_samples, n_lat, n_lon).
             Dataset must also include a 'time' variable with length n_samples.
         prognostic_names: Names of prognostic variables to extract from the dataset.
+        labels: Labels for the initial conditions. If provided, these labels will be
+            provided to the stepper for every initial condition.
 
     Returns:
         The initial condition and the time coordinate.
@@ -131,6 +133,7 @@ def get_initial_condition(
         data=initial_condition,
         time=initial_times,
         horizontal_dims=["lat", "lon"],
+        labels=[set(labels)] * n_samples,
     )
     return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
 
@@ -158,6 +161,8 @@ class InferenceConfig:
             be used with caution, as it may allow the stepper to make scientifically
             invalid predictions, but it can allow running inference with incorrectly
             formatted or missing grid information.
+        labels: Dataset labels to use for inference. If provided, these labels will be
+            provided to the stepper for every initial condition.
     """
 
     experiment_dir: str
@@ -175,6 +180,7 @@ class InferenceConfig:
     )
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
+    labels: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -266,7 +272,9 @@ def run_inference_from_config(config: InferenceConfig):
         )
         logging.info("Loading initial condition data")
         initial_condition = get_initial_condition(
-            config.initial_condition.get_dataset(), stepper_config.prognostic_names
+            config.initial_condition.get_dataset(),
+            stepper_config.prognostic_names,
+            config.labels,
         )
         stepper = config.load_stepper()
         stepper.set_eval()
@@ -278,6 +286,7 @@ def run_inference_from_config(config: InferenceConfig):
             initial_condition=initial_condition,
             surface_temperature_name=stepper.surface_temperature_name,
             ocean_fraction_name=stepper.ocean_fraction_name,
+            label_override=config.labels,
         )
         if not config.allow_incompatible_dataset:
             try:

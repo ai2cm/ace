@@ -121,6 +121,7 @@ def get_inference_data(
     total_forward_steps: int,
     window_requirements: DataRequirements,
     initial_condition: PrognosticState | PrognosticStateDataRequirements,
+    label_override: list[str] | None = None,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
 ) -> InferenceGriddedData:
@@ -133,6 +134,8 @@ def get_inference_data(
         initial_condition: Initial condition for the inference, or a requirements object
             specifying how to extract the initial condition from the first batch of
             data
+        label_override: Labels for the forcing data to be provided on each sample
+            instead of the labels in the dataset.
         surface_temperature_name: Name of the surface temperature variable. Can be
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
@@ -142,11 +145,12 @@ def get_inference_data(
         A data loader for inference with coordinates and metadata.
     """
     dataset = InferenceDataset(
-        config,
-        total_forward_steps,
-        window_requirements,
-        surface_temperature_name,
-        ocean_fraction_name,
+        config=config,
+        total_forward_steps=total_forward_steps,
+        requirements=window_requirements,
+        surface_temperature_name=surface_temperature_name,
+        ocean_fraction_name=ocean_fraction_name,
+        label_override=label_override,
     )
     properties = dataset.properties
 
@@ -187,6 +191,7 @@ def get_forcing_data(
     initial_condition: PrognosticState,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
+    label_override: list[str] | None = None,
 ) -> InferenceGriddedData:
     """Return a GriddedData loader for forcing data based on the initial condition.
     This function determines the start indices for the forcing data based on the initial
@@ -202,6 +207,8 @@ def get_forcing_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
+        label_override: Labels for the forcing data. If provided, these labels will be
+            provided on each sample instead of the labels in the dataset.
 
     Returns:
         A data loader for forcing data with coordinates and metadata.
@@ -237,4 +244,5 @@ def get_forcing_data(
         initial_condition=initial_condition,
         surface_temperature_name=surface_temperature_name,
         ocean_fraction_name=ocean_fraction_name,
+        label_override=label_override,
     )

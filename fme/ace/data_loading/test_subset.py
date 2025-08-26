@@ -16,6 +16,7 @@ def get_sample_tuples(start: int, end: int, times_per_batch: int):
                 data=[list(range(i, i + times_per_batch))],
                 dims=["sample", "time"],
             ),
+            set(),
         )
         for i in range(start, end)
     ]
