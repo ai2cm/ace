@@ -442,6 +442,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         unpaired_batch = BatchData.new_on_device(
             data=merged,
             time=batch.time,
+            labels=batch.labels,
         )
         self._append_batch(unpaired_batch)
 
