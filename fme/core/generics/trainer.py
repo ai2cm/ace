@@ -443,6 +443,8 @@ class Trainer:
             aggregator.record_batch(stepped)
             self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
+            # Step scheduler per-iteration if configured to do so
+            self.optimization.step_scheduler()
             self.num_batches_seen += 1
             self._current_epoch_num_batches_seen += 1
             n_samples_seen_since_logging += self.train_data.batch_size
