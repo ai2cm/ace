@@ -362,9 +362,10 @@ def get_trainer(
         original_step_scheduler = opt.step_scheduler
 
         def step_scheduler_side_effect(*args, **kwargs):
-            original_step_scheduler(*args, **kwargs)
-            nonlocal i
-            i += 1
+            scheduler_was_stepped = original_step_scheduler(*args, **kwargs)
+            if scheduler_was_stepped:
+                nonlocal i
+                i += 1
 
         opt.step_scheduler = unittest.mock.MagicMock(  # type: ignore
             side_effect=step_scheduler_side_effect
