@@ -15,6 +15,7 @@ class DatasetProperties:
         mask_provider: MaskProvider,
         timestep: datetime.timedelta,
         is_remote: bool,
+        all_labels: set[str],
     ):
         self.variable_metadata = variable_metadata
         self.vertical_coordinate = vertical_coordinate
@@ -22,6 +23,7 @@ class DatasetProperties:
         self.mask_provider = mask_provider
         self.timestep = timestep
         self.is_remote = is_remote
+        self.all_labels = all_labels
 
     def to_device(self) -> "DatasetProperties":
         device = get_device()
@@ -32,6 +34,7 @@ class DatasetProperties:
             self.mask_provider.to(device),
             self.timestep,
             self.is_remote,
+            self.all_labels,
         )
 
     def update(self, other: "DatasetProperties"):
@@ -46,6 +49,7 @@ class DatasetProperties:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
         if self.mask_provider != other.mask_provider:
             raise ValueError("Inconsistent mask providers between datasets")
+        self.all_labels.update(other.all_labels)
 
     def update_merged_dataset(self, other: "DatasetProperties"):
         if isinstance(self.variable_metadata, dict):
@@ -56,3 +60,4 @@ class DatasetProperties:
             raise ValueError("Inconsistent timesteps between datasets")
         if self.horizontal_coordinates != other.horizontal_coordinates:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
+        self.all_labels.update(other.all_labels)

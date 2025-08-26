@@ -494,6 +494,7 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[TensorDict],
     time: xr.DataArray,
+    labels: list[set[str]],
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
     output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim=1)
@@ -501,6 +502,7 @@ def process_prediction_generator_list(
         data=output_timeseries,
         time=time,
         horizontal_dims=horizontal_dims,
+        labels=labels,
     )
 
 
@@ -1130,11 +1132,17 @@ class Stepper(
             self._step_obj.next_step_input_names
         )
         with timer.context("forward_prediction"):
+            ic_batch_data = initial_condition.as_batch_data()
+            if ic_batch_data.labels != forcing.labels:
+                raise ValueError(
+                    "Initial condition and forcing data must have the same labels, "
+                    f"got {ic_batch_data.labels} and {forcing.labels}."
+                )
             forcing_data = forcing.subset_names(forcing_names)
-            if initial_condition.as_batch_data().n_timesteps != self.n_ic_timesteps:
+            if ic_batch_data.n_timesteps != self.n_ic_timesteps:
                 raise ValueError(
                     f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
-                    f"{initial_condition.as_batch_data().n_timesteps}."
+                    f"{ic_batch_data.n_timesteps}."
                 )
             n_forward_steps = forcing_data.n_timesteps - self.n_ic_timesteps
             output_list = list(
@@ -1149,6 +1157,7 @@ class Stepper(
             output_list,
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
+            labels=forcing.labels,
         )
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
@@ -1165,6 +1174,7 @@ class Stepper(
             data=data.data,
             time=data.time,
             horizontal_dims=data.horizontal_dims,
+            labels=data.labels,
         )
         return data, prognostic_state
 
@@ -1206,6 +1216,7 @@ class Stepper(
                     data=forward_data.data,
                     time=forward_data.time,
                     horizontal_dims=forward_data.horizontal_dims,
+                    labels=forward_data.labels,
                 ),
             ),
             new_initial_condition,

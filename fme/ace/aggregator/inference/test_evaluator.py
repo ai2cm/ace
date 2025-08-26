@@ -55,6 +55,7 @@ def test_logs_labels_exist():
             },
             reference={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
             time=time,
+            labels=[set() for _ in range(n_sample)],
         ),
     )
     assert len(logs) == n_time
@@ -128,6 +129,7 @@ def test_inference_logs_labels_exist():
             },
             reference={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
             time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+            labels=[set() for _ in range(n_sample)],
         ),
     )
     assert isinstance(logs, list)
@@ -173,6 +175,8 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     target_data = BatchData.new_on_device(
         data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
         time=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
+        labels=[set() for _ in range(2)],
+        horizontal_dims=["lat", "lon"],
     )
     i_start = 0
     for i in range(n_windows):
@@ -183,6 +187,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
             prediction=sample_data,
             reference=target_data.data,
             time=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
+            labels=[set() for _ in range(2)],
         )
         logs = agg.record_batch(
             data=paired_data,
@@ -214,6 +219,7 @@ def test_flush_diagnostics(tmpdir):
             prediction=gen_data,
             reference=target_data,
             time=time,
+            labels=[set() for _ in range(n_sample)],
         ),
     )
     agg.flush_diagnostics()
