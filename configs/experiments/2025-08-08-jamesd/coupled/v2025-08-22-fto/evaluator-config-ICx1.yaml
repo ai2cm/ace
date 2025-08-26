@@ -1,0 +1,49 @@
+experiment_dir: /results
+n_coupled_steps: 2920
+coupled_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0151-01-03T12:00:00' # earlier times nan
+      - data_path: /climate-default
+        file_pattern: 2025-08-22-cm4-piControl-200yr-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0151-01-03T12:00:00' # earlier times nan
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
+        engine: zarr
+        subset:
+          # NOTE: this is required to align the atmosphere and ocean start times
+          start_time: '0151-01-03T12:00:00' # earlier times nan
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+        subset:
+          # NOTE: this is required to align the atmosphere and ocean start times
+          start_time: '0151-01-03T12:00:00' # earlier times nan
+  start_indices:
+    times:
+      - '0310-12-29T12:00:00'
