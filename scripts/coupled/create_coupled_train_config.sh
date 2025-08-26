@@ -28,11 +28,11 @@ cp $TEMPLATE_CONFIG_PATH $CONFIG_PATH
 # NOTE: requires yq >= 4
 
 # update ocean stepper config, preserving template values on conflict
-yq -i '.stepper.ocean.stepper *+= load("ocean-config.yaml").stepper' $CONFIG_PATH
+yq -i '.stepper.ocean.stepper *=n load("ocean-config.yaml").stepper' $CONFIG_PATH
 SIC_NAME=$SIC_NAME yq -i '.stepper.ocean_fraction_prediction.sea_ice_fraction_name = env(SIC_NAME)' $CONFIG_PATH
 
 # update atmos stepper config, preserving template values on conflict
-yq -i '.stepper.atmosphere.stepper *+= load("atmos-config.yaml").stepper' $CONFIG_PATH
+yq -i '.stepper.atmosphere.stepper *=n load("atmos-config.yaml").stepper' $CONFIG_PATH
 
 # cleanup
 rm ./atmos-config.yaml ./ocean-config.yaml
