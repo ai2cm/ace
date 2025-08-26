@@ -128,6 +128,9 @@ class TrainConfigProtocol(Protocol):
     @property
     def evaluate_before_training(self) -> bool: ...
 
+    @property
+    def save_best_inference_epoch_checkpoints(self) -> bool: ...
+
     def get_inference_epochs(self) -> list[int]: ...
 
 
@@ -177,6 +180,9 @@ class CheckpointPaths:
 
     def ema_epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"ema_ckpt_{epoch:04d}.tar")
+
+    def best_inference_epoch_checkpoint_path(self, epoch: int) -> str:
+        return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
 
 
 def chain_signal_handler(sig, handler):
@@ -663,6 +669,19 @@ class Trainer:
                 )
                 self._best_inference_error = inference_error
                 self.save_checkpoint(self.paths.best_inference_checkpoint_path)
+
+                # Save epoch-specific best inference checkpoint if configured
+                if self.config.save_best_inference_epoch_checkpoints:
+                    best_inference_epoch_path = (
+                        self.paths.best_inference_epoch_checkpoint_path(
+                            self._epochs_trained
+                        )
+                    )
+                    logging.info(
+                        "Saving best inference checkpoint for epoch "
+                        f"{self._epochs_trained} to {best_inference_epoch_path}"
+                    )
+                    self.save_checkpoint(best_inference_epoch_path)
             if save_best_checkpoint:
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 

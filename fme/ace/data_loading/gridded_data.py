@@ -208,6 +208,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             vertical_coordinate=self._vertical_coordinate,
             mask_provider=self._properties.mask_provider,
             timestep=self.timestep,
+            all_labels=self._properties.all_labels,
         )
 
     @property

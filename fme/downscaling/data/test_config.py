@@ -86,3 +86,25 @@ def test_XarrayEnsembleDataConfig():
         for i in range(n_ensemble_members)
     ]
     assert ensemble_config.expand() == isel_sample_configs
+
+
+def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
+    paths = data_paths_helper(tmp_path)
+    requirements = DataRequirements(
+        fine_names=["x"], coarse_names=["x"], n_timesteps=1, use_fine_topography=True
+    )
+    n_sample = 3
+    data_config = PairedDataLoaderConfig(
+        fine=[XarrayDataConfig(paths.fine)],
+        coarse=[XarrayDataConfig(paths.coarse)],
+        batch_size=1,
+        num_data_workers=1,
+        strict_ensemble=False,
+        topography=f"{paths.fine}/data.nc",
+        lat_extent=ClosedInterval(1, 4),
+        lon_extent=ClosedInterval(0, 3),
+        sample_with_replacement=n_sample,
+    )
+    data = data_config.build(requirements=requirements, train=True)
+    epoch_samples = list(data.loader)
+    assert len(epoch_samples) == n_sample

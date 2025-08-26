@@ -164,6 +164,7 @@ def test_integration_with_stepper():
             for n in expected_all_names
         },
         time,
+        labels=[set() for _ in range(full_shape[0])],
     )
     with GlobalTimer():
         output = stepper.train_on_batch(data, NullOptimization())

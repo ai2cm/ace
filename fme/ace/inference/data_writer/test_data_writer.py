@@ -20,6 +20,7 @@ from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.subselect import SubselectWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.core.device import get_device
+from fme.core.typing_ import TensorMapping
 
 CALENDAR_CFTIME = {
     "julian": cftime.DatetimeJulian,
@@ -47,6 +48,22 @@ def test_data_writer_config_save_names():
         kwargs_copy = kwargs.copy()
         kwargs_copy.update({save_writer: True})
         DataWriterConfig(names=variable_names, **kwargs_copy)  # type: ignore
+
+
+def get_paired_data(
+    prediction: TensorMapping, reference: TensorMapping, time: xr.DataArray
+) -> PairedData:
+    for k in prediction:
+        n_samples = prediction[k].shape[0]
+        break
+    else:
+        raise ValueError("No prediction variables found")
+    return PairedData(
+        prediction=prediction,
+        reference=reference,
+        labels=[set() for _ in range(n_samples)],
+        time=time,
+    )
 
 
 class TestDataWriter:
@@ -177,7 +194,7 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            batch=PairedData(
+            batch=get_paired_data(
                 prediction=sample_prediction_data,
                 reference=sample_target_data,
                 time=batch_time,
@@ -193,7 +210,7 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            batch=PairedData(
+            batch=get_paired_data(
                 prediction=sample_prediction_data,
                 reference=sample_target_data,
                 time=batch_time,
@@ -347,7 +364,7 @@ class TestDataWriter:
             n_initial_conditions=n_samples,
         )
         writer.append_batch(
-            batch=PairedData(
+            batch=get_paired_data(
                 prediction=sample_prediction_data,
                 reference=sample_target_data,
                 time=batch_time,
@@ -418,7 +435,7 @@ class TestDataWriter:
         )
         with pytest.raises(ValueError):
             writer.append_batch(
-                batch=PairedData(
+                batch=get_paired_data(
                     prediction=sample_prediction_data,
                     reference=sample_target_data,
                     time=batch_time,
@@ -477,7 +494,7 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            batch=PairedData(
+            batch=get_paired_data(
                 prediction=prediction_data,
                 reference=reference_data,
                 time=batch_time,
@@ -493,7 +510,7 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            batch=PairedData(
+            batch=get_paired_data(
                 prediction=prediction_data,
                 reference=reference_data,
                 time=batch_time,

@@ -474,19 +474,20 @@ class PairedDataLoaderConfig:
         dist: Distributed,
         train: bool,
     ) -> RandomSampler | DistributedSampler | None:
+        # Use RandomSampler with replacement for both distributed and
+        # non-distributed cases
+        if self.sample_with_replacement is not None:
+            local_sample_with_replacement_dataset_size = (
+                self.sample_with_replacement // dist.world_size
+            )
+            return RandomSampler(
+                dataset,
+                num_samples=local_sample_with_replacement_dataset_size,
+                replacement=True,
+            )
         if dist.is_distributed():
             if train:
-                if self.sample_with_replacement is None:
-                    sampler = DistributedSampler(dataset, shuffle=train)
-                else:
-                    local_sample_with_replacement_dataset_size = (
-                        self.sample_with_replacement // dist.world_size
-                    )
-                    sampler = RandomSampler(
-                        dataset,
-                        num_samples=local_sample_with_replacement_dataset_size,
-                        replacement=True,
-                    )
+                sampler = DistributedSampler(dataset, shuffle=train)
             else:
                 sampler = ContiguousDistributedSampler(dataset)
         else:
