@@ -1,7 +1,8 @@
 import dataclasses
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import Any, TypeVar
 
+import cftime
 import numpy as np
 import torch
 import xarray as xr
@@ -52,15 +53,72 @@ class BatchData:
         time: An array representing time coordinates for each sample in the batch,
             concatenated along samples to make a batch. To be used in writing out
             inference predictions with time coordinates, not directly in ML.
+        labels: Labels for each sample in the batch.
         horizontal_dims: Horizontal dimensions of the data. Used for writing to
             netCDF files.
     """
 
     data: TensorMapping
     time: xr.DataArray
+    labels: list[set[str]]
     horizontal_dims: list[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
+
+    @classmethod
+    def new_for_testing(
+        cls,
+        names: Iterable[str],
+        n_samples: int = 2,
+        n_timesteps: int = 10,
+        t_initial: cftime.datetime = cftime.datetime(2020, 1, 1),
+        freq="6h",
+        calendar="julian",
+        img_shape: tuple[int, ...] = (9, 18),
+        horizontal_dims: list[str] = ["lat", "lon"],
+        labels: list[set[str]] | None = None,
+        device: torch.device | None = None,
+    ) -> "BatchData":
+        """
+        Create a new batch data object for testing.
+
+        Args:
+            names: The names of the variables to create.
+            n_samples: The number of samples to create.
+            n_timesteps: The number of timesteps to create.
+            t_initial: The initial time.
+            freq: The frequency of the time steps.
+            calendar: The calendar of the time steps.
+            img_shape: The shape of the horizontal dimensions of the data.
+            horizontal_dims: The horizontal dimensions of the data.
+            labels: The labels of the data.
+            device: The device to create the data on. By default, the device is
+                determined by the global device specified by get_device().
+        """
+        if device is None:
+            device = get_device()
+        time = xr.DataArray(
+            data=xr.date_range(
+                start=t_initial,
+                periods=n_timesteps,
+                freq=freq,
+                calendar=calendar,
+                use_cftime=True,
+            ),
+            dims=["time"],
+        ).drop_vars(["time"])
+        sample_times = xr.concat([time] * n_samples, dim="sample")
+        if labels is None:
+            labels = [set() for _ in range(n_samples)]
+        return BatchData(
+            data={
+                k: torch.randn(n_samples, n_timesteps, *img_shape).to(device)
+                for k in names
+            },
+            time=sample_times,
+            labels=labels,
+            horizontal_dims=horizontal_dims,
+        )
 
     @property
     def dims(self) -> list[str]:
@@ -75,6 +133,15 @@ class BatchData:
             data={k: v.to(get_device()) for k, v in self.data.items()},
             time=self.time,
             horizontal_dims=self.horizontal_dims,
+            labels=self.labels,
+        )
+
+    def to_cpu(self) -> "BatchData":
+        return self.__class__(
+            data={k: v.cpu() for k, v in self.data.items()},
+            time=self.time,
+            horizontal_dims=self.horizontal_dims,
+            labels=self.labels,
         )
 
     @classmethod
@@ -90,6 +157,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
+        labels: list[set[str]],
         horizontal_dims: list[str] | None = None,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
@@ -97,6 +165,7 @@ class BatchData:
         return BatchData(
             data=data,
             time=time,
+            labels=labels,
             **kwargs,
         )
 
@@ -105,6 +174,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
+        labels: list[set[str]],
         horizontal_dims: list[str] | None = None,
     ) -> "BatchData":
         """
@@ -115,6 +185,7 @@ class BatchData:
         return BatchData(
             data=data,
             time=time,
+            labels=labels,
             **kwargs,
         )
 
@@ -135,16 +206,17 @@ class BatchData:
     @classmethod
     def from_sample_tuples(
         cls,
-        samples: Sequence[tuple[TensorMapping, xr.DataArray]],
+        samples: Sequence[tuple[TensorMapping, xr.DataArray, set[str]]],
         sample_dim_name: str = "sample",
         horizontal_dims: list[str] | None = None,
     ) -> "BatchData":
-        sample_data, sample_times = zip(*samples)
+        sample_data, sample_times, sample_labels = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_times, dim=sample_dim_name)
         return BatchData.new_on_cpu(
             data=batch_data,
             time=batch_time,
+            labels=list(sample_labels),
             horizontal_dims=horizontal_dims,
         )
 
@@ -172,6 +244,7 @@ class BatchData:
             data={**self.data, **derived_data},
             time=self.time,
             horizontal_dims=self.horizontal_dims,
+            labels=self.labels,
         )
 
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
@@ -184,6 +257,7 @@ class BatchData:
             {k: v[:, n_ic_timesteps:] for k, v in self.data.items()},
             time=self.time.isel(time=slice(n_ic_timesteps, None)),
             horizontal_dims=self.horizontal_dims,
+            labels=self.labels,
         )
 
     def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
@@ -194,6 +268,7 @@ class BatchData:
             {k: v for k, v in self.data.items() if k in names},
             time=self.time,
             horizontal_dims=self.horizontal_dims,
+            labels=self.labels,
         )
 
     def get_start(
@@ -228,6 +303,7 @@ class BatchData:
             {k: v[:, time_slice] for k, v in self.data.items()},
             time=self.time[:, time_slice],
             horizontal_dims=self.horizontal_dims,
+            labels=self.labels,
         )
 
     def prepend(self: SelfType, initial_condition: PrognosticState) -> SelfType:
@@ -248,6 +324,7 @@ class BatchData:
             },
             time=xr.concat([initial_batch_data.time, self.time], dim="time"),
             horizontal_dims=self.horizontal_dims,
+            labels=self.labels,
         )
 
 
@@ -259,6 +336,7 @@ class PairedData:
 
     prediction: TensorMapping
     reference: TensorMapping
+    labels: list[set[str]]
     time: xr.DataArray
 
     @property
@@ -278,7 +356,10 @@ class PairedData:
         if not np.all(prediction.time.values == reference.time.values):
             raise ValueError("Prediction and target time coordinate must be the same.")
         return PairedData(
-            prediction=prediction.data, reference=reference.data, time=prediction.time
+            prediction=prediction.data,
+            reference=reference.data,
+            labels=prediction.labels,
+            time=prediction.time,
         )
 
     @classmethod
@@ -286,20 +367,32 @@ class PairedData:
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
+        labels: list[set[str]],
         time: xr.DataArray,
     ) -> "PairedData":
         device = get_device()
         _check_device(prediction, device)
         _check_device(reference, device)
-        return PairedData(prediction, reference, time)
+        return PairedData(
+            prediction=prediction,
+            reference=reference,
+            labels=labels,
+            time=time,
+        )
 
     @classmethod
     def new_on_cpu(
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
+        labels: list[set[str]],
         time: xr.DataArray,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))
         _check_device(reference, torch.device("cpu"))
-        return PairedData(prediction, reference, time)
+        return PairedData(
+            prediction=prediction,
+            reference=reference,
+            labels=labels,
+            time=time,
+        )
