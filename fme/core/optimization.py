@@ -11,7 +11,7 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.scheduler import SchedulerConfig
+from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -83,7 +83,7 @@ class Optimization(OptimizationABC):
         ],
         lr: float,
         max_epochs: int,
-        scheduler: SchedulerConfig,
+        scheduler: SchedulerConfig | SequentialSchedulerConfig,
         enable_automatic_mixed_precision: bool,
         kwargs: Mapping[str, Any],
         use_gradient_accumulation: bool = False,
@@ -105,6 +105,7 @@ class Optimization(OptimizationABC):
         else:
             self.gscaler = None
         self.scheduler = scheduler.build(self.optimizer, max_epochs)
+        self._scheduler_config = scheduler
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
@@ -130,19 +131,46 @@ class Optimization(OptimizationABC):
         for m in modules:
             m.train()
 
-    def step_scheduler(self, valid_loss: float):
+    def step_scheduler(self, valid_loss: float | None = None):
         """
         Step the scheduler.
 
         Args:
             valid_loss: The validation loss. Used in schedulers which change the
                 learning rate based on whether the validation loss is decreasing.
+                If None, this indicates the call is from within a training iteration
+                rather than at the end of an epoch.
         """
         if self.scheduler is not None:
-            try:
-                self.scheduler.step(metrics=valid_loss)
-            except TypeError:
-                self.scheduler.step()
+            should_step = self._should_step_scheduler(valid_loss)
+            if should_step:
+                try:
+                    if valid_loss is not None:
+                        self.scheduler.step(metrics=valid_loss)
+                    else:
+                        self.scheduler.step()
+                except TypeError:
+                    # Some schedulers don't accept metrics argument
+                    self.scheduler.step()
+
+    def _should_step_scheduler(self, valid_loss: float | None) -> bool:
+        """Determine whether the scheduler should be stepped based on
+        configuration and context.
+
+        Args:
+            valid_loss: If None, we're being called from within training iterations.
+                If not None, we're being called at the end of an epoch.
+
+        Returns:
+            True if the scheduler should be stepped.
+
+        """
+        if self._scheduler_config.steps_per_iteration:
+            # Step every iteration, only when valid_loss is None
+            return valid_loss is None
+        else:
+            # Step every epoch, only when valid_loss is not None
+            return valid_loss is not None
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
         if self._use_gradient_accumulation:
@@ -235,7 +263,7 @@ class OptimizationConfig:
     lr: float = 0.001
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     enable_automatic_mixed_precision: bool = False
-    scheduler: SchedulerConfig = dataclasses.field(
+    scheduler: SchedulerConfig | SequentialSchedulerConfig = dataclasses.field(
         default_factory=lambda: SchedulerConfig()
     )
     use_gradient_accumulation: bool = False
