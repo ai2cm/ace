@@ -176,7 +176,8 @@ class Trainer:
         outputs = None
         for i, batch in enumerate(train_batch_generator):
             self.num_batches_seen += 1
-            logging.info(f"Training on batch {i+1}")
+            if i % 10 == 0:
+                logging.info(f"Training on batch {i+1}")
             outputs = self.model.train_on_batch(batch, self.optimization)
             self.ema(self.model.modules)
             with torch.no_grad():
@@ -339,11 +340,11 @@ class Trainer:
             train_end = time.time()
 
             self.startEpoch = epoch + 1
+            wandb.log({"epoch": epoch}, step=self.num_batches_seen)
             if self._validate_current_epoch(epoch):
                 logging.info("Running metrics on validation data.")
                 valid_loss = self.valid_one_epoch()
                 valid_end = time.time()
-                wandb.log({"epoch": epoch}, step=self.num_batches_seen)
                 if dist.is_root():
                     self.save_best_checkpoint(valid_loss)
             else:
