@@ -68,6 +68,7 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
 )
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
@@ -118,6 +119,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     record_step_20 = inference_n_forward_steps >= 20
 
     aggregator_builder = AggregatorBuilder(
+        train_config=config.train_aggregator,
         inference_config=config.inference_aggregator,
         dataset_info=dataset_info.update_variable_metadata(variable_metadata),
         output_dir=config.output_dir,
@@ -179,6 +181,7 @@ class AggregatorBuilder(
 ):
     def __init__(
         self,
+        train_config: TrainAggregatorConfig,
         inference_config: InferenceEvaluatorAggregatorConfig | None,
         dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray | None,
@@ -193,6 +196,7 @@ class AggregatorBuilder(
             default_factory=lambda: OneStepAggregatorConfig(),
         ),
     ):
+        self.train_config = train_config
         self.inference_config = inference_config
         self.dataset_info = dataset_info
         self.initial_inference_time = initial_inference_time
@@ -206,7 +210,10 @@ class AggregatorBuilder(
         self.validation_config = validation_config
 
     def get_train_aggregator(self) -> TrainAggregator:
-        return TrainAggregator(operations=self.dataset_info.gridded_operations)
+        return TrainAggregator(
+            config=self.train_config,
+            operations=self.dataset_info.gridded_operations,
+        )
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return self.validation_config.build(

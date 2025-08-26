@@ -8,6 +8,7 @@ import torch
 
 from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregator
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
@@ -41,6 +42,7 @@ class TrainConfig:
         experiment_dir: Directory where checkpoints and logs are saved.
         inference: Configuration for inline inference.
         n_forward_steps: Number of forward steps to take gradient over.
+        train_aggregator: Configuration for the train aggregator.
         copy_weights_after_batch: Configuration for copying weights from the
             base model to the training model after each batch.
         ema: Configuration for exponential moving average of model weights.
@@ -78,6 +80,9 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig
     n_forward_steps: int
+    train_aggregator: TrainAggregatorConfig = dataclasses.field(
+        default_factory=lambda: TrainAggregatorConfig(spherical_power_spectrum=False)
+    )
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
     )

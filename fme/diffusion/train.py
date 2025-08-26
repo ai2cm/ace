@@ -64,6 +64,7 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
 )
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.cli import get_parser, prepare_config, prepare_directory
 from fme.core.dataset.data_typing import VariableMetadata
@@ -96,6 +97,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         initial_inference_times = batch.time.isel(time=0)
         break
     aggregator_builder = AggregatorBuilder(
+        train_config=config.train_aggregator,
         inference_config=config.inference_aggregator,
         dataset_info=train_data.dataset_info,
         initial_inference_time=initial_inference_times,
@@ -137,6 +139,7 @@ class AggregatorBuilder(
 ):
     def __init__(
         self,
+        train_config: TrainAggregatorConfig,
         inference_config: InferenceEvaluatorAggregatorConfig,
         dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray,
@@ -149,6 +152,7 @@ class AggregatorBuilder(
         channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
+        self.train_config = train_config
         self.inference_config = inference_config
         self.dataset_info = dataset_info
         self.initial_inference_time = initial_inference_time
@@ -162,7 +166,10 @@ class AggregatorBuilder(
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
-        return TrainAggregator(operations=self.dataset_info.gridded_operations)
+        return TrainAggregator(
+            config=self.train_config,
+            operations=self.dataset_info.gridded_operations,
+        )
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(

@@ -1,3 +1,5 @@
+import dataclasses
+
 import torch
 
 from fme.ace.aggregator.one_step.spectrum import PairedSphericalPowerSpectrumAggregator
@@ -9,6 +11,11 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.tensors import fold_ensemble_dim
 
 
+@dataclasses.dataclass
+class TrainAggregatorConfig:
+    spherical_power_spectrum: bool = False
+
+
 class TrainAggregator(AggregatorABC[TrainOutput]):
     """
     Aggregates statistics for the first timestep.
@@ -17,15 +24,17 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     `get_logs` to get a dictionary of statistics when you're done.
     """
 
-    def __init__(self, operations: GriddedOperations):
+    def __init__(self, config: TrainAggregatorConfig, operations: GriddedOperations):
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
-        self._paired_aggregators = [
-            PairedSphericalPowerSpectrumAggregator(
-                gridded_operations=operations,
-                report_plot=False,
+        self._paired_aggregators = []
+        if config.spherical_power_spectrum:
+            self._paired_aggregators.append(
+                PairedSphericalPowerSpectrumAggregator(
+                    gridded_operations=operations,
+                    report_plot=False,
+                )
             )
-        ]
 
     @torch.no_grad()
     def record_batch(self, batch: TrainOutput):
