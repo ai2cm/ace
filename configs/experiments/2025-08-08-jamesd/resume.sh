@@ -48,6 +48,12 @@ while read RESUMING; do
     fi
     JOB_GROUP="${GROUP}"
     JOB_NAME="${JOB_GROUP}-train"
+    # Determine which fme module to use based on CONFIG_SUBDIR
+    if [[ "$CONFIG_SUBDIR" =~ ^coupled ]]; then
+        FME_MODULE="fme.coupled.train"
+    else
+        FME_MODULE="fme.ace.train"
+    fi
     if [[ -z $EXISTING_RESULTS_DATASET ]]; then
         EXPER_ID=$(
             python $REPO_ROOT/scripts/wandb/wandb_to_beaker_experiment.py \
@@ -114,7 +120,7 @@ while read RESUMING; do
             --budget ai2/climate \
             --no-conda \
             --install "pip install --no-deps ." \
-            -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train /existing-results/config.yaml \
+            -- torchrun --nproc_per_node "$N_GPUS" -m $FME_MODULE /existing-results/config.yaml \
             --override existing_results_dir=/existing-results "${OVERRIDE_ARGS[@]}" |
             tee /dev/tty |
             grep beaker.org |

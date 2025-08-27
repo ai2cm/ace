@@ -42,6 +42,15 @@ while read TRAIN_EXPER; do
 
     JOB_NAME="${JOB_GROUP}-evaluator_${CKPT}-${CURRENT_CONFIG_TAG}"
 
+    # Determine which fme module to use based on CONFIG_SUBDIR
+    if [[ "$CONFIG_SUBDIR" =~ ^coupled ]]; then
+        FME_MODULE_VALIDATE="fme.coupled.validate_config"
+        FME_MODULE_EVALUATOR="fme.coupled.evaluator"
+    else
+        FME_MODULE_VALIDATE="fme.ace.validate_config"
+        FME_MODULE_EVALUATOR="fme.ace.evaluator"
+    fi
+
     # Construct the full path to the configuration file for the current experiment
     CONFIG_PATH="${SCRIPT_DIR}/${CONFIG_SUBDIR}/${CURRENT_CONFIG_FILENAME}"
 
@@ -60,7 +69,7 @@ while read TRAIN_EXPER; do
     fi
 
     echo
-    echo "Launching coupled evaluator job:"
+    echo "Launching ${CONFIG_SUBDIR} evaluator job:"
     echo " - Config path: ${CONFIG_PATH}"
     echo " - Group: ${JOB_GROUP}"
     echo " - Checkpoint: ${CKPT}"
@@ -71,12 +80,12 @@ while read TRAIN_EXPER; do
 
     echo
 
-    python -m fme.coupled.validate_config --config_type evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
+    python -m $FME_MODULE_VALIDATE --config_type evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
 
     echo $JOB_NAME
     gantry run \
         --name $JOB_NAME \
-        --description 'Run coupled evaluator' \
+        --description "Run ${CONFIG_SUBDIR} evaluator" \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/climate-ceres \
         --priority $PRIORITY \
@@ -96,6 +105,6 @@ while read TRAIN_EXPER; do
         --budget ai2/climate \
         --no-conda \
         --install "pip install --no-deps ." \
-        -- python -I -m fme.coupled.evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
+        -- python -I -m $FME_MODULE_EVALUATOR $CONFIG_PATH --override $OVERRIDE_ARGS
     echo
 done <"${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
