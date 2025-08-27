@@ -100,7 +100,7 @@ while read FINETUNING; do
     fi
 
     echo
-    echo "Launching uncoupled fine-tuning job:"
+    echo "Launching coupled fine-tuning job:"
     echo " - Job name: ${JOB_NAME}"
     echo " - Config: ${CONFIG_PATH}"
     echo " - Coupled pretraining results dataset ID: ${EXISTING_RESULTS_DATASET}"
@@ -123,7 +123,7 @@ while read FINETUNING; do
     EXPERIMENT_ID=$(
         gantry run \
             --name $JOB_NAME \
-            --description "Run uncoupled fine-tuning: ${JOB_GROUP}" \
+            --description "Run coupled fine-tuning: ${JOB_GROUP}" \
             --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
             --priority $PRIORITY \
             --preemptible \
