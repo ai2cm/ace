@@ -1,2 +1,2 @@
-group|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|workspace|retries|override
-v2025-08-22-mnsf-correctHI-rs1-finetune|ace-samudra-cm4|ntslj27c|train|urgent|ceres|8|600GiB||0|max_epochs=50
+group|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override
+v2025-08-22-mnsf-correctHI-rs1-finetune|ace-samudra-cm4|ntslj27c|train|urgent|ceres|8|600GiB|0||max_epochs=50
