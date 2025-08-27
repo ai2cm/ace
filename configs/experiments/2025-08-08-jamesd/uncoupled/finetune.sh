@@ -49,6 +49,8 @@ while read FINETUNING; do
     RETRIES=$(echo "$FINETUNING" | cut -d"|" -f10)
     WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f11)
     OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f12)
+    # can be used in place of WANDB_PROJECT and WANDB_ID
+    EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -57,14 +59,16 @@ while read FINETUNING; do
     fi
     JOB_GROUP="${GROUP}"
     JOB_NAME="${JOB_GROUP}-train"
-    EXPER_ID=$(
-        python $REPO_ROOT/scripts/wandb/wandb_to_beaker_experiment.py \
-            --project "$WANDB_PROJECT" --wandb_id "$WANDB_ID"
-    )
-    EXISTING_RESULTS_DATASET=$(
-        beaker experiment get $EXPER_ID --format json |
-            jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4
-    )
+    if [[ -z $EXISTING_RESULTS_DATASET ]]; then
+        EXPER_ID=$(
+            python $REPO_ROOT/scripts/wandb/wandb_to_beaker_experiment.py \
+                --project "$WANDB_PROJECT" --wandb_id "$WANDB_ID"
+        )
+        EXISTING_RESULTS_DATASET=$(
+            beaker experiment get $EXPER_ID --format json |
+                jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4
+        )
+    fi
     declare -a CLUSTER_ARGS
     if [[ "$CLUSTER" == "titan" ]]; then
         if [[ -z "$WORKSPACE" ]]; then
@@ -99,7 +103,7 @@ while read FINETUNING; do
     echo "Launching uncoupled fine-tuning job:"
     echo " - Job name: ${JOB_NAME}"
     echo " - Config: ${CONFIG_PATH}"
-    echo " - Pretraining experiment ID: ${EXPER_ID}"
+    echo " - Pretraining results dataset ID: ${EXISTING_RESULTS_DATASET}"
     echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"

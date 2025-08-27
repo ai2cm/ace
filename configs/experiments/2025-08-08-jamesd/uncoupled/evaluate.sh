@@ -27,6 +27,8 @@ while read TRAIN_EXPER; do
     PRIORITY=$(echo "$TRAIN_EXPER" | cut -d"|" -f5)
     PREEMPTIBLE=$(echo "$TRAIN_EXPER" | cut -d"|" -f6)
     OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
+    # can be used in place of EXPER_ID in case the final results dataset is not desired
+    EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
     # Check if STATUS starts with "run_"
     if [[ ! "$STATUS" =~ ^run_ ]]; then
         continue
@@ -53,14 +55,15 @@ while read TRAIN_EXPER; do
     if [[ -z $PREEMPTIBLE ]]; then
         PREEMPTIBLE=--not-preemptible
     fi
+    if [[ -z $EXISTING_RESULTS_DATASET ]]; then
+        EXISTING_RESULTS_DATASET=$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4)
+    fi
 
-    EXISTING_RESULTS_DATASET=$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4)
     echo
     echo "Launching uncoupled evaluator job:"
     echo " - Config path: ${CONFIG_PATH}"
     echo " - Group: ${JOB_GROUP}"
     echo " - Checkpoint: ${CKPT}"
-    echo " - Training experiment ID: ${EXPER_ID}"
     echo " - Training results dataset ID: ${EXISTING_RESULTS_DATASET}"
     echo " - Priority: ${PRIORITY}"
     echo " - ${PREEMPTIBLE}"

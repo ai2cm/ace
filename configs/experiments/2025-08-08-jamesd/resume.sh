@@ -38,6 +38,8 @@ while read RESUMING; do
     RETRIES=$(echo "$RESUMING" | cut -d"|" -f9)
     WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f10)
     OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f11)
+    # can be used in place of WANDB_PROJECT and WANDB_ID
+    EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -46,14 +48,16 @@ while read RESUMING; do
     fi
     JOB_GROUP="${GROUP}"
     JOB_NAME="${JOB_GROUP}-train"
-    EXPER_ID=$(
-        python $REPO_ROOT/scripts/wandb/wandb_to_beaker_experiment.py \
-          --project "$WANDB_PROJECT" --wandb_id "$WANDB_ID"
-    )
-    EXISTING_RESULTS_DATASET=$(
-        beaker experiment get $EXPER_ID --format json |
-          jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4
-    )
+    if [[ -z $EXISTING_RESULTS_DATASET ]]; then
+        EXPER_ID=$(
+            python $REPO_ROOT/scripts/wandb/wandb_to_beaker_experiment.py \
+              --project "$WANDB_PROJECT" --wandb_id "$WANDB_ID"
+        )
+        EXISTING_RESULTS_DATASET=$(
+            beaker experiment get $EXPER_ID --format json |
+              jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4
+        )
+    fi
     declare -a CLUSTER_ARGS
     if [[ "$CLUSTER" == "titan" ]]; then
         if [[ -z "$WORKSPACE" ]]; then
@@ -76,7 +80,7 @@ while read RESUMING; do
     echo
     echo "Resuming uncoupled training job:"
     echo " - Job name: ${JOB_NAME}"
-    echo " - Original experiment ID: ${EXPER_ID}"
+    echo " - Resuming results dataset ID: ${EXISTING_RESULTS_DATASET}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
     echo " - Workspace: ${WORKSPACE}"

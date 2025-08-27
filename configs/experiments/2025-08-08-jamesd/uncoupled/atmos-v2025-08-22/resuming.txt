@@ -1,2 +1,2 @@
-group|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override
-v2025-08-22-ts_uncoupled-trapezoid_lr-rs1|ace2-cm4-atmos-noLSM|uud2d6cw|train|high|ceres|8|600GiB|0|ai2/ace
+group|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+v2025-08-22-ts_uncoupled-trapezoid_lr-rs1|ace2-cm4-atmos-noLSM|uud2d6cw|train|high|ceres|8|600GiB|0|ai2/ace||01K3KHXB47FJQYRAEY83ECPRQ4
