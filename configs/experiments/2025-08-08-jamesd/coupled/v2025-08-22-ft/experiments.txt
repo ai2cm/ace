@@ -2,3 +2,5 @@ group|exper_id|status|ckpt_type|priority|premptible_flag|override|results_datase
 ft-sxnhx8rg-10ep-trapezoid_lr||01K3PEP7458T3DY3JSHV1V61M3|training|best_inference_ckpt|normal|--not-preemptible
 
 ft-sxnhx8rg-10ep-trapezoid_lr-ncs2-atm21loss|01K3PJ7FHBAE9TRJNSP5NE0E3V|training|best_inference_ckpt|normal|--not-preemptible
+
+ft-sxnhx8rg-10ep-trapezoid_lr|01K3PZ5B8VF0N15C7G29THFC0F|training|best_inference_ckpt|normal|--not-preemptible
