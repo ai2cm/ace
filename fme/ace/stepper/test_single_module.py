@@ -1001,6 +1001,28 @@ def test_step_with_prescribed_ocean():
     assert set(output) == {"a", "b"}
 
 
+def test_prescribe_sst_integration():
+    """Test that prescribe_sst produces the same prescription as step method."""
+    stepper = _get_stepper(
+        ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
+    )
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
+    prescribed_data = stepper.prescribe_sst(
+        mask_data=ocean_data,
+        gen_data=input_data,
+        target_data=ocean_data,
+    )
+    expected_prescribed_a = torch.where(
+        torch.round(ocean_data["mask"]).to(int) == 1,
+        ocean_data["a"],
+        input_data["a"],  # no +1
+    )
+    torch.testing.assert_close(prescribed_data["a"], expected_prescribed_a)
+    torch.testing.assert_close(prescribed_data["b"], input_data["b"])
+    assert set(prescribed_data) == {"a", "b"}
+
+
 def get_data_for_predict(
     n_steps, forcing_names: list[str]
 ) -> tuple[PrognosticState, BatchData]:

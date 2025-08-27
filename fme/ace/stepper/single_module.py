@@ -969,6 +969,23 @@ class Stepper(
     def ocean_fraction_name(self) -> str | None:
         return self._step_obj.ocean_fraction_name
 
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        """
+        Prescribe sea surface temperature onto the generated surface temperature field.
+
+        Args:
+            mask_data: Source for the prescriber mask field.
+            gen_data: Contains the generated surface temperature field.
+            target_data: Contains the target surface temperature that will
+                be prescribed onto the generated one according to the mask.
+        """
+        return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
+
     @property
     def training_dataset_info(self) -> DatasetInfo:
         return self._dataset_info
