@@ -845,13 +845,13 @@ class CoupledStepper(
             which should be output from _get_atmosphere_forcings.
 
         """
-        ts_name = self._config.surface_temperature_name
+        ts_name = self.atmosphere.surface_temperature_name
         assert np.all(atmos_ic_state.as_batch_data().time == forcing_ic_batch.time)
         atmos_ic_data = atmos_ic_state.as_batch_data().data
         forcing_ic_data = forcing_ic_batch.data
         assert ts_name in atmos_ic_data
         assert ts_name in forcing_ic_data
-        assert self._config.ocean_fraction_name in forcing_ic_data
+        assert self.atmosphere.ocean_fraction_name in forcing_ic_data
         atmos_ic_data = self.atmosphere.prescribe_sst(
             mask_data=forcing_ic_data,
             gen_data=atmos_ic_data,
