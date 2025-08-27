@@ -33,7 +33,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.ocean import Ocean, OceanConfig
+from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OceanData
 from fme.core.optimization import NullOptimization
 from fme.core.tensors import add_ensemble_dim
@@ -762,11 +762,6 @@ class CoupledStepper(
         self._dataset_info = dataset_info
         self._ocean_mask_provider = dataset_info.ocean_mask_provider
 
-        sst_prescriber: Ocean | None = self.atmosphere.ocean
-        if sst_prescriber is None:
-            raise ValueError("Atmosphere must have an Ocean interface.")
-        self._sst_prescriber: Ocean = sst_prescriber
-
         ocean_loss = self._config.get_ocean_loss(
             self.ocean.loss_obj,
             ocean.TIME_DIM,
@@ -849,20 +844,19 @@ class CoupledStepper(
         initial condition field.
 
         atmos_ic_state: The atmosphere prognostic state to be updated.
-
         forcing_ic_state: The corresponding forcing state at the same time,
             which should be output from _get_atmosphere_forcings.
 
         """
-        ts_name = self._config.surface_temperature_name
+        ts_name = self.atmosphere.surface_temperature_name
         assert np.all(atmos_ic_state.as_batch_data().time == forcing_ic_batch.time)
         atmos_ic_data = atmos_ic_state.as_batch_data().data
         forcing_ic_data = forcing_ic_batch.data
         assert ts_name in atmos_ic_data
         assert ts_name in forcing_ic_data
-        assert self._config.ocean_fraction_name in forcing_ic_data
-        atmos_ic_data = self._sst_prescriber(
-            input_data=forcing_ic_data,
+        assert self.atmosphere.ocean_fraction_name in forcing_ic_data
+        atmos_ic_data = self.atmosphere.prescribe_sst(
+            mask_data=forcing_ic_data,
             gen_data=atmos_ic_data,
             target_data=forcing_ic_data,
         )
@@ -870,6 +864,7 @@ class CoupledStepper(
             BatchData(
                 data=atmos_ic_data,
                 time=forcing_ic_batch.time,
+                labels=forcing_ic_batch.labels,
             )
         )
 

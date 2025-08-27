@@ -45,7 +45,7 @@ from fme.core.normalizer import (
     NormalizationConfig,
     StandardNormalizer,
 )
-from fme.core.ocean import Ocean, OceanConfig
+from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.multi_call import MultiCallStepConfig, replace_multi_call
@@ -962,16 +962,20 @@ class Stepper(
         return self._derive_func
 
     @property
-    def ocean(self) -> Ocean | None:
-        return self._step_obj.ocean
-
-    @property
     def surface_temperature_name(self) -> str | None:
         return self._step_obj.surface_temperature_name
 
     @property
     def ocean_fraction_name(self) -> str | None:
         return self._step_obj.ocean_fraction_name
+
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
     @property
     def training_dataset_info(self) -> DatasetInfo:

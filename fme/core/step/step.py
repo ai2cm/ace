@@ -296,6 +296,18 @@ class StepABC(abc.ABC, nn.Module):
         pass
 
     @abc.abstractmethod
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        """
+        Prescribe target_data SST onto gen_data according to mask_data.
+        """
+        pass
+
+    @abc.abstractmethod
     def get_regularizer_loss(self) -> torch.Tensor:
         """
         Get the regularizer loss.
