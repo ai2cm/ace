@@ -44,8 +44,8 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 10
-  batch_size: 16  # 48  for 8 GPUs
+  sample_with_replacement: 20
+  batch_size: 20  # 48  for 8 GPUs
   num_data_workers: 8
   fine:
   - data_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
