@@ -78,7 +78,7 @@ while read RESUMING; do
     fi
 
     echo
-    echo "Resuming uncoupled training job:"
+    echo "Resuming ${CONFIG_SUBDIR} training job:"
     echo " - Job name: ${JOB_NAME}"
     echo " - Resuming results dataset ID: ${EXISTING_RESULTS_DATASET}"
     echo " - Priority: ${PRIORITY}"
@@ -91,7 +91,7 @@ while read RESUMING; do
     EXPERIMENT_ID=$(
         gantry run \
             --name "$JOB_NAME" \
-            --description "Resume uncoupled pretraining: ${JOB_GROUP}" \
+            --description "Resume ${CONFIG_SUBDIR} pretraining: ${JOB_GROUP}" \
             --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
             --priority "$PRIORITY" \
             --preemptible \
@@ -127,7 +127,7 @@ while read RESUMING; do
     } >> "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
 
     git add "${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
-    git commit -m"Update uncoupled/${CONFIG_SUBDIR}/experiments.txt"
+    git commit -m"Update ${CONFIG_SUBDIR}/experiments.txt"
     git push origin "${GIT_BRANCH}"
 
 done <"${SCRIPT_DIR}/${CONFIG_SUBDIR}/resuming.txt"
