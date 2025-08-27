@@ -162,7 +162,7 @@ stepper:
     timedelta: 5D
     stepper:
       parameter_init:
-        weights_path: /ckpt.tar
+        weights_path: /ocean_ckpt.tar
       loss:
         type: MSE
       input_masking:
