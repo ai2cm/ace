@@ -1,6 +1,7 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
+evaluate_before_training: false
 ema:
   decay: 0.999
 max_epochs: 10
@@ -154,9 +155,6 @@ stepper:
     checkpoint_path: /ckpt.tar
   ocean:
     timedelta: 5D
-    loss_contributions:
-      n_steps: 4
-      weight: 0.5
     stepper:
       parameter_init:
         weights_path: null  # required
