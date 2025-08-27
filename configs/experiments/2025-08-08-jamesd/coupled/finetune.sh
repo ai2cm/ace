@@ -107,6 +107,7 @@ while read FINETUNING; do
     echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
+    echo " - Workspace: ${WORKSPACE}"
     echo " - GPUs: ${N_GPUS}"
     echo " - Shared memory: ${SHARED_MEM}"
     echo " - Override: ${OVERRIDE_ARGS}"
