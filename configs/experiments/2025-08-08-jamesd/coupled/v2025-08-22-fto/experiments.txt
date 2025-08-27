@@ -8,3 +8,5 @@ fto-v2025-08-22||training|best_inference_ckpt|normal|--not-preemptible
 fto-v2025-08-22||training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v2025-08-22|01K3MD6CDSM2V9NQXS5BC8WZ1V|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v2025-08-22|01K3MVERF59R2XJPTHQ6T3847P|training|best_inference_ckpt|normal|--not-preemptible
