@@ -11,7 +11,7 @@ import torch
 import xarray as xr
 
 import fme
-from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.stepper import StepperConfig
 from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import (
@@ -1086,6 +1086,58 @@ def test__get_ocean_forcings():
     torch.testing.assert_close(
         new_ocean_forcings["o_exog"], expected_ocean_forcings["o_exog"]
     )
+
+
+def test__prescribe_ic_sst():
+    torch.manual_seed(0)
+    # create a mock atmosphere stepper with required attributes
+    mock_atmosphere = Mock()
+    mock_atmosphere.surface_temperature_name = "surface_temp"
+    mock_atmosphere.ocean_fraction_name = "ocean_frac"
+
+    # mock prescribe_sst method to return modified data
+    def mock_prescribe_sst(mask_data, gen_data, target_data):
+        result = gen_data.copy()
+        result["surface_temp"] = target_data["surface_temp"] + 1.0
+        return result
+
+    mock_atmosphere.prescribe_sst = Mock(side_effect=mock_prescribe_sst)
+
+    # mock CoupledStepper with the mocked atmosphere
+    mock_coupler = Mock(spec=CoupledStepper)
+    mock_coupler.atmosphere = mock_atmosphere
+
+    atmos_ic_batch = BatchData.new_for_testing(
+        names=["surface_temp", "other_var"],
+        n_samples=2,
+        n_timesteps=1,
+        img_shape=(N_LAT, N_LON),
+    )
+    atmos_ic_state = PrognosticState(atmos_ic_batch)
+
+    forcing_ic_batch = BatchData.new_for_testing(
+        names=["surface_temp", "ocean_frac"],
+        n_samples=2,
+        n_timesteps=1,
+        img_shape=(N_LAT, N_LON),
+    )
+
+    result = CoupledStepper._prescribe_ic_sst(
+        mock_coupler, atmos_ic_state, forcing_ic_batch
+    )
+    assert isinstance(result, PrognosticState)
+    result_data = result.as_batch_data().data
+
+    expected_surface_temp = forcing_ic_batch.data["surface_temp"] + 1.0
+    torch.testing.assert_close(result_data["surface_temp"], expected_surface_temp)
+
+    torch.testing.assert_close(
+        result_data["other_var"], atmos_ic_batch.data["other_var"]
+    )
+    assert np.array_equal(
+        result.as_batch_data().time.values, forcing_ic_batch.time.values
+    )
+    assert result.as_batch_data().labels == forcing_ic_batch.labels
 
 
 def test_predict_paired():
