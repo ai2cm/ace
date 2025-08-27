@@ -137,7 +137,7 @@ def test_force_conserve_dry_air(size: tuple[int, ...], use_area: bool):
     if area_weights is not None:
         gridded_operations: GriddedOperations = LatLonOperations(area_weights)
     else:
-        gridded_operations = HEALPixOperations()
+        gridded_operations = HEALPixOperations(nside=size[-1])
     original_nonconservation = get_dry_air_nonconservation(
         data,
         vertical_coordinate=vertical_coordinate,
@@ -212,10 +212,10 @@ def test_force_conserve_moisture(
     )
     if use_area:
         ops: GriddedOperations = LatLonOperations(
-            1.0 + torch.rand(size=(5, 1)).broadcast_to(size=(5, 5))
+            1.0 + torch.rand(size=(size[-2], 1)).broadcast_to(size=size[-2:])
         )
     else:
-        ops = HEALPixOperations()
+        ops = HEALPixOperations(nside=size[-1])
     data["tendency_of_total_water_path_due_to_advection"] -= ops.area_weighted_mean(
         data["tendency_of_total_water_path_due_to_advection"], keepdim=True
     )
