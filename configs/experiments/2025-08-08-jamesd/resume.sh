@@ -36,10 +36,10 @@ while read RESUMING; do
     N_GPUS=$(echo "$RESUMING" | cut -d"|" -f7)
     SHARED_MEM=$(echo "$RESUMING" | cut -d"|" -f8)
     RETRIES=$(echo "$RESUMING" | cut -d"|" -f9)
-    WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f10)
+    WORKSPACE=$(echo "$RESUMING" | cut -d"|" -f10)
     OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f11)
     # can be used in place of WANDB_PROJECT and WANDB_ID
-    EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
+    EXISTING_RESULTS_DATASET=$(echo "$RESUMING" | cut -d"|" -f12)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi

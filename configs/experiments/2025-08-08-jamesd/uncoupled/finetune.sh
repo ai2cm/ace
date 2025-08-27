@@ -50,7 +50,7 @@ while read FINETUNING; do
     WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f11)
     OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f12)
     # can be used in place of WANDB_PROJECT and WANDB_ID
-    EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
+    EXISTING_RESULTS_DATASET=$(echo "$FINETUNING" | cut -d"|" -f13)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
