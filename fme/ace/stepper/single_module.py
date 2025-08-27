@@ -975,6 +975,15 @@ class Stepper(
         gen_data: TensorMapping,
         target_data: TensorMapping,
     ) -> TensorDict:
+        """
+        Prescribe sea surface temperature onto the generated surface temperature field.
+
+        Args:
+            mask_data: Source for the prescriber mask field.
+            gen_data: Contains the generated surface temperature field.
+            target_data: Contains the target surface temperature that will
+                be prescribed onto the generated one according to the mask.
+        """
         return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
     @property

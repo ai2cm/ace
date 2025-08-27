@@ -406,8 +406,8 @@ class FCN2Step(StepABC):
     ) -> TensorDict:
         if self.ocean is None:
             raise RuntimeError(
-                "The Ocean interface is missing but required for calling "
-                "prescribe_surface_temperature."
+                "The Ocean interface is missing but required to prescribe "
+                "sea surface temperature."
             )
         return self.ocean.prescriber(mask_data, gen_data, target_data)
 
