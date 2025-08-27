@@ -124,6 +124,7 @@ validation_loader:
               start_time: '0306-01-03T12:00:00'
               stop_time: '0311-01-03T12:00:00'
 optimization:
+  use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.00001
   optimizer_type: AdamW
