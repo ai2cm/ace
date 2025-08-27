@@ -1,2 +1,3 @@
 group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
-ft-sxnhx8rg-10ep-trapezoid_lr|ace-samudra-coupled-cm4|sxnhx8rg|best_inference_ckpt|train|urgent|ceres|8|800GiB|3||stepper.ocean.loss_contributions.weight=0.5
+ft-sxnhx8rg-10ep-trapezoid_lr|ace-samudra-coupled-cm4|sxnhx8rg|best_inference_ckpt|training|urgent|ceres|8|800GiB|3||stepper.ocean.loss_contributions.weight=0.5
+ft-sxnhx8rg-10ep-trapezoid_lr-ncs2-atm21loss|ace-samudra-coupled-cm4|sxnhx8rg|best_inference_ckpt|train|high|ceres|8|800GiB|0|ai2/ace|n_coupled_steps=2 stepper.atmosphere.loss_contributions.n_steps=21 stepper.atmosphere.loss_contributions.weight=0.1
