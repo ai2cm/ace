@@ -36,7 +36,8 @@ while read RESUMING; do
     N_GPUS=$(echo "$RESUMING" | cut -d"|" -f7)
     SHARED_MEM=$(echo "$RESUMING" | cut -d"|" -f8)
     RETRIES=$(echo "$RESUMING" | cut -d"|" -f9)
-    OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f10)
+    WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f10)
+    OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f11)
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
