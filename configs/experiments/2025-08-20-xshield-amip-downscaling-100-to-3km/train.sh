@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-sample-w-repl"
-CONFIG_FILENAME="config-train-sample-test.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-control-test"
+CONFIG_FILENAME="config-train-no-sample.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
