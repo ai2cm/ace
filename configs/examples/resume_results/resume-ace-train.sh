@@ -9,13 +9,13 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 # Job configuration
-JOB_GROUP="resume-example"  # Update this to match your experiment group
-JOB_NAME="${JOB_GROUP}-resume-train"
+JOB_GROUP="resume_results"  # Update this to match your experiment group
+JOB_NAME="${JOB_GROUP}-train"
 EXISTING_RESULTS_DATASET="01JSYKN0GVT0NVT43KJSFMBAF6"  # Update this with your results dataset ID
 STATS_DATA="jamesd/2025-04-16-cm4-piControl-ocean-atmos-5daily-stats"
 N_GPUS=8
 SHARED_MEM="600GiB"
-PRIORITY="urgent" # FIXME!
+PRIORITY="normal"
 RETRIES=0
 
 # Override arguments (add any config overrides here)
@@ -41,7 +41,7 @@ gantry run \
     --priority "$PRIORITY" \
     --preemptible \
     --retries $RETRIES \
-    --cluster ai2/ceres-cirrascale \
+    --cluster ai2/ace \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
