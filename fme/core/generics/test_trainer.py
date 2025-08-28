@@ -219,7 +219,6 @@ class Config:
     segment_epochs: int | None = None
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
-    resume_results_dir: str | None = None
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1

@@ -63,7 +63,6 @@ from typing import Any, ClassVar, Generic, Protocol, TypeVar
 import torch
 
 import fme
-from fme.core.cli import ResumeResultsConfig
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
@@ -101,9 +100,6 @@ class TrainConfigProtocol(Protocol):
 
     @property
     def checkpoint_dir(self) -> str: ...
-
-    @property
-    def resume_results(self) -> ResumeResultsConfig | None: ...
 
     @property
     def max_epochs(self) -> int: ...
