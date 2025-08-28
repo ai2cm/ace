@@ -16,7 +16,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 JOB_GROUP="2025-08-28-baseline" # update when training a new baseline
 RS=1
-JOB_NAME="${JOB_GROUP}-${RS}-train"
+JOB_NAME="${JOB_GROUP}-rs${RS}-train"
 echo "Job name: ${JOB_NAME}"
 
 OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
