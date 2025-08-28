@@ -18,6 +18,9 @@ class ResumeResultsConfig:
     (e.g., to resume training on different hardware or to change data loader settings
     such as number of data workers).
 
+    WARNING: We typically don't guarantee backwards compatibility for training, so this
+    may not work well when resuming old experiments.
+
     Arguments:
         existing_dir: Directory with existing results to resume from.
         resume_wandb: If true, log to the same WandB job as given in the
