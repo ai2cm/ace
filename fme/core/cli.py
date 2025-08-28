@@ -51,6 +51,9 @@ def prepare_directory(
             )
         # recursively copy all files in resume_results_path to path
         shutil.copytree(resume_results.existing_dir, path, dirs_exist_ok=True)
+        wandb_run_id_path = os.path.join(path, "wandb_run_id")
+        if not resume_results.resume_wandb and os.path.exists(wandb_run_id_path):
+            os.remove(wandb_run_id_path)
     else:
         # either not given or ignored because we already resumed once before
         resume_results = None
