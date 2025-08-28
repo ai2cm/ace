@@ -11,7 +11,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 # Job configuration
 JOB_GROUP="resume_results"  # Update this to match your experiment group
 JOB_NAME="${JOB_GROUP}-train"
-EXISTING_RESULTS_DATASET="01JX0FGCR0NDK3J1RA2BYY9M42"  # Update this with your results dataset ID
+EXISTING_RESULTS_DATASET="01K32TXSMT883X8M3MW6906HD7"  # Update this with your results dataset ID
 STATS_DATA="jamesd/2025-04-16-cm4-piControl-ocean-atmos-5daily-stats"
 N_GPUS=8
 SHARED_MEM="600GiB"
