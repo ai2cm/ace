@@ -25,6 +25,7 @@ from fme.ace.requirements import (
 )
 from fme.ace.stepper import ExistingStepperConfig, Stepper
 from fme.ace.stepper.single_module import StepperConfig
+from fme.core.cli import ResumeResultsConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
@@ -197,11 +198,11 @@ class TrainConfig:
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
-        resume_results_dir: Directory where an existing results directory is mounted to
-            resume from, including logging to the same WandB job. When provided and
-            experiment_dir has no training_checkpoints subdirectory, then it is assumed
-            that this is a new run to resume a previously completed run and
-            resume_results_dir is recursively copied to experiment_dir.
+        resume_results:  Configuration for resuming a previously stopped or finished
+            training job. When provided and experiment_dir has no training_checkpoints
+            subdirectory, then it is assumed that this is a new run to resume a
+            previously completed run and resume_results.existing_dir is recursively
+            copied to experiment_dir.
     """
 
     train_loader: DataLoaderConfig
@@ -232,7 +233,7 @@ class TrainConfig:
     )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
-    resume_results_dir: str | None = None
+    resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
         if (

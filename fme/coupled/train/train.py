@@ -146,8 +146,10 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
     config.logging.configure_wandb(
         config=config_as_dict, env_vars=env_vars, notes=beaker_url
     )
-    if config.resume_results_dir is not None:
-        logging.info(f"Resuming training from results in {config.resume_results_dir}")
+    if config.resume_results is not None:
+        logging.info(
+            f"Resuming training from results in {config.resume_results.existing_dir}"
+        )
     trainer = build_trainer(builders, config)
     trainer.train()
     logging.info(f"DONE ---- rank {dist.rank}")
@@ -164,7 +166,8 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         data=data,
         config=dacite.Config(strict=True),
     )
-    train_config.resume_results_dir = prepare_directory(
-        train_config.experiment_dir, data, train_config.resume_results_dir
+    train_config.set_random_seed()
+    train_config.resume_results = prepare_directory(
+        train_config.experiment_dir, data, train_config.resume_results
     )
     run_train_from_config(train_config)

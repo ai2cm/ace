@@ -1,4 +1,5 @@
 import argparse
+import dataclasses
 import os
 import shutil
 from collections.abc import Sequence
@@ -6,6 +7,25 @@ from collections.abc import Sequence
 import yaml
 
 from .config import update_dict_with_dotlist
+
+
+@dataclasses.dataclass
+class ResumeResultsConfig:
+    """Configuration for resuming a previously stopped or finished job.
+
+    Typically only useful for training jobs which have already finished (e.g., to train
+    for a larger value of max_epochs than originally configured) or which were stopped
+    (e.g., to resume training on different hardware or to change data loader settings
+    such as number of data workers).
+
+    Arguments:
+        existing_dir: Directory with existing results to resume from.
+        resume_wandb: If true, log to the same WandB job as given in the
+            wandb_job_id file in existing_dir, if any.
+    """
+
+    existing_dir: str
+    resume_wandb: bool = False
 
 
 def prepare_config(path: str, override: Sequence[str] | None = None) -> dict:
@@ -17,24 +37,26 @@ def prepare_config(path: str, override: Sequence[str] | None = None) -> dict:
 
 
 def prepare_directory(
-    path: str, config_data: dict, resume_results_path: str | None = None
-) -> str | None:
+    path: str, config_data: dict, resume_results: ResumeResultsConfig | None = None
+) -> ResumeResultsConfig | None:
     """Create experiment directory and dump config_data to it."""
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=True)
-    if resume_results_path is not None and not os.path.isdir(
+    if resume_results is not None and not os.path.isdir(
         os.path.join(path, "training_checkpoints")
     ):
-        if not os.path.isdir(resume_results_path):
-            raise ValueError(f"The directory {resume_results_path} does not exist.")
+        if not os.path.isdir(resume_results.existing_dir):
+            raise ValueError(
+                f"The directory {resume_results.existing_dir} does not exist."
+            )
         # recursively copy all files in resume_results_path to path
-        shutil.copytree(resume_results_path, path, dirs_exist_ok=True)
+        shutil.copytree(resume_results.existing_dir, path, dirs_exist_ok=True)
     else:
         # either not given or ignored because we already resumed once before
-        resume_results_path = None
+        resume_results = None
     with open(os.path.join(path, "config.yaml"), "w") as f:
         yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
-    return resume_results_path
+    return resume_results
 
 
 def get_parser():
