@@ -1,3 +1,8 @@
-group|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset
-ft-1y8prir2-20ep-cosine_annealing|01JZHQJXBGRW367AXKJFG1BCR0|run_200yr|best_inference_ckpt|normal|--not-preemptible
+group|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
+ft-1y8prir2-20ep-cosine_annealing|01JZHQJXBGRW367AXKJFG1BCR0|run_ICx1|best_inference_ckpt|normal|--not-preemptible|||ai2/ace
+ft-1y8prir2-20ep-cosine_annealing|01JZHQJXBGRW367AXKJFG1BCR0|run_200yr0311|best_inference_ckpt|normal|--not-preemptible|||ai2/ace
+ft-1y8prir2-20ep-cosine_annealing|01JZHQJXBGRW367AXKJFG1BCR0|run_200yr0313|best_inference_ckpt|normal|--not-preemptible|||ai2/ace
+ft-1y8prir2-20ep-cosine_annealing|01JZHQJXBGRW367AXKJFG1BCR0|run_200yr0315|best_inference_ckpt|normal|--not-preemptible|||ai2/ace
+ft-1y8prir2-20ep-cosine_annealing|01JZHQJXBGRW367AXKJFG1BCR0|run_200yr0317|best_inference_ckpt|normal|--not-preemptible|||ai2/ace
+ft-1y8prir2-20ep-cosine_annealing|01JZHQJXBGRW367AXKJFG1BCR0|run_200yr0319|best_inference_ckpt|normal|--not-preemptible|||ai2/ace
 ft-xsowtml8-20ep-cosine_annealing|01JZTQ0VSBDTYN6WVDD4KR9V9W|skip|best_inference_ckpt|normal|--not-preemptible
