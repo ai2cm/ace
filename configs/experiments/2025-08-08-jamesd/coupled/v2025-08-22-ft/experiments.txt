@@ -6,3 +6,5 @@ ft-sxnhx8rg-10ep-trapezoid_lr-ncs2-atm21loss|01K3PJ7FHBAE9TRJNSP5NE0E3V|training
 ft-sxnhx8rg-10ep-trapezoid_lr|01K3PZ5B8VF0N15C7G29THFC0F|training|best_inference_ckpt|normal|--not-preemptible
 
 ft-sxnhx8rg-10ep-trapezoid_lr-ncs2-atm21loss|01K3PZ5TXBZSFQEFWYD1B6VNBF|training|best_inference_ckpt|normal|--not-preemptible
+
+ft-sxnhx8rg-10ep-trapezoid_lr-ncs2-atm21loss||training|best_inference_ckpt|normal|--not-preemptible
