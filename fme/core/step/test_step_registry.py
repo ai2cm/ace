@@ -56,7 +56,13 @@ class MockStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
 
-    def step(self, input, next_step_input_data, use_activation_checkpointing=False):
+    def step(
+        self,
+        input,
+        next_step_input_data,
+        labels,
+        use_activation_checkpointing=False,
+    ):
         raise NotImplementedError()
 
     def get_state(self):

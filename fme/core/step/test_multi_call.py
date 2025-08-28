@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from fme.core.dataset_info import DatasetInfo
+from fme.core.labels import BatchLabels
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import StandardNormalizer
 
@@ -22,7 +23,7 @@ def test_multi_call(include_multi_call_in_loss: bool):
     output_names = ["b", "c"]
     multi_call_output_names = ["c"]
 
-    def _step(input, next_step_input_data, wrapper):
+    def _step(input, next_step_input_data, labels, wrapper):
         prediction = {k: input["CO2"].detach().clone() for k in output_names}
         return prediction
 
@@ -52,7 +53,8 @@ def test_multi_call(include_multi_call_in_loss: bool):
             "b": torch.randn(1, 2, 3, 4),
             "CO2": torch.randn(1, 2, 3, 4),
         }
-        out = step.step(input, {})
+        labels: BatchLabels = [set() for _ in range(1)]
+        out = step.step(input, {}, labels=labels)
     torch.testing.assert_close(out["b"], input["CO2"])
     torch.testing.assert_close(out["c"], input["CO2"])
     torch.testing.assert_close(out["c_doubled_co2"], input["CO2"] * 2)

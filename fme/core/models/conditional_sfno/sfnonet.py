@@ -14,8 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import partial
 import math
+from functools import partial
 from typing import Any, List, Optional, Tuple
 
 import torch
@@ -421,7 +421,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         embed_dim: int = 256,
         context_config: ContextConfig = ContextConfig(
             embed_dim_scalar=0,
-            embed_dim_2d=0,
+            embed_dim_labels=0,
+            embed_dim_noise=0,
         ),
         global_layer_norm: bool = False,
         num_layers: int = 12,

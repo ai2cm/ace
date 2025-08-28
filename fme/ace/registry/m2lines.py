@@ -32,8 +32,11 @@ class SamudraBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
+        n_labels: int,
         img_shape: tuple[int, int],
     ):
+        if n_labels > 0:
+            raise ValueError("Samudra does not support labels")
         return Samudra(
             input_channels=n_in_channels,
             output_channels=n_out_channels,

@@ -44,8 +44,13 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
+        n_labels: int,
         img_shape: tuple[int, int],
     ):
+        if n_labels > 0:
+            raise ValueError(
+                "SphericalFourierNeuralOperatorNet does not support labels"
+            )
         sfno_net = SphericalFourierNeuralOperatorNet(
             params=self,
             in_chans=n_in_channels,
@@ -89,8 +94,11 @@ class SFNO_V0_1_0(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
+        n_labels: int,
         img_shape: tuple[int, int],
     ):
+        if n_labels > 0:
+            raise ValueError("SFNO-v0.1.0 does not support labels")
         return MakaniSFNO(
             inp_chans=n_in_channels,
             out_chans=n_out_channels,

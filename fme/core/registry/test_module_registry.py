@@ -5,7 +5,9 @@ import dacite
 import pytest
 import torch
 
-from .module import ModuleConfig, ModuleSelector
+from fme.core.labels import LabelEncoder
+
+from .module import CONDITIONAL_BUILDERS, ModuleConfig, ModuleSelector
 
 
 class MockModule(torch.nn.Module):
@@ -20,7 +22,7 @@ class MockModule(torch.nn.Module):
 class MockModuleBuilder(ModuleConfig):
     param_shapes: list[tuple[int, ...]]
 
-    def build(self, n_in_channels, n_out_channels, img_shape):
+    def build(self, n_in_channels, n_out_channels, n_labels, img_shape):
         return MockModule(self.param_shapes)
 
     @classmethod
@@ -36,8 +38,27 @@ class MockModuleBuilder(ModuleConfig):
 def test_register():
     """Make sure that the registry is working as expected."""
     selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
-    module = selector.build(1, 1, (16, 32))
+    module, encoder = selector.build(
+        n_in_channels=1, n_out_channels=1, all_labels=set(), img_shape=(16, 32)
+    )
     assert isinstance(module, MockModule)
+    assert encoder is None
+
+
+def test_build_conditional():
+    """Make sure that the registry is working as expected."""
+    try:
+        CONDITIONAL_BUILDERS.append("mock")
+        selector = ModuleSelector(
+            type="mock", conditional=True, config={"param_shapes": [(1, 2, 3)]}
+        )
+        module, encoder = selector.build(
+            n_in_channels=1, n_out_channels=1, all_labels={"a", "b"}, img_shape=(16, 32)
+        )
+        assert isinstance(module, MockModule)
+        assert isinstance(encoder, LabelEncoder)
+    finally:
+        CONDITIONAL_BUILDERS.remove("mock")
 
 
 def test_module_selector_raises_with_bad_config():

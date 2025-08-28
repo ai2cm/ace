@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from torch import nn
 
+from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorDict, TensorMapping
 
 LEVEL_PATTERN = re.compile(r"_(\d+)$")
@@ -11,7 +12,8 @@ TEMPLATE = "{name}{suffix}"
 
 
 StepMethod = Callable[
-    [TensorMapping, TensorMapping, Callable[[nn.Module], nn.Module]], TensorDict
+    [TensorMapping, TensorMapping, BatchLabels, Callable[[nn.Module], nn.Module]],
+    TensorDict,
 ]
 
 
@@ -147,6 +149,7 @@ class MultiCall:
         self,
         input: TensorMapping,
         next_step_forcing_data: TensorMapping,
+        labels: BatchLabels,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         predictions = {}
@@ -154,7 +157,7 @@ class MultiCall:
         for suffix, multiplier in self.forcing_multipliers.items():
             scaled_input = dict(input)
             scaled_input[self.forcing_name] = multiplier * unscaled_forcing
-            output = self._step(scaled_input, next_step_forcing_data, wrapper)
+            output = self._step(scaled_input, next_step_forcing_data, labels, wrapper)
 
             for name in self.output_names:
                 new_name = get_multi_call_name(name, suffix)

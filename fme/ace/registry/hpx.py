@@ -45,6 +45,7 @@ class HEALPixRecUNetBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
+        n_labels: int,
         img_shape: tuple[int, int],
     ) -> nn.Module:
         """
@@ -53,11 +54,14 @@ class HEALPixRecUNetBuilder(ModuleConfig):
         Args:
             n_in_channels: Number of input channels.
             n_out_channels: Number of output channels.
+            n_labels: Number of labels.
             img_shape: Shape of the input image.
 
         Returns:
             HEALPixRecUNet model.
         """
+        if n_labels > 0:
+            raise ValueError("HEALPixRecUNet does not support labels")
         # Construct the HEALPixRecUNet module here using the parameters
         return HEALPixRecUNet(
             encoder=self.encoder,

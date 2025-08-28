@@ -47,6 +47,7 @@ from fme.core.coordinates import (
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
+from fme.core.labels import BatchLabels
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
@@ -948,9 +949,11 @@ def _get_stepper(
 
 def test_step():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    n_samples = 3
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    labels: BatchLabels = [set() for _ in range(n_samples)]
 
-    output = stepper.step(input_data, {})
+    output = stepper.step(input_data, {}, labels=labels)
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
@@ -958,8 +961,10 @@ def test_step():
 
 def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
-    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
-    output = stepper.step(input_data, {})
+    n_samples = 3
+    input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
+    labels: BatchLabels = [{"a"} for _ in range(n_samples)]
+    output = stepper.step(input_data, {}, labels=labels)
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
 
@@ -973,8 +978,10 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
         norm_mean=norm_mean,
         residual_prediction=residual_prediction,
     )
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    output = stepper.step(input_data, {})
+    n_samples = 3
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    labels: BatchLabels = [set() for _ in range(n_samples)]
+    output = stepper.step(input_data, {}, labels=labels)
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
     else:
@@ -990,7 +997,8 @@ def test_step_with_prescribed_ocean():
     )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
-    output = stepper.step(input_data, ocean_data)
+    labels: BatchLabels = [set() for _ in range(3)]
+    output = stepper.step(input_data, ocean_data, labels=labels)
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
         ocean_data["a"],

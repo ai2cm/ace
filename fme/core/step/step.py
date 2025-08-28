@@ -10,6 +10,7 @@ import torch
 from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
@@ -319,6 +320,7 @@ class StepABC(abc.ABC, nn.Module):
         self: SelfType,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
+        labels: BatchLabels,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
@@ -333,6 +335,7 @@ class StepABC(abc.ABC, nn.Module):
                 [n_batch, n_lat, n_lon]. This must contain the necessary input
                 data at the output timestep, such as might be needed to prescribe
                 sea surface temperature or use a corrector.
+            labels: Labels for each batch member.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
@@ -342,9 +345,16 @@ class StepABC(abc.ABC, nn.Module):
 
     @final
     def forward(
-        self, input: TensorMapping, next_step_input_data: TensorMapping
+        self,
+        input: TensorMapping,
+        next_step_input_data: TensorMapping,
+        labels: BatchLabels,
     ) -> TensorDict:
-        return self.step(input, next_step_input_data)
+        return self.step(
+            input=input,
+            next_step_input_data=next_step_input_data,
+            labels=labels,
+        )
 
     @final
     def export(

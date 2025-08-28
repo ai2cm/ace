@@ -54,7 +54,8 @@ class ConditionalSFNOBuilder(ModuleConfig):
             img_shape=img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=n_sigma_embedding_channels,
-                embed_dim_2d=0,
+                embed_dim_labels=0,
+                embed_dim_noise=0,
             ),
         )
 

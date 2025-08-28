@@ -20,6 +20,7 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import DummyWrapper
+from fme.core.labels import BatchLabels
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
@@ -153,6 +154,43 @@ def get_single_module_noise_conditioned_selector(
             SingleModuleStepConfig(
                 builder=ModuleSelector(
                     type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="isotropic",
+                            num_layers=2,
+                            local_blocks=[0],
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def get_label_conditioned_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_shared",
+            "forcing_rad",
+            "diagnostic_main",
+            "diagnostic_rad",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    conditional=True,
                     config=dataclasses.asdict(
                         NoiseConditionedSFNOBuilder(
                             embed_dim=4,
@@ -422,6 +460,7 @@ def get_step(
     selector: StepSelector,
     img_shape: tuple[int, int],
     init_weights: Callable[[list[nn.Module]], None] = lambda _: None,
+    all_labels: set[str] | None = None,
 ) -> StepABC:
     device = fme.get_device()
     horizontal_coordinate = LatLonCoordinates(
@@ -435,8 +474,21 @@ def get_step(
         horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
+        all_labels=all_labels,
     )
     return selector.get_step(dataset_info, init_weights)
+
+
+def test_label_conditioned_step():
+    selector = get_label_conditioned_selector()
+    step = get_step(selector, DEFAULT_IMG_SHAPE, all_labels={"a", "b"})
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=1)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples=1
+    )
+    output = step.step(input_data, next_step_input_data, labels=[{"a", "b"}])
+    assert output["diagnostic_main"].shape == (1, 45, 90)
+    assert output["diagnostic_rad"].shape == (1, 45, 90)
 
 
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
@@ -493,7 +545,8 @@ def test_step_applies_wrapper(config: StepSelector):
             multi_calls += len(config._step_config_instance.config.forcing_multipliers)
 
     wrapper = unittest.mock.MagicMock(side_effect=lambda x: x)
-    step.step(input_data, next_step_input_data, wrapper=wrapper)
+    labels: BatchLabels = [set() for _ in range(n_samples)]
+    step.step(input_data, next_step_input_data, wrapper=wrapper, labels=labels)
     assert wrapper.call_count == multi_calls * len(step.modules)
     for module in step.modules:
         wrapper.assert_any_call(module)
@@ -528,7 +581,8 @@ def test_export_step(config: StepSelector, very_fast_only: bool):
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
-    unscripted_output = step.step(input_data, next_step_input_data)
+    labels: BatchLabels = [set() for _ in range(n_samples)]
+    unscripted_output = step.step(input_data, next_step_input_data, labels=labels)
     for name in step.output_names:
         # informative check for nan values
         torch.testing.assert_close(unscripted_output[name], unscripted_output[name])

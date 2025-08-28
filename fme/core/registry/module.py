@@ -8,6 +8,8 @@ from typing import Any, ClassVar, Type  # noqa: UP035
 import dacite
 from torch import nn
 
+from fme.core.labels import LabelEncoder
+
 from .registry import Registry
 
 
@@ -26,6 +28,7 @@ class ModuleConfig(abc.ABC):
         self,
         n_in_channels: int,
         n_out_channels: int,
+        n_labels: int,
         img_shape: tuple[int, int],
     ) -> nn.Module:
         """
@@ -35,6 +38,7 @@ class ModuleConfig(abc.ABC):
         Args:
             n_in_channels: number of input channels
             n_out_channels: number of output channels
+            n_labels: number of labels
             img_shape: shape of last two dimensions of data, e.g. latitude and
                 longitude.
 
@@ -54,6 +58,11 @@ class ModuleConfig(abc.ABC):
         )
 
 
+CONDITIONAL_BUILDERS = [
+    "NoiseConditionedSFNO",
+]
+
+
 @dataclasses.dataclass
 class ModuleSelector:
     """
@@ -71,15 +80,22 @@ class ModuleSelector:
     Parameters:
         type: the type of the ModuleConfig
         config: data for a ModuleConfig instance of the indicated type
+        conditional: whether to condition the predictions on batch labels.
     """
 
     type: str
     config: Mapping[str, Any]
+    conditional: bool = False
     registry: ClassVar[Registry[ModuleConfig]] = Registry[ModuleConfig]()
 
     def __post_init__(self):
         if not isinstance(self.registry, Registry):
             raise ValueError("ModuleSelector.registry should not be set manually")
+        if self.conditional and self.type not in CONDITIONAL_BUILDERS:
+            raise ValueError(
+                "Conditional predictions require a conditional builder, "
+                f"got {self.type} (available: {CONDITIONAL_BUILDERS})"
+            )
         self._instance = self.registry.get(self.type, self.config)
 
     @classmethod
@@ -92,26 +108,43 @@ class ModuleSelector:
         self,
         n_in_channels: int,
         n_out_channels: int,
+        all_labels: set[str],
         img_shape: tuple[int, int],
-    ) -> nn.Module:
+    ) -> tuple[nn.Module, LabelEncoder | None]:
         """
         Build a nn.Module given information about the input and output channels
         and the image shape.
 
+        If a label encoder is returned, the caller is meant to use it to encode
+        the labels for each batch member, and then pass those as a `labels` argument
+        when calling the module. If no label encoder is returned, the caller should
+        not provide this argument (even as None).
+
         Args:
             n_in_channels: number of input channels
             n_out_channels: number of output channels
+            all_labels: all labels we might see in the data
             img_shape: shape of last two dimensions of data, e.g. latitude and
                 longitude.
 
         Returns:
-            a nn.Module
+            a nn.Module, and a label encoder if conditional is True
         """
-        return self._instance.build(
+        if self.conditional and len(all_labels) == 0:
+            raise ValueError("Conditional predictions require labels")
+        if self.conditional:
+            label_encoder = LabelEncoder(all_labels)
+            n_labels = len(all_labels)
+        else:
+            label_encoder = None
+            n_labels = 0
+        module = self._instance.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
+            n_labels=n_labels,
             img_shape=img_shape,
         )
+        return module, label_encoder
 
     @classmethod
     def get_available_types(cls):

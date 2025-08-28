@@ -20,6 +20,7 @@ class PreBuiltBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
+        n_labels: int,
         img_shape: tuple[int, int],
     ) -> nn.Module:
         return self.module

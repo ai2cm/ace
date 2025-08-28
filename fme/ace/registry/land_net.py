@@ -20,8 +20,11 @@ class LandNetBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
+        n_labels: int,
         img_shape: tuple[int, int],
     ):
+        if n_labels > 0:
+            raise ValueError("LandNet does not support labels")
         assert self.network_type in ["MLP"], "network_type must be MLP"
 
         return LandNet(

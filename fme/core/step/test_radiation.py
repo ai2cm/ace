@@ -7,6 +7,7 @@ import torch
 import fme
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.typing_ import TensorDict
@@ -130,7 +131,8 @@ def test_detach_radiation(detach_radiation: bool):
         n_samples=1,
     )
     input_data["forcing_rad"].requires_grad = True
-    output_data = step.step(input_data, input_data)
+    labels: BatchLabels = [set() for _ in range(1)]
+    output_data = step.step(input_data, input_data, labels=labels)
     for name, value in output_data.items():
         assert value.requires_grad, f"{name} should require grad"
     grad = torch.autograd.grad(
@@ -140,7 +142,7 @@ def test_detach_radiation(detach_radiation: bool):
     )[0]
     assert grad is not None
     # have to call again as torch.autograd.grad frees the graph
-    output_data = step.step(input_data, input_data)
+    output_data = step.step(input_data, input_data, labels=labels)
     grad = torch.autograd.grad(
         outputs=output_data["diagnostic_main"].sum(),
         inputs=input_data["forcing_rad"],
@@ -166,7 +168,8 @@ def test_residual_prediction(residual_prediction: bool):
         img_shape=IMAGE_SHAPE,
         n_samples=1,
     )
-    output = step.step(input_data, {})
+    labels: BatchLabels = [set() for _ in range(1)]
+    output = step.step(input_data, {}, labels=labels)
 
     for name in MAIN_PROGNOSTIC_NAMES:
         if residual_prediction:

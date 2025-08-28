@@ -8,15 +8,17 @@ from .layers import ConditionalLayerNorm, Context, ContextConfig
 
 @pytest.mark.parametrize("global_layer_norm", [True, False])
 @pytest.mark.parametrize("n_channels", [32])
-@pytest.mark.parametrize("embed_dim_scalar", [20, 0])
-@pytest.mark.parametrize("embed_dim_2d", [20, 0])
+@pytest.mark.parametrize("embed_dim_scalar", [10, 0])
+@pytest.mark.parametrize("embed_dim_noise", [10, 0])
+@pytest.mark.parametrize("embed_dim_labels", [10, 0])
 @pytest.mark.parametrize("img_shape", [(8, 16)])
 def test_conditional_layer_norm(
     n_channels: int,
     img_shape: tuple[int, int],
     global_layer_norm: bool,
     embed_dim_scalar: int,
-    embed_dim_2d: int,
+    embed_dim_labels: int,
+    embed_dim_noise: int,
 ):
     epsilon = 1e-6
     device = get_device()
@@ -25,15 +27,21 @@ def test_conditional_layer_norm(
         img_shape,
         context_config=ContextConfig(
             embed_dim_scalar=embed_dim_scalar,
-            embed_dim_2d=embed_dim_2d,
+            embed_dim_labels=embed_dim_labels,
+            embed_dim_noise=embed_dim_noise,
         ),
         global_layer_norm=global_layer_norm,
         epsilon=epsilon,
     ).to(device)
     x = torch.randn(1, n_channels, *img_shape, device=device) * 5 + 2
-    context_embedding = torch.randn(1, embed_dim_scalar, device=device)
-    context_embedding_2d = torch.randn(1, embed_dim_2d, *img_shape, device=device)
-    context = Context(context_embedding, context_embedding_2d)
+    context_embedding_scalar = torch.randn(1, embed_dim_scalar, device=device)
+    context_embedding_labels = torch.randn(1, embed_dim_labels, device=device)
+    context_embedding_noise = torch.randn(1, embed_dim_noise, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=context_embedding_scalar,
+        labels=context_embedding_labels,
+        noise=context_embedding_noise,
+    )
     output = conditional_layer_norm(x, context)
     assert output.shape == x.shape
     torch.testing.assert_close(

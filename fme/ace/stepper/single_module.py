@@ -37,6 +37,7 @@ from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.labels import BatchLabels
 from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
@@ -528,7 +529,7 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[TensorDict],
     time: xr.DataArray,
-    labels: list[set[str]],
+    labels: BatchLabels,
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
     output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim=1)
@@ -1094,6 +1095,7 @@ class Stepper(
         self,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
+        labels: BatchLabels,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
@@ -1106,6 +1108,7 @@ class Stepper(
             next_step_input_data: Mapping from variable name to tensor of shape
                 [n_batch, n_lat, n_lon] containing denormalized data from
                 the output timestep.
+            labels: Labels for the input and output data.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
@@ -1113,7 +1116,9 @@ class Stepper(
         """
         input = self._input_process_func(input)
         next_step_input_data = self._input_process_func(next_step_input_data)
-        output = self._step_obj.step(input, next_step_input_data, wrapper=wrapper)
+        output = self._step_obj.step(
+            input, next_step_input_data, wrapper=wrapper, labels=labels
+        )
         return self._output_process_func(output)
 
     def get_prediction_generator(
@@ -1141,10 +1146,16 @@ class Stepper(
         Returns:
             Generator yielding the output data at each timestep.
         """
-        ic_dict = initial_condition.as_batch_data().data
+        ic_batch_data = initial_condition.as_batch_data()
+        if ic_batch_data.labels != forcing_data.labels:
+            raise ValueError(
+                "Initial condition and forcing data must have the same labels, "
+                f"got {ic_batch_data.labels} and {forcing_data.labels}."
+            )
+        ic_dict = ic_batch_data.data
         forcing_dict = forcing_data.data
         return self._predict_generator(
-            ic_dict, forcing_dict, n_forward_steps, optimizer
+            ic_dict, forcing_dict, n_forward_steps, optimizer, forcing_data.labels
         )
 
     @property
@@ -1159,6 +1170,7 @@ class Stepper(
         forcing_dict: TensorMapping,
         n_forward_steps: int,
         optimizer: OptimizationABC,
+        labels: BatchLabels,
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1183,6 +1195,7 @@ class Stepper(
                 input_data,
                 next_step_input_dict,
                 wrapper=checkpoint,
+                labels=labels,
             )
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
@@ -1217,11 +1230,6 @@ class Stepper(
         )
         with timer.context("forward_prediction"):
             ic_batch_data = initial_condition.as_batch_data()
-            if ic_batch_data.labels != forcing.labels:
-                raise ValueError(
-                    "Initial condition and forcing data must have the same labels, "
-                    f"got {ic_batch_data.labels} and {forcing.labels}."
-                )
             forcing_data = forcing.subset_names(forcing_names)
             if ic_batch_data.n_timesteps != self.n_ic_timesteps:
                 raise ValueError(
@@ -1403,11 +1411,18 @@ class Stepper(
         forcing_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
             data.data, repeats=n_ensemble
         )
+        input_batch_data = input_data.as_batch_data()
+        if input_batch_data.labels != data.labels:
+            raise ValueError(
+                "Initial condition and forcing data must have the same labels, "
+                f"got {input_batch_data.labels} and {data.labels}."
+            )
         output_generator = self._predict_generator(
             input_ensemble_data,
             forcing_ensemble_data,
             n_forward_steps,
             optimization,
+            labels=input_batch_data.labels,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

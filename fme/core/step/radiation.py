@@ -13,6 +13,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
@@ -117,6 +118,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
             normalizer=normalizer,
             timestep=dataset_info.timestep,
             init_weights=init_weights,
+            all_labels=dataset_info.all_labels,
         )
 
     def get_loss_normalizer(
@@ -250,6 +252,7 @@ class SeparateRadiationStep(StepABC):
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
         init_weights: Callable[[list[nn.Module]], None],
+        all_labels: set[str],
     ):
         """
         Args:
@@ -259,6 +262,7 @@ class SeparateRadiationStep(StepABC):
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
             init_weights: Function to initialize the weights of the step.
+            all_labels: All labels we might see in the data.
         """
         super().__init__()
         self.in_packer = Packer(config.main_in_names)
@@ -274,16 +278,22 @@ class SeparateRadiationStep(StepABC):
             )
         else:
             self.ocean = None
-        self.module: nn.Module = config.builder.build(
+        module, self._module_label_encoder = config.builder.build(
             n_in_channels=len(config.main_in_names),
             n_out_channels=len(config.main_out_names),
+            all_labels=all_labels,
             img_shape=img_shape,
-        ).to(get_device())
-        self.radiation_module: nn.Module = config.radiation_builder.build(
-            n_in_channels=len(config.radiation_in_names),
-            n_out_channels=len(config.radiation_out_names),
-            img_shape=img_shape,
-        ).to(get_device())
+        )
+        self.module = module.to(get_device())
+        radiation_module, self._radiation_label_encoder = (
+            config.radiation_builder.build(
+                n_in_channels=len(config.radiation_in_names),
+                n_out_channels=len(config.radiation_out_names),
+                all_labels=all_labels,
+                img_shape=img_shape,
+            )
+        )
+        self.radiation_module = radiation_module.to(get_device())
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
@@ -340,6 +350,7 @@ class SeparateRadiationStep(StepABC):
         self,
         input: TensorMapping,
         next_step_forcing_data: TensorMapping,
+        labels: BatchLabels,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
@@ -352,6 +363,7 @@ class SeparateRadiationStep(StepABC):
             next_step_forcing_data: Mapping from variable name to tensor of shape
                 [n_batch, n_lat, n_lon]. This must contain the necessary forcing
                 data at the output timestep for the ocean model and corrector.
+            labels: Labels for each batch member.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
@@ -362,9 +374,16 @@ class SeparateRadiationStep(StepABC):
             radiation_input_tensor = self.radiation_in_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
             )
-            radiation_output_tensor = wrapper(self.radiation_module)(
-                radiation_input_tensor
-            )
+            if self._radiation_label_encoder is not None:
+                radiation_labels = self._radiation_label_encoder.encode(labels)
+                radiation_output_tensor = wrapper(self.radiation_module)(
+                    radiation_input_tensor, labels=radiation_labels
+                )
+            else:
+                radiation_output_tensor = wrapper(self.radiation_module)(
+                    radiation_input_tensor
+                )
+
             radiation_output_norm = self.radiation_out_packer.unpack(
                 radiation_output_tensor, axis=self.CHANNEL_DIM
             )
@@ -377,7 +396,11 @@ class SeparateRadiationStep(StepABC):
             else:
                 main_input_data = {**input_norm, **radiation_output_norm}
             input_tensor = self.in_packer.pack(main_input_data, axis=self.CHANNEL_DIM)
-            output_tensor = wrapper(self.module)(input_tensor)
+            if self._module_label_encoder is not None:
+                module_labels = self._module_label_encoder.encode(labels)
+                output_tensor = wrapper(self.module)(input_tensor, labels=module_labels)
+            else:
+                output_tensor = wrapper(self.module)(input_tensor)
             main_output_norm = self.out_packer.unpack(
                 output_tensor, axis=self.CHANNEL_DIM
             )

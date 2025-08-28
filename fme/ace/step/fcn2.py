@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import logging
+import warnings
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -17,6 +18,7 @@ from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
@@ -423,6 +425,7 @@ class FCN2Step(StepABC):
         self,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
+        labels: BatchLabels,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
@@ -436,11 +439,15 @@ class FCN2Step(StepABC):
                 [n_batch, n_lat, n_lon] containing denormalized data from
                 the output timestep. In practice this contains the necessary data
                 at the output timestep for the ocean model and corrector.
+            labels: Labels for the input and output data. FCN2 does not support
+                labels, so this is ignored.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
         """
+        if len(labels) > 0:
+            warnings.warn("FCN2 does not support labels, ignoring them")
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             forcing_tensor = self.forcing_packer.pack(input_norm, axis=self.CHANNEL_DIM)
