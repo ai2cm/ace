@@ -43,6 +43,9 @@ class TrainConfig:
         experiment_dir: Directory where checkpoints and logs are saved.
         inference: Configuration for inline inference.
         n_forward_steps: Number of forward steps to take gradient over.
+        seed: Random seed for reproducibility. If set, is used for all types of
+            randomization, including data shuffling and model initialization.
+            If unset, weight initialization is not reproducible but data shuffling is.
         copy_weights_after_batch: Configuration for copying weights from the
             base model to the training model after each batch.
         ema: Configuration for exponential moving average of model weights.
