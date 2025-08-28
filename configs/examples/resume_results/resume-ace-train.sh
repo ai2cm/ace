@@ -15,7 +15,8 @@ EXISTING_RESULTS_DATASET="01JSYKN0GVT0NVT43KJSFMBAF6"  # Update this with your r
 STATS_DATA="jamesd/2025-04-16-cm4-piControl-ocean-atmos-5daily-stats"
 N_GPUS=8
 SHARED_MEM="600GiB"
-PRIORITY="normal"
+PRIORITY="urgent" # FIXME
+WORKSPACE="ai2/climate-ceres" # FIXME
 RETRIES=0
 
 # Override arguments (add any config overrides here)
@@ -37,11 +38,11 @@ gantry run \
     --name "$JOB_NAME" \
     --description "Resume training: ${JOB_GROUP}" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/climate-ceres \
+    --workspace $WORKSPACE \
     --priority "$PRIORITY" \
     --preemptible \
     --retries $RETRIES \
-    --cluster ai2/ace \
+    --cluster ai2/ceres-cirrascale \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
@@ -57,5 +58,5 @@ gantry run \
     --budget ai2/climate \
     --no-conda \
     --install "pip install --no-deps ." \
-    -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train $CONFIG_PATH \
+    -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train /existing-results/config.yaml \
     --override resume_results.existing_dir=/existing-results $OVERRIDE_ARGS
