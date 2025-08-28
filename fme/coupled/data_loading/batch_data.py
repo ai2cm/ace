@@ -51,12 +51,8 @@ class CoupledBatchData:
         ocean_data: BatchData,
         atmosphere_data: BatchData,
     ) -> "CoupledBatchData":
-        ocean_batch = BatchData.new_on_device(
-            ocean_data.data, ocean_data.time, ocean_data.horizontal_dims
-        )
-        atmos_batch = BatchData.new_on_device(
-            atmosphere_data.data, atmosphere_data.time, atmosphere_data.horizontal_dims
-        )
+        ocean_batch = ocean_data.to_device()
+        atmos_batch = atmosphere_data.to_device()
         return CoupledBatchData(ocean_data=ocean_batch, atmosphere_data=atmos_batch)
 
     @classmethod
@@ -65,12 +61,8 @@ class CoupledBatchData:
         ocean_data: BatchData,
         atmosphere_data: BatchData,
     ) -> "CoupledBatchData":
-        ocean_batch = BatchData.new_on_cpu(
-            ocean_data.data, ocean_data.time, ocean_data.horizontal_dims
-        )
-        atmos_batch = BatchData.new_on_cpu(
-            atmosphere_data.data, atmosphere_data.time, atmosphere_data.horizontal_dims
-        )
+        ocean_batch = ocean_data.to_cpu()
+        atmos_batch = atmosphere_data.to_cpu()
         return CoupledBatchData(ocean_data=ocean_batch, atmosphere_data=atmos_batch)
 
     @classmethod
@@ -187,10 +179,12 @@ class CoupledPairedData:
                 prediction=prediction.ocean_data.data,
                 reference=reference.ocean_data.data,
                 time=prediction.ocean_data.time,
+                labels=prediction.ocean_data.labels,
             ),
             atmosphere_data=PairedData(
                 prediction=prediction.atmosphere_data.data,
                 reference=reference.atmosphere_data.data,
                 time=prediction.atmosphere_data.time,
+                labels=prediction.atmosphere_data.labels,
             ),
         )

@@ -23,6 +23,7 @@ from fme.ace.stepper.parameter_init import (
     WeightsAndHistoryLoader,
     null_weights_and_history,
 )
+from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
 from fme.core.coordinates import (
     NullPostProcessFn,
     SerializableVerticalCoordinate,
@@ -323,6 +324,14 @@ class ExistingStepperConfig:
             self.checkpoint_path, map_location=get_device(), weights_only=False
         )
 
+    def get_train_window_data_requirements(
+        self,
+        default_n_forward_steps: int | None,
+    ) -> DataRequirements:
+        return self._stepper_config.get_train_window_data_requirements(
+            default_n_forward_steps
+        )
+
     def get_evaluation_window_data_requirements(
         self, n_forward_steps: int
     ) -> DataRequirements:
@@ -364,6 +373,16 @@ def _prepend_timesteps(
     )
 
 
+def _get_time_dim_size(data: TensorDict) -> int:
+    for v in data.values():
+        return v.shape[1]
+    raise ValueError("data is empty")
+
+
+def _clip_time_dim(data: TensorDict, time_dim_size: int) -> TensorDict:
+    return {k: v[:, :time_dim_size] for k, v in data.items()}
+
+
 @dataclasses.dataclass
 class TrainOutput(TrainOutputABC):
     metrics: TensorDict
@@ -385,6 +404,18 @@ class TrainOutput(TrainOutputABC):
     def ensemble_derive_func(
         self, data: EnsembleTensorDict, forcing_data: TensorMapping
     ) -> EnsembleTensorDict:
+        """
+        Compute derived variables for an ensemble of data.
+
+        Args:
+            data: The data to compute derived variables for.
+            forcing_data: The forcing data to use for the derived variables.
+                Time dimension must be at least as long as present in the data,
+                if longer it will be clipped.
+
+        Returns:
+            The derived variables.
+        """
         flattened_data, n_ensemble = fold_ensemble_dim(data)
         if n_ensemble > 1:
             ensemble_forcing_data = add_ensemble_dim(forcing_data, repeats=n_ensemble)
@@ -393,6 +424,9 @@ class TrainOutput(TrainOutputABC):
             )
         else:
             flattened_forcing_data = dict(forcing_data)
+        flattened_forcing_data = _clip_time_dim(
+            flattened_forcing_data, _get_time_dim_size(flattened_data)
+        )
         derived_data = self.derive_func(flattened_data, flattened_forcing_data)
         return unfold_ensemble_dim(derived_data, n_ensemble)
 
@@ -494,6 +528,7 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[TensorDict],
     time: xr.DataArray,
+    labels: list[set[str]],
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
     output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim=1)
@@ -501,6 +536,7 @@ def process_prediction_generator_list(
         data=output_timeseries,
         time=time,
         horizontal_dims=horizontal_dims,
+        labels=labels,
     )
 
 
@@ -520,6 +556,11 @@ class StepperConfig:
             n_ensemble=2 with a CRPS loss instead.
         parameter_init: The parameter initialization configuration.
         input_masking: Config for masking step inputs.
+        train_n_forward_steps: The number of timesteps to train on and associated
+            sampling probabilities. By default, the stepper will train on the full
+            number of timesteps present in the training dataset samples. Values must
+            be less than or equal to the number of timesteps present
+            in the training dataset samples.
     """
 
     step: StepSelector
@@ -533,6 +574,13 @@ class StepperConfig:
         default_factory=lambda: ParameterInitializationConfig()
     )
     input_masking: StaticMaskingConfig | None = None
+    train_n_forward_steps: TimeLengthProbabilities | int | None = None
+
+    @property
+    def train_n_forward_steps_sampler(self) -> TimeLengthProbabilities | None:
+        if isinstance(self.train_n_forward_steps, int):
+            return TimeLengthProbabilities.from_constant(self.train_n_forward_steps)
+        return self.train_n_forward_steps
 
     def __post_init__(self):
         if self.crps_training:
@@ -555,6 +603,26 @@ class StepperConfig:
     @property
     def n_ic_timesteps(self) -> int:
         return self.step.n_ic_timesteps
+
+    def get_train_window_data_requirements(
+        self,
+        default_n_forward_steps: int | None,
+    ) -> DataRequirements:
+        if self.train_n_forward_steps is None:
+            if default_n_forward_steps is None:
+                raise ValueError(
+                    "default_n_forward_steps is required if "
+                    "train_n_forward_steps is not provided"
+                )
+            n_forward_steps = default_n_forward_steps
+        elif isinstance(self.train_n_forward_steps, int):
+            n_forward_steps = self.train_n_forward_steps
+        else:
+            n_forward_steps = self.train_n_forward_steps.max_n_forward_steps
+        return DataRequirements(
+            names=self.all_names,
+            n_timesteps=self._window_steps_required(n_forward_steps),
+        )
 
     def get_evaluation_window_data_requirements(
         self, n_forward_steps: int
@@ -823,6 +891,7 @@ class Stepper(
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
+        self._train_n_forward_steps_sampler = config.train_n_forward_steps_sampler
 
         def get_loss_obj():
             loss_normalizer = step.get_loss_normalizer()
@@ -899,6 +968,23 @@ class Stepper(
     @property
     def ocean_fraction_name(self) -> str | None:
         return self._step_obj.ocean_fraction_name
+
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        """
+        Prescribe sea surface temperature onto the generated surface temperature field.
+
+        Args:
+            mask_data: Source for the prescriber mask field.
+            gen_data: Contains the generated surface temperature field.
+            target_data: Contains the target surface temperature that will
+                be prescribed onto the generated one according to the mask.
+        """
+        return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
     @property
     def training_dataset_info(self) -> DatasetInfo:
@@ -1130,11 +1216,17 @@ class Stepper(
             self._step_obj.next_step_input_names
         )
         with timer.context("forward_prediction"):
+            ic_batch_data = initial_condition.as_batch_data()
+            if ic_batch_data.labels != forcing.labels:
+                raise ValueError(
+                    "Initial condition and forcing data must have the same labels, "
+                    f"got {ic_batch_data.labels} and {forcing.labels}."
+                )
             forcing_data = forcing.subset_names(forcing_names)
-            if initial_condition.as_batch_data().n_timesteps != self.n_ic_timesteps:
+            if ic_batch_data.n_timesteps != self.n_ic_timesteps:
                 raise ValueError(
                     f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
-                    f"{initial_condition.as_batch_data().n_timesteps}."
+                    f"{ic_batch_data.n_timesteps}."
                 )
             n_forward_steps = forcing_data.n_timesteps - self.n_ic_timesteps
             output_list = list(
@@ -1149,6 +1241,7 @@ class Stepper(
             output_list,
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
+            labels=forcing.labels,
         )
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
@@ -1165,6 +1258,7 @@ class Stepper(
             data=data.data,
             time=data.time,
             horizontal_dims=data.horizontal_dims,
+            labels=data.labels,
         )
         return data, prognostic_state
 
@@ -1206,6 +1300,7 @@ class Stepper(
                     data=forward_data.data,
                     time=forward_data.time,
                     horizontal_dims=forward_data.horizontal_dims,
+                    labels=forward_data.labels,
                 ),
             ),
             new_initial_condition,
@@ -1316,6 +1411,17 @@ class Stepper(
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
+        if self._train_n_forward_steps_sampler is not None:
+            stochastic_n_forward_steps = self._train_n_forward_steps_sampler.sample()
+            if stochastic_n_forward_steps > n_forward_steps:
+                raise RuntimeError(
+                    "The number of forward steps to train on "
+                    f"({stochastic_n_forward_steps}) is greater than the number of "
+                    f"forward steps in the data ({n_forward_steps}), "
+                    "This is supposed to be ensured by the StepperConfig when train "
+                    "data requirements are retrieved, so this is a bug."
+                )
+            n_forward_steps = stochastic_n_forward_steps
         for step in range(n_forward_steps):
             optimize_step = (
                 step == n_forward_steps - 1 or not self._config.optimize_last_step_only

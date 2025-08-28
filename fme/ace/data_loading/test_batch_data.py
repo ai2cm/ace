@@ -27,6 +27,7 @@ def get_batch_data(
         },
         time=xr.DataArray(np.random.rand(n_samples, n_times), dims=["sample", "time"]),
         horizontal_dims=horizontal_dims,
+        labels=[set() for _ in range(n_samples)],
     )
 
 
@@ -62,6 +63,39 @@ def test_get_start(names: list[str], prognostic_names: list[str], n_ic_timesteps
         np.testing.assert_allclose(
             start.data[name].cpu().numpy(),
             batch_data.data[name][:, :n_ic_timesteps, ...].cpu().numpy(),
+        )
+
+
+@pytest.mark.parametrize("n_ic_timesteps", [1, 2])
+def test_remove_initial_condition(n_ic_timesteps: int):
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    batch_data = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+    removed = batch_data.remove_initial_condition(n_ic_timesteps)
+    assert_metadata_equal(removed, batch_data)
+    assert removed.time.equals(batch_data.time.isel(time=slice(n_ic_timesteps, None)))
+    assert set(removed.data.keys()) == set(names)
+    for name in names:
+        assert removed.data[name].shape == (
+            n_samples,
+            n_times - n_ic_timesteps,
+            n_lat,
+            n_lon,
+        )
+        np.testing.assert_allclose(
+            removed.data[name].cpu().numpy(),
+            batch_data.data[name][:, n_ic_timesteps:, ...].cpu().numpy(),
         )
 
 
