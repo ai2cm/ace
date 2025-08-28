@@ -47,6 +47,8 @@ train_loader:
     - data_path: /climate-default
       file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
       engine: zarr
+      subset:
+        stop_time: '0306-01-01'
     - data_path: /climate-default
       file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
       engine: zarr
@@ -65,6 +67,9 @@ validation_loader:
     - data_path: /climate-default
       file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
       engine: zarr
+      subset:
+        start_time: '0306-01-01'
+        stop_time: '0311-01-01'
     - data_path: /climate-default
       file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
       engine: zarr
