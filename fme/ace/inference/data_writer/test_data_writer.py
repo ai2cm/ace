@@ -462,7 +462,7 @@ class TestDataWriter:
         }
 
         region_config = SubselectWriterConfig(
-            label="test_region.nc",
+            label="test_region",
             names=["pressure"],
             lat_extent=(1, 2),
             lon_extent=(1, 3),
