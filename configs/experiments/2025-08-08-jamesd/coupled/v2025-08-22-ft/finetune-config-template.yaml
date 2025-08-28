@@ -1,7 +1,6 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-evaluate_before_training: false
 ema:
   decay: 0.999
 max_epochs: 10
