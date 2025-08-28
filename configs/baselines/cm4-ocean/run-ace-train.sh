@@ -9,8 +9,8 @@ CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=8
-PRIORITY="urgent" # FIXME
-WORKSPACE="ai2/climate-ceres" # FIXME
+PRIORITY="normal"
+WORKSPACE="ai2/ace"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
