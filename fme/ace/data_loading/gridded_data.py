@@ -101,6 +101,7 @@ class GriddedData(GriddedDataABC[BatchData]):
             mask_provider=self._mask_provider,
             timestep=self._timestep,
             variable_metadata=self._properties.variable_metadata,
+            all_labels=self._properties.all_labels,
         )
 
     @property
