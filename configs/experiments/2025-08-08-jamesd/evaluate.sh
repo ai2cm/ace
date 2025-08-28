@@ -29,6 +29,7 @@ while read TRAIN_EXPER; do
     OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
     # can be used in place of EXPER_ID in case the final results dataset is not desired
     EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
+    WORKSPACE=$(echo "$TRAIN_EXPER" | cut -d"|" -f9)
     # Check if STATUS starts with "run_"
     if [[ ! "$STATUS" =~ ^run_ ]]; then
         continue
@@ -68,6 +69,10 @@ while read TRAIN_EXPER; do
         EXISTING_RESULTS_DATASET=$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4)
     fi
 
+    if [[ -z "$WORKSPACE" ]]; then
+        WORKSPACE=ai2/climate-ceres
+    fi
+
     echo
     echo "Launching ${CONFIG_SUBDIR} evaluator job:"
     echo " - Config path: ${CONFIG_PATH}"
@@ -87,10 +92,10 @@ while read TRAIN_EXPER; do
         --name $JOB_NAME \
         --description "Run ${CONFIG_SUBDIR} evaluator" \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/climate-ceres \
         --priority $PRIORITY \
         $PREEMPTIBLE \
         --cluster ai2/ceres-cirrascale \
+        --workspace $WORKSPACE \
         --weka climate-default:/climate-default \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
