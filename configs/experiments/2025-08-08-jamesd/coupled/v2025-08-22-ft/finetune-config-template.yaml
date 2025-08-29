@@ -149,7 +149,7 @@ optimization:
           end_factor: 0.0
           total_iters: 1414
         steps_per_iteration: true
-    milestones: [300, 5356]
+    milestones: [300, 5656]
 stepper:
   parameter_init:
     checkpoint_path: /ckpt.tar

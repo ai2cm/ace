@@ -151,7 +151,7 @@ optimization:
           end_factor: 0.0
           total_iters: 707
         steps_per_iteration: true
-    milestones: [300, 2528]
+    milestones: [300, 2828]
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
