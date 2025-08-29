@@ -49,12 +49,16 @@ class DatasetInfo:
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         gridded_operations: GriddedOperations | None = None,
         img_shape: tuple[int, int] | None = None,
+        all_labels: set[str] | None = None,
     ):
         self._horizontal_coordinates = horizontal_coordinates
         self._vertical_coordinate = vertical_coordinate
         self._mask_provider = mask_provider
         self._timestep = timestep
         self._variable_metadata = variable_metadata
+        if all_labels is None:
+            all_labels = set()
+        self._all_labels = all_labels
 
         # The gridded_operations and img_shape arguments are only provided for backwards
         # compatibility with older serialized states that have these attributes instead
@@ -88,7 +92,8 @@ class DatasetInfo:
             f"vertical_coordinate={self._vertical_coordinate}, "
             f"timestep={self._timestep}), "
             f"mask_provider={self._mask_provider}, "
-            f"variable_metadata={self._variable_metadata})"
+            f"variable_metadata={self._variable_metadata}, "
+            f"all_labels={self._all_labels})"
         )
 
     def assert_compatible_with(self, other: "DatasetInfo"):
@@ -138,6 +143,10 @@ class DatasetInfo:
                 "DatasetInfo is not compatible with other DatasetInfo:\n"
                 + "\n".join(issues)
             )
+
+    @property
+    def all_labels(self) -> set[str]:
+        return self._all_labels
 
     @property
     def img_shape(self) -> tuple[int, int]:
@@ -205,6 +214,7 @@ class DatasetInfo:
             variable_metadata=new_metadata,
             gridded_operations=self._gridded_operations,
             img_shape=self._img_shape,
+            all_labels=self._all_labels,
         )
 
     def to_state(self) -> dict[str, Any]:
@@ -240,6 +250,7 @@ class DatasetInfo:
             "variable_metadata": self._variable_metadata,
             "gridded_operations": gridded_operations,
             "img_shape": img_shape,
+            "all_labels": list(self._all_labels),
         }
 
     @classmethod
@@ -285,6 +296,7 @@ class DatasetInfo:
             variable_metadata=variable_metadata,
             gridded_operations=gridded_ops,
             img_shape=img_shape,
+            all_labels=set(state.get("all_labels", [])),
         )
 
 

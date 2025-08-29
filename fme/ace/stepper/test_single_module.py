@@ -128,6 +128,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
             np.zeros((n_samples, n_time)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
     )
     return SphericalData(data, area_weights, vertical_coord)
 
@@ -818,6 +819,7 @@ def test_stepper_corrector(
     batch_data = BatchData.new_on_cpu(
         data=data,
         time=time,
+        labels=[set() for _ in range(time.shape[0])],
     ).to_device()
     # run the stepper on the data
     with torch.no_grad():
@@ -999,6 +1001,28 @@ def test_step_with_prescribed_ocean():
     assert set(output) == {"a", "b"}
 
 
+def test_prescribe_sst_integration():
+    """Test that prescribe_sst produces the same prescription as step method."""
+    stepper = _get_stepper(
+        ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
+    )
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
+    prescribed_data = stepper.prescribe_sst(
+        mask_data=ocean_data,
+        gen_data=input_data,
+        target_data=ocean_data,
+    )
+    expected_prescribed_a = torch.where(
+        torch.round(ocean_data["mask"]).to(int) == 1,
+        ocean_data["a"],
+        input_data["a"],  # no +1
+    )
+    torch.testing.assert_close(prescribed_data["a"], expected_prescribed_a)
+    torch.testing.assert_close(prescribed_data["b"], input_data["b"])
+    assert set(prescribed_data) == {"a", "b"}
+
+
 def get_data_for_predict(
     n_steps, forcing_names: list[str]
 ) -> tuple[PrognosticState, BatchData]:
@@ -1009,6 +1033,7 @@ def get_data_for_predict(
             np.zeros((n_samples, 1)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
     ).get_start(
         prognostic_names=["a"],
         n_ic_timesteps=1,
@@ -1021,6 +1046,7 @@ def get_data_for_predict(
             np.zeros((n_samples, n_steps + 1)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
     )
     return input_data, forcing_data
 
@@ -1144,7 +1170,8 @@ def test_prepend_initial_condition():
     }
     ic = BatchData.new_on_device(
         data=ic_data,
-        time=xr.DataArray(np.zeros((3, 1)), dims=["sample", "time"]),
+        time=xr.DataArray(np.zeros((batch_size, 1)), dims=["sample", "time"]),
+        labels=[set() for _ in range(batch_size)],
     ).get_start(
         prognostic_names=["a", "b"],
         n_ic_timesteps=1,
@@ -1352,6 +1379,8 @@ def get_regression_stepper_and_data(
             np.zeros((n_samples, n_forward_steps + 1)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
+        horizontal_dims=["lat", "lon"],
     )
     return stepper, data
 

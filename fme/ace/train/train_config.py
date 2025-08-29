@@ -25,6 +25,7 @@ from fme.ace.requirements import (
 )
 from fme.ace.stepper import ExistingStepperConfig, Stepper
 from fme.ace.stepper.single_module import StepperConfig
+from fme.core.cli import ResumeResultsConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
@@ -164,7 +165,8 @@ class TrainConfig:
         weather_evaluation: Configuration for weather evaluation.
             If None, no weather evaluation is run. Weather evaluation is not
             used to select checkpoints, but is used to provide metrics.
-        n_forward_steps: Number of forward steps to take gradient over.
+        n_forward_steps: Number of forward steps during training. Cannot be given
+            at the same time as train_n_forward_steps in StepperConfig.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
             If unset, weight initialization is not reproducible but data shuffling is.
@@ -196,6 +198,11 @@ class TrainConfig:
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
+        resume_results:  Configuration for resuming a previously stopped or finished
+            training job. When provided and experiment_dir has no training_checkpoints
+            subdirectory, then it is assumed that this is a new run to resume a
+            previously completed run and resume_results.existing_dir is recursively
+            copied to experiment_dir.
     """
 
     train_loader: DataLoaderConfig
@@ -207,7 +214,7 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig | None
-    n_forward_steps: int
+    n_forward_steps: int | None = None
     seed: int | None = None
     copy_weights_after_batch: list[CopyWeightsConfig] = dataclasses.field(
         default_factory=list
@@ -226,6 +233,18 @@ class TrainConfig:
     )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    resume_results: ResumeResultsConfig | None = None
+
+    def __post_init__(self):
+        if (
+            isinstance(self.stepper, StepperConfig)
+            and self.stepper.train_n_forward_steps is not None
+            and self.n_forward_steps is not None
+        ):
+            raise ValueError(
+                "stepper.train_n_forward_steps may not be given at the same time as "
+                "n_forward_steps at the top level"
+            )
 
     def set_random_seed(self):
         if self.seed is not None:
@@ -270,8 +289,8 @@ class TrainBuilders:
         self.config = config
 
     def _get_train_window_data_requirements(self) -> DataRequirements:
-        return self.config.stepper.get_evaluation_window_data_requirements(
-            self.config.n_forward_steps
+        return self.config.stepper.get_train_window_data_requirements(
+            default_n_forward_steps=self.config.n_forward_steps
         )
 
     def _get_evaluation_window_data_requirements(self) -> DataRequirements:

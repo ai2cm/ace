@@ -270,7 +270,7 @@ def test_get_initial_condition():
         np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    initial_condition = get_initial_condition(data, ["prog"])
+    initial_condition = get_initial_condition(data, ["prog"], labels=[])
     assert isinstance(initial_condition, PrognosticState)
     batch_data = initial_condition.as_batch_data()
     assert batch_data.time.shape == (2, 1)
@@ -292,7 +292,7 @@ def test_get_initial_condition_raises_bad_variable_shape():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, ["prog"], labels=[])
 
 
 def test_get_initial_condition_raises_missing_time():
@@ -301,7 +301,7 @@ def test_get_initial_condition_raises_missing_time():
     )
     data = xr.Dataset({"prog": prognostic_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, ["prog"], labels=[])
 
 
 def test_get_initial_condition_raises_mismatched_time_length():
@@ -311,7 +311,7 @@ def test_get_initial_condition_raises_mismatched_time_length():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, ["prog"], labels=[])
 
 
 @pytest.mark.parametrize(

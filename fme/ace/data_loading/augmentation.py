@@ -105,7 +105,12 @@ class RotateModifier(BatchModifierABC):
             if self._pattern.match(name):
                 new_value = -1 * new_value
             new_data[name] = torch.where(apply, new_value, value)
-        return BatchData(new_data, batch.time, batch.horizontal_dims)
+        return BatchData(
+            data=new_data,
+            time=batch.time,
+            horizontal_dims=batch.horizontal_dims,
+            labels=batch.labels,
+        )
 
 
 class NullModifier(BatchModifierABC):

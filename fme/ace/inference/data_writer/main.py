@@ -17,7 +17,7 @@ from .dataset_metadata import DatasetMetadata
 from .histograms import PairedHistogramDataWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
 from .raw import PairedRawDataWriter, RawDataWriter
-from .subselect import SubselectWriter, SubselectWriterConfig
+from .subselect import PairedSubselectWriter, SubselectWriter, SubselectWriterConfig
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .video import PairedVideoDataWriter
 
@@ -27,6 +27,7 @@ PairedSubwriter: TypeAlias = (
     | PairedHistogramDataWriter
     | PairedTimeCoarsen
     | PairedMonthlyDataWriter
+    | PairedSubselectWriter
 )
 
 Subwriter: TypeAlias = MonthlyDataWriter | RawDataWriter | TimeCoarsen | SubselectWriter
@@ -100,6 +101,7 @@ class DataWriterConfig:
             enable_histogram_netcdfs=self.save_histogram_files,
             time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
+            subselection=self.subselection,
         )
 
     def build(
@@ -154,6 +156,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         enable_histogram_netcdfs: bool,
         dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
+        subselection: list[SubselectWriterConfig] | None = None,
     ):
         """
         Args:
@@ -174,6 +177,8 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             enable_histogram_netcdfs: Whether to write netCDFs with histogram data.
             dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of written outputs.
+            subselection: Configurations for subselection data writers.
+
         """
         self._writers: list[PairedSubwriter] = []
         self.path = path
@@ -241,6 +246,17 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                     )
                 )
             )
+        if subselection is not None:
+            for writer_config in subselection:
+                self._writers.append(
+                    writer_config.build_paired(
+                        experiment_dir=path,
+                        n_initial_conditions=n_initial_conditions,
+                        variable_metadata=variable_metadata,
+                        coords=coords,
+                        dataset_metadata=dataset_metadata,
+                    )
+                )
         self._n_timesteps_seen = 0
 
     def write(self, data: PrognosticState, filename: str):
@@ -442,6 +458,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         unpaired_batch = BatchData.new_on_device(
             data=merged,
             time=batch.time,
+            labels=batch.labels,
         )
         self._append_batch(unpaired_batch)
 
