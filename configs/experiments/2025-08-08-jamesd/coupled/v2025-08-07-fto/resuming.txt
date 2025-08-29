@@ -1,2 +1,2 @@
 group|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
-fto-v2025-08-07-ocn_pt_nfs8|ace-samudra-coupled-cm4|7i99sms0|train|high|ceres|8|800GiB|0|ai2/ace|max_epochs=50
+fto-v2025-08-07-ocn_pt_nfs8|ace-samudra-coupled-cm4|7i99sms0|train|high|ceres|8|800GiB|0|ai2/ace|max_epochs=50 resume_results.resume_wandb=True
