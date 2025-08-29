@@ -121,7 +121,7 @@ while read RESUMING; do
             --no-conda \
             --install "pip install --no-deps ." \
             -- torchrun --nproc_per_node "$N_GPUS" -m $FME_MODULE /existing-results/config.yaml \
-            --override existing_results_dir=/existing-results "${OVERRIDE_ARGS[@]}" |
+            --override resume_results.existing_dir=/existing-results $OVERRIDE_ARGS |
             tee /dev/tty |
             grep beaker.org |
             cut -d/ -f5
