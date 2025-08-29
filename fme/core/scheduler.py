@@ -51,8 +51,13 @@ class SequentialSchedulerConfig:
 
     Parameters:
         schedulers: Ordered sequence of SchedulerConfigs to define the schedulers
-            for the SequentialLR.
-        milestones: List of integers that reflects milestone points.
+            for the SequentialLR. Note that all schedulers in the sequence must
+            have the same value for steps_per_iteration.
+        milestones: Sequence of integers that reflects milestone points, where
+            milestones[i] corresponds to the last epoch or iteration where
+            schedulers[i] is active before switching to schedulers[i+1]. For example,
+            with two schedulers and milestones=[10] the first 10 epochs will use the
+            first scheduler and then switch to the second scheduler for epoch 11.
         last_epoch: The index of last epoch. Default: -1.
     """
 
