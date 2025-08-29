@@ -1405,24 +1405,22 @@ class Stepper(
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
         n_ensemble = self._config.n_ensemble
-        input_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
-            input_data.as_batch_data().data, repeats=n_ensemble
-        )
-        forcing_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
-            data.data, repeats=n_ensemble
-        )
         input_batch_data = input_data.as_batch_data()
         if input_batch_data.labels != data.labels:
             raise ValueError(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
             )
+        input_ensemble_batch = input_batch_data.repeat_interleave_batch_dim(n_ensemble)
+        forcing_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
+            data.data, repeats=n_ensemble
+        )
         output_generator = self._predict_generator(
-            input_ensemble_data,
+            input_ensemble_batch.data,
             forcing_ensemble_data,
             n_forward_steps,
             optimization,
-            labels=input_batch_data.labels,
+            labels=input_ensemble_batch.labels,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

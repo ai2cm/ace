@@ -58,6 +58,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.generics.trainer import (
     _restore_checkpoint,
@@ -168,6 +169,11 @@ def _get_test_yaml_files(
         )
         spatial_dimensions_str = "latlon"
 
+    if nettype == "NoiseConditionedSFNO":
+        conditional = True
+    else:
+        conditional = False
+
     if nettype == "SphericalFourierNeuralOperatorNet":
         corrector_config: AtmosphereCorrectorConfig | CorrectorSelector = (
             CorrectorSelector(
@@ -238,9 +244,19 @@ def _get_test_yaml_files(
 
     train_config = TrainConfig(
         train_loader=DataLoaderConfig(
-            dataset=XarrayDataConfig(
-                data_path=str(train_data_path),
-                spatial_dimensions=spatial_dimensions_str,
+            dataset=ConcatDatasetConfig(
+                concat=[
+                    XarrayDataConfig(
+                        data_path=str(train_data_path),
+                        labels=["era5"],
+                        spatial_dimensions=spatial_dimensions_str,
+                    ),
+                    XarrayDataConfig(
+                        data_path=str(train_data_path),
+                        labels=[],
+                        spatial_dimensions=spatial_dimensions_str,
+                    ),
+                ],
             ),
             batch_size=2,
             num_data_workers=0,
@@ -293,6 +309,7 @@ def _get_test_yaml_files(
                         ),
                         builder=ModuleSelector(
                             type=nettype,
+                            conditional=conditional,
                             config=net_config,
                         ),
                         ocean=OceanConfig(

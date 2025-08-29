@@ -10,6 +10,7 @@ from torch.utils.data import default_collate
 
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
+from fme.core.tensors import repeat_interleave_batch_dim
 from fme.core.typing_ import TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
@@ -188,6 +189,18 @@ class BatchData:
             time=time,
             labels=labels,
             **kwargs,
+        )
+
+    def repeat_interleave_batch_dim(self: SelfType, repeats: int) -> SelfType:
+        new_labels: list[set[str]] = np.repeat(self.labels, repeats).tolist()
+        return self.__class__(
+            data=repeat_interleave_batch_dim(self.data, repeats),
+            time=xr.DataArray(
+                np.repeat(self.time, repeats, axis=0),
+                dims=self.time.dims,
+            ),
+            labels=new_labels,
+            horizontal_dims=self.horizontal_dims,
         )
 
     def __post_init__(self):
