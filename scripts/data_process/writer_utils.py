@@ -26,6 +26,8 @@ class OutputWriterConfig:
             self._client = None
 
     def write(self, ds: xr.Dataset, output_store: str):
+        import xpartition  # noqa: F401
+
         ds = ds.chunk(OUTER_CHUNKS)
         if self.starting_split == 0:
             if os.path.isdir(output_store):
