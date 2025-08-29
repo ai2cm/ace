@@ -131,7 +131,7 @@ class Optimization(OptimizationABC):
         for m in modules:
             m.train()
 
-    def step_scheduler(self, valid_loss: float | None = None):
+    def step_scheduler(self, valid_loss: float | None = None) -> bool:
         """
         Step the scheduler.
 
@@ -140,8 +140,8 @@ class Optimization(OptimizationABC):
                 learning rate based on whether the validation loss is decreasing.
                 If None, this indicates the call is from within a training iteration
                 rather than at the end of an epoch.
-
         """
+        should_step = False
         if self.scheduler is not None:
             should_step = self._should_step_scheduler(valid_loss)
             if should_step:
@@ -153,6 +153,7 @@ class Optimization(OptimizationABC):
                 except TypeError:
                     # Some schedulers don't accept metrics argument
                     self.scheduler.step()
+        return should_step
 
     def _should_step_scheduler(self, valid_loss: float | None) -> bool:
         """Determine whether the scheduler should be stepped based on
@@ -316,7 +317,7 @@ class NullOptimization(OptimizationABC):
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return module
 
-    def step_scheduler(self, valid_loss: float | None = None):
+    def step_scheduler(self, valid_loss: float | None = None) -> bool:
         return False
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
