@@ -155,6 +155,7 @@ class SubselectWriterConfig:
     time_selection: Slice | MonthSelector | TimeSlice | None = None
     latitude_name: str = "latitude"
     longitude_name: str = "longitude"
+    save_reference: bool = False
 
     def __post_init__(self):
         if not self.lon_extent and not self.lat_extent and not self.time_selection:
@@ -173,6 +174,39 @@ class SubselectWriterConfig:
             self.lon_slice = slice(*self.lon_extent)
         else:
             self.lon_slice = slice(None)
+
+    def build_paired(
+        self,
+        experiment_dir: str,
+        n_initial_conditions: int,
+        variable_metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
+        prediction_suffix: str = "prediction",
+        reference_suffix: str = "reference",
+    ) -> "PairedSubselectWriter":
+        prediction_writer = dataclasses.replace(
+            self, label=f"{self.label}_{prediction_suffix}"
+        ).build(
+            experiment_dir=experiment_dir,
+            n_initial_conditions=n_initial_conditions,
+            variable_metadata=variable_metadata,
+            coords=coords,
+            dataset_metadata=dataset_metadata,
+        )
+        if self.save_reference:
+            reference_writer = dataclasses.replace(
+                self, label=f"{self.label}_{reference_suffix}"
+            ).build(
+                experiment_dir=experiment_dir,
+                n_initial_conditions=n_initial_conditions,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            )
+        else:
+            reference_writer = None
+        return PairedSubselectWriter(prediction_writer, reference_writer)
 
     def build(
         self,
@@ -217,7 +251,7 @@ class SubselectWriterConfig:
 
         raw_writer = RawDataWriter(
             path=experiment_dir,
-            label=self.label,
+            label=f"{self.label}.nc",
             n_initial_conditions=n_initial_conditions,
             save_names=self.names,
             variable_metadata=variable_metadata,
@@ -319,3 +353,37 @@ class SubselectWriter:
         Flush the writer to ensure all data is written.
         """
         self.writer.flush()
+
+
+class PairedSubselectWriter:
+    def __init__(
+        self,
+        prediction_writer: SubselectWriter,
+        reference_writer: SubselectWriter | None,
+    ):
+        self.prediction_writer = prediction_writer
+        self.reference_writer = reference_writer
+
+    def append_batch(
+        self,
+        target: dict[str, torch.Tensor],
+        prediction: dict[str, torch.Tensor],
+        start_timestep: int,
+        batch_time: xr.DataArray,
+    ):
+        self.prediction_writer.append_batch(
+            data=prediction,
+            start_timestep=start_timestep,
+            batch_time=batch_time,
+        )
+        if self.reference_writer:
+            self.reference_writer.append_batch(
+                data=target,
+                start_timestep=start_timestep,
+                batch_time=batch_time,
+            )
+
+    def flush(self):
+        self.prediction_writer.flush()
+        if self.reference_writer:
+            self.reference_writer.flush()
