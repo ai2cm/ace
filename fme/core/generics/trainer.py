@@ -415,7 +415,7 @@ class Trainer:
         self.train_data.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
         dist = Distributed.get_instance()
-        names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0")
+        names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
         aggregator = self._aggregator_builder.get_train_aggregator()
         n_samples_seen_since_logging = 0
         self.stepper.set_train()
