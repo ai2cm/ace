@@ -1,0 +1,14 @@
+input_dataset:
+  zarr_path: /climate-default/2025-08-14-cm4-piControl-200yr-sea-ice-6h.zarr
+  time_chunk_size: 500
+  names:
+    - sea_ice_fraction
+    - sea_surface_fraction
+window_timedelta: "5D"
+output_name: cm4-piControl-200yr-sic-6h-to-5Davg
+output_directory: /climate-default
+first_timestamp: "0151-01-06T00:00:00"
+shift_timestamps_to_avg_interval_midpoint: true
+output_writer:
+  n_dask_workers: 64
+version: "2025-08-22"

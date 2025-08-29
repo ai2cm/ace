@@ -9,6 +9,7 @@ import dacite
 import pandas as pd
 import xarray as xr
 import yaml
+from time_utils import shift_timestamps_to_midpoint
 from writer_utils import OutputWriterConfig
 
 
@@ -45,6 +46,8 @@ class WindowAvgDatasetConfig:
             e.g. '2016-01-01T06:00:00'. The 'origin' used in resampling is
             one step (of size window_timedelta) earlier than first_timestamp.
         last_timestamp: Optional final timestamp in case of extra unneeded windows.
+        shift_timestamps_to_avg_interval_midpoint: If True, shift time axis labels
+            backwards by half the window size.
         output_writer: Configuration for dask and xpartition.
         version: An optional version string, e.g. a date '2025-01-01', which is
             prepended to output_name_prefix.
@@ -56,6 +59,7 @@ class WindowAvgDatasetConfig:
     output_directory: str
     first_timestamp: str | None = None
     last_timestamp: str | None = None
+    shift_timestamps_to_avg_interval_midpoint: bool = False
     output_writer: OutputWriterConfig = dataclasses.field(
         default_factory=OutputWriterConfig
     )
@@ -81,6 +85,26 @@ class WindowAvgDatasetConfig:
             .sel(time=slice(None, self.last_timestamp))
         )
 
+    def shift_timestamps(self, ds: xr.Dataset):
+        """
+        Shifts the time coordinate to the midpoint of the averaging interval.
+
+        This is useful for models where the timestamp represents the end of an
+        averaging period. This method shifts it to the middle of that period.
+
+        Args:
+            ds: The input xarray.Dataset with a 'time' coordinate.
+
+        Returns:
+            A new xr.Dataset with shifted timestamps if the config flag
+            is True, otherwise the original dataset.
+
+        """
+        if self.shift_timestamps_to_avg_interval_midpoint:
+            ds = shift_timestamps_to_midpoint(ds, time_dim="time")
+            ds["time"].attrs["long_name"] = "time, avg interval midpoint"
+        return ds
+
 
 @click.command()
 @click.option("--yaml", help="Path to dataset configuration YAML file.")
@@ -104,6 +128,7 @@ def main(
 
     ds = config.input_dataset.get_dataset()
     ds = config.compute_window_avg(ds)
+    ds = config.shift_timestamps(ds)
 
     if config.version is None:
         version = datetime.today().strftime("%Y-%m-%d")
