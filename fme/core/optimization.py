@@ -141,10 +141,10 @@ class Optimization(OptimizationABC):
                 If None, this indicates the call is from within a training iteration
                 rather than at the end of an epoch.
         """
-        should_step = False
+        call_step = False
         if self.scheduler is not None:
-            should_step = self._should_step_scheduler(valid_loss)
-            if should_step:
+            call_step = self._should_step_scheduler(valid_loss)
+            if call_step:
                 try:
                     if valid_loss is not None:
                         self.scheduler.step(metrics=valid_loss)
@@ -153,7 +153,7 @@ class Optimization(OptimizationABC):
                 except TypeError:
                     # Some schedulers don't accept metrics argument
                     self.scheduler.step()
-        return should_step
+        return call_step
 
     def _should_step_scheduler(self, valid_loss: float | None) -> bool:
         """Determine whether the scheduler should be stepped based on
@@ -317,7 +317,7 @@ class NullOptimization(OptimizationABC):
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return module
 
-    def step_scheduler(self, valid_loss: float) -> bool:
+    def step_scheduler(self, valid_loss: float | None = None) -> bool:
         return False
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
