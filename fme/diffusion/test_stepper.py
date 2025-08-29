@@ -41,12 +41,11 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
     area_weights = fme.spherical_area_weights(lats, n_lon).to(DEVICE)
     ak, bk = torch.arange(nz), torch.arange(nz)
     vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
-    data = BatchData.new_on_device(
-        data=data_dict,
-        time=xr.DataArray(
-            np.zeros((n_samples, n_time)),
-            dims=["sample", "time"],
-        ),
+    data = BatchData.new_for_testing(
+        names=names,
+        n_samples=n_samples,
+        n_timesteps=n_time,
+        img_shape=(9, 18),
     )
     return SphericalData(data, area_weights, vertical_coord)
 
@@ -112,7 +111,7 @@ def test_train_on_batch_addition_series(n_steps: int):
     torch.manual_seed(0)
 
     data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
-    area = torch.ones((5, 5), device=DEVICE)
+    area = torch.ones((9, 18), device=DEVICE)
     gridded_operations = LatLonOperations(area)
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
@@ -128,11 +127,11 @@ def test_train_on_batch_addition_series(n_steps: int):
         loss=WeightedMappingLossConfig(type="MSE"),
     )
     stepper = config.get_stepper(
-        (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
+        (9, 18), gridded_operations, vertical_coordinate, TIMESTEP
     )
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
-    assert stepped.gen_data["a"].shape == (5, 1, n_steps + 1, 5, 5)
+    assert stepped.gen_data["a"].shape == (5, 1, n_steps + 1, 9, 18)
 
     for i in range(n_steps - 1):
         assert torch.allclose(
@@ -170,7 +169,7 @@ def test_train_on_batch_with_prescribed_ocean():
         "a": np.array([2.0], dtype=np.float32),
         "b": np.array([3.0], dtype=np.float32),
     }
-    area = torch.ones((5, 5), device=DEVICE)
+    area = torch.ones((9, 18), device=DEVICE)
     gridded_operations = LatLonOperations(area)
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
@@ -207,10 +206,10 @@ def test_reloaded_stepper_gives_different_prediction():
         ),
     )
     shapes = {
-        "a": (1, 2, 5, 5),
-        "b": (1, 2, 5, 5),
+        "a": (1, 2, 9, 18),
+        "b": (1, 2, 9, 18),
     }
-    area = torch.ones((5, 5), device=DEVICE)
+    area = torch.ones((9, 18), device=DEVICE)
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
@@ -220,7 +219,7 @@ def test_reloaded_stepper_gives_different_prediction():
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    area = torch.ones((5, 5), device=DEVICE)
+    area = torch.ones((9, 18), device=DEVICE)
     new_stepper = DiffusionStepper.from_state(stepper.get_state())
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     first_result = stepper.train_on_batch(
@@ -280,7 +279,7 @@ def _setup_and_train_on_batch(
     else:
         optimization = optimization_config.build(modules=[module], max_epochs=2)
 
-    area = torch.ones((5, 5), device=DEVICE)
+    area = torch.ones((9, 18), device=DEVICE)
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
@@ -358,7 +357,7 @@ def _get_stepper(
         raise ValueError(f"Unknown module name: {module_name}")
 
     all_names = list(set(in_names + out_names))
-    area = torch.ones((5, 5))
+    area = torch.ones((9, 18))
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
@@ -374,13 +373,13 @@ def _get_stepper(
         **kwargs,
     )
     return config.get_stepper(
-        (5, 5), LatLonOperations(area), vertical_coordinate, TIMESTEP
+        (9, 18), LatLonOperations(area), vertical_coordinate, TIMESTEP
     )
 
 
 def test_step():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data = {x: torch.rand(3, 9, 18).to(DEVICE) for x in ["a", "b"]}
     output = stepper.step(input_data, {})
     assert isinstance(output["a"], torch.Tensor)
     assert isinstance(output["b"], torch.Tensor)
@@ -388,7 +387,7 @@ def test_step():
 
 def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="PassThrough")
-    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
+    input_data = {"a": torch.rand(3, 9, 18).to(DEVICE)}
     output = stepper.step(input_data, {})
     assert isinstance(output["a"], torch.Tensor)
     assert isinstance(output["c"], torch.Tensor)
@@ -396,7 +395,7 @@ def test_step_with_diagnostic():
 
 def test_step_with_forcing_and_diagnostic():
     stepper = _get_stepper(["a", "b"], ["a", "c"])
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data = {x: torch.rand(3, 9, 18).to(DEVICE) for x in ["a", "b"]}
     output = stepper.step(input_data, {})
     assert isinstance(output["a"], torch.Tensor)
     assert "b" not in output
@@ -407,8 +406,8 @@ def test_step_with_prescribed_ocean():
     stepper = _get_stepper(
         ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
     )
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
+    input_data = {x: torch.rand(3, 9, 18).to(DEVICE) for x in ["a", "b"]}
+    ocean_data = {x: torch.rand(3, 9, 18).to(DEVICE) for x in ["a", "mask"]}
     output = stepper.step(input_data, ocean_data)
     assert isinstance(output["a"], torch.Tensor)
     assert isinstance(output["b"], torch.Tensor)
@@ -419,24 +418,18 @@ def get_data_for_predict(
     n_steps, forcing_names: list[str]
 ) -> tuple[PrognosticState, BatchData]:
     n_samples = 3
-    input_data = BatchData.new_on_device(
-        data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
-        time=xr.DataArray(
-            np.zeros((n_samples, 1)),
-            dims=["sample", "time"],
-        ),
+    input_data = BatchData.new_for_testing(
+        names=["a"],
+        n_samples=n_samples,
+        n_timesteps=1,
     ).get_start(
         prognostic_names=["a"],
         n_ic_timesteps=1,
     )
-    forcing_data = BatchData.new_on_device(
-        data={
-            name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
-        },
-        time=xr.DataArray(
-            np.zeros((n_samples, n_steps + 1)),
-            dims=["sample", "time"],
-        ),
+    forcing_data = BatchData.new_for_testing(
+        names=forcing_names,
+        n_samples=n_samples,
+        n_timesteps=n_steps + 1,
     )
     return input_data, forcing_data
 
@@ -574,11 +567,11 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         ),
     )
     shapes = {
-        "a": (1, 1, 5, 5),
-        "b": (1, 1, 5, 5),
-        "diagnostic": (1, 1, 5, 5),
+        "a": (1, 1, 9, 18),
+        "b": (1, 1, 9, 18),
+        "diagnostic": (1, 1, 9, 18),
     }
-    area = torch.ones((5, 5), device=DEVICE)
+    area = torch.ones((9, 18), device=DEVICE)
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
