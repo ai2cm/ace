@@ -1127,7 +1127,7 @@ class Stepper(
         Predict multiple steps forward given initial condition and forcing data.
 
         Uses low-level inputs and does not compute derived variables, to separate
-        concerns from the public `predict` method.
+        concerns from the `predict` method.
 
         Args:
             initial_condition: The initial condition, containing tensors of shape
