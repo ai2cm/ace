@@ -4,11 +4,13 @@ import os
 
 import torch
 
+from fme.core.cli import ResumeResultsConfig
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.rand import set_seed
 from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
@@ -82,6 +84,9 @@ class TrainConfig:
         inference: Configuration for inline inference.
         n_coupled_steps: Number of coupled forward steps to take gradient over.
             This is equal to the number of forward steps of the ocean model.
+        seed: Random seed for reproducibility. If set, is used for all types of
+            randomization, including data shuffling and model initialization.
+            If unset, weight initialization is not reproducible but data shuffling is.
         copy_weights_after_batch: Configuration for copying weights from the
             base model to the training model after each batch.
         ema: Configuration for exponential moving average of model weights.
@@ -107,6 +112,11 @@ class TrainConfig:
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
+        resume_results: Configuration for resuming a previously stopped or finished
+            training job. When provided and experiment_dir has no training_checkpoints
+            subdirectory, then it is assumed that this is a new run to resume a
+            previously completed run and resume_results.existing_dir is recursively
+            copied to experiment_dir.
     """
 
     train_loader: CoupledDataLoaderConfig
@@ -119,6 +129,7 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig
     n_coupled_steps: int
+    seed: int | None = None
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
     )
@@ -132,6 +143,7 @@ class TrainConfig:
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = True
     save_best_inference_epoch_checkpoints: bool = False
+    resume_results: ResumeResultsConfig | None = None
 
     @property
     def n_forward_steps(self) -> int:
@@ -152,6 +164,10 @@ class TrainConfig:
     @property
     def inference_n_coupled_steps(self) -> int:
         return self.inference.n_coupled_steps
+
+    def set_random_seed(self):
+        if self.seed is not None:
+            set_seed(self.seed)
 
     def get_inference_epochs(self) -> list[int]:
         start_epoch = 0 if self.evaluate_before_training else 1
