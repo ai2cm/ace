@@ -1,9 +1,7 @@
 import argparse
 import dataclasses
 import logging
-from collections.abc import Mapping
-from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Literal
 
 import dacite
 import torch
@@ -11,7 +9,6 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -20,14 +17,13 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
 from fme.downscaling.data import (
-    ClosedInterval,
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
 )
 from fme.downscaling.models import (
+    CheckpointModelConfig,
     DiffusionModel,
-    DiffusionModelConfig,
     DownscalingModelConfig,
     Model,
     PairedNormalizationConfig,
@@ -38,6 +34,7 @@ from fme.downscaling.patching import (
     PatchPredictor,
     paired_patch_generator_from_loader,
 )
+from fme.downscaling.predict import EventConfig
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -83,61 +80,6 @@ class InterpolateModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-        )
-
-
-@dataclasses.dataclass
-class _CheckpointModelConfigSelector:
-    wrapper: DownscalingModelConfig | DiffusionModelConfig
-
-    @classmethod
-    def from_state(
-        cls, state: Mapping[str, Any]
-    ) -> DownscalingModelConfig | DiffusionModelConfig:
-        return dacite.from_dict(
-            data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
-        ).wrapper
-
-
-@dataclasses.dataclass
-class CheckpointModelConfig:
-    checkpoint_path: str
-
-    def __post_init__(self) -> None:
-        # For config validation testing, we don't want to load immediately
-        # so we defer until build or properties are accessed.
-        self._checkpoint_is_loaded = False
-
-    @property
-    def _checkpoint(self) -> Mapping[str, Any]:
-        if not self._checkpoint_is_loaded:
-            self._checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
-            self._checkpoint_is_loaded = True
-        return self._checkpoint_data
-
-    def build(
-        self,
-    ) -> Model | DiffusionModel:
-        model = _CheckpointModelConfigSelector.from_state(
-            self._checkpoint["model"]["config"]
-        ).build(
-            coarse_shape=self._checkpoint["model"]["coarse_shape"],
-            downscale_factor=self._checkpoint["model"]["downscale_factor"],
-        )
-        model.module.load_state_dict(self._checkpoint["model"]["module"])
-        return model
-
-    @property
-    def data_requirements(self) -> DataRequirements:
-        in_names = self._checkpoint["model"]["config"]["in_names"]
-        out_names = self._checkpoint["model"]["config"]["out_names"]
-        return DataRequirements(
-            fine_names=out_names,
-            coarse_names=list(set(in_names).union(out_names)),
-            n_timesteps=1,
-            use_fine_topography=self._checkpoint["model"]["config"][
-                "use_fine_topography"
-            ],
         )
 
 
@@ -262,30 +204,11 @@ class EventEvaluator:
 
 
 @dataclasses.dataclass
-class EventConfig:
-    name: str
-    date: str
-    lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
-    )
-    lon_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
-    )
-    n_samples: int = 64
-    date_format: str = "%Y-%m-%dT%H:%M"
-    save_generated_samples: bool = False
-
-    def get_gridded_data(
+class PairedEventConfig(EventConfig):
+    def get_paired_gridded_data(
         self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
     ) -> PairedGriddedData:
-        # Event evaluation only load the first snapshot.
-        # Filling the slice stop isn't necessary but guards against
-        # future code trying to iterate over the entire dataloader.
-        _stop = (
-            datetime.strptime(self.date, self.date_format) + timedelta(hours=6)
-        ).strftime(self.date_format)
-
-        time_slice = TimeSlice(self.date, _stop)
+        time_slice = self._time_selection_slice
 
         event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
         event_coarse = dataclasses.replace(
@@ -314,7 +237,7 @@ class EvaluatorConfig:
     logging: LoggingConfig
     n_samples: int = 4
     patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
-    events: list[EventConfig] | None = None
+    events: list[PairedEventConfig] | None = None
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -357,12 +280,12 @@ class EvaluatorConfig:
 
     def _build_event_evaluator(
         self,
-        event_config: EventConfig,
+        event_config: PairedEventConfig,
     ) -> EventEvaluator:
         model = self.model.build()
         evaluator_model: Model | DiffusionModel | PatchPredictor
 
-        dataset = event_config.get_gridded_data(
+        dataset = event_config.get_paired_gridded_data(
             base_data_config=self.data, requirements=self.model.data_requirements
         )
 
