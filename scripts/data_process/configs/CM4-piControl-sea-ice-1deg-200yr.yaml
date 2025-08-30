@@ -1,0 +1,31 @@
+runs:
+  2025-08-14-cm4-piControl-200yr-sea-ice: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
+dataset_computation:
+  ice_zarr: ice_6hourly.zarr
+  nc_mosaic_path: s3://emulators/ai2_colab/2024-11-11-static-data/ocean_hgrid.nc
+  nc_target_grid_path: s3://emulators/ai2_colab/2024-11-11-static-data/gaussian_grid_180_by_360.nc
+  ocean_static:
+    zarr: ocean_static.zarr
+    names:
+    - wet
+    - areacello
+    renaming:
+      xh: x
+      yh: y
+  outer_chunks:
+    time_dim: 360
+    latitude_dim: 180
+    longitude_dim: 360
+n_split: 500
+dask:
+  n_workers: 64
+  use_gateway: true
+  cluster_options:
+    worker_resource_allocation: "8CPU, 57.9Gi"
+    idle_timeout_minutes: 10
+filesystem:
+  protocol: s3
+  storage_options:
+    profile: ai2
+    client_kwargs:
+      endpoint_url: https://nyu1.osn.mghpcc.org

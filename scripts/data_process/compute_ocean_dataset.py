@@ -1,5 +1,5 @@
 """
-Utils for CM4 ocean data preprocessing. This script relies on a m2lines/ocean_emulators.
+Utils for CM4 ocean data preprocessing. This script relies on m2lines/ocean_emulators.
 
 The 200-year pre-industrial control simulation ocean preprocessing ran in about
 6 hours on LEAP's 2i2c JupyterHub in the default "notebook" conda environment
@@ -35,6 +35,7 @@ from ocean_emulators.preprocessing import (
     spatially_filter,
 )
 from ocean_emulators.simulation_preprocessing.gfdl_cm4 import cm4_preprocessing
+from time_utils import shift_timestamps_to_midpoint
 
 
 @dataclasses.dataclass
@@ -268,11 +269,10 @@ class OceanDatasetComputationConfig:
 
         """
         if self.shift_timestamps_to_avg_interval_midpoint:
-            time_coord = ds[self.standard_names.time_dim]
-            dt = (time_coord.values[1] - time_coord.values[0]) / 2
-            new_coord = time_coord - dt
-            new_coord.attrs["long_name"] = "time, avg interval midpoint"
-            ds = ds.assign_coords(time=new_coord)
+            ds = shift_timestamps_to_midpoint(ds, time_dim=self.standard_names.time_dim)
+            ds[self.standard_names.time_dim].attrs["long_name"] = (
+                "time, avg interval midpoint"
+            )
         return ds
 
 

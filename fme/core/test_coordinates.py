@@ -29,14 +29,14 @@ from fme.core.mask_provider import MaskProvider
         ),
         (
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([7, 8, 9]),
+                face=torch.arange(12),
+                height=torch.arange(16),
+                width=torch.arange(16),
             ),
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([7, 8, 9]),
+                face=torch.arange(12),
+                height=torch.arange(16),
+                width=torch.arange(16),
             ),
         ),
         (
@@ -66,22 +66,22 @@ def test_equality(first, second):
         ),
         (
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([7, 8, 9]),
+                face=torch.arange(12),
+                height=torch.arange(16),
+                width=torch.arange(16),
             ),
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([8, 9, 10]),
+                face=torch.arange(12),
+                height=torch.arange(8),
+                width=torch.arange(8),
             ),
         ),
         (
             LatLonCoordinates(lat=torch.tensor([1, 2, 3]), lon=torch.tensor([4, 5, 6])),
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([7, 8, 9]),
+                face=torch.arange(12),
+                height=torch.arange(16),
+                width=torch.arange(16),
             ),
         ),
         (
