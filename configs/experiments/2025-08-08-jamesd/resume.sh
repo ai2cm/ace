@@ -2,14 +2,35 @@
 
 set -e
 
-if [[ "$#" -ne 1 ]]; then
-  echo "Usage: $0 <config_subdirectory>"
+if [[ "$#" -lt 1 ]]; then
+  echo "Usage: $0 <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>]"
   echo "  - <config_subdirectory>: Subdirectory containing the 'resuming.txt' file."
+  echo "  - --atmos_stats: Override atmosphere stats data path (optional)"
+  echo "  - --ocean_stats: Override ocean stats data path (optional)"
   exit 1
 fi
 
 # The subdirectory (passed as an argument) that holds the config file.
 CONFIG_SUBDIR=$1
+shift
+
+# Parse optional arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --atmos_stats)
+      ATMOS_STATS_DATA="$2"
+      shift 2
+      ;;
+    --ocean_stats)
+      OCEAN_STATS_DATA="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
 
 # Get the absolute directory where this script is located.
 SCRIPT_DIR=$(git rev-parse --show-prefix)
@@ -19,9 +40,13 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-# FIXME: this needs to be per-task configurable
-ATMOS_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-atmosphere
-OCEAN_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean
+# Set default values if not provided via CLI args
+if [[ -z "$ATMOS_STATS_DATA" ]]; then
+    ATMOS_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-atmosphere
+fi
+if [[ -z "$OCEAN_STATS_DATA" ]]; then
+    OCEAN_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean
+fi
 
 # Change to the repo root so paths are valid no matter where we run the script from.
 cd "$REPO_ROOT"
