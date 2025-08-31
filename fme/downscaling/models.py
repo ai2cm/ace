@@ -656,16 +656,27 @@ class _CheckpointModelConfigSelector:
 @dataclasses.dataclass
 class CheckpointModelConfig:
     checkpoint_path: str
+    rename: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         # For config validation testing, we don't want to load immediately
         # so we defer until build or properties are accessed.
         self._checkpoint_is_loaded = False
+        self._rename = self.rename or {}
 
     @property
     def _checkpoint(self) -> Mapping[str, Any]:
         if not self._checkpoint_is_loaded:
-            self._checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
+            checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
+            checkpoint_data["model"]["config"]["in_names"] = [
+                self._rename.get(name, name)
+                for name in checkpoint_data["model"]["config"]["in_names"]
+            ]
+            checkpoint_data["model"]["config"]["out_names"] = [
+                self._rename.get(name, name)
+                for name in checkpoint_data["model"]["config"]["out_names"]
+            ]
+            self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
         return self._checkpoint_data
 
