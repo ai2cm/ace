@@ -5,7 +5,7 @@ save_best_inference_epoch_checkpoints: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 5
+max_epochs: 14
 n_coupled_steps: 4
 inference:
   n_coupled_steps: 1456
@@ -138,20 +138,20 @@ optimization:
         kwargs:
           start_factor: 0.01
           end_factor: 1.0
-          total_iters: 300
+          total_iters: 900
         steps_per_iteration: true
       - type: ConstantLR
         kwargs:
           factor: 1.0
-          total_iters: 2528
+          total_iters: 7070
         steps_per_iteration: true
       - type: LinearLR
         kwargs:
           start_factor: 1.0
           end_factor: 0.0
-          total_iters: 707
+          total_iters: 1928
         steps_per_iteration: true
-    milestones: [300, 2828]
+    milestones: [900, 7970]
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
