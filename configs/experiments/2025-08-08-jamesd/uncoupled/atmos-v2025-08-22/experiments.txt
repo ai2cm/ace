@@ -22,3 +22,5 @@ v2025-08-22-ts_uncoupled-trapezoid_lr-rs1|01K3PGYZMF132EXG365FYDPS2G|training|be
 v2025-08-22-ts_uncoupled-trapezoid_lr-rs1|01K3VXNH1E03YJCXPHYHE7AQRE|training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-22-ts_uncoupled-trapezoid_lr-rs1|01K3VZR269WA0AC7P99V1F5VTY|training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-22-ts_unc-trap_lr_9ep-rs1||training|best_inference_ckpt|normal|--not-preemptible
