@@ -1,3 +1,2 @@
-group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|override_args
-v2025-08-22-ts_uncoupled-rs1|training|urgent|titan|4|400GiB|3
-v2025-08-22-ts_uncoupled-trapezoid_lr-rs1|train|urgent|ceres|8|600GiB|3
+group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+v2025-08-22-ts_unc-trap_lr_9ep-rs1|train|high|ceres|8|600GiB|3|ai2/ace

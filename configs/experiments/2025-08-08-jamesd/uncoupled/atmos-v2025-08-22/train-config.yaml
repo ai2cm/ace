@@ -5,7 +5,7 @@ save_best_inference_epoch_checkpoints: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 20
+max_epochs: 9
 n_forward_steps: 2
 inference:
   n_forward_steps: 29200
@@ -94,15 +94,15 @@ optimization:
       - type: ConstantLR
         kwargs:
           factor: 1.0
-          total_iters: 224288
+          total_iters: 97000
         steps_per_iteration: true
       - type: LinearLR
         kwargs:
           start_factor: 1.0
           end_factor: 0.0
-          total_iters: 56572
+          total_iters: 28287
         steps_per_iteration: true
-    milestones: [2000, 226288]
+    milestones: [2000, 99000]
 stepper:
   loss:
     type: MSE
