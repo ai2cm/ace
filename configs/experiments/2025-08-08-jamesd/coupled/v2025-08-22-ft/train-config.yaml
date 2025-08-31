@@ -413,10 +413,6 @@ stepper:
     stepper:
       parameter_init:
         weights_path: /atmos_ckpt.tar
-        parameters:
-          - frozen:
-              include:
-                - '*'
       loss:
         type: MSE
         weights:
