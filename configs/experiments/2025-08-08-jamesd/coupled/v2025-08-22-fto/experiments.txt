@@ -4,3 +4,5 @@ fto-v2025-08-22|01K3MVERF59R2XJPTHQ6T3847P|training|best_inference_ckpt|normal|-
 fto-v2025-08-22-trap_lr_14ep-ncs2-atm21loss|01K3Z46F4XQE3JN1Q3VXTJZCVZ|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v2025-08-22-trap_lr_14ep-ncs2|01K3ZD01PYTDQWH9CTA12N8WQS|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v2025-08-22-trap_lr_14ep-ncs2|01K40AXBA9555A1QBVXS1KXZWQ|training|best_inference_ckpt|normal|--not-preemptible
