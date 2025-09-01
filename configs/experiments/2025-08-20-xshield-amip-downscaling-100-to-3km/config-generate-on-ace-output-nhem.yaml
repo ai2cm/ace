@@ -18,7 +18,7 @@ data:
     file_pattern: 2025-08-29-ace-crps-onestep-outputs.zarr
   lat_extent:
     #start: -66.0
-    stop: 0
+    start: 0
     stop: 70.0
   batch_size: 4
   num_data_workers: 2
