@@ -5,10 +5,16 @@ checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: true
+    names:
+      - HI
+      - sea_ice_fraction
   atmosphere:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: true
+    names:
+      - surface_temperature
+      - PRATEsfc
 logging:
   log_to_screen: true
   log_to_wandb: true
