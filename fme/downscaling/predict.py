@@ -10,15 +10,20 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators.no_target import NoTargetAggregator
-from fme.downscaling.data import ClosedInterval, DataLoaderConfig, GriddedData
-from fme.downscaling.evaluator import CheckpointModelConfig
-from fme.downscaling.models import DiffusionModel, Model
+from fme.downscaling.aggregators import NoTargetAggregator, SampleAggregator
+from fme.downscaling.data import (
+    BatchData,
+    ClosedInterval,
+    DataLoaderConfig,
+    GriddedData,
+)
+from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, Model
 from fme.downscaling.patching import (
     MultipatchConfig,
     PatchPredictor,
@@ -26,6 +31,37 @@ from fme.downscaling.patching import (
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
+from fme.downscaling.typing_ import FineResCoarseResPair
+
+
+def _downscale_coord(coord: torch.tensor, downscale_factor: int):
+    """
+    This is a bandaid fix for the issue where BatchData does not
+    contain coords for the topography, which is fine-res in the no-target
+    generation case. The SampleAggregator requires the fine-res coords
+    for the predictions.
+
+    TODO: remove after topography refactors to have its own data container.
+    """
+    if len(coord.shape) != 1:
+        raise ValueError("coord tensor to downscale must be 1d")
+    if not torch.allclose(
+        coord[1:] - coord[:-1],
+        coord[1] - coord[0],
+    ):
+        raise ValueError("downscale_coord only handles equiangular grids.")
+    spacing = coord[1] - coord[0]
+    # Compute edges from midpoints
+    first_edge = coord[0] - spacing / 2
+    last_edge = coord[-1] + spacing / 2
+
+    # Subdivide edges
+    step = spacing / downscale_factor
+    new_edges = torch.arange(first_edge, last_edge + step / 2, step)
+
+    # Compute new midpoints
+    coord_new = (new_edges[:-1] + new_edges[1:]) / 2
+    return coord_new.to(device=coord.device, dtype=coord.dtype)
 
 
 @dataclasses.dataclass
@@ -41,6 +77,7 @@ class EventConfig:
     n_samples: int = 64
     date_format: str = "%Y-%m-%dT%H:%M"
     save_generated_samples: bool = False
+    patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
 
     @property
     def _time_selection_slice(self) -> TimeSlice:
@@ -50,7 +87,7 @@ class EventConfig:
         future code trying to iterate over the entire dataloader.
         """
         _stop = (
-            datetime.strptime(self.date, self.date_format) + timedelta(hours=6)
+            datetime.strptime(self.date, self.date_format) + timedelta(hours=12)
         ).strftime(self.date_format)
         return TimeSlice(self.date, _stop)
 
@@ -70,6 +107,86 @@ class EventConfig:
             lon_extent=self.lon_extent,
         )
         return event_data_config.build(requirements=requirements)
+
+
+class EventDownscaler:
+    def __init__(
+        self,
+        event_name: str,
+        data: GriddedData,
+        model: DiffusionModel,
+        experiment_dir: str,
+        n_samples: int,
+        patch: MultipatchConfig = MultipatchConfig(
+            divide_generation=True,
+            composite_prediction=True,
+            coarse_horizontal_overlap=1,
+        ),
+        save_generated_samples: bool = False,
+    ):
+        self.event_name = event_name
+        self.data = data
+        self.model = model
+        self.experiment_dir = experiment_dir
+        self.n_samples = n_samples
+        self.dist = Distributed.get_instance()
+        self.patch = patch
+        self._max_sample_group = 8
+        self.save_generated_samples = save_generated_samples
+
+    @property
+    def generation_model(self):
+        if self.patch.needs_patch_predictor:
+            return PatchPredictor(
+                self.model,
+                self.data.shape,
+                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
+            )
+        else:
+            return self.model
+
+    def run(self):
+        logging.info(f"Running {self.event_name} event downscaling...")
+        batch: BatchData = next(iter(self.data.loader))
+        coarse_coords = batch[0].latlon_coordinates
+        fine_coords = LatLonCoordinates(
+            lat=_downscale_coord(coarse_coords.lat, self.model.downscale_factor),
+            lon=_downscale_coord(coarse_coords.lon, self.model.downscale_factor),
+        )
+        sample_agg = SampleAggregator(
+            coarse=batch[0].data,
+            latlon_coordinates=FineResCoarseResPair(
+                fine=fine_coords,
+                coarse=coarse_coords,
+            ),
+        )
+        # Sample generation is split up into chunks for GPU parallelism
+        # since there is no batch parallelism in event evaluation.
+        total_samples = self.dist.local_batch_size(self.n_samples)
+        for start_idx in range(0, total_samples, self._max_sample_group):
+            end_idx = min(start_idx + self._max_sample_group, total_samples)
+            logging.info(
+                f"Generating samples {start_idx} to {end_idx} "
+                f"for event {self.event_name}"
+            )
+            outputs = self.model.generate_on_batch_no_target(
+                batch, n_samples=end_idx - start_idx
+            )
+            sample_agg.record_batch(outputs)
+        to_log = sample_agg.get_wandb()
+        wandb = WandB.get_instance()
+        wandb.log({f"{self.event_name}/{k}": v for k, v in to_log.items()}, step=0)
+
+        if self.save_generated_samples:
+            ds = sample_agg.get_dataset()
+            if self.dist.is_root():
+                # no slashes allowed in netcdf variable names
+                ds = ds.rename({k: k.replace("/", "_") for k in ds.data_vars})
+                ds.to_netcdf(f"{self.experiment_dir}/{self.event_name}.nc", mode="w")
+            logging.info(
+                f"{self.n_samples} generated samples saved for {self.event_name}"
+            )
+        torch.cuda.empty_cache()
 
 
 class Downscaler:
@@ -125,7 +242,7 @@ class Downscaler:
             )
 
     def run(self):
-        aggregator = NoTargetAggregator()
+        aggregator = NoTargetAggregator(downscale_factor=self.model.downscale_factor)
         for i, batch in enumerate(self.batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
@@ -152,13 +269,12 @@ class DownscalerConfig:
     logging: LoggingConfig
     n_samples: int = 4
     patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
+    events: list[EventConfig] | None = None
     """
     This class is used to configure the downscaling model generation.
     Fine-resolution outputs are generated from coarse-resolution inputs.
     In contrast to the Evaluator, there is no fine-resolution target data
     to compare the generated outputs against.
-
-    TODO: add event generation.
     """
 
     def configure_logging(self, log_filename: str):
@@ -171,7 +287,7 @@ class DownscalerConfig:
             config=config, env_vars=env_vars, resumable=resumable, **kwargs
         )
 
-    def build(self) -> Downscaler:
+    def build(self) -> list[Downscaler | EventDownscaler]:
         dataset = self.data.build(
             requirements=self.model.data_requirements,
         )
@@ -180,35 +296,55 @@ class DownscalerConfig:
             raise NotImplementedError(
                 "No-target generation is only enabled for DiffusionModel, not Model"
             )
-
-        return Downscaler(
+        downscaler = Downscaler(
             data=dataset,
             model=model,
             experiment_dir=self.experiment_dir,
             n_samples=self.n_samples,
         )
 
+        event_downscalers = []
+        for event_config in self.events or []:
+            event_dataset = event_config.get_gridded_data(
+                base_data_config=self.data, requirements=self.model.data_requirements
+            )
+            event_downscalers.append(
+                EventDownscaler(
+                    event_name=event_config.name,
+                    data=event_dataset,
+                    model=model,
+                    experiment_dir=self.experiment_dir,
+                    n_samples=event_config.n_samples,
+                    patch=event_config.patch,
+                    save_generated_samples=event_config.save_generated_samples,
+                )
+            )
+        return [downscaler] + event_downscalers
+
 
 def main(config_path: str):
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
-    predictor_config: DownscalerConfig = dacite.from_dict(
+    downscaler_config: DownscalerConfig = dacite.from_dict(
         data_class=DownscalerConfig,
         data=config,
         config=dacite.Config(strict=True),
     )
-    prepare_directory(predictor_config.experiment_dir, config)
+    prepare_directory(downscaler_config.experiment_dir, config)
 
-    predictor_config.configure_logging(log_filename="out.log")
+    downscaler_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
-    predictor_config.configure_wandb(resumable=True, notes=beaker_url)
+    downscaler_config.configure_wandb(resumable=True, notes=beaker_url)
 
     logging.info("Starting downscaling model generation...")
-    predictor = predictor_config.build()
-    logging.info(f"Number of parameters: {count_parameters(predictor.model.modules)}")
-    predictor.run()
+    downscalers = downscaler_config.build()
+    logging.info(
+        f"Number of parameters: {count_parameters(downscalers[0].model.modules)}"
+    )
+    for downscaler in downscalers:
+        downscaler.run()
 
 
 def parse_args():
