@@ -31,17 +31,36 @@ class ModelOutputs:
     latent_steps: list[torch.Tensor] = dataclasses.field(default_factory=list)
 
 
+def _rename_normalizer(
+    normalizer: StandardNormalizer, rename: dict[str, str] | None
+) -> StandardNormalizer:
+    if not rename:
+        return normalizer
+    new_means = {
+        rename.get(name, name): value for name, value in normalizer.means.items()
+    }
+    new_stds = {
+        rename.get(name, name): value for name, value in normalizer.stds.items()
+    }
+    return StandardNormalizer(means=new_means, stds=new_stds)
+
+
 @dataclasses.dataclass
 class PairedNormalizationConfig:
     fine: NormalizationConfig
     coarse: NormalizationConfig
 
     def build(
-        self, in_names: list[str], out_names: list[str]
+        self,
+        in_names: list[str],
+        out_names: list[str],
+        rename: dict[str, str] | None = None,
     ) -> FineResCoarseResPair[StandardNormalizer]:
+        coarse = self.coarse.build(list(set(in_names).union(out_names)))
+        fine = self.fine.build(out_names)
         return FineResCoarseResPair[StandardNormalizer](
-            coarse=self.coarse.build(list(set(in_names).union(out_names))),
-            fine=self.fine.build(out_names),
+            coarse=_rename_normalizer(coarse, rename),
+            fine=_rename_normalizer(fine, rename),
         )
 
     def load(self):
@@ -638,3 +657,69 @@ class DiffusionModel:
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
+
+
+@dataclasses.dataclass
+class _CheckpointModelConfigSelector:
+    wrapper: DownscalingModelConfig | DiffusionModelConfig
+
+    @classmethod
+    def from_state(
+        cls, state: Mapping[str, Any]
+    ) -> DownscalingModelConfig | DiffusionModelConfig:
+        return dacite.from_dict(
+            data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
+        ).wrapper
+
+
+@dataclasses.dataclass
+class CheckpointModelConfig:
+    checkpoint_path: str
+    rename: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        # For config validation testing, we don't want to load immediately
+        # so we defer until build or properties are accessed.
+        self._checkpoint_is_loaded = False
+        self._rename = self.rename or {}
+
+    @property
+    def _checkpoint(self) -> Mapping[str, Any]:
+        if not self._checkpoint_is_loaded:
+            checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
+            checkpoint_data["model"]["config"]["in_names"] = [
+                self._rename.get(name, name)
+                for name in checkpoint_data["model"]["config"]["in_names"]
+            ]
+            checkpoint_data["model"]["config"]["out_names"] = [
+                self._rename.get(name, name)
+                for name in checkpoint_data["model"]["config"]["out_names"]
+            ]
+            self._checkpoint_data = checkpoint_data
+            self._checkpoint_is_loaded = True
+        return self._checkpoint_data
+
+    def build(
+        self,
+    ) -> Model | DiffusionModel:
+        model = _CheckpointModelConfigSelector.from_state(
+            self._checkpoint["model"]["config"]
+        ).build(
+            coarse_shape=self._checkpoint["model"]["coarse_shape"],
+            downscale_factor=self._checkpoint["model"]["downscale_factor"],
+        )
+        model.module.load_state_dict(self._checkpoint["model"]["module"])
+        return model
+
+    @property
+    def data_requirements(self) -> DataRequirements:
+        in_names = self._checkpoint["model"]["config"]["in_names"]
+        out_names = self._checkpoint["model"]["config"]["out_names"]
+        return DataRequirements(
+            fine_names=out_names,
+            coarse_names=list(set(in_names).union(out_names)),
+            n_timesteps=1,
+            use_fine_topography=self._checkpoint["model"]["config"][
+                "use_fine_topography"
+            ],
+        )
