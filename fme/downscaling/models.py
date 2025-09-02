@@ -96,7 +96,10 @@ class DownscalingModelConfig:
         downscale_factor: int,
         rename: dict[str, str] | None = None,
     ) -> "Model":
-        normalizer = self.normalization.build(self.in_names, self.out_names, rename)
+        invert_rename = {v: k for k, v in (rename or {}).items()}
+        orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
+        orig_out_names = [invert_rename.get(name, name) for name in self.out_names]
+        normalizer = self.normalization.build(orig_in_names, orig_out_names, rename)
         loss = self.loss.build(reduction="mean", gridded_operations=None)
         n_in_channels = len(self.in_names)
 
