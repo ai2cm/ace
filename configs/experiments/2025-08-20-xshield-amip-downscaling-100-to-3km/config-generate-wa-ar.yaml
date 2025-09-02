@@ -1,9 +1,9 @@
 experiment_dir: /results
-n_samples: 4
-patch:
-  divide_generation: true
-  composite_prediction: true
-  coarse_horizontal_overlap: 1
+n_samples: 12
+#patch:
+#  divide_generation: true
+#  composite_prediction: true
+#  coarse_horizontal_overlap: 1
 model:
   #checkpoint_path: /Users/annak/Code/scratch/100-to-3km-mps.ckpt
   checkpoint_path: /checkpoints/ckpt.tar
@@ -16,17 +16,17 @@ data:
   - data_path: /climate-default
     engine: zarr
     file_pattern: 2025-08-29-ace-crps-onestep-outputs.zarr
-    #infer_timestep: false
     subset:
-      start: 0
-      stop: 12
-      #step: None
+      start_date: 2023-04-25T12:00
+      stop_date: 2023-04-25T18:00
   lat_extent:
-    #start: -66.0
-    start: 0
-    stop: 70.0
-  batch_size: 4
-  num_data_workers: 2
+    start: 36
+    stop: 52
+  lon_extent:
+    start: 228
+    stop: 244
+  batch_size: 1
+  num_data_workers: 1
   strict_ensemble: False
 logging:
   log_to_screen: true
