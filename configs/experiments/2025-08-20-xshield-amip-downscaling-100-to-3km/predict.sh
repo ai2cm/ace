@@ -4,9 +4,9 @@
 
 set -e
 
-JOB_NAME="generate-global-trained-xshield-amip-100km-to-3km-ACE-outputs-nhem"
+JOB_NAME="generate-global-trained-xshield-amip-100km-to-3km-ACE-outputs-WA-AR"
 #JOB_NAME="generate-conus-trained-8x8-100km-to-3km-conus-patched"
-CONFIG_FILENAME="config-generate-on-ace-output-nhem.yaml"
+CONFIG_FILENAME="config-generate-wa-ar.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -18,7 +18,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=4
+NGPU=1
 
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
@@ -29,8 +29,8 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km generation on ACE one step outputs' \
-    --workspace ai2/climate-titan \
-    --priority urgent \
+    --workspace ai2/downscaling \
+    --priority normal \
     --preemptible \
     --cluster ai2/titan-cirrascale \
     --beaker-image $IMAGE \
