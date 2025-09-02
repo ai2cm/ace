@@ -94,8 +94,9 @@ class DownscalingModelConfig:
         self,
         coarse_shape: tuple[int, int],
         downscale_factor: int,
+        rename: dict[str, str] | None = None,
     ) -> "Model":
-        normalizer = self.normalization.build(self.in_names, self.out_names)
+        normalizer = self.normalization.build(self.in_names, self.out_names, rename)
         loss = self.loss.build(reduction="mean", gridded_operations=None)
         n_in_channels = len(self.in_names)
 
@@ -308,8 +309,9 @@ class DiffusionModelConfig:
         self,
         coarse_shape: tuple[int, int],
         downscale_factor: int,
+        rename: dict[str, str] | None = None,
     ) -> "DiffusionModel":
-        normalizer = self.normalization.build(self.in_names, self.out_names)
+        normalizer = self.normalization.build(self.in_names, self.out_names, rename)
         loss = self.loss.build(reduction="none", gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
@@ -707,6 +709,7 @@ class CheckpointModelConfig:
         ).build(
             coarse_shape=self._checkpoint["model"]["coarse_shape"],
             downscale_factor=self._checkpoint["model"]["downscale_factor"],
+            rename=self._rename,
         )
         model.module.load_state_dict(self._checkpoint["model"]["module"])
         return model
