@@ -29,8 +29,8 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km generation on ACE one step outputs' \
-    --workspace ai2/downscaling \
-    --priority normal \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
     --cluster ai2/titan-cirrascale \
     --beaker-image $IMAGE \
