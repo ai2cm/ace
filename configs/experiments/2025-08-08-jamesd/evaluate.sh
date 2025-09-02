@@ -94,7 +94,7 @@ while read TRAIN_EXPER; do
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --priority $PRIORITY \
         $PREEMPTIBLE \
-        --cluster ai2/ceres-cirrascale \
+        --cluster ceres \
         --workspace $WORKSPACE \
         --weka climate-default:/climate-default \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
