@@ -17,6 +17,10 @@ data:
     engine: zarr
     file_pattern: 2025-08-29-ace-crps-onestep-outputs.zarr
     #infer_timestep: false
+    subset:
+      start: None
+      stop: 120
+      #step: None
   lat_extent:
     #start: -66.0
     start: 0
