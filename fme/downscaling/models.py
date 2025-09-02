@@ -314,7 +314,10 @@ class DiffusionModelConfig:
         downscale_factor: int,
         rename: dict[str, str] | None = None,
     ) -> "DiffusionModel":
-        normalizer = self.normalization.build(self.in_names, self.out_names, rename)
+        invert_rename = {v: k for k, v in (rename or {}).items()}
+        orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
+        orig_out_names = [invert_rename.get(name, name) for name in self.out_names]
+        normalizer = self.normalization.build(orig_in_names, orig_out_names, rename)
         loss = self.loss.build(reduction="none", gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
