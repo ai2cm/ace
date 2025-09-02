@@ -72,6 +72,8 @@ def create_predictor_config(tmp_path, n_samples: int):
         "checkpoint_path": f"{str(experiment_dir)}/checkpoints/latest.ckpt"
     }
     config["n_samples"] = n_samples
+    config["events"][0]["name"] = "test_event"
+    config["events"][0]["save_generated_samples"] = True
 
     out_path = tmp_path / "predictor-config.yaml"
     with open(out_path, "w") as file:
@@ -104,3 +106,4 @@ def test_predictor_runs(
     assert os.path.exists(
         f"{predictor_config['experiment_dir']}/generated_maps_and_metrics.nc"
     )
+    assert os.path.exists(f"{predictor_config['experiment_dir']}/test_event.nc")
