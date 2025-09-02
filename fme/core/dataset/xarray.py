@@ -881,7 +881,7 @@ def _get_timestep(time: np.ndarray) -> datetime.timedelta:
     if len(time) > 1:
         timesteps = np.diff(time)
         timestep = timesteps[0]
-
+        return timestep
         if not (timestep > datetime.timedelta(days=0)):
             raise ValueError("Timestep of data must be greater than zero.")
 
