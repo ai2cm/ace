@@ -96,7 +96,7 @@ while read RESUMING; do
         fi
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
-            --cluster ai2/titan-cirrascale
+            --cluster titan
         )
     else
         if [[ -z "$WORKSPACE" ]]; then
