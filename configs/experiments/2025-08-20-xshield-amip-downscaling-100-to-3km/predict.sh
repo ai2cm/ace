@@ -4,9 +4,9 @@
 
 set -e
 
-JOB_NAME="generate-global-trained-xshield-amip-100km-to-3km-ACE-outputs-nhem"
+JOB_NAME="generate-global-trained-xshield-amip-100km-to-3km-ACE-outputs-events"
 #JOB_NAME="generate-conus-trained-8x8-100km-to-3km-conus-patched"
-CONFIG_FILENAME="config-generate-on-ace-output-nhem.yaml"
+CONFIG_FILENAME="config-generate-on-ace-output-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

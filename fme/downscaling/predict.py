@@ -253,7 +253,7 @@ class Downscaler:
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.data.items()}
-                aggregator.record_batch(prediction, coarse)
+                aggregator.record_batch(prediction, coarse, batch.time)
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()
         wandb.log(logs, step=0)
