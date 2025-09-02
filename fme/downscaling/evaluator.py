@@ -1,9 +1,8 @@
 import argparse
 import dataclasses
 import logging
-from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Literal
 
 import dacite
 import torch
@@ -26,8 +25,8 @@ from fme.downscaling.data import (
     PairedGriddedData,
 )
 from fme.downscaling.models import (
+    CheckpointModelConfig,
     DiffusionModel,
-    DiffusionModelConfig,
     DownscalingModelConfig,
     Model,
     PairedNormalizationConfig,
@@ -83,79 +82,6 @@ class InterpolateModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-        )
-
-
-@dataclasses.dataclass
-class _CheckpointModelConfigSelector:
-    wrapper: DownscalingModelConfig | DiffusionModelConfig
-
-    @classmethod
-    def from_state(
-        cls, state: Mapping[str, Any]
-    ) -> DownscalingModelConfig | DiffusionModelConfig:
-        return dacite.from_dict(
-            data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
-        ).wrapper
-
-
-@dataclasses.dataclass
-class CheckpointModelConfig:
-    """
-    Load a model from a checkpoint file.
-    checkpoint_path: Path to the checkpoint file.
-    rename: Optional dict to rename original to new variable names for
-        model inputs and outputs.
-    """
-
-    checkpoint_path: str
-    rename: dict[str, str] | None = None
-
-    def __post_init__(self) -> None:
-        # For config validation testing, we don't want to load immediately
-        # so we defer until build or properties are accessed.
-        self._checkpoint_is_loaded = False
-        self._rename = self.rename or {}
-
-    @property
-    def _checkpoint(self) -> Mapping[str, Any]:
-        if not self._checkpoint_is_loaded:
-            checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
-            checkpoint_data["model"]["config"]["in_names"] = [
-                self._rename.get(name, name)
-                for name in checkpoint_data["model"]["config"]["in_names"]
-            ]
-            checkpoint_data["model"]["config"]["out_names"] = [
-                self._rename.get(name, name)
-                for name in checkpoint_data["model"]["config"]["out_names"]
-            ]
-            self._checkpoint_data = checkpoint_data
-            self._checkpoint_is_loaded = True
-        return self._checkpoint_data
-
-    def build(
-        self,
-    ) -> Model | DiffusionModel:
-        model = _CheckpointModelConfigSelector.from_state(
-            self._checkpoint["model"]["config"]
-        ).build(
-            coarse_shape=self._checkpoint["model"]["coarse_shape"],
-            downscale_factor=self._checkpoint["model"]["downscale_factor"],
-        )
-        model.module.load_state_dict(self._checkpoint["model"]["module"])
-        return model
-
-    @property
-    def data_requirements(self) -> DataRequirements:
-        in_names = self._checkpoint["model"]["config"]["in_names"]
-        out_names = self._checkpoint["model"]["config"]["out_names"]
-        return DataRequirements(
-            fine_names=out_names,
-            coarse_names=list(set(in_names).union(out_names)),
-            n_timesteps=1,
-            use_fine_topography=self._checkpoint["model"]["config"][
-                "use_fine_topography"
-            ],
         )
 
 
