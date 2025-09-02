@@ -2,13 +2,17 @@ experiment_dir: /results
 n_coupled_steps: 2920
 coupled_steps_in_memory: 20
 checkpoint_path: /ckpt.tar
+aggregator:
+  log_histograms: true
 data_writer:
   ocean:
     save_prediction_files: false
     save_monthly_files: true
+    save_histogram_files: true
   atmosphere:
     save_prediction_files: false
     save_monthly_files: true
+    save_histogram_files: true
 logging:
   log_to_screen: true
   log_to_wandb: true
