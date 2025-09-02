@@ -115,7 +115,7 @@ while read PRETRAINING; do
         fi
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
-            --cluster ai2/ceres-cirrascale
+            --cluster ceres
         )
     fi
 

@@ -88,7 +88,7 @@ while read TRAINING; do
         fi
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
-            --cluster ai2/ceres-cirrascale
+            --cluster ceres
         )
     fi
 
