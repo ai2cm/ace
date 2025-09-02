@@ -17,8 +17,8 @@ data:
     engine: zarr
     file_pattern: 2025-08-29-ace-crps-onestep-outputs.zarr
     subset:
-      start_date: 2023-04-25T12:00
-      stop_date: 2023-04-25T18:00
+      start_time: 2023-04-25T12:00
+      stop_time: 2023-04-25T18:00
   lat_extent:
     start: 36
     stop: 52
