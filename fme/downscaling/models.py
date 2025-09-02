@@ -31,17 +31,36 @@ class ModelOutputs:
     latent_steps: list[torch.Tensor] = dataclasses.field(default_factory=list)
 
 
+def _rename_normalizer(
+    normalizer: StandardNormalizer, rename: dict[str, str] | None
+) -> StandardNormalizer:
+    if not rename:
+        return normalizer
+    new_means = {
+        rename.get(name, name): value for name, value in normalizer.means.items()
+    }
+    new_stds = {
+        rename.get(name, name): value for name, value in normalizer.stds.items()
+    }
+    return StandardNormalizer(new_means, new_stds)
+
+
 @dataclasses.dataclass
 class PairedNormalizationConfig:
     fine: NormalizationConfig
     coarse: NormalizationConfig
 
     def build(
-        self, in_names: list[str], out_names: list[str]
+        self,
+        in_names: list[str],
+        out_names: list[str],
+        rename: dict[str, str] | None = None,
     ) -> FineResCoarseResPair[StandardNormalizer]:
+        coarse = self.coarse.build(list(set(in_names).union(out_names)))
+        fine = self.fine.build(out_names)
         return FineResCoarseResPair[StandardNormalizer](
-            coarse=self.coarse.build(list(set(in_names).union(out_names))),
-            fine=self.fine.build(out_names),
+            coarse=_rename_normalizer(coarse, rename),
+            fine=_rename_normalizer(fine, rename),
         )
 
     def load(self):
