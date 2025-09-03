@@ -28,3 +28,5 @@ v2025-08-22-ts_unc-trap_lr_9ep-rs1||training|best_inference_ckpt|normal|--not-pr
 v2025-08-22-ts_unc-trap_lr_9ep-rs1|01K3Z39D90H1T88QBTSVVB1G19|training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-22-ts_unc-trap_lr_9ep-lr0000p5-rs1|01K41W25H2YBVNWC5Y62JJ9WMP|training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-22-ts_unc-trap_lr_30ep-rs1|01K48EFDBCYT95V5K5KG0C36EH|training|best_inference_ckpt|normal|--not-preemptible
