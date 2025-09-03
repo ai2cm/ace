@@ -5,7 +5,7 @@ save_best_inference_epoch_checkpoints: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 9
+max_epochs: 30
 n_forward_steps: 2
 inference:
   n_forward_steps: 29200
@@ -29,9 +29,9 @@ inference:
       - data_path: /climate-default
         file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
         engine: zarr
-    num_data_workers: 16
+    num_data_workers: 4
   aggregator:
-    log_histograms: true
+    log_histograms: false
     time_mean_reference_data: /atmos_stats/time-mean.nc
 logging:
   log_to_screen: true
@@ -41,7 +41,7 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 16
+  num_data_workers: 4
   prefetch_factor: 4
   dataset:
     merge:
@@ -59,7 +59,7 @@ train_loader:
         stop_time: '0306-01-01T06:00:00'
 validation_loader:
   batch_size: 64
-  num_data_workers: 16
+  num_data_workers: 4
   prefetch_factor: 4
   dataset:
     merge:
@@ -89,20 +89,20 @@ optimization:
         kwargs:
           start_factor: 0.01
           end_factor: 1.0
-          total_iters: 2000
+          total_iters: 14143
         steps_per_iteration: true
       - type: ConstantLR
         kwargs:
           factor: 1.0
-          total_iters: 97000
+          total_iters: 339432
         steps_per_iteration: true
       - type: LinearLR
         kwargs:
           start_factor: 1.0
           end_factor: 0.0
-          total_iters: 28287
+          total_iters: 70715
         steps_per_iteration: true
-    milestones: [2000, 99000]
+    milestones: [14143, 353575]
 stepper:
   loss:
     type: MSE
