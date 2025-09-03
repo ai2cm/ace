@@ -8,10 +8,8 @@ import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.histogram import DynamicHistogramAggregator
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators.adapters import DynamicHistogramsAdapter
 from fme.downscaling.aggregators.main import (
     Mean,
     ZonalPowerSpectrumAggregator,
@@ -57,12 +55,12 @@ class NoTargetAggregator:
             TimeSeriesAggregator(
                 name="time_series", variable_metadata=variable_metadata
             ),
-            DynamicHistogramsAdapter(
-                name="histogram",
-                histograms=DynamicHistogramAggregator(
-                    n_bins=300, percentiles=[99.9999, 99.99999]
-                ),
-            ),
+            # DynamicHistogramsAdapter(
+            #    name="histogram",
+            #    histograms=DynamicHistogramAggregator(
+            #        n_bins=300, percentiles=[99.9999, 99.99999]
+            #   ),
+            # ),
         ]
 
     @torch.no_grad()
