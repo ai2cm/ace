@@ -5,6 +5,7 @@ import torch
 
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
+    ForcingDataLoaderConfig,
     InferenceInitialConditionIndices,
     TimestampList,
 )
@@ -133,3 +134,20 @@ class InferenceDataset(torch.utils.data.Dataset):
     @property
     def properties(self) -> CoupledDatasetProperties:
         return self._properties
+
+
+@dataclasses.dataclass
+class CoupledForcingDataLoaderConfig:
+    ocean: ForcingDataLoaderConfig
+    atmosphere: ForcingDataLoaderConfig
+    num_data_workers: int = 0
+
+    def build_inference_config(self, start_indices: ExplicitIndices):
+        return InferenceDataLoaderConfig(
+            dataset=CoupledDatasetConfig(
+                ocean=self.ocean.dataset,
+                atmosphere=self.atmosphere.dataset,
+            ),
+            start_indices=start_indices,
+            num_data_workers=self.num_data_workers,
+        )
