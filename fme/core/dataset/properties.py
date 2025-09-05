@@ -13,7 +13,7 @@ class DatasetProperties:
         vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         mask_provider: MaskProvider,
-        timestep: datetime.timedelta,
+        timestep: datetime.timedelta | None,
         is_remote: bool,
         all_labels: set[str],
     ):
