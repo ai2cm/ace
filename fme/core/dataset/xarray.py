@@ -575,6 +575,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         )
         self._check_isel_dimensions(first_dataset.sizes)
         self._labels = set(config.labels)
+        self._infer_timestep = config.infer_timestep
 
     def _check_isel_dimensions(self, data_dim_sizes):
         # Horizontal dimensions are not currently supported, as the current isel code
@@ -662,8 +663,11 @@ class XarrayDataset(torch.utils.data.Dataset):
 
         self._timestep: datetime.timedelta | None
         if infer_timestep:
-            self._timestep = _get_timestep(np.concatenate(raw_times))
-            time_coord = _repeat_and_increment_time(raw_times, n_repeats, self.timestep)
+            inferred_timestep = _get_timestep(np.concatenate(raw_times))
+            time_coord = _repeat_and_increment_time(
+                raw_times, n_repeats, inferred_timestep
+            )
+            self._timestep = inferred_timestep
         else:
             self._timestep = None
             time_coord = raw_times
@@ -743,13 +747,20 @@ class XarrayDataset(torch.utils.data.Dataset):
         return horizontal_coordinates, static_derived_data, dim_names
 
     @property
-    def timestep(self) -> datetime.timedelta:
+    def timestep(self) -> datetime.timedelta | None:
         if self._timestep is None:
-            raise ValueError(
-                "Timestep was not inferred in the data loader. Note "
-                "XarrayDataConfig.infer_timestep must be set to True for this "
-                "to occur."
-            )
+            if self._infer_timestep is False:
+                warnings.warn(
+                    "XarrayDataConfig.infer_timestep set to False. "
+                    "Timestep was not inferred in the data loader."
+                )
+                return self._timestep
+            else:
+                raise ValueError(
+                    "Timestep was not inferred in the data loader. Note "
+                    "XarrayDataConfig.infer_timestep must be set to True for this "
+                    "to occur."
+                )
         else:
             return self._timestep
 

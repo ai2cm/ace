@@ -214,11 +214,11 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
 
     @property
     def ocean_timestep(self) -> datetime.timedelta:
-        return self._properties.ocean.timestep
+        return self._properties.ocean_timestep
 
     @property
     def atmosphere_timestep(self) -> datetime.timedelta:
-        return self._properties.atmosphere.timestep
+        return self._properties.atmosphere_timestep
 
     @property
     def n_inner_steps(self) -> int:
