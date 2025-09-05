@@ -158,6 +158,7 @@ def get_single_module_noise_conditioned_selector(
                             embed_dim=4,
                             noise_embed_dim=4,
                             noise_type="isotropic",
+                            context_pos_embed_dim=2,
                             num_layers=2,
                             local_blocks=[0],
                         )
