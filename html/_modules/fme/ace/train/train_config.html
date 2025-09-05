@@ -1,0 +1,636 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../../../../genindex.html" /><link rel="search" title="Search" href="../../../../search.html" />
+
+    <link rel="shortcut icon" href="../../../../_static/Ai2_icon_pink_RGB.png"/><!-- Generated with Sphinx 7.0.0 and Furo 2024.04.27 -->
+        <title>fme.ace.train.train_config - fme v2025.7.0</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/styles/furo.css?digest=46965ee0ad39e5260c2467c27b94afaae98bd900" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/styles/furo-extensions.css?digest=30d1aed668e5c3a91c3e3bf6a60b675221979f0e" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/custom.css" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #eeffcc;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-half" viewBox="0 0 24 24">
+    <title>Auto light/dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-shadow">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M13 12h5" />
+      <path d="M13 15h4" />
+      <path d="M13 18h1" />
+      <path d="M13 9h4" />
+      <path d="M13 6h1" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../../../index.html"><div class="brand">fme v2025.7.0</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../../../../index.html">
+  
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo only-light" src="../../../../_static/Ai2_icon_pink_padding_RGB.png" alt="Light Logo"/>
+    <img class="sidebar-logo only-dark" src="../../../../_static/Ai2_icon_pink_padding_RGB.png" alt="Dark Logo"/>
+  </div>
+  
+  <span class="sidebar-brand-text">fme v2025.7.0</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../../../../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../training_config.html">Training Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../inference_config.html">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../gcs_access.html">Accessing data via Google Cloud Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../builder.html">The Builder Pattern: Modern Namelists</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../api.html">API Reference</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <h1>Source code for fme.ace.train.train_config</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">dataclasses</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">,</span> <span class="n">Sequence</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.ace.aggregator</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">InferenceEvaluatorAggregatorConfig</span><span class="p">,</span>
+    <span class="n">OneStepAggregatorConfig</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.ace.aggregator.inference.main</span><span class="w"> </span><span class="kn">import</span> <span class="n">InferenceEvaluatorAggregator</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.ace.data_loading.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataLoaderConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.ace.data_loading.getters</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_gridded_data</span><span class="p">,</span> <span class="n">get_inference_data</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.ace.data_loading.gridded_data</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">ErrorInferenceData</span><span class="p">,</span>
+    <span class="n">GriddedData</span><span class="p">,</span>
+    <span class="n">InferenceGriddedData</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.ace.data_loading.inference</span><span class="w"> </span><span class="kn">import</span> <span class="n">InferenceDataLoaderConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.ace.requirements</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">DataRequirements</span><span class="p">,</span>
+    <span class="n">NullDataRequirements</span><span class="p">,</span>
+    <span class="n">PrognosticStateDataRequirements</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.ace.stepper</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExistingStepperConfig</span><span class="p">,</span> <span class="n">SingleModuleStepperConfig</span><span class="p">,</span> <span class="n">Stepper</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.ace.stepper.single_module</span><span class="w"> </span><span class="kn">import</span> <span class="n">StepperConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.core.dataset.data_typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">VariableMetadata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.core.dataset_info</span><span class="w"> </span><span class="kn">import</span> <span class="n">DatasetInfo</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.core.distributed</span><span class="w"> </span><span class="kn">import</span> <span class="n">Distributed</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.core.ema</span><span class="w"> </span><span class="kn">import</span> <span class="n">EMAConfig</span><span class="p">,</span> <span class="n">EMATracker</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.core.generics.trainer</span><span class="w"> </span><span class="kn">import</span> <span class="n">EndOfBatchCallback</span><span class="p">,</span> <span class="n">EndOfEpochCallback</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.core.logging_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">LoggingConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.core.optimization</span><span class="w"> </span><span class="kn">import</span> <span class="n">Optimization</span><span class="p">,</span> <span class="n">OptimizationConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.core.typing_</span><span class="w"> </span><span class="kn">import</span> <span class="n">Slice</span><span class="p">,</span> <span class="n">TensorDict</span><span class="p">,</span> <span class="n">TensorMapping</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fme.core.weight_ops</span><span class="w"> </span><span class="kn">import</span> <span class="n">CopyWeightsConfig</span>
+
+
+<span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">WeatherEvaluationConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">        loader: configuration for the data loader used during weather evaluation</span>
+<span class="sd">        n_forward_steps: number of forward steps to take</span>
+<span class="sd">        forward_steps_in_memory: number of forward steps to take before</span>
+<span class="sd">            re-reading data from disk</span>
+<span class="sd">        epochs: epochs on which to run weather evaluation. By default runs</span>
+<span class="sd">            weather evaluation every epoch.</span>
+<span class="sd">        aggregator: configuration of weather evaluation aggregator.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">loader</span><span class="p">:</span> <span class="n">InferenceDataLoaderConfig</span>
+    <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">forward_steps_in_memory</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">epochs</span><span class="p">:</span> <span class="n">Slice</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">Slice</span><span class="p">())</span>
+    <span class="n">aggregator</span><span class="p">:</span> <span class="n">InferenceEvaluatorAggregatorConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">InferenceEvaluatorAggregatorConfig</span><span class="p">(</span>
+            <span class="n">log_global_mean_time_series</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">log_global_mean_norm_time_series</span><span class="o">=</span><span class="kc">False</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">dist</span> <span class="o">=</span> <span class="n">Distributed</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">start_indices</span><span class="o">.</span><span class="n">n_initial_conditions</span> <span class="o">%</span> <span class="n">dist</span><span class="o">.</span><span class="n">world_size</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Number of inference initial conditions must be divisible by the &quot;</span>
+                <span class="s2">&quot;number of parallel workers, got &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">start_indices</span><span class="o">.</span><span class="n">n_initial_conditions</span><span class="si">}</span><span class="s2"> and &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">dist</span><span class="o">.</span><span class="n">world_size</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">log_global_mean_time_series</span>
+            <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">log_global_mean_norm_time_series</span>
+        <span class="p">):</span>
+            <span class="c1"># Both of log_global_mean_time_series and</span>
+            <span class="c1"># log_global_mean_norm_time_series must be False for inline inference.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">log_global_mean_time_series</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">log_global_mean_norm_time_series</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_inference_data</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">window_requirements</span><span class="p">:</span> <span class="n">DataRequirements</span><span class="p">,</span>
+        <span class="n">initial_condition</span><span class="p">:</span> <span class="n">PrognosticStateDataRequirements</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">InferenceGriddedData</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">get_inference_data</span><span class="p">(</span>
+            <span class="n">config</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">loader</span><span class="p">,</span>
+            <span class="n">total_forward_steps</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">n_forward_steps</span><span class="p">,</span>
+            <span class="n">window_requirements</span><span class="o">=</span><span class="n">window_requirements</span><span class="p">,</span>
+            <span class="n">initial_condition</span><span class="o">=</span><span class="n">initial_condition</span><span class="p">,</span>
+        <span class="p">)</span>
+
+
+<div class="viewcode-block" id="InlineInferenceConfig"><a class="viewcode-back" href="../../../../training_config.html#fme.ace.InlineInferenceConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">InlineInferenceConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Parameters:</span>
+<span class="sd">        loader: configuration for the data loader used during inference</span>
+<span class="sd">        n_forward_steps: number of forward steps to take</span>
+<span class="sd">        forward_steps_in_memory: number of forward steps to take before</span>
+<span class="sd">            re-reading data from disk</span>
+<span class="sd">        epochs: epochs on which to run inference. By default runs inference every epoch.</span>
+<span class="sd">        aggregator: configuration of inline inference aggregator.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">loader</span><span class="p">:</span> <span class="n">InferenceDataLoaderConfig</span>
+    <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">forward_steps_in_memory</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">epochs</span><span class="p">:</span> <span class="n">Slice</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">Slice</span><span class="p">())</span>
+    <span class="n">aggregator</span><span class="p">:</span> <span class="n">InferenceEvaluatorAggregatorConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">InferenceEvaluatorAggregatorConfig</span><span class="p">(</span>
+            <span class="n">log_global_mean_time_series</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">log_global_mean_norm_time_series</span><span class="o">=</span><span class="kc">False</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">dist</span> <span class="o">=</span> <span class="n">Distributed</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">start_indices</span><span class="o">.</span><span class="n">n_initial_conditions</span> <span class="o">%</span> <span class="n">dist</span><span class="o">.</span><span class="n">world_size</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Number of inference initial conditions must be divisible by the &quot;</span>
+                <span class="s2">&quot;number of parallel workers, got &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">start_indices</span><span class="o">.</span><span class="n">n_initial_conditions</span><span class="si">}</span><span class="s2"> and &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">dist</span><span class="o">.</span><span class="n">world_size</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">log_global_mean_time_series</span>
+            <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">log_global_mean_norm_time_series</span>
+        <span class="p">):</span>
+            <span class="c1"># Both of log_global_mean_time_series and</span>
+            <span class="c1"># log_global_mean_norm_time_series must be False for inline inference.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">log_global_mean_time_series</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">log_global_mean_norm_time_series</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_inference_data</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">window_requirements</span><span class="p">:</span> <span class="n">DataRequirements</span><span class="p">,</span>
+        <span class="n">initial_condition</span><span class="p">:</span> <span class="n">PrognosticStateDataRequirements</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">InferenceGriddedData</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">get_inference_data</span><span class="p">(</span>
+            <span class="n">config</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">loader</span><span class="p">,</span>
+            <span class="n">total_forward_steps</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">n_forward_steps</span><span class="p">,</span>
+            <span class="n">window_requirements</span><span class="o">=</span><span class="n">window_requirements</span><span class="p">,</span>
+            <span class="n">initial_condition</span><span class="o">=</span><span class="n">initial_condition</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="TrainConfig"><a class="viewcode-back" href="../../../../training_config.html#fme.ace.TrainConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">TrainConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for training a model.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        train_loader: Configuration for the training data loader.</span>
+<span class="sd">        validation_loader: Configuration for the validation data loader.</span>
+<span class="sd">        stepper: Configuration for the stepper. SingleModuleStepperConfig is</span>
+<span class="sd">            deprecated and will be removed in a future version. Use StepperConfig</span>
+<span class="sd">            instead.</span>
+<span class="sd">        optimization: Configuration for the optimization.</span>
+<span class="sd">        logging: Configuration for logging.</span>
+<span class="sd">        max_epochs: Total number of epochs to train for.</span>
+<span class="sd">        save_checkpoint: Whether to save checkpoints.</span>
+<span class="sd">        experiment_dir: Directory where checkpoints and logs are saved.</span>
+<span class="sd">        inference: Configuration for inline inference.</span>
+<span class="sd">            If None, no inline inference is run,</span>
+<span class="sd">            and no &quot;best_inline_inference&quot; checkpoint will be saved.</span>
+<span class="sd">        weather_evaluation: Configuration for weather evaluation.</span>
+<span class="sd">            If None, no weather evaluation is run. Weather evaluation is not</span>
+<span class="sd">            used to select checkpoints, but is used to provide metrics.</span>
+<span class="sd">        n_forward_steps: Number of forward steps to take gradient over.</span>
+<span class="sd">        copy_weights_after_batch: Configuration for copying weights from the</span>
+<span class="sd">            base model to the training model after each batch.</span>
+<span class="sd">        ema: Configuration for exponential moving average of model weights.</span>
+<span class="sd">        validate_using_ema: Whether to validate and perform inference using</span>
+<span class="sd">            the EMA model.</span>
+<span class="sd">        checkpoint_save_epochs: How often to save epoch-based checkpoints,</span>
+<span class="sd">            if save_checkpoint is True. If None, checkpoints are only saved</span>
+<span class="sd">            for the most recent epoch</span>
+<span class="sd">            (and the best epochs if validate_using_ema == False).</span>
+<span class="sd">        ema_checkpoint_save_epochs: How often to save epoch-based EMA checkpoints,</span>
+<span class="sd">            if save_checkpoint is True. If None, EMA checkpoints are only saved</span>
+<span class="sd">            for the most recent epoch</span>
+<span class="sd">            (and the best epochs if validate_using_ema == True).</span>
+<span class="sd">        log_train_every_n_batches: How often to log batch_loss during training.</span>
+<span class="sd">        segment_epochs: Exit after training for at most this many epochs</span>
+<span class="sd">            in current job, without exceeding `max_epochs`. Use this if training</span>
+<span class="sd">            must be run in segments, e.g. due to wall clock limit.</span>
+<span class="sd">        save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from</span>
+<span class="sd">            training, validation and inline inference aggregators.</span>
+<span class="sd">        validation_aggregator: Configuration for the validation aggregator.</span>
+<span class="sd">        evaluate_before_training: Whether to run validation and inline inference before</span>
+<span class="sd">            any training is done.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">train_loader</span><span class="p">:</span> <span class="n">DataLoaderConfig</span>
+    <span class="n">validation_loader</span><span class="p">:</span> <span class="n">DataLoaderConfig</span>
+    <span class="n">stepper</span><span class="p">:</span> <span class="n">SingleModuleStepperConfig</span> <span class="o">|</span> <span class="n">ExistingStepperConfig</span> <span class="o">|</span> <span class="n">StepperConfig</span>
+    <span class="n">optimization</span><span class="p">:</span> <span class="n">OptimizationConfig</span>
+    <span class="n">logging</span><span class="p">:</span> <span class="n">LoggingConfig</span>
+    <span class="n">max_epochs</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">save_checkpoint</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">experiment_dir</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">inference</span><span class="p">:</span> <span class="n">InlineInferenceConfig</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">copy_weights_after_batch</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">CopyWeightsConfig</span><span class="p">]</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span>
+    <span class="p">)</span>
+    <span class="n">ema</span><span class="p">:</span> <span class="n">EMAConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">EMAConfig</span><span class="p">())</span>
+    <span class="n">weather_evaluation</span><span class="p">:</span> <span class="n">WeatherEvaluationConfig</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">validate_using_ema</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">checkpoint_save_epochs</span><span class="p">:</span> <span class="n">Slice</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">ema_checkpoint_save_epochs</span><span class="p">:</span> <span class="n">Slice</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">log_train_every_n_batches</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">100</span>
+    <span class="n">segment_epochs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">save_per_epoch_diagnostics</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">validation_aggregator</span><span class="p">:</span> <span class="n">OneStepAggregatorConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">OneStepAggregatorConfig</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="n">evaluate_before_training</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stepper</span><span class="p">,</span> <span class="n">SingleModuleStepperConfig</span><span class="p">):</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="s2">&quot;SingleModuleStepperConfig is deprecated. Use StepperConfig instead.&quot;</span><span class="p">,</span>
+                <span class="ne">DeprecationWarning</span><span class="p">,</span>
+            <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">inference_n_forward_steps</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">inference</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">0</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">inference</span><span class="o">.</span><span class="n">n_forward_steps</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">inference_aggregator</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">InferenceEvaluatorAggregatorConfig</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">inference</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">inference</span><span class="o">.</span><span class="n">aggregator</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">checkpoint_dir</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        The directory where checkpoints are saved.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">,</span> <span class="s2">&quot;training_checkpoints&quot;</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">output_dir</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        The directory where output files are saved.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_inference_epochs</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">inference</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span>
+        <span class="n">start_epoch</span> <span class="o">=</span> <span class="mi">0</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">evaluate_before_training</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="n">all_epochs</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">start_epoch</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_epochs</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">all_epochs</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">inference</span><span class="o">.</span><span class="n">epochs</span><span class="o">.</span><span class="n">slice</span><span class="p">]</span></div>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">TrainBuilders</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="n">TrainConfig</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="n">config</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_train_window_data_requirements</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataRequirements</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">stepper</span><span class="o">.</span><span class="n">get_evaluation_window_data_requirements</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">n_forward_steps</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_evaluation_window_data_requirements</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataRequirements</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">inference</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">NullDataRequirements</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">stepper</span><span class="o">.</span><span class="n">get_evaluation_window_data_requirements</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">inference</span><span class="o">.</span><span class="n">forward_steps_in_memory</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_initial_condition_data_requirements</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">PrognosticStateDataRequirements</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">stepper</span><span class="o">.</span><span class="n">get_prognostic_state_data_requirements</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_train_data</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">GriddedData</span><span class="p">:</span>
+        <span class="n">data_requirements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_train_window_data_requirements</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">get_gridded_data</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">train_loader</span><span class="p">,</span>
+            <span class="n">requirements</span><span class="o">=</span><span class="n">data_requirements</span><span class="p">,</span>
+            <span class="n">train</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_validation_data</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">GriddedData</span><span class="p">:</span>
+        <span class="n">data_requirements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_train_window_data_requirements</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">get_gridded_data</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">validation_loader</span><span class="p">,</span>
+            <span class="n">requirements</span><span class="o">=</span><span class="n">data_requirements</span><span class="p">,</span>
+            <span class="n">train</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_evaluation_inference_data</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">InferenceGriddedData</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">inference</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">ErrorInferenceData</span><span class="p">()</span>  <span class="c1"># type: ignore</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">inference</span><span class="o">.</span><span class="n">get_inference_data</span><span class="p">(</span>
+                <span class="n">window_requirements</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_evaluation_window_data_requirements</span><span class="p">(),</span>
+                <span class="n">initial_condition</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_initial_condition_data_requirements</span><span class="p">(),</span>
+            <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_optimization</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">modules</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">ModuleList</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optimization</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">optimization</span><span class="o">.</span><span class="n">build</span><span class="p">(</span><span class="n">modules</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">max_epochs</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_stepper</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">dataset_info</span><span class="p">:</span> <span class="n">DatasetInfo</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Stepper</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">stepper</span><span class="o">.</span><span class="n">get_stepper</span><span class="p">(</span>
+            <span class="n">dataset_info</span><span class="o">=</span><span class="n">dataset_info</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_ema</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">modules</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">EMATracker</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">ema</span><span class="o">.</span><span class="n">build</span><span class="p">(</span><span class="n">modules</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_end_of_batch_ops</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">modules</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">],</span>
+        <span class="n">base_weights</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">EndOfBatchCallback</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">base_weights</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+
+            <span class="k">def</span><span class="w"> </span><span class="nf">copy_after_batch</span><span class="p">():</span>
+                <span class="k">for</span> <span class="n">module</span><span class="p">,</span> <span class="n">copy_config</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span>
+                    <span class="n">modules</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">copy_weights_after_batch</span>
+                <span class="p">):</span>
+                    <span class="n">copy_config</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">weights</span><span class="o">=</span><span class="n">base_weights</span><span class="p">,</span> <span class="n">modules</span><span class="o">=</span><span class="p">[</span><span class="n">module</span><span class="p">])</span>
+                <span class="k">return</span>
+
+            <span class="k">return</span> <span class="n">copy_after_batch</span>
+        <span class="k">return</span> <span class="k">lambda</span><span class="p">:</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_end_of_epoch_callback</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">inference_one_epoch</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[</span>
+            <span class="p">[</span><span class="n">InferenceGriddedData</span><span class="p">,</span> <span class="n">InferenceEvaluatorAggregator</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
+            <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span>
+        <span class="p">],</span>
+        <span class="n">normalize</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">TensorMapping</span><span class="p">],</span> <span class="n">TensorDict</span><span class="p">],</span>
+        <span class="n">output_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">variable_metadata</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">VariableMetadata</span><span class="p">],</span>
+        <span class="n">channel_mean_names</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+        <span class="n">save_diagnostics</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+        <span class="n">n_ic_timesteps</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">EndOfEpochCallback</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">weather_evaluation</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">weather_evaluation</span><span class="o">.</span><span class="n">get_inference_data</span><span class="p">(</span>
+                <span class="n">window_requirements</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_evaluation_window_data_requirements</span><span class="p">(),</span>
+                <span class="n">initial_condition</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_initial_condition_data_requirements</span><span class="p">(),</span>
+            <span class="p">)</span>
+            <span class="n">dataset_info</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">dataset_info</span><span class="o">.</span><span class="n">update_variable_metadata</span><span class="p">(</span><span class="n">variable_metadata</span><span class="p">)</span>
+            <span class="n">aggregator</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">weather_evaluation</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">build</span><span class="p">(</span>
+                <span class="n">dataset_info</span><span class="o">=</span><span class="n">dataset_info</span><span class="p">,</span>
+                <span class="n">n_timesteps</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">weather_evaluation</span><span class="o">.</span><span class="n">n_forward_steps</span>
+                <span class="o">+</span> <span class="n">n_ic_timesteps</span><span class="p">,</span>
+                <span class="n">initial_time</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">initial_time</span><span class="p">,</span>
+                <span class="n">normalize</span><span class="o">=</span><span class="n">normalize</span><span class="p">,</span>
+                <span class="n">output_dir</span><span class="o">=</span><span class="n">output_dir</span><span class="p">,</span>
+                <span class="n">record_step_20</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">weather_evaluation</span><span class="o">.</span><span class="n">n_forward_steps</span> <span class="o">&gt;=</span> <span class="mi">20</span><span class="p">,</span>
+                <span class="n">channel_mean_names</span><span class="o">=</span><span class="n">channel_mean_names</span><span class="p">,</span>
+                <span class="n">save_diagnostics</span><span class="o">=</span><span class="n">save_diagnostics</span><span class="p">,</span>
+            <span class="p">)</span>
+
+            <span class="k">def</span><span class="w"> </span><span class="nf">end_of_epoch_ops</span><span class="p">(</span><span class="n">epoch</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">weather_evaluation</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">weather_evaluation</span><span class="o">.</span><span class="n">epochs</span><span class="o">.</span><span class="n">contains</span><span class="p">(</span><span class="n">epoch</span><span class="p">):</span>
+                        <span class="k">return</span> <span class="n">inference_one_epoch</span><span class="p">(</span>
+                            <span class="n">data</span><span class="p">,</span>
+                            <span class="n">aggregator</span><span class="p">,</span>
+                            <span class="s2">&quot;weather_eval&quot;</span><span class="p">,</span>
+                            <span class="n">epoch</span><span class="p">,</span>
+                        <span class="p">)</span>
+                <span class="k">return</span> <span class="p">{}</span>
+
+            <span class="k">return</span> <span class="n">end_of_epoch_ops</span>
+
+        <span class="k">return</span> <span class="k">lambda</span> <span class="n">epoch</span><span class="p">:</span> <span class="p">{}</span>
+</pre></div>
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          
+          
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2024, Allen Institute for Artificial Intelligence
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            <div class="icons">
+              <a class="muted-link " href="https://github.com/ai2cm/ace" aria-label="GitHub">
+                <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 16 16">
+                    <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path>
+                </svg>
+            </a>
+              
+            </div>
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer no-toc">
+      
+      
+      
+    </aside>
+  </div>
+</div><script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/sphinx_highlight.js"></script>
+    <script src="../../../../_static/scripts/furo.js"></script>
+    </body>
+</html>
