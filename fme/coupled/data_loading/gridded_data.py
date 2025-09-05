@@ -174,6 +174,14 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         return self._properties.ocean
 
     @property
+    def n_initial_conditions(self) -> int:
+        if self._n_initial_conditions is None:
+            example_data = next(iter(self.loader)).ocean_data.data
+            example_tensor = next(iter(example_data.values()))
+            self._n_initial_conditions = example_tensor.shape[0]
+        return self._n_initial_conditions
+
+    @property
     def initial_condition(self) -> CoupledPrognosticState:
         return self._initial_condition
 
