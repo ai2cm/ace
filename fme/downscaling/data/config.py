@@ -1,7 +1,7 @@
 import dataclasses
 from collections.abc import Sequence
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
@@ -271,6 +271,9 @@ class PairedDataLoaderConfig:
         topography: Optional path to dataset to load for topography. If not
             provided and model has requires_topography=True, the data loader
             will default to trying to load the variable from the fine data.
+        sample_with_replacement: If provided, the dataset will be
+            sampled randomly with replacement to the given size each period,
+            instead of retrieving each sample once (either shuffled or not).
     """
 
     fine: Sequence[XarrayDataConfig]
@@ -286,6 +289,7 @@ class PairedDataLoaderConfig:
     )
     repeat: int = 1
     topography: str | None = None
+    sample_with_replacement: int | None = None
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
@@ -427,16 +431,7 @@ class PairedDataLoaderConfig:
             dataset_fine_subset,
             dataset_coarse_subset,
         )
-
-        sampler: DistributedSampler | None
-        if dist.is_distributed():
-            if train:
-                sampler = DistributedSampler(dataset, shuffle=train)
-            else:
-                sampler = ContiguousDistributedSampler(dataset)
-        else:
-            sampler = None
-
+        sampler = self._get_sampler(dataset=dataset, dist=dist, train=train)
         dataloader = DataLoader(
             dataset,
             batch_size=dist.local_batch_size(int(self.batch_size)),
@@ -472,3 +467,30 @@ class PairedDataLoaderConfig:
             variable_metadata,
             all_times=all_times,
         )
+
+    def _get_sampler(
+        self,
+        dataset: Dataset,
+        dist: Distributed,
+        train: bool,
+    ) -> RandomSampler | DistributedSampler | None:
+        # Use RandomSampler with replacement for both distributed and
+        # non-distributed cases
+        if self.sample_with_replacement is not None:
+            local_sample_with_replacement_dataset_size = (
+                self.sample_with_replacement // dist.world_size
+            )
+            return RandomSampler(
+                dataset,
+                num_samples=local_sample_with_replacement_dataset_size,
+                replacement=True,
+            )
+        if dist.is_distributed():
+            if train:
+                sampler = DistributedSampler(dataset, shuffle=train)
+            else:
+                sampler = ContiguousDistributedSampler(dataset)
+        else:
+            sampler = None
+
+        return sampler
