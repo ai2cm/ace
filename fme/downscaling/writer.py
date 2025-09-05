@@ -6,6 +6,7 @@ import fsspec
 import gcsfs
 import netCDF4
 import numpy as np
+import xarray as xr
 import zarr
 
 from fme.core.distributed import Distributed
@@ -17,19 +18,64 @@ def _encode_cftime_times(times, units="hours since 2000-01-01", calendar="julian
     return netCDF4.date2num(times, units=units, calendar=calendar)
 
 
+def _check_for_overwrite(arr, insert_slices_tuple):
+    # Loads the slice of zarr array
+    existing = arr[insert_slices_tuple]
+
+    fill_value = arr.fill_value
+
+    if fill_value is None:
+        # If no fill_value, assume all entries are valid → forbid any overwrite
+        if np.any(existing):
+            raise RuntimeError(
+                f"Attempting to overwrite existing values in {arr.name} "
+                f"at slice {insert_slices_tuple}"
+            )
+    elif np.isnan(fill_value):
+        # Special case for NaN fill value
+        conflict_mask = ~np.isnan(existing)
+        if np.any(conflict_mask):
+            raise RuntimeError(
+                f"Attempting to overwrite existing values in {arr.name} "
+                f"at slice {insert_slices_tuple}"
+            )
+    else:
+        conflict_mask = existing != fill_value
+        if np.any(conflict_mask):
+            raise RuntimeError(
+                f"Attempting to overwrite existing values in {arr.name} "
+                f"at slice {insert_slices_tuple}"
+            )
+
+
+def _check_data_size_fits_slice(data: np.ndarray, insert_slices: Mapping[int, slice]):
+    for dim_index, slice in insert_slices.items():
+        if data.shape[dim_index] != slice.stop - slice.start:
+            raise RuntimeError(
+                "Size of data to insert into zarr must match slice. "
+                f"Attempted to insert data with size {data.shape[dim_index]} "
+                f"into {slice} of dimension index {dim_index}."
+            )
+
+
 def insert_into_zarr(
-    path: str, data: Mapping[str, np.ndarray], insert_slices: Mapping[int, slice]
+    path: str,
+    data: Mapping[str, np.ndarray],
+    insert_slices: Mapping[int, slice],
+    overwrite_check: bool = True,
 ):
     root = zarr.open(path, mode="a")
     for var_name, var_data in data.items():
         n_dims = len(var_data.shape)
+        # Array data is not loaded until index or slice is referenced
+        zarr_array = root[var_name]
         insert_slices_tuple = tuple(
-            [
-                insert_slices.get(dim_index, slice(None, None))
-                for dim_index in range(n_dims)
-            ]
+            insert_slices.get(dim_index, slice(None, None))
+            for dim_index in range(n_dims)
         )
-        root[var_name][insert_slices_tuple] = var_data
+        _check_data_size_fits_slice(var_data, insert_slices)
+        _check_for_overwrite(zarr_array, insert_slices_tuple)
+        zarr_array[insert_slices_tuple] = var_data
 
 
 def initialize_zarr(
@@ -95,6 +141,8 @@ class ZarrWriter:
         coords: dict[str, np.ndarray],
         data_vars: list[str],
         chunks: dict[str, int] | None = None,
+        allow_existing: bool = False,
+        overwrite_check: bool = True,
     ):
         """
         Initialize the ZarrWriter with the specified parameters.
@@ -108,6 +156,9 @@ class ZarrWriter:
         data_vars: Variables to write
         chunks: Optional mapping of dimension name to chunk size. If a dimension is not
             in this mapping, the chunk size will be the same as the dimension size.
+        allow_existing: If true, allow writing to a preexisting store.
+        overwrite_check: If true, check when recording each batch that the slice of the
+            existing store does not already contain data.
         """
         self.path = path
         self.dims = dims
@@ -115,10 +166,17 @@ class ZarrWriter:
         self.data_vars = data_vars
         self.chunks = chunks or {}
         self.dist = Distributed.get_instance()
-
-        self._store_initialized = False
-
-        self._verify_path_empty()
+        self.overwrite_check = overwrite_check
+        if allow_existing:
+            self._store_initialized = True if self._path_exists() else False
+        else:
+            if self._path_exists() is True:
+                raise FileExistsError(
+                    f"Zarr store {self.path} already exists. "
+                    "Please delete first before writing to this path, "
+                    "or write to a different path."
+                )
+            self._store_initialized = False
 
         for coord, coord_arr in coords.items():
             if len(coord_arr.shape) != 1:
@@ -134,18 +192,35 @@ class ZarrWriter:
                     "should be provided."
                 )
 
-    def _verify_path_empty(self):
+    @classmethod
+    def from_existing_store(cls, path: str) -> "ZarrWriter":
+        ds = xr.open_zarr(path)
+        coords = {k: v.values for k, v in ds.coords.items()}
+        dims_list = [ds[var].dims for var in ds.data_vars]
+        if not all(dims == dims_list[0] for dims in dims_list):
+            raise ValueError(
+                "Data arrays must have same dim order when writing "
+                "to existing zarr store with ZarrWriter."
+            )
+        return cls(
+            path=path,
+            dims=dims_list[0],
+            coords=coords,
+            chunks=ds.chunks,
+            data_vars=list(ds.data_vars),
+            allow_existing=True,
+        )
+
+    def _path_exists(self) -> bool:
         if self.path.startswith("gs://"):
             fs = gcsfs.GCSFileSystem()
         else:
             fs = fsspec.filesystem("file")
 
         if fs.exists(self.path):
-            raise FileExistsError(
-                f"Zarr store {self.path} already exists. "
-                "Please delete first before writing to this path, "
-                "or write to a different path."
-            )
+            return True
+        else:
+            return False
 
     def record_batch(
         self, data: Mapping[str, np.ndarray], position_slices: Mapping[str, slice]
@@ -162,7 +237,9 @@ class ZarrWriter:
             self.dims.index(dim): position_slices[dim] for dim in position_slices.keys()
         }
         write_data = {v: data[v] for v in self.data_vars}
-        insert_into_zarr(self.path, write_data, indexed_position_slices)
+        insert_into_zarr(
+            self.path, write_data, indexed_position_slices, self.overwrite_check
+        )
 
     def create_zarr_store(
         self,

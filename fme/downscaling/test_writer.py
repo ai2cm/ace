@@ -56,8 +56,8 @@ def test_initialize_zarr(tmp_path):
     ],
 )
 def test_insert_into_zarr(tmp_path, time_batch_size):
-    n_times = 10
-    n_samples = 9
+    n_times = 20
+    n_samples = 20
     time_chunk_size = 3
     sample_chunk_size = 4
     chunks = {
@@ -88,8 +88,10 @@ def test_insert_into_zarr(tmp_path, time_batch_size):
     for t in range(int(np.ceil(n_times / time_batch_size))):
         for s in range(int(np.ceil(n_samples / chunks["sample"]))):
             insert_slices = {
-                0: slice(t * time_batch_size, time_batch_size * (t + 1)),
-                1: slice(s * sample_chunk_size, sample_chunk_size * (s + 1)),
+                0: slice(t * time_batch_size, min(time_batch_size * (t + 1), n_times)),
+                1: slice(
+                    s * sample_chunk_size, min(sample_chunk_size * (s + 1), n_samples)
+                ),
             }
             batch_data = {
                 "var1": data["var1"][insert_slices[0], insert_slices[1], :, :],
@@ -142,7 +144,7 @@ def test_ZarrWriter(
     # Data is written in slices along time and sample dims
     position_slices = {
         "time": slice(3, 6),
-        "sample": slice(2, 4),
+        "sample": slice(1, 3),
     }
     batch_data = {
         v: data[v][position_slices["time"], position_slices["sample"], :, :]
@@ -167,3 +169,65 @@ def test_ZarrWriter(
     np.testing.assert_array_equal(ds_write["time"], times)
 
     assert "no_write_var" not in ds_write.variables
+
+
+def _create_writer(path, n_times, chunks):
+    times = np.array(
+        [
+            cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=i)
+            for i in range(n_times)
+        ]
+    )
+    lat = np.linspace(-90, 90, NLAT)
+    lon = np.linspace(-180, 180, NLON)
+
+    coords = {
+        "time": times,
+        "lat": lat,
+        "lon": lon,
+    }
+
+    return ZarrWriter(
+        path=path,
+        coords=coords,
+        dims=("time", "lat", "lon"),
+        chunks=chunks,
+        data_vars=["var"],
+    )
+
+
+def test_ZarrWriter_append_to_existing(
+    tmp_path,
+):
+    n_times = 8
+
+    path = os.path.join(tmp_path, "test.zarr")
+    data = {
+        "var": np.random.rand(n_times, NLAT, NLON),
+    }
+
+    writer_0 = _create_writer(n_times=n_times, path=path, chunks={"time": 3})
+
+    writer_0.record_batch(
+        data={"var": data["var"][slice(0, 4)]}, position_slices={"time": slice(0, 4)}
+    )
+
+    writer_1 = ZarrWriter.from_existing_store(path)
+    writer_1.record_batch(
+        data={"var": data["var"][slice(4, 8)]}, position_slices={"time": slice(4, 8)}
+    )
+
+    ds = xr.open_zarr(path)
+    np.testing.assert_allclose(ds["var"].values, data["var"])
+
+
+def test_ZarrWriter_overwrite_check(tmp_path):
+    writer = _create_writer(
+        os.path.join(tmp_path, "test.zarr"), n_times=4, chunks={"time": 2}
+    )
+    batch_data = {
+        "var": np.random.rand(2, NLAT, NLON),
+    }
+    writer.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
+    with pytest.raises(RuntimeError):
+        writer.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
