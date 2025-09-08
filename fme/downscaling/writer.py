@@ -74,7 +74,8 @@ def insert_into_zarr(
             for dim_index in range(n_dims)
         )
         _check_data_size_fits_slice(var_data, insert_slices)
-        _check_for_overwrite(zarr_array, insert_slices_tuple)
+        if overwrite_check:
+            _check_for_overwrite(zarr_array, insert_slices_tuple)
         zarr_array[insert_slices_tuple] = var_data
 
 

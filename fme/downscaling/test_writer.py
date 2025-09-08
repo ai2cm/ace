@@ -171,7 +171,7 @@ def test_ZarrWriter(
     assert "no_write_var" not in ds_write.variables
 
 
-def _create_writer(path, n_times, chunks):
+def _create_writer(path, n_times, chunks, overwrite_check=True, allow_existing=False):
     times = np.array(
         [
             cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=i)
@@ -193,6 +193,8 @@ def _create_writer(path, n_times, chunks):
         dims=("time", "lat", "lon"),
         chunks=chunks,
         data_vars=["var"],
+        overwrite_check=overwrite_check,
+        allow_existing=allow_existing,
     )
 
 
@@ -231,3 +233,33 @@ def test_ZarrWriter_overwrite_check(tmp_path):
     writer.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
     with pytest.raises(RuntimeError):
         writer.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
+
+
+def test_ZarrWriter_can_overwrite(tmp_path):
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    batch_data_nonzero = {
+        "var": np.random.rand(2, NLAT, NLON),
+    }
+
+    writer.record_batch(data=batch_data_nonzero, position_slices={"time": slice(0, 2)})
+    ds = xr.open_zarr(path)
+    assert np.all(ds["var"][:2] != 0.0)
+
+    batch_data_zero = {"var": np.zeros((2, NLAT, NLON))}
+    writer.record_batch(data=batch_data_zero, position_slices={"time": slice(0, 2)})
+    ds = xr.open_zarr(path)
+    assert np.all(ds["var"][:2] == 0.0)
+
+
+def test_ZarrWriter_allow_existing(tmp_path):
+    path = os.path.join(tmp_path, "test.zarr")
+    batch_data = {
+        "var": np.random.rand(2, NLAT, NLON),
+    }
+
+    writer0 = _create_writer(path, n_times=4, chunks={"time": 2}, allow_existing=True)
+    writer0.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
+
+    writer1 = _create_writer(path, n_times=4, chunks={"time": 2}, allow_existing=True)
+    writer1.record_batch(data=batch_data, position_slices={"time": slice(2, 4)})
