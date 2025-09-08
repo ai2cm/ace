@@ -56,7 +56,7 @@ gantry run \
     --gpus "$N_GPUS" \
     --shared-memory "$SHARED_MEM" \
     --budget ai2/climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train /existing-results/config.yaml \
     --override resume_results.existing_dir=/existing-results $OVERRIDE_ARGS

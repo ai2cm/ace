@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME_BASE="ace2-era5-evaluator"
+JOB_NAME="ace2-era5-evaluator"
 JOB_GROUP="ace2-era5"
 EXISTING_RESULTS_DATASET="01K013CYF8HX12KJK91YJ8MM92"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-evaluator-config.yaml"
@@ -18,7 +18,8 @@ python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
-    --description 'Run ACE evaluator' \
+    --task-name $JOB_NAME \
+    --description 'Run ACE2-ERA5 evaluator' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
@@ -37,6 +38,6 @@ cd $REPO_ROOT && gantry run \
     --shared-memory 20GiB \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     -- python -I -m fme.ace.evaluator $CONFIG_PATH
