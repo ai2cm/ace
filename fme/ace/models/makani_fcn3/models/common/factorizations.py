@@ -18,7 +18,7 @@ from functools import partial
 
 import torch
 
-from fme.ace.models.makani_fcn2.models.common.contractions import (
+from fme.ace.models.makani_fcn3.models.common.contractions import (
     _contract_lmwise,
     _contract_lmwise_real,
     _contract_lwise,
