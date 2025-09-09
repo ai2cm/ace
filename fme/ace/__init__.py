@@ -76,7 +76,6 @@ from .train.train_config import (
     CopyWeightsConfig,
     DataLoaderConfig,
     EMAConfig,
-    ExistingStepperConfig,
     InlineInferenceConfig,
     LoggingConfig,
     OptimizationConfig,
