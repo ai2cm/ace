@@ -84,6 +84,7 @@ def initialize_zarr(
     vars: list[str],
     dim_sizes: tuple,
     chunks: Mapping[str, int],
+    shards: Mapping[str, int] | None,
     coords: dict[str, np.ndarray],
     dim_names: tuple,
     dtype="f4",
@@ -95,11 +96,21 @@ def initialize_zarr(
     chunks_tuple = tuple(
         [chunks.get(dim, dim_sizes[d]) for d, dim in enumerate(dim_names)]
     )
+    if shards is not None:
+        shards_tuple = tuple(
+            [shards.get(dim, dim_sizes[d]) for d, dim in enumerate(dim_names)]
+        )
+        for c, s in zip(chunks_tuple, shards_tuple):
+            if s % c != 0:
+                raise ValueError(f"Chunk shape {c} is not divisible by shard shape {s}")
+    else:
+        shards_tuple = None
     for var in vars:
         root.create_array(
             name=var,
             shape=dim_sizes,
             chunks=chunks_tuple,
+            shards=shards_tuple,
             dtype=dtype,
             dimension_names=dim_names,
         )
@@ -142,6 +153,7 @@ class ZarrWriter:
         coords: dict[str, np.ndarray],
         data_vars: list[str],
         chunks: dict[str, int] | None = None,
+        shards: dict[str, int] | None = None,
         allow_existing: bool = False,
         overwrite_check: bool = True,
     ):
@@ -157,6 +169,7 @@ class ZarrWriter:
         data_vars: Variables to write
         chunks: Optional mapping of dimension name to chunk size. If a dimension is not
             in this mapping, the chunk size will be the same as the dimension size.
+        shards: Optional mapping to store multiple chunks in a single storage object.
         allow_existing: If true, allow writing to a preexisting store.
         overwrite_check: If true, check when recording each batch that the slice of the
             existing store does not already contain data.
@@ -166,6 +179,7 @@ class ZarrWriter:
         self.coords = coords
         self.data_vars = data_vars
         self.chunks = chunks or {}
+        self.shards = shards or None
         self.dist = Distributed.get_instance()
         self.overwrite_check = overwrite_check
         if allow_existing:
@@ -255,6 +269,7 @@ class ZarrWriter:
                 vars=self.data_vars,
                 dim_sizes=dim_sizes,
                 chunks=self.chunks,
+                shards=self.shards,
                 coords=self.coords,
                 dim_names=self.dims,
                 dtype=data_dtype,
