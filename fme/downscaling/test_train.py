@@ -91,17 +91,17 @@ def create_test_data_on_disk(
     unlimited_dims = ["time"] if "time" in ds.dims else None
 
     ds.to_netcdf(filename, unlimited_dims=unlimited_dims, format="NETCDF4_CLASSIC")
-
     return filename
 
 
-def data_paths_helper(tmp_path) -> FineResCoarseResPair[str]:
+def data_paths_helper(tmp_path, rename: dict = {}) -> FineResCoarseResPair[str]:
     dim_sizes = FineResCoarseResPair[dict[str, int]](
         fine={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
         coarse={"time": NUM_TIMESTEPS, "lat": 8, "lon": 8},
     )
 
     variable_names = ["x", "y", "HGTsfc"]
+    variable_names = [rename.get(v, v) for v in variable_names]
     fine_path = tmp_path / "fine"
     coarse_path = tmp_path / "coarse"
     fine_path.mkdir()
