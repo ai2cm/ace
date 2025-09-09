@@ -12,6 +12,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 
 TIMESTEP = datetime.timedelta(hours=6)
+LOG_ZONAL_MEAN_IMAGES = 100
 
 
 def get_ds_info(nx: int, ny: int) -> DatasetInfo:
@@ -42,7 +43,7 @@ def test_logs_labels_exist():
         initial_time=initial_time,
         record_step_20=True,
         log_video=True,
-        log_zonal_mean_images=True,
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         normalize=lambda x: dict(x),
         save_diagnostics=False,
     )
@@ -117,6 +118,7 @@ def test_inference_logs_labels_exist():
         dataset_info=ds_info,
         n_timesteps=n_time,
         initial_time=initial_time,
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         record_step_20=True,
         log_video=True,
         normalize=lambda x: dict(x),
@@ -167,6 +169,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         n_timesteps=window_len * n_windows,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
@@ -207,7 +210,7 @@ def test_flush_diagnostics(tmpdir):
         normalize=lambda x: dict(x),
         output_dir=tmpdir,
         record_step_20=True,
-        log_zonal_mean_images=True,
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         log_video=True,
         log_histograms=True,
     )
@@ -246,6 +249,7 @@ def test_agg_raises_without_output_dir():
             n_timesteps=1,
             initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
             normalize=lambda x: dict(x),
+            log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
             save_diagnostics=True,
             output_dir=None,
         )
