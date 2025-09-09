@@ -1,6 +1,6 @@
 import torch
 
-from fme.ace.models.makani_fcn2.models.networks.fourcastnet2 import (
+from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (
     AtmoSphericNeuralOperatorNet,
 )
 

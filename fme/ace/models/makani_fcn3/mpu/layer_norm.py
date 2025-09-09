@@ -21,11 +21,11 @@ import torch.nn as nn
 from torch import amp
 
 # for spatial model-parallelism
-from fme.ace.models.makani_fcn2.utils import comm
-from fme.ace.models.makani_fcn2.utils.distributed import dist
+from fme.ace.models.makani_fcn3.utils import comm
+from fme.ace.models.makani_fcn3.utils.distributed import dist
 
 # quadrature stuff
-from fme.ace.models.makani_fcn2.utils.grids import (
+from fme.ace.models.makani_fcn3.utils.grids import (
     GridQuadrature,
     grid_to_quadrature_rule,
 )

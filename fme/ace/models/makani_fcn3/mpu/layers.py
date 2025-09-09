@@ -30,8 +30,8 @@ from torch_harmonics.distributed import (
     distributed_transpose_polar as distributed_transpose_h,
 )
 
-from fme.ace.models.makani_fcn2.utils import comm
-from fme.ace.models.makani_fcn2.utils.distributed import dist as makani_dist
+from fme.ace.models.makani_fcn3.utils import comm
+from fme.ace.models.makani_fcn3.utils.distributed import dist as makani_dist
 
 
 class DistributedRealFFT2(nn.Module):
