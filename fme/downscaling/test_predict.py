@@ -81,7 +81,8 @@ def create_predictor_config(
         "checkpoint_path": f"{str(experiment_dir)}/checkpoints/latest.ckpt"
     }
     config["n_samples"] = n_samples
-    config["model"]["rename"] = model_renaming
+    config["events"][0]["name"] = "test_event"
+    config["events"][0]["save_generated_samples"] = True
 
     out_path = tmp_path / "predictor-config.yaml"
     with open(out_path, "w") as file:
@@ -118,6 +119,7 @@ def test_predictor_runs(
     assert os.path.exists(
         f"{predictor_config['experiment_dir']}/generated_maps_and_metrics.nc"
     )
+    assert os.path.exists(f"{predictor_config['experiment_dir']}/test_event.nc")
 
 
 def test_predictor_renaming(
@@ -131,7 +133,7 @@ def test_predictor_renaming(
         tmp_path,
         n_samples,
         model_renaming=renaming,
-        data_paths_helper_kwargs={"rename": {"x": "var0_renamed", "y": "var1_renamed"}},
+        data_paths_helper_kwargs={"rename": {"x": "var0", "y": "var1"}},
     )
     model_config = get_model_config(coarse_shape, downscale_factor)
     model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)
