@@ -23,7 +23,7 @@ EXISTING_ERA5_FORCING_VARIABLES = [
     "DSWRFtoa",
 ]
 START_TIME = "1978-10-01T00:00:00"
-END_TIME = "2024-12-01T00:00:00"
+END_TIME = "2024-12-31T18:00:00"
 
 
 def open_aimip_forcing_data(
@@ -128,11 +128,11 @@ def get_time_coordinate(
 
 
 def get_repeated_insolation(
-    era5_forcing_DSWRFtoa: xr.DataArray = None,
-    start_repeat="2023-01-01T00:00:00",
-    end_repeat="2024-12-01T00:00:00",
-    source_start="2021-01-01T00:00:00",
-    source_end="2022-12-02T00:00:00",
+    era5_forcing_DSWRFtoa: xr.DataArray,
+    start_repeat: str,
+    end_repeat: str,
+    source_start: str,
+    source_end: str,
 ):
     """
     Get repeated insolation data for the period beyond the end of the existing ERA5 data
@@ -236,8 +236,8 @@ def main(
         existing_era5_forcing.DSWRFtoa,
         start_repeat="2023-01-01T00:00:00",
         end_repeat=end_time,
-        source_start="2021-01-01T00:00:00",
-        source_end="2022-12-02T00:00:00",
+        source_start="2020-12-31T00:00:00",
+        source_end="2022-12-31T18:00:00",
     )
 
     era5_forcing_DSWRFtoa = xr.concat(
