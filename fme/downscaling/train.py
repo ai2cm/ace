@@ -152,7 +152,7 @@ class Trainer:
 
         self._best_valid_loss_metric = "generation/metrics/crps"
         self._best_kl_divergence_metric = (
-            "generation/histogram/kl_divergence_above_percentile/99.99"
+            "generation/histogram/kl_divergence_above_percentile/99.99/"
         )
 
     def _get_batch_generator(
