@@ -89,6 +89,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
 
     Attributes:
         spectral_transform: Type of spherical transform to use.
+            Kept for backwards compatibility.
         filter_type: Type of filter to use.
         operator_type: Type of operator to use.
         residual_filter_factor: Factor by which to downsample the residual.
@@ -123,7 +124,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             https://arxiv.org/abs/2209.13603 for more details.
     """
 
-    spectral_transform: str = "sht"
+    spectral_transform: Literal["sht"] = "sht"
     filter_type: str = "non-linear"
     operator_type: str = "diagonal"
     residual_filter_factor: int = 1
