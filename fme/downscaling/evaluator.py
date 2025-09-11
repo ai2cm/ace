@@ -29,11 +29,7 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.patching import (
-    MultipatchConfig,
-    PatchPredictor,
-    paired_patch_generator_from_loader,
-)
+from fme.downscaling.patching import MultipatchConfig, PatchPredictor
 from fme.downscaling.predict import EventConfig
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
@@ -107,11 +103,8 @@ class Evaluator:
         )
 
         if self.patch_data:
-            batch_generator = paired_patch_generator_from_loader(
-                loader=self.data.loader,
-                coarse_yx_extent=self.data.coarse_shape,
-                coarse_yx_patch_extents=self.model.coarse_shape,
-                downscale_factor=self.model.downscale_factor,
+            batch_generator = self.data.get_patched_batch_generator(
+                coarse_yx_patch_extent=self.model.coarse_shape,
             )
         else:
             batch_generator = self.data.loader
@@ -263,6 +256,8 @@ class EvaluatorConfig:
             evaluator_model = model
 
         if self.patch.divide_generation and not self.patch.composite_prediction:
+            # Subdivide evaluation into patches, do not composite them together
+            # No maps will be saved for this configuration.
             patch_data = True
         else:
             patch_data = False

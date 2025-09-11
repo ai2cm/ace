@@ -7,15 +7,14 @@ from fme.core.device import get_device
 from fme.core.packer import Packer
 from fme.downscaling.aggregators.shape_helpers import upsample_tensor
 from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatchData
+from fme.downscaling.data.datasets import patched_batch_gen_from_paired_loader
 from fme.downscaling.models import ModelOutputs
 from fme.downscaling.patching import (
     PatchPredictor,
     _divide_into_slices,
     _get_patch_slices,
-    _paired_shuffle,
     composite_patch_predictions,
     get_patches,
-    paired_patch_generator_from_loader,
 )
 
 
@@ -250,16 +249,16 @@ def test_paired_patches_with_random_offset_consistent(overlap):
 
     y_offsets = []
     x_offsets = []
-
-    for paired_batch in paired_patch_generator_from_loader(
-        loader,
+    batch_generator = patched_batch_gen_from_paired_loader(
+        loader=loader,
         coarse_yx_extent=coarse_shape,
-        coarse_yx_patch_extents=(10, 10),
+        coarse_yx_patch_extent=(10, 10),
         downscale_factor=downscale_factor,
         coarse_overlap=overlap,
         drop_partial_patches=True,
         random_offset=True,
-    ):
+    )
+    for paired_batch in batch_generator:
         assert paired_batch.coarse.data["x"].shape == (batch_size, 10, 10)
         assert paired_batch.fine.data["x"].shape == (batch_size, 20, 20)
 
@@ -292,14 +291,6 @@ def test_paired_patches_with_random_offset_consistent(overlap):
     assert len(np.unique(x_offsets)) > 1
 
 
-def test__paired_shuffle():
-    a = np.arange(5)
-    b = a * 10
-    a_shuffled, b_shuffled = _paired_shuffle(list(a), list(b))
-    for ai, bi in zip(a_shuffled, b_shuffled):
-        assert ai * 10 == bi
-
-
 @pytest.mark.parametrize("shuffle", [True, False])
 def test_paired_patches_shuffle(shuffle):
     coarse_shape = (8, 8)
@@ -308,20 +299,20 @@ def test_paired_patches_shuffle(shuffle):
     loader = _mock_data_loader(
         10, *coarse_shape, downscale_factor=downscale_factor, batch_size=batch_size
     )
-    generator0 = paired_patch_generator_from_loader(
-        loader,
+    generator0 = patched_batch_gen_from_paired_loader(
+        loader=loader,
         coarse_yx_extent=coarse_shape,
-        coarse_yx_patch_extents=(2, 2),
+        coarse_yx_patch_extent=(2, 2),
         downscale_factor=downscale_factor,
         coarse_overlap=0,
         drop_partial_patches=True,
         random_offset=False,
         shuffle=shuffle,
     )
-    generator1 = paired_patch_generator_from_loader(
-        loader,
+    generator1 = patched_batch_gen_from_paired_loader(
+        loader=loader,
         coarse_yx_extent=coarse_shape,
-        coarse_yx_patch_extents=(2, 2),
+        coarse_yx_patch_extent=(2, 2),
         downscale_factor=downscale_factor,
         coarse_overlap=0,
         drop_partial_patches=True,

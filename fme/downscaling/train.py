@@ -33,7 +33,6 @@ from fme.downscaling.models import (
     DownscalingModelConfig,
     Model,
 )
-from fme.downscaling.patching import paired_patch_generator_from_loader
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -147,11 +146,10 @@ class Trainer:
         self, data: PairedGriddedData, random_offset: bool, shuffle: bool
     ):
         if self.patch_data:
-            batch_generator = paired_patch_generator_from_loader(
-                loader=data.loader,
-                coarse_yx_extent=data.coarse_shape,
-                coarse_yx_patch_extents=self.model.coarse_shape,
-                downscale_factor=self.model.downscale_factor,
+            batch_generator = data.get_patched_batch_generator(
+                coarse_yx_patch_extent=self.model.coarse_shape,
+                overlap=0,
+                drop_partial_patches=True,
                 random_offset=random_offset,
                 shuffle=shuffle,
             )

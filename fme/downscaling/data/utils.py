@@ -1,4 +1,5 @@
 import dataclasses
+import random
 from collections.abc import Sequence
 
 import torch
@@ -86,3 +87,22 @@ def adjust_fine_coord_range(
     fine_max = full_fine_coord[full_fine_coord > coarse_max][n_half_fine - 1]
 
     return ClosedInterval(start=fine_min, stop=fine_max)
+
+
+def paired_shuffle(a: list, b: list) -> tuple[list, list]:
+    if len(a) != len(b):
+        raise ValueError("Lists in paired shuffle must have the same length.")
+    indices = list(range(len(a)))
+    random.shuffle(indices)
+    return [a[i] for i in indices], [b[i] for i in indices]
+
+
+def get_offset(random_offset: bool, full_size: int, patch_size: int) -> int:
+    if random_offset:
+        max_offset = min(patch_size - 1, full_size - patch_size)
+        return random.randint(0, max_offset)
+    return 0
+
+
+def scale_tuple(extent: tuple[int, int], scale_factor: int) -> tuple[int, int]:
+    return (extent[0] * scale_factor, extent[1] * scale_factor)
