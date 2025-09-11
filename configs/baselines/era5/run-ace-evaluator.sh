@@ -35,7 +35,7 @@ cd $REPO_ROOT && gantry run \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
     --gpus 1 \
-    --shared-memory 20GiB \
+    --shared-memory 50GiB \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
     --system-python \
