@@ -125,7 +125,6 @@ def _sum_abs_diff_log_density_above_percentile(
     epsilon = 1e-12
     pred_density_masked = np.log(pred_density[tail_mask] + epsilon)
     target_density_masked = np.log(target_density[tail_mask] + epsilon)
-    assert 1 == 0
     return np.sum(np.abs(pred_density_masked - target_density_masked))
 
 
