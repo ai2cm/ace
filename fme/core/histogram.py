@@ -107,27 +107,6 @@ def _rebin_counts(bin_edges, counts, new_edges):
     return new_counts
 
 
-def _sum_abs_diff_log_density_above_percentile(
-    percentile: float,
-    predict_counts: np.ndarray,
-    target_counts: np.ndarray,
-    predict_bin_edges: np.ndarray,
-    target_bin_edges: np.ndarray,
-) -> float:
-    # rebin prediction to target bins
-    predict_counts_rebinned = _rebin_counts(
-        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
-    )
-    target_percentile_value = np.percentile(target_counts, percentile)
-    tail_mask = target_counts > target_percentile_value
-    pred_density = predict_counts_rebinned / np.sum(predict_counts_rebinned)
-    target_density = target_counts / np.sum(target_counts)
-    epsilon = 1e-12
-    pred_density_masked = np.log(pred_density[tail_mask] + epsilon)
-    target_density_masked = np.log(target_density[tail_mask] + epsilon)
-    return np.sum(np.abs(pred_density_masked - target_density_masked))
-
-
 def _kl_divergence_above_percentile(
     percentile: float,
     predict_counts: np.ndarray,
@@ -508,18 +487,6 @@ class ComparedDynamicHistograms:
                             return_dict[f"prediction/{p}th-percentile/{field_name}"]
                             / return_dict[f"target/{p}th-percentile/{field_name}"]
                         )
-                        abs_diff_log_hist_above_percentile = (
-                            _sum_abs_diff_log_density_above_percentile(
-                                percentile=p,
-                                predict_counts=prediction.counts,
-                                target_counts=target.counts,
-                                predict_bin_edges=prediction.bin_edges,
-                                target_bin_edges=target.bin_edges,
-                            )
-                        )
-                        return_dict[
-                            f"abs_diff_log_density_above_percentile/{p}/{field_name}"
-                        ] = abs_diff_log_hist_above_percentile
                         kl_div_above_percentile = _kl_divergence_above_percentile(
                             percentile=p,
                             predict_counts=prediction.counts,
