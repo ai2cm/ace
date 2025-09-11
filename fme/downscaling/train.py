@@ -243,6 +243,7 @@ class Trainer:
             generation_aggregator = GenerationAggregator(
                 self.dims,
                 self.model.downscale_factor,
+                percentiles=[99.99, 99.9999],
                 include_positional_comparisons=include_positional_comparisons,
             )
             batch: PairedBatchData
