@@ -69,6 +69,95 @@ def histogram(
     return return_counts
 
 
+def _rebin_counts(bin_edges, counts, new_edges):
+    """
+    Rebin histogram counts into new_edges.
+    Preserves total counts (mass).
+
+    Parameters
+    ----------
+    bin_edges : array of shape (n+1,)
+        Original bin edges
+    counts : array of shape (n,)
+        Counts in each bin
+    new_edges : array of shape (m+1,)
+        Desired bin edges
+
+    Returns:
+    -------
+    new_counts : array of shape (m,)
+        Rebinned counts
+    """
+    new_counts = np.zeros(len(new_edges) - 1, dtype=float)
+
+    i, j = 0, 0
+    while i < len(counts) and j < len(new_counts):
+        left = max(bin_edges[i], new_edges[j])
+        right = min(bin_edges[i + 1], new_edges[j + 1])
+
+        if right > left:
+            frac = (right - left) / (bin_edges[i + 1] - bin_edges[i])
+            new_counts[j] += counts[i] * frac
+
+        if bin_edges[i + 1] <= new_edges[j + 1]:
+            i += 1
+        else:
+            j += 1
+
+    return new_counts
+
+
+def _sum_abs_diff_log_density_above_percentile(
+    percentile: float,
+    predict_counts: np.ndarray,
+    target_counts: np.ndarray,
+    predict_bin_edges: np.ndarray,
+    target_bin_edges: np.ndarray,
+) -> float:
+    # rebin prediction to target bins
+    predict_counts_rebinned = _rebin_counts(
+        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
+    )
+    target_percentile_value = np.percentile(target_counts, percentile)
+    tail_mask = target_counts > target_percentile_value
+    pred_density = predict_counts_rebinned / np.sum(predict_counts_rebinned)
+    target_density = target_counts / np.sum(target_counts)
+    epsilon = 1e-12
+    pred_density_masked = np.log(pred_density[tail_mask] + epsilon)
+    target_density_masked = np.log(target_density[tail_mask] + epsilon)
+    assert 1 == 0
+    return np.sum(np.abs(pred_density_masked - target_density_masked))
+
+
+def _kl_divergence_above_percentile(
+    predict_counts: np.ndarray,
+    target_counts: np.ndarray,
+    predict_bin_edges: np.ndarray,
+    target_bin_edges: np.ndarray,
+    percentile: float,
+    eps: float = 1e-12,
+):
+    """
+    Compute unnormalized KL divergence from target to predicted densities,
+    using only bins above percentile p for comparison.
+    """
+    pred_counts_rebinned = _rebin_counts(
+        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
+    )
+
+    pred_density = pred_counts_rebinned / np.sum(pred_counts_rebinned)
+    target_density = target_counts / np.sum(target_counts)
+
+    threshold = np.percentile(target_density, percentile)
+    mask = target_density > threshold
+
+    # Only consider masked bins for KL sum
+    target_masked = target_density[mask] + eps
+    pred_masked = pred_density[mask] + eps
+    kl = np.sum(target_masked * np.log(target_masked / pred_masked))
+    return kl
+
+
 class DynamicHistogram:
     """
     A histogram that dynamically bins values into a fixed number of bins
@@ -420,7 +509,28 @@ class ComparedDynamicHistograms:
                             return_dict[f"prediction/{p}th-percentile/{field_name}"]
                             / return_dict[f"target/{p}th-percentile/{field_name}"]
                         )
-
+                        abs_diff_log_hist_above_percentile = (
+                            _sum_abs_diff_log_density_above_percentile(
+                                percentile=p,
+                                predict_counts=prediction.counts,
+                                target_counts=target.counts,
+                                predict_bin_edges=prediction.bin_edges,
+                                target_bin_edges=target.bin_edges,
+                            )
+                        )
+                        return_dict[
+                            f"abs_diff_log_density_above_percentile/{p}/{field_name}"
+                        ] = abs_diff_log_hist_above_percentile
+                        kl_div_above_percentile = _kl_divergence_above_percentile(
+                            percentile=p,
+                            predict_counts=prediction.counts,
+                            target_counts=target.counts,
+                            predict_bin_edges=prediction.bin_edges,
+                            target_bin_edges=target.bin_edges,
+                        )
+                        return_dict[
+                            f"kl_divergence_above_percentile/{p}/{field_name}"
+                        ] = kl_div_above_percentile
         return return_dict
 
     def get_dataset(self) -> xr.Dataset:
