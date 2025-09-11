@@ -24,11 +24,7 @@ from fme.downscaling.data import (
     GriddedData,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, Model
-from fme.downscaling.patching import (
-    MultipatchConfig,
-    PatchPredictor,
-    patch_generator_from_loader,
-)
+from fme.downscaling.patching import MultipatchConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -218,10 +214,8 @@ class Downscaler:
     @property
     def batch_generator(self):
         if self.patch.needs_patch_data_generator:
-            return patch_generator_from_loader(
-                self.data.loader,
-                yx_extent=self.data.shape,
-                yx_patch_extents=self.model.coarse_shape,
+            return self.data.get_patched_batch_generator(
+                yx_patch_extent=self.model.coarse_shape,
                 overlap=self.patch.coarse_horizontal_overlap,
                 drop_partial_patches=False,
             )

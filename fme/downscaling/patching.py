@@ -1,14 +1,12 @@
 import dataclasses
-import random
 from collections.abc import Generator
 from itertools import product
 
 import torch
-from torch.utils.data import DataLoader
 
 from fme.core.device import get_device
 from fme.core.typing_ import TensorDict
-from fme.downscaling.data import BatchData, BatchItem, PairedBatchData, PairedBatchItem
+from fme.downscaling.data import BatchData, PairedBatchData
 from fme.downscaling.models import DiffusionModel, Model, ModelOutputs
 
 
@@ -173,117 +171,6 @@ def paired_patch_generator_from_batch(
         yield PairedBatchData(
             fine=fine_patch,
             coarse=coarse_patch,
-        )
-
-
-def _random_offset(full_size, patch_size):
-    max_offset = min(patch_size - 1, full_size - patch_size)
-    return random.randint(0, max_offset)
-
-
-def _paired_shuffle(a: list, b: list) -> tuple[list, list]:
-    if len(a) != len(b):
-        raise ValueError("Lists in paired shuffle must have the same length.")
-    indices = list(range(len(a)))
-    random.shuffle(indices)
-    return [a[i] for i in indices], [b[i] for i in indices]
-
-
-def patch_generator_from_loader(
-    loader: DataLoader[BatchItem],
-    yx_extent: tuple[int, int],
-    yx_patch_extents: tuple[int, int],
-    overlap: int = 0,
-    drop_partial_patches: bool = True,
-    random_offset: bool = False,
-) -> Generator[BatchData, None, None]:
-    for batch in loader:
-        # get_patches is called at each iteration so that each batch has a different
-        # random offset if this option is enabled.
-        y_random_offset = (
-            _random_offset(full_size=yx_extent[0], patch_size=yx_patch_extents[0])
-            if random_offset
-            else 0
-        )
-        x_random_offset = (
-            _random_offset(full_size=yx_extent[1], patch_size=yx_patch_extents[1])
-            if random_offset
-            else 0
-        )
-        patches = get_patches(
-            yx_extents=yx_extent,
-            yx_patch_extents=yx_patch_extents,
-            overlap=overlap,
-            drop_partial_patches=drop_partial_patches,
-            y_offset=y_random_offset,
-            x_offset=x_random_offset,
-        )
-        yield from generate_patched_data(
-            batch,
-            patches=patches,
-        )
-
-
-def paired_patch_generator_from_loader(
-    loader: DataLoader[PairedBatchItem],
-    coarse_yx_extent: tuple[int, int],
-    coarse_yx_patch_extents: tuple[int, int],
-    downscale_factor: int,
-    coarse_overlap: int = 0,
-    drop_partial_patches: bool = True,
-    random_offset: bool = False,
-    shuffle: bool = False,
-) -> Generator[PairedBatchData, None, None]:
-    fine_yx_extent = (
-        coarse_yx_extent[0] * downscale_factor,
-        coarse_yx_extent[1] * downscale_factor,
-    )
-    fine_yx_patch_extents = (
-        coarse_yx_patch_extents[0] * downscale_factor,
-        coarse_yx_patch_extents[1] * downscale_factor,
-    )
-    for batch in loader:
-        # get_patches and shuffle (if applicable) are called at each iteration
-        # so that each batch has a different random offset if this option is enabled.
-
-        coarse_y_random_offset = (
-            _random_offset(
-                full_size=coarse_yx_extent[0], patch_size=coarse_yx_patch_extents[0]
-            )
-            if random_offset
-            else 0
-        )
-        coarse_x_random_offset = (
-            _random_offset(
-                full_size=coarse_yx_extent[1], patch_size=coarse_yx_patch_extents[1]
-            )
-            if random_offset
-            else 0
-        )
-
-        coarse_patches = get_patches(
-            yx_extents=coarse_yx_extent,
-            yx_patch_extents=coarse_yx_patch_extents,
-            overlap=coarse_overlap,
-            drop_partial_patches=drop_partial_patches,
-            y_offset=coarse_y_random_offset,
-            x_offset=coarse_x_random_offset,
-        )
-        fine_patches = get_patches(
-            yx_extents=fine_yx_extent,
-            yx_patch_extents=fine_yx_patch_extents,
-            overlap=coarse_overlap * downscale_factor,
-            drop_partial_patches=drop_partial_patches,
-            y_offset=coarse_y_random_offset * downscale_factor,
-            x_offset=coarse_x_random_offset * downscale_factor,
-        )
-        if shuffle:
-            coarse_patches, fine_patches = _paired_shuffle(coarse_patches, fine_patches)
-
-        yield from paired_patch_generator_from_batch(
-            batch,
-            coarse_patches=coarse_patches,
-            fine_patches=fine_patches,
         )
 
 
