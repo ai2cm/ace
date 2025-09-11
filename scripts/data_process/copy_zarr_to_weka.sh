@@ -66,7 +66,7 @@ cd $REPO_ROOT && gantry run \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
-    --cluster ai2/phobos-cirrascale \
+    --cluster ai2/phobos \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --gpus 0 \
     --shared-memory 40GiB \
