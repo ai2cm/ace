@@ -15,22 +15,33 @@ SAFETY_PERIOD = datetime.timedelta(days=90)
 TODAY = datetime.datetime.now(datetime.timezone.utc)
 
 
-def handle_experiment(client: beaker.Beaker, wl, dry_run: bool = False):
-    """Delete result datasets all jobs except the last for a given experiment."""
-    print(f"Processing experiment: {client.workload.url(wl)}")
-    # we assume one task for experiment, which is case for all ACE workloads
-    task = wl.experiment.tasks[0]
-    jobs = list(
+def get_results(client: beaker.Beaker, job: beaker.types.BeakerJob) -> set[str]:
+    for item in job.assignment_details.assigned_environment_variables:
+        if item.name == "BEAKER_RESULT_DATASET_ID":
+            return {item.literal}
+    try:
+        return {client.job.get_results(job).id}
+    except beaker.exceptions.BeakerDatasetNotFound:
+        return set()
+
+
+def get_jobs(
+    client: beaker.Beaker, wl: beaker.types.BeakerWorkload
+) -> list[beaker.types.BeakerJob]:
+    return list(
         client.job.list(
-            task=task,
+            task=wl.experiment.tasks[0],
             sort_field="created",
             sort_order=beaker.types.BeakerSortOrder.descending,
         )
     )
-    if len(jobs) <= 1:
-        # experiment was never preempted, so nothing to do
-        print("This experiment has a single job, so nothing to delete.")
-        return
+
+
+def handle_experiment(client: beaker.Beaker, wl, dry_run: bool = False):
+    """Delete result datasets all jobs except the last for a given experiment."""
+    print(f"Processing experiment: {client.workload.url(wl)}")
+    # we assume one task for experiment, which is case for all ACE workloads
+    jobs = get_jobs(client, wl)
 
     # we want to save the last results dataset that has at least 1 file
     # and delete all results datasets from prior jobs.
@@ -38,21 +49,17 @@ def handle_experiment(client: beaker.Beaker, wl, dry_run: bool = False):
     # is an edge case where a job may fail to start and so have an empty
     # results dataset, and it's possible this might happen for the last job.
     delete_all_earlier_datasets = False
-    datasets_to_delete = []
+    datasets_to_delete: set[str] = set()
 
     # assuming the jobs are sorted starting from most recent
     for job in jobs:
-        ds = client.job.get_results(job)
         if not delete_all_earlier_datasets:
-            file_generator = client.dataset.list_files(ds)
-            ds_has_at_least_one_file = False
-            for _ in file_generator:
-                ds_has_at_least_one_file = True
-                break
-            if ds_has_at_least_one_file:
-                delete_all_earlier_datasets = True
+            if hasattr(job.status, "started"):
+                delete_all_earlier_datasets = job.status.started.ToSeconds() > 0
+            else:
+                delete_all_earlier_datasets = False
         else:
-            datasets_to_delete.append(ds)
+            datasets_to_delete.update(get_results(client, job))
 
     if dry_run:
         print(f"  [DRY RUN] Would be deleting {len(datasets_to_delete)} datasets...")
