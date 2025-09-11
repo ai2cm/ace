@@ -129,9 +129,13 @@ class Trainer:
             ):
                 os.makedirs(self.config.checkpoint_dir)
 
-        self.best_valid_loss = float("inf")
         self.epoch_checkpoint_path: str | None = None
+
+        self.best_valid_loss = float("inf")
         self.best_checkpoint_path: str | None = None
+        self.best_tail_kl_divergence = float("inf")
+        self.best_tail_kl_divergence_checkpoint_path: str | None = None
+
         if self.config.checkpoint_dir is not None:
             self.epoch_checkpoint_path = os.path.join(
                 self.config.checkpoint_dir, "latest.ckpt"
@@ -142,6 +146,14 @@ class Trainer:
             self.ema_checkpoint_path = os.path.join(
                 self.config.checkpoint_dir, "ema_ckpt.tar"
             )
+            self.best_tail_kl_divergence_checkpoint_path = os.path.join(
+                self.config.checkpoint_dir, "best_tail_kl_div.ckpt"
+            )
+
+        self._best_valid_loss_metric = "generation/metrics/crps"
+        self._best_kl_divergence_metric = (
+            "generation/histogram/kl_divergence_above_percentile/99.99"
+        )
 
     def _get_batch_generator(
         self, data: PairedGriddedData, random_offset: bool, shuffle: bool
@@ -225,7 +237,7 @@ class Trainer:
         else:
             yield
 
-    def valid_one_epoch(self) -> float:
+    def valid_one_epoch(self) -> dict[str, float]:
         self.model.module.eval()
         if (
             self.patch_data
@@ -276,9 +288,14 @@ class Trainer:
             {**generation_metrics, **validation_metrics},
             self.num_batches_seen,
         )
-        channel_mean_crps = _get_crps(generation_metrics)
-
-        return channel_mean_crps
+        channel_mean_checkpoint_metrics = {
+            prefix: _get_channel_mean_scalar_metric(generation_metrics, prefix)
+            for prefix in [
+                self._best_valid_loss_metric,
+                self._best_kl_divergence_metric,
+            ]
+        }
+        return channel_mean_checkpoint_metrics
 
     @property
     def resuming(self) -> bool:
@@ -286,22 +303,39 @@ class Trainer:
             return False
         return os.path.isfile(self.epoch_checkpoint_path)
 
-    def save_best_checkpoint(self, valid_loss: float) -> None:
+    def save_best_checkpoint(self, valid_metrics: dict[str, float]) -> None:
         if self.best_checkpoint_path is not None:
             logging.info(f"Saving best checkpoint")
             if self.validate_using_ema:
                 best_checkpoint_context = self._ema_context
             else:
                 best_checkpoint_context = contextlib.nullcontext  # type: ignore
-            if valid_loss < self.best_valid_loss:
+            # Best checkpoint is hard coded to use validation CRPS channel mean
+            if valid_metrics[self._best_valid_loss_metric] < self.best_valid_loss:
                 logging.info("Saving best checkpoint")
-                self.best_valid_loss = valid_loss
+                self.best_valid_loss = valid_metrics[self._best_valid_loss_metric]
                 with best_checkpoint_context():
                     _save_checkpoint(self, self.best_checkpoint_path)
             else:
                 logging.info(
                     "Validation loss did not improve, will not overwrite "
                     "best checkpoint."
+                )
+        if self.best_tail_kl_divergence_checkpoint_path is not None:
+            if (
+                valid_metrics[self._best_kl_divergence_metric]
+                < self.best_tail_kl_divergence
+            ):
+                logging.info("Saving checkpoint for lowest tail KL divergence")
+                self.best_tail_kl_divergence = valid_metrics[
+                    self._best_kl_divergence_metric
+                ]
+                with best_checkpoint_context():
+                    _save_checkpoint(self, self.best_tail_kl_divergence_checkpoint_path)
+            else:
+                logging.info(
+                    "Tail KL divergence did not improve, will not overwrite "
+                    "best KL div checkpoint."
                 )
         else:
             raise ValueError("Best checkpoint path is not set")
@@ -344,10 +378,10 @@ class Trainer:
             wandb.log({"epoch": epoch}, step=self.num_batches_seen)
             if self._validate_current_epoch(epoch):
                 logging.info("Running metrics on validation data.")
-                valid_loss = self.valid_one_epoch()
+                valid_metrics = self.valid_one_epoch()
                 valid_end = time.time()
                 if dist.is_root():
-                    self.save_best_checkpoint(valid_loss)
+                    self.save_best_checkpoint(valid_metrics)
             else:
                 valid_end = train_end
             if dist.is_root():
@@ -440,19 +474,19 @@ class TrainerConfig:
         )
 
 
-def _get_crps(metrics, prefix="generation/metrics/crps"):
-    channel_crps = [v for k, v in metrics.items() if k.startswith(prefix)]
+def _get_channel_mean_scalar_metric(metrics, prefix="generation/metrics/crps"):
+    channel_metric = [v for k, v in metrics.items() if k.startswith(prefix)]
 
-    if len(channel_crps) != 1:
+    if len(channel_metric) != 1:
         warnings.warn(
-            "CRPS metric used for checkpoint selection is computed on "
+            f"Metric {prefix} used for checkpoint selection is computed on "
             "denormalized outputs. If multiple outputs are present, "
-            "the mean CRPS will not be evenly weighted across outputs."
+            "the mean will not be evenly weighted across outputs."
         )
-    if len(channel_crps) == 0:
+    if len(channel_metric) == 0:
         return float("inf")
     else:
-        return sum(channel_crps) / len(channel_crps)
+        return sum(channel_metric) / len(channel_metric)
 
 
 def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
