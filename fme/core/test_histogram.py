@@ -9,8 +9,51 @@ from fme.core.histogram import (
     ComparedDynamicHistograms,
     DynamicHistogram,
     DynamicHistogramAggregator,
+    _kl_divergence_above_percentile,
     _normalize_histogram,
+    _rebin_counts,
 )
+
+
+def test__rebin_counts():
+    counts = np.ones(5)
+    bin_edges = np.array([0, 1, 2, 3, 4, 5])
+    new_bin_edges = np.array([0, 2, 3.5, 5])
+    new_counts = _rebin_counts(counts, bin_edges, new_bin_edges)
+    assert np.array_equal(new_counts, np.array([2.0, 1.5, 1.5]))
+
+
+@pytest.mark.parametrize(
+    "pred_counts, percentile, expected_kl_is_zero",
+    [
+        (np.array([0, 1, 2, 3]), 0, True),
+        (np.array([1, 0, 0, 3]), 0, False),
+        (np.array([2, 0, 1, 3]), 75.0, True),
+    ],
+)
+def test__kl_divergence_above_percentile(pred_counts, percentile, expected_kl_is_zero):
+    target_counts = np.array([0, 1, 2, 3])
+    bin_edges = np.array(
+        [
+            0,
+            1,
+            2,
+            3,
+            4,
+        ]
+    )
+
+    result = _kl_divergence_above_percentile(
+        percentile=percentile,
+        predict_counts=pred_counts,
+        target_counts=target_counts,
+        predict_bin_edges=bin_edges,
+        target_bin_edges=bin_edges,
+    )
+    if expected_kl_is_zero:
+        assert np.isclose(result, 0.0, atol=1e-10)
+    else:
+        assert result > 0.0
 
 
 def test__normalize_histogram():
