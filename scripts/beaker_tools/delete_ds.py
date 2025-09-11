@@ -66,8 +66,11 @@ def handle_experiment(client: beaker.Beaker, wl, dry_run: bool = False):
         for ds in datasets_to_delete:
             print(f"  [DRY RUN] Would delete dataset {client.dataset.url(ds)}")
     else:
-        print(f"  Deleting {len(datasets_to_delete)} datasets...")
-        client.dataset.delete(*datasets_to_delete)
+        if len(datasets_to_delete) > 0:
+            print(f"  Deleting {len(datasets_to_delete)} datasets...")
+            client.dataset.delete(*datasets_to_delete)
+        else:
+            print("  No datasets to delete.")
 
 
 def delete_non_last_job_datasets(
