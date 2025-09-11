@@ -129,11 +129,11 @@ def _sum_abs_diff_log_density_above_percentile(
 
 
 def _kl_divergence_above_percentile(
+    percentile: float,
     predict_counts: np.ndarray,
     target_counts: np.ndarray,
     predict_bin_edges: np.ndarray,
     target_bin_edges: np.ndarray,
-    percentile: float,
     eps: float = 1e-12,
 ):
     """
