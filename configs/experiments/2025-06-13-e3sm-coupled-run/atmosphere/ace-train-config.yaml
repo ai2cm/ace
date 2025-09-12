@@ -3,7 +3,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 50
+max_epochs: 20
 n_forward_steps: 2
 inference:
   n_forward_steps: 14600
@@ -103,7 +103,7 @@ stepper:
       specific_total_water_0: 0.5
       specific_total_water_1: 0.25
       specific_total_water_2: 0.5
-      surface_precipitation_rate: 0.5
+      surface_precipitation_rate: 2
       FLDS: 2
       surface_upward_longwave_flux: 5
       surface_upward_shortwave_flux: 2
