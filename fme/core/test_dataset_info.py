@@ -10,7 +10,6 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     NullVerticalCoordinate,
 )
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import (
     DatasetInfo,
     IncompatibleDatasetInfo,
@@ -20,6 +19,7 @@ from fme.core.dataset_info import (
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.mask_provider import MaskProvider
 from fme.core.metrics import spherical_area_weights
+from fme.core.typing_ import VariableMetadata
 
 
 @pytest.mark.parametrize(

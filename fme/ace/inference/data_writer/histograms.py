@@ -7,8 +7,8 @@ import torch
 import xarray as xr
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.histogram import DynamicHistogram
+from fme.core.typing_ import VariableMetadata
 
 
 class _HistogramAggregator:
