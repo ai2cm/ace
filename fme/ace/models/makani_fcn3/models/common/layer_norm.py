@@ -21,13 +21,13 @@ import torch.nn as nn
 from torch import amp
 
 # we need the kernels
-from fme.ace.models.makani_fcn2.mpu.layer_norm import (
+from fme.ace.models.makani_fcn3.mpu.layer_norm import (
     _normalize_kernel,
     _normalize_transform_kernel,
 )
 
 # quadrature stuff
-from fme.ace.models.makani_fcn2.utils.grids import (
+from fme.ace.models.makani_fcn3.utils.grids import (
     GridQuadrature,
     grid_to_quadrature_rule,
 )

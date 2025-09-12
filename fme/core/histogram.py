@@ -69,6 +69,52 @@ def histogram(
     return return_counts
 
 
+def _rebin_counts(counts, bin_edges, new_edges):
+    """
+    Rebin histogram counts into new_edges, preserves total counts.
+    """
+    if len(bin_edges) != len(counts) + 1:
+        raise ValueError("bin_edges must have length len(counts) + 1")
+    new_counts = np.zeros(len(new_edges) - 1, dtype=float)
+
+    i, j = 0, 0
+    while i < len(counts) and j < len(new_counts):
+        left = max(bin_edges[i], new_edges[j])
+        right = min(bin_edges[i + 1], new_edges[j + 1])
+
+        if right > left:
+            frac = (right - left) / (bin_edges[i + 1] - bin_edges[i])
+            new_counts[j] += counts[i] * frac
+
+        if bin_edges[i + 1] <= new_edges[j + 1]:
+            i += 1
+        else:
+            j += 1
+
+    return new_counts
+
+
+def _abs_norm_tail_bias(
+    percentile: float,
+    predict_counts: np.ndarray,
+    target_counts: np.ndarray,
+    predict_bin_edges: np.ndarray,
+    target_bin_edges: np.ndarray,
+):
+    pred_counts_rebinned = _rebin_counts(
+        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
+    )
+    bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
+    threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
+    tail_mask = bin_centers > threshold
+
+    pred_density = (pred_counts_rebinned / np.sum(pred_counts_rebinned))[tail_mask]
+    target_density = (target_counts / np.sum(target_counts))[tail_mask]
+    nan_mask = target_density > 0
+    ratio = (pred_density / target_density - 1)[nan_mask]
+    return np.sum(abs(ratio)) / ratio.shape[0]
+
+
 class DynamicHistogram:
     """
     A histogram that dynamically bins values into a fixed number of bins
@@ -420,6 +466,17 @@ class ComparedDynamicHistograms:
                             return_dict[f"prediction/{p}th-percentile/{field_name}"]
                             / return_dict[f"target/{p}th-percentile/{field_name}"]
                         )
+
+                        abs_norm_tail_bias = _abs_norm_tail_bias(
+                            percentile=p,
+                            predict_counts=prediction.counts,
+                            target_counts=target.counts,
+                            predict_bin_edges=prediction.bin_edges,
+                            target_bin_edges=target.bin_edges,
+                        )
+                        return_dict[
+                            f"abs_norm_tail_bias_above_percentile/{p}/{field_name}"
+                        ] = abs_norm_tail_bias
 
         return return_dict
 

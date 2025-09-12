@@ -45,11 +45,6 @@ def _downscale_coord(coord: torch.tensor, downscale_factor: int):
     """
     if len(coord.shape) != 1:
         raise ValueError("coord tensor to downscale must be 1d")
-    if not torch.allclose(
-        coord[1:] - coord[:-1],
-        coord[1] - coord[0],
-    ):
-        raise ValueError("downscale_coord only handles equiangular grids.")
     spacing = coord[1] - coord[0]
     # Compute edges from midpoints
     first_edge = coord[0] - spacing / 2
@@ -72,7 +67,7 @@ class EventConfig:
         default_factory=lambda: ClosedInterval(-90.0, 90.0)
     )
     lon_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
+        default_factory=lambda: ClosedInterval(-180.0, 360.0)
     )
     n_samples: int = 64
     date_format: str = "%Y-%m-%dT%H:%M"

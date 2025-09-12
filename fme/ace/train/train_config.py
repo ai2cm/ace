@@ -23,7 +23,7 @@ from fme.ace.requirements import (
     NullDataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.ace.stepper import ExistingStepperConfig, Stepper
+from fme.ace.stepper import Stepper
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.dataset.data_typing import VariableMetadata
@@ -207,7 +207,7 @@ class TrainConfig:
 
     train_loader: DataLoaderConfig
     validation_loader: DataLoaderConfig
-    stepper: ExistingStepperConfig | StepperConfig
+    stepper: StepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int

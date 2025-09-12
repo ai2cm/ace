@@ -28,11 +28,11 @@ logging:
 events:
   -
     name: test_event
-    n_samples: 1
+    n_samples: 2
     date:  "2000-01-01T00:00"
     lat_extent:
       start: 1
-      stop: 4
+      stop: 5
     lon_extent:
       start: 1
-      stop: 4
+      stop: 5

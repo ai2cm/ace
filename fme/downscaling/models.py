@@ -42,7 +42,7 @@ def _rename_normalizer(
     new_stds = {
         rename.get(name, name): value for name, value in normalizer.stds.items()
     }
-    return StandardNormalizer(new_means, new_stds)
+    return StandardNormalizer(means=new_means, stds=new_stds)
 
 
 @dataclasses.dataclass

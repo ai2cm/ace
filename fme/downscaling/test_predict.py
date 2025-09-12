@@ -36,11 +36,15 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
             expects_interpolated_input=False,
         ),
         loss=LossConfig("NaN"),
-        in_names=["x", "y"],
-        out_names=["x", "y"],
+        in_names=["var0", "var1"],
+        out_names=["var0", "var1"],
         normalization=PairedNormalizationConfig(
-            NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
-            NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
+            NormalizationConfig(
+                means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+            ),
+            NormalizationConfig(
+                means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+            ),
         ),
         p_mean=0,
         p_std=1,
@@ -52,11 +56,16 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
     )
 
 
-def create_predictor_config(tmp_path, n_samples: int):
+def create_predictor_config(
+    tmp_path,
+    n_samples: int,
+    model_renaming: dict | None = None,
+    data_paths_helper_kwargs: dict = {},
+):
     # create toy dataset
     path = tmp_path / "data"
     path.mkdir()
-    paths = data_paths_helper(path)
+    paths = data_paths_helper(path, **data_paths_helper_kwargs)
 
     # create config
     this_file = os.path.dirname(os.path.abspath(__file__))
@@ -87,7 +96,11 @@ def test_predictor_runs(
     n_samples = 2
     coarse_shape = (4, 4)
     downscale_factor = 2
-    predictor_config_path = create_predictor_config(tmp_path, n_samples)
+    predictor_config_path = create_predictor_config(
+        tmp_path,
+        n_samples,
+        data_paths_helper_kwargs={"rename": {"x": "var0", "y": "var1"}},
+    )
     model_config = get_model_config(coarse_shape, downscale_factor)
     model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)
     with open(predictor_config_path) as f:
@@ -107,3 +120,33 @@ def test_predictor_runs(
         f"{predictor_config['experiment_dir']}/generated_maps_and_metrics.nc"
     )
     assert os.path.exists(f"{predictor_config['experiment_dir']}/test_event.nc")
+
+
+def test_predictor_renaming(
+    tmp_path,
+):
+    n_samples = 2
+    coarse_shape = (4, 4)
+    downscale_factor = 2
+    renaming = {"var0": "var0_renamed", "var1": "var1_renamed"}
+    predictor_config_path = create_predictor_config(
+        tmp_path,
+        n_samples,
+        model_renaming=renaming,
+        data_paths_helper_kwargs={"rename": {"x": "var0", "y": "var1"}},
+    )
+    model_config = get_model_config(coarse_shape, downscale_factor)
+    model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)
+    with open(predictor_config_path) as f:
+        predictor_config = yaml.safe_load(f)
+    os.makedirs(
+        os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
+    )
+    torch.save(
+        {
+            "model": model.get_state(),
+        },
+        predictor_config["model"]["checkpoint_path"],
+    )
+    with mock_wandb():
+        predict.main(str(predictor_config_path))

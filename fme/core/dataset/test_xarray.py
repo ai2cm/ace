@@ -632,8 +632,7 @@ def test_XarrayDataset_timestep(mock_monthly_netcdfs, infer_timestep):
         expected_timestep = pd.Timedelta(MOCK_DATA_FREQ).to_pytimedelta()
         assert dataset.timestep == expected_timestep
     else:
-        with pytest.raises(ValueError, match="Timestep was not inferred"):
-            assert dataset.timestep
+        assert dataset.timestep is None
 
 
 @pytest.mark.parametrize(
