@@ -21,11 +21,11 @@ import torch.nn as nn
 import torch_harmonics.distributed as thd
 from torch import amp
 
-from fme.ace.models.makani_fcn2.models.common import ComplexReLU
-from fme.ace.models.makani_fcn2.models.common.factorizations import get_contract_fun
+from fme.ace.models.makani_fcn3.models.common import ComplexReLU
+from fme.ace.models.makani_fcn3.models.common.factorizations import get_contract_fun
 
 # import convenience functions for factorized tensors
-from fme.ace.models.makani_fcn2.utils import comm
+from fme.ace.models.makani_fcn3.utils import comm
 
 
 class SpectralConv(nn.Module):

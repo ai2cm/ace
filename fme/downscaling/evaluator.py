@@ -104,6 +104,7 @@ class Evaluator:
             self.data.dims,
             self.model.downscale_factor,
             include_positional_comparisons=False if self.patch_data else True,
+            percentiles=[99.9, 99.99],
         )
 
         if self.patch_data:
@@ -209,14 +210,11 @@ class PairedEventConfig(EventConfig):
         self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
     ) -> PairedGriddedData:
         time_slice = self._time_selection_slice
-
         event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
         event_coarse = dataclasses.replace(
             base_data_config.coarse_full_config[0], subset=time_slice
         )
-
         n_processes = Distributed.get_instance().world_size
-
         event_data_config = dataclasses.replace(
             base_data_config,
             fine=[event_fine],
