@@ -69,7 +69,7 @@ def histogram(
     return return_counts
 
 
-def _rebin_counts(bin_edges, counts, new_edges):
+def _rebin_counts(counts, bin_edges, new_edges):
     """
     Rebin histogram counts into new_edges.
     Preserves total counts (mass).
@@ -88,6 +88,8 @@ def _rebin_counts(bin_edges, counts, new_edges):
     new_counts : array of shape (m,)
         Rebinned counts
     """
+    if len(bin_edges) != len(counts) + 1:
+        raise ValueError("bin_edges must have length len(counts) + 1")
     new_counts = np.zeros(len(new_edges) - 1, dtype=float)
 
     i, j = 0, 0
@@ -121,7 +123,8 @@ def _sum_abs_diff_log_density_above_percentile(
     target_percentile_value = quantile(
         target_bin_edges, target_counts, percentile / 100.0
     )
-    tail_mask = target_counts > target_percentile_value
+    bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
+    tail_mask = bin_centers > target_percentile_value
     pred_density = predict_counts_rebinned / np.sum(predict_counts_rebinned)
     target_density = target_counts / np.sum(target_counts)
     epsilon = 1e-12
