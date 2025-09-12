@@ -13,7 +13,6 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import (
@@ -22,7 +21,7 @@ from fme.core.generics.aggregator import (
     InferenceLog,
     InferenceLogs,
 )
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping, VariableMetadata
 from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,

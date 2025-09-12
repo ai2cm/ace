@@ -5,9 +5,8 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping, VariableMetadata
 from fme.core.wandb import WandB
 
 wandb = WandB.get_instance()

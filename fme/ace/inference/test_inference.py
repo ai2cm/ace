@@ -33,7 +33,6 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -41,6 +40,7 @@ from fme.core.ocean import OceanConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import mock_wandb
+from fme.core.typing_ import VariableMetadata
 
 TIMESTEP = datetime.timedelta(hours=6)
 

@@ -13,11 +13,10 @@ from fme.ace.aggregator.one_step.snapshot import (
 )
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
 from fme.core import metrics
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicHistograms
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorMapping, VariableMetadata
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import ComparedDynamicHistogramsAdapter
 from fme.downscaling.data import PairedBatchData
