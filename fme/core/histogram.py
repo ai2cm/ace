@@ -288,7 +288,7 @@ class DynamicHistogramAggregator:
         if self.histograms is None:
             raise ValueError("No data has been added to the histogram")
         data = {}
-        for var_name, histogram in self.get_histograms().items():
+        for var_name, histogram in self.histograms.items():
             data[var_name] = xr.DataArray(
                 histogram.counts[0, :],
                 dims=("bin",),
