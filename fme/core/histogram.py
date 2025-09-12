@@ -118,7 +118,9 @@ def _sum_abs_diff_log_density_above_percentile(
     predict_counts_rebinned = _rebin_counts(
         bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
     )
-    target_percentile_value = np.percentile(target_counts, percentile)
+    target_percentile_value = quantile(
+        target_bin_edges, target_counts, percentile / 100.0
+    )
     tail_mask = target_counts > target_percentile_value
     pred_density = predict_counts_rebinned / np.sum(predict_counts_rebinned)
     target_density = target_counts / np.sum(target_counts)
@@ -147,7 +149,7 @@ def _kl_divergence_above_percentile(
     pred_density = pred_counts_rebinned / np.sum(pred_counts_rebinned)
     target_density = target_counts / np.sum(target_counts)
 
-    threshold = np.percentile(target_density, percentile)
+    threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
     mask = target_density > threshold
 
     # Only consider masked bins for KL sum
