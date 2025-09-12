@@ -71,22 +71,7 @@ def histogram(
 
 def _rebin_counts(counts, bin_edges, new_edges):
     """
-    Rebin histogram counts into new_edges.
-    Preserves total counts (mass).
-
-    Parameters
-    ----------
-    bin_edges : array of shape (n+1,)
-        Original bin edges
-    counts : array of shape (n,)
-        Counts in each bin
-    new_edges : array of shape (m+1,)
-        Desired bin edges
-
-    Returns:
-    -------
-    new_counts : array of shape (m,)
-        Rebinned counts
+    Rebin histogram counts into new_edges, preserves total counts.
     """
     if len(bin_edges) != len(counts) + 1:
         raise ValueError("bin_edges must have length len(counts) + 1")
@@ -109,30 +94,6 @@ def _rebin_counts(counts, bin_edges, new_edges):
     return new_counts
 
 
-def _sum_abs_diff_log_density_above_percentile(
-    percentile: float,
-    predict_counts: np.ndarray,
-    target_counts: np.ndarray,
-    predict_bin_edges: np.ndarray,
-    target_bin_edges: np.ndarray,
-) -> float:
-    # rebin prediction to target bins
-    predict_counts_rebinned = _rebin_counts(
-        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
-    )
-    target_percentile_value = quantile(
-        target_bin_edges, target_counts, percentile / 100.0
-    )
-    bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
-    tail_mask = bin_centers > target_percentile_value
-    pred_density = predict_counts_rebinned / np.sum(predict_counts_rebinned)
-    target_density = target_counts / np.sum(target_counts)
-    epsilon = 1e-12
-    pred_log_density_masked = np.log(pred_density[tail_mask] + epsilon)
-    target_log_density_masked = np.log(target_density[tail_mask] + epsilon)
-    return np.sum(np.abs(pred_log_density_masked - target_log_density_masked))
-
-
 def _abs_norm_tail_bias(
     percentile: float,
     predict_counts: np.ndarray,
@@ -152,35 +113,6 @@ def _abs_norm_tail_bias(
     nan_mask = target_density > 0
     ratio = (pred_density / target_density - 1)[nan_mask]
     return np.sum(abs(ratio)) / ratio.shape[0]
-
-
-def _kl_divergence_above_percentile(
-    percentile: float,
-    predict_counts: np.ndarray,
-    target_counts: np.ndarray,
-    predict_bin_edges: np.ndarray,
-    target_bin_edges: np.ndarray,
-    eps: float = 1e-12,
-):
-    """
-    Compute unnormalized KL divergence from log of target to predicted densities,
-    using only bins above percentile p for comparison.
-    """
-    pred_counts_rebinned = _rebin_counts(
-        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
-    )
-    bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
-    pred_density = pred_counts_rebinned / np.sum(pred_counts_rebinned)
-    target_density = target_counts / np.sum(target_counts)
-
-    threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
-    mask = bin_centers > threshold
-
-    # Only consider masked bins for KL sum
-    target_masked = target_density[mask] + eps
-    pred_masked = pred_density[mask] + eps
-    kl = np.sum(target_masked * np.log(target_masked / pred_masked))
-    return kl
 
 
 class DynamicHistogram:
