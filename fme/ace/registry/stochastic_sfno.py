@@ -122,6 +122,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             convolution (DISCO) blocks, which apply local filters. See
             Ocampo et al. (2022)
             https://arxiv.org/abs/2209.13603 for more details.
+        affine_norms: Whether to use element-wise affine parameters in the
+            normalization layers.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -151,6 +153,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     filter_residual: bool = False
     filter_output: bool = False
     local_blocks: list[int] | None = None
+    affine_norms: bool = False
 
     def build(
         self,
