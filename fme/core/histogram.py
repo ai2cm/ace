@@ -510,16 +510,18 @@ class ComparedDynamicHistograms:
                             return_dict[f"prediction/{p}th-percentile/{field_name}"]
                             / return_dict[f"target/{p}th-percentile/{field_name}"]
                         )
-                        kl_div_above_percentile = _kl_divergence_above_percentile(
-                            percentile=p,
-                            predict_counts=prediction.counts,
-                            target_counts=target.counts,
-                            predict_bin_edges=prediction.bin_edges,
-                            target_bin_edges=target.bin_edges,
+                        sum_abs_diff_log_density = (
+                            _sum_abs_diff_log_density_above_percentile(
+                                percentile=p,
+                                predict_counts=prediction.counts,
+                                target_counts=target.counts,
+                                predict_bin_edges=prediction.bin_edges,
+                                target_bin_edges=target.bin_edges,
+                            )
                         )
                         return_dict[
-                            f"kl_divergence_above_percentile/{p}/{field_name}"
-                        ] = kl_div_above_percentile
+                            f"sum_abs_diff_log_density_above_perc/{p}/{field_name}"
+                        ] = sum_abs_diff_log_density
         return return_dict
 
     def get_dataset(self) -> xr.Dataset:
