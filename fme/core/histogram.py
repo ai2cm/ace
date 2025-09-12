@@ -133,35 +133,6 @@ def _sum_abs_diff_log_density_above_percentile(
     return np.sum(np.abs(pred_log_density_masked - target_log_density_masked))
 
 
-def _kl_divergence_above_percentile(
-    percentile: float,
-    predict_counts: np.ndarray,
-    target_counts: np.ndarray,
-    predict_bin_edges: np.ndarray,
-    target_bin_edges: np.ndarray,
-    eps: float = 1e-12,
-):
-    """
-    Compute unnormalized KL divergence from target to predicted densities,
-    using only bins above percentile p for comparison.
-    """
-    pred_counts_rebinned = _rebin_counts(
-        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
-    )
-
-    pred_density = pred_counts_rebinned / np.sum(pred_counts_rebinned)
-    target_density = target_counts / np.sum(target_counts)
-
-    threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
-    mask = target_density > threshold
-
-    # Only consider masked bins for KL sum
-    target_masked = target_density[mask] + eps
-    pred_masked = pred_density[mask] + eps
-    kl = np.sum(target_masked * np.log(target_masked / pred_masked))
-    return kl
-
-
 class DynamicHistogram:
     """
     A histogram that dynamically bins values into a fixed number of bins
