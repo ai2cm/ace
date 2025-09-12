@@ -10,8 +10,8 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
+from fme.core.typing_ import VariableMetadata
 
 from .dataset_metadata import DatasetMetadata
 from .histograms import PairedHistogramDataWriter

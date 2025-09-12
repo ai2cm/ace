@@ -30,7 +30,6 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
@@ -60,7 +59,12 @@ from fme.core.tensors import (
 )
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingHistory, TrainingJob
-from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
+from fme.core.typing_ import (
+    EnsembleTensorDict,
+    TensorDict,
+    TensorMapping,
+    VariableMetadata,
+)
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)

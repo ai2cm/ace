@@ -1,4 +1,4 @@
-from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.typing_ import VariableMetadata
 
 ERA5_VERSION_1 = {
     "DLWRFsfc": {

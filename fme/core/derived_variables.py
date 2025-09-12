@@ -5,9 +5,8 @@ from collections.abc import Callable, MutableMapping
 import torch
 
 from fme.core.atmosphere_data import AtmosphereData, HasAtmosphereVerticalIntegral
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.ocean_derived_variables import get_ocean_derived_variable_metadata
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorDict, VariableMetadata
 
 DerivedVariableFunc = Callable[[AtmosphereData, datetime.timedelta], torch.Tensor]
 
