@@ -510,18 +510,6 @@ class ComparedDynamicHistograms:
                             return_dict[f"prediction/{p}th-percentile/{field_name}"]
                             / return_dict[f"target/{p}th-percentile/{field_name}"]
                         )
-                        abs_diff_log_hist_above_percentile = (
-                            _sum_abs_diff_log_density_above_percentile(
-                                percentile=p,
-                                predict_counts=prediction.counts,
-                                target_counts=target.counts,
-                                predict_bin_edges=prediction.bin_edges,
-                                target_bin_edges=target.bin_edges,
-                            )
-                        )
-                        return_dict[
-                            f"abs_diff_log_density_above_percentile/{p}/{field_name}"
-                        ] = abs_diff_log_hist_above_percentile
                         kl_div_above_percentile = _kl_divergence_above_percentile(
                             percentile=p,
                             predict_counts=prediction.counts,
