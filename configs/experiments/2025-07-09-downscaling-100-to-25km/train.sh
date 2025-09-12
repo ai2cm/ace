@@ -8,7 +8,7 @@ set -e
 #JOB_NAME="conus-downscaling-100km-to-3km-bs96"
 #CONFIG_FILENAME="config-adjusted-cirrascale.yaml"
 
-JOB_NAME="short-test-conus-downscaling-100km-to-25km"
+JOB_NAME="short-tropical-downscaling-100km-to-25km"
 CONFIG_FILENAME="train.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -27,10 +27,10 @@ IMAGE=01JWJ96JMF89D812JS159VF37N
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 25km training conus' \
-    --workspace ai2/downscaling \
-    --priority low \
+    --workspace ai2/climate-ceres \
+    --priority urgent \
     --preemptible \
-    --cluster ai2/titan \
+    --cluster ai2/ceres \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
