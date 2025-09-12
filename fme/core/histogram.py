@@ -125,9 +125,9 @@ def _sum_abs_diff_log_density_above_percentile(
     pred_density = predict_counts_rebinned / np.sum(predict_counts_rebinned)
     target_density = target_counts / np.sum(target_counts)
     epsilon = 1e-12
-    pred_density_masked = np.log(pred_density[tail_mask] + epsilon)
-    target_density_masked = np.log(target_density[tail_mask] + epsilon)
-    return np.sum(np.abs(pred_density_masked - target_density_masked))
+    pred_log_density_masked = np.log(pred_density[tail_mask] + epsilon)
+    target_log_density_masked = np.log(target_density[tail_mask] + epsilon)
+    return np.sum(np.abs(pred_log_density_masked - target_log_density_masked))
 
 
 def _kl_divergence_above_percentile(
