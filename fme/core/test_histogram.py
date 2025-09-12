@@ -9,6 +9,7 @@ from fme.core.histogram import (
     ComparedDynamicHistograms,
     DynamicHistogram,
     DynamicHistogramAggregator,
+    _abs_norm_tail_bias,
     _normalize_histogram,
     _rebin_counts,
     _sum_abs_diff_log_density_above_percentile,
@@ -23,6 +24,39 @@ def test__rebin_counts():
         counts=counts, bin_edges=bin_edges, new_edges=new_bin_edges
     )
     assert np.array_equal(new_counts, np.array([2.0, 1.5, 1.5]))
+
+
+@pytest.mark.parametrize(
+    "pred_counts, percentile, expect_nonzero",
+    [
+        (np.array([0, 1, 2, 3, 4]), 0, False),
+        (np.array([1, 0, 0, 3, 4]), 0, True),
+        (np.array([2, 0, 1, 3, 4]), 75.0, False),
+    ],
+)
+def test__abs_norm_tail_bias(pred_counts, percentile, expect_nonzero):
+    target_counts = np.array([0, 1, 2, 3, 4])
+    bin_edges = np.array(
+        [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+        ]
+    )
+    result = _abs_norm_tail_bias(
+        percentile=percentile,
+        predict_counts=pred_counts,
+        target_counts=target_counts,
+        predict_bin_edges=bin_edges,
+        target_bin_edges=bin_edges,
+    )
+    if expect_nonzero:
+        assert result > 0.0
+    else:
+        assert result == 0.0
 
 
 @pytest.mark.parametrize(

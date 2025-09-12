@@ -152,7 +152,7 @@ class Trainer:
 
         self._best_valid_loss_name = "generation/metrics/crps"
         self._best_histogram_tail_name = (
-            "generation/histogram/abs_diff_log_density_above_percentile/99.99/"
+            "generation/histogram/abs_norm_tail_bias_above_percentile/99.99/"
         )
 
     def _get_batch_generator(

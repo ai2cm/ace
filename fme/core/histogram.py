@@ -133,6 +133,27 @@ def _sum_abs_diff_log_density_above_percentile(
     return np.sum(np.abs(pred_log_density_masked - target_log_density_masked))
 
 
+def _abs_norm_tail_bias(
+    percentile: float,
+    predict_counts: np.ndarray,
+    target_counts: np.ndarray,
+    predict_bin_edges: np.ndarray,
+    target_bin_edges: np.ndarray,
+):
+    pred_counts_rebinned = _rebin_counts(
+        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
+    )
+    bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
+    threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
+    tail_mask = bin_centers > threshold
+
+    pred_density = (pred_counts_rebinned / np.sum(pred_counts_rebinned))[tail_mask]
+    target_density = (target_counts / np.sum(target_counts))[tail_mask]
+    nan_mask = target_density > 0
+    ratio = (pred_density / target_density - 1)[nan_mask]
+    return np.sum(abs(ratio)) / ratio.shape[0]
+
+
 def _kl_divergence_above_percentile(
     percentile: float,
     predict_counts: np.ndarray,
@@ -142,18 +163,18 @@ def _kl_divergence_above_percentile(
     eps: float = 1e-12,
 ):
     """
-    Compute unnormalized KL divergence from target to predicted densities,
+    Compute unnormalized KL divergence from log of target to predicted densities,
     using only bins above percentile p for comparison.
     """
     pred_counts_rebinned = _rebin_counts(
         bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
     )
-
+    bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
     pred_density = pred_counts_rebinned / np.sum(pred_counts_rebinned)
     target_density = target_counts / np.sum(target_counts)
 
     threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
-    mask = target_density > threshold
+    mask = bin_centers > threshold
 
     # Only consider masked bins for KL sum
     target_masked = target_density[mask] + eps
@@ -335,7 +356,7 @@ class DynamicHistogramAggregator:
         if self.histograms is None:
             raise ValueError("No data has been added to the histogram")
         data = {}
-        for var_name, histogram in self.histograms.items():
+        for var_name, histogram in self.get_histograms().items():
             data[var_name] = xr.DataArray(
                 histogram.counts[0, :],
                 dims=("bin",),
@@ -513,18 +534,18 @@ class ComparedDynamicHistograms:
                             return_dict[f"prediction/{p}th-percentile/{field_name}"]
                             / return_dict[f"target/{p}th-percentile/{field_name}"]
                         )
-                        sum_abs_diff_log_density = (
-                            _sum_abs_diff_log_density_above_percentile(
-                                percentile=p,
-                                predict_counts=prediction.counts,
-                                target_counts=target.counts,
-                                predict_bin_edges=prediction.bin_edges,
-                                target_bin_edges=target.bin_edges,
-                            )
+
+                        abs_norm_tail_bias = _abs_norm_tail_bias(
+                            percentile=p,
+                            predict_counts=prediction.counts,
+                            target_counts=target.counts,
+                            predict_bin_edges=prediction.bin_edges,
+                            target_bin_edges=target.bin_edges,
                         )
                         return_dict[
-                            f"sum_abs_diff_log_density_above_perc/{p}/{field_name}"
-                        ] = sum_abs_diff_log_density
+                            f"abs_norm_tail_bias_above_percentile/{p}/{field_name}"
+                        ] = abs_norm_tail_bias
+
         return return_dict
 
     def get_dataset(self) -> xr.Dataset:
