@@ -133,8 +133,8 @@ class Trainer:
 
         self.best_valid_loss = float("inf")
         self.best_checkpoint_path: str | None = None
-        self.best_tail_kl_divergence = float("inf")
-        self.best_tail_kl_divergence_checkpoint_path: str | None = None
+        self.best_histogram_tail_metric = float("inf")
+        self.best_histogram_tail_checkpoint_path: str | None = None
 
         if self.config.checkpoint_dir is not None:
             self.epoch_checkpoint_path = os.path.join(
@@ -146,13 +146,13 @@ class Trainer:
             self.ema_checkpoint_path = os.path.join(
                 self.config.checkpoint_dir, "ema_ckpt.tar"
             )
-            self.best_tail_kl_divergence_checkpoint_path = os.path.join(
-                self.config.checkpoint_dir, "best_tail_kl_div.ckpt"
+            self.best_histogram_tail_checkpoint_path = os.path.join(
+                self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_metric = "generation/metrics/crps"
-        self._best_kl_divergence_metric = (
-            "generation/histogram/kl_divergence_above_percentile/99.99/"
+        self._best_valid_loss_name = "generation/metrics/crps"
+        self._best_histogram_tail_name = (
+            "generation/histogram/abs_diff_log_density_above_percentile/99.99/"
         )
 
     def _get_batch_generator(
@@ -255,7 +255,7 @@ class Trainer:
             generation_aggregator = GenerationAggregator(
                 self.dims,
                 self.model.downscale_factor,
-                percentiles=[99.99, 99.9999],
+                percentiles=[99, 99.99, 99.9999],
                 include_positional_comparisons=include_positional_comparisons,
             )
             batch: PairedBatchData
@@ -291,8 +291,8 @@ class Trainer:
         channel_mean_checkpoint_metrics = {
             prefix: _get_channel_mean_scalar_metric(generation_metrics, prefix)
             for prefix in [
-                self._best_valid_loss_metric,
-                self._best_kl_divergence_metric,
+                self._best_valid_loss_name,
+                self._best_histogram_tail_name,
             ]
         }
         return channel_mean_checkpoint_metrics
@@ -305,15 +305,14 @@ class Trainer:
 
     def save_best_checkpoint(self, valid_metrics: dict[str, float]) -> None:
         if self.best_checkpoint_path is not None:
-            logging.info(f"Saving best checkpoint")
             if self.validate_using_ema:
                 best_checkpoint_context = self._ema_context
             else:
                 best_checkpoint_context = contextlib.nullcontext  # type: ignore
             # Best checkpoint is hard coded to use validation CRPS channel mean
-            if valid_metrics[self._best_valid_loss_metric] < self.best_valid_loss:
+            if valid_metrics[self._best_valid_loss_name] < self.best_valid_loss:
                 logging.info("Saving best checkpoint")
-                self.best_valid_loss = valid_metrics[self._best_valid_loss_metric]
+                self.best_valid_loss = valid_metrics[self._best_valid_loss_name]
                 with best_checkpoint_context():
                     _save_checkpoint(self, self.best_checkpoint_path)
             else:
@@ -321,21 +320,21 @@ class Trainer:
                     "Validation loss did not improve, will not overwrite "
                     "best checkpoint."
                 )
-        if self.best_tail_kl_divergence_checkpoint_path is not None:
+        if self.best_histogram_tail_checkpoint_path is not None:
             if (
-                valid_metrics[self._best_kl_divergence_metric]
-                < self.best_tail_kl_divergence
+                valid_metrics[self._best_histogram_tail_name]
+                < self.best_histogram_tail_metric
             ):
-                logging.info("Saving checkpoint for lowest tail KL divergence")
-                self.best_tail_kl_divergence = valid_metrics[
-                    self._best_kl_divergence_metric
+                logging.info("Saving checkpoint for best histogram tail.")
+                self.best_histogram_tail_metric = valid_metrics[
+                    self._best_histogram_tail_name
                 ]
                 with best_checkpoint_context():
-                    _save_checkpoint(self, self.best_tail_kl_divergence_checkpoint_path)
+                    _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
             else:
                 logging.info(
-                    "Tail KL divergence did not improve, will not overwrite "
-                    "best KL div checkpoint."
+                    "Histogram tail metric did not improve, will not overwrite "
+                    "best histogram tail checkpoint."
                 )
         else:
             raise ValueError("Best checkpoint path is not set")
