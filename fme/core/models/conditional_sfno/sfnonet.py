@@ -180,6 +180,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         spectral_layers=1,
         checkpointing=0,
         filter_residual=False,
+        affine_norms=False,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -192,6 +193,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             img_shape=self.input_shape_loc,
             global_layer_norm=global_layer_norm,
             context_config=context_config,
+            affine_norms=affine_norms,
         )
 
         # convolution layer
@@ -236,6 +238,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             img_shape=self.output_shape_loc,
             global_layer_norm=global_layer_norm,
             context_config=context_config,
+            affine_norms=affine_norms,
         )
 
         if use_mlp == True:
@@ -368,6 +371,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         Number of checkpointing segments, by default 0
     local_blocks: List[int], optional
         List of blocks to use local filters, by default []
+    affine_norms: bool, optional
+        Whether to use element-wise affine parameters in the normalization layers,
+        by default False.
 
     Example:
     --------
@@ -428,6 +434,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         filter_residual: bool = False,
         filter_output: bool = False,
         local_blocks: Optional[List[int]] = None,
+        affine_norms: bool = False,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
@@ -538,6 +545,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.local_blocks = [i for i in range(self.num_layers) if i in local_blocks]
         else:
             self.local_blocks = []
+        self.affine_norms = (
+            params.affine_norms if hasattr(params, "affine_norms") else affine_norms
+        )
 
         data_grid = params.data_grid if hasattr(params, "data_grid") else "equiangular"
         # self.pretrain_encoding = params.pretrain_encoding if hasattr(params, "pretrain_encoding") else False
@@ -681,6 +691,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 spectral_layers=self.spectral_layers,
                 checkpointing=self.checkpointing,
                 filter_residual=self.filter_residual,
+                affine_norms=self.affine_norms,
             )
 
             self.blocks.append(block)
