@@ -1,5 +1,4 @@
 import dataclasses
-import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -577,7 +576,6 @@ class DiffusionModel:
         )
         latents = torch.randn(outputs_shape).to(device=get_device())
 
-        logging.info("Running EDM sampler...")
         generated_norm, latent_steps = edm_sampler(
             self.module,
             latents,
@@ -587,7 +585,6 @@ class DiffusionModel:
             sigma_max=self.config.sigma_max,
             num_steps=self.config.num_diffusion_generation_steps,
         )
-        logging.info("Done running EDM sampler.")
 
         if self.config.predict_residual:
             base_prediction = interpolate(
