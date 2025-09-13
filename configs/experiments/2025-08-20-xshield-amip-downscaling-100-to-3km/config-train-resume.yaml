@@ -76,7 +76,7 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 7
+      step: 3
   coarse:
   - data_path:  /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
@@ -84,7 +84,7 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 7
+      step: 3
   lat_extent:
     start: 22.0
     stop: 50.0
@@ -96,7 +96,7 @@ coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
 #max_epochs: 1500 # using 320 samples per epoch, this is roughly 500k steps (200 epochs for the previous 2 yr training dataset)
 max_epochs: 1700
-validate_interval: 4
+validate_interval: 6
 experiment_dir: /results
 save_checkpoints: true
 logging:
