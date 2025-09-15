@@ -185,7 +185,7 @@ while read PRETRAINING; do
             --gpus $N_GPUS \
             --shared-memory "${SHARED_MEM}" \
             --budget ai2/climate \
-            --no-conda \
+            --system-python \
             --install "pip install --no-deps ." \
             -- torchrun --nproc_per_node $N_GPUS -m fme.coupled.train "$CONFIG_PATH" $OVERRIDE |
             tee /dev/tty |
