@@ -17,6 +17,7 @@
 from functools import partial
 import math
 from typing import Any, List, Optional, Tuple
+from typing_extensions import Literal
 
 import torch
 import torch.nn as nn
@@ -37,7 +38,6 @@ from .layers import (
     Context,
     ContextConfig,
     DropPath,
-    RealFFT2,
     SpectralAttention2d,
 )
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
@@ -92,10 +92,7 @@ class SpectralFilterLayer(nn.Module):
     ):
         super(SpectralFilterLayer, self).__init__()
 
-        if filter_type == "non-linear" and (
-            isinstance(forward_transform, th.RealSHT)
-            or isinstance(forward_transform, thd.DistributedRealSHT)
-        ):
+        if filter_type == "non-linear":
             self.filter = SpectralAttentionS2(
                 forward_transform,
                 inverse_transform,
@@ -109,24 +106,8 @@ class SpectralFilterLayer(nn.Module):
                 bias=False,
             )
 
-        elif filter_type == "non-linear" and (isinstance(forward_transform, RealFFT2)):
-            self.filter = SpectralAttention2d(
-                forward_transform,
-                inverse_transform,
-                embed_dim,
-                sparsity_threshold=sparsity_threshold,
-                hidden_size_factor=hidden_size_factor,
-                complex_activation=complex_activation,
-                spectral_layers=spectral_layers,
-                drop_rate=drop_rate,
-                bias=False,
-            )
-
         # spectral transform is passed to the module
-        elif filter_type == "linear" and (
-            isinstance(forward_transform, th.RealSHT)
-            or isinstance(forward_transform, thd.DistributedRealSHT)
-        ):
+        elif filter_type == "linear":
             self.filter = SpectralConvS2(
                 forward_transform,
                 inverse_transform,
@@ -199,6 +180,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         spectral_layers=1,
         checkpointing=0,
         filter_residual=False,
+        affine_norms=False,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -211,6 +193,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             img_shape=self.input_shape_loc,
             global_layer_norm=global_layer_norm,
             context_config=context_config,
+            affine_norms=affine_norms,
         )
 
         # convolution layer
@@ -255,6 +238,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             img_shape=self.output_shape_loc,
             global_layer_norm=global_layer_norm,
             context_config=context_config,
+            affine_norms=affine_norms,
         )
 
         if use_mlp == True:
@@ -387,6 +371,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         Number of checkpointing segments, by default 0
     local_blocks: List[int], optional
         List of blocks to use local filters, by default []
+    affine_norms: bool, optional
+        Whether to use element-wise affine parameters in the normalization layers,
+        by default False.
 
     Example:
     --------
@@ -410,7 +397,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
     def __init__(
         self,
         params,
-        spectral_transform: str = "sht",
+        spectral_transform: Literal["sht"] = "sht",
         filter_type: str = "linear",
         operator_type: str = "diagonal",
         img_shape: Tuple[int, int] = (721, 1440),
@@ -447,6 +434,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         filter_residual: bool = False,
         filter_output: bool = False,
         local_blocks: Optional[List[int]] = None,
+        affine_norms: bool = False,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
@@ -557,6 +545,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.local_blocks = [i for i in range(self.num_layers) if i in local_blocks]
         else:
             self.local_blocks = []
+        self.affine_norms = (
+            params.affine_norms if hasattr(params, "affine_norms") else affine_norms
+        )
 
         data_grid = params.data_grid if hasattr(params, "data_grid") else "equiangular"
         # self.pretrain_encoding = params.pretrain_encoding if hasattr(params, "pretrain_encoding") else False
@@ -628,41 +619,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.itrans = isht_handle(
                 self.h, self.w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
             ).float()
-
-        elif self.spectral_transform == "fft":
-            fft_handle = th.RealFFT2
-            ifft_handle = th.InverseRealFFT2
-
-            # effective image size:
-            self.img_shape_eff = (
-                self.img_shape[0] + self.padding[0],
-                self.img_shape[1] + self.padding[1],
-            )
-            self.img_shape_loc = (
-                self.img_shape_eff[0],
-                self.img_shape_eff[1],
-            )
-
-            self.trans_down = fft_handle(
-                *self.img_shape_eff, lmax=modes_lat, mmax=modes_lon
-            ).float()
-            self.itrans_up = ifft_handle(
-                *self.img_shape_eff, lmax=modes_lat, mmax=modes_lon
-            ).float()
-            self.trans = fft_handle(
-                self.h, self.w, lmax=modes_lat, mmax=modes_lon
-            ).float()
-            self.itrans = ifft_handle(
-                self.h, self.w, lmax=modes_lat, mmax=modes_lon
-            ).float()
         else:
             raise (ValueError("Unknown spectral transform"))
-
-        # use the SHT/FFT to compute the local, downscaled grid dimensions
-        self.img_shape_loc = (self.trans_down.nlat, self.trans_down.nlon)
-        self.img_shape_eff = (self.trans_down.nlat, self.trans_down.nlon)
-        self.h_loc = self.itrans.nlat
-        self.w_loc = self.itrans.nlon
 
         # determine activation function
         if self.activation_function == "relu":
@@ -733,6 +691,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 spectral_layers=self.spectral_layers,
                 checkpointing=self.checkpointing,
                 filter_residual=self.filter_residual,
+                affine_norms=self.affine_norms,
             )
 
             self.blocks.append(block)
@@ -755,7 +714,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             # currently using deliberately a differently shape position embedding
             self.pos_embed = nn.Parameter(
                 torch.zeros(
-                    1, self.embed_dim, self.img_shape_loc[0], self.img_shape_loc[1]
+                    1, self.embed_dim, self.trans_down.nlat, self.trans_down.nlon
                 )
             )
             # self.pos_embed = nn.Parameter( torch.zeros(1, self.embed_dim, self.img_shape_eff[0], self.img_shape_eff[1]) )
@@ -799,15 +758,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         if hasattr(self, "pos_embed"):
             # old way of treating unequally shaped weights
-            if self.img_shape_loc != self.img_shape_eff:
-                xp = torch.zeros_like(x)
-                xp[..., : self.img_shape_loc[0], : self.img_shape_loc[1]] = (
-                    x[..., : self.img_shape_loc[0], : self.img_shape_loc[1]]
-                    + self.pos_embed
-                )
-                x = xp
-            else:
-                x = x + self.pos_embed
+            x = x + self.pos_embed
 
         # maybe clean the padding just in case
 

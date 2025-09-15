@@ -1,8 +1,16 @@
 """Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Sized
-from typing import Generic, Self, TypeVar
+from collections.abc import (
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+    Sized,
+)
+from typing import Generic, Literal, Self, TypeVar
 
 import torch
 import torch.utils.data
@@ -17,11 +25,15 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.metrics import spherical_area_weights
 from fme.core.typing_ import TensorMapping
+from fme.downscaling.data.patching_tmp import Patch, get_patches
 from fme.downscaling.data.utils import (
     ClosedInterval,
     check_leading_dim,
     expand_and_fold_tensor,
+    get_offset,
+    paired_shuffle,
     scale_slice,
+    scale_tuple,
 )
 
 
@@ -499,6 +511,22 @@ class GriddedData:
 
         return SizedMap(on_device, self._loader)
 
+    def get_patched_batch_generator(
+        self,
+        yx_patch_extent: tuple[int, int],
+        overlap: int = 0,
+        drop_partial_patches: bool = True,
+        random_offset: bool = False,
+    ) -> Generator["BatchData", None, None]:
+        return patched_batch_gen_from_loader(
+            self.loader,
+            yx_extent=self.shape,
+            yx_patch_extent=yx_patch_extent,
+            overlap=overlap,
+            drop_partial_patches=drop_partial_patches,
+            random_offset=random_offset,
+        )
+
 
 @dataclasses.dataclass
 class PairedGriddedData:
@@ -515,6 +543,25 @@ class PairedGriddedData:
             return batch.to_device()
 
         return SizedMap(on_device, self._loader)
+
+    def get_patched_batch_generator(
+        self,
+        coarse_yx_patch_extent: tuple[int, int],
+        overlap: int = 0,
+        drop_partial_patches: bool = True,
+        random_offset: bool = False,
+        shuffle: bool = False,
+    ) -> Generator["PairedBatchData", None, None]:
+        return patched_batch_gen_from_paired_loader(
+            self.loader,
+            coarse_yx_extent=self.coarse_shape,
+            coarse_yx_patch_extent=coarse_yx_patch_extent,
+            downscale_factor=self.downscale_factor,
+            coarse_overlap=overlap,
+            drop_partial_patches=drop_partial_patches,
+            random_offset=random_offset,
+            shuffle=shuffle,
+        )
 
 
 @dataclasses.dataclass
@@ -557,6 +604,7 @@ class BatchData:
         leading_dim = self._validate()
         self._len = leading_dim[0]
         self._horizontal_shape = self[0].horizontal_shape
+        self.is_patched = False
         if self.topography is not None:
             self._topography_downscale_factor = get_topography_downscale_factor(
                 self.topography.shape[-2:], self._horizontal_shape
@@ -670,6 +718,24 @@ class BatchData:
             topography=sliced_topo,
         )
 
+    def apply_patch(
+        self, patch: Patch, type: Literal["input", "output"]
+    ) -> "BatchData":
+        if self.is_patched:
+            raise ValueError("Patching previously patched data is not supported.")
+
+        use_slice = patch.input_slice if type == "input" else patch.output_slice
+
+        data = self.latlon_slice(lat_slice=use_slice.y, lon_slice=use_slice.x)
+        data.is_patched = True
+        return data
+
+    def generate_from_patches(
+        self, patches: list[Patch], patch_type: Literal["input", "output"] = "input"
+    ) -> Generator["BatchData", None, None]:
+        for patch in patches:
+            yield self.apply_patch(patch, patch_type)
+
 
 @dataclasses.dataclass
 class PairedBatchData:
@@ -735,6 +801,17 @@ class PairedBatchData:
         coarse = self.coarse.expand_and_fold(num_samples, sample_dim, dim_name)
         return PairedBatchData(fine, coarse)
 
+    def generate_from_patches(
+        self,
+        coarse_patches: list[Patch],
+        fine_patches: list[Patch],
+    ) -> Generator["PairedBatchData", None, None]:
+        coarse_gen = self.coarse.generate_from_patches(coarse_patches)
+        fine_gen = self.fine.generate_from_patches(fine_patches)
+
+        for coarse_batch, fine_batch in zip(coarse_gen, fine_gen):
+            yield PairedBatchData(fine=fine_batch, coarse=coarse_batch)
+
 
 class ContiguousDistributedSampler(DistributedSampler):
     """Distributes contiguous chunks of data across ranks.
@@ -783,3 +860,73 @@ def _subset_horizontal(
         latlon_coords,
         topography,
     )
+
+
+def patched_batch_gen_from_loader(
+    loader: DataLoader[BatchItem],
+    yx_extent: tuple[int, int],
+    yx_patch_extent: tuple[int, int],
+    overlap: int = 0,
+    drop_partial_patches: bool = True,
+    random_offset: bool = False,
+) -> Generator[BatchData, None, None]:
+    batch: BatchData
+    for batch in loader:
+        # get_patches is called at each iteration so that each batch has a different
+        # random offset if this option is enabled.
+        y_random_offset = get_offset(random_offset, yx_extent[0], yx_patch_extent[0])
+        x_random_offset = get_offset(random_offset, yx_extent[1], yx_patch_extent[1])
+
+        patches = get_patches(
+            yx_extent=yx_extent,
+            yx_patch_extent=yx_patch_extent,
+            overlap=overlap,
+            drop_partial_patches=drop_partial_patches,
+            y_offset=y_random_offset,
+            x_offset=x_random_offset,
+        )
+        yield from batch.generate_from_patches(patches, patch_type="input")
+
+
+def patched_batch_gen_from_paired_loader(
+    loader: DataLoader[PairedBatchItem],
+    coarse_yx_extent: tuple[int, int],
+    coarse_yx_patch_extent: tuple[int, int],
+    downscale_factor: int,
+    coarse_overlap: int = 0,
+    drop_partial_patches: bool = True,
+    random_offset: bool = False,
+    shuffle: bool = False,
+) -> Generator[PairedBatchData, None, None]:
+    batch: PairedBatchData
+    for batch in loader:
+        coarse_y_offset = get_offset(
+            random_offset, coarse_yx_extent[0], coarse_yx_patch_extent[0]
+        )
+        coarse_x_offset = get_offset(
+            random_offset, coarse_yx_extent[1], coarse_yx_patch_extent[1]
+        )
+        coarse_patches = get_patches(
+            yx_extent=coarse_yx_extent,
+            yx_patch_extent=coarse_yx_patch_extent,
+            overlap=coarse_overlap,
+            drop_partial_patches=drop_partial_patches,
+            y_offset=coarse_y_offset,
+            x_offset=coarse_x_offset,
+        )
+
+        fine_yx_extent = scale_tuple(coarse_yx_extent, downscale_factor)
+        fine_yx_patch_extent = scale_tuple(coarse_yx_patch_extent, downscale_factor)
+        fine_patches = get_patches(
+            yx_extent=fine_yx_extent,
+            yx_patch_extent=fine_yx_patch_extent,
+            overlap=coarse_overlap * downscale_factor,
+            drop_partial_patches=drop_partial_patches,
+            y_offset=coarse_y_offset * downscale_factor,
+            x_offset=coarse_x_offset * downscale_factor,
+        )
+
+        if shuffle:
+            coarse_patches, fine_patches = paired_shuffle(coarse_patches, fine_patches)
+
+        yield from batch.generate_from_patches(coarse_patches, fine_patches)

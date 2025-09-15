@@ -141,6 +141,7 @@ class Config:
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def get_data_writer(self, data: "Data") -> MonthlyDataWriter:
+        assert data.properties.timestep is not None
         n_months = months_for_timesteps(data.n_timesteps, data.properties.timestep)
         coords = {
             **data.properties.horizontal_coordinates.coords,
@@ -191,6 +192,7 @@ def run(config: Config):
     assert isinstance(
         data.properties.vertical_coordinate, OptionalHybridSigmaPressureCoordinate
     )
+    assert data.properties.timestep is not None
     derive_func = AtmosphericDeriveFn(
         vertical_coordinate=data.properties.vertical_coordinate,
         timestep=data.properties.timestep,

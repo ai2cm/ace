@@ -1,5 +1,4 @@
 from .single_module import (
-    ExistingStepperConfig,
     Stepper,
     StepperConfig,
     StepperOverrideConfig,
