@@ -9,3 +9,6 @@ fto-v2025-08-22-trap_lr_14ep-ncs2|01K40AXBA9555A1QBVXS1KXZWQ|run_200yr0319|best_
 fto-v2025-08-22-const_lr_20ep||training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v2025-08-22-const_lr_20ep||training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v2025-08-22-const_lr_20ep|01K57X0BJTHWT2H9ACDW12XT5B
+ws|training|best_inference_ckpt|normal|--not-preemptible
