@@ -24,10 +24,9 @@ from fme.ace.requirements import (
     NullDataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.ace.stepper import ExistingStepperConfig, Stepper
+from fme.ace.stepper import Stepper
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import ResumeResultsConfig
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -35,7 +34,7 @@ from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
-from fme.core.typing_ import Slice, TensorDict, TensorMapping
+from fme.core.typing_ import Slice, TensorDict, TensorMapping, VariableMetadata
 from fme.core.weight_ops import CopyWeightsConfig
 
 
@@ -209,7 +208,7 @@ class TrainConfig:
 
     train_loader: DataLoaderConfig
     validation_loader: DataLoaderConfig
-    stepper: ExistingStepperConfig | StepperConfig
+    stepper: StepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int

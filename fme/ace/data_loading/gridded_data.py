@@ -11,10 +11,10 @@ from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.dataloader import DataLoaderABC
 from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
+from fme.core.typing_ import VariableMetadata
 
 T = TypeVar("T", covariant=True)
 
@@ -221,6 +221,11 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
 
     @property
     def timestep(self) -> datetime.timedelta:
+        if self._properties.timestep is None:
+            raise ValueError(
+                "ACE datasets must have a valid, uniform timestep. "
+                "Requires XarrayDataConfig.infer_timestep==True"
+            )
         return self._properties.timestep
 
     @property

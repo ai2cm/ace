@@ -1,7 +1,6 @@
 import argparse
 import dataclasses
 import logging
-from datetime import datetime, timedelta
 from typing import Literal
 
 import dacite
@@ -10,7 +9,6 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -19,7 +17,6 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
 from fme.downscaling.data import (
-    ClosedInterval,
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
@@ -32,11 +29,8 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.patching import (
-    MultipatchConfig,
-    PatchPredictor,
-    paired_patch_generator_from_loader,
-)
+from fme.downscaling.patching import MultipatchConfig, PatchPredictor
+from fme.downscaling.predict import EventConfig
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -109,11 +103,8 @@ class Evaluator:
         )
 
         if self.patch_data:
-            batch_generator = paired_patch_generator_from_loader(
-                loader=self.data.loader,
-                coarse_yx_extent=self.data.coarse_shape,
-                coarse_yx_patch_extents=self.model.coarse_shape,
-                downscale_factor=self.model.downscale_factor,
+            batch_generator = self.data.get_patched_batch_generator(
+                coarse_yx_patch_extent=self.model.coarse_shape,
             )
         else:
             batch_generator = self.data.loader
@@ -206,38 +197,16 @@ class EventEvaluator:
 
 
 @dataclasses.dataclass
-class EventConfig:
-    name: str
-    date: str
-    lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
-    )
-    lon_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
-    )
-    n_samples: int = 64
-    date_format: str = "%Y-%m-%dT%H:%M"
-    save_generated_samples: bool = False
-
-    def get_gridded_data(
+class PairedEventConfig(EventConfig):
+    def get_paired_gridded_data(
         self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
     ) -> PairedGriddedData:
-        # Event evaluation only load the first snapshot.
-        # Filling the slice stop isn't necessary but guards against
-        # future code trying to iterate over the entire dataloader.
-        _stop = (
-            datetime.strptime(self.date, self.date_format) + timedelta(hours=6)
-        ).strftime(self.date_format)
-
-        time_slice = TimeSlice(self.date, _stop)
-
+        time_slice = self._time_selection_slice
         event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
         event_coarse = dataclasses.replace(
             base_data_config.coarse_full_config[0], subset=time_slice
         )
-
         n_processes = Distributed.get_instance().world_size
-
         event_data_config = dataclasses.replace(
             base_data_config,
             fine=[event_fine],
@@ -258,7 +227,7 @@ class EvaluatorConfig:
     logging: LoggingConfig
     n_samples: int = 4
     patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
-    events: list[EventConfig] | None = None
+    events: list[PairedEventConfig] | None = None
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -287,6 +256,8 @@ class EvaluatorConfig:
             evaluator_model = model
 
         if self.patch.divide_generation and not self.patch.composite_prediction:
+            # Subdivide evaluation into patches, do not composite them together
+            # No maps will be saved for this configuration.
             patch_data = True
         else:
             patch_data = False
@@ -301,12 +272,12 @@ class EvaluatorConfig:
 
     def _build_event_evaluator(
         self,
-        event_config: EventConfig,
+        event_config: PairedEventConfig,
     ) -> EventEvaluator:
         model = self.model.build()
         evaluator_model: Model | DiffusionModel | PatchPredictor
 
-        dataset = event_config.get_gridded_data(
+        dataset = event_config.get_paired_gridded_data(
             base_data_config=self.data, requirements=self.model.data_requirements
         )
 

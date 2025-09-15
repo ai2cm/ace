@@ -89,6 +89,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
 
     Attributes:
         spectral_transform: Type of spherical transform to use.
+            Kept for backwards compatibility.
         filter_type: Type of filter to use.
         operator_type: Type of operator to use.
         residual_filter_factor: Factor by which to downsample the residual.
@@ -121,9 +122,11 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             convolution (DISCO) blocks, which apply local filters. See
             Ocampo et al. (2022)
             https://arxiv.org/abs/2209.13603 for more details.
+        affine_norms: Whether to use element-wise affine parameters in the
+            normalization layers.
     """
 
-    spectral_transform: str = "sht"
+    spectral_transform: Literal["sht"] = "sht"
     filter_type: str = "non-linear"
     operator_type: str = "diagonal"
     residual_filter_factor: int = 1
@@ -150,6 +153,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     filter_residual: bool = False
     filter_output: bool = False
     local_blocks: list[int] | None = None
+    affine_norms: bool = False
 
     def build(
         self,

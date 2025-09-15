@@ -39,7 +39,7 @@ run_training() {
     --shared-memory 400GiB \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.diffusion.train "$CONFIG_PATH"

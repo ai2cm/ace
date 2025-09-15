@@ -16,8 +16,8 @@
 import torch
 from torch_harmonics.quadrature import clenshaw_curtiss_weights, legendre_gauss_weights
 
-from fme.ace.models.makani_fcn2.utils import comm
-from fme.ace.models.makani_fcn2.utils.distributed import dist
+from fme.ace.models.makani_fcn3.utils import comm
+from fme.ace.models.makani_fcn3.utils.distributed import dist
 
 
 def grid_to_quadrature_rule(grid_type):

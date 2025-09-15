@@ -30,7 +30,6 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
@@ -60,7 +59,12 @@ from fme.core.tensors import (
 )
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingHistory, TrainingJob
-from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
+from fme.core.typing_ import (
+    EnsembleTensorDict,
+    TensorDict,
+    TensorMapping,
+    VariableMetadata,
+)
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -297,66 +301,6 @@ class SingleModuleStepperConfig:
             crps_training=self.crps_training,
             residual_prediction=self.residual_prediction,
         )
-
-
-@dataclasses.dataclass
-class ExistingStepperConfig:
-    """
-    Configuration for an existing stepper. This allows loading a serialized
-    stepper from a checkpoint without loading its configuration of the training
-    and optimization schedule, i.e., this allows for specifying a new
-    schedule in fine-tuning. Not used for training resumption.
-
-    Parameters:
-        checkpoint_path: The path to the serialized checkpoint; should be different
-        than the experiment output directory.
-    """
-
-    checkpoint_path: str
-
-    def __post_init__(self):
-        self._stepper_config = StepperConfig.from_stepper_state(
-            self._load_checkpoint()["stepper"]
-        )
-
-    def _load_checkpoint(self) -> Mapping[str, Any]:
-        return torch.load(
-            self.checkpoint_path, map_location=get_device(), weights_only=False
-        )
-
-    def get_train_window_data_requirements(
-        self,
-        default_n_forward_steps: int | None,
-    ) -> DataRequirements:
-        return self._stepper_config.get_train_window_data_requirements(
-            default_n_forward_steps
-        )
-
-    def get_evaluation_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return self._stepper_config.get_evaluation_window_data_requirements(
-            n_forward_steps
-        )
-
-    def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
-        return self._stepper_config.get_prognostic_state_data_requirements()
-
-    def get_forcing_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return self._stepper_config.get_forcing_window_data_requirements(
-            n_forward_steps
-        )
-
-    def get_stepper(
-        self,
-        dataset_info: DatasetInfo,
-        apply_parameter_init: bool = True,
-        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
-    ):
-        logging.info(f"Initializing stepper from {self.checkpoint_path}")
-        return Stepper.from_state(self._load_checkpoint()["stepper"])
 
 
 def _prepend_timesteps(

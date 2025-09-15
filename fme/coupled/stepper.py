@@ -242,6 +242,7 @@ class CoupledStepperConfig:
                 self.ocean.stepper.output_names
             )
         )
+        self._remove_sea_ice_fraction_when_ocean_fraction_is_predicted()
         self._shared_forcing_exogenous_names = list(
             set(self._ocean_forcing_exogenous_names).intersection(
                 self._atmosphere_forcing_exogenous_names
@@ -450,6 +451,27 @@ class CoupledStepperConfig:
             names=self._all_atmosphere_names, n_timesteps=n_forward_steps + 1
         )
 
+    def _remove_sea_ice_fraction_when_ocean_fraction_is_predicted(self):
+        if self.ocean_fraction_prediction is None:
+            return
+
+        ocn_frac_name = self._atmosphere_ocean_config.ocean_fraction_name
+        self._atmosphere_forcing_exogenous_names = [
+            name
+            for name in self._atmosphere_forcing_exogenous_names
+            if name is not ocn_frac_name
+        ]
+        sea_ice_fraction_name = (
+            self.ocean_fraction_prediction.sea_ice_fraction_name_in_atmosphere
+            or self.ocean_fraction_prediction.sea_ice_fraction_name
+        )
+        # remove the sea ice fraction name used for atmosphere, if present
+        self._atmosphere_forcing_exogenous_names = [
+            name
+            for name in self._atmosphere_forcing_exogenous_names
+            if name is not sea_ice_fraction_name
+        ]
+
     def get_evaluation_window_data_requirements(
         self, n_coupled_steps: int
     ) -> CoupledDataRequirements:
@@ -480,6 +502,21 @@ class CoupledStepperConfig:
         return CoupledPrognosticStateDataRequirements(
             ocean=self.ocean.stepper.get_prognostic_state_data_requirements(),
             atmosphere=self.atmosphere.stepper.get_prognostic_state_data_requirements(),
+        )
+
+    def get_forcing_window_data_requirements(
+        self, n_coupled_steps: int
+    ) -> CoupledDataRequirements:
+        return CoupledDataRequirements(
+            ocean_timestep=self.ocean_timestep,
+            ocean_requirements=DataRequirements(
+                self.ocean_forcing_exogenous_names, n_timesteps=n_coupled_steps + 1
+            ),
+            atmosphere_timestep=self.atmosphere_timestep,
+            atmosphere_requirements=DataRequirements(
+                names=self.atmosphere_forcing_exogenous_names,
+                n_timesteps=n_coupled_steps * self.n_inner_steps + 1,
+            ),
         )
 
     def _get_ocean_stepper(
@@ -1153,15 +1190,12 @@ class CoupledStepper(
         )
         return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmos_data)
 
-    def predict_paired(
+    def _predict(
         self,
         initial_condition: CoupledPrognosticState,
         forcing: CoupledBatchData,
         compute_derived_variables: bool = False,
-    ) -> tuple[CoupledPairedData, CoupledPrognosticState]:
-        """
-        Predict multiple steps forward given initial condition and reference data.
-        """
+    ):
         timer = GlobalTimer.get_instance()
         output_list = list(
             self.get_prediction_generator(
@@ -1183,6 +1217,18 @@ class CoupledStepper(
                         n_ic_timesteps_atmosphere=self.atmosphere.n_ic_timesteps,
                     )
                 )
+        return gen_data
+
+    def predict_paired(
+        self,
+        initial_condition: CoupledPrognosticState,
+        forcing: CoupledBatchData,
+        compute_derived_variables: bool = False,
+    ) -> tuple[CoupledPairedData, CoupledPrognosticState]:
+        """
+        Predict multiple steps forward given initial condition and reference data.
+        """
+        gen_data = self._predict(initial_condition, forcing, compute_derived_variables)
         atmos_forward_data = self.atmosphere.get_forward_data(
             forcing.atmosphere_data, compute_derived_variables=compute_derived_variables
         )
@@ -1196,6 +1242,29 @@ class CoupledStepper(
                     ocean_data=ocean_forward_data,
                     atmosphere_data=atmos_forward_data,
                 ),
+            ),
+            CoupledPrognosticState(
+                ocean_data=gen_data.ocean_data.get_end(
+                    self.ocean.prognostic_names,
+                    self.n_ic_timesteps,
+                ),
+                atmosphere_data=gen_data.atmosphere_data.get_end(
+                    self.atmosphere.prognostic_names,
+                    self.atmosphere.n_ic_timesteps,
+                ),
+            ),
+        )
+
+    def predict(
+        self,
+        initial_condition: CoupledPrognosticState,
+        forcing: CoupledBatchData,
+        compute_derived_variables: bool = False,
+    ) -> tuple[CoupledBatchData, CoupledPrognosticState]:
+        gen_data = self._predict(initial_condition, forcing, compute_derived_variables)
+        return (
+            CoupledBatchData(
+                ocean_data=gen_data.ocean_data, atmosphere_data=gen_data.atmosphere_data
             ),
             CoupledPrognosticState(
                 ocean_data=gen_data.ocean_data.get_end(

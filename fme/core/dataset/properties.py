@@ -1,9 +1,9 @@
 import datetime
 
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.mask_provider import MaskProvider
+from fme.core.typing_ import VariableMetadata
 
 
 class DatasetProperties:
@@ -13,7 +13,7 @@ class DatasetProperties:
         vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         mask_provider: MaskProvider,
-        timestep: datetime.timedelta,
+        timestep: datetime.timedelta | None,
         is_remote: bool,
         all_labels: set[str],
     ):

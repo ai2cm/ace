@@ -41,6 +41,6 @@ gantry run \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node $NGPU -m fme.downscaling.evaluator $CONFIG_PATH

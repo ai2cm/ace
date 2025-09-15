@@ -3,8 +3,7 @@ from collections.abc import Mapping
 import torch
 import xarray as xr
 
-from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorMapping, VariableMetadata
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
