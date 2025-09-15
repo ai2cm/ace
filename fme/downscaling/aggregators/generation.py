@@ -6,7 +6,8 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
-from fme.core.typing_ import TensorMapping, VariableMetadata
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.data import PairedBatchData
 

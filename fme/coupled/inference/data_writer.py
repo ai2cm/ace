@@ -5,8 +5,8 @@ from collections.abc import Mapping
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.main import DataWriterConfig, PairedDataWriter
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
-from fme.core.typing_ import VariableMetadata
 from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,

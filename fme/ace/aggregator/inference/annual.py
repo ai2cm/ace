@@ -9,10 +9,11 @@ import torch
 import xarray as xr
 from matplotlib.figure import Figure
 
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.typing_ import TensorMapping, VariableMetadata
+from fme.core.typing_ import TensorMapping
 
 from ..plotting import plot_mean_and_samples
 

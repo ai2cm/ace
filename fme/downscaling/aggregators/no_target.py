@@ -7,8 +7,9 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.histogram import DynamicHistogramAggregator
-from fme.core.typing_ import TensorDict, TensorMapping, VariableMetadata
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import DynamicHistogramsAdapter
 from fme.downscaling.aggregators.main import (
@@ -124,7 +125,7 @@ def _plot_timeseries(
             fine_data.sel(generated_sample=sample),
             linewidth=0.70,
             label=(
-                f"fine samples 0-{fine_data.generated_sample.size - 1}"
+                f"fine samples 0-{fine_data.generated_sample.size-1}"
                 if sample == 0
                 else None
             ),
@@ -304,7 +305,7 @@ class _MapAggregator:
 
     def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
         _caption = (
-            "{name}  mean full field; (left) generated and (right) coarse [{units}]"
+            "{name}  mean full field; (left) generated and " "(right) coarse [{units}]"
         )
 
         if name in self._variable_metadata:

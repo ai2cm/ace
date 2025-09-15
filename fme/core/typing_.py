@@ -1,11 +1,9 @@
 import dataclasses
-from collections import namedtuple
 from collections.abc import Mapping
 from typing import NewType
 
 import torch
 
-VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
 TensorMapping = Mapping[str, torch.Tensor]
 TensorDict = dict[str, torch.Tensor]
 EnsembleTensorDict = NewType("EnsembleTensorDict", TensorDict)

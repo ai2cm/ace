@@ -66,11 +66,12 @@ from fme.ace.aggregator.inference.main import (
 )
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.cli import get_parser, prepare_config, prepare_directory
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
-from fme.core.typing_ import TensorDict, TensorMapping, VariableMetadata
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.diffusion.stepper import TrainOutput
 from fme.diffusion.train_config import TrainBuilders, TrainConfig
 
