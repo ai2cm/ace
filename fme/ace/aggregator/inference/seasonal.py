@@ -7,10 +7,11 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.plotting import plot_paneled_data
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.typing_ import TensorMapping, VariableMetadata
+from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Image
 
 

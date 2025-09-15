@@ -9,10 +9,11 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow, plot_paneled_data
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.typing_ import TensorDict, TensorMapping, VariableMetadata
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
 from .historical_index import INDEX_CALENDAR, NINO34_INDEX

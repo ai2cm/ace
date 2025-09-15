@@ -5,10 +5,10 @@ from collections import namedtuple
 import torch
 
 from fme.ace.data_loading.gridded_data import SizedMap
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
-from fme.core.typing_ import VariableMetadata
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.data_typing import (
     CoupledCoords,
