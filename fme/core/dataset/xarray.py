@@ -32,8 +32,9 @@ from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.stacker import Stacker
-from fme.core.typing_ import Slice, TensorDict, VariableMetadata
+from fme.core.typing_ import Slice, TensorDict
 
+from .data_typing import VariableMetadata
 from .utils import (
     as_broadcasted_tensor,
     get_horizontal_coordinates,

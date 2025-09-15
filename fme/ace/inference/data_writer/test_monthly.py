@@ -14,7 +14,7 @@ from fme.ace.inference.data_writer.monthly import (
     get_days_since_reference,
     months_for_timesteps,
 )
-from fme.core.typing_ import VariableMetadata
+from fme.core.dataset.data_typing import VariableMetadata
 
 TIMESTEP = datetime.timedelta(hours=6)
 

@@ -10,8 +10,9 @@ from fme.core.coordinates import (
     OptionalDepthCoordinate,
     OptionalHybridSigmaPressureCoordinate,
 )
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.typing_ import TensorDict, VariableMetadata
+from fme.core.typing_ import TensorDict
 
 
 @dataclasses.dataclass

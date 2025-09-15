@@ -5,10 +5,11 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.plotting import plot_paneled_data
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.ensemble import get_crps
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.typing_ import EnsembleTensorDict, TensorMapping, VariableMetadata
+from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 
 def get_gen_shape(gen_data: TensorMapping):

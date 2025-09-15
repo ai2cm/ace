@@ -8,8 +8,9 @@ import numpy as np
 import torch
 import xarray as xr
 
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.time import TimeSlice
-from fme.core.typing_ import Slice, VariableMetadata
+from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
 from .raw import RawDataWriter
