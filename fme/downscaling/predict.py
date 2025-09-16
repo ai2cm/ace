@@ -24,7 +24,7 @@ from fme.downscaling.data import (
     GriddedData,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, Model
-from fme.downscaling.patching import MultipatchConfig, PatchPredictor
+from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -68,7 +68,9 @@ class EventConfig:
     n_samples: int = 64
     date_format: str = "%Y-%m-%dT%H:%M"
     save_generated_samples: bool = False
-    patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
+    patch: PatchPredictionConfig = dataclasses.field(
+        default_factory=PatchPredictionConfig
+    )
 
     @property
     def _time_selection_slice(self) -> TimeSlice:
@@ -108,7 +110,7 @@ class EventDownscaler:
         model: DiffusionModel,
         experiment_dir: str,
         n_samples: int,
-        patch: MultipatchConfig = MultipatchConfig(
+        patch: PatchPredictionConfig = PatchPredictionConfig(
             divide_generation=True,
             composite_prediction=True,
             coarse_horizontal_overlap=1,
@@ -187,7 +189,7 @@ class Downscaler:
         model: DiffusionModel,
         experiment_dir: str,
         n_samples: int,
-        patch: MultipatchConfig = MultipatchConfig(
+        patch: PatchPredictionConfig = PatchPredictionConfig(
             divide_generation=True,
             composite_prediction=True,
             coarse_horizontal_overlap=1,
@@ -204,8 +206,8 @@ class Downscaler:
     def generation_model(self):
         if self.patch.needs_patch_predictor:
             return PatchPredictor(
-                self.model,
-                self.data.shape,
+                model=self.model,
+                coarse_yx_patch_extent=self.model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         else:
@@ -257,7 +259,9 @@ class DownscalerConfig:
     data: DataLoaderConfig
     logging: LoggingConfig
     n_samples: int = 4
-    patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
+    patch: PatchPredictionConfig = dataclasses.field(
+        default_factory=PatchPredictionConfig
+    )
     events: list[EventConfig] | None = None
     """
     This class is used to configure the downscaling model generation.
