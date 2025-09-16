@@ -100,6 +100,7 @@ class Evaluator:
             self.data.dims,
             self.model.downscale_factor,
             include_positional_comparisons=False if self.patch_data else True,
+            percentiles=[99.99, 99.9999],
         )
 
         if self.patch_data:
