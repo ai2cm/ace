@@ -438,7 +438,7 @@ def inference_helper(
     assert f"gen-{example_output_var}" in actual_var_names
     assert (
         zonal_mean_diagnostics.data_vars[f"gen-{example_output_var}"].attrs["units"]
-        == ""
+        == "cm"
     )
     assert len(zonal_mean_diagnostics.coords) == 1
     assert "lat" in zonal_mean_diagnostics.coords

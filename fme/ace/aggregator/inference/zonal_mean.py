@@ -250,8 +250,7 @@ class ZonalMeanAggregator:
             data[f"gen/{name}"] = _RawData(
                 datum=gen,
                 caption=self._get_caption("gen", name, vmin, vmax),
-                # generated data is not considered to have units
-                metadata=VariableMetadata(units="", long_name=metadata.long_name),
+                metadata=metadata,
             )
             vmin, vmax = get_cmap_limits(error, diverging=True)
             data[f"error/{name}"] = _RawData(
