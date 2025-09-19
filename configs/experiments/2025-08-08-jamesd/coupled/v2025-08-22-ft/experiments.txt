@@ -28,3 +28,6 @@ ws|training|best_inference_ckpt|normal|--not-preemptible
 
 ft-v2025-08-22-const_lr_5ep|ex
 ws|training|best_inference_ckpt|normal|--not-preemptible
+
+ft-v2025-08-22-const_lr_5ep|01K5FMWMP9P6VSGRRRK47WKKP4
+ws|training|best_inference_ckpt|normal|--not-preemptible
