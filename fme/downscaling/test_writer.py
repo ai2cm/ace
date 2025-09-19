@@ -16,6 +16,7 @@ NLAT, NLON = (8, 8)
 def create_zarr_store(path, shape, chunks, times, shards=None):
     dims = ("time", "sample", "lat", "lon")
     vars = ["var1", "var2"]
+    array_attributes = {"var1": {"units": "K", "long_name": "Variable 1"}}
     initialize_zarr(
         path=path,
         vars=vars,
@@ -25,6 +26,8 @@ def create_zarr_store(path, shape, chunks, times, shards=None):
         dim_names=dims,
         coords={"time": times},
         dtype="f4",
+        array_attributes=array_attributes,
+        group_attributes={"description": "Test Zarr store"},
     )
 
 
@@ -41,12 +44,14 @@ def test_initialize_zarr(tmp_path):
     path = os.path.join(tmp_path, "test.zarr")
     create_zarr_store(path, shape, chunks, times)
 
-    ds = xr.open_zarr(
-        path,
-    )
+    ds = xr.open_zarr(path)
     assert ds["var1"].shape == shape
     assert ds["var2"].shape == shape
     np.testing.assert_array_equal(ds.time.values, times)
+    assert ds["var1"].attrs["units"] == "K"
+    assert ds["var1"].attrs["long_name"] == "Variable 1"
+    assert ds["var2"].attrs == {}
+    assert ds.attrs["description"] == "Test Zarr store"
 
 
 @pytest.mark.parametrize(
@@ -134,6 +139,7 @@ def test_ZarrWriter(
     }
     chunks = {"time": 3, "sample": 2}
     coords = {"time": times, "lat": lat, "lon": lon, "sample": np.arange(n_samples)}
+    array_attrs = {"var": {"units": "K"}}
 
     writer = ZarrWriter(
         path=path,
@@ -141,6 +147,8 @@ def test_ZarrWriter(
         dims=("time", "sample", "lat", "lon"),
         chunks=chunks,
         data_vars=["var"],
+        array_attributes=array_attrs,
+        group_attributes={"description": "Test Zarr store"},
     )
 
     # Data is written in slices along time and sample dims
@@ -171,10 +179,19 @@ def test_ZarrWriter(
     np.testing.assert_array_equal(ds_write["time"], times)
 
     assert "no_write_var" not in ds_write.variables
+    assert ds_write["var"].attrs["units"] == "K"
+    assert ds_write.attrs["description"] == "Test Zarr store"
 
 
 def _create_writer(
-    path, n_times, chunks, shards=None, overwrite_check=True, allow_existing=False
+    path,
+    n_times,
+    chunks,
+    shards=None,
+    overwrite_check=True,
+    allow_existing=False,
+    array_attributes=None,
+    group_attributes=None,
 ):
     times = np.array(
         [
@@ -200,6 +217,8 @@ def _create_writer(
         data_vars=["var"],
         overwrite_check=overwrite_check,
         allow_existing=allow_existing,
+        array_attributes=array_attributes,
+        group_attributes=group_attributes,
     )
 
 
@@ -213,7 +232,13 @@ def test_ZarrWriter_append_to_existing(
         "var": np.random.rand(n_times, NLAT, NLON),
     }
 
-    writer_0 = _create_writer(n_times=n_times, path=path, chunks={"time": 3})
+    writer_0 = _create_writer(
+        n_times=n_times,
+        path=path,
+        chunks={"time": 3},
+        array_attributes={"var": {"units": "K"}},
+        group_attributes={"description": "Test Zarr store"},
+    )
 
     writer_0.record_batch(
         data={"var": data["var"][slice(0, 4)]}, position_slices={"time": slice(0, 4)}
@@ -226,6 +251,8 @@ def test_ZarrWriter_append_to_existing(
 
     ds = xr.open_zarr(path)
     np.testing.assert_allclose(ds["var"].values, data["var"])
+    assert ds["var"].attrs["units"] == "K"
+    assert ds.attrs["description"] == "Test Zarr store"
 
 
 def test_ZarrWriter_overwrite_check(tmp_path):

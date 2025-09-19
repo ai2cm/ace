@@ -343,7 +343,7 @@ class Trainer:
             )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
-            self.optimization.step_scheduler(valid_loss)
+            self.optimization.step_scheduler(valid_loss, is_iteration=False)
 
             time_elapsed = time.time() - start_time
             logging.info(
@@ -444,7 +444,7 @@ class Trainer:
             self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
             # Step scheduler per-iteration if configured to do so
-            scheduler_was_stepped = self.optimization.step_scheduler()
+            scheduler_was_stepped = self.optimization.step_scheduler(is_iteration=True)
             self.num_batches_seen += 1
             self._current_epoch_num_batches_seen += 1
             n_samples_seen_since_logging += self.train_data.batch_size

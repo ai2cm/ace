@@ -105,7 +105,6 @@ class Optimization(OptimizationABC):
         else:
             self.gscaler = None
         self.scheduler = scheduler.build(self.optimizer, max_epochs)
-        self._scheduler_config = scheduler
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
@@ -131,7 +130,11 @@ class Optimization(OptimizationABC):
         for m in modules:
             m.train()
 
-    def step_scheduler(self, valid_loss: float | None = None) -> bool:
+    def step_scheduler(
+        self,
+        valid_loss: float | None = None,
+        is_iteration: bool = False,
+    ) -> bool:
         """
         Step the scheduler.
 
@@ -140,39 +143,20 @@ class Optimization(OptimizationABC):
                 learning rate based on whether the validation loss is decreasing.
                 If None, this indicates the call is from within a training iteration
                 rather than at the end of an epoch.
+            is_iteration: Whether the step is called from a training iteration or at
+                the end of an epoch. Default is epoch.
         """
-        call_step = False
-        if self.scheduler is not None:
-            call_step = self._should_step_scheduler(valid_loss)
-            if call_step:
-                try:
-                    if valid_loss is not None:
-                        self.scheduler.step(metrics=valid_loss)
-                    else:
-                        self.scheduler.step()
-                except TypeError:
-                    # Some schedulers don't accept metrics argument
+        call_step = self.scheduler.should_step(is_iteration)
+        if call_step:
+            try:
+                if valid_loss is not None:
+                    self.scheduler.step(metrics=valid_loss)
+                else:
                     self.scheduler.step()
+            except TypeError:
+                # Some schedulers don't accept metrics argument
+                self.scheduler.step()
         return call_step
-
-    def _should_step_scheduler(self, valid_loss: float | None) -> bool:
-        """Determine whether the scheduler should be stepped based on
-        configuration and context.
-
-        Args:
-            valid_loss: If None, we're being called from within training iterations.
-                If not None, we're being called at the end of an epoch.
-
-        Returns:
-            True if the scheduler should be stepped.
-
-        """
-        if self._scheduler_config.steps_per_iteration:
-            # Step every iteration, only when valid_loss is None
-            return valid_loss is None
-        else:
-            # Step every epoch, only when valid_loss is not None
-            return valid_loss is not None
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
         if self._use_gradient_accumulation:
@@ -215,9 +199,7 @@ class Optimization(OptimizationABC):
         """
         state = {
             "optimizer_state_dict": self.optimizer.state_dict(),
-            "scheduler_state_dict": (
-                self.scheduler.state_dict() if self.scheduler is not None else None
-            ),
+            "scheduler_state_dict": (self.scheduler.state_dict()),
             "gscaler_state_dict": (
                 self.gscaler.state_dict() if self.gscaler is not None else None
             ),
@@ -229,8 +211,7 @@ class Optimization(OptimizationABC):
         Loads state from a serializable data structure.
         """
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
-        if self.scheduler is not None:
-            self.scheduler.load_state_dict(state["scheduler_state_dict"])
+        self.scheduler.load_state_dict(state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
 
@@ -317,7 +298,9 @@ class NullOptimization(OptimizationABC):
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return module
 
-    def step_scheduler(self, valid_loss: float | None = None) -> bool:
+    def step_scheduler(
+        self, valid_loss: float | None = None, is_iteration: bool = False
+    ) -> bool:
         return False
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:

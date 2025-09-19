@@ -24,13 +24,17 @@ class OptimizationABC(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def step_scheduler(self, valid_loss: float | None = None) -> bool:
+    def step_scheduler(
+        self, valid_loss: float | None = None, is_iteration: bool = False
+    ) -> bool:
         """
         Step the scheduler.
 
         Args:
             valid_loss: The validation loss. Used in schedulers which change the
                 learning rate based on whether the validation loss is decreasing.
+            is_iteration: Whether the step is called from a training iteration or at
+                the end of an epoch. Default is epoch.
         """
         ...
 

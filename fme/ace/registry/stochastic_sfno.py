@@ -6,7 +6,11 @@ from typing import Literal
 import torch
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
-from fme.core.models.conditional_sfno.sfnonet import Context, ContextConfig
+from fme.core.models.conditional_sfno.sfnonet import (
+    Context,
+    ContextConfig,
+    get_lat_lon_sfnonet,
+)
 from fme.core.models.conditional_sfno.sfnonet import (
     SphericalFourierNeuralOperatorNet as ConditionalSFNO,
 )
@@ -161,7 +165,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         n_out_channels: int,
         img_shape: tuple[int, int],
     ):
-        sfno_net = ConditionalSFNO(
+        sfno_net = get_lat_lon_sfnonet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,

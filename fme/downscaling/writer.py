@@ -88,11 +88,14 @@ def initialize_zarr(
     coords: dict[str, np.ndarray],
     dim_names: tuple,
     dtype="f4",
+    array_attributes: dict[str, dict[str, str]] | None = None,
+    group_attributes: dict[str, str] | None = None,
 ):
     """
     Initialize a Zarr group with the specified dimensions and chunk sizes.
     """
     root = zarr.open(path, mode="a")
+    root.update_attributes(group_attributes or {})
     chunks_tuple = tuple(
         [chunks.get(dim, dim_sizes[d]) for d, dim in enumerate(dim_names)]
     )
@@ -105,6 +108,7 @@ def initialize_zarr(
                 raise ValueError(f"Chunk shape {c} is not divisible by shard shape {s}")
     else:
         shards_tuple = None
+    array_attributes = array_attributes or {}
     for var in vars:
         root.create_array(
             name=var,
@@ -113,6 +117,7 @@ def initialize_zarr(
             shards=shards_tuple,
             dtype=dtype,
             dimension_names=dim_names,
+            attributes=array_attributes.get(var, {}),
         )
 
     if "time" in coords:
@@ -154,6 +159,8 @@ class ZarrWriter:
         data_vars: list[str],
         chunks: dict[str, int] | None = None,
         shards: dict[str, int] | None = None,
+        array_attributes: dict[str, dict[str, str]] | None = None,
+        group_attributes: dict[str, str] | None = None,
         allow_existing: bool = False,
         overwrite_check: bool = True,
     ):
@@ -170,6 +177,9 @@ class ZarrWriter:
         chunks: Optional mapping of dimension name to chunk size. If a dimension is not
             in this mapping, the chunk size will be the same as the dimension size.
         shards: Optional mapping to store multiple chunks in a single storage object.
+        array_attributes: Optional mapping of variable name to a dictionary of array
+            attributes, e.g. units and long_name.
+        group_attributes: Optional dictionary of attributes to add to the zarr group.
         allow_existing: If true, allow writing to a preexisting store.
         overwrite_check: If true, check when recording each batch that the slice of the
             existing store does not already contain data.
@@ -180,6 +190,8 @@ class ZarrWriter:
         self.data_vars = data_vars
         self.chunks = chunks or {}
         self.shards = shards or None
+        self.array_attributes = array_attributes
+        self.group_attributes = group_attributes
         self.dist = Distributed.get_instance()
         self.overwrite_check = overwrite_check
         if allow_existing:
@@ -212,6 +224,8 @@ class ZarrWriter:
         ds = xr.open_zarr(path)
         coords = {k: v.values for k, v in ds.coords.items()}
         dims_list = [ds[var].dims for var in ds.data_vars]
+        array_attributes = {var: dict(ds[var].attrs) for var in ds.data_vars}
+        group_attributes = dict(ds.attrs)
         if not all(dims == dims_list[0] for dims in dims_list):
             raise ValueError(
                 "Data arrays must have same dim order when writing "
@@ -223,6 +237,8 @@ class ZarrWriter:
             coords=coords,
             chunks=ds.chunks,
             data_vars=list(ds.data_vars),
+            array_attributes=array_attributes,
+            group_attributes=group_attributes,
             allow_existing=True,
         )
 
@@ -273,6 +289,8 @@ class ZarrWriter:
                 coords=self.coords,
                 dim_names=self.dims,
                 dtype=data_dtype,
+                array_attributes=self.array_attributes,
+                group_attributes=self.group_attributes,
             )
             self.dist.barrier()
             self._store_initialized = True

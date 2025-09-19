@@ -1,0 +1,215 @@
+import dataclasses
+
+import torch
+
+from fme.core.typing_ import TensorDict
+from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
+from fme.downscaling.models import DiffusionModel, Model, ModelOutputs
+from fme.downscaling.patching import Patch, get_patches
+
+
+@dataclasses.dataclass
+class PatchPredictionConfig:
+    """
+    Configuration to enable predictions on multiple patches for evaluation.
+
+    Args:
+        divide_generation: enables the patched prediction of the full
+            input data extent for generation.
+        composite_prediction: if True, recombines the smaller prediction
+            regions into the original full region as a single sample.
+        coarse_horizontal_overlap: number of pixels to overlap in the
+            coarse data.
+    """
+
+    divide_generation: bool = False
+    composite_prediction: bool = False
+    coarse_horizontal_overlap: int = 1
+
+    @property
+    def needs_patch_data_generator(self):
+        # If final predictions are not composited together, the BatchData is divided
+        # into patches before being passed to the top level no-target generation call.
+        # If final predictions are composited together, the BatchData is divided
+        # into patches within the PatchPredictor's generation method.
+        if self.divide_generation and not self.composite_prediction:
+            return True
+        return False
+
+    @property
+    def needs_patch_predictor(self):
+        if self.divide_generation and self.composite_prediction:
+            return True
+        return False
+
+
+class PatchPredictor:
+    """
+    Model prediction wrapper for generating a full-extent prediction
+    by dividing the input into a grid of patches.
+    """
+
+    def __init__(
+        self,
+        model: DiffusionModel | Model,
+        coarse_yx_patch_extent: tuple[int, int] | None = None,
+        coarse_horizontal_overlap: int = 1,
+    ):
+        """
+        Args:
+            model: the model to use for generating predictions.
+            coarse_yx_patch_extent: The shape of the coarse region passed
+                to the downscaling model for prediction. If None, will be
+                inferred from model.coarse_shape.
+            coarse_horizontal_overlap: the number of pixels to overlap
+                between patches in the coarse data.
+        """
+        self.model = model
+        self.modules = self.model.modules
+
+        if coarse_yx_patch_extent is None:
+            coarse_yx_patch_extent = self.model.coarse_shape
+
+        self.coarse_yx_patch_extent = coarse_yx_patch_extent
+        self.downscale_factor = self.model.downscale_factor
+        self.coarse_horizontal_overlap = coarse_horizontal_overlap
+
+    @property
+    def coarse_shape(self):
+        return self.coarse_yx_patch_extent
+
+    def _get_patches(
+        self, coarse_yx_extent, fine_yx_extent
+    ) -> tuple[list[Patch], list[Patch]]:
+        coarse_patches = get_patches(
+            yx_extent=coarse_yx_extent,
+            yx_patch_extent=self.coarse_yx_patch_extent,
+            overlap=self.coarse_horizontal_overlap,
+            drop_partial_patches=False,
+        )
+        fine_yx_patch_extent = scale_tuple(
+            self.coarse_yx_patch_extent, self.downscale_factor
+        )
+
+        fine_patches = get_patches(
+            yx_extent=fine_yx_extent,
+            yx_patch_extent=fine_yx_patch_extent,
+            overlap=self.coarse_horizontal_overlap * self.downscale_factor,
+            drop_partial_patches=False,
+        )
+
+        return coarse_patches, fine_patches
+
+    @torch.no_grad()
+    def generate_on_batch(
+        self,
+        batch: PairedBatchData,
+        n_samples: int = 1,
+    ) -> ModelOutputs:
+        predictions = []
+        loss = 0.0
+
+        coarse_patches, fine_patches = self._get_patches(
+            coarse_yx_extent=batch.coarse.horizontal_shape,
+            fine_yx_extent=batch.fine.horizontal_shape,
+        )
+
+        for paired_patch_data in batch.generate_from_patches(
+            coarse_patches=coarse_patches, fine_patches=fine_patches
+        ):
+            model_output = self.model.generate_on_batch(paired_patch_data, n_samples)
+            predictions.append(model_output.prediction)
+            loss = loss + model_output.loss
+
+        prediction = composite_patch_predictions(predictions, fine_patches)
+        # add ensemble dim to the target since not provided by the model
+        target = {k: v.unsqueeze(1) for k, v in batch.fine.data.items()}
+        outputs = ModelOutputs(
+            prediction=prediction,
+            target=target,
+            loss=loss,
+        )
+        return outputs
+
+    @torch.no_grad()
+    def generate_on_batch_no_target(
+        self,
+        batch: BatchData,
+        n_samples: int = 1,
+    ) -> TensorDict:
+        coarse_yx_extent = batch.horizontal_shape
+        fine_yx_extent = scale_tuple(coarse_yx_extent, self.downscale_factor)
+        coarse_patches, fine_patches = self._get_patches(
+            coarse_yx_extent=coarse_yx_extent, fine_yx_extent=fine_yx_extent
+        )
+        predictions = []
+        for patch in batch.generate_from_patches(coarse_patches):
+            predictions.append(
+                self.model.generate_on_batch_no_target(
+                    batch=patch,
+                    n_samples=n_samples,
+                )
+            )
+        prediction = composite_patch_predictions(predictions, fine_patches)
+
+        return prediction
+
+
+def _get_full_extent_from_patches(patches: list[Patch]) -> tuple[int, int]:
+    # input patches should have int start/stop values
+    y_max = max(patch.input_slice.y.stop for patch in patches)
+    x_max = max(patch.input_slice.x.stop for patch in patches)
+    return y_max, x_max
+
+
+def composite_patch_predictions(
+    predictions: list[TensorDict], patches: list[Patch]
+) -> TensorDict:
+    """
+    Take the predictions from patches and combine them into a single
+    tensor with the full extent of the patches. The predictions are
+    averaged in overlapping patch regions.
+    """
+    if len(predictions) != len(patches):
+        raise ValueError("The number of predictions must match the number of patches.")
+
+    y_size, x_size = _get_full_extent_from_patches(patches)
+
+    example_data_tensor = list(predictions[0].values())[0]
+    prediction_vars = list(predictions[0].keys())
+
+    # prediction tensors have dims [batch, generated_sample, lat, lon]
+    # a temporary patch dimension is added at axis 0 and stacked before returning
+    empty_tensor = torch.full(
+        (
+            len(predictions),
+            example_data_tensor.shape[0],
+            example_data_tensor.shape[1],
+            y_size,
+            x_size,
+        ),
+        torch.nan,
+        device=example_data_tensor.device,
+    )
+    combined_data = {var: empty_tensor for var in prediction_vars}
+
+    for i, pred in enumerate(predictions):
+        in_slice = patches[i].input_slice
+        out_slice = patches[i].output_slice
+
+        # Adjust the input slice start if the output slice is trimmed
+        adjusted_in_slice_y = slice(
+            in_slice.y.start + (out_slice.y.start or 0), in_slice.y.stop
+        )
+        adjusted_in_slice_x = slice(
+            in_slice.x.start + (out_slice.x.start or 0), in_slice.x.stop
+        )
+        for var in prediction_vars:
+            combined_data[var][i, :, :, adjusted_in_slice_y, adjusted_in_slice_x] = (
+                pred[var][..., out_slice.y, out_slice.x]
+            )
+
+    for var in prediction_vars:
+        combined_data[var] = torch.nanmean(combined_data[var], dim=0)
+
+    return combined_data

@@ -25,7 +25,6 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.metrics import spherical_area_weights
 from fme.core.typing_ import TensorMapping
-from fme.downscaling.data.patching_tmp import Patch, get_patches
 from fme.downscaling.data.utils import (
     ClosedInterval,
     check_leading_dim,
@@ -35,6 +34,7 @@ from fme.downscaling.data.utils import (
     scale_slice,
     scale_tuple,
 )
+from fme.downscaling.patching import Patch, get_patches
 
 
 @dataclasses.dataclass

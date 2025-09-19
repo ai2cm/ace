@@ -1031,7 +1031,7 @@ def test_lr_logging_by_epoch(tmp_path: str):
             n_train_batches=n_train_batches,
             scheduler_config=SchedulerConfig(
                 type="ConstantLR",
-                steps_per_iteration=False,
+                step_each_iteration=False,
             ),
         )
         return trainer
@@ -1069,7 +1069,7 @@ def test_lr_logging_by_iter(tmp_path: str):
             n_train_batches=n_train_batches,
             scheduler_config=SchedulerConfig(
                 type="ConstantLR",
-                steps_per_iteration=True,
+                step_each_iteration=True,
             ),
         )
         return trainer

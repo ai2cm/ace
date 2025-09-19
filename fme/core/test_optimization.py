@@ -256,19 +256,19 @@ def test_sequential_scheduler_trapezoid():
     warmup_scheduler = SchedulerConfig(
         type="LinearLR",
         kwargs={"start_factor": 0.1, "end_factor": 1.0, "total_iters": warmup_steps},
-        steps_per_iteration=True,
+        step_each_iteration=True,
     )
     # ConstantLR keeps the LR constant at the current level
     constant_scheduler = SchedulerConfig(
         type="ConstantLR",
         kwargs={"factor": 1.0, "total_iters": constant_steps},
-        steps_per_iteration=True,
+        step_each_iteration=True,
     )
     # LinearLR for cooldown from current LR to 0
     cooldown_scheduler = SchedulerConfig(
         type="LinearLR",
         kwargs={"start_factor": 1.0, "end_factor": 0.1, "total_iters": cooldown_steps},
-        steps_per_iteration=True,
+        step_each_iteration=True,
     )
 
     sequential_scheduler = SequentialSchedulerConfig(
@@ -301,8 +301,8 @@ def test_sequential_scheduler_trapezoid():
         loss = model(x).sum()
         optimization.accumulate_loss(loss)
         optimization.step_weights()
-        # Step scheduler per iteration (no valid_loss)
-        optimization.step_scheduler(valid_loss=None)
+        # Step scheduler each iteration
+        optimization.step_scheduler(is_iteration=True)
 
     # Verify trapezoid shape
     # Warmup phase: LR should increase
@@ -384,7 +384,7 @@ def test_sequential_scheduler_reload():
         loss = model(x).sum()
         optimization.accumulate_loss(loss)
         optimization.step_weights()
-        optimization.step_scheduler(loss.item())
+        optimization.step_scheduler(loss.item(), is_iteration=False)
     model_first_final_state = copy.deepcopy(model.state_dict())
 
     # Reset and reload
@@ -408,7 +408,7 @@ def test_sequential_scheduler_reload():
         loss = model(x).sum()
         optimization.accumulate_loss(loss)
         optimization.step_weights()
-        optimization.step_scheduler(loss.item())
+        optimization.step_scheduler(loss.item(), is_iteration=False)
     model_second_final_state = model.state_dict()
 
     # Verify identical final states
@@ -419,14 +419,14 @@ def test_sequential_scheduler_reload():
 def test_scheduler_step_timing():
     """
     Test that schedulers step at the correct timing based on
-    steps_per_iteration setting.
+    step_each_iteration setting.
 
     """
     model = nn.Linear(1, 1).to(fme.get_device())
 
     # Test per-iteration stepping
     per_iteration_scheduler = SchedulerConfig(
-        type="StepLR", kwargs={"step_size": 2, "gamma": 0.5}, steps_per_iteration=True
+        type="StepLR", kwargs={"step_size": 2, "gamma": 0.5}, step_each_iteration=True
     )
 
     optimization = Optimization(
@@ -442,13 +442,15 @@ def test_scheduler_step_timing():
     # Initial LR
     initial_lr = optimization.learning_rate
 
-    # Step scheduler per iteration (should step)
-    optimization.step_scheduler(valid_loss=None)
-    optimization.step_scheduler(valid_loss=None)  # 2 steps, should trigger StepLR
+    # Step scheduler each iteration
+    optimization.step_scheduler(valid_loss=None, is_iteration=True)
+    optimization.step_scheduler(
+        valid_loss=None, is_iteration=True
+    )  # 2 steps, should trigger StepLR
     lr_after_iterations = optimization.learning_rate
 
-    # Step scheduler per epoch (should not step since steps_per_iteration=True)
-    optimization.step_scheduler(valid_loss=0.5)
+    # Step scheduler per epoch (should not step since step_each_iteration=True)
+    optimization.step_scheduler(valid_loss=0.5, is_iteration=False)
     lr_after_epoch = optimization.learning_rate
 
     # Verify per-iteration stepping worked but per-epoch didn't
@@ -457,12 +459,12 @@ def test_scheduler_step_timing():
     ), "LR should decrease after per-iteration steps"
     assert (
         lr_after_epoch == lr_after_iterations
-    ), "LR should not change on per-epoch step when steps_per_iteration=True"
+    ), "LR should not change on per-epoch step when step_each_iteration=True"
 
     # Test per-epoch stepping
     model = nn.Linear(1, 1).to(fme.get_device())
     per_epoch_scheduler = SchedulerConfig(
-        type="StepLR", kwargs={"step_size": 1, "gamma": 0.5}, steps_per_iteration=False
+        type="StepLR", kwargs={"step_size": 1, "gamma": 0.5}, step_each_iteration=False
     )
 
     optimization = Optimization(
@@ -477,16 +479,16 @@ def test_scheduler_step_timing():
 
     initial_lr = optimization.learning_rate
 
-    # Step scheduler per iteration (should not step since steps_per_iteration=False)
-    optimization.step_scheduler()
+    # Step scheduler each iteration (should not step since step_each_iteration=False)
+    optimization.step_scheduler(is_iteration=True)
     lr_after_iteration = optimization.learning_rate
 
     # Step scheduler per epoch (should step)
-    optimization.step_scheduler(valid_loss=0.5)
+    optimization.step_scheduler(is_iteration=False)
     lr_after_epoch = optimization.learning_rate
 
     # Verify per-epoch stepping worked but per-iteration didn't
     assert (
         lr_after_iteration == initial_lr
-    ), "LR should not change on per-iteration step when steps_per_iteration=False"
+    ), "LR should not change on per-iteration step when step_each_iteration=False"
     assert lr_after_epoch < initial_lr, "LR should decrease after per-epoch step"
