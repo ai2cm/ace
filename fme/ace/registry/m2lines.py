@@ -21,6 +21,7 @@ class SamudraBuilder(ModuleConfig):
     pad: str = "circular"
     norm: str = "instance"
     norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    upscale_factor: int = 4
 
     def __post_init__(self):
         if "num_features" in self.norm_kwargs:
@@ -43,4 +44,5 @@ class SamudraBuilder(ModuleConfig):
             pad=self.pad,
             norm=self.norm,
             norm_kwargs=self.norm_kwargs,
+            upscale_factor=self.upscale_factor,
         )
