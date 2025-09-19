@@ -34,3 +34,6 @@ ws|training|best_inference_ckpt|normal|--not-preemptible
 
 ft-v2025-08-22-const_lr_5ep|ex
 ws|training|best_inference_ckpt|normal|--not-preemptible
+
+ft-v2025-08-22-const_lr_5ep-ncs1-oloss_w0p1|01K5HFSJ46CHCH7Q5GDHM7JZN2
+ws|training|best_inference_ckpt|normal|--not-preemptible
