@@ -25,3 +25,6 @@ ft-ojyzoqli-cos_lr_20ep-ncs2-atm21loss|01K43HC42T8P835V4HPVWYF9HX|training|best_
 
 ft-04b09e64-cos_lr_20ep|ex
 ws|training|best_inference_ckpt|normal|--not-preemptible
+
+ft-v2025-08-22-const_lr_5ep|ex
+ws|training|best_inference_ckpt|normal|--not-preemptible
