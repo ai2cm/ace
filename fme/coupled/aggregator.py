@@ -7,6 +7,9 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.main import (
+    InferenceAggregator as InferenceAggregator_,
+)
+from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
@@ -452,6 +455,179 @@ class InferenceEvaluatorAggregator(
         ) / num_channels
         return {
             "time_mean_norm/rmse/channel_mean": channel_mean,
+            **ocean_logs,
+            **atmos_logs,
+        }
+
+    @torch.no_grad()
+    def flush_diagnostics(self, subdir: str | None = None):
+        """
+        Flushes diagnostics to netCDF files, in separate directories for ocean and
+        atmosphere.
+        """
+        for aggregator in self._aggregators.values():
+            aggregator.flush_diagnostics(subdir)
+
+
+@dataclasses.dataclass
+class InferenceAggregatorConfig:
+    """
+    Configuration for inference aggregator.
+
+    Parameters:
+        log_global_mean_time_series: Whether to log global mean time series metrics.
+        atmosphere_time_mean_reference_data: Path to atmosphere reference time means.
+        ocean_time_mean_reference_data: Path to ocean reference time means.
+    """
+
+    log_global_mean_time_series: bool = True
+    atmosphere_time_mean_reference_data: str | None = None
+    ocean_time_mean_reference_data: str | None = None
+
+    def build(
+        self,
+        dataset_info: CoupledDatasetInfo,
+        n_timesteps_ocean: int,
+        n_timesteps_atmosphere: int,
+        output_dir: str,
+    ) -> "InferenceAggregator":
+        if self.atmosphere_time_mean_reference_data is None:
+            atmos_time_mean = None
+        else:
+            atmos_time_mean = xr.open_dataset(
+                self.atmosphere_time_mean_reference_data, decode_timedelta=False
+            )
+        if self.ocean_time_mean_reference_data is None:
+            ocean_time_mean = None
+        else:
+            ocean_time_mean = xr.open_dataset(
+                self.ocean_time_mean_reference_data, decode_timedelta=False
+            )
+        return InferenceAggregator(
+            dataset_info=dataset_info,
+            n_timesteps_ocean=n_timesteps_ocean,
+            n_timesteps_atmosphere=n_timesteps_atmosphere,
+            output_dir=output_dir,
+            log_global_mean_time_series=self.log_global_mean_time_series,
+            atmosphere_time_mean_reference_data=atmos_time_mean,
+            ocean_time_mean_reference_data=ocean_time_mean,
+        )
+
+
+class InferenceAggregator(
+    InferenceAggregatorABC[
+        CoupledPrognosticState,
+        CoupledPairedData,
+    ]
+):
+    """
+    Aggregates statistics on a single timeseries of data.
+
+    To use, call `record_batch` on the results of each batch, then call
+    `get_logs` to get a dictionary of statistics when you're done.
+    """
+
+    def __init__(
+        self,
+        dataset_info: CoupledDatasetInfo,
+        n_timesteps_ocean: int,
+        n_timesteps_atmosphere: int,
+        save_diagnostics: bool = True,
+        output_dir: str | None = None,
+        atmosphere_time_mean_reference_data: xr.Dataset | None = None,
+        ocean_time_mean_reference_data: xr.Dataset | None = None,
+        log_global_mean_time_series: bool = True,
+    ):
+        """
+        Args:
+            dataset_info: The coordinates of the dataset.
+            n_timesteps_ocean: Number of timesteps for ocean.
+            n_timesteps_atmosphere: Number of timesteps for atmosphere.
+            save_diagnostics: Whether to save diagnostics.
+            output_dir: Directory to save diagnostic output.
+            atmosphere_time_mean_reference_data: Reference time means for atmosphere.
+            ocean_time_mean_reference_data: Reference time means for ocean.
+            log_global_mean_time_series: Whether to log global mean time series metrics.
+        """
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics")
+        self._log_time_series = log_global_mean_time_series
+        self._save_diagnostics = save_diagnostics
+        self._output_dir = output_dir
+        self._aggregators = {
+            "ocean": InferenceAggregator_(
+                dataset_info=dataset_info.ocean,
+                n_timesteps=n_timesteps_ocean,
+                save_diagnostics=save_diagnostics,
+                output_dir=(
+                    os.path.join(output_dir, "ocean")
+                    if output_dir is not None
+                    else None
+                ),
+                log_global_mean_time_series=log_global_mean_time_series,
+                time_mean_reference_data=ocean_time_mean_reference_data,
+            ),
+            "atmosphere": InferenceAggregator_(
+                dataset_info=dataset_info.atmosphere,
+                n_timesteps=n_timesteps_atmosphere,
+                save_diagnostics=save_diagnostics,
+                output_dir=(
+                    os.path.join(output_dir, "atmosphere")
+                    if output_dir is not None
+                    else None
+                ),
+                log_global_mean_time_series=log_global_mean_time_series,
+                time_mean_reference_data=atmosphere_time_mean_reference_data,
+            ),
+        }
+
+    @property
+    def ocean(self) -> InferenceAggregator_:
+        return self._aggregators["ocean"]
+
+    @property
+    def atmosphere(self) -> InferenceAggregator_:
+        return self._aggregators["atmosphere"]
+
+    @property
+    def log_time_series(self) -> bool:
+        return self._log_time_series
+
+    @torch.no_grad()
+    def record_batch(self, data: CoupledPairedData) -> InferenceLogs:
+        ocean_logs = self.ocean.record_batch(data.ocean_data)
+        atmos_logs = self.atmosphere.record_batch(data.atmosphere_data)
+        n_times_ocean = data.ocean_data.time["time"].size
+        n_times_atmos = data.atmosphere_data.time["time"].size
+        return _combine_logs(ocean_logs, atmos_logs, n_times_atmos // n_times_ocean)
+
+    @torch.no_grad()
+    def record_initial_condition(
+        self,
+        initial_condition: CoupledPrognosticState,
+    ) -> InferenceLogs:
+        """
+        Record the initial condition.
+
+        May only be recorded once, before any calls to record_batch.
+        """
+        ocean_logs = self.ocean.record_initial_condition(initial_condition.ocean_data)
+        atmos_logs = self.atmosphere.record_initial_condition(
+            initial_condition.atmosphere_data
+        )
+        # initial condition "steps" must align, so record both
+        return _combine_logs(ocean_logs, atmos_logs, n_atmos_steps_per_ocean_step=1)
+
+    def get_summary_logs(self) -> InferenceLog:
+        ocean_logs = self.ocean.get_summary_logs()
+        atmos_logs = self.atmosphere.get_summary_logs()
+        duplicates = set(ocean_logs.keys()) & set(atmos_logs.keys())
+        if len(duplicates) > 0:
+            raise ValueError(
+                "Duplicate keys found in ocean and atmosphere "
+                f"inference evaluator aggregator logs: {duplicates}."
+            )
+        return {
             **ocean_logs,
             **atmos_logs,
         }

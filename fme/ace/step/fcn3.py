@@ -8,7 +8,7 @@ import dacite
 import torch
 from torch import nn
 
-from fme.ace.models.makani_fcn2.models.networks.fourcastnet2 import (  # type: ignore
+from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (  # type: ignore
     AtmoSphericNeuralOperatorNet,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
@@ -31,9 +31,9 @@ DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
 @dataclasses.dataclass
-class FCN2Config:
+class FCN3Config:
     """
-    Configuration for a FCN2 model.
+    Configuration for a FCN3 model.
     """
 
     model_grid_type: str = "legendre-gauss"
@@ -116,9 +116,9 @@ class FCN2Config:
 
 
 @dataclasses.dataclass
-class FCN2Selector:
-    type: Literal["FCN2"]
-    config: FCN2Config
+class FCN3Selector:
+    type: Literal["FCN3"]
+    config: FCN3Config
 
     def build(
         self,
@@ -141,9 +141,9 @@ class FCN2Selector:
         )
 
 
-@StepSelector.register("FCN2")
+@StepSelector.register("FCN3")
 @dataclasses.dataclass
-class FCN2StepConfig(StepConfigABC):
+class FCN3StepConfig(StepConfigABC):
     """
     Configuration for a single module stepper.
 
@@ -158,7 +158,7 @@ class FCN2StepConfig(StepConfigABC):
         residual_prediction: Whether to use residual prediction.
     """
 
-    builder: FCN2Selector
+    builder: FCN3Selector
     forcing_names: list[str]
     atmosphere_prognostic_names: list[str]
     atmosphere_diagnostic_names: list[str]
@@ -182,7 +182,7 @@ class FCN2StepConfig(StepConfigABC):
                 )
         atmosphere_out_names = []
         atmosphere_in_names = []
-        # the FCN2 model expects atmosphere "channels" to be the faster dimension
+        # the FCN3 model expects atmosphere "channels" to be the faster dimension
         # so that they can be encoded together, meaning we must replicate that
         # ordering here.
         for i in range(self.atmosphere_levels):
@@ -224,7 +224,7 @@ class FCN2StepConfig(StepConfigABC):
         )
 
     @classmethod
-    def from_state(cls, state) -> "FCN2StepConfig":
+    def from_state(cls, state) -> "FCN3StepConfig":
         state = cls._remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
@@ -292,7 +292,7 @@ class FCN2StepConfig(StepConfigABC):
         self,
         dataset_info: DatasetInfo,
         init_weights: Callable[[list[nn.Module]], None],
-    ) -> "FCN2Step":
+    ) -> "FCN3Step":
         logging.info("Initializing stepper from provided config")
         corrector = dataset_info.vertical_coordinate.build_corrector(
             config=self.corrector,
@@ -300,7 +300,7 @@ class FCN2StepConfig(StepConfigABC):
             timestep=dataset_info.timestep,
         )
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
-        return FCN2Step(
+        return FCN3Step(
             config=self,
             img_shape=dataset_info.img_shape,
             corrector=corrector,
@@ -313,7 +313,7 @@ class FCN2StepConfig(StepConfigABC):
         self.normalization.load()
 
 
-class FCN2Step(StepABC):
+class FCN3Step(StepABC):
     """
     Step class for a single pytorch module.
     """
@@ -323,7 +323,7 @@ class FCN2Step(StepABC):
 
     def __init__(
         self,
-        config: FCN2StepConfig,
+        config: FCN3StepConfig,
         img_shape: tuple[int, int],
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
@@ -379,7 +379,7 @@ class FCN2Step(StepABC):
         self.out_names = config.out_names
 
     @property
-    def config(self) -> FCN2StepConfig:
+    def config(self) -> FCN3StepConfig:
         return self._config
 
     @property

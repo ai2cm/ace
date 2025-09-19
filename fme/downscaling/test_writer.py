@@ -1,4 +1,5 @@
 import datetime
+import math
 import os
 
 import cftime
@@ -12,17 +13,21 @@ from fme.downscaling.writer import ZarrWriter, initialize_zarr, insert_into_zarr
 NLAT, NLON = (8, 8)
 
 
-def create_zarr_store(path, shape, chunks, times):
+def create_zarr_store(path, shape, chunks, times, shards=None):
     dims = ("time", "sample", "lat", "lon")
     vars = ["var1", "var2"]
+    array_attributes = {"var1": {"units": "K", "long_name": "Variable 1"}}
     initialize_zarr(
         path=path,
         vars=vars,
         dim_sizes=shape,
         chunks=chunks,
+        shards=shards,
         dim_names=dims,
         coords={"time": times},
         dtype="f4",
+        array_attributes=array_attributes,
+        group_attributes={"description": "Test Zarr store"},
     )
 
 
@@ -39,12 +44,14 @@ def test_initialize_zarr(tmp_path):
     path = os.path.join(tmp_path, "test.zarr")
     create_zarr_store(path, shape, chunks, times)
 
-    ds = xr.open_zarr(
-        path,
-    )
+    ds = xr.open_zarr(path)
     assert ds["var1"].shape == shape
     assert ds["var2"].shape == shape
     np.testing.assert_array_equal(ds.time.values, times)
+    assert ds["var1"].attrs["units"] == "K"
+    assert ds["var1"].attrs["long_name"] == "Variable 1"
+    assert ds["var2"].attrs == {}
+    assert ds.attrs["description"] == "Test Zarr store"
 
 
 @pytest.mark.parametrize(
@@ -56,8 +63,8 @@ def test_initialize_zarr(tmp_path):
     ],
 )
 def test_insert_into_zarr(tmp_path, time_batch_size):
-    n_times = 10
-    n_samples = 9
+    n_times = 20
+    n_samples = 20
     time_chunk_size = 3
     sample_chunk_size = 4
     chunks = {
@@ -88,8 +95,10 @@ def test_insert_into_zarr(tmp_path, time_batch_size):
     for t in range(int(np.ceil(n_times / time_batch_size))):
         for s in range(int(np.ceil(n_samples / chunks["sample"]))):
             insert_slices = {
-                0: slice(t * time_batch_size, time_batch_size * (t + 1)),
-                1: slice(s * sample_chunk_size, sample_chunk_size * (s + 1)),
+                0: slice(t * time_batch_size, min(time_batch_size * (t + 1), n_times)),
+                1: slice(
+                    s * sample_chunk_size, min(sample_chunk_size * (s + 1), n_samples)
+                ),
             }
             batch_data = {
                 "var1": data["var1"][insert_slices[0], insert_slices[1], :, :],
@@ -130,6 +139,7 @@ def test_ZarrWriter(
     }
     chunks = {"time": 3, "sample": 2}
     coords = {"time": times, "lat": lat, "lon": lon, "sample": np.arange(n_samples)}
+    array_attrs = {"var": {"units": "K"}}
 
     writer = ZarrWriter(
         path=path,
@@ -137,12 +147,14 @@ def test_ZarrWriter(
         dims=("time", "sample", "lat", "lon"),
         chunks=chunks,
         data_vars=["var"],
+        array_attributes=array_attrs,
+        group_attributes={"description": "Test Zarr store"},
     )
 
     # Data is written in slices along time and sample dims
     position_slices = {
         "time": slice(3, 6),
-        "sample": slice(2, 4),
+        "sample": slice(1, 3),
     }
     batch_data = {
         v: data[v][position_slices["time"], position_slices["sample"], :, :]
@@ -167,3 +179,174 @@ def test_ZarrWriter(
     np.testing.assert_array_equal(ds_write["time"], times)
 
     assert "no_write_var" not in ds_write.variables
+    assert ds_write["var"].attrs["units"] == "K"
+    assert ds_write.attrs["description"] == "Test Zarr store"
+
+
+def _create_writer(
+    path,
+    n_times,
+    chunks,
+    shards=None,
+    overwrite_check=True,
+    allow_existing=False,
+    array_attributes=None,
+    group_attributes=None,
+):
+    times = np.array(
+        [
+            cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=i)
+            for i in range(n_times)
+        ]
+    )
+    lat = np.linspace(-90, 90, NLAT)
+    lon = np.linspace(-180, 180, NLON)
+
+    coords = {
+        "time": times,
+        "lat": lat,
+        "lon": lon,
+    }
+
+    return ZarrWriter(
+        path=path,
+        coords=coords,
+        dims=("time", "lat", "lon"),
+        chunks=chunks,
+        shards=shards,
+        data_vars=["var"],
+        overwrite_check=overwrite_check,
+        allow_existing=allow_existing,
+        array_attributes=array_attributes,
+        group_attributes=group_attributes,
+    )
+
+
+def test_ZarrWriter_append_to_existing(
+    tmp_path,
+):
+    n_times = 8
+
+    path = os.path.join(tmp_path, "test.zarr")
+    data = {
+        "var": np.random.rand(n_times, NLAT, NLON),
+    }
+
+    writer_0 = _create_writer(
+        n_times=n_times,
+        path=path,
+        chunks={"time": 3},
+        array_attributes={"var": {"units": "K"}},
+        group_attributes={"description": "Test Zarr store"},
+    )
+
+    writer_0.record_batch(
+        data={"var": data["var"][slice(0, 4)]}, position_slices={"time": slice(0, 4)}
+    )
+
+    writer_1 = ZarrWriter.from_existing_store(path)
+    writer_1.record_batch(
+        data={"var": data["var"][slice(4, 8)]}, position_slices={"time": slice(4, 8)}
+    )
+
+    ds = xr.open_zarr(path)
+    np.testing.assert_allclose(ds["var"].values, data["var"])
+    assert ds["var"].attrs["units"] == "K"
+    assert ds.attrs["description"] == "Test Zarr store"
+
+
+def test_ZarrWriter_overwrite_check(tmp_path):
+    writer = _create_writer(
+        os.path.join(tmp_path, "test.zarr"), n_times=4, chunks={"time": 2}
+    )
+    batch_data = {
+        "var": np.random.rand(2, NLAT, NLON),
+    }
+    writer.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
+    with pytest.raises(RuntimeError):
+        writer.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
+
+
+def test_ZarrWriter_can_overwrite(tmp_path):
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    batch_data_nonzero = {
+        "var": np.random.rand(2, NLAT, NLON),
+    }
+
+    writer.record_batch(data=batch_data_nonzero, position_slices={"time": slice(0, 2)})
+    ds = xr.open_zarr(path)
+    assert np.all(ds["var"][:2] != 0.0)
+
+    batch_data_zero = {"var": np.zeros((2, NLAT, NLON))}
+    writer.record_batch(data=batch_data_zero, position_slices={"time": slice(0, 2)})
+    ds = xr.open_zarr(path)
+    assert np.all(ds["var"][:2] == 0.0)
+
+
+def test_ZarrWriter_allow_existing(tmp_path):
+    path = os.path.join(tmp_path, "test.zarr")
+    batch_data = {
+        "var": np.random.rand(2, NLAT, NLON),
+    }
+
+    writer0 = _create_writer(path, n_times=4, chunks={"time": 2}, allow_existing=True)
+    writer0.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
+
+    writer1 = _create_writer(path, n_times=4, chunks={"time": 2}, allow_existing=True)
+    writer1.record_batch(data=batch_data, position_slices={"time": slice(2, 4)})
+
+
+@pytest.mark.parametrize(
+    "time_chunk_size, time_shard_size",
+    [(1, 1), (1, 4), (1, 9), (2, 8)],
+)
+def test_ZarrWriter_shards_file_count(tmp_path, time_chunk_size, time_shard_size):
+    n_times = 8
+
+    path = os.path.join(tmp_path, "test.zarr")
+    data = {
+        "var": np.random.rand(n_times, NLAT, NLON),
+    }
+    writer_0 = _create_writer(
+        n_times=n_times,
+        path=path,
+        chunks={"time": time_chunk_size},
+        shards={"time": time_shard_size},
+    )
+
+    writer_0.record_batch(
+        data={"var": data["var"][slice(0, 4)]}, position_slices={"time": slice(0, 4)}
+    )
+
+    writer_1 = ZarrWriter.from_existing_store(path)
+    writer_1.record_batch(
+        data={"var": data["var"][slice(4, 8)]}, position_slices={"time": slice(4, 8)}
+    )
+
+    ds = xr.open_zarr(path)
+    np.testing.assert_allclose(ds["var"].values, data["var"])
+    var_dir = os.path.join(path, "var/c")
+    assert len(os.listdir(var_dir)) == math.ceil(n_times / time_shard_size)
+
+
+def test_ZarrWriter_shards_errors_for_wrong_chunks_size(tmp_path):
+    n_times = 8
+    shape = (n_times, 1, NLAT, NLON)
+    path = os.path.join(tmp_path, "test.zarr")
+    chunks = {"time": 2}
+    shards = {"time": 1}
+    times = np.array(
+        [
+            cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=i)
+            for i in range(n_times)
+        ]
+    )
+    with pytest.raises(ValueError, match="not divisible"):
+        create_zarr_store(
+            path=path,
+            shape=shape,
+            times=times,
+            chunks=chunks,
+            shards=shards,
+        )

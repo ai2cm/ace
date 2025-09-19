@@ -21,23 +21,31 @@ from typing import Callable, Optional, Tuple, TypeVar
 import torch
 import torch.amp as amp
 import torch.nn as nn
+
 # get spectral transforms and spherical convolutions from torch_harmonics
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
 from torch.utils.checkpoint import checkpoint
 
 # helpers
-from fme.ace.models.makani_fcn2.models.common import (MLP, DropPath,
-                                                      EncoderDecoder,
-                                                      GeometricInstanceNormS2,
-                                                      SpectralConv)
-from fme.ace.models.makani_fcn2.mpu.layer_norm import (
-    DistributedGeometricInstanceNormS2, DistributedInstanceNorm2d,
-    DistributedLayerNorm)
+from fme.ace.models.makani_fcn3.models.common import (
+    MLP,
+    DropPath,
+    EncoderDecoder,
+    GeometricInstanceNormS2,
+    SpectralConv,
+)
+from fme.ace.models.makani_fcn3.mpu.layer_norm import (
+    DistributedGeometricInstanceNormS2,
+    DistributedInstanceNorm2d,
+    DistributedLayerNorm,
+)
+
 # get pre-formulated layers
-from fme.ace.models.makani_fcn2.mpu.layers import DistributedMLP
+from fme.ace.models.makani_fcn3.mpu.layers import DistributedMLP
+
 # more distributed stuff
-from fme.ace.models.makani_fcn2.utils import comm
+from fme.ace.models.makani_fcn3.utils import comm
 
 
 # heuristic for finding theta_cutoff
@@ -556,7 +564,8 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
                 basis_norm_mode=filter_basis_norm_mode,
                 activation_function=activation_function,
                 groups=math.gcd(
-                    self.n_surf_channels - n_surf_diagnostic_channels, self.surf_embed_dim
+                    self.n_surf_channels - n_surf_diagnostic_channels,
+                    self.surf_embed_dim,
                 ),
                 bias=bias,
                 use_mlp=encoder_mlp,
@@ -799,7 +808,9 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
 
         # for atmospheric channels the same encoder is applied to each atmospheric level
         x_atmo = x_atmo.contiguous().reshape(
-            -1, self.n_atmo_channels - self.n_atmo_diagnostic_channels, *x_atmo.shape[-2:]
+            -1,
+            self.n_atmo_channels - self.n_atmo_diagnostic_channels,
+            *x_atmo.shape[-2:],
         )
         x_out = self.atmo_encoder(x_atmo)
         x_out = x_out.reshape(

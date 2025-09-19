@@ -4,12 +4,13 @@ set -e
 make_gsutil_cmds() {
     local output_directory="$1"   # first arg: output directory
     local weka_run_name="$2"      # second arg: run name for weka
-    shift                         # rest of args: names
+    shift 2                       # rest of args: names
     local names=("$@")
 
     local cmd=""
     for name in "${names[@]}"; do
-        local part="gsutil -m -o Credentials:gs_service_key_file=/tmp/google_application_credentials.json cp -r ${output_directory}/${name}.zarr /climate-default/${weka_run_name}/"
+        local weka_root="/climate-default${weka_run_name}"
+        local part="mkdir -p ${weka_root} && gsutil -m -o Credentials:gs_service_key_file=/tmp/google_application_credentials.json cp -r ${output_directory}/${name}.zarr ${weka_root}"
         if [[ -z "$cmd" ]]; then
             cmd="$part"
         else
@@ -27,7 +28,12 @@ extract_path_suffix() {
     local suffix="${input#gs://vcm-ml-intermediate/}"
     suffix="${suffix#gs://vcm-ml-intermediate}"
 
-    # Return the suffix (empty if input was only the prefix)
+    suffix="/${suffix}/"  # add leading and ending slashes if exists
+    if [[ -z "$suffix" ]]; then
+        suffix="/"  # return /
+    fi
+
+    # Return the suffix ("/" if input was only the prefix)
     echo "$suffix"
 }
 
@@ -66,7 +72,7 @@ cd $REPO_ROOT && gantry run \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
-    --cluster ai2/phobos-cirrascale \
+    --cluster ai2/phobos \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --gpus 0 \
     --shared-memory 40GiB \
@@ -74,4 +80,3 @@ cd $REPO_ROOT && gantry run \
     --budget ai2/climate \
     --install "pip install --no-deps ." \
     -- bash -c "$cmds"
-

@@ -1,5 +1,4 @@
 import dataclasses
-import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -58,6 +57,7 @@ class PairedNormalizationConfig:
     ) -> FineResCoarseResPair[StandardNormalizer]:
         coarse = self.coarse.build(list(set(in_names).union(out_names)))
         fine = self.fine.build(out_names)
+
         return FineResCoarseResPair[StandardNormalizer](
             coarse=_rename_normalizer(coarse, rename),
             fine=_rename_normalizer(fine, rename),
@@ -94,8 +94,12 @@ class DownscalingModelConfig:
         self,
         coarse_shape: tuple[int, int],
         downscale_factor: int,
+        rename: dict[str, str] | None = None,
     ) -> "Model":
-        normalizer = self.normalization.build(self.in_names, self.out_names)
+        invert_rename = {v: k for k, v in (rename or {}).items()}
+        orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
+        orig_out_names = [invert_rename.get(name, name) for name in self.out_names]
+        normalizer = self.normalization.build(orig_in_names, orig_out_names, rename)
         loss = self.loss.build(reduction="mean", gridded_operations=None)
         n_in_channels = len(self.in_names)
 
@@ -308,8 +312,12 @@ class DiffusionModelConfig:
         self,
         coarse_shape: tuple[int, int],
         downscale_factor: int,
+        rename: dict[str, str] | None = None,
     ) -> "DiffusionModel":
-        normalizer = self.normalization.build(self.in_names, self.out_names)
+        invert_rename = {v: k for k, v in (rename or {}).items()}
+        orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
+        orig_out_names = [invert_rename.get(name, name) for name in self.out_names]
+        normalizer = self.normalization.build(orig_in_names, orig_out_names, rename)
         loss = self.loss.build(reduction="none", gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
@@ -569,7 +577,6 @@ class DiffusionModel:
         )
         latents = torch.randn(outputs_shape).to(device=get_device())
 
-        logging.info("Running EDM sampler...")
         generated_norm, latent_steps = edm_sampler(
             self.module,
             latents,
@@ -579,7 +586,6 @@ class DiffusionModel:
             sigma_max=self.config.sigma_max,
             num_steps=self.config.num_diffusion_generation_steps,
         )
-        logging.info("Done running EDM sampler.")
 
         if self.config.predict_residual:
             base_prediction = interpolate(
@@ -707,6 +713,7 @@ class CheckpointModelConfig:
         ).build(
             coarse_shape=self._checkpoint["model"]["coarse_shape"],
             downscale_factor=self._checkpoint["model"]["downscale_factor"],
+            rename=self._rename,
         )
         model.module.load_state_dict(self._checkpoint["model"]["module"])
         return model

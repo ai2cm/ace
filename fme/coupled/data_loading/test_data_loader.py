@@ -178,6 +178,13 @@ class MockCoupledData:
             ),
         )
 
+    @property
+    def dataset_config(self) -> CoupledDatasetConfig:
+        return CoupledDatasetConfig(
+            ocean=XarrayDataConfig(str(self.ocean.data_dir)),
+            atmosphere=XarrayDataConfig(str(self.atmosphere.data_dir)),
+        )
+
 
 def create_coupled_data_on_disk(
     data_dir: pathlib.Path,

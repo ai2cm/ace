@@ -39,6 +39,6 @@ gantry run \
     --shared-memory 400GiB \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
