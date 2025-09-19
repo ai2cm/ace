@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-nhem-histckpt"
-CONFIG_FILENAME="config-generate-on-perfect-pred-nhem.yaml"
+JOB_NAME="eval-xshield-amip-100km-to-3km-shem-histckpt"
+CONFIG_FILENAME="config-generate-on-perfect-pred-shem.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
