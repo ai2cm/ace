@@ -145,7 +145,7 @@ stepper:
   atmosphere:
     timedelta: 6h
     loss_contributions:
-      n_steps: 0
+      n_steps: 2
     stepper:
       parameter_init:
         weights_path: /atmos_ckpt.tar
