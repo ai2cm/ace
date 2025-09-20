@@ -15,3 +15,6 @@ ws|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v2025-08-22-const_lr_10ep-ncs8|01K5DCV2RTVA6VBQTVARSDDRBW
 ws|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-sad8rguj-cos_lr_20ep|ex
+ws|training|best_inference_ckpt|normal|--not-preemptible
