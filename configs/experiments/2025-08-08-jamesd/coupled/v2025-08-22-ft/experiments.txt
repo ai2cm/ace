@@ -45,3 +45,6 @@ ft-v2025-08-22-const_lr_5ep-ncs1-oloss_w0p1|01K5J85SHYVM0EP917QED8J8FK
 ws|training|best_inference_ckpt|normal|--not-preemptible
 
 ft-v2025-08-22-const_lr_20ep-ncs1-oloss_w0p1-fta_enc||training|best_inference_ckpt|normal|--not-preemptible
+
+ft-v2025-08-22-const_lr_20ep-ncs1-oloss_w0p1-fta_enc|ex
+ws|training|best_inference_ckpt|normal|--not-preemptible
