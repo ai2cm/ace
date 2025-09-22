@@ -30,7 +30,7 @@ data:
       step: 7
   lat_extent:
     #start: -66.0
-    start: 0
+    start: -66
     stop: 70.0
   batch_size: 4
   num_data_workers: 2
