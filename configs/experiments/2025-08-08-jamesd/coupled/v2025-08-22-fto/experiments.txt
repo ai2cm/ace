@@ -24,3 +24,6 @@ ws|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-rq97q5t9_ep1-const_lr_10ep|01K5SRSWPX2V7D7NF23GJESQCN
 ws|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-rq97q5t9-const_lr_10ep|01K5SWEG4D8V9YM9WK3KBA7WZ9
+ws|training|best_inference_ckpt|normal|--not-preemptible
