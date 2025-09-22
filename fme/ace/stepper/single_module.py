@@ -1452,6 +1452,11 @@ class Stepper(
 
             if "img_shape" in state:
                 dataset_state["img_shape"] = state["img_shape"]
+            elif "data_shapes" in state:
+                for _, shape in state["data_shapes"].items():
+                    if len(shape) == 4:
+                        dataset_state["img_shape"] = shape[-2:]
+                        break
 
             normalizer = StandardNormalizer.from_state(
                 state.get("normalizer", state.get("normalization"))
@@ -1460,10 +1465,11 @@ class Stepper(
                 raise ValueError(
                     f"No normalizer state found, keys include {state.keys()}"
                 )
-            loss_normalizer = StandardNormalizer.from_state(
-                state.get("loss_normalizer", state.get("loss_normalization"))
-            )
-            if loss_normalizer is None:
+            if "loss_normalizer" in state or "loss_normalization" in state:
+                loss_normalizer = StandardNormalizer.from_state(
+                    state.get("loss_normalizer", state.get("loss_normalization"))
+                )
+            else:
                 loss_normalizer = normalizer
             config = legacy_config.to_stepper_config(
                 normalizer=normalizer, loss_normalizer=loss_normalizer

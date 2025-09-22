@@ -23,4 +23,10 @@ The GCS path for the resulting zarr dataset can be specified:
 
 ```GCS_OUTPUT_PATH=gs://vcm-ml-intermediate/2025-08-27-era5-1deg-monthly-mean-forcing-1978-2024.zarr make process_aimip_forcing```
 
-Note that the wofkflow is memory-intensive and was run on a high-memory (128GB) GCP VM.
+Note that the workflow is memory-intensive and was run on a high-memory (128GB) GCP VM.
+
+### Generating the public AIMIP forcing dataset
+
+Additionally, the public forcing dataset at 0.25° resolution [available on Zenodo as version 2](https://zenodo.org/records/17065758) can also be generated and uploaded to GCS here. To do so, run:
+
+```make create_aimip_forcing```

@@ -109,7 +109,7 @@ def _get_test_yaml_files(
 ):
     input_time_size = 1
     output_time_size = 1
-    if use_healpix:
+    if nettype == "HEALPixRecUNet":
         in_channels = len(in_variable_names)
         out_channels = len(out_variable_names)
         prognostic_variables = min(
@@ -166,7 +166,11 @@ def _get_test_yaml_files(
             num_layers=2,
             embed_dim=12,
         )
-        spatial_dimensions_str = "latlon"
+        if use_healpix:
+            net_config["data_grid"] = "healpix"
+            spatial_dimensions_str = "healpix"
+        else:
+            spatial_dimensions_str = "latlon"
 
     if nettype == "SphericalFourierNeuralOperatorNet":
         corrector_config: AtmosphereCorrectorConfig | CorrectorSelector = (
@@ -477,17 +481,22 @@ def _setup(
 
 
 @pytest.mark.parametrize(
-    "nettype, crps_training, log_validation_maps",
+    "nettype, crps_training, log_validation_maps, use_healpix",
     [
-        ("SphericalFourierNeuralOperatorNet", False, True),
-        ("NoiseConditionedSFNO", True, False),
-        ("HEALPixRecUNet", False, False),
-        ("Samudra", False, False),
-        ("NoiseConditionedSFNO", False, False),
+        ("SphericalFourierNeuralOperatorNet", False, True, False),
+        ("NoiseConditionedSFNO", True, False, False),
+        ("HEALPixRecUNet", False, False, True),
+        ("Samudra", False, False, False),
+        ("NoiseConditionedSFNO", False, False, False),
     ],
 )
 def test_train_and_inference(
-    tmp_path, nettype, crps_training, log_validation_maps: bool, very_fast_only: bool
+    tmp_path,
+    nettype,
+    crps_training,
+    log_validation_maps: bool,
+    use_healpix: bool,
+    very_fast_only: bool,
 ):
     """Ensure that ACE training and subsequent standalone inference run without errors.
 
@@ -506,7 +515,7 @@ def test_train_and_inference(
         timestep_days=20,
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
-        use_healpix=(nettype == "HEALPixRecUNet"),
+        use_healpix=use_healpix,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
         log_validation_maps=log_validation_maps,

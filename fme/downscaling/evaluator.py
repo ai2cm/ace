@@ -29,12 +29,8 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.patching import (
-    MultipatchConfig,
-    PatchPredictor,
-    paired_patch_generator_from_loader,
-)
 from fme.downscaling.predict import EventConfig
+from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -104,15 +100,12 @@ class Evaluator:
             self.data.dims,
             self.model.downscale_factor,
             include_positional_comparisons=False if self.patch_data else True,
-            percentiles=[99.9, 99.99],
+            percentiles=[99.99, 99.9999],
         )
 
         if self.patch_data:
-            batch_generator = paired_patch_generator_from_loader(
-                loader=self.data.loader,
-                coarse_yx_extent=self.data.coarse_shape,
-                coarse_yx_patch_extents=self.model.coarse_shape,
-                downscale_factor=self.model.downscale_factor,
+            batch_generator = self.data.get_patched_batch_generator(
+                coarse_yx_patch_extent=self.model.coarse_shape,
             )
         else:
             batch_generator = self.data.loader
@@ -234,7 +227,9 @@ class EvaluatorConfig:
     data: PairedDataLoaderConfig
     logging: LoggingConfig
     n_samples: int = 4
-    patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
+    patch: PatchPredictionConfig = dataclasses.field(
+        default_factory=PatchPredictionConfig
+    )
     events: list[PairedEventConfig] | None = None
 
     def configure_logging(self, log_filename: str):
@@ -257,13 +252,15 @@ class EvaluatorConfig:
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
                 model,
-                dataset.coarse_shape,
+                coarse_yx_patch_extent=model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         else:
             evaluator_model = model
 
         if self.patch.divide_generation and not self.patch.composite_prediction:
+            # Subdivide evaluation into patches, do not composite them together
+            # No maps will be saved for this configuration.
             patch_data = True
         else:
             patch_data = False
@@ -291,8 +288,8 @@ class EvaluatorConfig:
             dataset.coarse_shape[1] > model.coarse_shape[1]
         ):
             evaluator_model = PatchPredictor(
-                model,
-                dataset.coarse_shape,
+                model=model,
+                coarse_yx_patch_extent=model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         else:
