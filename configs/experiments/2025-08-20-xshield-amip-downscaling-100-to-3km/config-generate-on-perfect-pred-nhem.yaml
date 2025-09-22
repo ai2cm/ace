@@ -6,7 +6,7 @@ patch:
   coarse_horizontal_overlap: 1
 model:
   #checkpoint_path: /Users/annak/Code/scratch/100-to-3km-mps.ckpt
-  checkpoint_path: /checkpoints/ckpt.tar
+  checkpoint_path: /checkpoints/best.ckpt
   rename:
     eastward_wind_at_ten_meters: UGRD10m
     northward_wind_at_ten_meters: VGRD10m
