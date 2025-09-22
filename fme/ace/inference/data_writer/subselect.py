@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TypeAlias, TypeGuard
@@ -14,6 +15,7 @@ from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
 from .raw import RawDataWriter
+from .zarr import ZarrWriterAdapter, ZarrWriterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +158,7 @@ class SubselectWriterConfig:
     latitude_name: str = "latitude"
     longitude_name: str = "longitude"
     save_reference: bool = False
+    zarr: ZarrWriterConfig = dataclasses.field(default_factory=ZarrWriterConfig)
 
     def __post_init__(self):
         if not self.lon_extent and not self.lat_extent and not self.time_selection:
@@ -179,6 +182,7 @@ class SubselectWriterConfig:
         self,
         experiment_dir: str,
         n_initial_conditions: int,
+        n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
@@ -193,6 +197,7 @@ class SubselectWriterConfig:
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
+            n_timesteps=n_timesteps,
         )
         if self.save_reference:
             reference_writer = dataclasses.replace(
@@ -203,6 +208,7 @@ class SubselectWriterConfig:
                 variable_metadata=variable_metadata,
                 coords=coords,
                 dataset_metadata=dataset_metadata,
+                n_timesteps=n_timesteps,
             )
         else:
             reference_writer = None
@@ -212,6 +218,7 @@ class SubselectWriterConfig:
         self,
         experiment_dir: str,
         n_initial_conditions: int,
+        n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
@@ -222,6 +229,7 @@ class SubselectWriterConfig:
         Args:
             experiment_dir: The directory where experiment outputs are saved.
             n_initial_conditions: The number of initial conditions or ensemble members.
+            n_timesteps: Total number of inference forward steps.
             variable_metadata: Metadata for each variable.
             coords: Coordinate arrays for the dataset. These should be the coordinates
                 of the entire global domain, not the subset region coordinates.
@@ -248,16 +256,31 @@ class SubselectWriterConfig:
             }
         )
         subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
-
-        raw_writer = RawDataWriter(
-            path=experiment_dir,
-            label=f"{self.label}.nc",
-            n_initial_conditions=n_initial_conditions,
-            save_names=self.names,
-            variable_metadata=variable_metadata,
-            coords=subselect_coords_,
-            dataset_metadata=dataset_metadata,
-        )
+        raw_writer: RawDataWriter | ZarrWriterAdapter
+        if self.zarr.write_to_zarr:
+            raw_writer = ZarrWriterAdapter(
+                path=os.path.join(experiment_dir, f"{self.label}.zarr"),
+                dims=("sample", "time", self.latitude_name, self.longitude_name),
+                data_coords=subselect_coords_,
+                data_vars=self.names,
+                n_timesteps=n_timesteps,
+                n_initial_conditions=n_initial_conditions,
+                variable_metadata=variable_metadata,
+                dataset_metadata=dataset_metadata,
+                chunks=self.zarr.chunks,
+                allow_existing=self.zarr.allow_existing,
+                overwrite_check=self.zarr.overwrite_check,
+            )
+        else:
+            raw_writer = RawDataWriter(
+                path=experiment_dir,
+                label=f"{self.label}.nc",
+                n_initial_conditions=n_initial_conditions,
+                save_names=self.names,
+                variable_metadata=variable_metadata,
+                coords=subselect_coords_,
+                dataset_metadata=dataset_metadata,
+            )
         return SubselectWriter(self, raw_writer, full_coords=coords)
 
 
@@ -269,7 +292,7 @@ class SubselectWriter:
     def __init__(
         self,
         config: SubselectWriterConfig,
-        writer: RawDataWriter,
+        writer: RawDataWriter | ZarrWriterAdapter,
         full_coords: Mapping[str, np.ndarray],
     ):
         self.config = config
@@ -341,7 +364,6 @@ class SubselectWriter:
             elif self._no_write_count == 10:
                 logging.warning("Further warnings about empty data will be suppressed.")
             return
-
         self.writer.append_batch(
             data=subselected,
             start_timestep=start_timestep,
