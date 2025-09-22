@@ -19,6 +19,7 @@ from fme.ace.inference.data_writer.main import (
 from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.subselect import SubselectWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
+from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.core.device import get_device
 from fme.core.typing_ import TensorMapping
 
@@ -441,6 +442,11 @@ class TestDataWriter:
             lon_extent=(1, 3),
             latitude_name="lat",
             longitude_name="lon",
+            zarr=ZarrWriterConfig(
+                write_to_zarr=True,
+                allow_existing=True,
+                overwrite_check=False,
+            ),
         )
 
         writer = DataWriter(
@@ -524,10 +530,17 @@ class TestDataWriter:
             assert ds.attrs["title"] == "ACE monthly predictions data file"
             assert ds.attrs["source.inference_version"] == "1.0"
 
-        with xr.open_dataset(tmp_path / "test_region.nc") as ds:
+        with xr.open_dataset(tmp_path / "test_region.zarr") as ds:
             assert "pressure" in ds
             assert "temp" not in ds
-            assert ds.pressure.shape[-2:] == (2, 3)
+            assert ds.pressure.shape == (n_samples, n_timesteps, 2, 3)
+            assert ds.pressure.dims == ("sample", "time", "lat", "lon")
+            for key in ["init_time", "valid_time"]:
+                assert key in ds.coords and key not in ds.data_vars
+            assert ds.pressure.encoding["shards"][1] == batch_time.shape[1]
+            assert ds.pressure.encoding["chunks"] == (1, 1, 2, 3)
+            assert ds.attrs["title"] == "ACE test region data"
+            assert ds.attrs["source.inference_version"] == "1.0"
 
 
 @pytest.mark.parametrize(

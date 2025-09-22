@@ -40,6 +40,7 @@ def test_subselect_writer_config_build():
         writer = config.build(
             experiment_dir="test_experiment",
             n_initial_conditions=1,
+            n_timesteps=10,
             variable_metadata={},
             coords={
                 "latitude": np.array([-20, -10.0, 0.0, 10.0, 20.0]),
@@ -94,6 +95,7 @@ def test_subselect_writer_config_build_missing_coords(lat_name, lon_name):
         config.build(
             experiment_dir="test_experiment",
             n_initial_conditions=1,
+            n_timesteps=10,
             variable_metadata={},
             coords=coords,
             dataset_metadata=MagicMock(),
