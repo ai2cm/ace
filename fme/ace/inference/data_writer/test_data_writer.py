@@ -35,16 +35,8 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 def test_data_writer_config_save_names():
     variable_names = ["temp", "humidity"]
-    kwargs = dict(
-        save_prediction_files=False,
-        save_monthly_files=False,
-        save_histogram_files=False,
-    )
-    for save_writer in [
-        "save_prediction_files",
-        "save_monthly_files",
-        "save_histogram_files",
-    ]:
+    kwargs = dict(save_prediction_files=False, save_monthly_files=False)
+    for save_writer in ["save_prediction_files", "save_monthly_files"]:
         kwargs_copy = kwargs.copy()
         kwargs_copy.update({save_writer: True})
         DataWriterConfig(names=variable_names, **kwargs_copy)  # type: ignore
@@ -178,9 +170,7 @@ class TestDataWriter:
             variable_metadata=sample_metadata,
             coords=coords,
             enable_prediction_netcdfs=True,
-            enable_video_netcdfs=False,
             enable_monthly_netcdfs=True,
-            enable_histogram_netcdfs=True,
             save_names=None,
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
@@ -293,19 +283,6 @@ class TestDataWriter:
             for var_name in set(sample_prediction_data.keys()):
                 assert "valid_time" in ds[var_name].coords
                 assert "init_time" in ds[var_name].coords
-        for source in ["target", "prediction"]:
-            histograms = xr.open_dataset(
-                tmp_path / f"histograms_{source}.nc", decode_timedelta=False
-            )
-            actual_var_names = sorted([str(k) for k in histograms.keys()])
-            assert histograms.data_vars["temp"].attrs["units"] == "count"
-            assert "temp_bin_edges" in actual_var_names
-            assert histograms.data_vars["temp_bin_edges"].attrs["units"] == "K"
-            counts_per_timestep = histograms["temp"].sum(dim=["bin"])
-            same_count_each_timestep = np.all(
-                counts_per_timestep.values == counts_per_timestep.values[0]
-            )
-            assert same_count_each_timestep
 
         with xr.open_dataset(
             tmp_path / "monthly_mean_predictions.nc", decode_timedelta=False
@@ -349,10 +326,8 @@ class TestDataWriter:
             variable_metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
-            enable_video_netcdfs=False,
             enable_monthly_netcdfs=True,
             save_names=save_names,
-            enable_histogram_netcdfs=True,
             dataset_metadata=DatasetMetadata(),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
@@ -419,10 +394,8 @@ class TestDataWriter:
             variable_metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
-            enable_video_netcdfs=False,
             enable_monthly_netcdfs=True,
             save_names=None,
-            enable_histogram_netcdfs=True,
             dataset_metadata=DatasetMetadata(),
         )
         start_time = (2020, 1, 1, 0, 0, 0)

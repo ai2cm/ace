@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import torch
 import yaml
 
@@ -90,9 +91,9 @@ def create_predictor_config(
     return out_path
 
 
-def test_predictor_runs(
-    tmp_path,
-):
+def test_predictor_runs(tmp_path, very_fast_only: bool = False):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     n_samples = 2
     coarse_shape = (4, 4)
     downscale_factor = 2
