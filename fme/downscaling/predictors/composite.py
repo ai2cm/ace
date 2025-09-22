@@ -180,6 +180,14 @@ def composite_patch_predictions(
 
     # prediction tensors have dims [batch, generated_sample, lat, lon]
     # a temporary patch dimension is added at axis 0 and stacked before returning
+    extent_shape = (
+        len(predictions),
+        example_data_tensor.shape[0],
+        example_data_tensor.shape[1],
+        y_size,
+        x_size,
+    )
+    print("composited extent: ", extent_shape)
     empty_tensor = torch.full(
         (
             len(predictions),
