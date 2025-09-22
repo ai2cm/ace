@@ -1,4 +1,4 @@
 group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 fto-sad8rguj-cos_lr_20ep|ace-samudra-coupled-cm4|sad8rguj|best_inference_ckpt|trained|urgent|ceres|8|800GiB|3||
-fto-rq97q5t9-const_lr_10ep|ace-samudra-coupled-cm4|rq97q5t9|best_inference_ckpt|train|urgent|ceres|8|800GiB|3||
-fto-rq97q5t9_ep1-const_lr_10ep|ace-samudra-coupled-cm4|rq97q5t9|best_inference_ckpt_0001|train|urgent|ceres|8|800GiB|3||
+fto-rq97q5t9-const_lr_10ep|ace-samudra-coupled-cm4|rq97q5t9|best_inference_ckpt|train|urgent|ceres|8|800GiB|3||optimization.scheduler=null
+fto-rq97q5t9_ep1-const_lr_10ep|ace-samudra-coupled-cm4|rq97q5t9|best_inference_ckpt_0001|train|urgent|ceres|8|800GiB|3||optimization.scheduler=null
