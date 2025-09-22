@@ -162,6 +162,38 @@ def _get_full_extent_from_patches(patches: list[Patch]) -> tuple[int, int]:
     return y_max, x_max
 
 
+def _composite_patch_tensors(
+    predictions: list[torch.Tensor], patches: list[Patch]
+) -> TensorDict:
+    if len(predictions) != len(patches):
+        raise ValueError("The number of predictions must match the number of patches.")
+
+    y_size, x_size = _get_full_extent_from_patches(patches)
+    # list elements have shape (n_batch, n_generated_sample, patch_lat, patch_lon)
+    n_batch, n_gen_sample = predictions[0].shape[:2]
+    output_sum = torch.zeros(
+        n_batch, n_gen_sample, y_size, x_size, device=predictions[0].device
+    )
+    output_count = torch.zeros(
+        n_batch, n_gen_sample, y_size, x_size, device=predictions[0].device
+    )
+
+    for i, pred in enumerate(predictions):
+        in_slice = patches[i].input_slice
+        out_slice = patches[i].output_slice
+        # Adjust the input slice start if the output slice is trimmed
+        adjusted_in_slice_y = slice(
+            in_slice.y.start + (out_slice.y.start or 0), in_slice.y.stop
+        )
+        adjusted_in_slice_x = slice(
+            in_slice.x.start + (out_slice.x.start or 0), in_slice.x.stop
+        )
+        trimmed_pred = pred[..., out_slice.y, out_slice.x]
+        output_sum[..., adjusted_in_slice_y, adjusted_in_slice_x] += trimmed_pred
+        output_count[..., adjusted_in_slice_y, adjusted_in_slice_x] += 1
+    return output_sum / output_count
+
+
 def composite_patch_predictions(
     predictions: list[TensorDict], patches: list[Patch]
 ) -> TensorDict:
@@ -170,46 +202,9 @@ def composite_patch_predictions(
     tensor with the full extent of the patches. The predictions are
     averaged in overlapping patch regions.
     """
-    if len(predictions) != len(patches):
-        raise ValueError("The number of predictions must match the number of patches.")
-
-    y_size, x_size = _get_full_extent_from_patches(patches)
-
-    example_data_tensor = list(predictions[0].values())[0]
-    prediction_vars = list(predictions[0].keys())
-
-    # prediction tensors have dims [batch, generated_sample, lat, lon]
-    # a temporary patch dimension is added at axis 0 and stacked before returning
-    empty_tensor = torch.full(
-        (
-            len(predictions),
-            example_data_tensor.shape[0],
-            example_data_tensor.shape[1],
-            y_size,
-            x_size,
-        ),
-        torch.nan,
-        device=example_data_tensor.device,
-    )
-    combined_data = {var: empty_tensor for var in prediction_vars}
-
-    for i, pred in enumerate(predictions):
-        in_slice = patches[i].input_slice
-        out_slice = patches[i].output_slice
-
-        # Adjust the input slice start if the output slice is trimmed
-        adjusted_in_slice_y = slice(
-            in_slice.y.start + (out_slice.y.start or 0), in_slice.y.stop
-        )
-        adjusted_in_slice_x = slice(
-            in_slice.x.start + (out_slice.x.start or 0), in_slice.x.stop
-        )
-        for var in prediction_vars:
-            combined_data[var][i, :, :, adjusted_in_slice_y, adjusted_in_slice_x] = (
-                pred[var][..., out_slice.y, out_slice.x]
-            )
-
-    for var in prediction_vars:
-        combined_data[var] = torch.nanmean(combined_data[var], dim=0)
-
+    combined_data = {}
+    predicted_vars = list(predictions[0].keys())
+    for var in predicted_vars:
+        var_predictions = [pred[var] for pred in predictions]
+        combined_data[var] = _composite_patch_tensors(var_predictions, patches)
     return combined_data

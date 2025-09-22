@@ -91,7 +91,7 @@ def create_predictor_config(
     return out_path
 
 
-def test_predictor_runs(tmp_path, very_fast_only: bool = False):
+def test_predictor_runs(tmp_path, very_fast_only: bool):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
     n_samples = 2
