@@ -271,6 +271,7 @@ class InferenceEvaluatorAggregator(
                 n_timesteps=n_timesteps,
                 variable_metadata=dataset_info.variable_metadata,
             )
+        self._record_step_20 = record_step_20
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
                 ops, target_time=20
@@ -457,6 +458,8 @@ class InferenceEvaluatorAggregator(
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
+        if self._record_step_20:
+            logs.pop("mean_step_20/loss")  # we don't provide it so it's NaN always
         return logs
 
     @torch.no_grad()
