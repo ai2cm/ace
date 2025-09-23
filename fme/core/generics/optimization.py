@@ -35,6 +35,9 @@ class OptimizationABC(abc.ABC):
                 learning rate based on whether the validation loss is decreasing.
             is_iteration: Whether the step is called from a training iteration or at
                 the end of an epoch. Default is epoch.
+
+        Returns:
+            A boolean indicating whether or not the scheduler step was called.
         """
         ...
 

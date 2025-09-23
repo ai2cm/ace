@@ -343,7 +343,7 @@ class Trainer:
             )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
-            self.optimization.step_scheduler(valid_loss, is_iteration=False)
+            self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
 
             time_elapsed = time.time() - start_time
             logging.info(
