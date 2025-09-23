@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_samples: 4
+n_samples: 2
 patch:
   divide_generation: true
   composite_prediction: true
@@ -19,7 +19,7 @@ data:
     #infer_timestep: false
     subset:
       start_time: 2023-01-01T00:00
-      step: 7
+      step: 29
   fine:
   - data_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/
     engine: zarr
@@ -27,12 +27,12 @@ data:
     #infer_timestep: false
     subset:
       start_time: 2023-01-01T00:00
-      step: 7
+      step: 29
   lat_extent:
     #start: -66.0
     start: -66
     stop: 70.0
-  batch_size: 4
+  batch_size: 6
   num_data_workers: 2
   strict_ensemble: False
 logging:
