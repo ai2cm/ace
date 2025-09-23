@@ -40,8 +40,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 32
-  prefetch_factor: 2
+  num_data_workers: 16
+  prefetch_factor: 4
   dataset:
     merge:
     - data_path: /climate-default
@@ -58,7 +58,7 @@ train_loader:
         stop_time: '0306-01-01T06:00:00'
 validation_loader:
   batch_size: 64
-  num_data_workers: 8
+  num_data_workers: 16
   prefetch_factor: 4
   dataset:
     merge:
@@ -77,13 +77,11 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.00001
+  lr: 0.0001
   optimizer_type: AdamW
   kwargs:
     fused: true
     weight_decay: 0.01
-  scheduler:
-    type: CosineAnnealingLR
 stepper:
   parameter_init:
     weights_path: /ckpt.tar
