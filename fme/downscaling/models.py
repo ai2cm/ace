@@ -222,7 +222,7 @@ class Model:
                 )
 
             # Join the normalized topography to the input (see dataset for details)
-            topo = batch.fine.topography.unsqueeze(self._channel_axis)
+            topo = batch.fine.topography.data.unsqueeze(self._channel_axis)
             coarse_norm = torch.concat([interpolated, topo], axis=self._channel_axis)
         elif self.config._interpolate_input:
             coarse_norm = interpolated
@@ -516,7 +516,10 @@ class DiffusionModel:
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_norm = self._get_input_from_coarse(coarse, batch.fine.topography)
+        fine_topography = (
+            batch.fine.topography.data if batch.fine.topography is not None else None
+        )
+        inputs_norm = self._get_input_from_coarse(coarse, fine_topography)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
@@ -615,7 +618,8 @@ class DiffusionModel:
         batch: BatchData,
         n_samples: int = 1,
     ) -> TensorDict:
-        generated, _, _ = self._generate(batch.data, batch.topography, n_samples)
+        topography = batch.topography.data if batch.topography is not None else None
+        generated, _, _ = self._generate(batch.data, topography, n_samples)
         return generated
 
     @torch.no_grad()
@@ -626,8 +630,11 @@ class DiffusionModel:
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
 
+        fine_topography = (
+            batch.fine.topography.data if batch.fine.topography is not None else None
+        )
         generated, generated_norm, latent_steps = self._generate(
-            coarse, batch.fine.topography, n_samples
+            coarse, fine_topography, n_samples
         )
 
         targets_norm = self.out_packer.pack(
