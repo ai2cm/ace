@@ -10,6 +10,7 @@ from fme.ace.aggregator import (
     OneStepAggregatorConfig,
 )
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import (
@@ -167,6 +168,7 @@ class TrainConfig:
             used to select checkpoints, but is used to provide metrics.
         n_forward_steps: Number of forward steps during training. Cannot be given
             at the same time as train_n_forward_steps in StepperConfig.
+        train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
             If unset, weight initialization is not reproducible but data shuffling is.
@@ -215,6 +217,9 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig | None
     n_forward_steps: int | None = None
+    train_aggregator: TrainAggregatorConfig = dataclasses.field(
+        default_factory=lambda: TrainAggregatorConfig()
+    )
     seed: int | None = None
     copy_weights_after_batch: list[CopyWeightsConfig] = dataclasses.field(
         default_factory=list

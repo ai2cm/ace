@@ -29,6 +29,8 @@ class MeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         target_time: int = 1,
+        include_bias: bool = True,
+        include_grad_mag_percent_diff: bool = True,
     ):
         self._gridded_operations = gridded_operations
         self._n_batches = 0
@@ -42,24 +44,26 @@ class MeanAggregator:
             device=device,
             compute_metric=self._gridded_operations.area_weighted_rmse_dict,
         )
-        self._variable_metrics["weighted_bias"] = AreaWeightedReducedMetric(
-            device=device,
-            compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
-        )
-        self._variable_metrics["weighted_grad_mag_percent_diff"] = (
-            AreaWeightedReducedMetric(
+        if include_bias:
+            self._variable_metrics["weighted_bias"] = AreaWeightedReducedMetric(
                 device=device,
-                compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
+                compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
             )
-        )
+        if include_grad_mag_percent_diff:
+            self._variable_metrics["weighted_grad_mag_percent_diff"] = (
+                AreaWeightedReducedMetric(
+                    device=device,
+                    compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
+                )
+            )
 
     @torch.no_grad()
     def record_batch(
         self,
         target_data: TensorMapping,
         gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
+        target_data_norm: TensorMapping | None = None,
+        gen_data_norm: TensorMapping | None = None,
         loss: torch.Tensor = torch.tensor(np.nan),
         i_time_start: int = 0,
     ):
