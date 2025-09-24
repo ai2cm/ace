@@ -52,4 +52,4 @@ run_training() {
 base_name="stochastic"
 
 run_training "train-amip-e9c1-1step.yaml" "$base_name-amip-e9c1-1step"
-run_training "train-amip-e9c1-gauss-1step.yaml" "$base_name-amip-e9c1-gauss-1step"
+# run_training "train-amip-e9c1-gauss-1step.yaml" "$base_name-amip-e9c1-gauss-1step"
