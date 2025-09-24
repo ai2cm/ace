@@ -184,7 +184,7 @@ checkpoint_path: {results_dir}/training_checkpoints/best_ckpt.tar
 data_writer:
   save_prediction_files: true
 aggregator:
-  log_video: true
+  log_video: false
 logging:
   log_to_screen: true
   log_to_wandb: {log_to_wandb}

@@ -122,6 +122,8 @@ def plot_paneled_data(
     if diverging:
         vmax = max(abs(vmin), abs(vmax))
         vmin = -vmax
+    if vmin > vmax:  # occurs when all data is nan
+        vmin, vmax = 0, 0
     if caption is not None:
         caption += " "
     else:
