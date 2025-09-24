@@ -218,7 +218,7 @@ class TrainConfig:
     inference: InlineInferenceConfig | None
     n_forward_steps: int | None = None
     train_aggregator: TrainAggregatorConfig = dataclasses.field(
-        default_factory=lambda: TrainAggregatorConfig(spherical_power_spectrum=False)
+        default_factory=lambda: TrainAggregatorConfig()
     )
     seed: int | None = None
     copy_weights_after_batch: list[CopyWeightsConfig] = dataclasses.field(

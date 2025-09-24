@@ -16,8 +16,8 @@ from fme.core.typing_ import TensorMapping
 
 @dataclasses.dataclass
 class TrainAggregatorConfig:
-    spherical_power_spectrum: bool = False
-    rmse: bool = False
+    spherical_power_spectrum: bool = True
+    weighted_rmse: bool = True
 
 
 class Aggregator(Protocol):
@@ -47,7 +47,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                     report_plot=False,
                 )
             )
-        if config.rmse:
+        if config.weighted_rmse:
             self._paired_aggregators["mean"] = MeanAggregator(
                 gridded_operations=operations,
                 include_bias=False,

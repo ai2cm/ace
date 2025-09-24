@@ -15,7 +15,7 @@ from fme.core.typing_ import EnsembleTensorDict
     [
         (TrainAggregatorConfig(), ["test/mean/loss"]),
         (
-            TrainAggregatorConfig(spherical_power_spectrum=True, rmse=True),
+            TrainAggregatorConfig(spherical_power_spectrum=True, weighted_rmse=True),
             [
                 "test/power_spectrum/positive_norm_bias/a",
                 "test/power_spectrum/negative_norm_bias/a",
