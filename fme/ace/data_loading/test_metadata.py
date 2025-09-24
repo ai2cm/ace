@@ -10,8 +10,8 @@ from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data
 from fme.ace.requirements import DataRequirements
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.core.typing_ import VariableMetadata
 
 
 def _coord_value(name, size):

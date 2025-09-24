@@ -30,6 +30,7 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
@@ -59,12 +60,7 @@ from fme.core.tensors import (
 )
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingHistory, TrainingJob
-from fme.core.typing_ import (
-    EnsembleTensorDict,
-    TensorDict,
-    TensorMapping,
-    VariableMetadata,
-)
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -1456,6 +1452,11 @@ class Stepper(
 
             if "img_shape" in state:
                 dataset_state["img_shape"] = state["img_shape"]
+            elif "data_shapes" in state:
+                for _, shape in state["data_shapes"].items():
+                    if len(shape) == 4:
+                        dataset_state["img_shape"] = shape[-2:]
+                        break
 
             normalizer = StandardNormalizer.from_state(
                 state.get("normalizer", state.get("normalization"))
@@ -1464,10 +1465,11 @@ class Stepper(
                 raise ValueError(
                     f"No normalizer state found, keys include {state.keys()}"
                 )
-            loss_normalizer = StandardNormalizer.from_state(
-                state.get("loss_normalizer", state.get("loss_normalization"))
-            )
-            if loss_normalizer is None:
+            if "loss_normalizer" in state or "loss_normalization" in state:
+                loss_normalizer = StandardNormalizer.from_state(
+                    state.get("loss_normalizer", state.get("loss_normalization"))
+                )
+            else:
                 loss_normalizer = normalizer
             config = legacy_config.to_stepper_config(
                 normalizer=normalizer, loss_normalizer=loss_normalizer

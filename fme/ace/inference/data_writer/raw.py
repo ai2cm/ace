@@ -16,7 +16,7 @@ from fme.ace.inference.data_writer.utils import (
     DIM_INFO_LATLON,
     get_all_names,
 )
-from fme.core.typing_ import VariableMetadata
+from fme.core.dataset.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "time"
 LEAD_TIME_UNITS = "microseconds"

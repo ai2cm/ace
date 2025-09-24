@@ -1,9 +1,9 @@
 import datetime
 
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.mask_provider import MaskProvider
-from fme.core.typing_ import VariableMetadata
 
 
 class DatasetProperties:

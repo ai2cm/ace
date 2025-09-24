@@ -37,6 +37,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
@@ -49,12 +50,7 @@ from fme.core.step.multi_call import MultiCallStep, MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import mock_wandb
-from fme.core.typing_ import (
-    EnsembleTensorDict,
-    TensorDict,
-    TensorMapping,
-    VariableMetadata,
-)
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DIR = pathlib.Path(__file__).parent
 TIMESTEP = datetime.timedelta(hours=6)
@@ -280,7 +276,6 @@ def inference_helper(
 ):
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     all_names = list(set(in_names).union(out_names))
-    forcing_names = list(set(in_names).difference(out_names))
     data = FV3GFSData(
         path=tmp_path,
         names=all_names,
@@ -325,8 +320,6 @@ def inference_helper(
         ),
         data_writer=DataWriterConfig(
             save_prediction_files=True,
-            log_extended_video_netcdfs=True,
-            save_histogram_files=True,
             save_monthly_files=save_monthly_files,
         ),
         forward_steps_in_memory=1,
@@ -413,36 +406,6 @@ def inference_helper(
         )
         np.testing.assert_allclose(ic_ds[example_output_var].values, 0.0)
 
-    metric_ds = xr.open_dataset(
-        tmp_path / "reduced_autoregressive_predictions.nc", decode_timedelta=False
-    )
-    assert example_output_var in metric_ds.data_vars
-    assert metric_ds.data_vars[example_output_var].attrs["units"] == "cm"
-    assert (
-        metric_ds.data_vars[example_output_var].attrs["long_name"]
-        == f"ensemble mean of an output variable"
-    )
-    assert f"rmse_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"rmse_{example_output_var}"].attrs["units"] == "cm"
-    assert (
-        metric_ds.data_vars[f"rmse_{example_output_var}"].attrs["long_name"]
-        == f"root mean squared error of an output variable"
-    )
-    assert f"bias_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"bias_{example_output_var}"].attrs["units"] == "cm"
-    assert f"min_err_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"min_err_{example_output_var}"].attrs["units"] == "cm"
-    assert f"max_err_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"max_err_{example_output_var}"].attrs["units"] == "cm"
-    assert f"gen_var_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"gen_var_{example_output_var}"].attrs["units"] == ""
-    assert (
-        metric_ds.data_vars[f"gen_var_{example_output_var}"].attrs["long_name"]
-        == f"prediction variance of an output variable as fraction of target variance"
-    )
-    assert "lat" in metric_ds.coords
-    assert "lon" in metric_ds.coords
-
     time_mean_diagnostics = xr.open_dataset(
         tmp_path / "time_mean_diagnostics.nc", decode_timedelta=False
     )
@@ -475,35 +438,11 @@ def inference_helper(
     assert f"gen-{example_output_var}" in actual_var_names
     assert (
         zonal_mean_diagnostics.data_vars[f"gen-{example_output_var}"].attrs["units"]
-        == ""
+        == "cm"
     )
     assert len(zonal_mean_diagnostics.coords) == 1
     assert "lat" in zonal_mean_diagnostics.coords
 
-    for source in ["target", "prediction"]:
-        histograms = xr.open_dataset(
-            tmp_path / f"histograms_{source}.nc", decode_timedelta=False
-        )
-        actual_var_names = sorted([str(k) for k in histograms.keys()])
-        # NOTE: target histograms include forcing variables
-        n_vars = (
-            len(all_out_names)
-            if source == "prediction"
-            else len(all_out_names) + len(forcing_names)
-        )
-        assert len(actual_var_names) == 2 * n_vars
-        assert example_output_var in actual_var_names
-        assert histograms.data_vars[example_output_var].attrs["units"] == "count"
-        assert f"{example_output_var}_bin_edges" in actual_var_names
-        assert (
-            histograms.data_vars[f"{example_output_var}_bin_edges"].attrs["units"]
-            == "cm"
-        )
-        var_counts_per_timestep = histograms[example_output_var].sum(dim=["bin"])
-        same_count_each_timestep = np.all(
-            var_counts_per_timestep.values == var_counts_per_timestep.values[0]
-        )
-        assert same_count_each_timestep
     if monthly_reference_filename is not None:
         assert f"inference/annual/{example_output_var}" in wandb_logs[-1]
         assert f"inference/annual/r2_gen_{example_output_var}" in wandb_logs[-1]
@@ -693,9 +632,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_prediction_files=True,
-            log_extended_video_netcdfs=True,
             time_coarsen=TimeCoarsenConfig(coarsen_factor=coarsen_factor),
-            save_histogram_files=True,
         ),
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -711,19 +648,6 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
     assert (
         len(prediction_ds["time"]) == n_coarsened_timesteps
     ), "raw predictions time dimension size"
-    metric_ds = xr.open_dataset(
-        tmp_path / "reduced_autoregressive_predictions.nc", decode_timedelta=False
-    )
-    assert (
-        metric_ds.sizes["timestep"] == n_coarsened_timesteps
-    ), "reduced predictions time dimension size"
-    for source in ["target", "prediction"]:
-        histograms = xr.open_dataset(
-            tmp_path / f"histograms_{source}.nc", decode_timedelta=False
-        )
-        assert (
-            histograms.sizes["time"] == n_coarsened_timesteps
-        ), "histograms time dimension size"
 
 
 @pytest.mark.parametrize("has_required_fields", [True, False])

@@ -4,8 +4,9 @@ from collections.abc import Callable, MutableMapping
 
 import torch
 
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
-from fme.core.typing_ import TensorDict, VariableMetadata
+from fme.core.typing_ import TensorDict
 
 OceanDerivedVariableFunc = Callable[[OceanData, datetime.timedelta], torch.Tensor]
 

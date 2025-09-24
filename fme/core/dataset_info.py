@@ -10,10 +10,10 @@ from fme.core.coordinates import (
     SerializableVerticalCoordinate,
     VerticalCoordinate,
 )
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
-from fme.core.typing_ import VariableMetadata
 
 
 class MissingDatasetInfo(ValueError):
