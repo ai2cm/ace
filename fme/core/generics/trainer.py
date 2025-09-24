@@ -343,7 +343,7 @@ class Trainer:
             )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
-            self.optimization.step_scheduler(valid_loss)
+            self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
 
             time_elapsed = time.time() - start_time
             logging.info(
@@ -415,7 +415,7 @@ class Trainer:
         self.train_data.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
         dist = Distributed.get_instance()
-        names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0")
+        names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
         aggregator = self._aggregator_builder.get_train_aggregator()
         n_samples_seen_since_logging = 0
         self.stepper.set_train()
@@ -443,6 +443,8 @@ class Trainer:
             aggregator.record_batch(stepped)
             self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
+            # Step scheduler per-iteration if configured to do so
+            self.optimization.step_scheduler(is_iteration=True)
             self.num_batches_seen += 1
             self._current_epoch_num_batches_seen += 1
             n_samples_seen_since_logging += self.train_data.batch_size
@@ -460,6 +462,7 @@ class Trainer:
                 current_time = time.time()
                 samples_per_second = n_samples_seen_since_logging / duration
                 metrics["training_samples_per_second_on_rank_0"] = samples_per_second
+                metrics["lr"] = self.optimization.learning_rate
                 wandb.log(metrics, step=self.num_batches_seen)
                 metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
