@@ -13,9 +13,12 @@ from fme.core.typing_ import EnsembleTensorDict
 @pytest.mark.parametrize(
     "config, expected_keys",
     [
-        (TrainAggregatorConfig(), ["test/mean/loss"]),
         (
-            TrainAggregatorConfig(spherical_power_spectrum=True, weighted_rmse=True),
+            TrainAggregatorConfig(spherical_power_spectrum=False, weighted_rmse=False),
+            ["test/mean/loss"],
+        ),
+        (
+            TrainAggregatorConfig(),
             [
                 "test/power_spectrum/positive_norm_bias/a",
                 "test/power_spectrum/negative_norm_bias/a",
