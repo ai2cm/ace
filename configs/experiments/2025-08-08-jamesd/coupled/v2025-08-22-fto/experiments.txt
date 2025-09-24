@@ -30,3 +30,6 @@ ws|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-rq97q5t9_ep1-const_lr_10ep|01K5SWEZ3HK8HGX8BFD103SNS7
 ws|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-vxi6yc4m-cos_lr_10ep|ex
+ws|training|best_inference_ckpt|normal|--not-preemptible
