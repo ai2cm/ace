@@ -134,7 +134,7 @@ class Optimization(OptimizationABC):
         self,
         valid_loss: float | None = None,
         is_iteration: bool = False,
-    ) -> bool:
+    ):
         """
         Step the scheduler.
 
@@ -146,8 +146,7 @@ class Optimization(OptimizationABC):
             is_iteration: Whether the step is called from a training iteration or at
                 the end of an epoch. Default is epoch.
         """
-        should_step = self.scheduler.should_step(is_iteration)
-        if should_step:
+        if self.scheduler.should_step(is_iteration):
             try:
                 if valid_loss is not None:
                     self.scheduler.step(metrics=valid_loss)
@@ -156,7 +155,6 @@ class Optimization(OptimizationABC):
             except TypeError:
                 # Some schedulers don't accept metrics argument
                 self.scheduler.step()
-        return should_step
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
         if self._use_gradient_accumulation:
@@ -300,8 +298,8 @@ class NullOptimization(OptimizationABC):
 
     def step_scheduler(
         self, valid_loss: float | None = None, is_iteration: bool = False
-    ) -> bool:
-        return False
+    ):
+        return
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
         return dict(state)
