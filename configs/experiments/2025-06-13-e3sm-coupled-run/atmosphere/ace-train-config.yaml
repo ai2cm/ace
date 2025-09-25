@@ -3,7 +3,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 20
+max_epochs: 10
 n_forward_steps: 2
 inference:
   n_forward_steps: 14600
@@ -40,7 +40,7 @@ logging:
   project: ace-eamv3
   entity: ai2cm
 train_loader:
-  batch_size: 16
+  batch_size: 8
   num_data_workers: 8
   dataset:
     merge:
