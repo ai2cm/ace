@@ -26,7 +26,7 @@ class OptimizationABC(abc.ABC):
     @abc.abstractmethod
     def step_scheduler(
         self, valid_loss: float | None = None, is_iteration: bool = False
-    ) -> bool:
+    ):
         """
         Step the scheduler.
 

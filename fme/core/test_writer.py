@@ -8,12 +8,12 @@ import pytest
 import xarray as xr
 import zarr
 
-from fme.downscaling.writer import ZarrWriter, initialize_zarr, insert_into_zarr
+from fme.core.writer import ZarrWriter, initialize_zarr, insert_into_zarr
 
 NLAT, NLON = (8, 8)
 
 
-def create_zarr_store(path, shape, chunks, times, shards=None):
+def create_zarr_store(path, shape, chunks, times, shards=None, nondim_coords=None):
     dims = ("time", "sample", "lat", "lon")
     vars = ["var1", "var2"]
     array_attributes = {"var1": {"units": "K", "long_name": "Variable 1"}}
@@ -26,6 +26,7 @@ def create_zarr_store(path, shape, chunks, times, shards=None):
         dim_names=dims,
         coords={"time": times},
         dtype="f4",
+        nondim_coords=nondim_coords,
         array_attributes=array_attributes,
         group_attributes={"description": "Test Zarr store"},
     )
@@ -33,7 +34,8 @@ def create_zarr_store(path, shape, chunks, times, shards=None):
 
 def test_initialize_zarr(tmp_path):
     n_times = 20
-    shape = (n_times, 10, NLAT, NLON)
+    n_sample = 15
+    shape = (n_times, n_sample, NLAT, NLON)
     chunks = {"time": 10, "sample": 5, "lat": NLAT, "lon": NLON}
     times = np.array(
         [
@@ -42,12 +44,21 @@ def test_initialize_zarr(tmp_path):
         ]
     )
     path = os.path.join(tmp_path, "test.zarr")
-    create_zarr_store(path, shape, chunks, times)
+    nondim_coords = {
+        "nondimensional_coord": xr.DataArray(
+            np.ones((n_times, n_sample)), dims=("time", "sample")
+        )
+    }
+    create_zarr_store(path, shape, chunks, times, nondim_coords=nondim_coords)
 
     ds = xr.open_zarr(path)
     assert ds["var1"].shape == shape
     assert ds["var2"].shape == shape
     np.testing.assert_array_equal(ds.time.values, times)
+    assert (
+        "nondimensional_coord" in ds.coords
+        and "nondimensional_coord" not in ds.data_vars
+    )
     assert ds["var1"].attrs["units"] == "K"
     assert ds["var1"].attrs["long_name"] == "Variable 1"
     assert ds["var2"].attrs == {}

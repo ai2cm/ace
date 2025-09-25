@@ -191,6 +191,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                     writer_config.build_paired(
                         experiment_dir=path,
                         n_initial_conditions=n_initial_conditions,
+                        n_timesteps=n_timesteps,
                         variable_metadata=variable_metadata,
                         coords=coords,
                         dataset_metadata=dataset_metadata,
@@ -373,6 +374,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                     writer_config.build(
                         experiment_dir=path,
                         n_initial_conditions=n_initial_conditions,
+                        n_timesteps=n_timesteps,
                         variable_metadata=variable_metadata,
                         coords=coords,
                         dataset_metadata=dataset_metadata,

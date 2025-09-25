@@ -365,12 +365,12 @@ def get_trainer(
         original_step_scheduler = opt.step_scheduler
 
         def step_scheduler_side_effect(*args, **kwargs):
-            scheduler_was_stepped = original_step_scheduler(*args, **kwargs)
-            if len(args) > 0 or "valid_loss" in kwargs:
+            original_step_scheduler(*args, **kwargs)
+            is_iteration = kwargs.get("is_iteration", False)
+            if not is_iteration:
                 # this is an "epoch" step
                 nonlocal i
                 i += 1
-            return scheduler_was_stepped
 
         opt.step_scheduler = unittest.mock.MagicMock(  # type: ignore
             side_effect=step_scheduler_side_effect
@@ -1042,13 +1042,14 @@ def test_lr_logging_by_epoch(tmp_path: str):
         trainer.train()
         wandb_logs = wandb.get_logs()
 
-        iters_with_lr = [n_train_batches * (i + 1) for i in range(max_epochs)]
+        epoch_iters = [n_train_batches * i for i in range(max_epochs + 1)]
         for i, logs in enumerate(wandb_logs):
-            if i in iters_with_lr:
+            if i > 0:
                 assert "lr" in logs
-                assert "epoch" in logs
             else:
                 assert "lr" not in logs
+            if i in epoch_iters:
+                assert "epoch" in logs
 
 
 def test_lr_logging_by_iter(tmp_path: str):

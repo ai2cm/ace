@@ -29,7 +29,7 @@ class SchedulerConfig:
         Build the scheduler.
         """
         if self.type is None:
-            return LRScheduler(None)
+            return LRScheduler()
 
         build_kwargs = {**self.kwargs}
         # work-around so we don't need to specify T_max
@@ -136,5 +136,5 @@ class LRScheduler:
         return self._scheduler_obj.state_dict()
 
     def load_state_dict(self, state):
-        if self._scheduler_obj is not None:
+        if self._scheduler_obj is not None and state is not None:
             self._scheduler_obj.load_state_dict(state)
