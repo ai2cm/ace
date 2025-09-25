@@ -173,7 +173,7 @@ while read FINETUNING; do
             --install "pip install --no-deps ." \
             -- torchrun --nproc_per_node "${N_GPUS}" -m fme.coupled.train "$CONFIG_PATH" $OVERRIDE |
             tee /dev/tty |
-            grep beaker.org |
+            grep beaker.org/ex |
             cut -d/ -f5
     )
 

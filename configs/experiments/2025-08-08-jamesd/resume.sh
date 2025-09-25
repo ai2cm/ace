@@ -148,7 +148,7 @@ while read RESUMING; do
             -- torchrun --nproc_per_node "$N_GPUS" -m $FME_MODULE /existing-results/config.yaml \
             --override resume_results.existing_dir=/existing-results $OVERRIDE_ARGS |
             tee /dev/tty |
-            grep beaker.org |
+            grep beaker.org/ex |
             cut -d/ -f5
     )
 
