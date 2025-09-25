@@ -146,13 +146,19 @@ class TimeMeanAggregator:
         return ret
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, float | Image]:
+    def get_logs(
+        self, label: str, target_maps: dict[str, torch.Tensor] | None = None
+    ) -> dict[str, float | Image]:
         logs: dict[str, float | Image] = {}
         data = self.get_data()
         gen_map_key = "gen_map"
         for name, pred in data.items():
+            if target_maps is not None and name in target_maps:
+                data_panels = [[pred.cpu().numpy()], [target_maps[name].cpu().numpy()]]
+            else:
+                data_panels = [[pred.cpu().numpy()]]
             prediction_image = plot_paneled_data(
-                [[pred.cpu().numpy()]],
+                data_panels,
                 diverging=False,
                 caption=self._get_caption(gen_map_key, name),
             )
@@ -301,7 +307,7 @@ class TimeMeanEvaluatorAggregator:
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, float | torch.Tensor | Image]:
-        logs = self._gen_agg.get_logs("")
+        logs = self._gen_agg.get_logs("", target_maps=self._target_agg.get_data())
         preds = self._get_target_gen_pairs()
         bias_map_key = "bias_map"
         rmse_all_channels = {}
