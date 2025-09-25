@@ -37,7 +37,9 @@ class GriddedOperations(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def zonal_mean(self) -> Callable[[torch.Tensor, str], torch.Tensor] | None: ...
+    def zonal_mean(
+        self,
+    ) -> Callable[[torch.Tensor, str | None], torch.Tensor] | None: ...
 
     @abc.abstractmethod
     def area_weighted_sum(
@@ -300,7 +302,7 @@ class LatLonOperations(GriddedOperations):
         self._grid = "legendre-gauss"
 
     @property
-    def zonal_mean(self) -> Callable[[torch.Tensor, str], torch.Tensor]:
+    def zonal_mean(self) -> Callable[[torch.Tensor, str | None], torch.Tensor]:
         return self._zonal_mean
 
     def _zonal_mean(self, data: torch.Tensor, name: str | None = None) -> torch.Tensor:
