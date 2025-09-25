@@ -9,7 +9,7 @@ n_sample, n_time, ny, nx = 3, 6, 10, 20
 zonal_mean_max_size = 2**12
 
 
-def zonal_mean(data: torch.Tensor, name: str) -> torch.Tensor:
+def zonal_mean(data: torch.Tensor) -> torch.Tensor:
     return data.mean(dim=3)
 
 

@@ -66,7 +66,7 @@ class ZonalMeanAggregator:
 
     def __init__(
         self,
-        zonal_mean: Callable[[torch.Tensor, str], torch.Tensor],
+        zonal_mean: Callable[[torch.Tensor], torch.Tensor],
         n_timesteps: int,
         zonal_mean_max_size: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
@@ -198,7 +198,7 @@ class ZonalMeanAggregator:
                         dim=self._time_dim,
                     )
                 self._target_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor, name)
+                    self._zonal_mean(tensor)
                 )
                 if buffer_size > 0:
                     buffer[name] = tensor[:, -buffer_size:, :]
@@ -216,7 +216,7 @@ class ZonalMeanAggregator:
                         dim=self._time_dim,
                     )
                 self._gen_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor, name)
+                    self._zonal_mean(tensor)
                 )
                 if buffer_size > 0:
                     buffer[name] = tensor[:, -buffer_size:, :]

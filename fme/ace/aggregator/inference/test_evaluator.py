@@ -73,13 +73,8 @@ def regress_logs(
         raw_logs_loaded = torch.load(regression_file)
         assert set(raw_logs.keys()) == set(raw_logs_loaded.keys())
         for key, value in raw_logs.items():
-            if isinstance(value, torch.Tensor) and value.dtype == torch.uint8:
-                # a grayscale difference of at most 1 is allowed
-                rtol, atol = 1 / 255, 1.0
-            else:
-                rtol, atol = 1e-3, 1e-3
             torch.testing.assert_close(
-                value, raw_logs_loaded[key], rtol=rtol, atol=atol
+                value, raw_logs_loaded[key], rtol=1e-3, atol=1e-3
             )
 
 
