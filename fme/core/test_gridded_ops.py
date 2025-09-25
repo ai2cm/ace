@@ -5,6 +5,7 @@ import torch
 
 from fme.core import get_device, set_seed
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
+from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import TensorMapping
 
 
@@ -74,6 +75,22 @@ def test_latlon_zonal_mean():
     result = ops.zonal_mean(data, None)
     assert result.shape == (n_sample, n_time, n_lat)
     torch.testing.assert_close(result, data.mean(dim=-1))
+
+
+def test_latlon_zonal_mean_with_nans():
+    n_sample, n_time, n_lat, n_lon = 2, 4, 5, 6
+    area_weights = torch.ones(n_lat, n_lon)
+    mask = torch.ones(n_lat, n_lon)
+    mask[3, 2:4] = 0
+    data = torch.randn(n_sample, n_time, n_lat, n_lon)
+    data[..., 3, 2:4] = float("nan")
+    ops = LatLonOperations(
+        area_weights=area_weights,
+        mask_provider=MaskProvider({"mask_var": mask}),
+    )
+    result = ops.zonal_mean(data, "var")
+    assert result.shape == (n_sample, n_time, n_lat)
+    torch.testing.assert_close(result, data.nanmean(dim=-1))
 
 
 def test_latlon_area_weighted_mean_dict():
