@@ -65,7 +65,7 @@ inference:
         - '1970-01-03T00:00:00'
   n_coupled_steps: {inference_n_coupled_steps}
   aggregator:
-    log_zonal_mean_images: {log_zonal_mean_images}
+    log_zonal_mean_images: True
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
@@ -192,7 +192,6 @@ def _write_test_yaml_files(
     n_coupled_steps: int = 1,
     max_epochs: int = 1,
     inline_inference_n_coupled_steps: int = 3,
-    log_zonal_mean_images: bool = False,
     inference_n_coupled_steps: int = 6,
     coupled_steps_in_memory: int = 2,
     save_per_epoch_diagnostics: bool = True,
@@ -223,7 +222,6 @@ def _write_test_yaml_files(
         land_frac_name=land_frac_name,
         atmos_sfc_temp_name=atmos_sfc_temp_name,
         ocean_frac_name=ocean_frac_name,
-        log_zonal_mean_images=str(log_zonal_mean_images).lower(),
         save_per_epoch_diagnostics=str(save_per_epoch_diagnostics).lower(),
         loss_atmos_n_steps=loss_atmos_n_steps,
         loss_ocean_weight=loss_ocean_weight,
@@ -248,25 +246,10 @@ def _write_test_yaml_files(
 
 
 @pytest.mark.parametrize(
-    "log_zonal_mean_images,loss_atmos_n_steps",
-    [
-        (False, 3),
-        (False, 0),
-        pytest.param(
-            True,
-            1,
-            marks=pytest.mark.xfail(
-                reason=(
-                    "There is an unresolved bug when logging "
-                    "zonal mean images during coupled inference"
-                )
-            ),
-        ),
-    ],
+    "loss_atmos_n_steps",
+    [3, 0],
 )
-def test_train_and_inference(
-    tmp_path, log_zonal_mean_images, loss_atmos_n_steps, very_fast_only: bool
-):
+def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool):
     """Ensure that coupled training and standalone inference run without errors."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
@@ -361,7 +344,6 @@ def test_train_and_inference(
         land_frac_name="land_fraction",
         atmos_sfc_temp_name="surface_temperature",
         ocean_frac_name="ocean_fraction",
-        log_zonal_mean_images=log_zonal_mean_images,
         n_coupled_steps=2,
         max_epochs=1,
         inline_inference_n_coupled_steps=3,
