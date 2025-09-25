@@ -6,7 +6,8 @@ import xarray as xr
 from fme.core.device import get_device
 from fme.core.packer import Packer
 from fme.downscaling.aggregators.shape_helpers import upsample_tensor
-from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatchData
+from fme.downscaling.data import BatchData, PairedBatchData
+from fme.downscaling.data.utils import BatchedLatLonCoordinates
 from fme.downscaling.models import ModelOutputs
 from fme.downscaling.patching import get_patches
 from fme.downscaling.predictors.composite import (
