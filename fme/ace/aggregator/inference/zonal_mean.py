@@ -20,6 +20,7 @@ class _RawData:
     datum: torch.Tensor
     caption: str
     metadata: VariableMetadata
+    target_datum: torch.Tensor | None = None
     diverging: bool = False
 
     def get_image(self) -> Image:
@@ -27,11 +28,19 @@ class _RawData:
         # data is time, lat
         # we want lat on y-axis and time on x-axis
         datum = self.datum.transpose()
-        return plot_paneled_data(
-            [[datum]],
-            diverging=self.diverging,
-            caption=self.caption,
-        )
+        if self.target_datum is not None:
+            target_datum = self.target_datum.transpose()
+            return plot_paneled_data(
+                [[datum], [target_datum]],
+                diverging=self.diverging,
+                caption=self.caption,
+            )
+        else:
+            return plot_paneled_data(
+                [[datum]],
+                diverging=self.diverging,
+                caption=self.caption,
+            )
 
 
 class ZonalMeanAggregator:
@@ -57,7 +66,7 @@ class ZonalMeanAggregator:
 
     def __init__(
         self,
-        zonal_mean: Callable[[torch.Tensor], torch.Tensor],
+        zonal_mean: Callable[[torch.Tensor, str], torch.Tensor],
         n_timesteps: int,
         zonal_mean_max_size: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
@@ -189,7 +198,7 @@ class ZonalMeanAggregator:
                         dim=self._time_dim,
                     )
                 self._target_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor)
+                    self._zonal_mean(tensor, name)
                 )
                 if buffer_size > 0:
                     buffer[name] = tensor[:, -buffer_size:, :]
@@ -207,7 +216,7 @@ class ZonalMeanAggregator:
                         dim=self._time_dim,
                     )
                 self._gen_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor)
+                    self._zonal_mean(tensor, name)
                 )
                 if buffer_size > 0:
                     buffer[name] = tensor[:, -buffer_size:, :]
@@ -241,6 +250,7 @@ class ZonalMeanAggregator:
             )
             data[f"gen/{name}"] = _RawData(
                 datum=gen,
+                target_datum=target,
                 caption=self._get_caption("gen", name),
                 metadata=metadata,
                 diverging=False,

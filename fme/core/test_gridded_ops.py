@@ -67,11 +67,11 @@ def test_latlon_area_weighted_sum_dict():
 
 
 def test_latlon_zonal_mean():
-    area_weights = torch.ones(4, 5)
-    ops = LatLonOperations(area_weights=area_weights)
     n_sample, n_time, n_lat, n_lon = 2, 4, 5, 6
+    area_weights = torch.ones(n_lat, n_lon)
+    ops = LatLonOperations(area_weights=area_weights)
     data = torch.randn(n_sample, n_time, n_lat, n_lon)
-    result = ops.zonal_mean(data)
+    result = ops.zonal_mean(data, None)
     assert result.shape == (n_sample, n_time, n_lat)
     torch.testing.assert_close(result, data.mean(dim=-1))
 

@@ -19,6 +19,8 @@ from fme.downscaling.data.datasets import (
     HorizontalSubsetDataset,
     PairedBatchData,
     PairedGriddedData,
+)
+from fme.downscaling.data.topography import (
     get_normalized_topography,
     get_topography_downscale_factor,
 )
@@ -87,6 +89,9 @@ class DataLoaderConfig:
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
         topography: The dataset path for the topography data.
+            This may be at a higher resolution than the coarse data, e.g.
+            when fine topography is loaded as an input for predictions that
+            have no fine-res paired targets.
             If None, no topography data will be loaded.
         lat_extent: The latitude extent to use for the dataset specified in
             degrees (-90, 90).  The extent is inclusive, so the start and
@@ -373,7 +378,8 @@ class PairedDataLoaderConfig:
                 fine_topography = get_normalized_topography(self.topography)
             if (
                 get_topography_downscale_factor(
-                    fine_topography.shape, properties_fine.horizontal_coordinates.shape
+                    fine_topography.data.shape,
+                    properties_fine.horizontal_coordinates.shape,
                 )
                 != 1
             ):
