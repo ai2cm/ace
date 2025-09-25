@@ -3,6 +3,3 @@ v2025-08-22-mnsf-correctHI-rs1|01K3AMWVE2M9PYC8K0FG38V8QJ|run_ICx1|best_inferenc
 v2025-08-22-mnsf-correctHI-rs1-finetune|01K3D5RZS4FCY5APBCRT6Q3GJC|trained|best_inference_ckpt|normal|--not-preemptible
 v2025-08-22-mnsf-correctHI-nfs8-rs1|01K3DBQT6S6D2QF3YZEB2CDRD5|run_ICx1|best_inference_ckpt|normal|--not-preemptible
 v2025-08-22-mnsf-correctHI-nfs8-rs1-finetune|01K3J6CPM3NHH1VVJJPKVVBVEF|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-
-test-run-zonal-mean-with-nans|01K61EJFYD3251E6WV7BEVCWNK
-ws|training|best_inference_ckpt|normal|--not-preemptible
