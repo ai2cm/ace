@@ -70,7 +70,7 @@ while read TRAIN_EXPER; do
     fi
 
     if [[ -z "$WORKSPACE" ]]; then
-        WORKSPACE=ai2/climate-ceres
+        WORKSPACE=ai2/ace
     fi
 
     echo
