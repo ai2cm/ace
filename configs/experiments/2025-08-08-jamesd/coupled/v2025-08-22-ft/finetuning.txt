@@ -1,3 +1,4 @@
 group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 ft-04b09e64-cos_lr_20ep|ace-samudra-coupled-cm4|04b09e64|best_inference_ckpt|training|urgent|ceres|8|800GiB|3
-ft-vxi6yc4m-cos_lr_10ep|ace-samudra-coupled-cm4|vxi6yc4m|best_ckpt|train|urgent|ceres|8|800GiB|3||max_epochs=10
+ft-vxi6yc4m-cos_lr_10ep|ace-samudra-coupled-cm4|vxi6yc4m|best_ckpt|failed|urgent|ceres|8|800GiB|3||max_epochs=10
+ft-vxi6yc4m-const_lr_20ep-ncs2-oloss_w0p1-fta_enc|vxi6yc4m|best_ckpt|train|normal|ceres|8|800GiB|3||n_coupled_steps=2 stepper.ocean.loss_contributions.weight=0.1 stepper.atmosphere.stepper.parameter_init.parameters=[{'frozen':{'include':['(?!conditional_model.encoder)*'],'exclude':['conditional_model.encoder.*']}}] checkpoint_every_n_batches=360
