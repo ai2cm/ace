@@ -322,6 +322,7 @@ def get_trainer(
     checkpoint_every_n_batches: int = 0,
     n_train_batches: int = 100,
     save_best_inference_epoch_checkpoints: bool = False,
+    scheduler_config: SchedulerConfig | None = None,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -349,13 +350,15 @@ def get_trainer(
         if module.weight.numel() != 1:
             raise ValueError("Expected a linear module with 1 weight")
         i = 0
-
+        nonlocal scheduler_config
+        if scheduler_config is None:
+            scheduler_config = SchedulerConfig()
         opt = Optimization(
             parameters=itertools.chain(*[module.parameters() for module in modules]),
             optimizer_type="Adam",
             lr=0.01,
             max_epochs=max_epochs,
-            scheduler=SchedulerConfig(),
+            scheduler=scheduler_config,
             enable_automatic_mixed_precision=False,
             kwargs={},
         )
@@ -363,8 +366,11 @@ def get_trainer(
 
         def step_scheduler_side_effect(*args, **kwargs):
             original_step_scheduler(*args, **kwargs)
-            nonlocal i
-            i += 1
+            is_iteration = kwargs.get("is_iteration", False)
+            if not is_iteration:
+                # this is an "epoch" step
+                nonlocal i
+                i += 1
 
         opt.step_scheduler = unittest.mock.MagicMock(  # type: ignore
             side_effect=step_scheduler_side_effect
@@ -1005,3 +1011,79 @@ def test_save_best_inference_epoch_ckpts_disabled(tmp_path: str):
         assert not os.path.exists(
             paths.best_inference_epoch_checkpoint_path(epoch)
         ), f"Should not save best_inference_ckpt_{epoch}.tar when disabled"
+
+
+def test_lr_logging_by_epoch(tmp_path: str):
+    max_epochs = 2
+    n_train_batches = 5
+    train_losses = np.random.rand(max_epochs)
+    val_losses = np.random.rand(max_epochs + 1)
+    inference_errors = np.random.rand(max_epochs + 1)
+
+    def _get_trainer(train_losses, val_losses, inference_errors):
+        _, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            train_losses=train_losses,
+            validation_losses=val_losses,
+            inference_losses=inference_errors,
+            evaluate_before_training=True,
+            n_train_batches=n_train_batches,
+            scheduler_config=SchedulerConfig(
+                type="ConstantLR",
+                step_each_iteration=False,
+            ),
+        )
+        return trainer
+
+    with mock_wandb() as wandb:
+        LoggingConfig(log_to_wandb=True).configure_wandb({"experiment_dir": tmp_path})
+        trainer = _get_trainer(train_losses, val_losses, inference_errors)
+        trainer.train()
+        wandb_logs = wandb.get_logs()
+
+        epoch_iters = [n_train_batches * i for i in range(max_epochs + 1)]
+        for i, logs in enumerate(wandb_logs):
+            if i > 0:
+                assert "lr" in logs
+            else:
+                assert "lr" not in logs
+            if i in epoch_iters:
+                assert "epoch" in logs
+
+
+def test_lr_logging_by_iter(tmp_path: str):
+    max_epochs = 2
+    n_train_batches = 5
+    train_losses = np.random.rand(max_epochs)
+    val_losses = np.random.rand(max_epochs + 1)
+    inference_errors = np.random.rand(max_epochs + 1)
+
+    def _get_trainer(train_losses, val_losses, inference_errors):
+        _, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            train_losses=train_losses,
+            validation_losses=val_losses,
+            inference_losses=inference_errors,
+            evaluate_before_training=True,
+            n_train_batches=n_train_batches,
+            scheduler_config=SchedulerConfig(
+                type="ConstantLR",
+                step_each_iteration=True,
+            ),
+        )
+        return trainer
+
+    with mock_wandb() as wandb:
+        LoggingConfig(log_to_wandb=True).configure_wandb({"experiment_dir": tmp_path})
+        trainer = _get_trainer(train_losses, val_losses, inference_errors)
+        trainer.train()
+        wandb_logs = wandb.get_logs()
+
+        for i, logs in enumerate(wandb_logs):
+            if i > 0:
+                # epoch 0 doesn't log the LR
+                assert "lr" in logs
+            else:
+                assert "lr" not in logs

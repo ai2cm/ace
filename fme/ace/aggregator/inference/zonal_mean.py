@@ -20,6 +20,7 @@ class _RawData:
     datum: torch.Tensor
     caption: str
     metadata: VariableMetadata
+    target_datum: torch.Tensor | None = None
     diverging: bool = False
 
     def get_image(self) -> Image:
@@ -27,11 +28,19 @@ class _RawData:
         # data is time, lat
         # we want lat on y-axis and time on x-axis
         datum = self.datum.transpose()
-        return plot_paneled_data(
-            [[datum]],
-            diverging=self.diverging,
-            caption=self.caption,
-        )
+        if self.target_datum is not None:
+            target_datum = self.target_datum.transpose()
+            return plot_paneled_data(
+                [[datum], [target_datum]],
+                diverging=self.diverging,
+                caption=self.caption,
+            )
+        else:
+            return plot_paneled_data(
+                [[datum]],
+                diverging=self.diverging,
+                caption=self.caption,
+            )
 
 
 class ZonalMeanAggregator:
@@ -241,6 +250,7 @@ class ZonalMeanAggregator:
             )
             data[f"gen/{name}"] = _RawData(
                 datum=gen,
+                target_datum=target,
                 caption=self._get_caption("gen", name),
                 metadata=metadata,
                 diverging=False,
