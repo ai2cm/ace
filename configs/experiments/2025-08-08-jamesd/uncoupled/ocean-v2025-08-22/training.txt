@@ -1,3 +1,4 @@
-group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|override_args
-v2025-08-22-mnsf-correctHI-rs1|training|urgent|ceres|8|400GiB|3
-v2025-08-22-mnsf-correctHI-nfs8-rs1|train|urgent|ceres|8|400GiB|3||n_forward_steps=8 max_epochs=75
+group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+v2025-08-22-mnsf-correctHI-rs1|trained|urgent|ceres|8|400GiB|3
+v2025-08-22-mnsf-correctHI-nfs8-rs1|trained|urgent|ceres|8|400GiB|3||n_forward_steps=8 max_epochs=75
+test-run-zonal-mean-with-nans|train|urgent|ceres|1|200GiB|0||n_forward_steps=1 max_epochs=1 evaluate_before_training=True save_checkpoint=False train_loader.batch_size=2 validation_loader.batch_size=2 logging.project=ocean-emulator
