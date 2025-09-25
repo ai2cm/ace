@@ -317,7 +317,7 @@ class AreaWeightedCRPSLoss(torch.nn.Module):
         self.area_weighted_mean = area_weighted_mean
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return self.area_weighted_mean(get_crps(x, y, alpha=self.alpha))
+        return torch.mean(self.area_weighted_mean(get_crps(x, y, alpha=self.alpha)))
 
 
 class EnsembleLoss(torch.nn.Module):
