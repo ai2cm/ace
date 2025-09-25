@@ -300,12 +300,34 @@ class CRPSLoss(torch.nn.Module):
         return get_crps(x, y, alpha=self.alpha).mean()
 
 
+class AreaWeightedCRPSLoss(torch.nn.Module):
+    """
+    Compute the area-weighted CRPS loss.
+
+    Supports almost-fair modification to CRPS from
+    https://arxiv.org/html/2412.15832v1, which claims to be helpful in
+    avoiding numerical issues with fair CRPS.
+    """
+
+    def __init__(
+        self, alpha: float, area_weighted_mean: Callable[[torch.Tensor], torch.Tensor]
+    ):
+        super().__init__()
+        self.alpha = alpha
+        self.area_weighted_mean = area_weighted_mean
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return self.area_weighted_mean(get_crps(x, y, alpha=self.alpha))
+
+
 class EnsembleLoss(torch.nn.Module):
     def __init__(
         self,
         crps_weight: float,
+        area_weighted_crps_weight: float,
         energy_score_weight: float,
         sht: Callable[[torch.Tensor], torch.Tensor],
+        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -319,9 +341,13 @@ class EnsembleLoss(torch.nn.Module):
                 f"got {crps_weight} and {energy_score_weight}"
             )
         self.crps_loss = CRPSLoss(alpha=0.95)
+        self.area_weighted_crps_loss = AreaWeightedCRPSLoss(
+            alpha=0.95, area_weighted_mean=area_weighted_mean
+        )
         self.energy_score_loss = EnergyScoreLoss(sht=sht)
 
         self.crps_weight = crps_weight
+        self.area_weighted_crps_weight = area_weighted_crps_weight
         self.energy_score_weight = energy_score_weight
 
     def forward(
@@ -339,7 +365,14 @@ class EnsembleLoss(torch.nn.Module):
             )
         else:
             energy_score_loss = torch.tensor(0.0)
-        return crps + energy_score_loss
+        if self.area_weighted_crps_weight > 0:
+            area_weighted_crps = (
+                self.area_weighted_crps_weight
+                * self.area_weighted_crps_loss(gen_norm, target_norm)
+            )
+        else:
+            area_weighted_crps = torch.tensor(0.0)
+        return crps + energy_score_loss + area_weighted_crps
 
 
 @dataclasses.dataclass
@@ -412,10 +445,13 @@ class LossConfig:
             kwargs = dict(self.kwargs)
             crps_weight = kwargs.pop("crps_weight", 1.0)
             energy_score_weight = kwargs.pop("energy_score_weight", 0.0)
+            area_weighted_crps_weight = kwargs.pop("area_weighted_crps_weight", 0.0)
             main_loss = EnsembleLoss(
                 sht=gridded_operations.get_real_sht(),
                 crps_weight=crps_weight,
                 energy_score_weight=energy_score_weight,
+                area_weighted_crps_weight=area_weighted_crps_weight,
+                area_weighted_mean=gridded_operations.area_weighted_mean,
                 **kwargs,
             )
 
