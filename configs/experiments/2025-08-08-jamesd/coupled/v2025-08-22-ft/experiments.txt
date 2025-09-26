@@ -71,3 +71,5 @@ ft-vxi6yc4m-const_lr_20ep-ncs4-oloss_w0p1|01K62837JAK82KB041T4V4G0VA|training|be
 ft-wkyt377i-const_lr_20ep-ncs3-oloss_w0p1-fta_dec|01K63C4Q3QGCY88CJ8SYG2YQ7B|training|best_inference_ckpt|normal|--not-preemptible
 
 ft-v2025-08-22-const_lr_50ep-ncs4-fta_enc_dec|01K63V0VXWM5PSBXE59KZTYZ4E|training|best_inference_ckpt|normal|--not-preemptible
+
+ft-v2025-08-22-const_lr_50ep-ncs4-fta_enc_dec|01K6455X4S7APG3MEBE6BZD9H0|training|best_inference_ckpt|normal|--not-preemptible
