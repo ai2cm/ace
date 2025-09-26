@@ -125,7 +125,10 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
 
 def test_predictor_renaming(
     tmp_path,
+    very_fast_only: bool,
 ):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     n_samples = 2
     coarse_shape = (4, 4)
     downscale_factor = 2

@@ -34,7 +34,9 @@ def test_loss_builds_and_runs(global_mean_type):
     assert isinstance(result, torch.Tensor)
 
 
-def test_spectral_energy_score():
+def test_spectral_energy_score(very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     torch.manual_seed(0)
     DEVICE = get_device()
     n_lat, n_lon = 16, 32
