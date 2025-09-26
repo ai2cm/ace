@@ -150,3 +150,9 @@ stepper:
     stepper:
       parameter_init:
         weights_path: /atmos_ckpt.tar
+        parameters:
+          - frozen:
+              include:
+                - '(?!conditional_model.encoder|conditional_model.decoder)*'
+              exclude:
+                - 'conditional_model.decoder.*|conditional_model.encoder.*'
