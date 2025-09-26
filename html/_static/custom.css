@@ -1,0 +1,21 @@
+body[data-theme="dark"] {
+    --code-block-background: #202020;
+}
+
+body[data-theme="light"] {
+    --code-block-background: #f8f9fb;
+}
+
+body[data-theme="auto"] {
+    --code-block-background: #f8f9fb;
+}
+
+@media (prefers-color-scheme: dark) {
+    body[data-theme="auto"] {
+        --code-block-background: #202020;
+    }
+}
+
+div.highlight pre {
+    background: var(--code-block-background);
+}

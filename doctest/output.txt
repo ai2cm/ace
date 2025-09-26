@@ -1,0 +1,62 @@
+Results of doctest builder run on 2025-09-26 16:44:46
+=====================================================
+
+Document: api
+-------------
+1 items passed all tests:
+   4 tests in default
+4 tests in 1 items.
+4 passed and 0 failed.
+Test passed.
+
+Document: builder
+-----------------
+1 items passed all tests:
+   3 tests in default
+3 tests in 1 items.
+3 passed and 0 failed.
+Test passed.
+1 items passed all tests:
+   1 tests in default (cleanup code)
+1 tests in 1 items.
+1 passed and 0 failed.
+Test passed.
+
+Document: training_config
+-------------------------
+1 items passed all tests:
+   1 tests in default
+1 tests in 1 items.
+1 passed and 0 failed.
+Test passed.
+
+Document: inference_config
+--------------------------
+1 items passed all tests:
+   6 tests in default
+6 tests in 1 items.
+6 passed and 0 failed.
+Test passed.
+
+Document: evaluator_config
+--------------------------
+1 items passed all tests:
+   3 tests in default
+3 tests in 1 items.
+3 passed and 0 failed.
+Test passed.
+
+Document: quickstart
+--------------------
+1 items passed all tests:
+   1 tests in default
+1 tests in 1 items.
+1 passed and 0 failed.
+Test passed.
+
+Doctest summary
+===============
+   18 tests
+    0 failures in tests
+    0 failures in setup code
+    0 failures in cleanup code
