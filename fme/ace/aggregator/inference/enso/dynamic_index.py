@@ -82,6 +82,27 @@ def compute_nino34_index_power_spectrum(
     return freqs_per_year, power
 
 
+def compute_nino34_index_std(
+    data: xr.DataArray,
+    target_data: xr.DataArray | None = None,
+    time_dim: int = TIME_DIM,
+) -> float:
+    """Compute the standard deviation of each sample in the data and return the
+    average standard deviation across all samples.
+
+    Args:
+        data: The generated nino34 index data with sample and a time dims.
+        target_data: (Optional) The target nino34 index data of the same shape. If
+            provided, the generated standard deviations are normalized by the target
+            standard deviation prior to computing the mean across samples.
+        time_dim: Time dimension index
+    """
+    std_by_sample = np.nanstd(data, axis=time_dim)
+    if target_data is not None:
+        std_by_sample = std_by_sample / np.nanstd(target_data, axis=time_dim)
+    return std_by_sample.mean().item()
+
+
 class RegionalIndexAggregator:
     """Aggregator for computing a regional index, in this case a monthly- and area-
     weighted average of a variable over a region.
@@ -211,7 +232,7 @@ class RegionalIndexAggregator:
 
     def get_logs(self, label: str) -> dict[str, Any]:
         indices = self.get_indices()
-        plots = {}
+        logs = {}
         for sst_name in self.sea_surface_temperature_names:
             if sst_name in indices and indices[sst_name].sizes["time"] > 1:
                 fig, ax = plt.subplots(1, 1)
@@ -225,7 +246,10 @@ class RegionalIndexAggregator:
                 ax.set_ylabel("K")
                 ax.legend()
                 fig.tight_layout()
-                plots[f"{sst_name}_nino34_index"] = fig
+                logs[f"{sst_name}_nino34_index"] = fig
+                logs[f"{sst_name}_nino34_index_std"] = compute_nino34_index_std(
+                    indices[sst_name]
+                )
         for sst_name in self.sea_surface_temperature_names:
             if (
                 sst_name in indices
@@ -242,11 +266,11 @@ class RegionalIndexAggregator:
                 ax.set(yscale="log")
                 ax.legend()
                 fig.tight_layout()
-                plots[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
 
         if len(label) > 0:
             label = label + "/"
-        return {f"{label}{k}": v for k, v in plots.items()}
+        return {f"{label}{k}": v for k, v in logs.items()}
 
     def get_dataset(self) -> xr.Dataset:
         indices = self.get_indices()
@@ -279,7 +303,7 @@ class PairedRegionalIndexAggregator:
     def get_logs(self, label: str) -> dict[str, Any]:
         target_indices = self._target_aggregator.get_indices()
         prediction_indices = self._prediction_aggregator.get_indices()
-        plots = {}
+        logs = {}
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
             if (
                 sst_name in prediction_indices
@@ -291,6 +315,7 @@ class PairedRegionalIndexAggregator:
                 prediction_indices_plottable = prediction_indices.assign_coords(
                     {"time": convert_cftime_to_datetime_coord(prediction_indices.time)}
                 )
+
                 fig, ax = plt.subplots(1, 1)
                 plot_mean_and_samples(
                     ax,
@@ -310,7 +335,14 @@ class PairedRegionalIndexAggregator:
                 ax.set_ylabel("K")
                 ax.legend()
                 fig.tight_layout()
-                plots[f"{sst_name}_nino34_index"] = fig
+                logs[f"{sst_name}_nino34_index"] = fig
+                logs[f"{sst_name}_nino34_index_std"] = compute_nino34_index_std(
+                    prediction_indices[sst_name]
+                )
+                logs[f"{sst_name}_nino34_index_std_norm"] = compute_nino34_index_std(
+                    prediction_indices[sst_name],
+                    target_indices[sst_name],
+                )
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
             if (
                 sst_name in prediction_indices
@@ -332,11 +364,11 @@ class PairedRegionalIndexAggregator:
                 ax.set(yscale="log")
                 ax.legend()
                 fig.tight_layout()
-                plots[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
         if len(label) > 0:
             label = label + "/"
 
-        return {f"{label}{k}": v for k, v in plots.items()}
+        return {f"{label}{k}": v for k, v in logs.items()}
 
     def get_dataset(self) -> xr.Dataset:
         prediction = self._prediction_aggregator.get_dataset()
