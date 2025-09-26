@@ -63,3 +63,5 @@ ws|training|best_inference_ckpt|normal|--not-preemptible
 
 ft-vxi6yc4m-const_lr_20ep-ncs2-oloss_w0p1-fta_enc|01K5ZC1GP0GV8FZV4G64E0YJCR
 ws|training|best_inference_ckpt|normal|--not-preemptible
+
+ft-vxi6yc4m-const_lr_20ep-ncs4-oloss_w0p1||training|best_inference_ckpt|normal|--not-preemptible
