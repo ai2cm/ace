@@ -57,7 +57,8 @@ class ZonalMeanAggregator:
             "x-axis is time increasing to right, y-axis is latitude increasing upward"
         ),
         "gen": (
-            "{name} zonal-mean generated [{units}], "
+            "{name} zonal-mean; "
+            "(top) generated and (bottom) target [{units}], "
             "x-axis is time increasing to right, y-axis is latitude increasing upward"
         ),
     }

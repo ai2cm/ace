@@ -58,6 +58,9 @@ class TimeMeanAggregator:
     _image_captions = {
         "bias_map": "{name} time-mean bias (generated - reference) [{units}]",
         "gen_map": "{name} time-mean generated [{units}]",
+        "gen_target_map": (
+            "{name} time-mean; (top) generated and (bottom) target [{units}]"
+        ),
     }
 
     def __init__(
@@ -154,13 +157,15 @@ class TimeMeanAggregator:
         gen_map_key = "gen_map"
         for name, pred in data.items():
             if target_maps is not None and name in target_maps:
+                gen_map_caption_key = gen_map_key
                 data_panels = [[pred.cpu().numpy()], [target_maps[name].cpu().numpy()]]
             else:
+                gen_map_caption_key = "gen_target_map"
                 data_panels = [[pred.cpu().numpy()]]
             prediction_image = plot_paneled_data(
                 data_panels,
                 diverging=False,
-                caption=self._get_caption(gen_map_key, name),
+                caption=self._get_caption(gen_map_caption_key, name),
             )
             logs.update(
                 {
