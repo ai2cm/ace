@@ -133,7 +133,7 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-  schdeuler:
+  scheduler:
     type: CosineAnnealingLR
 stepper:
   ocean_fraction_prediction:
