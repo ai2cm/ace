@@ -45,3 +45,5 @@ v2025-08-22-ts_unc-const_lr_50ep-nfs2-ft_18o5meta-train|01K673SZF9JAEQJG6C80085P
 v2025-08-22-ts_unc-const_lr_50ep-rs2|01K68M05FXFCTHH9X1YZ0PWDNV|training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-22-ts_unc-const_lr_50ep-nfs2-ft_18o5meta|01K68M0BF125FT4833BV154F5D|training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-22-ts_unc-const_lr_50ep-rs1|01K68M0H81S7M4KWA9SB2HEV24|training|best_inference_ckpt|normal|--not-preemptible
