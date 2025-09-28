@@ -1,0 +1,2 @@
+
+fta-v2025-08-22-cos_lr_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
