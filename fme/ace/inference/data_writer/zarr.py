@@ -63,8 +63,8 @@ class ZarrWriterConfig:
     chunks: dict[str, int] | None = field(
         default_factory=lambda: {"time": 1, "sample": 1}
     )
-    allow_existing: bool = False
-    overwrite_check: bool = True
+    allow_existing: bool = True
+    overwrite_check: bool = False
 
 
 class ZarrWriterAdapter:

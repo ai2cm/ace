@@ -3,7 +3,7 @@ import logging
 import os
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import TypeAlias, TypeGuard
+from typing import TypeAlias, TypeGuard, Union
 
 import numpy as np
 import torch
@@ -15,6 +15,7 @@ from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
 from .raw import RawDataWriter
+from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .zarr import ZarrWriterAdapter, ZarrWriterConfig
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,9 @@ class SubselectWriterConfig:
             allows for datetime range selection.
         latitude_name: The name of the latitude coordinate in the dataset.
         longitude_name: The name of the longitude coordinate in the dataset.
+        time_coarsen: Optional TimeCoarsen config for reducing in the time dimension.
+        zarr: Optional configuration for writing to zarr. If not specified, data
+            will be written to netcdf.
     """
 
     label: str
@@ -158,6 +162,7 @@ class SubselectWriterConfig:
     latitude_name: str = "latitude"
     longitude_name: str = "longitude"
     save_reference: bool = False
+    time_coarsen: TimeCoarsenConfig | None = None
     zarr: ZarrWriterConfig = dataclasses.field(default_factory=ZarrWriterConfig)
 
     def __post_init__(self):
@@ -178,6 +183,12 @@ class SubselectWriterConfig:
         else:
             self.lon_slice = slice(None)
 
+        if self.time_selection is not None and self.time_coarsen is not None:
+            logging.warning(
+                "Time coarsening is enabled. "
+                "Time subselection is applied *after* time coarsening."
+            )
+
     def build_paired(
         self,
         experiment_dir: str,
@@ -188,7 +199,7 @@ class SubselectWriterConfig:
         dataset_metadata: DatasetMetadata,
         prediction_suffix: str = "prediction",
         reference_suffix: str = "reference",
-    ) -> "PairedSubselectWriter":
+    ) -> Union["PairedSubselectWriter", PairedTimeCoarsen]:
         prediction_writer = dataclasses.replace(
             self, label=f"{self.label}_{prediction_suffix}"
         ).build(
@@ -212,7 +223,9 @@ class SubselectWriterConfig:
             )
         else:
             reference_writer = None
-        return PairedSubselectWriter(prediction_writer, reference_writer)
+        paired_writer = PairedSubselectWriter(prediction_writer, reference_writer)
+        # Time coarsening is built around writer in the single build method
+        return paired_writer
 
     def build(
         self,
@@ -222,7 +235,7 @@ class SubselectWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
-    ) -> "SubselectWriter":
+    ) -> Union["SubselectWriter", TimeCoarsen]:
         """
         Build a SubselectWriter object for saving data within the specified region.
 
@@ -258,12 +271,16 @@ class SubselectWriterConfig:
         subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
         raw_writer: RawDataWriter | ZarrWriterAdapter
         if self.zarr.write_to_zarr:
+            if self.time_coarsen:
+                n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
+            else:
+                n_timesteps_write = n_timesteps
             raw_writer = ZarrWriterAdapter(
                 path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                 dims=("sample", "time", self.latitude_name, self.longitude_name),
                 data_coords=subselect_coords_,
                 data_vars=self.names,
-                n_timesteps=n_timesteps,
+                n_timesteps=n_timesteps_write,
                 n_initial_conditions=n_initial_conditions,
                 variable_metadata=variable_metadata,
                 dataset_metadata=dataset_metadata,
@@ -281,7 +298,11 @@ class SubselectWriterConfig:
                 coords=subselect_coords_,
                 dataset_metadata=dataset_metadata,
             )
-        return SubselectWriter(self, raw_writer, full_coords=coords)
+        writer = SubselectWriter(self, raw_writer, full_coords=coords)
+        if self.time_coarsen is not None:
+            return self.time_coarsen.build(writer)
+        else:
+            return writer
 
 
 class SubselectWriter:
@@ -380,8 +401,8 @@ class SubselectWriter:
 class PairedSubselectWriter:
     def __init__(
         self,
-        prediction_writer: SubselectWriter,
-        reference_writer: SubselectWriter | None,
+        prediction_writer: SubselectWriter | TimeCoarsen,
+        reference_writer: SubselectWriter | TimeCoarsen | None,
     ):
         self.prediction_writer = prediction_writer
         self.reference_writer = reference_writer

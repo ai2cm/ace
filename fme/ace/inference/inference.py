@@ -189,6 +189,14 @@ class InferenceConfig:
                 self.forward_steps_in_memory,
                 self.n_forward_steps,
             )
+        if self.data_writer.subselection is not None:
+            for subselect_config in self.data_writer.subselection:
+                if subselect_config.time_coarsen is not None:
+                    validate_time_coarsen_config(
+                        subselect_config.time_coarsen,
+                        self.forward_steps_in_memory,
+                        self.n_forward_steps,
+                    )
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
