@@ -70,13 +70,13 @@ train_loader:
           file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-03T12:00:00'
+            start_time: '0151-01-03T12:00:00' # earlier times nan
             stop_time: '0306-01-03T12:00:00'
         - data_path: /climate-default
           file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-03T12:00:00'
+            start_time: '0151-01-03T12:00:00' # earlier times nan
             stop_time: '0306-01-03T12:00:00'
       atmosphere:
         merge:
@@ -144,7 +144,7 @@ stepper:
       n_steps: 0
     stepper:
       parameter_init:
-        weights_path: /ocean_ckpt.tar
+        weights_path: null # required
         parameters:
           - frozen:
               include:
@@ -155,4 +155,4 @@ stepper:
       n_steps: 2
     stepper:
       parameter_init:
-        weights_path: /atmos_ckpt.tar
+        weights_path: null # required
