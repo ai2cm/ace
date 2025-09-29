@@ -17,6 +17,7 @@ from .subselect import (
     _month_string_to_int,
     _select_time,
 )
+from .time_coarsen import TimeCoarsen
 
 
 def test_subselect_writer_missing_selection():
@@ -326,3 +327,42 @@ def test_subselect_writer_append_batch():
     writer.append_batch.assert_called_once()
     args, kwargs = writer.append_batch.call_args
     torch.testing.assert_close(kwargs["data"]["temperature"], expected_temperature)
+
+
+def test_subselect_writer_append_batch_time_coarsened():
+    subselect_writer = get_subselect_writer()
+    coarsen_factor = 2
+    time_coarsen_writer = TimeCoarsen(
+        data_writer=subselect_writer, coarsen_factor=coarsen_factor
+    )
+    data = {
+        "temperature": torch.rand(3, 10, 5, 5),  # batch_size=5, time=10, lat=5, lon=5
+        "humidity": torch.rand(3, 10, 5, 5),
+    }
+    batch_time = xr.DataArray(
+        xr.date_range("2020-01-01", periods=10, freq="D"), dims=["time"]
+    )
+
+    time_coarsen_writer.append_batch(data, start_timestep=0, batch_time=batch_time)
+
+    subselected_temperature = data["temperature"][:, :, 1:4, 1:4]
+
+    coarsened_time_blocks = []
+    for i in range(5):
+        coarsened_time_blocks.append(
+            subselected_temperature[
+                :, coarsen_factor * i : coarsen_factor * (i + 1), :, :
+            ]
+            .mean(axis=1)
+            .unsqueeze(1)
+        )
+    time_coarsened_temperature = torch.concat(coarsened_time_blocks, axis=1)
+    coarsened_times = batch_time.coarsen(time=coarsen_factor).mean()
+
+    writer: MagicMock = cast(MagicMock, subselect_writer.writer)
+    writer.append_batch.assert_called_once()
+    _, kwargs = writer.append_batch.call_args
+    torch.testing.assert_close(
+        kwargs["data"]["temperature"], time_coarsened_temperature
+    )
+    xr.testing.assert_equal(kwargs["batch_time"], coarsened_times)
