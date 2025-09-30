@@ -21,6 +21,9 @@ class _PairedDataWriter(Protocol):
     def flush(self):
         pass
 
+    def finalize(self):
+        pass
+
 
 class _DataWriter(Protocol):
     def append_batch(
@@ -32,6 +35,9 @@ class _DataWriter(Protocol):
         pass
 
     def flush(self):
+        pass
+
+    def finalize(self):
         pass
 
 
@@ -104,6 +110,9 @@ class PairedTimeCoarsen:
     def flush(self):
         self._data_writer.flush()
 
+    def finalize(self):
+        self._data_writer.finalize()
+
 
 class TimeCoarsen:
     """Wraps a data writer and coarsens its arguments in time before passing them on."""
@@ -133,6 +142,9 @@ class TimeCoarsen:
 
     def flush(self):
         self._data_writer.flush()
+
+    def finalize(self):
+        self._data_writer.finalize()
 
 
 def coarsen_batch(
