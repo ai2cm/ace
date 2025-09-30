@@ -241,6 +241,10 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         for writer in self._writers:
             writer.flush()
 
+    def finalize(self):
+        for writer in self._writers:
+            writer.finalize()
+
 
 def _write(
     data: BatchData,
@@ -418,6 +422,10 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+
+    def finalize(self):
+        for writer in self._writers:
+            writer.finalize()
 
     def write(self, data: PrognosticState, filename: str):
         _write(

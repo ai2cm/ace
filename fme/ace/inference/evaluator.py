@@ -335,7 +335,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     timer.start("final_writer_flush")
     logging.info("Starting final flush of data writer")
-    writer.flush()
+    writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
     timer.stop()

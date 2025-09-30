@@ -336,7 +336,7 @@ def run_inference_from_config(config: InferenceConfig):
 
     with timer.context("final_writer_flush"):
         logging.info("Starting final flush of data writer")
-        writer.flush()
+        writer.finalize()
         logging.info("Writing reduced metrics to disk in netcdf format.")
         aggregator.flush_diagnostics()
 

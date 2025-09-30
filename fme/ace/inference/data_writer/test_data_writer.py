@@ -207,7 +207,7 @@ class TestDataWriter:
                 time=batch_time,
             ),
         )
-        writer.flush()
+        writer.finalize()
 
         # Open the file and check the data
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
@@ -346,7 +346,7 @@ class TestDataWriter:
                 time=batch_time,
             ),
         )
-        writer.flush()
+        writer.finalize()
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
         expected_variables = (
             set(save_names).intersection(sample_prediction_data)
@@ -495,7 +495,7 @@ class TestDataWriter:
                 time=batch_time,
             ),
         )
-        writer.flush()
+        writer.finalize()
 
         with xr.open_dataset(
             tmp_path / "autoregressive_predictions.nc",

@@ -83,6 +83,10 @@ class PairedRawDataWriter:
         self._target_writer.flush()
         self._prediction_writer.flush()
 
+    def finalize(self):
+        self._target_writer.finalize()
+        self._prediction_writer.finalize()
+
 
 class RawDataWriter:
     """
@@ -259,6 +263,10 @@ class RawDataWriter:
         Flush the data to disk.
         """
         self.dataset.sync()
+
+    def finalize(self):
+        self.flush()
+        self.dataset.close()
 
 
 def get_batch_lead_time_microseconds(

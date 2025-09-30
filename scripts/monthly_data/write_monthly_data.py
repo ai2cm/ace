@@ -217,7 +217,7 @@ def run(config: Config):
             logging.info(f"Writing batch {i + 1} of {n_batches}.")
             writer.flush()
 
-    writer.flush()
+    writer.finalize()
     logging.info("Finished writing data.")
 
 
