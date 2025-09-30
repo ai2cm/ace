@@ -4,3 +4,5 @@ fta-v2025-08-22-cos_lr_20ep|ex|training|best_inference_ckpt|normal|--not-preempt
 fta-eyu9akgo-cos_lr_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
 
 fta-uufa63if-cos_lr_10ep|ex|training|best_inference_ckpt|normal|--not-preemptible
+
+fta-uufa63if-cos_lr_10ep-ncs_2-atmos_loss_ns40|01K6DR102K6QQHMMR96SGCW86J|training|best_inference_ckpt|normal|--not-preemptible
