@@ -397,6 +397,9 @@ class SubselectWriter:
         """
         self.writer.flush()
 
+    def finalize(self):
+        self.writer.finalize()
+
 
 class PairedSubselectWriter:
     def __init__(
@@ -430,3 +433,8 @@ class PairedSubselectWriter:
         self.prediction_writer.flush()
         if self.reference_writer:
             self.reference_writer.flush()
+
+    def finalize(self):
+        self.prediction_writer.finalize()
+        if self.reference_writer:
+            self.reference_writer.finalize()

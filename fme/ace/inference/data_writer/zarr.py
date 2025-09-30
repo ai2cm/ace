@@ -208,3 +208,6 @@ class ZarrWriterAdapter:
 
     def flush(self):
         pass
+
+    def finalize(self):
+        pass
