@@ -11,6 +11,11 @@ from fme.core.coordinates import (
 )
 from fme.core.mask_provider import MaskProvider
 
+try:
+    from earth2grid import healpix as e2ghpx
+except ImportError:
+    e2ghpx = None
+
 
 @pytest.mark.parametrize(
     "first, second",
@@ -239,11 +244,9 @@ def test_healpix_ops_raises_value_error_with_mask():
         healpix_coords.get_gridded_operations(mask_provider=mask_provider)
 
 
+@pytest.mark.skipif(e2ghpx is None, reason="earth2grid is not available")
 @pytest.mark.parametrize("pad", [True, False])
-def test_healpix_coordinates_xyz(pad: bool, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests and healpix (earth2grid) tests")
-
+def test_healpix_coordinates_xyz(pad: bool):
     face = torch.arange(12)
     height = torch.arange(16)
     width = torch.arange(16)
