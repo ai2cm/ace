@@ -8,8 +8,11 @@ fto-rq97q5t9-const_lr_10ep|01K5SWEG4D8V9YM9WK3KBA7WZ9|training|best_inference_ck
 fto-rq97q5t9_ep1-const_lr_10ep|01K5SRSWPX2V7D7NF23GJESQCN|training|best_inference_ckpt|normal|--not-preemptible
 fto-rq97q5t9-const_lr_10ep|01K5SWEG4D8V9YM9WK3KBA7WZ9|training|best_inference_ckpt|normal|--not-preemptible
 fto-rq97q5t9_ep1-const_lr_10ep|01K5SWEZ3HK8HGX8BFD103SNS7|training|best_inference_ckpt|normal|--not-preemptible
-fto-vxi6yc4m-cos_lr_10ep|01K5WTPNMS0AFHGG1G9Y1PQDE0|run_ICx1|ema_ckpt|normal|--not-preemptible
-fto-vxi6yc4m-cos_lr_10ep|01K5WTPNMS0AFHGG1G9Y1PQDE0|run_200yr|ema_ckpt|normal|--not-preemptible
+fto-vxi6yc4m-cos_lr_10ep|01K5WTPNMS0AFHGG1G9Y1PQDE0|run_200yr0311|ema_ckpt|normal|--not-preemptible
+fto-vxi6yc4m-cos_lr_10ep|01K5WTPNMS0AFHGG1G9Y1PQDE0|run_200yr0313|ema_ckpt|normal|--not-preemptible
+fto-vxi6yc4m-cos_lr_10ep|01K5WTPNMS0AFHGG1G9Y1PQDE0|run_200yr0315|ema_ckpt|normal|--not-preemptible
+fto-vxi6yc4m-cos_lr_10ep|01K5WTPNMS0AFHGG1G9Y1PQDE0|run_200yr0317|ema_ckpt|normal|--not-preemptible
+fto-vxi6yc4m-cos_lr_10ep|01K5WTPNMS0AFHGG1G9Y1PQDE0|run_200yr0319|ema_ckpt|normal|--not-preemptible
 fto-vxi6yc4m-cos_lr_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
 fto-ojyzoqli-cooldown_lr_2ep|ex|training|best_inference_ckpt|normal|--not-preemptible
 fto-ojyzoqli-cooldown_lr_2ep-ncs2||training|best_inference_ckpt|normal|--not-preemptible
