@@ -142,9 +142,9 @@ def coarsen_batch(
     coarsen_factor: int,
 ) -> tuple[dict[str, torch.Tensor], int, xr.DataArray]:
     data_coarsened = _coarsen_tensor_dict(data, coarsen_factor)
-    start_timestep = start_timestep // coarsen_factor
+    start_timestep_coarsened = start_timestep // coarsen_factor
     batch_time_coarsened = batch_time.coarsen({TIME_DIM_NAME: coarsen_factor}).mean()
-    return data_coarsened, start_timestep, batch_time_coarsened
+    return data_coarsened, start_timestep_coarsened, batch_time_coarsened
 
 
 def _coarsen_tensor_dict(
