@@ -51,3 +51,5 @@ v2025-08-22-ts_unc-const_lr_50ep-rs1|01K68M0H81S7M4KWA9SB2HEV24|training|best_in
 v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs1||training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs2||training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs1|01K6E9ND3X48ZWNV94MPG1B8JD|training|best_inference_ckpt|normal|--not-preemptible
