@@ -15,3 +15,5 @@ fto-vxi6yc4m-cos_lr_20ep|ex|training|best_inference_ckpt|normal|--not-preemptibl
 fto-ojyzoqli-cooldown_lr_2ep|ex|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-ojyzoqli-cooldown_lr_2ep-ncs2||training|best_inference_ckpt|normal|--not-preemptible
+
+fto-ojyzoqli-cooldown_lr_2ep-ncs2||training|best_inference_ckpt|normal|--not-preemptible
