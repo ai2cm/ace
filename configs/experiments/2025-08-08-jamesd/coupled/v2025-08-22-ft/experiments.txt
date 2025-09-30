@@ -75,3 +75,5 @@ ft-v2025-08-22-const_lr_50ep-ncs4-fta_enc_dec|01K63V0VXWM5PSBXE59KZTYZ4E|trainin
 ft-v2025-08-22-const_lr_50ep-ncs4-fta_enc_dec|01K6455X4S7APG3MEBE6BZD9H0|training|best_inference_ckpt|normal|--not-preemptible
 
 ft-eyu9akgo-cos_lr_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
+
+ft-v2025-08-22-warmup_const_lr_50ep-ncs1-atmos_loss_ns20|01K6EE3M9S2NX82HTZRSYFHRV4|training|best_inference_ckpt|normal|--not-preemptible
