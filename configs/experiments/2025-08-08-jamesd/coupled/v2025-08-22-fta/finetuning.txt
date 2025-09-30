@@ -1,2 +1,3 @@
 group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
-fta-eyu9akgo-cos_lr_20ep|ace-samudra-coupled-cm4|eyu9akgo|best_inference_ckpt|train|high|ceres|8|800GiB|3||optimization.scheduler.step_each_iteration=true optimization.scheduler.kwargs.T_max=14140
+fta-eyu9akgo-cos_lr_20ep|ace-samudra-coupled-cm4|eyu9akgo|best_inference_ckpt|training|high|ceres|8|800GiB|3||optimization.scheduler.step_each_iteration=true optimization.scheduler.kwargs.T_max=14140
+fta-uufa63if-cos_lr_10ep|ace-samudra-coupled-cm4|uufa63if|ema_ckpt|train|urgent|ceres|8|800GiB|3||max_epochs=10 optimization.scheduler.step_each_iteration=true optimization.scheduler.kwargs.T_max=7070
