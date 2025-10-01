@@ -265,7 +265,10 @@ class Trainer:
         self._started_training = False
 
         def on_terminate(signum, frame):
-            if self._current_epoch_num_batches_seen > 0:
+            dist = Distributed.get_instance()
+            # have all ranks check in to logs
+            dist.barrier()
+            if self._current_epoch_num_batches_seen > 0 and dist.is_root():
                 if self._in_ema_context:
                     logging.info(
                         "In EMA context during interrupt, not saving "
