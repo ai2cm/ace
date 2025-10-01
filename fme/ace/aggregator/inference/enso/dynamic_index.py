@@ -1,5 +1,6 @@
 import abc
 import logging
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -52,7 +53,7 @@ class LatLonRegion(Region):
         return self._regional_weights
 
 
-def compute_nino34_index_power_spectrum(
+def compute_power_spectrum(
     data: xr.DataArray,
     fs=1,
     time_dim: int = TIME_DIM,
@@ -73,8 +74,8 @@ def compute_nino34_index_power_spectrum(
         power = power.mean(axis=sample_dim)
     else:
         raise ValueError(
-            f"Expected indicies to be of shape (sample, time) when calculating \
-                nino 3.4 index power spectrum, got {data.shape}"
+            "Expected indicies to be of shape (sample, time) when calculating "
+            f"power spectrum, got {data.shape}"
         )
     n_samples = data.shape[time_dim]
     freqs = np.fft.rfftfreq(n_samples, d=1 / fs)
@@ -255,8 +256,8 @@ class RegionalIndexAggregator:
                 sst_name in indices
                 and indices[sst_name].dropna("time").sizes["time"] > 1
             ):
-                freq, power_spectrum = compute_nino34_index_power_spectrum(
-                    indices.dropna("time")[sst_name]
+                freq, power_spectrum = _calculate_sample_average_power_spectrum(
+                    indices[sst_name]
                 )
                 fig, ax = plt.subplots(1, 1)
                 ax.plot(freq, power_spectrum, label="predicted ensemble mean")
@@ -346,19 +347,25 @@ class PairedRegionalIndexAggregator:
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
             if (
                 sst_name in prediction_indices
-                and prediction_indices[sst_name].dropna("time").sizes["time"] > 1
+                and prediction_indices[sst_name].notnull().any().item()
             ):
-                freq, prediction_power_spectrum = compute_nino34_index_power_spectrum(
-                    prediction_indices.dropna("time")[sst_name]
+                pred_freq, prediction_power_spectrum = (
+                    _calculate_sample_average_power_spectrum(
+                        prediction_indices[sst_name]
+                    )
                 )
-                freq, target_power_spectrum = compute_nino34_index_power_spectrum(
-                    target_indices.dropna("time")[sst_name]
+                target_freq, target_power_spectrum = (
+                    _calculate_sample_average_power_spectrum(target_indices[sst_name])
                 )
                 fig, ax = plt.subplots(1, 1)
                 ax.plot(
-                    freq, prediction_power_spectrum, label="predicted ensemble mean"
+                    pred_freq,
+                    prediction_power_spectrum,
+                    label="predicted ensemble mean",
                 )
-                ax.plot(freq, target_power_spectrum, label="target", color="orange")
+                ax.plot(
+                    target_freq, target_power_spectrum, label="target", color="orange"
+                )
                 ax.set_title("Power Spectrum of Nino3.4 Index")
                 ax.set_xlabel("Frequency [cycles/year]")
                 ax.set(yscale="log")
@@ -383,6 +390,34 @@ class PairedRegionalIndexAggregator:
                 ],
                 dim="source",
             )
+
+
+def _calculate_sample_average_power_spectrum(
+    timeseries: xr.DataArray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """This function handles the case where samples have different lengths
+    by truncating to the shortest length.
+    """
+    data_arrays = []
+    data_lengths = []
+    for sample in range(timeseries.sizes["sample"]):
+        data_without_nan = timeseries.isel(sample=sample).dropna("time")
+        data_arrays.append(data_without_nan)
+        data_lengths.append(data_without_nan.sizes["time"])
+    min_data_length = min(data_lengths)
+    if max(data_lengths) != min_data_length:
+        warnings.warn(
+            "Samples have different lengths, truncating to shortest length "
+            f"of {min_data_length} steps for power spectrum calculation. The maximum "
+            f"input sample length is {max(data_lengths)} steps."
+        )
+    all_data = np.array(
+        [
+            data_array.isel(time=slice(0, min_data_length)).values
+            for data_array in data_arrays
+        ]
+    )
+    return compute_power_spectrum(all_data)
 
 
 def anomalies_from_monthly_climo(

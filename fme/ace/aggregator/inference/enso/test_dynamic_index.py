@@ -16,6 +16,7 @@ from .dynamic_index import (
     LatLonRegion,
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
+    _calculate_sample_average_power_spectrum,
     _compute_sample_mean_std,
     anomalies_from_monthly_climo,
     running_monthly_mean,
@@ -443,13 +444,25 @@ def test_paired_regional_index_aggregator(variable_name):
     metric_name = f"test/{variable_name}_nino34_index_power_spectrum"
     assert metric_name in logs
     assert isinstance(logs[metric_name], plt.Figure)
-
     for metric_name in [
         f"test/{variable_name}_nino34_index_std",
         f"test/{variable_name}_nino34_index_std_norm",
     ]:
         assert metric_name in logs
         assert isinstance(logs[metric_name], float)
+
+
+def test__calculate_sample_average_power_spectrum():
+    data = [
+        [0.0, 1.0, 2.0, 5.0, 9.0, 10.0, 11.0],
+        [np.nan, np.nan, 3.0, 4.0, 6.0, 7.0, 8.0],
+    ]
+    with pytest.warns(UserWarning, match="Samples have different lengths"):
+        freq, power_spectrum = _calculate_sample_average_power_spectrum(
+            timeseries=xr.DataArray(data, dims=("sample", "time"))
+        )
+    assert freq.shape == power_spectrum.shape
+    assert freq.shape == (3,)
 
 
 def test__compute_sample_mean_std():
