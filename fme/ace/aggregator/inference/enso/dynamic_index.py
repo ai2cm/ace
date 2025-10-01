@@ -82,7 +82,7 @@ def compute_nino34_index_power_spectrum(
     return freqs_per_year, power
 
 
-def compute_nino34_index_std(
+def _compute_sample_mean_std(
     data: xr.DataArray,
     target_data: xr.DataArray | None = None,
     time_dim: int = TIME_DIM,
@@ -247,7 +247,7 @@ class RegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index"] = fig
-                logs[f"{sst_name}_nino34_index_std"] = compute_nino34_index_std(
+                logs[f"{sst_name}_nino34_index_std"] = _compute_sample_mean_std(
                     indices[sst_name]
                 )
         for sst_name in self.sea_surface_temperature_names:
@@ -336,10 +336,10 @@ class PairedRegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index"] = fig
-                logs[f"{sst_name}_nino34_index_std"] = compute_nino34_index_std(
+                logs[f"{sst_name}_nino34_index_std"] = _compute_sample_mean_std(
                     prediction_indices[sst_name]
                 )
-                logs[f"{sst_name}_nino34_index_std_norm"] = compute_nino34_index_std(
+                logs[f"{sst_name}_nino34_index_std_norm"] = _compute_sample_mean_std(
                     prediction_indices[sst_name],
                     target_indices[sst_name],
                 )
