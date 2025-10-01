@@ -16,8 +16,8 @@ from .dynamic_index import (
     LatLonRegion,
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
+    _compute_sample_mean_std,
     anomalies_from_monthly_climo,
-    compute_nino34_index_std,
     running_monthly_mean,
 )
 
@@ -452,7 +452,7 @@ def test_paired_regional_index_aggregator(variable_name):
         assert isinstance(logs[metric_name], float)
 
 
-def test_compute_nino34_index_std():
+def test__compute_sample_mean_std():
     """Test basic standard deviation computation with NaNs from misaligned time
     coordinates."""
     data1 = xr.DataArray(
@@ -470,8 +470,9 @@ def test_compute_nino34_index_std():
         },
     )
     data = xr.concat([data1, data2], dim="sample")
-    assert np.isclose(
-        compute_nino34_index_std(data), (np.std(data1) + np.std(data2)) / 2
+    np.testing.assert_almost_equal(
+        _compute_sample_mean_std(data),
+        (np.std(data1) + np.std(data2)) / 2,
     )
 
     target_data1 = xr.DataArray(
@@ -489,8 +490,8 @@ def test_compute_nino34_index_std():
         },
     )
     target_data = xr.concat([target_data1, target_data2], dim="sample")
-    assert np.isclose(
-        compute_nino34_index_std(data, target_data),
+    np.testing.assert_almost_equal(
+        _compute_sample_mean_std(data, target_data),
         (np.std(data1) / np.std(target_data1) + np.std(data2) / np.std(target_data2))
         / 2,
     )
