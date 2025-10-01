@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 import cftime
+import numpy as np
 import pytest
 import torch
 import xarray as xr
@@ -15,6 +16,7 @@ from .dynamic_index import (
     LatLonRegion,
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
+    _compute_sample_mean_std,
     anomalies_from_monthly_climo,
     running_monthly_mean,
 )
@@ -386,6 +388,10 @@ def test_regional_index_aggregator(variable_name):
     assert metric_name in logs
     assert isinstance(logs[metric_name], plt.Figure)
 
+    metric_name = f"test/{variable_name}_nino34_index_std"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
+
 
 @pytest.mark.parametrize(
     "variable_name",
@@ -437,3 +443,55 @@ def test_paired_regional_index_aggregator(variable_name):
     metric_name = f"test/{variable_name}_nino34_index_power_spectrum"
     assert metric_name in logs
     assert isinstance(logs[metric_name], plt.Figure)
+
+    for metric_name in [
+        f"test/{variable_name}_nino34_index_std",
+        f"test/{variable_name}_nino34_index_std_norm",
+    ]:
+        assert metric_name in logs
+        assert isinstance(logs[metric_name], float)
+
+
+def test__compute_sample_mean_std():
+    """Test basic standard deviation computation with NaNs from misaligned time
+    coordinates."""
+    data1 = xr.DataArray(
+        [1, 2, 3, 4],
+        dims=["time"],
+        coords={
+            "time": xr.date_range("2000-01-01", periods=4, freq="MS", use_cftime=True)
+        },
+    )
+    data2 = xr.DataArray(
+        [5, 7, 9, 11],
+        dims=["time"],
+        coords={
+            "time": xr.date_range("2000-03-01", periods=4, freq="MS", use_cftime=True)
+        },
+    )
+    data = xr.concat([data1, data2], dim="sample")
+    np.testing.assert_almost_equal(
+        _compute_sample_mean_std(data),
+        (np.std(data1) + np.std(data2)) / 2,
+    )
+
+    target_data1 = xr.DataArray(
+        [2, 5, 4, 9],
+        dims=["time"],
+        coords={
+            "time": xr.date_range("2000-01-01", periods=4, freq="MS", use_cftime=True)
+        },
+    )
+    target_data2 = xr.DataArray(
+        [1, 7, 3, 11],
+        dims=["time"],
+        coords={
+            "time": xr.date_range("2000-03-01", periods=4, freq="MS", use_cftime=True)
+        },
+    )
+    target_data = xr.concat([target_data1, target_data2], dim="sample")
+    np.testing.assert_almost_equal(
+        _compute_sample_mean_std(data, target_data),
+        (np.std(data1) / np.std(target_data1) + np.std(data2) / np.std(target_data2))
+        / 2,
+    )
