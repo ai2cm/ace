@@ -257,16 +257,12 @@ class SubselectWriterConfig:
                 f"Got {list(coords.keys())}."
             )
 
+        subset_coords = xr.Dataset(coords)
         if self.lat_extent or self.lon_extent:
-            subset_coords = xr.Dataset(coords).sel(
-                {
-                    LAT_NAME: self.lat_slice,
-                    LON_NAME: self.lon_slice,
-                }
+            subset_coords = subset_coords.sel(
+                {LAT_NAME: self.lat_slice, LON_NAME: self.lon_slice}
             )
-            subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
-        else:
-            subselect_coords_ = dict(coords)
+        subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
 
         raw_writer: RawDataWriter | ZarrWriterAdapter
         if self.zarr.write_to_zarr:
