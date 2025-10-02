@@ -18,14 +18,7 @@ from .subselect import (
     _select_time,
 )
 from .time_coarsen import TimeCoarsen
-
-
-def test_subselect_writer_missing_selection():
-    with pytest.raises(ValueError):
-        SubselectWriterConfig(
-            label="test_region",
-            names=["temperature", "humidity"],
-        )
+from .zarr import ZarrWriterConfig
 
 
 def test_subselect_writer_config_build():
@@ -44,8 +37,8 @@ def test_subselect_writer_config_build():
             n_timesteps=10,
             variable_metadata={},
             coords={
-                "latitude": np.array([-20, -10.0, 0.0, 10.0, 20.0]),
-                "longitude": np.array([-30.0, -20.0, 0.0, 20.0, 30.0]),
+                "lat": np.array([-20, -10.0, 0.0, 10.0, 20.0]),
+                "lon": np.array([-30.0, -20.0, 0.0, 20.0, 30.0]),
             },
             dataset_metadata=MagicMock(),
         )
@@ -71,25 +64,13 @@ def test_subselect_writer_config_invalid_lat_lon_extent(lat_extent, lon_extent):
         )
 
 
-@pytest.mark.parametrize(
-    "lat_name, lon_name",
-    [
-        ("lat", "longitude"),  # Missing longitude
-        ("latitude", "lon"),  # Missing latitude
-    ],
-)
-def test_subselect_writer_config_build_missing_coords(lat_name, lon_name):
-    coords = {
-        "lat": np.array([-20, -10.0, 0.0, 10.0, 20.0]),
-        "lon": np.array([-30.0, -20.0, 0.0, 20.0, 30.0]),
-    }
+def test_subselect_writer_config_build_missing_coords():
+    coords = {"face": np.array([-20, -10.0, 0.0, 10.0, 20.0])}
     config = SubselectWriterConfig(
         label="test_region",
         names=["temperature", "humidity"],
         lat_extent=(-10.0, 10.0),
         lon_extent=(-20.0, 20.0),
-        latitude_name=lat_name,
-        longitude_name=lon_name,
     )
 
     with pytest.raises(ValueError):
@@ -250,8 +231,8 @@ def get_subselect_writer(**kwarg_updates):
 
     config = SubselectWriterConfig(**kwargs)
     full_coords = {
-        "latitude": np.array([-20, -10.0, 0.0, 10.0, 20.0]),
-        "longitude": np.array([-30.0, -20.0, 0.0, 20.0, 30.0]),
+        "lat": np.array([-20, -10.0, 0.0, 10.0, 20.0]),
+        "lon": np.array([-30.0, -20.0, 0.0, 20.0, 30.0]),
     }
     raw_writer = MagicMock()
     return SubselectWriter(config, raw_writer, full_coords=full_coords)
@@ -327,6 +308,52 @@ def test_subselect_writer_append_batch():
     writer.append_batch.assert_called_once()
     args, kwargs = writer.append_batch.call_args
     torch.testing.assert_close(kwargs["data"]["temperature"], expected_temperature)
+
+
+def test_subselect_writer_with_healpix_data_and_zarr(tmpdir):
+    config = SubselectWriterConfig(
+        "filename", zarr=ZarrWriterConfig(write_to_zarr=True)
+    )
+    n_samples = 2
+    n_timesteps = 6
+    shape = (12, 4, 4)
+    coords = {"face": np.arange(12), "height": np.arange(4), "width": np.arange(4)}
+    writer = config.build(
+        experiment_dir=str(tmpdir),
+        n_initial_conditions=n_samples,
+        variable_metadata={},
+        coords=coords,
+        dataset_metadata=MagicMock(),
+        n_timesteps=n_timesteps,
+    )
+    data = {"temperature": torch.rand(n_samples, n_timesteps, *shape)}
+    data_first_half = {k: v[:, :3] for k, v in data.items()}
+    data_second_half = {k: v[:, 3:] for k, v in data.items()}
+    batch_time_single_sample = xr.DataArray(
+        xr.date_range("2020-01-01", periods=n_timesteps, freq="D", use_cftime=True),
+        dims="time",
+    )
+    batch_time = xr.concat([batch_time_single_sample] * n_samples, dim="sample")
+    batch_time_first_half = batch_time.isel(time=slice(0, 3))
+    batch_time_second_half = batch_time.isel(time=slice(3, None))
+    writer.append_batch(data_first_half, 0, batch_time=batch_time_first_half)
+    writer.append_batch(data_second_half, 3, batch_time=batch_time_second_half)
+    writer.finalize()
+    zarr_data = xr.open_zarr(tmpdir / "filename.zarr")
+    assert dict(zarr_data.sizes) == {
+        "sample": n_samples,
+        "time": n_timesteps,
+        "face": 12,
+        "height": 4,
+        "width": 4,
+    }
+    assert zarr_data.temperature.dims == ("sample", "time", "face", "height", "width")
+    np.testing.assert_allclose(zarr_data.temperature, data["temperature"].numpy())
+    # drop coordinates which are not expected to agree
+    xr.testing.assert_allclose(
+        batch_time.astype("datetime64[ns]").drop_vars("time"),
+        zarr_data.valid_time.drop_vars(("time", "valid_time", "sample", "init_time")),
+    )
 
 
 def test_subselect_writer_append_batch_time_coarsened():
