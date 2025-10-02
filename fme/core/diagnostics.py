@@ -2,6 +2,7 @@ import os
 from collections.abc import Mapping
 from typing import Protocol
 
+import fsspec
 import numpy as np
 import xarray as xr
 
@@ -52,7 +53,9 @@ def write_reduced_diagnostics(
         output_dir = os.path.join(output_dir, subdir)
     dist = Distributed.get_instance()
     if dist.is_root():
-        os.makedirs(output_dir, exist_ok=True)
+        fs = fsspec.url_to_fs(output_dir)[0]
+        fs.makedirs(output_dir, exist_ok=True)
         for name, ds in reduced_diagnostics.items():
             if len(ds) > 0:
-                ds.to_netcdf(os.path.join(output_dir, f"{name}_diagnostics.nc"))
+                path = os.path.join(output_dir, f"{name}_diagnostics.zarr")
+                ds.to_zarr(path, mode="w")
