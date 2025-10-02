@@ -440,8 +440,6 @@ class TestDataWriter:
             names=["pressure"],
             lat_extent=(1, 2),
             lon_extent=(1, 3),
-            latitude_name="lat",
-            longitude_name="lon",
             zarr=ZarrWriterConfig(
                 write_to_zarr=True,
                 allow_existing=True,
