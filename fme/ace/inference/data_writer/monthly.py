@@ -5,6 +5,7 @@ from math import ceil
 from pathlib import Path
 
 import cftime
+import fsspec
 import numpy as np
 import torch
 import xarray as xr
@@ -127,6 +128,9 @@ class MonthlyDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
+        fs = fsspec.url_to_fs(path)[0]
+        if fs != fsspec.filesystem("file"):
+            raise ValueError("MonthlyDataWriter only supports local file systems.")
         filename = str(Path(path) / f"monthly_mean_{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata

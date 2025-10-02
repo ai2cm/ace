@@ -4,6 +4,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 import cftime
+import fsspec
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -115,6 +116,9 @@ class RawDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
+        fs = fsspec.url_to_fs(path)[0]
+        if fs != fsspec.filesystem("file"):
+            raise ValueError("RawDataWriter only supports local file systems.")
         filename = str(Path(path) / label)
         self._save_names = save_names
         self.variable_metadata = variable_metadata
