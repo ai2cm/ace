@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TypeAlias
 
+import fsspec
 import numpy as np
 import torch
 import xarray as xr
@@ -295,7 +296,9 @@ def _write(
     data_arrays["time"] = time_array
     ds = xr.Dataset(data_arrays, coords=coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
-    ds.to_netcdf(str(Path(path) / filename))
+    netcdf_in_memory = ds.to_netcdf(path=None, engine="h5netcdf")
+    with fsspec.open(Path(path) / filename, "wb") as f:
+        f.write(netcdf_in_memory)
 
 
 class DataWriter(WriterABC[PrognosticState, PairedData]):
