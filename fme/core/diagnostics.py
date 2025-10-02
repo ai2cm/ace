@@ -57,5 +57,7 @@ def write_reduced_diagnostics(
         fs.makedirs(output_dir, exist_ok=True)
         for name, ds in reduced_diagnostics.items():
             if len(ds) > 0:
-                path = os.path.join(output_dir, f"{name}_diagnostics.zarr")
-                ds.to_zarr(path, mode="w")
+                path = os.path.join(output_dir, f"{name}_diagnostics.nc")
+                netcdf_in_memory = ds.to_netcdf(path=None, engine="h5netcdf")
+                with fsspec.open(path, "wb") as f:
+                    f.write(netcdf_in_memory)
