@@ -274,7 +274,9 @@ class InferenceEvaluatorAggregator(
         self._record_step_20 = record_step_20
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
-                ops, target_time=20
+                ops,
+                target_time=20,
+                channel_mean_names=self._channel_mean_names,
             )
         try:
             self._aggregators["power_spectrum"] = (

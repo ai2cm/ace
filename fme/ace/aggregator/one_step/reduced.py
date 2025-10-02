@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 import numpy as np
 import torch
 import xarray as xr
@@ -29,12 +31,14 @@ class MeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         target_time: int = 1,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         self._gridded_operations = gridded_operations
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
         self._target_time = target_time
         self._dist = Distributed.get_instance()
+        self._channel_mean_names = channel_mean_names
 
         device = get_device()
         self._variable_metrics: dict[str, ReducedMetric] = {}
@@ -51,6 +55,12 @@ class MeanAggregator:
                 device=device,
                 compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
             )
+        )
+        # metrics which only report channel mean
+        self._variable_metrics_norm: dict[str, ReducedMetric] = {}
+        self._variable_metrics_norm["weighted_rmse_norm"] = AreaWeightedReducedMetric(
+            device=device,
+            compute_metric=self._gridded_operations.area_weighted_rmse_dict,
         )
 
     @torch.no_grad()
@@ -82,6 +92,22 @@ class MeanAggregator:
                     target=target_snapshot,
                     gen=gen_snapshot,
                 )
+            target_snapshot_norm = {}
+            gen_snapshot_norm = {}
+            if self._channel_mean_names is None:
+                self._channel_mean_names = list(gen_data_norm.keys())
+            for name in self._channel_mean_names:
+                target_snapshot_norm[name] = target_data_norm[name].select(
+                    dim=time_dim, index=target_time
+                )
+                gen_snapshot_norm[name] = gen_data_norm[name].select(
+                    dim=time_dim, index=target_time
+                )
+            for metric in self._variable_metrics_norm.values():
+                metric.record(
+                    target=target_snapshot_norm,
+                    gen=gen_snapshot_norm,
+                )
             # only increment n_batches if we actually recorded a batch
             self._n_batches += 1
 
@@ -90,9 +116,14 @@ class MeanAggregator:
             raise ValueError("No batches have been recorded.")
         data: dict[str, torch.Tensor] = {"loss": self._loss / self._n_batches}
         for name, metric in self._variable_metrics.items():
-            metric_results = metric.get()  # TensorDict: {var_name: metric_data}
+            metric_results = metric.get()
             for key in metric_results:
                 data[f"{name}/{key}"] = metric_results[key] / self._n_batches
+        if self._channel_mean_names is not None and len(self._channel_mean_names) > 1:
+            for name, metric in self._variable_metrics_norm.items():
+                data[f"{name}/channel_mean"] = (
+                    metric.get_channel_mean() / self._n_batches
+                )
         for key in sorted(data.keys()):
             data[key] = float(self._dist.reduce_mean(data[key].detach()).cpu().numpy())
         return data

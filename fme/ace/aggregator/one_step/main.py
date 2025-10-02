@@ -1,4 +1,5 @@
 import dataclasses
+from collections.abc import Sequence
 
 import torch
 
@@ -30,6 +31,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -40,6 +42,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
                 used in loss computation.
             log_snapshots: Whether to include snapshots in diagnostics.
             log_mean_maps: Whether to include mean maps in diagnostics.
+            channel_mean_names: Names to include in channel-mean metrics.
         """
         self._deterministic_aggregator = OneStepDeterministicAggregator(
             dataset_info=dataset_info,
@@ -48,6 +51,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             loss_scaling=loss_scaling,
             log_snapshots=log_snapshots,
             log_mean_maps=log_mean_maps,
+            channel_mean_names=channel_mean_names,
         )
         self._ensemble_aggregator = get_one_step_ensemble_aggregator(
             gridded_operations=dataset_info.gridded_operations,
@@ -56,6 +60,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             metadata=dataset_info.variable_metadata,
         )
         self._ensemble_recorded = False
+        self._channel_mean_names = channel_mean_names
 
     @torch.no_grad()
     def record_batch(
@@ -125,6 +130,7 @@ class OneStepAggregatorConfig:
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         loss_scaling: TensorMapping | None = None,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         return OneStepAggregator(
             dataset_info=dataset_info,
@@ -133,4 +139,5 @@ class OneStepAggregatorConfig:
             loss_scaling=loss_scaling,
             log_snapshots=self.log_snapshots,
             log_mean_maps=self.log_mean_maps,
+            channel_mean_names=channel_mean_names,
         )

@@ -43,6 +43,12 @@ class ReducedMetric(Protocol):
         """
         ...
 
+    def get_channel_mean(self) -> torch.Tensor:
+        """
+        Get the channel-mean metric value, not divided by number of record batches.
+        """
+        ...
+
 
 class AreaWeightedReducedMetric:
     """
@@ -56,6 +62,7 @@ class AreaWeightedReducedMetric:
     ):
         self._compute_metric = compute_metric
         self._total: TensorDict | None = None
+        self._channel_mean: torch.Tensor | None = None
         self._device = device
 
     def _update_total(self, tensors: TensorDict):
@@ -64,6 +71,7 @@ class AreaWeightedReducedMetric:
                 name: torch.zeros_like(tensor, device=self._device)
                 for name, tensor in tensors.items()
             }
+            self._channel_mean = torch.tensor(0.0, device=self._device)
         missing_names = set(self._total) - set(tensors)
         if len(missing_names) > 0:
             raise ValueError(
@@ -73,6 +81,7 @@ class AreaWeightedReducedMetric:
         for name, tensor in tensors.items():
             try:
                 self._total[name] += tensor
+                self._channel_mean += tensor / len(tensors)
             except KeyError:
                 raise ValueError(
                     "Attempted to record the area weighted reduced metric for "
@@ -99,3 +108,9 @@ class AreaWeightedReducedMetric:
         if self._total is None:
             return defaultdict(lambda: torch.tensor(torch.nan))
         return self._total
+
+    def get_channel_mean(self) -> torch.Tensor:
+        """Returns the channel-mean metric."""
+        if self._channel_mean is None:
+            return torch.tensor(torch.nan)
+        return self._channel_mean

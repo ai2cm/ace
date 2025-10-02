@@ -214,6 +214,7 @@ class AggregatorBuilder(
             loss_scaling=self.loss_scaling,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
+            channel_mean_names=self.channel_mean_names,
         )
 
     def get_inference_aggregator(

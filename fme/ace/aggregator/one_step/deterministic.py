@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
 import numpy as np
@@ -59,6 +59,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -70,6 +71,8 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
                 used in loss computation.
             log_snapshots: Whether to include snapshots in diagnostics.
             log_mean_maps: Whether to include mean maps in diagnostics.
+            channel_mean_names: Names of variables whose RMSE will be averaged. If
+                not provided, all available variables will be used.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
@@ -78,7 +81,9 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         horizontal_coordinates = dataset_info.horizontal_coordinates
         self._coords = horizontal_coordinates.coords
         self._aggregators: dict[str, _Aggregator] = {
-            "mean": MeanAggregator(dataset_info.gridded_operations),
+            "mean": MeanAggregator(
+                dataset_info.gridded_operations, channel_mean_names=channel_mean_names
+            ),
         }
         try:
             self._aggregators["power_spectrum"] = SpectrumAggregator(
