@@ -53,16 +53,19 @@ jobs:
                 image:
                   beaker: ${{ steps.image.outputs.BEAKER_IMAGE }}
                 context:
-                  priority: normal
+                  priority: low
                   preemptible: true
                 resources:
                   gpuCount: 1
                   sharedMemory: 10 GiB
                 constraints:
                   cluster:
-                    - ai2/saturn-cirrascale
-                    - ai2/jupiter-cirrascale-2
-                    - ai2/augusta-google-1
+                    - ai2/saturn
+                    - ai2/jupiter
+                    - ai2/augusta
+                    - ai2/ceres
+                    - ai2/neptune
+                    - ai2/rhea
                 datasets:
                   - mountPath: /test-data
                     source:

@@ -198,7 +198,9 @@ def test_reloaded_stepper_gives_different_prediction(very_fast_only: bool):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
     config = DiffusionStepperConfig(
-        builder=ModuleSelector(type="ConditionalSFNO", config={"scale_factor": 1}),
+        builder=ModuleSelector(
+            type="ConditionalSFNO", config={"scale_factor": 1, "embed_dim": 8}
+        ),
         in_names=["a", "b"],
         out_names=["a", "b"],
         normalization=NormalizationConfig(
@@ -559,7 +561,9 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     residual_means = {"a": 1.0, "b": 1.0, "diagnostic": 1.0}
     residual_stds = {"a": 2.0, "b": 2.0, "diagnostic": 2.0}
     config = DiffusionStepperConfig(
-        builder=ModuleSelector(type="ConditionalSFNO", config={"scale_factor": 1}),
+        builder=ModuleSelector(
+            type="ConditionalSFNO", config={"scale_factor": 1, "embed_dim": 8}
+        ),
         in_names=["a", "b"],
         out_names=["a", "b", "diagnostic"],
         normalization=NormalizationConfig(means=full_field_means, stds=full_field_stds),
