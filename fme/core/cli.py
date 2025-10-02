@@ -4,6 +4,7 @@ import os
 import shutil
 from collections.abc import Sequence
 
+import fsspec
 import yaml
 
 from .config import update_dict_with_dotlist
@@ -60,7 +61,7 @@ def prepare_directory(
     else:
         # either not given or ignored because we already resumed once before
         resume_results = None
-    with open(os.path.join(path, "config.yaml"), "w") as f:
+    with fsspec.open(os.path.join(path, "config.yaml"), "w") as f:
         yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
     return resume_results
 
