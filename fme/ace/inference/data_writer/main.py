@@ -1,8 +1,8 @@
 import dataclasses
 import datetime
+import os
 import warnings
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import TypeAlias
 
 import fsspec
@@ -297,7 +297,7 @@ def _write(
     ds = xr.Dataset(data_arrays, coords=coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
     netcdf_in_memory = ds.to_netcdf(path=None, engine="h5netcdf")
-    with fsspec.open(Path(path) / filename, "wb") as f:
+    with fsspec.open(os.path.join(path, filename), "wb") as f:
         f.write(netcdf_in_memory)
 
 
