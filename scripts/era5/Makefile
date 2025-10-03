@@ -1,6 +1,7 @@
 VERSION ?= 2024-07-10-era5-xarray-beam-pipelines
 IMAGE_NAME ?= us.gcr.io/vcm-ml/era5-ingest-dataflow:$(VERSION)
 LOCAL_ENVIRONMENT ?= era5-ingestion
+DATAFLOW_RUNNER ?= DataflowRunner
 
 ingest_ncar_variables:
 	cd ingest_ncar_data && ./main.sh
@@ -30,3 +31,6 @@ netcdf_to_zarr_dataflow:
 
 era5_dataflow:
 	cd pipeline && conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) ./run-dataflow.sh
+
+era5_pressure_levels_only_dataflow:
+	cd pressure-levels-only-pipeline && conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) ./run-dataflow.sh $(DATAFLOW_RUNNER)
