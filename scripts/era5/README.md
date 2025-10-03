@@ -68,3 +68,12 @@ Once these steps are done, the workflow can be submitted with
 ```
 make era5_dataflow
 ```
+
+
+## ERA5 pressure-level only variables
+
+Alternatively, the pressure-level only variables can be downloaded for ERA5 using:
+
+```
+make era5_pressure_levels_only_dataflow
+```
