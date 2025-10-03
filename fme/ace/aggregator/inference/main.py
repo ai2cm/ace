@@ -321,6 +321,7 @@ class InferenceEvaluatorAggregator(
             horizontal_dims=horizontal_coordinates.dims,
             target="norm",
             variable_metadata=dataset_info.variable_metadata,
+            channel_mean_names=self._channel_mean_names,
         )
         if log_histograms:
             self._aggregators["histogram"] = HistogramAggregator()
