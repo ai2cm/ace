@@ -277,6 +277,13 @@ class InferenceEvaluatorAggregator(
                 ops,
                 target_time=20,
                 channel_mean_names=self._channel_mean_names,
+                target="denorm",
+            )
+            self._aggregators["mean_step_20_norm"] = OneStepMeanAggregator(
+                ops,
+                target_time=20,
+                channel_mean_names=self._channel_mean_names,
+                target="norm",
             )
         try:
             self._aggregators["power_spectrum"] = (

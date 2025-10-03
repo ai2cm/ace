@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 import torch
@@ -31,6 +32,7 @@ class MeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         target_time: int = 1,
+        target: Literal["norm", "denorm"] = "denorm",
         channel_mean_names: Sequence[str] | None = None,
     ):
         self._gridded_operations = gridded_operations
@@ -38,30 +40,26 @@ class MeanAggregator:
         self._loss = torch.tensor(0.0, device=get_device())
         self._target_time = target_time
         self._dist = Distributed.get_instance()
-        self._channel_mean_names = channel_mean_names
+        self._target = target
 
         device = get_device()
         self._variable_metrics: dict[str, ReducedMetric] = {}
         self._variable_metrics["weighted_rmse"] = AreaWeightedReducedMetric(
             device=device,
             compute_metric=self._gridded_operations.area_weighted_rmse_dict,
+            channel_mean_names=channel_mean_names,
         )
-        self._variable_metrics["weighted_bias"] = AreaWeightedReducedMetric(
-            device=device,
-            compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
-        )
-        self._variable_metrics["weighted_grad_mag_percent_diff"] = (
-            AreaWeightedReducedMetric(
+        if self._target == "denorm":
+            self._variable_metrics["weighted_bias"] = AreaWeightedReducedMetric(
                 device=device,
-                compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
+                compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
             )
-        )
-        # metrics which only report channel mean
-        self._variable_metrics_norm: dict[str, ReducedMetric] = {}
-        self._variable_metrics_norm["weighted_rmse_norm"] = AreaWeightedReducedMetric(
-            device=device,
-            compute_metric=self._gridded_operations.area_weighted_rmse_dict,
-        )
+            self._variable_metrics["weighted_grad_mag_percent_diff"] = (
+                AreaWeightedReducedMetric(
+                    device=device,
+                    compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
+                )
+            )
 
     @torch.no_grad()
     def record_batch(
@@ -77,6 +75,9 @@ class MeanAggregator:
         time_dim = 1
         time_len = gen_data[list(gen_data.keys())[0]].shape[time_dim]
         target_time = self._target_time - i_time_start
+        if self._target == "norm":
+            target_data = target_data_norm
+            gen_data = gen_data_norm
         if target_time >= 0 and time_len > target_time:
             target_snapshot = {}
             gen_snapshot = {}
@@ -92,22 +93,6 @@ class MeanAggregator:
                     target=target_snapshot,
                     gen=gen_snapshot,
                 )
-            target_snapshot_norm = {}
-            gen_snapshot_norm = {}
-            if self._channel_mean_names is None:
-                self._channel_mean_names = list(gen_data_norm.keys())
-            for name in self._channel_mean_names:
-                target_snapshot_norm[name] = target_data_norm[name].select(
-                    dim=time_dim, index=target_time
-                )
-                gen_snapshot_norm[name] = gen_data_norm[name].select(
-                    dim=time_dim, index=target_time
-                )
-            for metric in self._variable_metrics_norm.values():
-                metric.record(
-                    target=target_snapshot_norm,
-                    gen=gen_snapshot_norm,
-                )
             # only increment n_batches if we actually recorded a batch
             self._n_batches += 1
 
@@ -119,8 +104,7 @@ class MeanAggregator:
             metric_results = metric.get()
             for key in metric_results:
                 data[f"{name}/{key}"] = metric_results[key] / self._n_batches
-        if self._channel_mean_names is not None and len(self._channel_mean_names) > 1:
-            for name, metric in self._variable_metrics_norm.items():
+            if self._target == "norm":
                 data[f"{name}/channel_mean"] = (
                     metric.get_channel_mean() / self._n_batches
                 )

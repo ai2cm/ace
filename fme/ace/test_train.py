@@ -330,7 +330,9 @@ def _get_test_yaml_files(
         data_writer=DataWriterConfig(
             save_prediction_files=True,
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(log_video=False),  # True, # FIXME
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_video=True,
+        ),
         logging=logging_config,
         loader=InferenceDataLoaderConfig(
             dataset=XarrayDataConfig(
@@ -528,9 +530,9 @@ def test_train_and_inference(
             # ensure inference time series is not logged
             assert "inference/mean/forecast_step" not in log
 
-        epoch_logs = wandb_logs[10]
-        assert "inference/mean_step_20/weighted_rmse_norm/channel_mean" in epoch_logs
-        assert "val/mean/weighted_rmse_norm/channel_mean" in epoch_logs
+        epoch_logs = wandb_logs[-1]
+        assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
+        assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
     assert validation_output_dir.exists()

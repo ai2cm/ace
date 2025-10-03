@@ -81,8 +81,11 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         horizontal_coordinates = dataset_info.horizontal_coordinates
         self._coords = horizontal_coordinates.coords
         self._aggregators: dict[str, _Aggregator] = {
-            "mean": MeanAggregator(
-                dataset_info.gridded_operations, channel_mean_names=channel_mean_names
+            "mean": MeanAggregator(dataset_info.gridded_operations),
+            "mean_norm": MeanAggregator(
+                dataset_info.gridded_operations,
+                target="norm",
+                channel_mean_names=channel_mean_names,
             ),
         }
         try:
