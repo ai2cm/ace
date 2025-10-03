@@ -8,9 +8,10 @@ RUNNER=${1:-DataflowRunner}
 python xr-beam-pipeline.py \
     gs://vcm-ml-scratch/brianhenn/era5-1deg-pressure-level-2024.zarr \
     2024-01-01T12:00:00 \
-    2024-12-31T18:00:00 \
+    2024-01-31T18:00:00 \
     --output_grid F90 \
-    --output_time_chunksize 20 \
+    --output_time_chunksize 1 \
+    --process_time_chunksize 1 \
     --project vcm-ml \
     --region us-central1 \
     --temp_location gs://vcm-ml-scratch/brianhenn/temp/ \
