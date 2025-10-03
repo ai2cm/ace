@@ -47,19 +47,19 @@ SCALAR_COORDS_TO_DROP = [
 
 
 OUTPUT_PRESSURE_LEVELS = [
-    1000,
-    925,
+    # 1000,
+    # 925,
     850,
-    700,
-    600,
+    # 700,
+    # 600,
     500,
-    400,
-    300,
-    250,
+    # 400,
+    # 300,
+    # 250,
     200,
-    150,
-    100,
-    50,
+    # 150,
+    # 100,
+    # 50,
 ]
 
 RENAME_Q_PRES = {f"specific_humidity_{p}": f"Q{p}" for p in OUTPUT_PRESSURE_LEVELS}
@@ -254,7 +254,7 @@ def _get_parser():
     parser.add_argument(
         "--output_time_chunksize",
         type=int,
-        default=50,
+        default=20,
         help="Number of times per output chunk.",
     )
     parser.add_argument(
