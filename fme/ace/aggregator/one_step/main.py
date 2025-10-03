@@ -60,7 +60,6 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             metadata=dataset_info.variable_metadata,
         )
         self._ensemble_recorded = False
-        self._channel_mean_names = channel_mean_names
 
     @torch.no_grad()
     def record_batch(
