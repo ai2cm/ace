@@ -47,19 +47,19 @@ SCALAR_COORDS_TO_DROP = [
 
 
 OUTPUT_PRESSURE_LEVELS = [
-    # 1000,
+    1000,
     # 925,
     850,
-    # 700,
+    700,
     # 600,
     500,
     # 400,
     # 300,
-    # 250,
-    200,
+    250,
+    # 200,
     # 150,
-    # 100,
-    # 50,
+    100,
+    50,
 ]
 
 RENAME_Q_PRES = {f"specific_humidity_{p}": f"Q{p}" for p in OUTPUT_PRESSURE_LEVELS}
@@ -90,17 +90,12 @@ def _open_zarr(key, sel_indices):
         assert desired_start >= ds_start, f"{key} dataset {dim} start out of bounds"
         assert desired_stop <= ds_stop, f"{key} dataset {dim} stop out of bounds"
     ds = ds.sel(**sel_indices[key])
-    ds = ds.drop_vars("time")
     return ds
 
 
 def open_google_latlon_dataset(indices) -> xr.Dataset:
     ds = _open_zarr(GOOGLE_LATLON, indices)
     return ds
-
-
-def _to_dataset(fs: metview.Fieldset) -> xr.Dataset:
-    return fs.to_dataset().load()
 
 
 def _to_dataarray(fs: metview.Fieldset, name: str) -> xr.DataArray:
@@ -143,14 +138,13 @@ def _process_pressure_level_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset
 
     regridded = _regrid_quarter_degree(select_levels, output_grid)
     regridded = regridded.rename(RENAME_PRESSURE_LEVEL)
-    # coordinates will be written by template, so drop here to avoid possible conflicts
-    regridded = regridded.drop_vars(["latitude", "longitude"])
-
     return regridded
 
 
 def process_pressure_level_data(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
     output = _process_pressure_level_data(ds, output_grid)
+    # coordinates will be written by template, so drop here to avoid possible conflicts
+    output = output.drop_vars(["latitude", "longitude", "time"], errors="ignore")
     new_key = key.replace(
         offsets={"time": key.offsets["time"], "latitude": 0, "longitude": 0},
         vars=frozenset(output.keys()),
@@ -292,6 +286,7 @@ def main():
 
     logging.info("Opening datasets")
     ds_google_latlon = open_google_latlon_dataset(sel_indices)
+    print(ds_google_latlon)
 
     logging.info("Generating template")
     template = _make_template(
@@ -299,6 +294,7 @@ def main():
         output_chunks,
         args.output_grid,
     )
+    print(template)
 
     logging.info("Template finished generating. Starting pipeline.")
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
