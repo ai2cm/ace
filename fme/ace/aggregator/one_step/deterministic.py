@@ -141,6 +141,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             logging.info(f"Getting logs for {agg_label} aggregator")
             for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
                 logs[f"{label}/{k}"] = v
+        logs.pop(f"{label}/mean_norm/loss")  # remove duplicate of mean/loss
         logging.info(f"Inserting loss-scaled MSE componenets into logs")
         logs.update(
             self._get_loss_scaled_mse_components(

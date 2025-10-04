@@ -468,7 +468,9 @@ class InferenceEvaluatorAggregator(
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
         if self._record_step_20:
-            logs.pop("mean_step_20/loss")  # we don't provide it so it's NaN always
+            # we don't provide it so these are NaN always
+            logs.pop("mean_step_20/loss")
+            logs.pop("mean_step_20_norm/loss")
         return logs
 
     @torch.no_grad()
