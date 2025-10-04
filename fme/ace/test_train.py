@@ -526,10 +526,13 @@ def test_train_and_inference(
             yaml_config=train_config,
         )
         wandb_logs = wandb.get_logs()
-
         for log in wandb_logs:
             # ensure inference time series is not logged
             assert "inference/mean/forecast_step" not in log
+
+        epoch_logs = wandb_logs[-1]
+        assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
+        assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
     assert validation_output_dir.exists()

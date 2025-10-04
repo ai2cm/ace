@@ -125,7 +125,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         record_step_20=record_step_20,
         n_timesteps=inference_n_forward_steps + stepper.n_ic_timesteps,
         loss_scaling=stepper.effective_loss_scaling,
-        channel_mean_names=stepper.loss_names,
+        channel_mean_names=None,  # include all generated data names
         normalize=stepper.normalizer.normalize,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         validation_config=config.validation_aggregator,
@@ -164,7 +164,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     end_of_epoch_ops = builder.get_end_of_epoch_callback(
         inference,
         normalize=stepper.normalizer.normalize,
-        channel_mean_names=stepper.loss_names,
+        channel_mean_names=None,  # include all generated data names
         output_dir=config.output_dir,
         variable_metadata=variable_metadata,
         save_diagnostics=config.save_per_epoch_diagnostics,
@@ -214,6 +214,7 @@ class AggregatorBuilder(
             loss_scaling=self.loss_scaling,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
+            channel_mean_names=self.channel_mean_names,
         )
 
     def get_inference_aggregator(
