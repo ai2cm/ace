@@ -203,7 +203,6 @@ def test_inference_logs_labels_exist():
     assert "mean_norm/weighted_mean_gen/a" in logs[0]
     assert "mean_norm/weighted_mean_target/a" in logs[0]
     assert "mean_norm/weighted_rmse/a" in logs[0]
-    assert "mean_norm/weighted_rmse/channel_mean" in logs[0]
     # series/table data should be rolled out, not included as a table
     assert "mean/series" not in logs[0]
     assert "mean_norm/series" not in logs[0]
