@@ -128,14 +128,17 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.00001
+  lr: 0.0001
   optimizer_type: AdamW
   kwargs:
     fused: true
     weight_decay: 0.01
-  scheduler:
-    type: CosineAnnealingLR
 stepper:
+  ocean_fraction_prediction:
+    land_fraction_name: land_fraction
+    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+    sea_ice_fraction_name: ocean_sea_ice_fraction
+  sst_name: sst
   parameter_init:
     checkpoint_path: /ckpt.tar
   ocean:
@@ -554,8 +557,3 @@ stepper:
             - Q2m
             - eastward_surface_wind_stress
             - northward_surface_wind_stress
-  ocean_fraction_prediction:
-    land_fraction_name: land_fraction
-    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
-    sea_ice_fraction_name: ocean_sea_ice_fraction
-  sst_name: sst
