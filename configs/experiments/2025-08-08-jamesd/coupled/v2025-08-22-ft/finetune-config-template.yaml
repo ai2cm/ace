@@ -6,7 +6,7 @@ log_train_every_n_batches: 20
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 20
+max_epochs: 5
 n_coupled_steps: 4
 inference:
   n_coupled_steps: 1456
@@ -133,6 +133,21 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 707
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 1
+          end_factor: 0
+          total_iters: 2828
+    milestones: [707]
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
