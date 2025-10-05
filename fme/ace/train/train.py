@@ -264,6 +264,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
     trainer = build_trainer(builders, config)
     trainer.train()
     logging.info(f"DONE ---- rank {dist.rank}")
+    dist.shutdown()
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
