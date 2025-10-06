@@ -4,7 +4,11 @@ import torch
 
 from fme.downscaling.data import PairedBatchData
 from fme.downscaling.data.datasets import patched_batch_gen_from_paired_loader
-from fme.downscaling.patching import _divide_into_slices, _get_patch_slices, get_patches
+from fme.downscaling.data.patching import (
+    _divide_into_slices,
+    _get_patch_slices,
+    get_patches,
+)
 from fme.downscaling.predictors.test_composite import get_paired_test_data
 
 
