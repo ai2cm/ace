@@ -14,7 +14,7 @@ ensemble members represent multiple predictions for the same initial condition.
 The ensemble dimension is the second dimension of the tensors,
 while the batch dimension is the first.
 """
-EnsembleTensorMapping = Mapping[str, torch.Tensor]
+EnsembleMapping = NewType("EnsembleMapping", TensorMapping)
 
 
 def _shift_bound(
