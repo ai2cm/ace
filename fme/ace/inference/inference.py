@@ -91,7 +91,7 @@ class InitialConditionConfig:
 
 
 def get_initial_condition(
-    ds: xr.Dataset, prognostic_names: Sequence[str], labels: list[str]
+    ds: xr.Dataset, prognostic_names: Sequence[str], labels: list[str], n_ensemble: int
 ) -> PrognosticState:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
@@ -103,6 +103,7 @@ def get_initial_condition(
         prognostic_names: Names of prognostic variables to extract from the dataset.
         labels: Labels for the initial conditions. If provided, these labels will be
             provided to the stepper for every initial condition.
+        n_ensemble: Number of initial condition-based ensembles
 
     Returns:
         The initial condition and the time coordinate.
@@ -134,6 +135,7 @@ def get_initial_condition(
         time=initial_times,
         horizontal_dims=["lat", "lon"],
         labels=[set(labels)] * n_samples,
+        n_ensemble=n_ensemble,
     )
     return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
 
@@ -163,6 +165,9 @@ class InferenceConfig:
             formatted or missing grid information.
         labels: Dataset labels to use for inference. If provided, these labels will be
             provided to the stepper for every initial condition.
+        n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
+            stochastic model weather inference. n_ensemble_per_ic = 1 is default
+            inference behavior.
     """
 
     experiment_dir: str
@@ -181,6 +186,7 @@ class InferenceConfig:
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     labels: list[str] = dataclasses.field(default_factory=list)
+    n_ensemble_per_ic: int = 1
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -189,14 +195,6 @@ class InferenceConfig:
                 self.forward_steps_in_memory,
                 self.n_forward_steps,
             )
-        if self.data_writer.subselection is not None:
-            for subselect_config in self.data_writer.subselection:
-                if subselect_config.time_coarsen is not None:
-                    validate_time_coarsen_config(
-                        subselect_config.time_coarsen,
-                        self.forward_steps_in_memory,
-                        self.n_forward_steps,
-                    )
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -283,6 +281,7 @@ def run_inference_from_config(config: InferenceConfig):
             config.initial_condition.get_dataset(),
             stepper_config.prognostic_names,
             config.labels,
+            config.n_ensemble_per_ic,
         )
         stepper = config.load_stepper()
         stepper.set_eval()
@@ -336,7 +335,7 @@ def run_inference_from_config(config: InferenceConfig):
 
     with timer.context("final_writer_flush"):
         logging.info("Starting final flush of data writer")
-        writer.finalize()
+        writer.flush()
         logging.info("Writing reduced metrics to disk in netcdf format.")
         aggregator.flush_diagnostics()
 
