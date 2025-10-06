@@ -3,7 +3,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 60
+max_epochs: 150
 n_forward_steps: 4
 inference:
   n_forward_steps: 1440
@@ -32,7 +32,7 @@ inference:
         engine: zarr
     num_data_workers: 8
   aggregator:
-    log_histograms: true
+    log_histograms: false
 logging:
   log_to_screen: true
   log_to_wandb: true
