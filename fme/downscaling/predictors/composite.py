@@ -4,8 +4,8 @@ import torch
 
 from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
+from fme.downscaling.data.patching import Patch, get_patches
 from fme.downscaling.models import DiffusionModel, Model, ModelOutputs
-from fme.downscaling.patching import Patch, get_patches
 
 
 @dataclasses.dataclass
