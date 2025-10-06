@@ -286,7 +286,6 @@ def main():
 
     logging.info("Opening datasets")
     ds_google_latlon = open_google_latlon_dataset(sel_indices)
-    print(ds_google_latlon)
 
     logging.info("Generating template")
     template = _make_template(
@@ -294,7 +293,6 @@ def main():
         output_chunks,
         args.output_grid,
     )
-    print(template)
 
     logging.info("Template finished generating. Starting pipeline.")
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
