@@ -179,11 +179,16 @@ class SubselectWriterConfig:
         else:
             self.lon_slice = slice(None)
 
-        if self.time_selection is not None and self.time_coarsen is not None:
-            logging.warning(
-                "Time coarsening is enabled. "
-                "Time subselection is applied *after* time coarsening."
-            )
+        if self.time_selection is not None:
+            if self.time_coarsen is not None:
+                logging.warning(
+                    "Time coarsening is enabled. "
+                    "Time subselection is applied *after* time coarsening."
+                )
+            if self.zarr.write_to_zarr:
+                raise NotImplementedError(
+                    "Time selection is not currently supported when writing to zarr."
+                )
 
     def build_paired(
         self,
