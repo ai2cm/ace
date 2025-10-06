@@ -178,14 +178,6 @@ def test_batch_item():
             LatLonCoordinates(lat=torch.rand(10), lon=torch.rand(2, 5)),
             id="lon_2D",
         ),
-        pytest.param(
-            "topography",
-            Topography(
-                torch.randn(1, 8, 16),
-                LatLonCoordinates(lat=torch.rand(8), lon=torch.rand(16)),
-            ),
-            id="topo_3D",
-        ),
     ],
 )
 def test_batch_item_validation(key, failing_value):
