@@ -1,3 +1,2 @@
 group|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override
-fto-v2025-08-22-const_lr_20ep|ace-samudra-cm4|ntslj27c|best_inference_ckpt|ace2-cm4-atmos-noLSM|ud6gm418|best_ckpt|trained|urgent|ceres|8|800GiB|3
-fto-v2025-08-22-const_lr_10ep-ncs8|ace-samudra-cm4|ntslj27c|best_inference_ckpt|ace2-cm4-atmos-noLSM|ud6gm418|best_ckpt|training|urgent|ceres|8|800GiB|3||max_epochs=10 n_coupled_steps=8
+fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|ace-samudra-cm4|ntslj27c|best_inference_ckpt|ace2-cm4-atmos-noLSM|2aw6z7n3|best_inference_ckpt|train|urgent|ceres|8|800GiB|3||optimization.lr=0.00005
