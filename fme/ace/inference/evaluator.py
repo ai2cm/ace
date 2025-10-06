@@ -291,7 +291,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         record_step_20=config.n_forward_steps >= 20,
         n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
         initial_time=initial_time,
-        channel_mean_names=None,  # include all generated data names
+        channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
         output_dir=config.experiment_dir,
     )

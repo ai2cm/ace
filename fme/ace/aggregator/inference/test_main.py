@@ -60,11 +60,6 @@ def test_inference_evaluator_aggregator_channel_mean_names(
 
     time = xr.DataArray(np.zeros((batch_size, n_timesteps)), dims=["sample", "time"])
 
-    if channel_mean_names is None:
-        expected_channel_mean_rmse = 5 / 3
-    else:
-        expected_channel_mean_rmse = 3 / 2
-
     paired_data = PairedData.new_on_device(
         prediction=gen_data,
         reference=target_data,
@@ -74,8 +69,16 @@ def test_inference_evaluator_aggregator_channel_mean_names(
     agg.record_batch(paired_data)
 
     summary_logs = agg.get_summary_logs()
-    actual_channel_mean_rmse = summary_logs["time_mean_norm/rmse/channel_mean"]
 
+    for varname in ["a", "b", "c"]:
+        assert f"time_mean_norm/rmse/{varname}" in summary_logs
+
+    assert "time_mean_norm/rmse/channel_mean" in summary_logs
+    actual_channel_mean_rmse = summary_logs["time_mean_norm/rmse/channel_mean"]
+    if channel_mean_names is None:
+        expected_channel_mean_rmse = 5 / 3
+    else:
+        expected_channel_mean_rmse = 3 / 2
     np.testing.assert_allclose(
         actual_channel_mean_rmse,
         expected_channel_mean_rmse,

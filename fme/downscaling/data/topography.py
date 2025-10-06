@@ -1,11 +1,21 @@
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 
 import torch
 import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.device import get_device
+from fme.downscaling.data.patching import Patch
 from fme.downscaling.data.utils import BatchedLatLonCoordinates, ClosedInterval
+
+
+def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
+    mask = (coords >= range.start) & (coords <= range.stop)
+    indices = mask.nonzero(as_tuple=True)[0]
+    if indices.numel() == 0:
+        return slice(0, 0)
+    return slice(indices[0].item(), indices[-1].item() + 1)
 
 
 @dataclasses.dataclass
@@ -13,12 +23,13 @@ class Topography:
     data: torch.Tensor
     coords: LatLonCoordinates
 
-    @property
-    def dim(self) -> int:
-        return len(self.shape)
-
-    @property
-    def shape(self) -> tuple[int, int]:
+    def __post_init__(self):
+        if len(self.data.shape) != 2:
+            raise ValueError(f"Topography data must be 2D. Got shape {self.data.shape}")
+        if self.coords is None:
+            raise ValueError(
+                "Both topography data and coords must be provided or None."
+            )
         if self.data.shape[0] != len(self.coords.lat) or self.data.shape[1] != len(
             self.coords.lon
         ):
@@ -26,6 +37,13 @@ class Topography:
                 f"Topography data shape {self.data.shape} does not match "
                 f"coordinates shape {(len(self.coords.lat), len(self.coords.lon))}"
             )
+
+    @property
+    def dim(self) -> int:
+        return len(self.shape)
+
+    @property
+    def shape(self) -> tuple[int, int]:
         return self.data.shape
 
     def subset_latlon(
@@ -33,30 +51,12 @@ class Topography:
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
     ) -> "Topography":
-        subset_lats = torch.tensor(
-            [
-                i
-                for i in range(len(self.coords.lat))
-                if float(self.coords.lat[i]) in lat_interval
-            ]
-        )
-        subset_lons = torch.tensor(
-            [
-                i
-                for i in range(len(self.coords.lon))
-                if float(self.coords.lon[i]) in lon_interval
-            ]
-        )
-        subset_topography = torch.index_select(self.data, -2, subset_lats)
-        subset_topography = torch.index_select(subset_topography, -1, subset_lons)
-        return Topography(
-            data=subset_topography,
-            coords=LatLonCoordinates(
-                lat=self.coords.lat[subset_lats], lon=self.coords.lon[subset_lons]
-            ),
-        )
+        lat_slice = _range_to_slice(self.coords.lat, lat_interval)
+        lon_slice = _range_to_slice(self.coords.lon, lon_interval)
+        return self._latlon_index_slice(lat_slice=lat_slice, lon_slice=lon_slice)
 
-    def to(self, device: torch.device) -> "Topography":
+    def to_device(self) -> "Topography":
+        device = get_device()
         return Topography(
             data=self.data.to(device),
             coords=LatLonCoordinates(
@@ -64,6 +64,33 @@ class Topography:
                 lon=self.coords.lon.to(device),
             ),
         )
+
+    def _apply_patch(self, patch: Patch):
+        return self._latlon_index_slice(
+            lat_slice=patch.input_slice.y, lon_slice=patch.input_slice.x
+        )
+
+    def _latlon_index_slice(
+        self,
+        lat_slice: slice,
+        lon_slice: slice,
+    ) -> "Topography":
+        sliced_data = self.data[lat_slice, lon_slice]
+        sliced_latlon = LatLonCoordinates(
+            lat=self.coords.lat[lat_slice],
+            lon=self.coords.lon[lon_slice],
+        )
+        return Topography(
+            data=sliced_data,
+            coords=sliced_latlon,
+        )
+
+    def generate_from_patches(
+        self,
+        patches: list[Patch],
+    ) -> Generator["Topography", None, None]:
+        for patch in patches:
+            yield self._apply_patch(patch)
 
 
 @dataclasses.dataclass
@@ -83,7 +110,8 @@ class BatchedTopography:
     def __getitem__(self, k):
         return Topography(self.data[k], self.coords[k])
 
-    def to(self, device: torch.device) -> "BatchedTopography":
+    def to_device(self) -> "BatchedTopography":
+        device = get_device()
         return BatchedTopography(
             data=self.data.to(device),
             coords=BatchedLatLonCoordinates(
