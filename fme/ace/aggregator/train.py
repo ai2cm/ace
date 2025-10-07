@@ -95,13 +95,13 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         logs = {}
         if self._n_loss_batches > 0:
             logs[f"{label}/mean/loss"] = self._loss / self._n_loss_batches
-        dist = Distributed.get_instance()
-        for key in sorted(logs.keys()):
-            logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
-        for name, aggregator in self._paired_aggregators.items():
-            logs.update(
-                {f"{label}/{k}": v for k, v in aggregator.get_logs(name).items()}
-            )
+            dist = Distributed.get_instance()
+            for key in sorted(logs.keys()):
+                logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
+            for name, aggregator in self._paired_aggregators.items():
+                logs.update(
+                    {f"{label}/{k}": v for k, v in aggregator.get_logs(name).items()}
+                )
         return logs
 
     @torch.no_grad()
