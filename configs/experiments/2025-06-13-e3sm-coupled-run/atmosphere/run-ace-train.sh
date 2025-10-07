@@ -13,7 +13,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-E3SMv3-atmosphere-v0909-0421-fill-nans-false"
+JOB_GROUP="BK-E3SMv3-atmosphere-v0909-first-80-fill-nans-false"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
