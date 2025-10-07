@@ -207,7 +207,7 @@ class TestDataWriter:
                 time=batch_time,
             ),
         )
-        writer.flush()
+        writer.finalize()
 
         # Open the file and check the data
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
@@ -346,7 +346,7 @@ class TestDataWriter:
                 time=batch_time,
             ),
         )
-        writer.flush()
+        writer.finalize()
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
         expected_variables = (
             set(save_names).intersection(sample_prediction_data)
@@ -440,8 +440,6 @@ class TestDataWriter:
             names=["pressure"],
             lat_extent=(1, 2),
             lon_extent=(1, 3),
-            latitude_name="lat",
-            longitude_name="lon",
             zarr=ZarrWriterConfig(
                 write_to_zarr=True,
                 allow_existing=True,
@@ -495,7 +493,7 @@ class TestDataWriter:
                 time=batch_time,
             ),
         )
-        writer.flush()
+        writer.finalize()
 
         with xr.open_dataset(
             tmp_path / "autoregressive_predictions.nc",

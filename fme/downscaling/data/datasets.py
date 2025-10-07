@@ -23,10 +23,17 @@ from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import get_device, move_tensordict_to_device
-from fme.core.metrics import spherical_area_weights
 from fme.core.typing_ import TensorMapping
+from fme.downscaling.data.patching import Patch, get_patches
+from fme.downscaling.data.topography import (
+    BatchedTopography,
+    Topography,
+    get_topography_downscale_factor,
+)
 from fme.downscaling.data.utils import (
+    BatchedLatLonCoordinates,
     ClosedInterval,
+    adjust_fine_coord_range,
     check_leading_dim,
     expand_and_fold_tensor,
     get_offset,
@@ -34,111 +41,6 @@ from fme.downscaling.data.utils import (
     scale_slice,
     scale_tuple,
 )
-from fme.downscaling.patching import Patch, get_patches
-
-
-@dataclasses.dataclass
-class Topography:
-    data: torch.Tensor
-    coordinates: LatLonCoordinates
-
-
-def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
-    if path.endswith(".zarr"):
-        topography = xr.open_zarr(path, mask_and_scale=False)[topography_name]
-    else:
-        topography = xr.open_dataset(path, mask_and_scale=False)[topography_name]
-    if "time" in topography.dims:
-        topography = topography.isel(time=0).squeeze()
-    if len(topography.shape) != 2:
-        raise ValueError(f"unexpected shape {topography.shape} for topography")
-    topography_normalized = (topography - topography.mean()) / topography.std()
-    return torch.tensor(topography_normalized.values)
-
-
-def get_topography_downscale_factor(
-    topography_shape: tuple[int, ...], data_coords_shape: tuple[int, ...]
-):
-    if len(topography_shape) != 2 or len(data_coords_shape) != 2:
-        raise ValueError(
-            f"Expected 2D shapes for topography {topography_shape} and "
-            f"data coordinates {data_coords_shape}, got {len(topography_shape)}D "
-            f"and {len(data_coords_shape)}D."
-        )
-    if (
-        topography_shape[0] % data_coords_shape[0] != 0
-        or topography_shape[1] % data_coords_shape[1] != 0
-    ):
-        raise ValueError(
-            f"Topography shape {topography_shape} must be evenly "
-            f"divisible by horizontal shape {data_coords_shape}"
-        )
-    topography_downscale_factor = topography_shape[0] // data_coords_shape[0]
-    if topography_downscale_factor != topography_shape[1] // data_coords_shape[1]:
-        raise ValueError(
-            f"Topography shape {topography_shape} must have the same scale factor "
-            "between lat and lon dimensions as data coordinates "
-            f"shape {data_coords_shape}"
-        )
-    return topography_downscale_factor
-
-
-@dataclasses.dataclass
-class BatchedLatLonCoordinates:
-    """
-    Container for batched latitude and longitude coordinates.
-    Expects leading batch dimensions (that are the same) for
-    lat and lon coordinates.
-    """
-
-    lat: torch.Tensor
-    lon: torch.Tensor
-    dims: list[str] = dataclasses.field(default_factory=lambda: ["batch", "lat", "lon"])
-
-    def __post_init__(self):
-        self._validate()
-
-    def _validate(self):
-        if self.lat.dim() != 2 or self.lon.dim() != 2:
-            raise ValueError(
-                f"Expected 2D lat and lon coordinates, got shapes {self.lat.shape} "
-                f"and {self.lon.shape}."
-            )
-
-        if self.lat.shape[0] != self.lon.shape[0]:
-            raise ValueError(
-                f"Latitude batch dimension {self.lat.shape[0]} does not match "
-                f"longitude batch dimension {self.lon.shape[0]}"
-            )
-
-    @classmethod
-    def from_sequence(
-        cls,
-        items: Sequence[LatLonCoordinates],
-    ) -> "BatchedLatLonCoordinates":
-        lats = torch.utils.data.default_collate([i.lat for i in items])
-        lons = torch.utils.data.default_collate([i.lon for i in items])
-        return BatchedLatLonCoordinates(lats, lons)
-
-    @property
-    def area_weights(self) -> torch.Tensor:
-        return spherical_area_weights(self.lat, self.lon.shape[-1])
-
-    def to_device(self) -> "BatchedLatLonCoordinates":
-        device = get_device()
-        return BatchedLatLonCoordinates(self.lat.to(device), self.lon.to(device))
-
-    def __getitem__(self, k):
-        lats = self.lat[k]
-        lons = self.lon[k]
-
-        return LatLonCoordinates(lat=lats, lon=lons)
-
-    def __eq__(self, other):
-        return torch.equal(self.lat, other.lat) and torch.equal(self.lon, other.lon)
-
-    def __len__(self):
-        return self.lat.shape[0]
 
 
 @dataclasses.dataclass
@@ -154,7 +56,7 @@ class BatchItem:
     data: TensorMapping
     time: xr.DataArray
     latlon_coordinates: LatLonCoordinates
-    topography: torch.Tensor | None = None
+    topography: Topography | None = None
 
     def _validate(self):
         for key, value in self.data.items():
@@ -174,7 +76,7 @@ class BatchItem:
                 "Expected 1D lon coordinates, got shape "
                 f"{self.latlon_coordinates.lon.shape}"
             )
-        if self.topography is not None and self.topography.dim() != 2:
+        if self.topography is not None and self.topography.dim != 2:
             raise ValueError(
                 f"Expected 2D topography, got shape {self.topography.shape}"
             )
@@ -196,7 +98,7 @@ class BatchItem:
             lon=self.latlon_coordinates.lon.to(get_device()),
         )
         if self.topography is not None:
-            topography = self.topography.to(get_device())
+            topography = self.topography.to_device()
         else:
             topography = None
 
@@ -218,7 +120,9 @@ class BatchItem:
         if not self.latlon_coordinates == value.latlon_coordinates:
             return False
         if self.topography is not None:
-            if not torch.equal(self.topography, value.topography):
+            if not torch.equal(self.topography.data, value.topography.data):
+                return False
+            if not self.topography.coords == value.topography.coords:
                 return False
         return True
 
@@ -234,7 +138,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
         properties: DatasetProperties,
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
-        topography: torch.Tensor | None = None,
+        topography: Topography | None = None,
     ):
         self.dataset = dataset
         self._properties = properties
@@ -246,34 +150,34 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
                 "Horizontal coordinates must be of type LatLonCoordinates"
             )
 
-        coords: LatLonCoordinates = properties.horizontal_coordinates
+        self._orig_coords: LatLonCoordinates = properties.horizontal_coordinates
         lats = torch.tensor(
             [
                 i
-                for i in range(len(coords.lat))
-                if float(coords.lat[i]) in self.lat_interval
+                for i in range(len(self._orig_coords.lat))
+                if float(self._orig_coords.lat[i]) in self.lat_interval
             ]
         )
         lons = torch.tensor(
             [
                 i
-                for i in range(len(coords.lon))
-                if float(coords.lon[i]) in self.lon_interval
+                for i in range(len(self._orig_coords.lon))
+                if float(self._orig_coords.lon[i]) in self.lon_interval
             ]
         )
 
         if (self.lon_interval.stop != float("inf")) and (
-            torch.any(coords.lon < self.lon_interval.stop - 360.0)
+            torch.any(self._orig_coords.lon < self.lon_interval.stop - 360.0)
         ):
-            lon_max = coords.lon.max()
+            lon_max = self._orig_coords.lon.max()
             raise NotImplementedError(
                 f"lon wraparound not implemented, received lon_max {lon_max} but "
                 f"expected lon_max > {self.lon_interval.stop - 360.0}"
             )
         if (self.lon_interval.start != -float("inf")) and (
-            torch.any(coords.lon > self.lon_interval.start + 360.0)
+            torch.any(self._orig_coords.lon > self.lon_interval.start + 360.0)
         ):
-            lon_min = coords.lon.min()
+            lon_min = self._orig_coords.lon.min()
             raise NotImplementedError(
                 f"lon wraparound not implemented, received lon_min {lon_min} but "
                 f"expected lon_min < {self.lon_interval.start + 360.0}"
@@ -287,46 +191,26 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             lon=lons,
         )
         self._latlon_coordinates = LatLonCoordinates(
-            lat=coords.lat[self.mask_indices.lat],
-            lon=coords.lon[self.mask_indices.lon],
+            lat=self._orig_coords.lat[self.mask_indices.lat],
+            lon=self._orig_coords.lon[self.mask_indices.lon],
         )
         self._area_weights = self._latlon_coordinates.area_weights
         self._full_topography = topography
-        self._full_shape = (
-            coords.lat.numel(),
-            coords.lon.numel(),
+
+        _full_shape = (
+            self._orig_coords.lat.numel(),
+            self._orig_coords.lon.numel(),
         )
-        if self._full_topography is not None:
-            self._topography_mask = self._get_topography_mask(
-                self.mask_indices,
-                self._full_topography.shape,
-                self._full_shape,
+        if topography is not None:
+            _full_topography_shape = (
+                topography.coords.lat.numel(),
+                topography.coords.lon.numel(),
+            )
+            self._topography_downscale_factor = get_topography_downscale_factor(
+                _full_topography_shape, _full_shape
             )
         else:
-            self._topography_mask = None
-
-    def _get_topography_mask(
-        self, data_mask_indices, topography_shape, data_coords_shape
-    ):
-        """
-        Topography is allowed to be higher resolution than the data,
-        as a common use case is to load fine topography as an input
-        when loading coarse input data.
-        """
-        topography_downscale_factor = get_topography_downscale_factor(
-            topography_shape, data_coords_shape
-        )
-        lat_mask = torch.arange(
-            (data_mask_indices.lat[0]) * topography_downscale_factor,
-            (data_mask_indices.lat[-1] + 1) * topography_downscale_factor,
-        )
-        lon_mask = torch.arange(
-            (data_mask_indices.lon[0]) * topography_downscale_factor,
-            (data_mask_indices.lon[-1] + 1) * topography_downscale_factor,
-        )
-        mask = (lat_mask.unsqueeze(1), lon_mask.unsqueeze(0))
-
-        return mask
+            self._topography_downscale_factor = None
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
@@ -347,7 +231,28 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
     @property
     def subset_topography(self) -> torch.Tensor | None:
         if self._full_topography is not None:
-            return self._full_topography[*self._topography_mask]
+            if self._topography_downscale_factor == 1:
+                return self._full_topography.subset_latlon(
+                    lat_interval=self.lat_interval,
+                    lon_interval=self.lon_interval,
+                )
+            else:
+                # If topography is higher resolution than data, we need to
+                # ensure that the subselected range exactly matches the coarse
+                # data at the cell
+                topo_lat_interval = adjust_fine_coord_range(
+                    coord_range=self.lat_interval,
+                    full_coarse_coord=self._orig_coords.lat,
+                    full_fine_coord=self._full_topography.coords.lat,
+                )
+                topo_lon_interval = adjust_fine_coord_range(
+                    coord_range=self.lon_interval,
+                    full_coarse_coord=self._orig_coords.lon,
+                    full_fine_coord=self._full_topography.coords.lon,
+                )
+            return self._full_topography.subset_latlon(
+                lat_interval=topo_lat_interval, lon_interval=topo_lon_interval
+            )
         else:
             return None
 
@@ -376,7 +281,7 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         self,
         dataset: HorizontalSubsetDataset | XarrayConcat,
         coordinates: LatLonCoordinates,
-        topography: torch.Tensor | None = None,
+        topography: Topography | None = None,
         properties: DatasetProperties | None = None,
     ):
         self._dataset = dataset
@@ -576,7 +481,7 @@ class BatchData:
     data: TensorMapping
     time: xr.DataArray
     latlon_coordinates: BatchedLatLonCoordinates
-    topography: torch.Tensor | None = None
+    topography: BatchedTopography | None = None
 
     def _validate(self):
         leading_dim = None
@@ -592,7 +497,9 @@ class BatchData:
         check_leading_dim("lat", self.latlon_coordinates.lat.shape[:-1], leading_dim)
         check_leading_dim("lon", self.latlon_coordinates.lon.shape[:-1], leading_dim)
         if self.topography is not None:
-            check_leading_dim("topography", self.topography.shape[:-2], leading_dim)
+            check_leading_dim(
+                "topography", self.topography.data.shape[:-2], leading_dim
+            )
 
         # TODO: temporary constraint for only 1 leading batch dimension
         if len(leading_dim) != 1:
@@ -607,7 +514,7 @@ class BatchData:
         self.is_patched = False
         if self.topography is not None:
             self._topography_downscale_factor = get_topography_downscale_factor(
-                self.topography.shape[-2:], self._horizontal_shape
+                self.topography.data.shape[-2:], self._horizontal_shape
             )
         else:
             self._topography_downscale_factor = None
@@ -627,7 +534,7 @@ class BatchData:
         if any(topo is None for topo in fine_topographies):
             fine_topography = None
         else:
-            fine_topography = torch.utils.data.default_collate(fine_topographies)
+            fine_topography = BatchedTopography.from_sequence(fine_topographies)
 
         return cls(
             torch.utils.data.default_collate(data),
@@ -638,7 +545,7 @@ class BatchData:
 
     def to_device(self) -> "BatchData":
         if self.topography is not None:
-            topography = self.topography.to(get_device())
+            topography = self.topography.to_device()
         else:
             topography = None
 
@@ -686,9 +593,10 @@ class BatchData:
             ),
         )
         if self.topography is not None:
-            topography = expand_and_fold_tensor(
-                self.topography, num_samples, sample_dim
+            reshaped_topography = expand_and_fold_tensor(
+                self.topography.data, num_samples, sample_dim
             )
+            topography = BatchedTopography(reshaped_topography, self.topography.coords)
         else:
             topography = None
 
@@ -699,6 +607,9 @@ class BatchData:
         lat_slice: slice,
         lon_slice: slice,
     ) -> "BatchData":
+        # This method differs from using HorizontalSubsetDataset because the subsets
+        # are specified as index slices rather than coordinate ranges. This is useful
+        # for dividing a region into patches.
         sliced_data = {k: v[..., lat_slice, lon_slice] for k, v in self.data.items()}
         sliced_latlon = BatchedLatLonCoordinates(
             lat=self.latlon_coordinates.lat[..., lat_slice],
@@ -708,7 +619,14 @@ class BatchData:
         if self.topography is not None:
             topo_lat_slice = scale_slice(lat_slice, self._topography_downscale_factor)
             topo_lon_slice = scale_slice(lon_slice, self._topography_downscale_factor)
-            sliced_topo = self.topography[..., topo_lat_slice, topo_lon_slice]
+            sliced_topo_data = self.topography.data[..., topo_lat_slice, topo_lon_slice]
+            sliced_topo_coords = BatchedLatLonCoordinates(
+                self.topography.coords.lat[..., topo_lat_slice],
+                self.topography.coords.lon[..., topo_lon_slice],
+            )
+            sliced_topo = BatchedTopography(
+                data=sliced_topo_data, coords=sliced_topo_coords
+            )
         else:
             sliced_topo = None
         return BatchData(
@@ -838,28 +756,6 @@ class ContiguousDistributedSampler(DistributedSampler):
         end = start + chunk_size if self.rank != self.num_replicas - 1 else total_size
 
         return iter(indices[start:end])
-
-
-def _subset_horizontal(
-    item: BatchItem,
-    slice_lat: slice,
-    slice_lon: slice,
-) -> BatchItem:
-    dataset = {k: v[..., slice_lat, slice_lon] for k, v in item.data.items()}
-    latlon_coords = LatLonCoordinates(
-        lat=item.latlon_coordinates.lat[slice_lat],
-        lon=item.latlon_coordinates.lon[slice_lon],
-    )
-    topography = item.topography
-    if topography is not None:
-        topography = topography[..., slice_lat, slice_lon]
-
-    return BatchItem(
-        dataset,
-        item.time,
-        latlon_coords,
-        topography,
-    )
 
 
 def patched_batch_gen_from_loader(

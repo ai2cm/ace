@@ -3,7 +3,7 @@ import logging
 import os
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import TypeAlias, TypeGuard
+from typing import TypeAlias, TypeGuard, Union
 
 import numpy as np
 import torch
@@ -15,10 +15,14 @@ from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
 from .raw import RawDataWriter
+from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
+from .utils import DIM_INFO_HEALPIX, DIM_INFO_LATLON
 from .zarr import ZarrWriterAdapter, ZarrWriterConfig
 
 logger = logging.getLogger(__name__)
 
+LAT_NAME = DIM_INFO_LATLON[0].name
+LON_NAME = DIM_INFO_LATLON[1].name
 
 DatetimeDataArray: TypeAlias = xr.DataArray
 
@@ -146,8 +150,9 @@ class SubselectWriterConfig:
             can select an index range of steps in an inference, the MonthSelector can be
             used to target specific seasons or months for outputs, and a TimeSlice
             allows for datetime range selection.
-        latitude_name: The name of the latitude coordinate in the dataset.
-        longitude_name: The name of the longitude coordinate in the dataset.
+        time_coarsen: Optional TimeCoarsen config for reducing in the time dimension.
+        zarr: Optional configuration for writing to zarr. If not specified, data
+            will be written to netcdf.
     """
 
     label: str
@@ -155,15 +160,11 @@ class SubselectWriterConfig:
     lat_extent: Sequence[float] | None = None
     lon_extent: Sequence[float] | None = None
     time_selection: Slice | MonthSelector | TimeSlice | None = None
-    latitude_name: str = "latitude"
-    longitude_name: str = "longitude"
     save_reference: bool = False
+    time_coarsen: TimeCoarsenConfig | None = None
     zarr: ZarrWriterConfig = dataclasses.field(default_factory=ZarrWriterConfig)
 
     def __post_init__(self):
-        if not self.lon_extent and not self.lat_extent and not self.time_selection:
-            raise ValueError("No subselection details specified in the SubselectWriter")
-
         if self.lat_extent:
             if len(self.lat_extent) != 2:
                 raise ValueError("lat_extent must be a tuple of (min_lat, max_lat)")
@@ -178,6 +179,17 @@ class SubselectWriterConfig:
         else:
             self.lon_slice = slice(None)
 
+        if self.time_selection is not None:
+            if self.time_coarsen is not None:
+                logging.warning(
+                    "Time coarsening is enabled. "
+                    "Time subselection is applied *after* time coarsening."
+                )
+            if self.zarr.write_to_zarr:
+                raise NotImplementedError(
+                    "Time selection is not currently supported when writing to zarr."
+                )
+
     def build_paired(
         self,
         experiment_dir: str,
@@ -188,7 +200,7 @@ class SubselectWriterConfig:
         dataset_metadata: DatasetMetadata,
         prediction_suffix: str = "prediction",
         reference_suffix: str = "reference",
-    ) -> "PairedSubselectWriter":
+    ) -> Union["PairedSubselectWriter", PairedTimeCoarsen]:
         prediction_writer = dataclasses.replace(
             self, label=f"{self.label}_{prediction_suffix}"
         ).build(
@@ -212,7 +224,9 @@ class SubselectWriterConfig:
             )
         else:
             reference_writer = None
-        return PairedSubselectWriter(prediction_writer, reference_writer)
+        paired_writer = PairedSubselectWriter(prediction_writer, reference_writer)
+        # Time coarsening is built around writer in the single build method
+        return paired_writer
 
     def build(
         self,
@@ -222,7 +236,7 @@ class SubselectWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
-    ) -> "SubselectWriter":
+    ) -> Union["SubselectWriter", TimeCoarsen]:
         """
         Build a SubselectWriter object for saving data within the specified region.
 
@@ -236,34 +250,37 @@ class SubselectWriterConfig:
             dataset_metadata: Metadata for the entire dataset.
         """
         if "face" in coords:
-            raise NotImplementedError(
-                "SubselectWriter does not yet support writing HEALPix coordinates."
-            )
+            spatial_dims = DIM_INFO_HEALPIX
+        else:
+            spatial_dims = DIM_INFO_LATLON
 
-        if (self.lat_extent and self.latitude_name not in coords) or (
-            self.lon_extent and self.longitude_name not in coords
+        if (self.lat_extent and LAT_NAME not in coords) or (
+            self.lon_extent and LON_NAME not in coords
         ):
             raise ValueError(
-                f"Coordinates must include {self.latitude_name} and "
-                f"{self.longitude_name}."
+                "Coordinates must include 'lat' and 'lon' if using lat/lon extents. "
+                f"Got {list(coords.keys())}."
             )
 
         subset_coords = xr.Dataset(coords)
-        subset_coords = subset_coords.sel(
-            {
-                self.latitude_name: self.lat_slice,
-                self.longitude_name: self.lon_slice,
-            }
-        )
+        if self.lat_extent or self.lon_extent:
+            subset_coords = subset_coords.sel(
+                {LAT_NAME: self.lat_slice, LON_NAME: self.lon_slice}
+            )
         subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
+
         raw_writer: RawDataWriter | ZarrWriterAdapter
         if self.zarr.write_to_zarr:
+            if self.time_coarsen:
+                n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
+            else:
+                n_timesteps_write = n_timesteps
             raw_writer = ZarrWriterAdapter(
                 path=os.path.join(experiment_dir, f"{self.label}.zarr"),
-                dims=("sample", "time", self.latitude_name, self.longitude_name),
+                dims=("sample", "time", *(d.name for d in spatial_dims)),
                 data_coords=subselect_coords_,
                 data_vars=self.names,
-                n_timesteps=n_timesteps,
+                n_timesteps=n_timesteps_write,
                 n_initial_conditions=n_initial_conditions,
                 variable_metadata=variable_metadata,
                 dataset_metadata=dataset_metadata,
@@ -281,7 +298,11 @@ class SubselectWriterConfig:
                 coords=subselect_coords_,
                 dataset_metadata=dataset_metadata,
             )
-        return SubselectWriter(self, raw_writer, full_coords=coords)
+        writer = SubselectWriter(self, raw_writer, full_coords=coords)
+        if self.time_coarsen is not None:
+            return self.time_coarsen.build(writer)
+        else:
+            return writer
 
 
 class SubselectWriter:
@@ -299,6 +320,10 @@ class SubselectWriter:
         self.writer = writer
         self.full_coords = full_coords
         self._no_write_count = 0
+        if "face" in full_coords:
+            self._spatial_dims = DIM_INFO_HEALPIX
+        else:
+            self._spatial_dims = DIM_INFO_LATLON
 
     def _subselect_data(
         self,
@@ -314,8 +339,7 @@ class SubselectWriter:
                     dims=[
                         "batch",
                         "time",
-                        self.config.latitude_name,
-                        self.config.longitude_name,
+                        *[d.name for d in self._spatial_dims],
                     ],
                 )
                 for k, v in data.items()
@@ -324,13 +348,14 @@ class SubselectWriter:
             coords={"time": batch_time, **self.full_coords},
         )
 
-        # TODO: should eventually support selection straddling dateline
-        data_xr = data_xr.sel(
-            {
-                self.config.latitude_name: self.config.lat_slice,
-                self.config.longitude_name: self.config.lon_slice,
-            }
-        )
+        if self.config.lat_extent or self.config.lon_extent:
+            # TODO: should eventually support selection straddling dateline
+            data_xr = data_xr.sel(
+                {
+                    self._spatial_dims[0].name: self.config.lat_slice,
+                    self._spatial_dims[1].name: self.config.lon_slice,
+                }
+            )
 
         data_xr = _select_time(
             data_xr, self.config.time_selection, start_timestep=start_timestep
@@ -376,12 +401,15 @@ class SubselectWriter:
         """
         self.writer.flush()
 
+    def finalize(self):
+        self.writer.finalize()
+
 
 class PairedSubselectWriter:
     def __init__(
         self,
-        prediction_writer: SubselectWriter,
-        reference_writer: SubselectWriter | None,
+        prediction_writer: SubselectWriter | TimeCoarsen,
+        reference_writer: SubselectWriter | TimeCoarsen | None,
     ):
         self.prediction_writer = prediction_writer
         self.reference_writer = reference_writer
@@ -409,3 +437,8 @@ class PairedSubselectWriter:
         self.prediction_writer.flush()
         if self.reference_writer:
             self.reference_writer.flush()
+
+    def finalize(self):
+        self.prediction_writer.finalize()
+        if self.reference_writer:
+            self.reference_writer.finalize()

@@ -67,7 +67,7 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
     batch = next(iter(data.loader))
     # lat/lon midpoints are on (0.5, 1.5, ...)
     assert batch.data["x"].shape == (2, 3, 3)
-    assert batch.topography.shape == (2, 6, 6)
+    assert batch.topography.data.shape == (2, 6, 6)
 
 
 def test_XarrayEnsembleDataConfig():
