@@ -9,12 +9,12 @@ CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=8
-PRIORITY="normal"
+PRIORITY="low"
 WORKSPACE="ai2/ace"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="2025-08-28-baseline" # update when training a new baseline
+JOB_GROUP="2025-08-28-baseline-padding-fix" # update when training a new baseline
 RS=1
 JOB_NAME="${JOB_GROUP}-rs${RS}-train"
 echo "Job name: ${JOB_NAME}"
@@ -32,7 +32,10 @@ EXPERIMENT_ID=$(
       --workspace $WORKSPACE \
       --priority $PRIORITY \
       --preemptible \
-      --cluster ai2/ceres-cirrascale \
+      --cluster ai2/ceres \
+      --cluster ai2/jupiter \
+      --cluster ai2/neptune \
+      --cluster ai2/saturn \
       --env WANDB_USERNAME=$BEAKER_USERNAME \
       --env WANDB_NAME=$JOB_NAME \
       --env WANDB_JOB_TYPE=training \
