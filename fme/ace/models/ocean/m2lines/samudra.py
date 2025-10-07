@@ -6,7 +6,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fme.ace.models.ocean.m2lines.layers import AvgPool, BilinearUpsample, ConvNeXtBlock
+from fme.ace.models.ocean.m2lines.layers import (
+    AvgPool,
+    BilinearUpsample,
+    ConvNeXtBlock,
+    ZonallyPeriodicBilinearUpsample,
+)
 from fme.ace.models.ocean.m2lines.utils import pairwise
 
 
@@ -108,7 +113,7 @@ class Samudra(torch.nn.Module):
                 upscale_factor=self.upscale_factor,
             )
         )
-        layers.append(BilinearUpsample(in_channels=b, out_channels=b))
+        layers.append(ZonallyPeriodicBilinearUpsample(in_channels=b, out_channels=b))
         ch_width_with_input_reversed = ch_width_with_input[::-1]
         dilation_reversed = self.dilation[::-1]
         n_layers_reversed = self.n_layers[::-1]
@@ -125,7 +130,9 @@ class Samudra(torch.nn.Module):
                     upscale_factor=self.upscale_factor,
                 )
             )
-            layers.append(BilinearUpsample(in_channels=b, out_channels=b))
+            layers.append(
+                ZonallyPeriodicBilinearUpsample(in_channels=b, out_channels=b)
+            )
         layers.append(
             ConvNeXtBlock(
                 b,
@@ -161,7 +168,9 @@ class Samudra(torch.nn.Module):
                     temp.append(fts)
                     count += 1
             elif count >= self.num_steps:
-                if isinstance(layer, BilinearUpsample):
+                if isinstance(layer, BilinearUpsample) or isinstance(
+                    layer, ZonallyPeriodicBilinearUpsample
+                ):
                     crop = np.array(fts.shape[2:])
                     shape = np.array(
                         temp[int(2 * self.num_steps - count - 1)].shape[2:]

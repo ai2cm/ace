@@ -16,6 +16,51 @@ class BilinearUpsample(torch.nn.Module):
         return self.upsampler(x)
 
 
+class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
+    """Bilinear upsampling that enforces periodicity along the x/longitude axis."""
+
+    # Copied from https://github.com/Open-Athena/Ocean_Emulator/pull/408
+
+    def __init__(self, upsampling: int | tuple[int, int] = 2, **kwargs):
+        super().__init__()
+        if isinstance(upsampling, tuple):
+            if tuple(upsampling) != (2, 2):
+                raise ValueError(
+                    "ZonallyPeriodicBilinearUpsample only supports 2x upsampling"
+                )
+            self.scale_h, self.scale_w = upsampling
+        else:
+            if upsampling != 2:
+                raise ValueError(
+                    "ZonallyPeriodicBilinearUpsample only supports 2x upsampling"
+                )
+            self.scale_h = self.scale_w = upsampling
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # First upsample along latitude/height using standard "bilinear" interpolation.
+        # (This is just linear interpolation but pytorch requires us to use "bilinear"
+        # for 2d data.)
+        up_height = torch.nn.functional.interpolate(
+            x,
+            scale_factor=(self.scale_h, 1),
+            mode="bilinear",
+        )
+
+        # Then upsample along longitude/width using a circular 1D linear interpolation.
+        left = up_height
+        right = torch.roll(up_height, shifts=-1, dims=-1)
+        midpoint = 0.5 * (left + right)
+
+        out = torch.empty(
+            (*up_height.shape[:-1], up_height.shape[-1] * self.scale_w),
+            dtype=up_height.dtype,
+            device=up_height.device,
+        )
+        out[..., ::2] = left
+        out[..., 1::2] = midpoint
+        return out
+
+
 class AvgPool(torch.nn.Module):
     def __init__(
         self,
