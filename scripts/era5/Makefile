@@ -8,8 +8,9 @@ ingest_ncar_variables:
 
 create_environment:
 	conda env create -f environment.yaml
+	conda install -y -n era5-ingestion -c conda-forge metview-python
 	conda run --no-capture-output -n era5-ingestion pip install -r dataflow-requirements.txt
-	conda run --no-capture-output -n era5-ingestion pip install metview jupyterlab matplotlib cfgrib
+	conda run --no-capture-output -n era5-ingestion pip install jupyterlab matplotlib cfgrib
 
 build_dataflow:
 	docker build -t $(IMAGE_NAME) .
