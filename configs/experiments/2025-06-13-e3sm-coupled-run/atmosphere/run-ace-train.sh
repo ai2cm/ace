@@ -13,7 +13,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BKAUG-E3SMv3-atmosphere-v0909-lr-warmup-0421"
+JOB_GROUP="BK-E3SMv3-atmosphere-v0909-lr-warmup-0421"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
@@ -32,7 +32,7 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
         ALLOW_DIRTY=--allow-dirty # needed since experiments.txt will be updated
     else
         OVERRIDE_ARGS="${GROUP_OVERRIDE_ARGS}"
-        PRIORITY="low"
+        PRIORITY="urgent"
         ALLOW_DIRTY=
     fi
     if [[ -n "${OVERRIDE_ARGS}" ]]; then
@@ -47,10 +47,11 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --name "${JOB_NAME}" \
           --description "${DESCRIPTION}" \
           --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-          --workspace ai2/ace \
+          --workspace ai2/climate-ceres \
           --priority $PRIORITY \
           --preemptible \
-          --cluster ai2/augusta \
+          --cluster ai2/ceres \
+          --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$WANDB_USERNAME \
           --env WANDB_NAME="${JOB_NAME}" \
           --env WANDB_JOB_TYPE=training \
