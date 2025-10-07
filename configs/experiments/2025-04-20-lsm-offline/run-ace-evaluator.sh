@@ -39,6 +39,6 @@ gantry run \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     -- python -I -m fme.ace.evaluator $CONFIG_PATH

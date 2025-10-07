@@ -3,9 +3,12 @@ import warnings
 from collections.abc import Sequence
 
 import torch
+import torch.utils.data
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
@@ -21,6 +24,7 @@ from fme.coupled.data_loading.data_typing import (
 from fme.coupled.data_loading.dataloader import CoupledDataLoader
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import (
+    CoupledForcingDataLoaderConfig,
     InferenceDataLoaderConfig,
     InferenceDataset,
 )
@@ -28,6 +32,8 @@ from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
 )
+
+from .inference import ExplicitIndices
 
 
 class CollateFn:
@@ -160,7 +166,11 @@ def get_gridded_data(
         )
 
     return GriddedData(
-        loader=CoupledDataLoader(dataloader, sampler=sampler, dataset=dataset),
+        loader=CoupledDataLoader(
+            dataloader,
+            sampler=sampler,
+            dataset=dataset,
+        ),
         properties=properties,
         sampler=sampler,
     )
@@ -207,3 +217,57 @@ def get_inference_data(
     )
 
     return inference_data
+
+
+def get_forcing_data(
+    config: CoupledForcingDataLoaderConfig,
+    total_coupled_steps: int,
+    window_requirements: CoupledDataRequirements,
+    initial_condition: CoupledPrognosticState,
+) -> InferenceGriddedData:
+    """Return a GriddedData loader for forcing data based on the initial condition.
+    This function determines the start indices for the forcing data based on the initial
+    time in the provided initial condition.
+
+    Args:
+        config: Parameters for the forcing data loader.
+        total_coupled_steps: Total number of forward steps to take over the course of
+            inference.
+        window_requirements: Data requirements for the forcing data.
+        initial_condition: Initial condition for the inference.
+
+    Returns:
+        A data loader for forcing data with coordinates and metadata.
+    """
+    initial_time = initial_condition.ocean_data.as_batch_data().time
+    if initial_time.shape[1] != 1:
+        raise NotImplementedError("code assumes initial time only has 1 timestep")
+    if isinstance(config.ocean.dataset, XarrayDataConfig):
+        available_times = XarrayDataset(
+            config.ocean.dataset,
+            window_requirements.ocean_requirements.names,
+            window_requirements.ocean_requirements.n_timesteps,
+        ).all_times
+    elif isinstance(config.ocean.dataset, MergeNoConcatDatasetConfig):
+        # Some forcing variables may not be in the first dataset,
+        # use an empty data requirements to get all times
+        if isinstance(config.ocean.dataset.merge[0], XarrayDataConfig):
+            available_times = XarrayDataset(
+                config.ocean.dataset.merge[0],
+                names=[],
+                n_timesteps=window_requirements.ocean_requirements.n_timesteps,
+            ).all_times
+        else:
+            raise ValueError("Forcing data cannot be concatenated.")
+    start_time_indices = []
+    for time in initial_time.values[:, 0]:
+        start_time_indices.append(available_times.get_loc(time))
+    inference_config = config.build_inference_config(
+        start_indices=ExplicitIndices(start_time_indices)
+    )
+    return get_inference_data(
+        config=inference_config,
+        total_coupled_steps=total_coupled_steps,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition,
+    )

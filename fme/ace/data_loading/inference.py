@@ -198,9 +198,24 @@ class InferenceDataset(torch.utils.data.Dataset):
         config: InferenceDataLoaderConfig,
         total_forward_steps: int,
         requirements: DataRequirements,
+        label_override: list[str] | None = None,
         surface_temperature_name: str | None = None,
         ocean_fraction_name: str | None = None,
     ):
+        """
+        Parameters:
+            config: Configuration for the inference data.
+            total_forward_steps: Number of forward steps to take.
+            requirements: Requirements for the inference data.
+            label_override: Labels to override the labels in the dataset. If provided,
+                these labels will be provided on each sample instead of the labels
+                in the dataset.
+            surface_temperature_name: Name of the surface temperature variable.
+            ocean_fraction_name: Name of the ocean fraction variable.
+        """
+        self._label_override = (
+            set(label_override) if label_override is not None else None
+        )
         if isinstance(config.dataset, XarrayDataConfig):
             dataset: XarrayDataset | MergedXarrayDataset = XarrayDataset(
                 config.dataset, requirements.names, requirements.n_timesteps
@@ -264,7 +279,11 @@ class InferenceDataset(torch.utils.data.Dataset):
                     self._total_forward_steps + self._start_indices[i_member] + 1
                 )
             window_time_slice = slice(i_window_start, i_window_end)
-            tensors, time = self._dataset.get_sample_by_time_slice(window_time_slice)
+            tensors, time, labels = self._dataset.get_sample_by_time_slice(
+                window_time_slice
+            )
+            if self._label_override is not None:
+                labels = self._label_override
             if self._perturbations is not None:
                 if (
                     self._surface_temperature_name is None
@@ -282,7 +301,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                         self._lons,
                         tensors[self._ocean_fraction_name],
                     )
-            sample_tuples.append((tensors, time))
+            sample_tuples.append((tensors, time, labels))
         return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),

@@ -47,7 +47,7 @@ from fme.ace.stepper.parameter_init import (
     FrozenParameterConfig,
     ParameterInitializationConfig,
 )
-from fme.ace.stepper.single_module import StepperConfig, StepSelector
+from fme.ace.stepper.single_module import Stepper, StepperConfig, StepSelector
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
@@ -76,11 +76,9 @@ from .train.train_config import (
     CopyWeightsConfig,
     DataLoaderConfig,
     EMAConfig,
-    ExistingStepperConfig,
     InlineInferenceConfig,
     LoggingConfig,
     OptimizationConfig,
-    SingleModuleStepperConfig,
     TrainConfig,
 )
 

@@ -4,9 +4,13 @@ from typing import Any, TypeVar, final
 
 import torch
 import torch_harmonics
+from torch import nn
 
 from fme.core import metrics
+from fme.core.cuhpx.sht import SHT as CuHpxSHT
+from fme.core.cuhpx.sht import iSHT as CuHpxiSHT
 from fme.core.device import get_device
+from fme.core.hpx.reorder import get_reordering_xy_to_ring
 from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
 from fme.core.tensors import assert_dict_allclose
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -196,8 +200,12 @@ class GriddedOperations(abc.ABC):
     @abc.abstractmethod
     def get_real_sht(
         self,
-        grid: str = "legendre-gauss",
-    ) -> torch_harmonics.RealSHT: ...
+    ) -> nn.Module: ...
+
+    @abc.abstractmethod
+    def get_real_isht(
+        self,
+    ) -> nn.Module: ...
 
     def to_state(self) -> dict[str, Any]:
         return {
@@ -277,6 +285,7 @@ class LatLonOperations(GriddedOperations):
         self,
         area_weights: torch.Tensor,
         mask_provider: MaskProviderABC = NullMaskProvider,
+        grid: str = "legendre-gauss",
     ):
         # requires weights are longitudinally uniform
         if not torch.allclose(area_weights, area_weights[..., :1]):
@@ -288,13 +297,14 @@ class LatLonOperations(GriddedOperations):
         self._cpu_area = area_weights.to("cpu")
         self._device_mask_provider = mask_provider.to(get_device())
         self._cpu_mask_provider = mask_provider.to("cpu")
+        self._grid = "legendre-gauss"
 
     @property
     def zonal_mean(self) -> Callable[[torch.Tensor], torch.Tensor]:
         return self._zonal_mean
 
     def _zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
-        return data.mean(dim=self.HORIZONTAL_DIMS[1])
+        return data.nanmean(dim=self.HORIZONTAL_DIMS[1])
 
     def _get_area_weights(
         self,
@@ -366,17 +376,83 @@ class LatLonOperations(GriddedOperations):
             dim=self.HORIZONTAL_DIMS,
         )
 
-    def get_real_sht(self, grid: str = "legendre-gauss") -> torch_harmonics.RealSHT:
+    def get_real_sht(self) -> torch_harmonics.RealSHT:
         return torch_harmonics.RealSHT(
-            self._cpu_area.shape[-2], self._cpu_area.shape[-1], grid=grid
+            nlat=self._cpu_area.shape[-2],
+            nlon=self._cpu_area.shape[-1],
+            grid=self._grid,
+        ).to(get_device())
+
+    def get_real_isht(self) -> torch_harmonics.InverseRealSHT:
+        return torch_harmonics.InverseRealSHT(
+            nlat=self._cpu_area.shape[-2],
+            nlon=self._cpu_area.shape[-1],
+            grid=self._grid,
         ).to(get_device())
 
     def get_initialization_kwargs(self) -> dict[str, Any]:
         return {"area_weights": self._cpu_area}
 
 
+class HEALPixSHT(nn.Module):
+    def __init__(self, nside: int, lmax: int, mmax: int, grid: str):
+        super().__init__()
+        self.nside = nside
+        self.lmax = lmax
+        self.mmax = mmax
+        self.grid = grid
+        self.sht = CuHpxSHT(nside, lmax=lmax, mmax=mmax, grid=grid)
+        self._reordering = get_reordering_xy_to_ring(nside, device=get_device())
+        self._reordering_cpu = self._reordering.to("cpu")
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        if data.shape[-2] == 1:  # ring ordering, stored as [..., 1, npix]
+            return self.sht(data[..., 0, :])
+        else:  # face ordering, stored as [..., 12, n_channel, ny, nx]
+            n_face, ny, nx = data.shape[-3:]
+            if n_face != 12:
+                raise ValueError(
+                    f"Expected 12 faces, got {n_face} in shape {data.shape}"
+                )
+            if ny != nx:
+                raise ValueError(
+                    f"Expected square grid, got {ny}x{nx} in shape {data.shape}"
+                )
+            if ny != self.nside:
+                raise ValueError(
+                    f"Expected nside {self.nside}, got {ny} in shape {data.shape}"
+                )
+            data = data.reshape(*data.shape[:-3], 12 * self.nside * self.nside)
+            if data.device.type == "cpu":
+                data = data[..., self._reordering_cpu]
+            else:
+                data = data[..., self._reordering]
+            return self.sht(data)
+
+
+class HEALPixInverseSHT(nn.Module):
+    def __init__(self, nside: int, lmax: int, mmax: int, grid: str):
+        super().__init__()
+        self.nside = nside
+        self.lmax = lmax
+        self.mmax = mmax
+        self.grid = grid
+        self.isht = CuHpxiSHT(nside, lmax=lmax, mmax=mmax, grid=grid)
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return self.isht(data).unsqueeze(-2)
+
+
 class HEALPixOperations(GriddedOperations):
     HORIZONTAL_DIMS = (-3, -2, -1)
+
+    def __init__(self, nside: int | None = None):
+        """
+        Args:
+            nside: The nside of the HEALPix grid. nside must be specified in order to
+                use the SHT. It is allowed to be None only for backwards compatibility.
+        """
+        self.nside = nside
 
     @property
     def zonal_mean(self) -> None:
@@ -423,8 +499,19 @@ class HEALPixOperations(GriddedOperations):
             "Regional area weighted mean is not implemented for HEALPix."
         )
 
-    def get_real_sht(self, grid: str = "legendre-gauss") -> torch_harmonics.RealSHT:
-        raise NotImplementedError("SHT is not implemented for HEALPix.")
+    def get_real_sht(self) -> nn.Module:
+        if self.nside is None:
+            raise ValueError("nside must be specified for SHT.")
+        lmax = 2 * self.nside - 1
+        return HEALPixSHT(self.nside, lmax=lmax, mmax=lmax, grid="healpix")
+
+    def get_real_isht(self) -> nn.Module:
+        if self.nside is None:
+            raise ValueError("nside must be specified for SHT.")
+        lmax = 2 * self.nside - 1
+        return HEALPixInverseSHT(self.nside, lmax=lmax, mmax=lmax, grid="healpix")
 
     def get_initialization_kwargs(self) -> dict[str, Any]:
-        return {}
+        if self.nside is None:
+            return {}
+        return {"nside": self.nside}

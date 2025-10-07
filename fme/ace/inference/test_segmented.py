@@ -23,7 +23,7 @@ from fme.ace.inference.inference import (
     run_segmented_inference,
 )
 from fme.ace.registry import ModuleSelector
-from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import (
     DimSize,
@@ -33,7 +33,9 @@ from fme.core.coordinates import (
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.logging_utils import LoggingConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -53,13 +55,24 @@ def save_stepper(
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means={name: mean for name in all_names},
-            stds={name: std for name in all_names},
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": PlusOne()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={name: mean for name in all_names},
+                            stds={name: std for name in all_names},
+                        ),
+                    ),
+                ),
+            ),
         ),
     )
     horizontal_coordinate = LatLonCoordinates(

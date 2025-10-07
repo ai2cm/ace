@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 import pytest
 import torch
 import torch_harmonics
@@ -12,6 +11,7 @@ from fme.ace.aggregator.inference.spectrum import (
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.metrics import spherical_power_spectrum
+from fme.core.wandb import Image
 
 DEVICE = fme.get_device()
 
@@ -52,7 +52,7 @@ def test_paired_spherical_power_spectrum_aggregator(report_plot: bool):
     agg.record_batch(data, data, None, None)
     result = agg.get_logs("spectrum")
     if report_plot:
-        assert isinstance(result["spectrum/a"], plt.Figure)
+        assert isinstance(result["spectrum/a"], Image)
     else:
         assert "spectrum/a" not in result
 

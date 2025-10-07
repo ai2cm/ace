@@ -26,7 +26,7 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
-from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import (
     DimSize,
@@ -36,8 +36,10 @@ from fme.core.coordinates import (
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.logging_utils import LoggingConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.testing import mock_wandb
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -59,17 +61,28 @@ def save_stepper(
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means={name: mean for name in all_names},
-            stds={name: std for name in all_names},
-        ),
-        ocean=OceanConfig(
-            surface_temperature_name="sst",
-            ocean_fraction_name="ocean_fraction",
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": PlusOne()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={name: mean for name in all_names},
+                            stds={name: std for name in all_names},
+                        ),
+                    ),
+                    ocean=OceanConfig(
+                        surface_temperature_name="sst",
+                        ocean_fraction_name="ocean_fraction",
+                    ),
+                ),
+            ),
         ),
     )
     horizontal_coordinate = LatLonCoordinates(
@@ -257,7 +270,7 @@ def test_get_initial_condition():
         np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    initial_condition = get_initial_condition(data, ["prog"])
+    initial_condition = get_initial_condition(data, ["prog"], labels=[])
     assert isinstance(initial_condition, PrognosticState)
     batch_data = initial_condition.as_batch_data()
     assert batch_data.time.shape == (2, 1)
@@ -279,7 +292,7 @@ def test_get_initial_condition_raises_bad_variable_shape():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, ["prog"], labels=[])
 
 
 def test_get_initial_condition_raises_missing_time():
@@ -288,7 +301,7 @@ def test_get_initial_condition_raises_missing_time():
     )
     data = xr.Dataset({"prog": prognostic_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, ["prog"], labels=[])
 
 
 def test_get_initial_condition_raises_mismatched_time_length():
@@ -298,7 +311,7 @@ def test_get_initial_condition_raises_mismatched_time_length():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, ["prog"], labels=[])
 
 
 @pytest.mark.parametrize(

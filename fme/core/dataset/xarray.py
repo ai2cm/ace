@@ -425,6 +425,7 @@ class XarrayDataConfig(DatasetConfigABC):
             raise ValueError if time is included here, since the subset argument
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
+        labels: Optional list of labels to be returned with the data.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -455,6 +456,7 @@ class XarrayDataConfig(DatasetConfigABC):
     overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
+    labels: list[str] = dataclasses.field(default_factory=list)
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -572,6 +574,8 @@ class XarrayDataset(torch.utils.data.Dataset):
             [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
         )
         self._check_isel_dimensions(first_dataset.sizes)
+        self._labels = set(config.labels)
+        self._infer_timestep = config.infer_timestep
 
     def _check_isel_dimensions(self, data_dim_sizes):
         # Horizontal dimensions are not currently supported, as the current isel code
@@ -626,6 +630,7 @@ class XarrayDataset(torch.utils.data.Dataset):
             self._mask_provider,
             self.timestep,
             self._is_remote,
+            self._labels,
         )
 
     @property
@@ -658,8 +663,11 @@ class XarrayDataset(torch.utils.data.Dataset):
 
         self._timestep: datetime.timedelta | None
         if infer_timestep:
-            self._timestep = _get_timestep(np.concatenate(raw_times))
-            time_coord = _repeat_and_increment_time(raw_times, n_repeats, self.timestep)
+            inferred_timestep = _get_timestep(np.concatenate(raw_times))
+            time_coord = _repeat_and_increment_time(
+                raw_times, n_repeats, inferred_timestep
+            )
+            self._timestep = inferred_timestep
         else:
             self._timestep = None
             time_coord = raw_times
@@ -739,13 +747,20 @@ class XarrayDataset(torch.utils.data.Dataset):
         return horizontal_coordinates, static_derived_data, dim_names
 
     @property
-    def timestep(self) -> datetime.timedelta:
+    def timestep(self) -> datetime.timedelta | None:
         if self._timestep is None:
-            raise ValueError(
-                "Timestep was not inferred in the data loader. Note "
-                "XarrayDataConfig.infer_timestep must be set to True for this "
-                "to occur."
-            )
+            if self._infer_timestep is False:
+                warnings.warn(
+                    "XarrayDataConfig.infer_timestep set to False. "
+                    "Timestep was not inferred in the data loader."
+                )
+                return self._timestep
+            else:
+                raise ValueError(
+                    "Timestep was not inferred in the data loader. Note "
+                    "XarrayDataConfig.infer_timestep must be set to True for this "
+                    "to occur."
+                )
         else:
             return self._timestep
 
@@ -761,7 +776,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         """Return cftime index corresponding to start time of each sample."""
         return self._sample_start_times
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
         """Return a sample of data spanning the timesteps
         [idx, idx + self.sample_n_times).
 
@@ -777,7 +792,7 @@ class XarrayDataset(torch.utils.data.Dataset):
 
     def get_sample_by_time_slice(
         self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray]:
+    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
         input_file_idx, input_local_idx = _get_file_local_index(
             time_slice.start, self.start_indices
         )
@@ -863,7 +878,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         # is valid even when n_repeats > 1.
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
 
-        return tensors, time
+        return tensors, time, self._labels
 
 
 def _get_timestep(time: np.ndarray) -> datetime.timedelta:
@@ -923,7 +938,7 @@ class XarraySubset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self._dataset)
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
         return self._dataset[idx]
 
     @property

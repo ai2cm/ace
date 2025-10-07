@@ -89,10 +89,21 @@ class CoupledDatasetProperties:
         atmos_coord = atmosphere.vertical_coordinate
         assert isinstance(ocean_coord, OptionalDepthCoordinate)
         assert isinstance(atmos_coord, OptionalHybridSigmaPressureCoordinate)
+
         self._vertical_coordinate = CoupledVerticalCoordinate(ocean_coord, atmos_coord)
         self._horizontal_coordinates = CoupledHorizontalCoordinates(
             ocean.horizontal_coordinates, atmosphere.horizontal_coordinates
         )
+
+    @property
+    def atmosphere_timestep(self) -> datetime.timedelta:
+        assert self.atmosphere.timestep is not None
+        return self.atmosphere.timestep
+
+    @property
+    def ocean_timestep(self) -> datetime.timedelta:
+        assert self.ocean.timestep is not None
+        return self.ocean.timestep
 
     @property
     def vertical_coordinate(self) -> CoupledVerticalCoordinate:
@@ -111,7 +122,7 @@ class CoupledDatasetProperties:
 
     @property
     def timestep(self) -> datetime.timedelta:
-        return self.ocean.timestep
+        return self.ocean_timestep
 
     @property
     def is_remote(self) -> bool:
@@ -119,7 +130,7 @@ class CoupledDatasetProperties:
 
     @property
     def n_inner_steps(self) -> int:
-        return self.ocean.timestep // self.atmosphere.timestep
+        return self.ocean_timestep // self.atmosphere_timestep
 
     @property
     def coords(self) -> CoupledCoords:
@@ -152,8 +163,8 @@ class CoupledDatasetProperties:
 
 @dataclasses.dataclass
 class CoupledDatasetItem:
-    ocean: tuple[TensorDict, xr.DataArray]
-    atmosphere: tuple[TensorDict, xr.DataArray]
+    ocean: tuple[TensorDict, xr.DataArray, set[str]]
+    atmosphere: tuple[TensorDict, xr.DataArray, set[str]]
 
 
 class CoupledDataset(torch.utils.data.Dataset):
@@ -172,7 +183,7 @@ class CoupledDataset(torch.utils.data.Dataset):
             n_steps_fast: number of atmosphere timesteps per ocean timestep.
         """
         self._ocean = ocean
-        if properties.ocean.timestep != properties.atmosphere.timestep * n_steps_fast:
+        if properties.ocean_timestep != properties.atmosphere_timestep * n_steps_fast:
             raise ValueError(
                 "Ocean and atmosphere timesteps must be consistent with "
                 f"n_steps_fast, got ocean timestep {properties.ocean.timestep} "

@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 import logging
-import warnings
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
@@ -118,7 +117,9 @@ class InferenceEvaluatorAggregatorConfig:
         log_extended_video: Whether to log wandb videos of the predictions with
             statistical metrics, only done if log_video is True.
         log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
-            time dimension.
+                time dimension. If greater than 0 zonal-mean images will be logged. The
+                value of log_zonal_mean_images is default to 4096 (2**12) and can be set
+                with a maximum of 32768 (2**15) (limited by matplotlib).
         log_seasonal_means: Whether to log seasonal mean metrics and images.
         log_global_mean_time_series: Whether to log global mean time series metrics.
         log_global_mean_norm_time_series: Whether to log the normalized global mean
@@ -130,7 +131,7 @@ class InferenceEvaluatorAggregatorConfig:
     log_histograms: bool = False
     log_video: bool = False
     log_extended_video: bool = False
-    log_zonal_mean_images: bool = True
+    log_zonal_mean_images: bool | int = 4096
     log_seasonal_means: bool = False
     log_global_mean_time_series: bool = True
     log_global_mean_norm_time_series: bool = True
@@ -162,19 +163,6 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean = xr.open_dataset(
                 self.time_mean_reference_data, decode_timedelta=False
             )
-
-        if n_timesteps > 2**15 and self.log_zonal_mean_images:
-            # matplotlib raises an error if image size is too large, and we plot
-            # one pixel per timestep in the zonal mean images.
-            warnings.warn(
-                "Disabling zonal mean images logging due to large number of timesteps"
-                f" (n_timesteps={n_timesteps}). Set log_zonal_mean_images=False or "
-                "decrease n_timesteps to below 2**15 to avoid this warning."
-            )
-            log_zonal_mean_images = False
-        else:
-            log_zonal_mean_images = self.log_zonal_mean_images
-
         return InferenceEvaluatorAggregator(
             dataset_info=dataset_info,
             n_timesteps=n_timesteps,
@@ -183,7 +171,7 @@ class InferenceEvaluatorAggregatorConfig:
             log_histograms=self.log_histograms,
             log_video=self.log_video,
             enable_extended_videos=self.log_extended_video,
-            log_zonal_mean_images=log_zonal_mean_images,
+            log_zonal_mean_images=self.log_zonal_mean_images,
             log_seasonal_means=self.log_seasonal_means,
             log_global_mean_time_series=self.log_global_mean_time_series,
             log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
@@ -212,11 +200,11 @@ class InferenceEvaluatorAggregator(
         n_timesteps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
+        log_zonal_mean_images: bool | int,
         output_dir: str | None = None,
         record_step_20: bool = False,
         log_video: bool = False,
         enable_extended_videos: bool = False,
-        log_zonal_mean_images: bool = False,
         log_seasonal_means: bool = False,
         log_global_mean_time_series: bool = True,
         log_global_mean_norm_time_series: bool = True,
@@ -234,12 +222,12 @@ class InferenceEvaluatorAggregator(
             initial_time: Initial time for each sample.
             output_dir: Directory to save diagnostic output.
             normalize: Normalization function to use.
+            log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
+                time dimension.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
             enable_extended_videos: Whether to log videos of statistical
                 metrics of state evolution
-            log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
-                time dimension.
             log_seasonal_means: Whether to log seasonal means metrics and images.
             log_global_mean_time_series: Whether to log global mean time series metrics.
             log_global_mean_norm_time_series: Whether to log the normalized global mean
@@ -283,6 +271,7 @@ class InferenceEvaluatorAggregator(
                 n_timesteps=n_timesteps,
                 variable_metadata=dataset_info.variable_metadata,
             )
+        self._record_step_20 = record_step_20
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
                 ops, target_time=20
@@ -310,6 +299,7 @@ class InferenceEvaluatorAggregator(
                     zonal_mean=ops.zonal_mean,
                     n_timesteps=n_timesteps,
                     variable_metadata=dataset_info.variable_metadata,
+                    zonal_mean_max_size=log_zonal_mean_images,
                 )
         if isinstance(horizontal_coordinates, LatLonCoordinates):
             if log_video:
@@ -329,6 +319,7 @@ class InferenceEvaluatorAggregator(
             horizontal_dims=horizontal_coordinates.dims,
             target="norm",
             variable_metadata=dataset_info.variable_metadata,
+            channel_mean_names=self._channel_mean_names,
         )
         if log_histograms:
             self._aggregators["histogram"] = HistogramAggregator()
@@ -468,6 +459,8 @@ class InferenceEvaluatorAggregator(
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
+        if self._record_step_20:
+            logs.pop("mean_step_20/loss")  # we don't provide it so it's NaN always
         return logs
 
     @torch.no_grad()

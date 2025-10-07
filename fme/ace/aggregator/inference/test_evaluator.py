@@ -1,4 +1,5 @@
 import datetime
+import pathlib
 
 import numpy as np
 import pytest
@@ -10,8 +11,11 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
+from fme.core.wandb import Image
 
 TIMESTEP = datetime.timedelta(hours=6)
+LOG_ZONAL_MEAN_IMAGES = 100
+DATA_DIR = pathlib.Path(__file__).parent / "testdata"
 
 
 def get_ds_info(nx: int, ny: int) -> DatasetInfo:
@@ -28,11 +32,58 @@ def get_zero_time(shape, dims):
     return xr.DataArray(np.zeros(shape, dtype="datetime64[ns]"), dims=dims)
 
 
-def test_logs_labels_exist():
+def logs_to_raw(
+    logs: dict[str, float | Image], max_size: int
+) -> dict[str, float | torch.Tensor]:
+    raw_logs = {}
+    for key, value in logs.items():
+        if isinstance(value, Image):
+            assert value.image is not None
+            data = torch.as_tensor(np.array(value.image))
+            if data.shape[0] * data.shape[1] < max_size:
+                raw_logs[key] = torch.as_tensor(np.array(value.image))
+        else:
+            raw_logs[key] = value
+    return raw_logs
+
+
+def regress_logs(
+    logs: dict[str, float | Image],
+    label: str,
+    max_size: int,
+    path: pathlib.Path = DATA_DIR,
+):
+    label = label.replace("/", "-")
+    raw_logs = logs_to_raw(logs, max_size=max_size)
+    regression_file = path / f"{label}-regression.pt"
+    if not regression_file.exists():
+        for key, value in logs.items():
+            if isinstance(value, Image):
+                assert value.image is not None
+                shape = np.array(value.image).shape
+                if shape[0] * shape[1] < max_size:
+                    value.image.save(path / f"{label}-{key.replace('/', '-')}.png")
+            else:
+                pass
+        torch.save(raw_logs, regression_file)
+        pytest.fail(
+            f"Regression file {regression_file} did not exist, so it was created"
+        )
+    else:
+        raw_logs_loaded = torch.load(regression_file)
+        assert set(raw_logs.keys()) == set(raw_logs_loaded.keys())
+        for key, value in raw_logs.items():
+            torch.testing.assert_close(
+                value, raw_logs_loaded[key], rtol=1e-3, atol=1e-3
+            )
+
+
+def test_logs_regression():
+    torch.manual_seed(0)
     n_sample = 10
-    n_time = 22
-    nx = 2
-    ny = 2
+    n_time = 24
+    nx = 90
+    ny = 45
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
@@ -41,8 +92,7 @@ def test_logs_labels_exist():
         n_timesteps=n_time,
         initial_time=initial_time,
         record_step_20=True,
-        log_video=True,
-        log_zonal_mean_images=True,
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         normalize=lambda x: dict(x),
         save_diagnostics=False,
     )
@@ -50,11 +100,10 @@ def test_logs_labels_exist():
 
     logs = agg.record_batch(
         data=PairedData(
-            prediction={
-                "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
-            },
-            reference={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+            prediction={"a": torch.randn(n_sample, n_time, ny, nx).to(get_device())},
+            reference={"a": torch.randn(n_sample, n_time, ny, nx).to(get_device())},
             time=time,
+            labels=[set() for _ in range(n_sample)],
         ),
     )
     assert len(logs) == n_time
@@ -81,8 +130,18 @@ def test_logs_labels_exist():
         )
 
     summary_logs = agg.get_summary_logs()
+    for key, value in summary_logs.items():
+        if not isinstance(value, float | Image):
+            pytest.fail(
+                f"Summary log {key} is of type {type(value)}, not a float or Image"
+            )
+    if get_device() == torch.device("cpu"):
+        regress_logs(
+            summary_logs,
+            label="test_evaluator-test_logs_labels_exist",
+            max_size=6 * ny * nx,
+        )
     expected_keys = [
-        "mean_step_20/loss",
         "mean_step_20/weighted_rmse/a",
         "mean_step_20/weighted_bias/a",
         "mean_step_20/weighted_grad_mag_percent_diff/a",
@@ -100,7 +159,6 @@ def test_logs_labels_exist():
         "time_mean_norm/rmse/channel_mean",
         "zonal_mean/error/a",
         "zonal_mean/gen/a",
-        "video/a",
     ]
     assert set(summary_logs.keys()) == set(expected_keys)
 
@@ -108,14 +166,15 @@ def test_logs_labels_exist():
 def test_inference_logs_labels_exist():
     n_sample = 10
     n_time = 22
-    nx = 2
-    ny = 2
+    nx = 90
+    ny = 45
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
         n_timesteps=n_time,
         initial_time=initial_time,
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         record_step_20=True,
         log_video=True,
         normalize=lambda x: dict(x),
@@ -124,10 +183,11 @@ def test_inference_logs_labels_exist():
     logs = agg.record_batch(
         data=PairedData(
             prediction={
-                "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
+                "a": torch.randn(n_sample, n_time, ny, nx, device=get_device())
             },
-            reference={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+            reference={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
             time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+            labels=[set() for _ in range(n_sample)],
         ),
     )
     assert isinstance(logs, list)
@@ -165,6 +225,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         n_timesteps=window_len * n_windows,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
@@ -173,6 +234,8 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     target_data = BatchData.new_on_device(
         data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
         time=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
+        labels=[set() for _ in range(2)],
+        horizontal_dims=["lat", "lon"],
     )
     i_start = 0
     for i in range(n_windows):
@@ -183,6 +246,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
             prediction=sample_data,
             reference=target_data.data,
             time=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
+            labels=[set() for _ in range(2)],
         )
         logs = agg.record_batch(
             data=paired_data,
@@ -202,7 +266,7 @@ def test_flush_diagnostics(tmpdir):
         normalize=lambda x: dict(x),
         output_dir=tmpdir,
         record_step_20=True,
-        log_zonal_mean_images=True,
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         log_video=True,
         log_histograms=True,
     )
@@ -214,6 +278,7 @@ def test_flush_diagnostics(tmpdir):
             prediction=gen_data,
             reference=target_data,
             time=time,
+            labels=[set() for _ in range(n_sample)],
         ),
     )
     agg.flush_diagnostics()
@@ -240,6 +305,7 @@ def test_agg_raises_without_output_dir():
             n_timesteps=1,
             initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
             normalize=lambda x: dict(x),
+            log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
             save_diagnostics=True,
             output_dir=None,
         )

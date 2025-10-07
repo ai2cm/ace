@@ -68,6 +68,7 @@ from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
+from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
@@ -127,6 +128,9 @@ class TrainConfigProtocol(Protocol):
     @property
     def evaluate_before_training(self) -> bool: ...
 
+    @property
+    def save_best_inference_epoch_checkpoints(self) -> bool: ...
+
     def get_inference_epochs(self) -> list[int]: ...
 
 
@@ -176,6 +180,9 @@ class CheckpointPaths:
 
     def ema_epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"ema_ckpt_{epoch:04d}.tar")
+
+    def best_inference_epoch_checkpoint_path(self, epoch: int) -> str:
+        return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
 
 
 def chain_signal_handler(sig, handler):
@@ -258,7 +265,10 @@ class Trainer:
         self._started_training = False
 
         def on_terminate(signum, frame):
-            if self._current_epoch_num_batches_seen > 0:
+            dist = Distributed.get_instance()
+            # have all ranks check in to logs
+            dist.barrier()
+            if self._current_epoch_num_batches_seen > 0 and dist.is_root():
                 if self._in_ema_context:
                     logging.info(
                         "In EMA context during interrupt, not saving "
@@ -336,7 +346,7 @@ class Trainer:
             )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
-            self.optimization.step_scheduler(valid_loss)
+            self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
 
             time_elapsed = time.time() - start_time
             logging.info(
@@ -408,7 +418,7 @@ class Trainer:
         self.train_data.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
         dist = Distributed.get_instance()
-        names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0")
+        names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
         aggregator = self._aggregator_builder.get_train_aggregator()
         n_samples_seen_since_logging = 0
         self.stepper.set_train()
@@ -429,28 +439,33 @@ class Trainer:
         self._last_saved_num_batches_seen = self.num_batches_seen
         self._started_training = True
         current_time = time.time()
+        metrics_aggregator = MetricsAggregator()
         for batch in epoch_data:
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
             aggregator.record_batch(stepped)
             self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
+            # Step scheduler per-iteration if configured to do so
+            self.optimization.step_scheduler(is_iteration=True)
             self.num_batches_seen += 1
             self._current_epoch_num_batches_seen += 1
             n_samples_seen_since_logging += self.train_data.batch_size
+            metrics_aggregator.record(stepped.get_metrics())
             if (
                 self.config.log_train_every_n_batches > 0
                 and self.num_batches_seen % self.config.log_train_every_n_batches == 0
             ):
-                with torch.no_grad():
-                    metrics = {
-                        f"batch_{name}": dist.reduce_mean(metric)
-                        for name, metric in sorted(stepped.get_metrics().items())
-                    }
+                metrics = {
+                    f"batch_{name}": value
+                    for name, value in metrics_aggregator.get_metrics().items()
+                }
+                metrics_aggregator.clear()
                 duration = time.time() - current_time
                 current_time = time.time()
                 samples_per_second = n_samples_seen_since_logging / duration
                 metrics["training_samples_per_second_on_rank_0"] = samples_per_second
+                metrics["lr"] = self.optimization.learning_rate
                 wandb.log(metrics, step=self.num_batches_seen)
                 metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
@@ -660,6 +675,19 @@ class Trainer:
                 )
                 self._best_inference_error = inference_error
                 self.save_checkpoint(self.paths.best_inference_checkpoint_path)
+
+                # Save epoch-specific best inference checkpoint if configured
+                if self.config.save_best_inference_epoch_checkpoints:
+                    best_inference_epoch_path = (
+                        self.paths.best_inference_epoch_checkpoint_path(
+                            self._epochs_trained
+                        )
+                    )
+                    logging.info(
+                        "Saving best inference checkpoint for epoch "
+                        f"{self._epochs_trained} to {best_inference_epoch_path}"
+                    )
+                    self.save_checkpoint(best_inference_epoch_path)
             if save_best_checkpoint:
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 

@@ -801,6 +801,11 @@ class DiffusionStepper(
         with timer.context("forward_prediction"):
             forcing_data = forcing.subset_names(self._forcing_names())
             initial_condition_state = initial_condition.as_batch_data()
+            if initial_condition_state.labels != forcing_data.labels:
+                raise ValueError(
+                    "Initial condition and forcing data must have the same labels, "
+                    f"got {initial_condition_state.labels} and {forcing_data.labels}."
+                )
             if initial_condition_state.time.shape[1] != self.n_ic_timesteps:
                 raise ValueError(
                     f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
@@ -814,6 +819,7 @@ class DiffusionStepper(
                 output_timeseries,
                 forcing_data.time[:, self.n_ic_timesteps :],
                 horizontal_dims=forcing_data.horizontal_dims,
+                labels=forcing_data.labels,
             )
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
