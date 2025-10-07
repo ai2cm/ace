@@ -1,5 +1,5 @@
-VERSION ?= 2024-07-10-era5-xarray-beam-pipelines
-IMAGE_NAME ?= us.gcr.io/vcm-ml/era5-ingest-dataflow:$(VERSION)
+VERSION ?= 2025-10-07-era5-xarray-beam-pipelines
+IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/era5-ingest-dataflow:$(VERSION)
 LOCAL_ENVIRONMENT ?= era5-ingestion
 DATAFLOW_RUNNER ?= DataflowRunner
 
