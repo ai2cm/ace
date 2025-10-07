@@ -52,7 +52,7 @@ resume_training() {
         --system-python \
         --install "pip install --no-deps ." \
         "${extra_args[@]}" \
-        -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH" \
+        -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train /existing-results/config.yaml \
         --override resume_results.existing_dir=/existing-results $OVERRIDE_ARGS
 }
 
