@@ -32,7 +32,6 @@ inference:
     num_data_workers: 16
   aggregator:
     log_histograms: false
-    time_mean_reference_data: /atmos_stats/time-mean.nc
 logging:
   log_to_screen: true
   log_to_wandb: true
