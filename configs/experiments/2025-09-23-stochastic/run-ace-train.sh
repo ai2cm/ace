@@ -13,7 +13,6 @@ cd "$REPO_ROOT"
 run_training() {
   local config_filename="$1"
   local job_name="$2"
-  local stats_dataset="$3"
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
