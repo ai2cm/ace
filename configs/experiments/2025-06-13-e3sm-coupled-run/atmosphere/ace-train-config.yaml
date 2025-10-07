@@ -93,10 +93,10 @@ optimization:
         kwargs:
           start_factor: 0.01
           end_factor: 1
-          total_iters: 7209
+          total_iters: 14418
       - type: ConstantLR
         step_each_iteration: true
-    milestones: [7209]
+    milestones: [14418]
 stepper:
   loss:
     type: MSE

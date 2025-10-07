@@ -13,7 +13,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-E3SMv3-atmosphere-v0909-lr-warmup-0421"
+JOB_GROUP="BK-E3SMv3-atmosphere-v0909-lr-warmup-14418-0421"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
@@ -50,6 +50,7 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --workspace ai2/climate-ceres \
           --priority $PRIORITY \
           --preemptible \
+          --retries 5 \
           --cluster ai2/ceres \
           --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$WANDB_USERNAME \
