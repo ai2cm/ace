@@ -12,7 +12,7 @@ create_environment:
 	conda run --no-capture-output -n era5-ingestion pip install metview jupyterlab matplotlib cfgrib
 
 build_dataflow:
-	docker build -t $(IMAGE_NAME) .
+	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
 
 push_dataflow: build_dataflow
 	docker push $(IMAGE_NAME)
