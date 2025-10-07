@@ -5,3 +5,5 @@ v2025-08-22-mnsf-correctHI-nfs8-rs1|01K3DBQT6S6D2QF3YZEB2CDRD5|run_ICx1|best_inf
 v2025-08-22-mnsf-correctHI-nfs8-rs1-finetune|01K3J6CPM3NHH1VVJJPKVVBVEF|run_ICx1|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-22-nfs4-150ep-rs1|ex|training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-22-nfs4-150ep-rs2|ex|training|best_inference_ckpt|normal|--not-preemptible
