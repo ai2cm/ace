@@ -20,3 +20,5 @@ v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs1|01K6E9ND3X48ZWNV94MPG1B8JD|ru
 v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs2|01K6E9NVQCWPHDRC0ZK4WQ1RN2|training|best_inference_ckpt|normal|--not-preemptible
 
 v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs2-train||training|best_inference_ckpt|normal|--not-preemptible
+
+v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs2-train|01K6YBD0RN0KQZR8ATTJ7ZQQ9D|training|best_inference_ckpt|normal|--not-preemptible
