@@ -16,8 +16,20 @@ from fme.core.typing_ import TensorMapping
 
 @dataclasses.dataclass
 class TrainAggregatorConfig:
+    """
+    Configuration for the train aggregator.
+
+    Attributes:
+        spherical_power_spectrum: Whether to compute the spherical power spectrum.
+        weighted_rmse: Whether to compute the weighted RMSE.
+        metric_sample_probability: The probability of sampling a batch for computing
+            metrics. The first batch is always sampled for metrics, so that metrics
+            are always logged. All batches are used for computing the loss.
+    """
+
     spherical_power_spectrum: bool = True
     weighted_rmse: bool = True
+    metric_sample_probability: float = 0.01
 
 
 class Aggregator(Protocol):
@@ -37,7 +49,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     """
 
     def __init__(self, config: TrainAggregatorConfig, operations: GriddedOperations):
-        self._n_batches = 0
+        self._n_loss_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
         self._paired_aggregators: dict[str, Aggregator] = {}
         if config.spherical_power_spectrum:
@@ -53,19 +65,24 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                 include_bias=False,
                 include_grad_mag_percent_diff=False,
             )
+        self._metric_sample_probability = config.metric_sample_probability
 
     @torch.no_grad()
     def record_batch(self, batch: TrainOutput):
         self._loss += batch.metrics["loss"]
-        self._n_batches += 1
+        self._n_loss_batches += 1
 
-        folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
-        folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
-        for aggregator in self._paired_aggregators.values():
-            aggregator.record_batch(
-                target_data=folded_target_data,
-                gen_data=folded_gen_data,
-            )
+        # always sample metrics for the first batch, so that metrics are always logged
+        if self._n_loss_batches == 1 or (
+            torch.rand(1) < self._metric_sample_probability
+        ):
+            folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
+            folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
+            for aggregator in self._paired_aggregators.values():
+                aggregator.record_batch(
+                    target_data=folded_target_data,
+                    gen_data=folded_gen_data,
+                )
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, torch.Tensor]:
@@ -76,15 +93,15 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
             label: Label to prepend to all log keys.
         """
         logs = {}
-        if self._n_batches > 0:
-            logs[f"{label}/mean/loss"] = self._loss / self._n_batches
-        dist = Distributed.get_instance()
-        for key in sorted(logs.keys()):
-            logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
-        for name, aggregator in self._paired_aggregators.items():
-            logs.update(
-                {f"{label}/{k}": v for k, v in aggregator.get_logs(name).items()}
-            )
+        if self._n_loss_batches > 0:
+            logs[f"{label}/mean/loss"] = self._loss / self._n_loss_batches
+            dist = Distributed.get_instance()
+            for key in sorted(logs.keys()):
+                logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
+            for name, aggregator in self._paired_aggregators.items():
+                logs.update(
+                    {f"{label}/{k}": v for k, v in aggregator.get_logs(name).items()}
+                )
         return logs
 
     @torch.no_grad()
