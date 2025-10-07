@@ -2,7 +2,7 @@
 
 set -e
 
-CONFIG_FILENAME="ace-train-config-gcp.yaml"
+CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -13,7 +13,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-E3SMv3-atmosphere-v0909-lr-warmup-14418-0421"
+JOB_GROUP="BK-E3SMv3-atmosphere-v0909-0421-fill-nans-false"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.

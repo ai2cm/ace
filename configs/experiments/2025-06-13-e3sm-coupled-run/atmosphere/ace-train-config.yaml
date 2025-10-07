@@ -86,17 +86,6 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-  scheduler:
-    schedulers:
-      - type: LinearLR
-        step_each_iteration: true
-        kwargs:
-          start_factor: 0.01
-          end_factor: 1
-          total_iters: 14418
-      - type: ConstantLR
-        step_each_iteration: true
-    milestones: [14418]
 stepper:
   loss:
     type: MSE
@@ -134,7 +123,7 @@ stepper:
         network:
           global_means_path: /statsdata/atmosphere/centering.nc
           global_stds_path: /statsdata/atmosphere/scaling-full-field.nc
-          fill_nans_on_normalize: true
+          fill_nans_on_normalize: false
         residual:
           global_means_path: /statsdata/atmosphere/centering.nc
           global_stds_path: /statsdata/atmosphere/scaling-residual.nc
