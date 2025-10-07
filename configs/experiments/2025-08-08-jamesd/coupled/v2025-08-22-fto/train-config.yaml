@@ -1,7 +1,8 @@
 experiment_dir: /results
 save_checkpoint: true
-checkpoint_every_n_batches: 120
 save_best_inference_epoch_checkpoints: true
+checkpoint_every_n_batches: 120
+log_train_every_n_batches: 20
 validate_using_ema: true
 ema:
   decay: 0.999
@@ -132,6 +133,17 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 1414
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [1414]
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
@@ -410,7 +422,8 @@ stepper:
           PRATEsfc: 0.5
           h500: 10
           TMP850: 5
-          Q2m: 0.5
+          Q2m: 2
+          TMP2m: 2
           DLWRFsfc: 2
           ULWRFsfc: 5
           USWRFsfc: 2
@@ -555,5 +568,7 @@ stepper:
             - h500
             - TMP2m
             - Q2m
+            - UGRD10m
+            - VGRD10m
             - eastward_surface_wind_stress
             - northward_surface_wind_stress
