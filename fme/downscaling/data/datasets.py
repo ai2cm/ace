@@ -24,6 +24,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.typing_ import TensorMapping
+from fme.downscaling.data.patching import Patch, get_patches
 from fme.downscaling.data.topography import (
     BatchedTopography,
     Topography,
@@ -40,7 +41,6 @@ from fme.downscaling.data.utils import (
     scale_slice,
     scale_tuple,
 )
-from fme.downscaling.patching import Patch, get_patches
 
 
 @dataclasses.dataclass
@@ -98,7 +98,7 @@ class BatchItem:
             lon=self.latlon_coordinates.lon.to(get_device()),
         )
         if self.topography is not None:
-            topography = self.topography.to(get_device())
+            topography = self.topography.to_device()
         else:
             topography = None
 
@@ -545,7 +545,7 @@ class BatchData:
 
     def to_device(self) -> "BatchData":
         if self.topography is not None:
-            topography = self.topography.to(get_device())
+            topography = self.topography.to_device()
         else:
             topography = None
 

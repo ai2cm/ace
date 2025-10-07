@@ -3,9 +3,10 @@ import datetime
 import cftime
 import numpy as np
 import pytest
+import torch
 import xarray as xr
 
-from fme.ace.inference.data_writer.zarr import _get_ace_time_coords
+from fme.ace.inference.data_writer.zarr import ZarrWriterAdapter, _get_ace_time_coords
 
 
 def get_batch_time(n_batch_times, n_initial_conditions, calendar="julian"):
@@ -85,3 +86,26 @@ def test__get_ace_time_coords(calendar):
     np.testing.assert_array_equal(
         valid_times_coord.isel(sample=1), expected_valid_times
     )
+
+
+def test_zarr_adapter_can_overwrite(tmpdir):
+    data = {"foo": torch.zeros((1, 2, 2, 2))}
+    time = xr.DataArray(
+        [[cftime.datetime(2020, 1, 1), cftime.datetime(2020, 1, 2)]],
+        dims=("sample", "time"),
+    )
+    args = dict(
+        path=str(tmpdir / "test.zarr"),
+        dims=("sample", "time", "lat", "lon"),
+        data_coords={
+            "lat": xr.DataArray([0, 1], dims=["lat"]),
+            "lon": xr.DataArray([0, 1], dims=["lon"]),
+        },
+        n_timesteps=2,
+        n_initial_conditions=1,
+        allow_existing=True,
+    )
+    adapter = ZarrWriterAdapter(**args)  # type: ignore
+    adapter.append_batch(data, 0, time)
+    adapter = ZarrWriterAdapter(**args)  # type: ignore
+    adapter.append_batch(data, 0, time)

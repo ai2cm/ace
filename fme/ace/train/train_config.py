@@ -372,7 +372,7 @@ class TrainBuilders:
         normalize: Callable[[TensorMapping], TensorDict],
         output_dir: str,
         variable_metadata: Mapping[str, VariableMetadata],
-        channel_mean_names: Sequence[str],
+        channel_mean_names: Sequence[str] | None,
         save_diagnostics: bool,
         n_ic_timesteps: int,
     ) -> EndOfEpochCallback:

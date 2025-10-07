@@ -311,7 +311,7 @@ class ZarrWriter:
             along that dimension axis to insert data.
         """
         if not self._store_initialized:
-            self.create_zarr_store(example_data=data)
+            self._create_zarr_store(example_data=data)
         indexed_position_slices = {
             self.dims.index(dim): position_slices[dim] for dim in position_slices.keys()
         }
@@ -320,7 +320,7 @@ class ZarrWriter:
             self.path, write_data, indexed_position_slices, self.overwrite_check
         )
 
-    def create_zarr_store(
+    def _create_zarr_store(
         self,
         example_data: Mapping[str, np.ndarray],
     ):
