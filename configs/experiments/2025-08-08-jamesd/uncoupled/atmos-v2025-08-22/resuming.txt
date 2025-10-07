@@ -1,2 +1,2 @@
 group|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
-v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs2-train|ace2-cm4-atmos-noLSM|lzd9t7n4|train|high|ceres|8|600GiB|1||resume_results.resume_wandb=True inference.aggregator.time_mean_reference_data=null
+v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs2-train|ace2-cm4-atmos-noLSM|lzd9t7n4|train|high|ceres|8|600GiB|1||resume_results.resume_wandb=True inference.aggregator.time_mean_reference_data=null|01K6GH407EGC6WG2W2QHJPPR2M
