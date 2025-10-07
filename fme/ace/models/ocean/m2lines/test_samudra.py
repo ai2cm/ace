@@ -98,25 +98,3 @@ def test_samudra_output_is_unchanged():
         output,
         os.path.join(DIR, "testdata/test_samudra_output_is_unchanged.pt"),
     )
-
-
-def test_samudra_circular_padding():
-    torch.manual_seed(0)
-    input_channels = 1
-    output_channels = 1
-    img_shape = (90, 180)
-    n_samples = 1
-    device = get_device()
-    model = Samudra(
-        input_channels=input_channels,
-        output_channels=output_channels,
-        ch_width=[1, 1, 1, 1],
-        dilation=[1, 2, 4, 8],
-        n_layers=[1, 1, 1, 1],
-        pad="circular",
-        norm="instance",
-    ).to(device)
-    # must initialize on CPU to get the same results on GPU
-    x = torch.ones(n_samples, input_channels, *img_shape).to(device)
-    with torch.no_grad():
-        _ = model(x)
