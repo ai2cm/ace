@@ -3,34 +3,39 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 50
+max_epochs: 30
 n_forward_steps: 2
 inference:
-  n_forward_steps: 14600
+  n_forward_steps: 7300
   forward_steps_in_memory: 40
   loader:
     start_indices:
       times:
-      - '0401-01-01T06:00:00'
-      - '0411-01-01T06:00:00'
       - '0421-01-01T06:00:00'
+      - '0426-01-01T06:00:00'
       - '0431-01-01T06:00:00'
+      - '0436-01-01T06:00:00'
       - '0441-01-01T06:00:00'
+      - '0446-01-01T06:00:00'
       - '0451-01-01T06:00:00'
+      - '0456-01-01T06:00:00'
       - '0461-01-01T06:00:00'
+      - '0466-01-01T06:00:00'
       - '0471-01-01T06:00:00'
+      - '0476-01-01T06:00:00'
+      - '0481-01-01T06:00:00'
+      - '0486-01-01T06:00:00'
+      - '0491-01-01T06:00:00'
+      - '0494-01-01T06:00:00'
     dataset:
       merge:
       - data_path: gs://vcm-ml-intermediate
-        file_pattern: 2025-07-01-e3smv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+        file_pattern: 2025-09-09-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
         engine: zarr
       - data_path: gs://vcm-ml-intermediate
-        file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
+        file_pattern: 2025-09-09-E3SMv3-coupled-piControl-atmosphere-100yr-preprocess-again.zarr
         engine: zarr
-      - data_path: gs://vcm-ml-intermediate
-        file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
-        engine: zarr
-    num_data_workers: 8
+    num_data_workers: 7
   aggregator:
     log_histograms: true
 logging:
@@ -41,54 +46,59 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 8
+  num_data_workers: 7
+  time_buffer: 1
   dataset:
     merge:
     - data_path: gs://vcm-ml-intermediate
-      file_pattern: 2025-07-01-e3smv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+      file_pattern: 2025-09-09-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
       engine: zarr
       subset:
-        stop_time: '0481-01-01T06:00:00'
+        start_time: '0421-01-01T06:00:00'
+        stop_time: '0500-01-01T06:00:00'
     - data_path: gs://vcm-ml-intermediate
-      file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
+      file_pattern: 2025-09-09-E3SMv3-coupled-piControl-atmosphere-100yr-preprocess-again.zarr
       engine: zarr
       subset:
-        stop_time: '0481-01-01T06:00:00'
-    - data_path: gs://vcm-ml-intermediate
-      file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
-      engine: zarr
-      subset:
-        stop_time: '0481-01-01T06:00:00'
+        start_time: '0421-01-01T06:00:00'
+        stop_time: '0500-01-01T06:00:00'
 validation_loader:
-  batch_size: 16
-  num_data_workers: 8
+  batch_size: 32
+  num_data_workers: 7
+  time_buffer: 1
   dataset:
     merge:
     - data_path: gs://vcm-ml-intermediate
-      file_pattern: 2025-07-01-e3smv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+      file_pattern: 2025-09-09-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
       engine: zarr
       subset:
-        start_time: '0481-01-01T06:00:00'
-        stop_time: '0486-01-01T06:00:00'
+        start_time: '0402-01-01T06:00:00'
+        stop_time: '0407-01-01T06:00:00'
     - data_path: gs://vcm-ml-intermediate
-      file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
+      file_pattern: 2025-09-09-E3SMv3-coupled-piControl-atmosphere-100yr-preprocess-again.zarr
       engine: zarr
       subset:
-        start_time: '0481-01-01T06:00:00'
-        stop_time: '0486-01-01T06:00:00'
-    - data_path: gs://vcm-ml-intermediate
-      file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
-      engine: zarr
-      subset:
-        start_time: '0481-01-01T06:00:00'
-        stop_time: '0486-01-01T06:00:00'
+        start_time: '0402-01-01T06:00:00'
+        stop_time: '0407-01-01T06:00:00'
 optimization:
+  use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  use_gradient_accumulation: false
-  optimizer_type: FusedAdam
+  optimizer_type: AdamW
   kwargs:
+    fused: true
     weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 7209
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [7209]
 stepper:
   loss:
     type: MSE
@@ -100,7 +110,7 @@ stepper:
       specific_total_water_0: 0.5
       specific_total_water_1: 0.25
       specific_total_water_2: 0.5
-      surface_precipitation_rate: 0.5
+      surface_precipitation_rate: 2
       FLDS: 2
       surface_upward_longwave_flux: 5
       surface_upward_shortwave_flux: 2
@@ -111,30 +121,29 @@ stepper:
     type: single_module
     config:
       builder:
-        type: SphericalFourierNeuralOperatorNet
+        type: NoiseConditionedSFNO
         config:
           embed_dim: 384
+          noise_embed_dim: 0
           filter_type: linear
-          hard_thresholding_fraction: 1.0
           use_mlp: true
-          normalization_layer: instance_norm
           num_layers: 8
           operator_type: dhconv
-          scale_factor: 1
           separable: false
           spectral_layers: 3
           spectral_transform: sht
       normalization:
         network:
-          global_means_path: /statsdata/centering.nc
-          global_stds_path: /statsdata/scaling-full-field.nc
+          global_means_path: /statsdata/atmosphere/centering.nc
+          global_stds_path: /statsdata/atmosphere/scaling-full-field.nc
           fill_nans_on_normalize: true
         residual:
-          global_means_path: /statsdata/centering.nc
-          global_stds_path: /statsdata/scaling-residual.nc
+          global_means_path: /statsdata/atmosphere/centering.nc
+          global_stds_path: /statsdata/atmosphere/scaling-residual.nc
       ocean:
         surface_temperature_name: TS
         ocean_fraction_name: ocean_fraction
+        interpolate: true
       corrector:
         conserve_dry_air: true
         moisture_budget_correction: advection_and_precipitation

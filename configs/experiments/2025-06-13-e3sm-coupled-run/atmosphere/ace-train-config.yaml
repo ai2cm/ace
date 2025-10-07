@@ -3,34 +3,39 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 10
+max_epochs: 30
 n_forward_steps: 2
 inference:
-  n_forward_steps: 14600
+  n_forward_steps: 7300
   forward_steps_in_memory: 40
   loader:
     start_indices:
       times:
-      - '0421-01-03T12:00:00'
+      - '0421-01-01T06:00:00'
+      - '0426-01-01T06:00:00'
       - '0431-01-01T06:00:00'
+      - '0436-01-01T06:00:00'
       - '0441-01-01T06:00:00'
+      - '0446-01-01T06:00:00'
       - '0451-01-01T06:00:00'
+      - '0456-01-01T06:00:00'
       - '0461-01-01T06:00:00'
+      - '0466-01-01T06:00:00'
       - '0471-01-01T06:00:00'
+      - '0476-01-01T06:00:00'
       - '0481-01-01T06:00:00'
+      - '0486-01-01T06:00:00'
       - '0491-01-01T06:00:00'
+      - '0494-01-01T06:00:00'
     dataset:
       merge:
       - data_path: /climate-default
-        file_pattern: 2025-08-13-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+        file_pattern: 2025-09-09-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
         engine: zarr
       - data_path: /climate-default
-        file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
+        file_pattern: 2025-09-09-E3SMv3-coupled-piControl-atmosphere-100yr-preprocess-again.zarr
         engine: zarr
-      - data_path: /climate-default
-        file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
-        engine: zarr
-    num_data_workers: 8
+    num_data_workers: 7
   aggregator:
     log_histograms: true
 logging:
@@ -40,57 +45,46 @@ logging:
   project: ace-eamv3
   entity: ai2cm
 train_loader:
-  batch_size: 8
-  num_data_workers: 8
-  dataset:
-    merge:
-    - data_path: /climate-default
-      file_pattern: 2025-08-13-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
-      engine: zarr
-      subset:
-        start_time: '0421-01-01T06:00:00'
-        stop_time: '0501-01-01T06:00:00'
-    - data_path: /climate-default
-      file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
-      engine: zarr
-      subset:
-        start_time: '0421-01-01T06:00:00'
-        stop_time: '0501-01-01T06:00:00'
-    - data_path: /climate-default
-      file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
-      engine: zarr
-      subset:
-        start_time: '0421-01-01T06:00:00'
-        stop_time: '0501-01-01T06:00:00'
-validation_loader:
   batch_size: 16
-  num_data_workers: 8
+  num_data_workers: 7
   dataset:
     merge:
     - data_path: /climate-default
-      file_pattern: 2025-08-13-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+      file_pattern: 2025-09-09-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+      engine: zarr
+      subset:
+        start_time: '0421-01-01T06:00:00'
+        stop_time: '0500-01-01T06:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-09-09-E3SMv3-coupled-piControl-atmosphere-100yr-preprocess-again.zarr
+      engine: zarr
+      subset:
+        start_time: '0421-01-01T06:00:00'
+        stop_time: '0500-01-01T06:00:00'
+validation_loader:
+  batch_size: 32
+  num_data_workers: 7
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-09-09-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
       engine: zarr
       subset:
         start_time: '0402-01-01T06:00:00'
         stop_time: '0407-01-01T06:00:00'
     - data_path: /climate-default
-      file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
-      engine: zarr
-      subset:
-        start_time: '0402-01-01T06:00:00'
-        stop_time: '0407-01-01T06:00:00'
-    - data_path: /climate-default
-      file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
+      file_pattern: 2025-09-09-E3SMv3-coupled-piControl-atmosphere-100yr-preprocess-again.zarr
       engine: zarr
       subset:
         start_time: '0402-01-01T06:00:00'
         stop_time: '0407-01-01T06:00:00'
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
-  use_gradient_accumulation: false
-  optimizer_type: FusedAdam
+  lr: 0.00005
+  use_gradient_accumulation: true
+  optimizer_type: AdamW
   kwargs:
+    fused: true
     weight_decay: 0.01
 stepper:
   loss:
@@ -114,27 +108,25 @@ stepper:
     type: single_module
     config:
       builder:
-        type: SphericalFourierNeuralOperatorNet
+        type: NoiseConditionedSFNO
         config:
           embed_dim: 384
+          noise_embed_dim: 0
           filter_type: linear
-          hard_thresholding_fraction: 1.0
           use_mlp: true
-          normalization_layer: instance_norm
           num_layers: 8
           operator_type: dhconv
-          scale_factor: 1
           separable: false
           spectral_layers: 3
           spectral_transform: sht
       normalization:
         network:
-          global_means_path: /statsdata/centering.nc
-          global_stds_path: /statsdata/scaling-full-field.nc
+          global_means_path: /statsdata/atmosphere/centering.nc
+          global_stds_path: /statsdata/atmosphere/scaling-full-field.nc
           fill_nans_on_normalize: true
         residual:
-          global_means_path: /statsdata/centering.nc
-          global_stds_path: /statsdata/scaling-residual.nc
+          global_means_path: /statsdata/atmosphere/centering.nc
+          global_stds_path: /statsdata/atmosphere/scaling-residual.nc
       ocean:
         surface_temperature_name: TS
         ocean_fraction_name: ocean_fraction
@@ -163,7 +155,7 @@ stepper:
       in_names:
       - land_fraction
       - ocean_fraction
-      - ocean_sea_ice_fraction
+      - sea_ice_fraction
       - PHIS
       - SOLIN
       - PS
@@ -247,6 +239,3 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TAUX
       - TAUY
-validation_aggregator:
-  log_snapshots: false
-  log_mean_maps: false

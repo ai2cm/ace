@@ -2,21 +2,22 @@
 
 set -e
 
-CONFIG_FILENAME="ace-train-config.yaml"
+CONFIG_FILENAME="ace-train-config-gcp.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
-BEAKER_USERNAME=elynnwu
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-E3SMv3-atmosphere-v0813-scale-precip-loss-2-saturn-bs-8"
+JOB_GROUP="BKAUG-E3SMv3-atmosphere-v0909-lr-warmup-0421"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
-STATS_DATA=elynn/2025-08-13-E3SMv3-piControl-100yr-coupled-stats-atmosphere
+STATS_DATA=elynn/2025-09-09-E3SMv3-piControl-100yr-coupled-stats
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
@@ -27,11 +28,11 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     if [ $RS -gt 1 ]; then
         # only log validation maps for the first random seed
         OVERRIDE_ARGS="${GROUP_OVERRIDE_ARGS}"
-        PRIORITY="normal"
+        PRIORITY="low"
         ALLOW_DIRTY=--allow-dirty # needed since experiments.txt will be updated
     else
         OVERRIDE_ARGS="${GROUP_OVERRIDE_ARGS}"
-        PRIORITY="normal"
+        PRIORITY="low"
         ALLOW_DIRTY=
     fi
     if [[ -n "${OVERRIDE_ARGS}" ]]; then
@@ -49,9 +50,8 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --workspace ai2/ace \
           --priority $PRIORITY \
           --preemptible \
-          --cluster ai2/saturn \
-          --weka climate-default:/climate-default \
-          --env WANDB_USERNAME=$BEAKER_USERNAME \
+          --cluster ai2/augusta \
+          --env WANDB_USERNAME=$WANDB_USERNAME \
           --env WANDB_NAME="${JOB_NAME}" \
           --env WANDB_JOB_TYPE=training \
           --env WANDB_RUN_GROUP="${JOB_GROUP}" \
