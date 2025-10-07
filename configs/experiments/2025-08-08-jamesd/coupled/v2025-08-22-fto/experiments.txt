@@ -16,3 +16,5 @@ fto-ojyzoqli-cooldown_lr_2ep|01K6BD53R4R9PT27E22T5WT2QQ|run_200yr0315|best_infer
 fto-ojyzoqli-cooldown_lr_2ep|01K6BD53R4R9PT27E22T5WT2QQ|run_200yr0317|best_inference_ckpt|normal|--not-preemptible
 fto-ojyzoqli-cooldown_lr_2ep|01K6BD53R4R9PT27E22T5WT2QQ|run_200yr0319|best_inference_ckpt|normal|--not-preemptible
 fto-ojyzoqli-cooldown_lr_2ep-ncs2|01K6DPHQZBAP1S1AKWSSTDA5XG|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|training|best_inference_ckpt|normal|--not-preemptible
