@@ -55,7 +55,6 @@ from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
     fold_sized_ensemble_dim,
-    repeat_interleave_batch_dim,
     unfold_ensemble_dim,
 )
 from fme.core.timing import GlobalTimer
@@ -1351,7 +1350,7 @@ class Stepper(
 
         input_data.as_batch_data().n_ensemble = n_ensemble
         data.n_ensemble = n_ensemble
-        
+
         output_generator = self._predict_generator(
             input_data.as_batch_data().ensemble_data,
             data.ensemble_data,
