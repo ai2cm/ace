@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-global-winds"
+JOB_NAME="xshield-downscaling-100km-to-3km-global-uwind-only"
 CONFIG_FILENAME="config-train-winds-debug.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
