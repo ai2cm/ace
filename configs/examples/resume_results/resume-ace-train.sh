@@ -20,7 +20,7 @@ WORKSPACE="ai2/ace"
 RETRIES=0
 
 # Override arguments (add any config overrides here)
-OVERRIDE_ARGS="max_epochs=200"
+OVERRIDE_ARGS="resume_results.resume_wandb=true max_epochs=10"
 
 # Change to the repo root so paths are valid no matter where we run the script from
 cd "$REPO_ROOT"
