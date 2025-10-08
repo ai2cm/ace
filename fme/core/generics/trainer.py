@@ -280,6 +280,7 @@ class Trainer:
                     )
                 else:
                     self._save_restart_checkpoints()
+            dist.shutdown()
 
         chain_signal_handler(signal.SIGTERM, on_terminate)
         chain_signal_handler(signal.SIGINT, on_terminate)

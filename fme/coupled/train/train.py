@@ -151,8 +151,11 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
             f"Resuming training from results in {config.resume_results.existing_dir}"
         )
     trainer = build_trainer(builders, config)
-    trainer.train()
-    logging.info(f"DONE ---- rank {dist.rank}")
+    try:
+        trainer.train()
+        logging.info(f"DONE ---- rank {dist.rank}")
+    finally:
+        dist.shutdown()
 
 
 def run_train_from_config(config: TrainConfig):
