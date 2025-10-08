@@ -163,7 +163,7 @@ class EventDownscaler:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch_no_target(
-                batch, n_samples=end_idx - start_idx
+                batch, topography=self.data.topography, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs)
         to_log = sample_agg.get_wandb()
@@ -216,13 +216,13 @@ class Downscaler:
     @property
     def batch_generator(self):
         if self.patch.needs_patch_data_generator:
-            return self.data.get_patched_batch_generator(
+            return self.data.get_patched_generator(
                 yx_patch_extent=self.model.coarse_shape,
                 overlap=self.patch.coarse_horizontal_overlap,
                 drop_partial_patches=False,
             )
         else:
-            return self.data.loader
+            return self.data.get_generator()
 
     def save_netcdf_data(self, ds: xr.Dataset):
         if self.dist.is_root():
@@ -234,11 +234,12 @@ class Downscaler:
 
     def run(self):
         aggregator = NoTargetAggregator(downscale_factor=self.model.downscale_factor)
-        for i, batch in enumerate(self.batch_generator):
+        for i, (batch, topography) in enumerate(self.batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 prediction = self.generation_model.generate_on_batch_no_target(
                     batch=batch,
+                    topography=topography,
                     n_samples=self.n_samples,
                 )
                 logging.info("Recording diagnostics to aggregator")

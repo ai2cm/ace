@@ -99,7 +99,7 @@ class ZarrWriterAdapter:
         )
         dataset_title = os.path.basename(path).removesuffix(".zarr").replace("_", " ")
         self.dataset_metadata["title"] = f"ACE {dataset_title} data"
-        self._data_vars = data_vars
+        self.data_vars = data_vars
 
         self._set_chunks(chunks)
 
@@ -152,7 +152,7 @@ class ZarrWriterAdapter:
             path=self.path,
             dims=self.dims,
             coords=self._dim_coords,
-            data_vars=self._data_vars,
+            data_vars=self.data_vars,
             chunks=self.chunks,
             shards={"time": batch_time.sizes["time"]},
             array_attributes=self.variable_metadata,
@@ -167,17 +167,8 @@ class ZarrWriterAdapter:
     def _to_ndarray_mapping(
         self, data: dict[str, torch.Tensor]
     ) -> dict[str, np.ndarray]:
-        return {k: v.cpu().numpy() for k, v in data.items() if k in self.data_vars}
-
-    @property
-    def data_vars(self) -> list[str]:
-        if self._data_vars is None:
-            raise RuntimeError(
-                "data_vars has not been set yet. If initialized as None, it will be "
-                "set as the full data vars of the first batch seen when append_batch "
-                "is called."
-            )
-        return self._data_vars
+        vars = self.data_vars or list(data.keys())
+        return {k: v.cpu().numpy() for k, v in data.items() if k in vars}
 
     def append_batch(
         self,
@@ -193,8 +184,6 @@ class ZarrWriterAdapter:
         # Zarr store initialization needs the full time coordinate information,
         # which is not available until the first batch is seen.
         if self._writer is None:
-            if self._data_vars is None:
-                self._data_vars = list(data.keys())
             self._initialize_writer(batch_time)
         self.writer.record_batch(
             data=self._to_ndarray_mapping(data),
@@ -202,6 +191,115 @@ class ZarrWriterAdapter:
                 "time": slice(start_timestep, start_timestep + batch_time.sizes["time"])
             },
         )
+
+    def flush(self):
+        pass
+
+    def finalize(self):
+        pass
+
+
+class SeparateICZarrWriterAdapter:
+    """
+    For simplicity, create a ZarrWriter for each IC sample.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        dims: tuple,
+        data_coords: dict[str, np.ndarray],
+        n_timesteps: int,
+        n_initial_conditions: int,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        dataset_metadata: DatasetMetadata | None = None,
+        data_vars: list[str] | None = None,
+        chunks: dict[str, int] | None = None,
+        allow_existing: bool = True,
+        overwrite_check: bool = False,
+    ):
+        self.path = path
+        self.dims = dims
+        # spatial coords are passed at init, time coords are read from first batch
+        self.coords = data_coords
+        self.n_timesteps = n_timesteps
+        self.n_initial_conditions = n_initial_conditions
+        self.data_vars = data_vars
+        self.chunks = chunks
+        self.allow_existing = allow_existing
+        self.overwrite_check = overwrite_check
+        self._writers: list[ZarrWriter] | None = None
+
+        self.variable_metadata = _variable_metadata_to_dict(variable_metadata)
+
+        dataset_metadata = copy.copy(dataset_metadata)
+
+        self.dataset_metadata = (
+            dataset_metadata.as_flat_str_dict() if dataset_metadata else {}
+        )
+        dataset_title = os.path.basename(path).removesuffix(".zarr").replace("_", " ")
+        self.dataset_metadata["title"] = f"ACE {dataset_title} data"
+
+        # spatial coords are passed at init, time coords are read from first batch
+        self._nondim_coords: dict[str, xr.DataArray] = {}
+        for vertical_nondim_coord in ["ak", "bk"]:
+            if vertical_nondim_coord in data_coords:
+                self._nondim_coords[vertical_nondim_coord] = xr.DataArray(
+                    data_coords.pop(vertical_nondim_coord).values,
+                    dims=("z_interface",),
+                )
+        self._horizontal_coords = data_coords
+
+    @property
+    def writers(self) -> list[ZarrWriter]:
+        if self._writers is None:
+            raise RuntimeError("ZarrWriters are not initialized yet.")
+        return self._writers
+
+    def _initialize_writers(self, first_batch_time: xr.DataArray):
+        self._writers = []
+        for s in range(self.n_initial_conditions):
+            _coords = copy.copy(self.coords)
+            start_time = first_batch_time.isel(sample=s).values[0]
+            timestep = first_batch_time.isel(sample=s).values[1] - start_time
+            _coords["time"] = np.array(
+                [start_time + i * timestep for i in range(self.n_timesteps)]
+            )
+            self._writers.append(
+                ZarrWriter(
+                    path=self.path.replace(".zarr", f"_ic{s:04d}.zarr"),
+                    dims=self.dims,
+                    coords=_coords,
+                    data_vars=self.data_vars,
+                    chunks=self.chunks,
+                    shards={"time": first_batch_time.sizes["time"]},
+                    array_attributes=self.variable_metadata,
+                    group_attributes=self.dataset_metadata,
+                    nondim_coords=self._nondim_coords,
+                    allow_existing=self.allow_existing,
+                    overwrite_check=self.overwrite_check,
+                )
+            )
+
+    def append_batch(
+        self,
+        data: dict[str, torch.Tensor],
+        start_timestep: int,
+        batch_time: xr.DataArray,
+    ) -> None:
+        # Zarr store initialization needs the full time coordinate information,
+        # which is not available until the first batch is seen.
+        if self._writers is None:
+            self._initialize_writers(batch_time)
+        vars = self.data_vars or list(data.keys())
+        for s in range(self.n_initial_conditions):
+            position_slice = {
+                "time": slice(start_timestep, start_timestep + batch_time.sizes["time"])
+            }
+            self.writers[s].record_batch(
+                data={k: v.cpu().numpy()[s] for k, v in data.items() if k in vars},
+                position_slices=position_slice,
+            )
 
     def flush(self):
         pass

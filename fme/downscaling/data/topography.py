@@ -26,10 +26,6 @@ class Topography:
     def __post_init__(self):
         if len(self.data.shape) != 2:
             raise ValueError(f"Topography data must be 2D. Got shape {self.data.shape}")
-        if self.coords is None:
-            raise ValueError(
-                "Both topography data and coords must be provided or None."
-            )
         if self.data.shape[0] != len(self.coords.lat) or self.data.shape[1] != len(
             self.coords.lon
         ):
