@@ -105,7 +105,6 @@ class ZarrWriterAdapter:
 
         self.allow_existing = allow_existing
         self.overwrite_check = overwrite_check
-        self._batches_seen = 0
         # writer is initialized when first batch is seen
         self._writer: ZarrWriter | None = None
 
@@ -193,18 +192,16 @@ class ZarrWriterAdapter:
         """
         # Zarr store initialization needs the full time coordinate information,
         # which is not available until the first batch is seen.
-        if self._batches_seen == 0:
+        if self._writer is None:
             if self._data_vars is None:
                 self._data_vars = list(data.keys())
             self._initialize_writer(batch_time)
-            self.writer.create_zarr_store(example_data=self._to_ndarray_mapping(data))
         self.writer.record_batch(
             data=self._to_ndarray_mapping(data),
             position_slices={
                 "time": slice(start_timestep, start_timestep + batch_time.sizes["time"])
             },
         )
-        self._batches_seen += 1
 
     def flush(self):
         pass
