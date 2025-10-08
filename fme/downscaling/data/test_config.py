@@ -106,5 +106,4 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
         sample_with_replacement=n_sample,
     )
     data = data_config.build(requirements=requirements, train=True)
-    epoch_samples = list(data.loader)
-    assert len(epoch_samples) == n_sample
+    assert len(data.loader) == n_sample

@@ -158,7 +158,7 @@ class Trainer:
         self, data: PairedGriddedData, random_offset: bool, shuffle: bool
     ):
         if self.patch_data:
-            batch_generator = data.get_patched_batch_generator(
+            batch_generator = data.get_patched_generator(
                 coarse_yx_patch_extent=self.model.coarse_shape,
                 overlap=0,
                 drop_partial_patches=True,
@@ -166,7 +166,7 @@ class Trainer:
                 shuffle=shuffle,
             )
         else:
-            batch_generator = data.loader
+            batch_generator = data.get_generator()
         return batch_generator
 
     def train_one_epoch(self) -> None:
@@ -184,11 +184,11 @@ class Trainer:
             self.train_data, random_offset=True, shuffle=True
         )
         outputs = None
-        for i, batch in enumerate(train_batch_generator):
+        for i, (batch, topography) in enumerate(train_batch_generator):
             self.num_batches_seen += 1
             if i % 10 == 0:
                 logging.info(f"Training on batch {i+1}")
-            outputs = self.model.train_on_batch(batch, self.optimization)
+            outputs = self.model.train_on_batch(batch, topography, self.optimization)
             self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -260,15 +260,19 @@ class Trainer:
             validation_batch_generator = self._get_batch_generator(
                 self.validation_data, random_offset=False, shuffle=False
             )
-            for batch in validation_batch_generator:
-                outputs = self.model.train_on_batch(batch, self.null_optimization)
+            for batch, topography in validation_batch_generator:
+                outputs = self.model.train_on_batch(
+                    batch, topography, self.null_optimization
+                )
                 validation_aggregator.record_batch(
                     outputs=outputs,
                     coarse=batch.coarse.data,
                     batch=batch,
                 )
                 generated_outputs = self.model.generate_on_batch(
-                    batch, n_samples=self.config.generate_n_samples
+                    batch,
+                    topography=topography,
+                    n_samples=self.config.generate_n_samples,
                 )
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}

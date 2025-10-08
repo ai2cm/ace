@@ -104,16 +104,18 @@ class Evaluator:
         )
 
         if self.patch_data:
-            batch_generator = self.data.get_patched_batch_generator(
+            batch_generator = self.data.get_patched_generator(
                 coarse_yx_patch_extent=self.model.coarse_shape,
             )
         else:
-            batch_generator = self.data.loader
+            batch_generator = self.data.get_generator()
 
-        for i, batch in enumerate(batch_generator):
+        for i, (batch, topography) in enumerate(batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
-                outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
+                outputs = self.model.generate_on_batch(
+                    batch, topography, n_samples=self.n_samples
+                )
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
@@ -178,7 +180,9 @@ class EventEvaluator:
                 f"Generating samples {start_idx} to {end_idx} "
                 f"for event {self.event_name}"
             )
-            outputs = self.model.generate_on_batch(batch, n_samples=end_idx - start_idx)
+            outputs = self.model.generate_on_batch(
+                batch, self.data.topography, n_samples=end_idx - start_idx
+            )
             sample_agg.record_batch(outputs.prediction)
 
         to_log = sample_agg.get_wandb()
