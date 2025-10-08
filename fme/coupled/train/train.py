@@ -152,11 +152,8 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         )
         config.resume_results.verify_wandb_resumption(config.experiment_dir)
     trainer = build_trainer(builders, config)
-    try:
-        trainer.train()
-        logging.info(f"DONE ---- rank {dist.rank}")
-    finally:
-        dist.shutdown()
+    trainer.train()
+    logging.info(f"DONE ---- rank {dist.rank}")
 
 
 def run_train_from_config(config: TrainConfig):
@@ -164,14 +161,18 @@ def run_train_from_config(config: TrainConfig):
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
-    data = prepare_config(yaml_config, override=override_dotlist)
-    train_config: TrainConfig = dacite.from_dict(
-        data_class=TrainConfig,
-        data=data,
-        config=dacite.Config(strict=True),
-    )
-    train_config.set_random_seed()
-    train_config.resume_results = prepare_directory(
-        train_config.experiment_dir, data, train_config.resume_results
-    )
-    run_train_from_config(train_config)
+    dist = Distributed.get_instance()
+    try:
+        data = prepare_config(yaml_config, override=override_dotlist)
+        train_config: TrainConfig = dacite.from_dict(
+            data_class=TrainConfig,
+            data=data,
+            config=dacite.Config(strict=True),
+        )
+        train_config.set_random_seed()
+        train_config.resume_results = prepare_directory(
+            train_config.experiment_dir, data, train_config.resume_results
+        )
+        run_train_from_config(train_config)
+    finally:
+        dist.shutdown()
