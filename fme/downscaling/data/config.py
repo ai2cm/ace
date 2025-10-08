@@ -21,6 +21,7 @@ from fme.downscaling.data.datasets import (
     PairedGriddedData,
 )
 from fme.downscaling.data.topography import (
+    Topography,
     get_normalized_topography,
     get_topography_downscale_factor,
 )
@@ -154,6 +155,33 @@ class DataLoaderConfig:
             strict=self.strict_ensemble,
         )
 
+    def build_topography(
+        self, coarse_coords: LatLonCoordinates, requires_topography: bool
+    ) -> Topography | None:
+        if requires_topography is False:
+            return None
+        if self.topography is None:
+            raise ValueError(
+                "Topography is required for this model, but no topography "
+                "dataset was specified in the configuration."
+            )
+        topography = get_normalized_topography(self.topography)
+        # Fine grid boundaries are adjusted to exactly match the coarse grid
+        fine_lat_interval = adjust_fine_coord_range(
+            self.lat_extent,
+            full_coarse_coord=coarse_coords.lat,
+            full_fine_coord=topography.coords.lat,
+        )
+        fine_lon_interval = adjust_fine_coord_range(
+            self.lon_extent,
+            full_coarse_coord=coarse_coords.lon,
+            full_fine_coord=topography.coords.lon,
+        )
+        subset_topography = topography.subset_latlon(
+            lat_interval=fine_lat_interval, lon_interval=fine_lon_interval
+        )
+        return subset_topography.to_device()
+
     def build_batchitem_dataset(
         self,
         dataset: XarrayConcat,
@@ -170,6 +198,7 @@ class DataLoaderConfig:
             )
         dataset = self._repeat_if_requested(dataset)
 
+        # TODO: follow up PR will remove topography from BatchItems
         if requires_topography:
             if self.topography is None:
                 raise ValueError(
@@ -207,6 +236,7 @@ class DataLoaderConfig:
             raise ValueError(
                 "Downscaling data loader only supports datasets with latlon coords."
             )
+        latlon_coords = properties.horizontal_coordinates
         dataset = self.build_batchitem_dataset(
             dataset=xr_dataset,
             properties=properties,
@@ -232,8 +262,13 @@ class DataLoaderConfig:
             persistent_workers=True if self.num_data_workers > 0 else False,
         )
         example = dataset[0]
+        subset_topography = self.build_topography(
+            coarse_coords=latlon_coords,
+            requires_topography=requirements.use_fine_topography,
+        )
         return GriddedData(
-            dataloader,
+            _loader=dataloader,
+            topography=subset_topography,
             shape=example.horizontal_shape,
             dims=example.latlon_coordinates.dims,
             variable_metadata=dataset.variable_metadata,
@@ -376,6 +411,7 @@ class PairedDataLoaderConfig:
                 )
             else:
                 fine_topography = get_normalized_topography(self.topography)
+            fine_topography = fine_topography.to_device()
             if (
                 get_topography_downscale_factor(
                     fine_topography.data.shape,
@@ -404,6 +440,7 @@ class PairedDataLoaderConfig:
 
         # TODO: horizontal subsetting should probably live in the XarrayDatast level
         # Subset to overall horizontal domain
+        # TODO: Follow up PR will remove topography from batch items
         dataset_fine_subset = HorizontalSubsetDataset(
             dataset_fine,
             properties=properties_fine,
@@ -466,11 +503,12 @@ class PairedDataLoaderConfig:
         }
 
         return PairedGriddedData(
-            dataloader,
-            example.coarse.horizontal_shape,
-            example.downscale_factor,
-            example.fine.latlon_coordinates.dims,
-            variable_metadata,
+            _loader=dataloader,
+            topography=fine_topography,
+            coarse_shape=example.coarse.horizontal_shape,
+            downscale_factor=example.downscale_factor,
+            dims=example.fine.latlon_coordinates.dims,
+            variable_metadata=variable_metadata,
             all_times=all_times,
         )
 

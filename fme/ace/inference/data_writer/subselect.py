@@ -17,7 +17,7 @@ from .dataset_metadata import DatasetMetadata
 from .raw import RawDataWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .utils import DIM_INFO_HEALPIX, DIM_INFO_LATLON
-from .zarr import ZarrWriterAdapter, ZarrWriterConfig
+from .zarr import SeparateICZarrWriterAdapter, ZarrWriterAdapter, ZarrWriterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +153,8 @@ class SubselectWriterConfig:
         time_coarsen: Optional TimeCoarsen config for reducing in the time dimension.
         zarr: Optional configuration for writing to zarr. If not specified, data
             will be written to netcdf.
+        separate_ensemble_members: Option to write ensemble members to separate files.
+            In this case, time is a datetime coordinate.
     """
 
     label: str
@@ -163,6 +165,7 @@ class SubselectWriterConfig:
     save_reference: bool = False
     time_coarsen: TimeCoarsenConfig | None = None
     zarr: ZarrWriterConfig = dataclasses.field(default_factory=ZarrWriterConfig)
+    separate_ensemble_members: bool = False
 
     def __post_init__(self):
         if self.lat_extent:
@@ -179,11 +182,16 @@ class SubselectWriterConfig:
         else:
             self.lon_slice = slice(None)
 
-        if self.time_selection is not None and self.time_coarsen is not None:
-            logging.warning(
-                "Time coarsening is enabled. "
-                "Time subselection is applied *after* time coarsening."
-            )
+        if self.time_selection is not None:
+            if self.time_coarsen is not None:
+                logging.warning(
+                    "Time coarsening is enabled. "
+                    "Time subselection is applied *after* time coarsening."
+                )
+            if self.zarr.write_to_zarr:
+                raise NotImplementedError(
+                    "Time selection is not currently supported when writing to zarr."
+                )
 
     def build_paired(
         self,
@@ -264,19 +272,28 @@ class SubselectWriterConfig:
             )
         subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
 
-        raw_writer: RawDataWriter | ZarrWriterAdapter
+        raw_writer: RawDataWriter | ZarrWriterAdapter | SeparateICZarrWriterAdapter
         if self.zarr.write_to_zarr:
             if self.time_coarsen:
                 n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
             else:
                 n_timesteps_write = n_timesteps
-            raw_writer = ZarrWriterAdapter(
+
+            zarr_writer_cls: type[SeparateICZarrWriterAdapter | ZarrWriterAdapter]
+
+            if self.separate_ensemble_members:
+                dims = ("time", *(d.name for d in spatial_dims))
+                zarr_writer_cls = SeparateICZarrWriterAdapter
+            else:
+                dims = ("sample", "time", *(d.name for d in spatial_dims))
+                zarr_writer_cls = ZarrWriterAdapter
+            raw_writer = zarr_writer_cls(
                 path=os.path.join(experiment_dir, f"{self.label}.zarr"),
-                dims=("sample", "time", *(d.name for d in spatial_dims)),
+                dims=dims,
                 data_coords=subselect_coords_,
-                data_vars=self.names,
                 n_timesteps=n_timesteps_write,
                 n_initial_conditions=n_initial_conditions,
+                data_vars=self.names,
                 variable_metadata=variable_metadata,
                 dataset_metadata=dataset_metadata,
                 chunks=self.zarr.chunks,
@@ -284,6 +301,11 @@ class SubselectWriterConfig:
                 overwrite_check=self.zarr.overwrite_check,
             )
         else:
+            if self.separate_ensemble_members:
+                raise NotImplementedError(
+                    "Writing separate ensemble members is not currently supported for "
+                    "netcdf output."
+                )
             raw_writer = RawDataWriter(
                 path=experiment_dir,
                 label=f"{self.label}.nc",
@@ -308,7 +330,7 @@ class SubselectWriter:
     def __init__(
         self,
         config: SubselectWriterConfig,
-        writer: RawDataWriter | ZarrWriterAdapter,
+        writer: RawDataWriter | ZarrWriterAdapter | SeparateICZarrWriterAdapter,
         full_coords: Mapping[str, np.ndarray],
     ):
         self.config = config

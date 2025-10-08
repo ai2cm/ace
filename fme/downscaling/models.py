@@ -13,7 +13,7 @@ from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import BatchData, PairedBatchData
+from fme.downscaling.data import BatchData, PairedBatchData, Topography
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -174,18 +174,20 @@ class Model:
     def train_on_batch(
         self,
         batch: PairedBatchData,
+        topography: Topography | None,
         optimization: Optimization | NullOptimization,
     ) -> ModelOutputs:
-        return self._run_on_batch(batch, optimization)
+        return self._run_on_batch(batch, topography, optimization)
 
     def generate_on_batch(
         self,
         batch: PairedBatchData,
+        topography: Topography | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         if n_samples != 1:
             raise ValueError("n_samples must be 1 for deterministic models")
-        result = self._run_on_batch(batch, self.null_optimization)
+        result = self._run_on_batch(batch, topography, self.null_optimization)
         for k, v in result.prediction.items():
             result.prediction[k] = v.unsqueeze(1)  # insert sample dimension
         for k, v in result.target.items():
@@ -195,6 +197,7 @@ class Model:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
+        topography: Topography | None,
         n_samples: int = 1,
     ) -> TensorDict:
         raise NotImplementedError(
@@ -204,6 +207,7 @@ class Model:
     def _run_on_batch(
         self,
         batch: PairedBatchData,
+        topography: Topography | None,
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
@@ -215,15 +219,17 @@ class Model:
         interpolated = interpolate(coarse_norm, self.downscale_factor)
 
         if self.config.use_fine_topography:
-            if batch.fine.topography is None:
+            if topography is None:
                 raise ValueError(
                     "Topography must be provided for each batch when use of fine "
                     "topography is enabled."
                 )
-
-            # Join the normalized topography to the input (see dataset for details)
-            topo = batch.fine.topography.data.unsqueeze(self._channel_axis)
-            coarse_norm = torch.concat([interpolated, topo], axis=self._channel_axis)
+            else:
+                # Join the normalized topography to the input (see dataset for details)
+                topo = topography.data.unsqueeze(self._channel_axis)
+                coarse_norm = torch.concat(
+                    [interpolated, topo], axis=self._channel_axis
+                )
         elif self.config._interpolate_input:
             coarse_norm = interpolated
 
@@ -487,7 +493,7 @@ class DiffusionModel:
         )
 
     def _get_input_from_coarse(
-        self, coarse: TensorMapping, topography: torch.Tensor | None
+        self, coarse: TensorMapping, topography: Topography | None
     ) -> torch.Tensor:
         inputs = filter_tensor_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
@@ -501,9 +507,14 @@ class DiffusionModel:
                     "Topography must be provided for each batch when use of fine "
                     "topography is enabled."
                 )
-            # Join the normalized topography to the input (see dataset for details)
-            topo = topography.unsqueeze(self._channel_axis)
-            interpolated = torch.concat([interpolated, topo], axis=self._channel_axis)
+            else:
+                n_batches = normalized.shape[0]
+                # Join the normalized topography to the input (see dataset for details)
+                topo = topography.data.unsqueeze(0).repeat(n_batches, 1, 1)
+                topo = topo.unsqueeze(self._channel_axis)
+                interpolated = torch.concat(
+                    [interpolated, topo], axis=self._channel_axis
+                )
 
         if self.config._interpolate_input:
             return interpolated
@@ -512,14 +523,12 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
+        topography: Topography | None,
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data
-        fine_topography = (
-            batch.fine.topography.data if batch.fine.topography is not None else None
-        )
-        inputs_norm = self._get_input_from_coarse(coarse, fine_topography)
+        inputs_norm = self._get_input_from_coarse(coarse, topography)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
@@ -564,10 +573,10 @@ class DiffusionModel:
     def _generate(
         self,
         coarse_data: TensorMapping,
-        fine_topography: torch.Tensor | None,
+        topography: torch.Tensor | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        inputs_ = self._get_input_from_coarse(coarse_data, fine_topography)
+        inputs_ = self._get_input_from_coarse(coarse_data, topography)
         # expand samples and fold to
         # [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
@@ -616,9 +625,9 @@ class DiffusionModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
+        topography: Topography | None,
         n_samples: int = 1,
     ) -> TensorDict:
-        topography = batch.topography.data if batch.topography is not None else None
         generated, _, _ = self._generate(batch.data, topography, n_samples)
         return generated
 
@@ -626,15 +635,12 @@ class DiffusionModel:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
+        topography: Topography | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
-
-        fine_topography = (
-            batch.fine.topography.data if batch.fine.topography is not None else None
-        )
         generated, generated_norm, latent_steps = self._generate(
-            coarse, fine_topography, n_samples
+            coarse, topography, n_samples
         )
 
         targets_norm = self.out_packer.pack(

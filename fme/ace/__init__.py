@@ -56,7 +56,7 @@ from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import OverwriteConfig, XarrayDataConfig
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig

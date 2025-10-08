@@ -65,7 +65,7 @@ from fme.core.generics.trainer import (
     epoch_checkpoint_enabled,
 )
 from fme.core.logging_utils import LoggingConfig
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import OptimizationConfig
@@ -270,7 +270,7 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=WeightedMappingLossConfig(type="MSE"),
+            loss=StepLossConfig(type="MSE"),
             crps_training=crps_training,
             train_n_forward_steps=TimeLengthProbabilities(
                 outcomes=[

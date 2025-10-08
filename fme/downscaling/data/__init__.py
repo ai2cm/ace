@@ -7,4 +7,5 @@ from .datasets import (
     PairedBatchItem,
     PairedGriddedData,
 )
+from .topography import Topography
 from .utils import BatchedLatLonCoordinates, ClosedInterval, scale_tuple

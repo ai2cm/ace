@@ -10,9 +10,9 @@ from fme.core.loss import (
     EnergyScoreLoss,
     GlobalMeanLoss,
     LossConfig,
+    StepLossConfig,
     VariableWeightingLoss,
     WeightedMappingLoss,
-    WeightedMappingLossConfig,
     _construct_weight_tensor,
 )
 from fme.core.normalizer import StandardNormalizer
@@ -226,14 +226,14 @@ def test_VariableWeightingLoss():
     assert weighted_result == ((16 + 0.25) / 2.0)
 
 
-def test_WeightedMappingLossConfig_no_weights():
+def test_StepLossConfig_no_weights():
     loss_config = LossConfig()
     n_channels = 5
     out_names = [f"var_{i}" for i in range(n_channels)]
     channel_dim = -3
     area = torch.tensor([])  # area not used by this config
     gridded_operations: GriddedOperations = LatLonOperations(area)
-    mapping_loss_config = WeightedMappingLossConfig()
+    mapping_loss_config = StepLossConfig(sqrt_loss_step_decay_constant=0.0)
     loss = loss_config.build(reduction="mean", gridded_operations=gridded_operations)
     normalizer = StandardNormalizer(
         means={name: torch.as_tensor(0.0) for name in out_names},
@@ -252,14 +252,15 @@ def test_WeightedMappingLossConfig_no_weights():
     x = packer.pack(x_mapping, axis=channel_dim)
     y = packer.pack(y_mapping, axis=channel_dim)
 
-    assert loss(x, y) == mapping_loss(x_mapping, y_mapping)
+    assert loss(x, y) == mapping_loss(x_mapping, y_mapping, step=0)
+    assert loss(x, y) == mapping_loss(x_mapping, y_mapping, step=1)
 
 
-def test_WeightedMappingLossConfig_weights():
+def test_StepLossConfig_weights():
     out_names = ["var_0", "var_1"]
     channel_dim = -3
     area = torch.tensor([])  # area not used by this config
-    mapping_loss_config = WeightedMappingLossConfig(
+    mapping_loss_config = StepLossConfig(
         type="MSE", weights={"var_0": 4.0, "var_1": 1.0}
     )
     normalizer = StandardNormalizer(
@@ -284,7 +285,51 @@ def test_WeightedMappingLossConfig_weights():
     x_mapping = {"var_0": x0, "var_1": x1}
     y_mapping = {"var_0": y0, "var_1": y1}
 
-    assert mapping_loss(x_mapping, y_mapping) == ((16 + 0.25) / 2.0)
+    assert mapping_loss(x_mapping, y_mapping, step=0) == ((16 + 0.25) / 2.0)
+
+
+@pytest.mark.parametrize("sqrt_loss_step_decay_constant", [0.0, 0.1, 1.0])
+def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant):
+    out_names = ["var_0", "var_1"]
+    channel_dim = -3
+    area = torch.tensor([])  # area not used by this config
+    mapping_loss_config = StepLossConfig(
+        type="MSE",
+        weights={"var_0": 4.0, "var_1": 1.0},
+        sqrt_loss_step_decay_constant=sqrt_loss_step_decay_constant,
+    )
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+
+    gridded_operations: GriddedOperations = LatLonOperations(area)
+
+    mapping_loss = mapping_loss_config.build(
+        gridded_operations,
+        out_names=out_names,
+        channel_dim=channel_dim,
+        normalizer=normalizer,
+    )
+
+    x0 = torch.ones(4, 5, 5).to(get_device())
+    x1 = 2.0 * x0
+    y0 = 2.0 * x0
+    y1 = 2.5 * x0
+
+    x_mapping = {"var_0": x0, "var_1": x1}
+    y_mapping = {"var_0": y0, "var_1": y1}
+
+    torch.testing.assert_close(
+        mapping_loss(x_mapping, y_mapping, step=0),
+        mapping_loss(x_mapping, y_mapping, step=1)
+        * (1 + sqrt_loss_step_decay_constant) ** 0.5,
+    )
+    torch.testing.assert_close(
+        mapping_loss(x_mapping, y_mapping, step=0),
+        mapping_loss(x_mapping, y_mapping, step=2)
+        * (1 + sqrt_loss_step_decay_constant * 2) ** 0.5,
+    )
 
 
 @pytest.mark.parametrize("mean", [0.0, 1.0])

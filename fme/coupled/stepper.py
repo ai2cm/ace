@@ -573,14 +573,14 @@ class CoupledStepperConfig:
 
     def get_ocean_loss(
         self,
-        loss_obj: Callable[[TensorMapping, TensorMapping], torch.Tensor],
+        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
         time_dim: int,
     ) -> StepLossABC:
         return self.ocean.loss_contributions.build(loss_obj, time_dim)
 
     def get_atmosphere_loss(
         self,
-        loss_obj: Callable[[TensorMapping, TensorMapping], torch.Tensor],
+        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
         time_dim: int,
     ) -> StepLossABC:
         return self.atmosphere.loss_contributions.build(loss_obj, time_dim)
