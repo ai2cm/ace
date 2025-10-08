@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_forward_steps: 2920
+n_forward_steps: 40
 forward_steps_in_memory: 40
 checkpoint_path: /ckpt.tar
 logging:
@@ -22,7 +22,7 @@ loader:
         engine: zarr
   num_data_workers: 1
 data_writer:
-  save_prediction_files: false
+  save_prediction_files: true
   save_monthly_files: true
 aggregator:
   log_histograms: true
