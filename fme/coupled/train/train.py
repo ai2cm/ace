@@ -136,7 +136,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
     dist = Distributed.get_instance()
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
-    if not os.path.isdir(config.experiment_dir):
+    if not os.path.isdir(config.experiment_dir) and dist.is_root():
         os.makedirs(config.experiment_dir, exist_ok=True)
     config.logging.configure_logging(config.experiment_dir, log_filename="out.log")
     env_vars = logging_utils.retrieve_env_vars()
@@ -150,6 +150,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         logging.info(
             f"Resuming training from results in {config.resume_results.existing_dir}"
         )
+        config.resume_results.verify_wandb_resumption(config.experiment_dir)
     trainer = build_trainer(builders, config)
     trainer.train()
     logging.info(f"DONE ---- rank {dist.rank}")
