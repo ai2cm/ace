@@ -22,7 +22,7 @@ from fme.core.generics.inference import (
     get_record_to_wandb,
     run_inference,
 )
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.single_module import SingleModuleStepConfig
@@ -143,7 +143,7 @@ def _get_stepper():
                 ),
             ),
         ),
-        loss=WeightedMappingLossConfig(),
+        loss=StepLossConfig(),
     )
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(

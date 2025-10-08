@@ -22,7 +22,7 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.dataset_info import DatasetInfo
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
@@ -895,7 +895,7 @@ def get_stepper_config(
                     ),
                 ),
                 parameter_init=atmosphere_parameter_init,
-                loss=WeightedMappingLossConfig(type="MSE"),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
@@ -920,7 +920,7 @@ def get_stepper_config(
                     ),
                 ),
                 parameter_init=ocean_parameter_init,
-                loss=WeightedMappingLossConfig(type="MSE"),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name=sst_name_in_ocean_data,
@@ -1436,7 +1436,7 @@ def test_reloaded_stepper_gives_same_prediction():
                         ),
                     ),
                 ),
-                loss=WeightedMappingLossConfig(type="MSE"),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
@@ -1462,7 +1462,7 @@ def test_reloaded_stepper_gives_same_prediction():
                         ),
                     ),
                 ),
-                loss=WeightedMappingLossConfig(type="MSE"),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name="o_sfc",
