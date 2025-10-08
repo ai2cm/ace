@@ -30,8 +30,8 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/climate-ceres \
-    --priority urgent \
+    --workspace ai2/downscaling \
+    --priority normal \
     --preemptible \
     --cluster ai2/ceres \
     --beaker-image $IMAGE \
