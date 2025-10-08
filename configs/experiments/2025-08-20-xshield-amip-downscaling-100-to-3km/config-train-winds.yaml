@@ -4,7 +4,7 @@ model:
   - northward_wind_at_ten_meters
   in_names:
   - eastward_wind_at_ten_meters
-  - northward_wind_at_ten_meters
+  #- northward_wind_at_ten_meters
   loss:
     type: MSE
   module:
