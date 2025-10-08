@@ -28,10 +28,9 @@ IMAGE=01JWJ96JMF89D812JS159VF37N
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km training global' \
-    --workspace ai2/downscaling \
-    --priority normal \
+    --workspace ai2/climate-ceres \
+    --priority urgent \
     --preemptible \
-    --cluster ai2/titan \
     --cluster ai2/ceres \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
