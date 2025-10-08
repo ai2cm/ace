@@ -44,8 +44,8 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 320   # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
-  batch_size: 24 #48 for 8
+  sample_with_replacement: 64   # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
+  batch_size: 12 #48 for 8
   num_data_workers: 4
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -66,7 +66,7 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 64 #128 for 8
+  batch_size: 32  #128 for 8
   num_data_workers: 4
   fine:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -75,7 +75,7 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 3
+      step: 29
   coarse:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
@@ -83,7 +83,7 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 3
+      step: 29
   lat_extent:
     start: 22.0
     stop: 50.0
@@ -93,7 +93,7 @@ validation_data:
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 1500 # using 320 samples per epoch, this is roughly 500k steps (200 epochs for the previous 2 yr training dataset)
+max_epochs: 15 # using 320 samples per epoch, this is roughly 500k steps (200 epochs for the previous 2 yr training dataset)
 validate_interval: 5
 experiment_dir: /results
 save_checkpoints: true
