@@ -1,9 +1,9 @@
 import logging
 from collections.abc import Mapping
+from typing import Literal
 
 import cftime
 import fsspec
-import gcsfs
 import numpy as np
 import xarray as xr
 import zarr
@@ -64,7 +64,7 @@ def insert_into_zarr(
     insert_slices: Mapping[int, slice],
     overwrite_check: bool = True,
 ):
-    root = zarr.open(path, mode="a")
+    root = zarr.open_group(path, mode="r+")
     for var_name, var_data in data.items():
         n_dims = len(var_data.shape)
         # Array data is not loaded until index or slice is referenced
@@ -93,11 +93,12 @@ def initialize_zarr(
     nondim_coords: dict[str, xr.DataArray] | None = None,
     array_attributes: dict[str, dict[str, str]] | None = None,
     group_attributes: dict[str, str] | None = None,
+    mode: str = "w-",
 ):
     """
     Initialize a Zarr group with the specified dimensions and chunk sizes.
     """
-    root = zarr.open(path, mode="a")
+    root = zarr.open_group(path, mode=mode)
     root.update_attributes(group_attributes or {})
     chunks_tuple = tuple(
         [chunks.get(dim, dim_sizes[d]) for d, dim in enumerate(dim_names)]
@@ -195,7 +196,7 @@ class ZarrWriter:
         shards: dict[str, int] | None = None,
         array_attributes: dict[str, dict[str, str]] | None = None,
         group_attributes: dict[str, str] | None = None,
-        allow_existing: bool = False,
+        mode: Literal["r+", "a", "w", "w-"] = "w-",
         overwrite_check: bool = True,
         time_units: str = DATETIME_ENCODING_UNITS,
         time_calendar: str | None = "julian",
@@ -217,7 +218,10 @@ class ZarrWriter:
         array_attributes: Optional mapping of variable name to a dictionary of array
             attributes, e.g. units and long_name.
         group_attributes: Optional dictionary of attributes to add to the zarr group.
-        allow_existing: If true, allow writing to a preexisting store.
+        mode: Access mode used for the zarr.open_group call during store initialization.
+            'r+' means read/write (must exist); 'a' means read/write (create if doesn’t
+            exist); 'w' means create (overwrite if exists); 'w-' means create (fail if
+            exists).
         overwrite_check: If true, check when recording each batch that the slice of the
             existing store does not already contain data.
         time_units: Units string for time coordinate. Defaults to
@@ -242,15 +246,10 @@ class ZarrWriter:
         self.time_units = time_units
         self.time_calendar = time_calendar
         self.nondim_coords = nondim_coords
-        if allow_existing:
+        self.mode = mode
+        if mode == "a" or mode == "r+":
             self._store_initialized = True if self._path_exists() else False
         else:
-            if self._path_exists() is True:
-                raise FileExistsError(
-                    f"Zarr store {self.path} already exists. "
-                    "Please delete first before writing to this path, "
-                    "or write to a different path."
-                )
             self._store_initialized = False
 
         for coord, coord_arr in coords.items():
@@ -267,34 +266,8 @@ class ZarrWriter:
                     "should be provided."
                 )
 
-    @classmethod
-    def from_existing_store(cls, path: str) -> "ZarrWriter":
-        ds = xr.open_zarr(path)
-        coords = {k: v.values for k, v in ds.coords.items()}
-        dims_list = [ds[var].dims for var in ds.data_vars]
-        array_attributes = {var: dict(ds[var].attrs) for var in ds.data_vars}
-        group_attributes = dict(ds.attrs)
-        if not all(dims == dims_list[0] for dims in dims_list):
-            raise ValueError(
-                "Data arrays must have same dim order when writing "
-                "to existing zarr store with ZarrWriter."
-            )
-        return cls(
-            path=path,
-            dims=dims_list[0],
-            coords=coords,
-            chunks=ds.chunks,
-            data_vars=list(ds.data_vars),
-            array_attributes=array_attributes,
-            group_attributes=group_attributes,
-            allow_existing=True,
-        )
-
     def _path_exists(self) -> bool:
-        if self.path.startswith("gs://"):
-            fs = gcsfs.GCSFileSystem()
-        else:
-            fs = fsspec.filesystem("file")
+        fs = fsspec.url_to_fs(self.path)[0]
 
         if fs.exists(self.path):
             return True
@@ -343,6 +316,7 @@ class ZarrWriter:
                 nondim_coords=self.nondim_coords,
                 array_attributes=self.array_attributes,
                 group_attributes=self.group_attributes,
+                mode=self.mode,
             )
             self.dist.barrier()
             self._store_initialized = True

@@ -103,7 +103,6 @@ def test_zarr_adapter_can_overwrite(tmpdir):
         },
         n_timesteps=2,
         n_initial_conditions=1,
-        allow_existing=True,
     )
     adapter = ZarrWriterAdapter(**args)  # type: ignore
     adapter.append_batch(data, 0, time)
