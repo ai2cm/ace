@@ -91,6 +91,8 @@ class CoupledAggregatorBuilder(
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         ocean_loss_scaling: TensorMapping | None = None,
         atmosphere_loss_scaling: TensorMapping | None = None,
+        ocean_channel_mean_names: Sequence[str] | None = None,
+        atmosphere_channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
@@ -103,6 +105,8 @@ class CoupledAggregatorBuilder(
         self.atmosphere_normalize = atmosphere_normalize
         self.ocean_loss_scaling = ocean_loss_scaling
         self.atmosphere_loss_scaling = atmosphere_loss_scaling
+        self.ocean_channel_mean_names = ocean_channel_mean_names
+        self.atmosphere_channel_mean_names = atmosphere_channel_mean_names
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
@@ -111,10 +115,12 @@ class CoupledAggregatorBuilder(
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
             dataset_info=self.dataset_info,
-            ocean_loss_scaling=self.ocean_loss_scaling,
-            atmosphere_loss_scaling=self.atmosphere_loss_scaling,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
+            ocean_loss_scaling=self.ocean_loss_scaling,
+            atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+            ocean_channel_mean_names=self.ocean_channel_mean_names,
+            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )
 
     def get_inference_aggregator(self):
@@ -127,6 +133,8 @@ class CoupledAggregatorBuilder(
             atmosphere_normalize=self.atmosphere_normalize,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "inference"),
+            ocean_channel_mean_names=self.ocean_channel_mean_names,
+            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )
 
 
