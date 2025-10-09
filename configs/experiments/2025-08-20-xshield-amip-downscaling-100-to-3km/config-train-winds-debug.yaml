@@ -48,7 +48,8 @@ train_data:
   batch_size: 12
   num_data_workers: 2
   fine:
-  - data_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
+  #- data_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 3km.zarr
     engine: zarr
     subset:
@@ -69,7 +70,8 @@ validation_data:
   batch_size: 24
   num_data_workers: 2
   fine:
-  - data_path:  /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+  #- data_path:  /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 3km.zarr
     subset:
