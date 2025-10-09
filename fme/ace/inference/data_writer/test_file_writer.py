@@ -9,10 +9,10 @@ import xarray as xr
 from fme.core.dataset.time import TimeSlice
 from fme.core.typing_ import Slice
 
-from .subselect import (
+from .file_writer import (
+    FileWriter,
+    FileWriterConfig,
     MonthSelector,
-    SubselectWriter,
-    SubselectWriterConfig,
     _get_time_mask,
     _month_string_to_int,
     _select_time,
@@ -21,15 +21,17 @@ from .time_coarsen import TimeCoarsen
 from .zarr import ZarrWriterConfig
 
 
-def test_subselect_writer_config_build():
-    config = SubselectWriterConfig(
+def test_file_writer_config_build():
+    config = FileWriterConfig(
         label="test_region",
         names=["temperature", "humidity"],
         lat_extent=(-10.0, 10.0),
         lon_extent=(-20.0, 20.0),
     )
 
-    with patch("fme.ace.inference.data_writer.subselect.RawDataWriter") as mock_writer:
+    with patch(
+        "fme.ace.inference.data_writer.file_writer.RawDataWriter"
+    ) as mock_writer:
         mock_writer.return_value = MagicMock()
         writer = config.build(
             experiment_dir="test_experiment",
@@ -42,7 +44,7 @@ def test_subselect_writer_config_build():
             },
             dataset_metadata=MagicMock(),
         )
-        assert isinstance(writer, SubselectWriter)
+        assert isinstance(writer, FileWriter)
 
 
 @pytest.mark.parametrize(
@@ -54,9 +56,9 @@ def test_subselect_writer_config_build():
         ([0, 1, 2], [0, 1]),
     ],
 )
-def test_subselect_writer_config_invalid_lat_lon_extent(lat_extent, lon_extent):
+def test_file_writer_config_invalid_lat_lon_extent(lat_extent, lon_extent):
     with pytest.raises(ValueError):
-        SubselectWriterConfig(
+        FileWriterConfig(
             label="test_region",
             names=["temperature", "humidity"],
             lat_extent=lat_extent,
@@ -64,9 +66,9 @@ def test_subselect_writer_config_invalid_lat_lon_extent(lat_extent, lon_extent):
         )
 
 
-def test_subselect_writer_config_build_missing_coords():
+def test_file_writer_config_build_missing_coords():
     coords = {"face": np.array([-20, -10.0, 0.0, 10.0, 20.0])}
-    config = SubselectWriterConfig(
+    config = FileWriterConfig(
         label="test_region",
         names=["temperature", "humidity"],
         lat_extent=(-10.0, 10.0),
@@ -85,8 +87,8 @@ def test_subselect_writer_config_build_missing_coords():
 
 
 @pytest.mark.parametrize("extent", [None, []])
-def test_subselect_writer_config_build_missing_extent(extent):
-    config = SubselectWriterConfig(
+def test_file_writer_config_build_missing_extent(extent):
+    config = FileWriterConfig(
         label="test_region",
         names=["temperature", "humidity"],
         lat_extent=extent,
@@ -216,7 +218,7 @@ def test__select_time():
         _select_time(data, 0.1)  # type: ignore
 
 
-def get_subselect_writer(**kwarg_updates):
+def get_file_writer(**kwarg_updates):
     if kwarg_updates is None:
         kwarg_updates = {}
 
@@ -229,17 +231,17 @@ def get_subselect_writer(**kwarg_updates):
         **kwarg_updates,
     }
 
-    config = SubselectWriterConfig(**kwargs)
+    config = FileWriterConfig(**kwargs)
     full_coords = {
         "lat": np.array([-20, -10.0, 0.0, 10.0, 20.0]),
         "lon": np.array([-30.0, -20.0, 0.0, 20.0, 30.0]),
     }
     raw_writer = MagicMock()
-    return SubselectWriter(config, raw_writer, full_coords=full_coords)
+    return FileWriter(config, raw_writer, full_coords=full_coords)
 
 
-def test_subselect_writer__subselect_data_limits_variables():
-    subselect_writer = get_subselect_writer()
+def test_file_writer__subselect_data_limits_variables():
+    writer = get_file_writer()
 
     data = {
         "temperature": torch.rand(3, 10, 5, 5),  # batch_size=3, time=10, lat=5, lon=5
@@ -248,14 +250,14 @@ def test_subselect_writer__subselect_data_limits_variables():
     }
     batch_time = xr.DataArray(xr.date_range("2020-01-01", periods=10, freq="D"))
 
-    subselected_data = subselect_writer._subselect_data(data, batch_time)
+    subselected_data = writer._subselect_data(data, batch_time)
 
     assert "pressure" not in subselected_data
     assert set(subselected_data.keys()) == {"temperature", "humidity"}
 
 
-def test_subselect_writer__subselect_data_empty_time():
-    subselect_writer = get_subselect_writer(
+def test_file_writer__subselect_data_empty_time():
+    writer = get_file_writer(
         time_selection=TimeSlice(start_time="2020-01", stop_time="2020-02"),
     )
 
@@ -268,15 +270,15 @@ def test_subselect_writer__subselect_data_empty_time():
         xr.date_range("2021-01-01", periods=10, freq="D"), dims="time"
     )
 
-    subselected_data = subselect_writer._subselect_data(data, batch_time)
+    subselected_data = writer._subselect_data(data, batch_time)
 
     assert (
         not subselected_data
     )  # Should return empty dict if no time steps are selected
 
 
-def test_subselect_writer_no_names_specified_saves_all():
-    subselect_writer = get_subselect_writer(names=None)
+def test_file_writer_no_names_specified_saves_all():
+    file_writer = get_file_writer(names=None)
 
     data = {
         "temperature": torch.rand(3, 10, 5, 5),  # batch_size=3, time=10, lat=5, lon=5
@@ -285,33 +287,33 @@ def test_subselect_writer_no_names_specified_saves_all():
     }
     batch_time = xr.DataArray(xr.date_range("2020-01-01", periods=10, freq="D"))
 
-    subselected_data = subselect_writer._subselect_data(data, batch_time)
+    subselected_data = file_writer._subselect_data(data, batch_time)
 
     assert set(subselected_data.keys()) == {"temperature", "humidity", "pressure"}
 
 
-def test_subselect_writer_append_batch():
-    subselect_writer = get_subselect_writer()
+def test_file_writer_append_batch():
+    file_writer = get_file_writer()
 
     data = {
         "temperature": torch.rand(3, 10, 5, 5),  # batch_size=5, time=10, lat=5, lon=5
         "humidity": torch.rand(3, 10, 5, 5),
     }
     batch_time = xr.DataArray(xr.date_range("2020-01-01", periods=10, freq="D"))
-    subselect_writer.append_batch(data, start_timestep=0, batch_time=batch_time)
+    file_writer.append_batch(data, start_timestep=0, batch_time=batch_time)
 
     # Check if the data was subselected correctly
     expected_temperature = data["temperature"][
         :, :, 1:4, 1:4
     ]  # lat -10 to 10, lon -20 to 20
-    writer: MagicMock = cast(MagicMock, subselect_writer.writer)
+    writer: MagicMock = cast(MagicMock, file_writer.writer)
     writer.append_batch.assert_called_once()
     args, kwargs = writer.append_batch.call_args
     torch.testing.assert_close(kwargs["data"]["temperature"], expected_temperature)
 
 
-def test_subselect_writer_with_healpix_data_and_zarr(tmpdir):
-    config = SubselectWriterConfig("filename", format=ZarrWriterConfig())
+def test_file_writer_with_healpix_data_and_zarr(tmpdir):
+    config = FileWriterConfig("filename", format=ZarrWriterConfig())
     n_samples = 2
     n_timesteps = 6
     shape = (12, 4, 4)
@@ -354,11 +356,11 @@ def test_subselect_writer_with_healpix_data_and_zarr(tmpdir):
     )
 
 
-def test_subselect_writer_append_batch_time_coarsened():
-    subselect_writer = get_subselect_writer()
+def test_file_writer_append_batch_time_coarsened():
+    file_writer = get_file_writer()
     coarsen_factor = 2
     time_coarsen_writer = TimeCoarsen(
-        data_writer=subselect_writer, coarsen_factor=coarsen_factor
+        data_writer=file_writer, coarsen_factor=coarsen_factor
     )
     data = {
         "temperature": torch.rand(3, 10, 5, 5),  # batch_size=5, time=10, lat=5, lon=5
@@ -384,7 +386,7 @@ def test_subselect_writer_append_batch_time_coarsened():
     time_coarsened_temperature = torch.concat(coarsened_time_blocks, axis=1)
     coarsened_times = batch_time.coarsen(time=coarsen_factor).mean()
 
-    writer: MagicMock = cast(MagicMock, subselect_writer.writer)
+    writer: MagicMock = cast(MagicMock, file_writer.writer)
     writer.append_batch.assert_called_once()
     _, kwargs = writer.append_batch.call_args
     torch.testing.assert_close(

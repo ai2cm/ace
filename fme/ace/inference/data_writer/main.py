@@ -14,19 +14,16 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 
 from .dataset_metadata import DatasetMetadata
+from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
 from .raw import PairedRawDataWriter, RawDataWriter
-from .subselect import PairedSubselectWriter, SubselectWriter, SubselectWriterConfig
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
 PairedSubwriter: TypeAlias = (
-    PairedRawDataWriter
-    | PairedTimeCoarsen
-    | PairedMonthlyDataWriter
-    | PairedSubselectWriter
+    PairedRawDataWriter | PairedTimeCoarsen | PairedMonthlyDataWriter | PairedFileWriter
 )
 
-Subwriter: TypeAlias = MonthlyDataWriter | RawDataWriter | TimeCoarsen | SubselectWriter
+Subwriter: TypeAlias = MonthlyDataWriter | RawDataWriter | TimeCoarsen | FileWriter
 
 
 @dataclasses.dataclass
@@ -43,14 +40,14 @@ class DataWriterConfig:
             netCDF files.
         time_coarsen: Configuration for time coarsening of written outputs to the
             raw data writer.
-        subselection: Configurations for subselection data writers.
+        files: Configuration for a sequence of individual data writers.
     """
 
     save_prediction_files: bool = True
     save_monthly_files: bool = True
     names: Sequence[str] | None = None
     time_coarsen: TimeCoarsenConfig | None = None
-    subselection: list[SubselectWriterConfig] | None = None
+    files: list[FileWriterConfig] | None = None
 
     def __post_init__(self):
         if (
@@ -84,7 +81,7 @@ class DataWriterConfig:
             save_names=self.names,
             time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
-            subselection=self.subselection,
+            files=self.files,
         )
 
     def build(
@@ -109,7 +106,7 @@ class DataWriterConfig:
             save_names=self.names,
             time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
-            subselection=self.subselection,
+            files=self.files,
         )
 
 
@@ -127,7 +124,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         save_names: Sequence[str] | None,
         dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
-        subselection: list[SubselectWriterConfig] | None = None,
+        files: list[FileWriterConfig] | None = None,
     ):
         """
         Args:
@@ -145,7 +142,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 and monthly netCDF files.
             dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of written outputs.
-            subselection: Configurations for subselection data writers.
+            files: Configurations for individual data writers.
 
         """
         self._writers: list[PairedSubwriter] = []
@@ -185,8 +182,8 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                     dataset_metadata=dataset_metadata,
                 )
             )
-        if subselection is not None:
-            for writer_config in subselection:
+        if files is not None:
+            for writer_config in files:
                 self._writers.append(
                     writer_config.build_paired(
                         experiment_dir=path,
@@ -312,7 +309,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         save_names: Sequence[str] | None,
         dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
-        subselection: list[SubselectWriterConfig] | None = None,
+        files: list[FileWriterConfig] | None = None,
     ):
         """
         Args:
@@ -330,7 +327,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 and monthly netCDF files.
             dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of raw outputs.
-            subselection: Configurations for subselection data writers.
+            files: Configurations for individual data writers.
         """
         self._writers: list[Subwriter] = []
         if "face" in coords:
@@ -372,8 +369,8 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 )
             )
 
-        if subselection is not None:
-            for writer_config in subselection:
+        if files is not None:
+            for writer_config in files:
                 self._writers.append(
                     writer_config.build(
                         experiment_dir=path,
