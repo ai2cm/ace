@@ -149,6 +149,8 @@ def test_logs_regression():
         "mean_step_20/weighted_rmse/a",
         "mean_step_20/weighted_bias/a",
         "mean_step_20/weighted_grad_mag_percent_diff/a",
+        "mean_step_20_norm/weighted_rmse/a",
+        "mean_step_20_norm/weighted_rmse/channel_mean",
         "power_spectrum/a",
         "power_spectrum/negative_norm_bias/a",
         "power_spectrum/positive_norm_bias/a",
