@@ -2,8 +2,11 @@ import contextlib
 import dataclasses
 import logging
 import os
+import warnings
 from collections.abc import Mapping
 from typing import Any
+
+import fsspec
 
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
@@ -64,6 +67,14 @@ class LoggingConfig:
             logging.basicConfig(level=logging.ERROR)
         logger = logging.getLogger()
         if self.log_to_file and self._dist.is_root():
+            if fsspec.url_to_fs(experiment_dir)[0] != "file":
+                warnings.warn(
+                    "Logging to a file is only supported for if the experiment "
+                    "directory is on a local file system. Got experiment "
+                    f"directory='{experiment_dir}', so no logs will be "
+                    "saved to a file."
+                )
+                return
             if not os.path.exists(experiment_dir):
                 raise ValueError(
                     f"experiment directory {experiment_dir} does not exist, "
