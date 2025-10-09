@@ -5,7 +5,6 @@ from math import ceil
 from pathlib import Path
 
 import cftime
-import fsspec
 import numpy as np
 import torch
 import xarray as xr
@@ -17,6 +16,7 @@ from fme.ace.inference.data_writer.utils import (
     DIM_INFO_LATLON,
     get_all_names,
 )
+from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "time"
@@ -128,8 +128,7 @@ class MonthlyDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
-        fs = fsspec.url_to_fs(path)[0]
-        if fs != fsspec.filesystem("file"):
+        if not is_local(path):
             raise ValueError("MonthlyDataWriter only supports local file systems.")
         filename = str(Path(path) / f"monthly_mean_{label}.nc")
         self._save_names = save_names
