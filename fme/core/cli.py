@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import fsspec
 import yaml
 
+from .cloud import is_local
 from .config import update_dict_with_dotlist
 
 
@@ -44,7 +45,7 @@ def prepare_directory(
     path: str, config_data: dict, resume_results: ResumeResultsConfig | None = None
 ) -> ResumeResultsConfig | None:
     """Create experiment directory and dump config_data to it."""
-    if not os.path.isdir(path):
+    if not os.path.isdir(path) and is_local(path):
         os.makedirs(path, exist_ok=True)
     if resume_results is not None and not os.path.isdir(
         os.path.join(path, "training_checkpoints")

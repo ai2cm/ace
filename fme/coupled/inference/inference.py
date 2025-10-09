@@ -18,6 +18,7 @@ from fme.ace.data_loading.inference import (
 from fme.ace.inference.evaluator import validate_time_coarsen_config
 from fme.ace.inference.inference import InitialConditionConfig, get_initial_condition
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.cloud import is_local
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -219,7 +220,7 @@ def run_inference_from_config(config: InferenceConfig):
     timer.start_outer("inference")
     timer.start("initialization")
 
-    if not os.path.isdir(config.experiment_dir):
+    if not os.path.isdir(config.experiment_dir) and is_local(config.experiment_dir):
         os.makedirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
     env_vars = logging_utils.retrieve_env_vars()
