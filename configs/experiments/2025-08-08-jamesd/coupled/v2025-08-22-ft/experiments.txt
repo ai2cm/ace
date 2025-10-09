@@ -36,3 +36,5 @@ ft-mtvb2ct3_best_inf_ckpt_ep25-wu1ep_cd4ep-ncs1-atmos_loss_ns20|01K6X4KY80YHMQVP
 ft-v2025-08-22-ncs2-atmos_2aw6z7n3_loss_ns2-wu_to_half_lr_50ep|01K6YCZT0YP0MG08PDYBVBMS23|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_5iqa5aw5-best_inf_ckpt-cos_half_lr_20ep|01K73JTGGY9AFDRQ680N460HDR|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_5iqa5aw5-ema_ckpt-cos_half_lr_20ep|01K73JTZ49B3H7AF864454H97A|training|best_inference_ckpt|normal|--not-preemptible
