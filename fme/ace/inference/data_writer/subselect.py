@@ -14,7 +14,7 @@ from fme.core.dataset.time import TimeSlice
 from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
-from .raw import RawDataWriter
+from .raw import NetCDFWriterConfig, RawDataWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .utils import DIM_INFO_HEALPIX, DIM_INFO_LATLON
 from .zarr import SeparateICZarrWriterAdapter, ZarrWriterAdapter, ZarrWriterConfig
@@ -151,8 +151,7 @@ class SubselectWriterConfig:
             used to target specific seasons or months for outputs, and a TimeSlice
             allows for datetime range selection.
         time_coarsen: Optional TimeCoarsen config for reducing in the time dimension.
-        zarr: Optional configuration for writing to zarr. If not specified, data
-            will be written to netcdf.
+        format: Configuration for the output format (i.e. netCDF or zarr).
         separate_ensemble_members: Option to write ensemble members to separate files.
             In this case, time is a datetime coordinate.
     """
@@ -164,7 +163,9 @@ class SubselectWriterConfig:
     time_selection: Slice | MonthSelector | TimeSlice | None = None
     save_reference: bool = False
     time_coarsen: TimeCoarsenConfig | None = None
-    zarr: ZarrWriterConfig = dataclasses.field(default_factory=ZarrWriterConfig)
+    format: NetCDFWriterConfig | ZarrWriterConfig = dataclasses.field(
+        default_factory=NetCDFWriterConfig
+    )
     separate_ensemble_members: bool = False
 
     def __post_init__(self):
@@ -188,7 +189,7 @@ class SubselectWriterConfig:
                     "Time coarsening is enabled. "
                     "Time subselection is applied *after* time coarsening."
                 )
-            if self.zarr.write_to_zarr:
+            if isinstance(self.format, ZarrWriterConfig):
                 raise NotImplementedError(
                     "Time selection is not currently supported when writing to zarr."
                 )
@@ -273,7 +274,7 @@ class SubselectWriterConfig:
         subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
 
         raw_writer: RawDataWriter | ZarrWriterAdapter | SeparateICZarrWriterAdapter
-        if self.zarr.write_to_zarr:
+        if isinstance(self.format, ZarrWriterConfig):
             if self.time_coarsen:
                 n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
             else:
@@ -296,8 +297,8 @@ class SubselectWriterConfig:
                 data_vars=self.names,
                 variable_metadata=variable_metadata,
                 dataset_metadata=dataset_metadata,
-                chunks=self.zarr.chunks,
-                overwrite_check=self.zarr.overwrite_check,
+                chunks=self.format.chunks,
+                overwrite_check=self.format.overwrite_check,
             )
         else:
             if self.separate_ensemble_members:

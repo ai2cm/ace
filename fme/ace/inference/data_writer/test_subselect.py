@@ -311,9 +311,7 @@ def test_subselect_writer_append_batch():
 
 
 def test_subselect_writer_with_healpix_data_and_zarr(tmpdir):
-    config = SubselectWriterConfig(
-        "filename", zarr=ZarrWriterConfig(write_to_zarr=True)
-    )
+    config = SubselectWriterConfig("filename", format=ZarrWriterConfig())
     n_samples = 2
     n_timesteps = 6
     shape = (12, 4, 4)
