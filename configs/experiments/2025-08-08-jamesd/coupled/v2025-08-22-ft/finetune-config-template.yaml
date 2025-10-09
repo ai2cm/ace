@@ -6,7 +6,7 @@ log_train_every_n_batches: 20
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 5
+max_epochs: 20
 n_coupled_steps: 4
 inference:
   n_coupled_steps: 1456
@@ -128,26 +128,16 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: AdamW
   kwargs:
     fused: true
     weight_decay: 0.01
   scheduler:
-    schedulers:
-      - type: LinearLR
-        step_each_iteration: true
-        kwargs:
-          start_factor: 0.01
-          end_factor: 1
-          total_iters: 707
-      - type: LinearLR
-        step_each_iteration: true
-        kwargs:
-          start_factor: 1
-          end_factor: 0
-          total_iters: 2828
-    milestones: [707]
+    type: CosineAnnealingLR
+    step_each_iteration: true
+    kwargs:
+      T_max: 14140
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction

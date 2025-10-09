@@ -1,2 +1,3 @@
 group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
-ft-mtvb2ct3_best_inf_ckpt_ep25-wu1ep_cd4ep-ncs1-atmos_loss_ns20|ace-samudra-coupled-cm4|mtvb2ct3|best_inference_ckpt_0025|train|high|ceres|8|800GiB|3||n_coupled_steps=1 stepper.atmosphere.loss_contributions.n_steps=20
+ft_5iqa5aw5-best_inf_ckpt-cos_half_lr_20ep|ace-samudra-coupled-cm4|5iqa5aw5|best_inference_ckpt|train|urgent|ceres|8|800GiB|3||optimization.lr=0.000025
+ft_5iqa5aw5-ema_ckpt-cos_half_lr_20ep|ace-samudra-coupled-cm4|5iqa5aw5|ema_ckpt|train|urgent|ceres|8|800GiB|3||optimization.lr=0.000025
