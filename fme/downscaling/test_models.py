@@ -64,10 +64,6 @@ class DummyModule(torch.nn.Module):
 def get_mock_batch(shape, topography_scale_factor: int = 1):
     batch = MagicMock()
     batch.data = {"x": torch.ones(*shape, device=get_device())}
-    topography_shape = tuple(
-        [shape[0]] + [dim * topography_scale_factor for dim in shape[1:]]
-    )
-    batch.topography = torch.ones(*topography_shape, device=get_device())
     return batch
 
 
