@@ -79,6 +79,7 @@ from fme.core.distributed import Distributed
 from fme.core.generics.data import InferenceDataABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
+    CheckpointPaths,
     TrainConfigProtocol,
     Trainer,
     inference_one_epoch,
@@ -274,9 +275,20 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
             data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
         )
         config.set_random_seed()
-        config.resume_results = prepare_directory(
-            config.experiment_dir, config_data, config.resume_results
+        resuming = os.path.isfile(
+            CheckpointPaths(config.checkpoint_dir).latest_checkpoint_path
         )
+        if resuming:
+            # the experiment directory already has checkpoints, so
+            # resume_results has already been used (if configured)
+            config.resume_results = None
+        if config.resume_results is not None:
+            config.resume_results.copy_existing_dir(dest_dir=config.experiment_dir)
+        prepare_directory(
+            path=config.experiment_dir,
+            config_data=config_data,
+        )
+        dist.barrier()  # ensure root rank preparations complete
         run_train_from_config(config)
     finally:
         dist.shutdown()

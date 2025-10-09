@@ -70,7 +70,12 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
-from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
+from fme.core.generics.trainer import (
+    AggregatorBuilderABC,
+    CheckpointPaths,
+    TrainConfigProtocol,
+    Trainer,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.diffusion.stepper import TrainOutput
 from fme.diffusion.train_config import TrainBuilders, TrainConfig
@@ -218,17 +223,26 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     dist = Distributed.get_instance()
     try:
-        data = prepare_config(yaml_config, override_dotlist)
-        train_config: TrainConfig = dacite.from_dict(
-            data_class=TrainConfig,
-            data=data,
-            config=dacite.Config(strict=True),
+        config_data = prepare_config(yaml_config, override=override_dotlist)
+        config = dacite.from_dict(
+            data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
         )
-        train_config.set_random_seed()
-        train_config.resume_results = prepare_directory(
-            train_config.experiment_dir, data, train_config.resume_results
+        config.set_random_seed()
+        resuming = os.path.isfile(
+            CheckpointPaths(config.checkpoint_dir).latest_checkpoint_path
         )
-        run_train_from_config(train_config)
+        if resuming:
+            # the experiment directory already has checkpoints, so
+            # resume_results has already been used (if configured)
+            config.resume_results = None
+        if config.resume_results is not None:
+            config.resume_results.copy_existing_dir(dest_dir=config.experiment_dir)
+        prepare_directory(
+            path=config.experiment_dir,
+            config_data=config_data,
+        )
+        dist.barrier()  # ensure root rank preparations complete
+        run_train_from_config(config)
     finally:
         dist.shutdown()
 
