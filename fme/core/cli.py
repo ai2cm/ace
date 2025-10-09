@@ -6,6 +6,9 @@ from collections.abc import Sequence
 
 import yaml
 
+from fme.core.distributed import Distributed
+from fme.core.wandb import WANDB_RUN_ID_FILE, WandB
+
 from .config import update_dict_with_dotlist
 
 
@@ -30,6 +33,29 @@ class ResumeResultsConfig:
     existing_dir: str
     resume_wandb: bool = False
 
+    def copy_existing_dir(self, dest_dir: str):
+        if not os.path.isdir(self.existing_dir):
+            raise ValueError(f"The directory {self.existing_dir} does not exist.")
+        dist = Distributed.get_instance()
+        if dist.is_root():
+            # recursively copy all files in existing_dir to dest_dir
+            shutil.copytree(self.existing_dir, dest_dir, dirs_exist_ok=True)
+            wandb_run_id_path = os.path.join(dest_dir, WANDB_RUN_ID_FILE)
+            if not self.resume_wandb and os.path.exists(wandb_run_id_path):
+                os.remove(wandb_run_id_path)
+
+    def verify_wandb_resumption(self, experiment_dir: str):
+        wandb = WandB.get_instance()
+        if self.resume_wandb and wandb.enabled:
+            with open(os.path.join(experiment_dir, WANDB_RUN_ID_FILE)) as f:
+                wandb_run_id = f.read().strip()
+            if wandb.get_id() != wandb_run_id:
+                raise ValueError(
+                    f"Expected WandB job ID for resumption is {wandb_run_id} "
+                    f"but the actual ID is {wandb.get_id()}. "
+                    "Is there a bug in ResumeResultsConfig?"
+                )
+
 
 def prepare_config(path: str, override: Sequence[str] | None = None) -> dict:
     """Get config and update with possible dotlist override."""
@@ -40,29 +66,16 @@ def prepare_config(path: str, override: Sequence[str] | None = None) -> dict:
 
 
 def prepare_directory(
-    path: str, config_data: dict, resume_results: ResumeResultsConfig | None = None
-) -> ResumeResultsConfig | None:
+    path: str,
+    config_data: dict,
+):
     """Create experiment directory and dump config_data to it."""
-    if not os.path.isdir(path):
-        os.makedirs(path, exist_ok=True)
-    if resume_results is not None and not os.path.isdir(
-        os.path.join(path, "training_checkpoints")
-    ):
-        if not os.path.isdir(resume_results.existing_dir):
-            raise ValueError(
-                f"The directory {resume_results.existing_dir} does not exist."
-            )
-        # recursively copy all files in resume_results_path to path
-        shutil.copytree(resume_results.existing_dir, path, dirs_exist_ok=True)
-        wandb_run_id_path = os.path.join(path, "wandb_run_id")
-        if not resume_results.resume_wandb and os.path.exists(wandb_run_id_path):
-            os.remove(wandb_run_id_path)
-    else:
-        # either not given or ignored because we already resumed once before
-        resume_results = None
-    with open(os.path.join(path, "config.yaml"), "w") as f:
-        yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
-    return resume_results
+    dist = Distributed.get_instance()
+    if dist.is_root():
+        if not os.path.isdir(path):
+            os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, "config.yaml"), "w") as f:
+            yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
 
 
 def get_parser():

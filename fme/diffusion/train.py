@@ -70,7 +70,12 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
-from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
+from fme.core.generics.trainer import (
+    AggregatorBuilderABC,
+    CheckpointPaths,
+    TrainConfigProtocol,
+    Trainer,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.diffusion.stepper import TrainOutput
 from fme.diffusion.train_config import TrainBuilders, TrainConfig
@@ -195,7 +200,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
     dist = Distributed.get_instance()
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
-    if not os.path.isdir(config.experiment_dir):
+    if not os.path.isdir(config.experiment_dir) and dist.is_root():
         os.makedirs(config.experiment_dir, exist_ok=True)
     config.logging.configure_logging(config.experiment_dir, log_filename="out.log")
     env_vars = logging_utils.retrieve_env_vars()
@@ -209,6 +214,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         logging.info(
             f"Resuming training from results in {config.resume_results.existing_dir}"
         )
+        config.resume_results.verify_wandb_resumption(config.experiment_dir)
     trainer = build_trainer(builders, config)
     try:
         trainer.train()
@@ -218,17 +224,30 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
-    data = prepare_config(yaml_config, override_dotlist)
-    train_config: TrainConfig = dacite.from_dict(
-        data_class=TrainConfig,
-        data=data,
-        config=dacite.Config(strict=True),
-    )
-    train_config.set_random_seed()
-    train_config.resume_results = prepare_directory(
-        train_config.experiment_dir, data, train_config.resume_results
-    )
-    run_train_from_config(train_config)
+    dist = Distributed.get_instance()
+    try:
+        config_data = prepare_config(yaml_config, override=override_dotlist)
+        config = dacite.from_dict(
+            data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
+        )
+        config.set_random_seed()
+        resuming = os.path.isfile(
+            CheckpointPaths(config.checkpoint_dir).latest_checkpoint_path
+        )
+        if resuming:
+            # the experiment directory already has checkpoints, so
+            # resume_results has already been used (if configured)
+            config.resume_results = None
+        if config.resume_results is not None:
+            config.resume_results.copy_existing_dir(dest_dir=config.experiment_dir)
+        prepare_directory(
+            path=config.experiment_dir,
+            config_data=config_data,
+        )
+        dist.barrier()  # ensure root rank preparations complete
+        run_train_from_config(config)
+    finally:
+        dist.shutdown()
 
 
 if __name__ == "__main__":
