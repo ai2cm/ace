@@ -1,6 +1,7 @@
 import datetime
 import pathlib
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import torch
@@ -42,13 +43,15 @@ def logs_to_raw(
             data = torch.as_tensor(np.array(value.image))
             if data.shape[0] * data.shape[1] < max_size:
                 raw_logs[key] = torch.as_tensor(np.array(value.image))
+        elif isinstance(value, plt.Figure):
+            pass  # not comparable
         else:
             raw_logs[key] = value
     return raw_logs
 
 
 def regress_logs(
-    logs: dict[str, float | Image],
+    logs: dict[str, float | Image | plt.Figure],
     label: str,
     max_size: int,
     path: pathlib.Path = DATA_DIR,
@@ -131,9 +134,10 @@ def test_logs_regression():
 
     summary_logs = agg.get_summary_logs()
     for key, value in summary_logs.items():
-        if not isinstance(value, float | Image):
+        if not isinstance(value, float | Image | plt.Figure):
             pytest.fail(
-                f"Summary log {key} is of type {type(value)}, not a float or Image"
+                f"Summary log {key} is of type {type(value)}, "
+                "not a float or Image or plt.Figure"
             )
     if get_device() == torch.device("cpu"):
         regress_logs(
