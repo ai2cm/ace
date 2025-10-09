@@ -447,10 +447,7 @@ class TestDataWriter:
             names=["pressure"],
             lat_extent=(1, 2),
             lon_extent=(1, 3),
-            zarr=ZarrWriterConfig(
-                write_to_zarr=True,
-                overwrite_check=False,
-            ),
+            format=ZarrWriterConfig(),
         )
 
         writer = DataWriter(
@@ -576,10 +573,7 @@ class TestDataWriter:
             label="test_region",
             names=["pressure", "temp"],
             separate_ensemble_members=True,
-            zarr=ZarrWriterConfig(
-                write_to_zarr=True,
-                overwrite_check=False,
-            ),
+            format=ZarrWriterConfig(),
         )
         writer = DataWriter(
             str(tmp_path),
