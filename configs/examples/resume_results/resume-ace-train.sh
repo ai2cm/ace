@@ -15,8 +15,8 @@ EXISTING_RESULTS_DATASET="01K3SEWJ5S6VFPN54DH4PF36RB"  # Update this with your r
 STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean
 N_GPUS=2
 SHARED_MEM="150GiB"
-PRIORITY="normal"
-WORKSPACE="ai2/ace"
+PRIORITY="urgent"
+WORKSPACE="ai2/climate-ceres"
 RETRIES=0
 
 # Override arguments (add any config overrides here)
