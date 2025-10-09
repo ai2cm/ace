@@ -449,7 +449,6 @@ class TestDataWriter:
             lon_extent=(1, 3),
             zarr=ZarrWriterConfig(
                 write_to_zarr=True,
-                allow_existing=True,
                 overwrite_check=False,
             ),
         )
@@ -579,7 +578,6 @@ class TestDataWriter:
             separate_ensemble_members=True,
             zarr=ZarrWriterConfig(
                 write_to_zarr=True,
-                allow_existing=True,
                 overwrite_check=False,
             ),
         )
