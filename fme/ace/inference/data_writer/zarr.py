@@ -63,7 +63,6 @@ class ZarrWriterConfig:
     chunks: dict[str, int] | None = field(
         default_factory=lambda: {"time": 1, "sample": 1}
     )
-    allow_existing: bool = True
     overwrite_check: bool = False
 
 
@@ -82,7 +81,6 @@ class ZarrWriterAdapter:
         dataset_metadata: DatasetMetadata | None = None,
         data_vars: list[str] | None = None,
         chunks: dict[str, int] | None = None,
-        allow_existing: bool = True,
         overwrite_check: bool = False,
     ):
         self.path = path
@@ -103,7 +101,6 @@ class ZarrWriterAdapter:
 
         self._set_chunks(chunks)
 
-        self.allow_existing = allow_existing
         self.overwrite_check = overwrite_check
         # writer is initialized when first batch is seen
         self._writer: ZarrWriter | None = None
@@ -160,7 +157,7 @@ class ZarrWriterAdapter:
             time_units=LEAD_TIME_UNITS,
             time_calendar=None,
             nondim_coords=self._nondim_coords,
-            allow_existing=self.allow_existing,
+            mode="w",  # ACE data writers are expected to overwrite existing data
             overwrite_check=self.overwrite_check,
         )
 
@@ -215,7 +212,6 @@ class SeparateICZarrWriterAdapter:
         dataset_metadata: DatasetMetadata | None = None,
         data_vars: list[str] | None = None,
         chunks: dict[str, int] | None = None,
-        allow_existing: bool = True,
         overwrite_check: bool = False,
     ):
         self.path = path
@@ -226,7 +222,6 @@ class SeparateICZarrWriterAdapter:
         self.n_initial_conditions = n_initial_conditions
         self.data_vars = data_vars
         self.chunks = chunks
-        self.allow_existing = allow_existing
         self.overwrite_check = overwrite_check
         self._writers: list[ZarrWriter] | None = None
 
@@ -276,7 +271,7 @@ class SeparateICZarrWriterAdapter:
                     array_attributes=self.variable_metadata,
                     group_attributes=self.dataset_metadata,
                     nondim_coords=self._nondim_coords,
-                    allow_existing=self.allow_existing,
+                    mode="w",
                     overwrite_check=self.overwrite_check,
                 )
             )

@@ -251,6 +251,7 @@ def run_inference_from_config(config: InferenceConfig):
         total_coupled_steps=config.n_coupled_steps,
         window_requirements=data_requirements,
         initial_condition=initial_condition,
+        dataset_info=stepper.training_dataset_info,
     )
 
     aggregator_config: InferenceAggregatorConfig = config.aggregator

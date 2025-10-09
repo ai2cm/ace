@@ -35,14 +35,12 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     logging.info("Initializing validation data loader")
     validation_data = builder.get_validation_data()
     logging.info("Initializing inline inference data loader")
+    dataset_info = train_data.dataset_info
     inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
-    dataset_info = train_data.dataset_info
     logging.info("Starting model initialization")
-    stepper = builder.get_stepper(
-        train_data.dataset_info,
-    )
+    stepper = builder.get_stepper(dataset_info)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
     batch = next(iter(inference_data.loader))

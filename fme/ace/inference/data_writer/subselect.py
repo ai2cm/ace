@@ -297,7 +297,6 @@ class SubselectWriterConfig:
                 variable_metadata=variable_metadata,
                 dataset_metadata=dataset_metadata,
                 chunks=self.zarr.chunks,
-                allow_existing=self.zarr.allow_existing,
                 overwrite_check=self.zarr.overwrite_check,
             )
         else:
