@@ -1,5 +1,8 @@
 experiment_dir: /results
 save_checkpoint: true
+save_best_inference_epoch_checkpoints: true
+checkpoint_every_n_batches: 120
+log_train_every_n_batches: 20
 validate_using_ema: true
 ema:
   decay: 0.999
@@ -14,39 +17,35 @@ inference:
       ocean:
         merge:
         - data_path: /climate-default
-          file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-ocean.zarr
+          file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
           engine: zarr
-          subset:
-            start_time: '0151-01-06'
         - data_path: /climate-default
-          file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+          file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
           engine: zarr
-          subset:
-            start_time: '0151-01-06'
       atmosphere:
         merge:
         - data_path: /climate-default
-          file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
+          file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
           engine: zarr
           subset:
-            # NOTE: this is required to align the atmosphere and ocean start times
-            start_time: '0151-01-06'
+            # NOTE: this is required to align the atmosphere to the ocean start time
+            start_time: '0151-01-03T12:00:00' # earlier times nan
         - data_path: /climate-default
           file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
           engine: zarr
           subset:
-            # NOTE: this is required to align the atmosphere and ocean start times
-            start_time: '0151-01-06'
+            # NOTE: this is required to align the atmosphere to the ocean start time
+            start_time: '0151-01-03T12:00:00' # earlier times nan
     start_indices:
       times:
-        - '0151-01-06T00:00:00'
-        - '0171-01-06T00:00:00'
-        - '0191-01-06T00:00:00'
-        - '0211-01-06T00:00:00'
-        - '0231-01-06T00:00:00'
-        - '0251-01-06T00:00:00'
-        - '0271-01-06T00:00:00'
-        - '0291-01-06T00:00:00'
+      - '0151-01-03T12:00:00'
+      - '0171-01-03T12:00:00'
+      - '0191-01-03T12:00:00'
+      - '0211-01-03T12:00:00'
+      - '0231-01-03T12:00:00'
+      - '0251-01-03T12:00:00'
+      - '0271-01-03T12:00:00'
+      - '0291-01-03T12:00:00'
   aggregator:
     log_zonal_mean_images: false
     log_histograms: false
@@ -64,31 +63,31 @@ train_loader:
     - ocean:
         merge:
         - data_path: /climate-default
-          file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-ocean.zarr
+          file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-06'
-            stop_time: '0306-01-01'
+            start_time: '0151-01-03T12:00:00'
+            stop_time: '0306-01-03T12:00:00'
         - data_path: /climate-default
-          file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+          file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-06'
-            stop_time: '0306-01-01'
+            start_time: '0151-01-03T12:00:00'
+            stop_time: '0306-01-03T12:00:00'
       atmosphere:
         merge:
         - data_path: /climate-default
-          file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
+          file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-06'
-            stop_time: '0306-01-01'
+            start_time: '0151-01-03T12:00:00'
+            stop_time: '0306-01-03T12:00:00'
         - data_path: /climate-default
           file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-06'
-            stop_time: '0306-01-01'
+            start_time: '0151-01-03T12:00:00'
+            stop_time: '0306-01-03T12:00:00'
 validation_loader:
   batch_size: 16
   num_data_workers: 4
@@ -97,38 +96,50 @@ validation_loader:
     - ocean:
         merge:
         - data_path: /climate-default
-          file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-ocean.zarr
+          file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
           engine: zarr
           subset:
-            start_time: '0306-01-01'
-            stop_time: '0311-01-01'
+            start_time: '0306-01-03T12:00:00'
+            stop_time: '0311-01-03T12:00:00'
         - data_path: /climate-default
-          file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+          file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
           engine: zarr
           subset:
-            start_time: '0306-01-01'
-            stop_time: '0311-01-01'
+            start_time: '0306-01-03T12:00:00'
+            stop_time: '0311-01-03T12:00:00'
       atmosphere:
         merge:
         - data_path: /climate-default
-          file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
+          file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
           engine: zarr
           subset:
-            start_time: '0306-01-01'
-            stop_time: '0311-01-01'
+            start_time: '0306-01-03T12:00:00'
+            stop_time: '0311-01-03T12:00:00'
         - data_path: /climate-default
           file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
           engine: zarr
           subset:
-            start_time: '0306-01-01'
-            stop_time: '0311-01-01'
+            start_time: '0306-01-03T12:00:00'
+            stop_time: '0311-01-03T12:00:00'
 optimization:
+  use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  optimizer_type: FusedAdam
+  optimizer_type: AdamW
   kwargs:
+    fused: true
     weight_decay: 0.01
-  use_gradient_accumulation: true
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 1414
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [1414]
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction

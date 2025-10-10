@@ -21,13 +21,15 @@ cd "$REPO_ROOT"  # so config path is valid no matter where we are running this s
 
 while read TRAIN_EXPER; do
     JOB_GROUP=$(echo "$TRAIN_EXPER" | cut -d"|" -f1)
-    JOB_TAG=$(echo "$TRAIN_EXPER" | cut -d"|" -f2)
-    EXPER_ID=$(echo "$TRAIN_EXPER" | cut -d"|" -f3)
-    STATUS=$(echo "$TRAIN_EXPER" | cut -d"|" -f4)
-    CKPT=$(echo "$TRAIN_EXPER" | cut -d"|" -f5)
-    PRIORITY=$(echo "$TRAIN_EXPER" | cut -d"|" -f6)
-    PREEMPTIBLE=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
-    OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
+    EXPER_ID=$(echo "$TRAIN_EXPER" | cut -d"|" -f2)
+    STATUS=$(echo "$TRAIN_EXPER" | cut -d"|" -f3)
+    CKPT=$(echo "$TRAIN_EXPER" | cut -d"|" -f4)
+    PRIORITY=$(echo "$TRAIN_EXPER" | cut -d"|" -f5)
+    PREEMPTIBLE=$(echo "$TRAIN_EXPER" | cut -d"|" -f6)
+    OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
+    # can be used in place of EXPER_ID in case the final results dataset is not desired
+    EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
+    WORKSPACE=$(echo "$TRAIN_EXPER" | cut -d"|" -f9)
     # Check if STATUS starts with "run_"
     if [[ ! "$STATUS" =~ ^run_ ]]; then
         continue
@@ -39,10 +41,15 @@ while read TRAIN_EXPER; do
     CURRENT_CONFIG_TAG=${STATUS#run_}
     CURRENT_CONFIG_FILENAME="evaluator-config-${CURRENT_CONFIG_TAG}.yaml"
 
-    if [[ -z $JOB_TAG ]]; then
-        JOB_NAME="${JOB_GROUP}-evaluator_${CKPT}-${CURRENT_CONFIG_TAG}"
+    JOB_NAME="${JOB_GROUP}-evaluator_${CKPT}-${CURRENT_CONFIG_TAG}"
+
+    # Determine which fme module to use based on CONFIG_SUBDIR
+    if [[ "$CONFIG_SUBDIR" =~ ^coupled ]]; then
+        FME_MODULE_VALIDATE="fme.coupled.validate_config"
+        FME_MODULE_EVALUATOR="fme.coupled.evaluator"
     else
-        JOB_NAME="${JOB_GROUP}--${JOB_TAG}--evaluator_${CKPT}-${CURRENT_CONFIG_TAG}"
+        FME_MODULE_VALIDATE="fme.ace.validate_config"
+        FME_MODULE_EVALUATOR="fme.ace.evaluator"
     fi
 
     # Construct the full path to the configuration file for the current experiment
@@ -58,14 +65,19 @@ while read TRAIN_EXPER; do
     if [[ -z $PREEMPTIBLE ]]; then
         PREEMPTIBLE=--not-preemptible
     fi
+    if [[ -z $EXISTING_RESULTS_DATASET ]]; then
+        EXISTING_RESULTS_DATASET=$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4)
+    fi
 
-    EXISTING_RESULTS_DATASET=$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4)
+    if [[ -z "$WORKSPACE" ]]; then
+        WORKSPACE=ai2/ace
+    fi
+
     echo
-    echo "Launching evaluator job:"
+    echo "Launching ${CONFIG_SUBDIR} evaluator job:"
     echo " - Config path: ${CONFIG_PATH}"
     echo " - Group: ${JOB_GROUP}"
     echo " - Checkpoint: ${CKPT}"
-    echo " - Training experiment ID: ${EXPER_ID}"
     echo " - Training results dataset ID: ${EXISTING_RESULTS_DATASET}"
     echo " - Priority: ${PRIORITY}"
     echo " - ${PREEMPTIBLE}"
@@ -73,17 +85,17 @@ while read TRAIN_EXPER; do
 
     echo
 
-    python -m fme.coupled.validate_config --config_type evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
+    python -m $FME_MODULE_VALIDATE --config_type evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
 
     echo $JOB_NAME
     gantry run \
         --name $JOB_NAME \
-        --description 'Run ACE coupled evaluator' \
+        --description "Run ${CONFIG_SUBDIR} evaluator" \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/climate-ceres \
         --priority $PRIORITY \
         $PREEMPTIBLE \
-        --cluster ai2/ceres-cirrascale \
+        --cluster ceres \
+        --workspace $WORKSPACE \
         --weka climate-default:/climate-default \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
@@ -96,8 +108,8 @@ while read TRAIN_EXPER; do
         --gpus 1 \
         --shared-memory 20GiB \
         --budget ai2/climate \
-        --no-conda \
+        --system-python \
         --install "pip install --no-deps ." \
-        -- python -I -m fme.coupled.evaluator $CONFIG_PATH --override $OVERRIDE_ARGS
+        -- python -I -m $FME_MODULE_EVALUATOR $CONFIG_PATH --override $OVERRIDE_ARGS
     echo
 done <"${SCRIPT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
