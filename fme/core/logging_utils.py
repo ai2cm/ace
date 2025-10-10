@@ -6,8 +6,7 @@ import warnings
 from collections.abc import Mapping
 from typing import Any
 
-import fsspec
-
+from fme.core.cloud import is_local
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
@@ -67,7 +66,7 @@ class LoggingConfig:
             logging.basicConfig(level=logging.ERROR)
         logger = logging.getLogger()
         if self.log_to_file and self._dist.is_root():
-            if fsspec.url_to_fs(experiment_dir)[0] != "file":
+            if not is_local(experiment_dir):
                 warnings.warn(
                     "Logging to a file is only supported for if the experiment "
                     "directory is on a local file system. Got experiment "
