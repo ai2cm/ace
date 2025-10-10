@@ -12,10 +12,4 @@ fto-vxi6yc4m-cos_lr_10ep|01K5WTPNMS0AFHGG1G9Y1PQDE0|trained|ema_ckpt|normal|--no
 fto-vxi6yc4m-cos_lr_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
 fto-ojyzoqli-cooldown_lr_2ep|01K6BD53R4R9PT27E22T5WT2QQ|trained|best_inference_ckpt|normal|--not-preemptible
 fto-ojyzoqli-cooldown_lr_2ep-ncs2|01K6DPHQZBAP1S1AKWSSTDA5XG|training|best_inference_ckpt|normal|--not-preemptible
-fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|run_200yr|best_inference_ckpt|normal|--not-preemptible
-fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|run_200yr0311|best_inference_ckpt|normal|--not-preemptible
-fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|run_200yr0313|best_inference_ckpt|normal|--not-preemptible
-fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|run_200yr0315|best_inference_ckpt|normal|--not-preemptible
-fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|run_200yr0317|best_inference_ckpt|normal|--not-preemptible
-fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|run_200yr0318|best_inference_ckpt|normal|--not-preemptible
+fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|run_200yr0319|best_inference_ckpt|normal|--not-preemptible
