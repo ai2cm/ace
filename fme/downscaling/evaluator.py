@@ -1,9 +1,7 @@
 import argparse
 import dataclasses
 import logging
-from collections.abc import Mapping
-from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Literal
 
 import dacite
 import torch
@@ -11,7 +9,6 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -20,24 +17,20 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
 from fme.downscaling.data import (
-    ClosedInterval,
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
 )
 from fme.downscaling.models import (
+    CheckpointModelConfig,
     DiffusionModel,
-    DiffusionModelConfig,
     DownscalingModelConfig,
     Model,
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.patching import (
-    MultipatchConfig,
-    PatchPredictor,
-    paired_patch_generator_from_loader,
-)
+from fme.downscaling.predict import EventConfig
+from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -86,61 +79,6 @@ class InterpolateModelConfig:
         )
 
 
-@dataclasses.dataclass
-class _CheckpointModelConfigSelector:
-    wrapper: DownscalingModelConfig | DiffusionModelConfig
-
-    @classmethod
-    def from_state(
-        cls, state: Mapping[str, Any]
-    ) -> DownscalingModelConfig | DiffusionModelConfig:
-        return dacite.from_dict(
-            data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
-        ).wrapper
-
-
-@dataclasses.dataclass
-class CheckpointModelConfig:
-    checkpoint_path: str
-
-    def __post_init__(self) -> None:
-        # For config validation testing, we don't want to load immediately
-        # so we defer until build or properties are accessed.
-        self._checkpoint_is_loaded = False
-
-    @property
-    def _checkpoint(self) -> Mapping[str, Any]:
-        if not self._checkpoint_is_loaded:
-            self._checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
-            self._checkpoint_is_loaded = True
-        return self._checkpoint_data
-
-    def build(
-        self,
-    ) -> Model | DiffusionModel:
-        model = _CheckpointModelConfigSelector.from_state(
-            self._checkpoint["model"]["config"]
-        ).build(
-            coarse_shape=self._checkpoint["model"]["coarse_shape"],
-            downscale_factor=self._checkpoint["model"]["downscale_factor"],
-        )
-        model.module.load_state_dict(self._checkpoint["model"]["module"])
-        return model
-
-    @property
-    def data_requirements(self) -> DataRequirements:
-        in_names = self._checkpoint["model"]["config"]["in_names"]
-        out_names = self._checkpoint["model"]["config"]["out_names"]
-        return DataRequirements(
-            fine_names=out_names,
-            coarse_names=list(set(in_names).union(out_names)),
-            n_timesteps=1,
-            use_fine_topography=self._checkpoint["model"]["config"][
-                "use_fine_topography"
-            ],
-        )
-
-
 class Evaluator:
     def __init__(
         self,
@@ -162,22 +100,22 @@ class Evaluator:
             self.data.dims,
             self.model.downscale_factor,
             include_positional_comparisons=False if self.patch_data else True,
+            percentiles=[99.99, 99.9999],
         )
 
         if self.patch_data:
-            batch_generator = paired_patch_generator_from_loader(
-                loader=self.data.loader,
-                coarse_yx_extent=self.data.coarse_shape,
-                coarse_yx_patch_extents=self.model.coarse_shape,
-                downscale_factor=self.model.downscale_factor,
+            batch_generator = self.data.get_patched_generator(
+                coarse_yx_patch_extent=self.model.coarse_shape,
             )
         else:
-            batch_generator = self.data.loader
+            batch_generator = self.data.get_generator()
 
-        for i, batch in enumerate(batch_generator):
+        for i, (batch, topography) in enumerate(batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
-                outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
+                outputs = self.model.generate_on_batch(
+                    batch, topography, n_samples=self.n_samples
+                )
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
@@ -242,7 +180,9 @@ class EventEvaluator:
                 f"Generating samples {start_idx} to {end_idx} "
                 f"for event {self.event_name}"
             )
-            outputs = self.model.generate_on_batch(batch, n_samples=end_idx - start_idx)
+            outputs = self.model.generate_on_batch(
+                batch, self.data.topography, n_samples=end_idx - start_idx
+            )
             sample_agg.record_batch(outputs.prediction)
 
         to_log = sample_agg.get_wandb()
@@ -262,38 +202,16 @@ class EventEvaluator:
 
 
 @dataclasses.dataclass
-class EventConfig:
-    name: str
-    date: str
-    lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
-    )
-    lon_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
-    )
-    n_samples: int = 64
-    date_format: str = "%Y-%m-%dT%H:%M"
-    save_generated_samples: bool = False
-
-    def get_gridded_data(
+class PairedEventConfig(EventConfig):
+    def get_paired_gridded_data(
         self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
     ) -> PairedGriddedData:
-        # Event evaluation only load the first snapshot.
-        # Filling the slice stop isn't necessary but guards against
-        # future code trying to iterate over the entire dataloader.
-        _stop = (
-            datetime.strptime(self.date, self.date_format) + timedelta(hours=6)
-        ).strftime(self.date_format)
-
-        time_slice = TimeSlice(self.date, _stop)
-
+        time_slice = self._time_selection_slice
         event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
         event_coarse = dataclasses.replace(
             base_data_config.coarse_full_config[0], subset=time_slice
         )
-
         n_processes = Distributed.get_instance().world_size
-
         event_data_config = dataclasses.replace(
             base_data_config,
             fine=[event_fine],
@@ -313,8 +231,10 @@ class EvaluatorConfig:
     data: PairedDataLoaderConfig
     logging: LoggingConfig
     n_samples: int = 4
-    patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
-    events: list[EventConfig] | None = None
+    patch: PatchPredictionConfig = dataclasses.field(
+        default_factory=PatchPredictionConfig
+    )
+    events: list[PairedEventConfig] | None = None
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -336,13 +256,15 @@ class EvaluatorConfig:
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
                 model,
-                dataset.coarse_shape,
+                coarse_yx_patch_extent=model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         else:
             evaluator_model = model
 
         if self.patch.divide_generation and not self.patch.composite_prediction:
+            # Subdivide evaluation into patches, do not composite them together
+            # No maps will be saved for this configuration.
             patch_data = True
         else:
             patch_data = False
@@ -357,12 +279,12 @@ class EvaluatorConfig:
 
     def _build_event_evaluator(
         self,
-        event_config: EventConfig,
+        event_config: PairedEventConfig,
     ) -> EventEvaluator:
         model = self.model.build()
         evaluator_model: Model | DiffusionModel | PatchPredictor
 
-        dataset = event_config.get_gridded_data(
+        dataset = event_config.get_paired_gridded_data(
             base_data_config=self.data, requirements=self.model.data_requirements
         )
 
@@ -370,8 +292,8 @@ class EvaluatorConfig:
             dataset.coarse_shape[1] > model.coarse_shape[1]
         ):
             evaluator_model = PatchPredictor(
-                model,
-                dataset.coarse_shape,
+                model=model,
+                coarse_yx_patch_extent=model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         else:

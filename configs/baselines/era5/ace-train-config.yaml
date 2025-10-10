@@ -1,3 +1,4 @@
+# arg: --dataset oliverwm/era5-1deg-8layer-stats-1990-2019-v2:/statsdata
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true

@@ -5,10 +5,12 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
+from fme.downscaling.data import Topography
 from fme.downscaling.models import (
     DiffusionModelConfig,
     DownscalingModelConfig,
@@ -62,10 +64,6 @@ class DummyModule(torch.nn.Module):
 def get_mock_batch(shape, topography_scale_factor: int = 1):
     batch = MagicMock()
     batch.data = {"x": torch.ones(*shape, device=get_device())}
-    topography_shape = tuple(
-        [shape[0]] + [dim * topography_scale_factor for dim in shape[1:]]
-    )
-    batch.topography = torch.ones(*topography_shape, device=get_device())
     return batch
 
 
@@ -112,9 +110,11 @@ def test_train_and_generate(use_opt):
     )
     if use_opt:
         optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
-        outputs = model.train_on_batch(batch, optimization)
+        outputs = model.train_on_batch(
+            batch, topography=None, optimization=optimization
+        )
     else:
-        outputs = model.generate_on_batch(batch)
+        outputs = model.generate_on_batch(batch, topography=None)
 
     assert outputs.prediction.keys() == outputs.target.keys()
     for k in outputs.prediction:
@@ -181,14 +181,17 @@ def test_serialization(tmp_path):
     batch = get_mock_paired_batch(
         [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
-    expected = model.generate_on_batch(batch).prediction["x"]
+    expected = model.generate_on_batch(
+        batch,
+        topography=None,
+    ).prediction["x"]
 
     model_from_state = Model.from_state(
         model.get_state(),
     )
     torch.testing.assert_close(
         expected,
-        model_from_state.generate_on_batch(batch).prediction["x"],
+        model_from_state.generate_on_batch(batch, topography=None).prediction["x"],
     )
 
     torch.save(model.get_state(), tmp_path / "test.ckpt")
@@ -197,7 +200,10 @@ def test_serialization(tmp_path):
     )
     torch.testing.assert_close(
         expected,
-        model_from_disk.generate_on_batch(batch).prediction["x"],
+        model_from_disk.generate_on_batch(
+            batch,
+            topography=None,
+        ).prediction["x"],
     )
 
 
@@ -246,21 +252,26 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
     assert model._get_fine_shape(coarse_shape) == fine_shape
 
     batch_size = 2
-    if use_fine_topography:
-        topography = torch.ones(batch_size, *fine_shape, device=get_device())
-    else:
-        topography = None
+
     batch = get_mock_paired_batch(
         [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
-    batch.fine.topography = topography
+    if use_fine_topography:
+        topography = Topography(
+            torch.ones(*fine_shape, device=get_device()),
+            LatLonCoordinates(
+                lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
+            ),
+        )
+    else:
+        topography = None
     optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
-    train_outputs = model.train_on_batch(batch, optimization)
+    train_outputs = model.train_on_batch(batch, topography, optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
 
     n_generated_samples = 2
     generated_outputs = [
-        model.generate_on_batch(batch) for _ in range(n_generated_samples)
+        model.generate_on_batch(batch, topography) for _ in range(n_generated_samples)
     ]
 
     for generated_output in generated_outputs:
@@ -407,7 +418,7 @@ def test_model_error_cases(model_config):
     # missing fine topography when model requires it
     batch.fine.topography = None
     with pytest.raises(ValueError):
-        model.generate_on_batch(batch)
+        model.generate_on_batch(batch, topography=None)
 
 
 def test_DiffusionModel_generate_on_batch_no_target():
@@ -428,8 +439,13 @@ def test_DiffusionModel_generate_on_batch_no_target():
     coarse_batch = get_mock_batch(
         [batch_size, *coarse_shape], topography_scale_factor=downscale_factor
     )
+    topography = Topography(
+        torch.rand(*fine_shape, device=get_device()),
+        LatLonCoordinates(lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])),
+    )
     samples = model.generate_on_batch_no_target(
         coarse_batch,
+        topography=topography,
         n_samples=n_generated_samples,
     )
 
@@ -461,9 +477,12 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
             [batch_size, *alternative_input_shape],
             topography_scale_factor=downscale_factor,
         )
+        topography = Topography(
+            torch.rand(*fine_shape, device=get_device()),
+            LatLonCoordinates(torch.ones(fine_shape[0]), torch.ones(fine_shape[1])),
+        )
         samples = model.generate_on_batch_no_target(
-            coarse_batch,
-            n_samples=n_ensemble,
+            coarse_batch, n_samples=n_ensemble, topography=topography
         )
 
         assert samples["x"].shape == (

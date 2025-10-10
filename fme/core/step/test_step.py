@@ -14,7 +14,7 @@ from torch import nn
 
 import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
-from fme.ace.step.fcn2 import FCN2Config, FCN2Selector, FCN2StepConfig
+from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
@@ -160,6 +160,7 @@ def get_single_module_noise_conditioned_selector(
                             noise_type="isotropic",
                             num_layers=2,
                             local_blocks=[0],
+                            affine_norms=True,
                         )
                     ),
                 ),
@@ -250,7 +251,7 @@ def get_single_module_with_atmosphere_corrector_selector(
     )
 
 
-def get_fcn2_selector(
+def get_fcn3_selector(
     dir: pathlib.Path | None = None,
 ) -> StepSelector:
     forcing_names = [
@@ -294,10 +295,10 @@ def get_fcn2_selector(
         ),
         dir=dir,
     )
-    step_config = FCN2StepConfig(
-        builder=FCN2Selector(
-            type="FCN2",
-            config=FCN2Config(
+    step_config = FCN3StepConfig(
+        builder=FCN3Selector(
+            type="FCN3",
+            config=FCN3Config(
                 scale_factor=1,
                 atmo_embed_dim=2,
                 surf_embed_dim=2,
@@ -321,7 +322,7 @@ def get_fcn2_selector(
         ),
     )
     return StepSelector(
-        type="FCN2",
+        type="FCN3",
         config=dataclasses.asdict(step_config),
     )
 
@@ -350,7 +351,7 @@ def get_multi_call_selector(
 SEPARATE_RADIATION_CONFIG = get_separate_radiation_config()
 
 SELECTOR_GETTERS = [
-    get_fcn2_selector,
+    get_fcn3_selector,
     get_single_module_with_atmosphere_corrector_selector,
     get_separate_radiation_selector,
     get_single_module_selector,

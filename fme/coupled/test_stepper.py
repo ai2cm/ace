@@ -22,7 +22,7 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.dataset_info import DatasetInfo
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
@@ -657,6 +657,101 @@ def test_config_parameter_init_error():
         )
 
 
+OCN_FRAC = CoupledOceanFractionConfig(
+    sea_ice_fraction_name="sea_ice_fraction",
+    land_fraction_name="land_fraction",
+)
+
+OCN_FRAC_OSIC = CoupledOceanFractionConfig(
+    sea_ice_fraction_name="ocean_sea_ice_fraction",
+    land_fraction_name="land_fraction",
+    sea_ice_fraction_name_in_atmosphere="sea_ice_fraction",
+)
+
+
+@pytest.mark.parametrize(
+    "in_out_names, ocean_fraction_prediction, expectations",
+    [
+        (  # atmosphere does not have sea ice input
+            # ocean does not predict ocean fraction
+            ForcingInputs(
+                ["land_fraction", "ocean_frac", "sfc_temp"],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag"],
+                ["sst"],
+            ),
+            None,
+            [
+                "land_fraction",
+                "ocean_frac",
+            ],
+        ),
+        (  # atmosphere has sea ice input, ocean does not predict ocean fraction
+            ForcingInputs(
+                ["land_fraction", "ocean_frac", "sfc_temp", "sea_ice_fraction"],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag"],
+                ["sst"],
+            ),
+            None,
+            [
+                "sea_ice_fraction",
+                "land_fraction",
+                "ocean_frac",
+            ],
+        ),
+        (  # atmosphere has sea ice input, ocean predicts same sea ice name
+            ForcingInputs(
+                [
+                    "land_fraction",
+                    "ocean_frac",
+                    "sfc_temp",
+                    OCN_FRAC.sea_ice_fraction_name,
+                ],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag", OCN_FRAC.sea_ice_fraction_name],
+                ["sst", OCN_FRAC.sea_ice_fraction_name],
+            ),
+            OCN_FRAC,
+            ["land_fraction"],
+        ),
+        (  # atmosphere has sea ice input, ocean predicts a different sea ice name
+            ForcingInputs(
+                [
+                    "land_fraction",
+                    "ocean_frac",
+                    "sfc_temp",
+                    OCN_FRAC_OSIC.sea_ice_fraction_name_in_atmosphere,
+                ],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag", OCN_FRAC_OSIC.sea_ice_fraction_name],
+                ["sst", OCN_FRAC_OSIC.sea_ice_fraction_name],
+            ),
+            OCN_FRAC_OSIC,
+            ["land_fraction"],
+        ),
+    ],
+)
+def test_config_atmosphere_forcing_exogenous_names(
+    in_out_names, ocean_fraction_prediction, expectations
+):
+    ocean_in_names = in_out_names.ocean_in
+    ocean_out_names = in_out_names.ocean_out
+    atmos_in_names = in_out_names.atmos_in
+    atmos_out_names = in_out_names.atmos_out
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_fraction_prediction=ocean_fraction_prediction,
+    )
+    assert sorted(config.atmosphere_forcing_exogenous_names) == sorted(expectations)
+
+
 SphericalData = namedtuple(
     "SphericalData",
     [
@@ -800,7 +895,7 @@ def get_stepper_config(
                     ),
                 ),
                 parameter_init=atmosphere_parameter_init,
-                loss=WeightedMappingLossConfig(type="MSE"),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
@@ -825,7 +920,7 @@ def get_stepper_config(
                     ),
                 ),
                 parameter_init=ocean_parameter_init,
-                loss=WeightedMappingLossConfig(type="MSE"),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name=sst_name_in_ocean_data,
@@ -1341,7 +1436,7 @@ def test_reloaded_stepper_gives_same_prediction():
                         ),
                     ),
                 ),
-                loss=WeightedMappingLossConfig(type="MSE"),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
@@ -1367,7 +1462,7 @@ def test_reloaded_stepper_gives_same_prediction():
                         ),
                     ),
                 ),
-                loss=WeightedMappingLossConfig(type="MSE"),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name="o_sfc",

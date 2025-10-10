@@ -67,7 +67,6 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
     batch = next(iter(data.loader))
     # lat/lon midpoints are on (0.5, 1.5, ...)
     assert batch.data["x"].shape == (2, 3, 3)
-    assert batch.topography.shape == (2, 6, 6)
 
 
 def test_XarrayEnsembleDataConfig():
@@ -106,5 +105,4 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
         sample_with_replacement=n_sample,
     )
     data = data_config.build(requirements=requirements, train=True)
-    epoch_samples = list(data.loader)
-    assert len(epoch_samples) == n_sample
+    assert len(data.loader) == n_sample

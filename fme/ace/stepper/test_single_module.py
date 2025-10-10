@@ -47,7 +47,7 @@ from fme.core.coordinates import (
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
@@ -183,7 +183,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
                     )
                 ),
             ),
-            loss=WeightedMappingLossConfig(type="MSE"),
+            loss=StepLossConfig(type="MSE"),
         )
 
     config = get_stepper_config(
@@ -257,7 +257,7 @@ def test_train_on_batch_addition_series():
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
@@ -320,7 +320,7 @@ def test_train_on_batch_crps_loss():
             ),
         ),
         n_ensemble=2,
-        loss=WeightedMappingLossConfig(
+        loss=StepLossConfig(
             type="EnsembleLoss",
             kwargs={
                 "crps_weight": 0.1,
@@ -370,7 +370,7 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
         ),
         optimize_last_step_only=optimize_last_step_only,
         n_ensemble=2,
-        loss=WeightedMappingLossConfig(
+        loss=StepLossConfig(
             type="EnsembleLoss",
             kwargs={
                 "crps_weight": 0.1,
@@ -472,7 +472,7 @@ def test_reloaded_stepper_gives_same_prediction():
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
@@ -590,7 +590,7 @@ def _setup_and_train_on_batch(
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
 
     dataset_info = get_dataset_info()
@@ -940,7 +940,7 @@ def _get_stepper(
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     return config.get_stepper(dataset_info)
@@ -999,6 +999,28 @@ def test_step_with_prescribed_ocean():
     torch.testing.assert_close(output["a"], expected_a_output)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
     assert set(output) == {"a", "b"}
+
+
+def test_prescribe_sst_integration():
+    """Test that prescribe_sst produces the same prescription as step method."""
+    stepper = _get_stepper(
+        ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
+    )
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
+    prescribed_data = stepper.prescribe_sst(
+        mask_data=ocean_data,
+        gen_data=input_data,
+        target_data=ocean_data,
+    )
+    expected_prescribed_a = torch.where(
+        torch.round(ocean_data["mask"]).to(int) == 1,
+        ocean_data["a"],
+        input_data["a"],  # no +1
+    )
+    torch.testing.assert_close(prescribed_data["a"], expected_prescribed_a)
+    torch.testing.assert_close(prescribed_data["b"], input_data["b"])
+    assert set(prescribed_data) == {"a", "b"}
 
 
 def get_data_for_predict(
@@ -1200,11 +1222,11 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     stepper_from_state = Stepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
-        assert stepper.loss_obj.normalizer.means == {
+        assert stepper.loss_obj._normalizer.means == {
             **residual_means,
             "diagnostic": full_field_means["diagnostic"],
         }
-        assert stepper.loss_obj.normalizer.stds == {
+        assert stepper.loss_obj._normalizer.stds == {
             **residual_stds,
             "diagnostic": full_field_stds["diagnostic"],
         }
@@ -1306,13 +1328,13 @@ def get_regression_stepper_and_data(
     all_names = list(set(in_names + out_names))
 
     if crps_training:
-        loss = WeightedMappingLossConfig(
+        loss = StepLossConfig(
             type="EnsembleLoss",
             kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
         )
         n_ensemble: int = 2
     else:
-        loss = WeightedMappingLossConfig(type="MSE")
+        loss = StepLossConfig(type="MSE")
         n_ensemble = 1
 
     config = StepperConfig(

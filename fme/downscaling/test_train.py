@@ -91,17 +91,17 @@ def create_test_data_on_disk(
     unlimited_dims = ["time"] if "time" in ds.dims else None
 
     ds.to_netcdf(filename, unlimited_dims=unlimited_dims, format="NETCDF4_CLASSIC")
-
     return filename
 
 
-def data_paths_helper(tmp_path) -> FineResCoarseResPair[str]:
+def data_paths_helper(tmp_path, rename: dict = {}) -> FineResCoarseResPair[str]:
     dim_sizes = FineResCoarseResPair[dict[str, int]](
         fine={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
         coarse={"time": NUM_TIMESTEPS, "lat": 8, "lon": 8},
     )
 
     variable_names = ["x", "y", "HGTsfc"]
+    variable_names = [rename.get(v, v) for v in variable_names]
     fine_path = tmp_path / "fine"
     coarse_path = tmp_path / "coarse"
     fine_path.mkdir()
@@ -349,14 +349,22 @@ def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
     null_optimization = NullOptimization()
 
     batch = next(iter(trainer.train_data.loader))
-    outputs1 = trainer.model.train_on_batch(batch, null_optimization)
-    outputs2 = trainer.model.train_on_batch(batch, null_optimization)
+    outputs1 = trainer.model.train_on_batch(
+        batch, topography=None, optimization=null_optimization
+    )
+    outputs2 = trainer.model.train_on_batch(
+        batch, topography=None, optimization=null_optimization
+    )
     assert not torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
     trainer.valid_one_epoch()
     assert not trainer.model.module.training
-    outputs1 = trainer.model.train_on_batch(batch, null_optimization)
-    outputs2 = trainer.model.train_on_batch(batch, null_optimization)
+    outputs1 = trainer.model.train_on_batch(
+        batch, topography=None, optimization=null_optimization
+    )
+    outputs2 = trainer.model.train_on_batch(
+        batch, topography=None, optimization=null_optimization
+    )
     assert torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
 

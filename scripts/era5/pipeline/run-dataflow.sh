@@ -18,7 +18,7 @@ python3 xr-beam-pipeline.py \
     --experiments use_runner_v2 \
     --runner $RUNNER \
     --sdk_location container \
-    --sdk_container_image us.gcr.io/vcm-ml/era5-ingest-dataflow:2024-03-11-era5-xarray-beam-pipelines \
+    --sdk_container_image us-central1-docker.pkg.dev/vcm-ml/full-model/era5-ingest-dataflow:2025-10-07-era5-xarray-beam-pipelines \
     --save_main_session \
     --num_workers 1 \
     --disk_size_gb 70 \

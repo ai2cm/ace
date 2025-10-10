@@ -1,13 +1,16 @@
 import dataclasses
+import logging
 from math import ceil
 
 import torch
 
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
+    ForcingDataLoaderConfig,
     InferenceInitialConditionIndices,
     TimestampList,
 )
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData
 from fme.coupled.data_loading.config import CoupledDatasetConfig
@@ -15,6 +18,7 @@ from fme.coupled.data_loading.data_typing import (
     CoupledDataset,
     CoupledDatasetProperties,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
 
 
@@ -64,6 +68,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         config: InferenceDataLoaderConfig,
         total_coupled_steps: int,
         requirements: CoupledDataRequirements,
+        dataset_info: CoupledDatasetInfo | None = None,
     ):
         ocean_reqs = requirements.ocean_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
@@ -72,6 +77,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         ocean, ocean_properties = config.dataset.ocean.build(
             ocean_reqs.names, ocean_reqs.n_timesteps
         )
+        ocean_properties = self._update_ocean_mask(ocean_properties, dataset_info)
         atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
             atmosphere_reqs.names, atmosphere_reqs.n_timesteps
         )
@@ -94,6 +100,29 @@ class InferenceDataset(torch.utils.data.Dataset):
             self._start_indices = config.start_indices.as_indices(dataset.all_ic_times)
         else:
             self._start_indices = config.start_indices.as_indices()
+
+    def _update_ocean_mask(
+        self,
+        ocean_properties: DatasetProperties,
+        dataset_info: CoupledDatasetInfo | None,
+    ) -> DatasetProperties:
+        if dataset_info is None:
+            return ocean_properties
+        ocean_mask_is_empty = not ocean_properties.mask_provider.masks
+        identical_masks = (
+            len(ocean_properties.mask_provider.masks) > 0
+            and len(dataset_info.ocean.mask_provider.masks) > 0
+            and ocean_properties.mask_provider == dataset_info.ocean.mask_provider
+        )
+        if ocean_mask_is_empty or identical_masks:
+            ocean_properties.update_mask_provider(dataset_info.ocean.mask_provider)
+        else:
+            logging.warning(
+                "Not updating ocean mask provider from dataset info in the checkpoint"
+                "because the existing mask provider is not empty or the masks are not"
+                "identical."
+            )
+        return ocean_properties
 
     def _get_batch_data(self, index) -> CoupledBatchData:
         dist = Distributed.get_instance()
@@ -133,3 +162,20 @@ class InferenceDataset(torch.utils.data.Dataset):
     @property
     def properties(self) -> CoupledDatasetProperties:
         return self._properties
+
+
+@dataclasses.dataclass
+class CoupledForcingDataLoaderConfig:
+    ocean: ForcingDataLoaderConfig
+    atmosphere: ForcingDataLoaderConfig
+    num_data_workers: int = 0
+
+    def build_inference_config(self, start_indices: ExplicitIndices):
+        return InferenceDataLoaderConfig(
+            dataset=CoupledDatasetConfig(
+                ocean=self.ocean.dataset,
+                atmosphere=self.atmosphere.dataset,
+            ),
+            start_indices=start_indices,
+            num_data_workers=self.num_data_workers,
+        )
