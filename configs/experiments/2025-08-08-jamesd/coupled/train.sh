@@ -124,7 +124,7 @@ while read PRETRAINING; do
     # get the template from the config subdir
     TEMPLATE_CONFIG_PATH="$SCRIPT_DIR/$CONFIG_SUBDIR/$TEMPLATE_CONFIG_FILENAME"
 
-    bash $REPO_ROOT/scripts/coupled/create_coupled_train_config.sh \
+    bash $SCRIPT_DIR/create_coupled_train_config.sh \
         "$EXISTING_RESULTS_ATMOS_DATASET" \
         "$EXISTING_RESULTS_OCEAN_DATASET" \
         "$TEMPLATE_CONFIG_PATH" \

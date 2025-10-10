@@ -113,7 +113,7 @@ while read FINETUNING; do
         )
     fi
 
-    bash $REPO_ROOT/scripts/coupled/create_coupled_finetune_config.sh \
+    bash $SCRIPT_DIR/create_coupled_finetune_config.sh \
         "$EXISTING_RESULTS_DATASET" \
         "$TEMPLATE_CONFIG_PATH" \
         "$CONFIG_PATH"
