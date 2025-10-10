@@ -11,13 +11,13 @@ from xarray.coding.times import CFDatetimeCoder
 
 from fme.ace.data_loading.batch_data import PairedData
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.main import (
     DataWriter,
     DataWriterConfig,
     PairedDataWriter,
 )
 from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
-from fme.ace.inference.data_writer.subselect import SubselectWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.core.device import get_device
@@ -442,16 +442,12 @@ class TestDataWriter:
             ),
         }
 
-        region_config = SubselectWriterConfig(
+        region_config = FileWriterConfig(
             label="test_region",
             names=["pressure"],
             lat_extent=(1, 2),
             lon_extent=(1, 3),
-            zarr=ZarrWriterConfig(
-                write_to_zarr=True,
-                allow_existing=True,
-                overwrite_check=False,
-            ),
+            format=ZarrWriterConfig(),
         )
 
         writer = DataWriter(
@@ -465,7 +461,7 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             save_names=None,
             time_coarsen=TimeCoarsenConfig(coarsen_factor),
-            subselection=[region_config],
+            files=[region_config],
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
@@ -573,15 +569,11 @@ class TestDataWriter:
             ),
         }
 
-        region_config = SubselectWriterConfig(
+        region_config = FileWriterConfig(
             label="test_region",
             names=["pressure", "temp"],
             separate_ensemble_members=True,
-            zarr=ZarrWriterConfig(
-                write_to_zarr=True,
-                allow_existing=True,
-                overwrite_check=False,
-            ),
+            format=ZarrWriterConfig(),
         )
         writer = DataWriter(
             str(tmp_path),
@@ -594,7 +586,7 @@ class TestDataWriter:
             enable_monthly_netcdfs=False,
             save_names=None,
             time_coarsen=None,
-            subselection=[region_config],
+            files=[region_config],
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
         start_time = (2020, 1, 1, 0, 0, 0)

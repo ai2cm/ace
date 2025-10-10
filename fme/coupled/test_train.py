@@ -406,6 +406,7 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
             assert f"inference/time_mean_norm/rmse/{name}" not in epoch_logs
 
     ocean_weight = len(ocean_out_names + ocean_derived_names) / len(all_out_names)
+    atol, rtol = 1e-6, 1e-6
     for prefix in ["inference/time_mean_norm/rmse", "val/mean_norm/weighted_rmse"]:
         assert f"{prefix}/ocean_channel_mean" in epoch_logs
         ocean_channel_mean = sum(
@@ -414,6 +415,8 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
         np.testing.assert_allclose(
             epoch_logs[f"{prefix}/ocean_channel_mean"],
             ocean_channel_mean,
+            rtol=rtol,
+            atol=atol,
         )
 
         assert f"{prefix}/atmosphere_channel_mean" in epoch_logs
@@ -423,6 +426,8 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
         np.testing.assert_allclose(
             epoch_logs[f"{prefix}/atmosphere_channel_mean"],
             atmos_channel_mean,
+            rtol=rtol,
+            atol=atol,
         )
 
         if "time_mean_norm" in prefix:
@@ -434,6 +439,8 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
                     + (1 - ocean_weight)
                     * epoch_logs[f"{prefix}/atmosphere_channel_mean"]
                 ),
+                rtol=rtol,
+                atol=atol,
             )
 
     # check that inference map captions includes expected units

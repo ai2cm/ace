@@ -33,14 +33,21 @@ class ResumeResultsConfig:
     existing_dir: str
     resume_wandb: bool = False
 
-    def copy_existing_dir(self, dest_dir: str):
+    def prepare_directory(self, experiment_dir: str):
+        """Recursively copies existing_dir to experiment_dir.
+
+        Arguments:
+            experiment_dir: Directory to which existing_dir will be copied. Typically,
+                this will be an empty directory which has been configured for saving a
+                training job's outputs, such as model checkpoints.
+        """
         if not os.path.isdir(self.existing_dir):
             raise ValueError(f"The directory {self.existing_dir} does not exist.")
         dist = Distributed.get_instance()
         if dist.is_root():
-            # recursively copy all files in existing_dir to dest_dir
-            shutil.copytree(self.existing_dir, dest_dir, dirs_exist_ok=True)
-            wandb_run_id_path = os.path.join(dest_dir, WANDB_RUN_ID_FILE)
+            # recursively copy all files in existing_dir to experiment_dir
+            shutil.copytree(self.existing_dir, experiment_dir, dirs_exist_ok=True)
+            wandb_run_id_path = os.path.join(experiment_dir, WANDB_RUN_ID_FILE)
             if not self.resume_wandb and os.path.exists(wandb_run_id_path):
                 os.remove(wandb_run_id_path)
 
@@ -66,16 +73,22 @@ def prepare_config(path: str, override: Sequence[str] | None = None) -> dict:
 
 
 def prepare_directory(
-    path: str,
-    config_data: dict,
-):
+    path: str, config_data: dict, resume_results: ResumeResultsConfig | None = None
+) -> ResumeResultsConfig | None:
     """Create experiment directory and dump config_data to it."""
     dist = Distributed.get_instance()
-    if dist.is_root():
-        if not os.path.isdir(path):
-            os.makedirs(path, exist_ok=True)
-        with open(os.path.join(path, "config.yaml"), "w") as f:
-            yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+    if not os.path.isdir(path) and dist.is_root():
+        os.makedirs(path, exist_ok=True)
+    if resume_results is not None and not os.path.isdir(
+        os.path.join(path, "training_checkpoints")
+    ):
+        resume_results.prepare_directory(path)
+    else:
+        # either not given or ignored because we already resumed once before
+        resume_results = None
+    with open(os.path.join(path, "config.yaml"), "w") as f:
+        yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+    return resume_results
 
 
 def get_parser():

@@ -844,6 +844,10 @@ class CoupledStepper(
         self.ocean.load_state(state["ocean_state"])
 
     @property
+    def training_dataset_info(self) -> CoupledDatasetInfo:
+        return self._dataset_info
+
+    @property
     def n_ic_timesteps(self) -> int:
         return 1
 

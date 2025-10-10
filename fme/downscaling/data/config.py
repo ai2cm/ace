@@ -186,7 +186,6 @@ class DataLoaderConfig:
         self,
         dataset: XarrayConcat,
         properties: DatasetProperties,
-        requires_topography: bool,
     ) -> BatchItemDatasetAdapter:
         # n_timesteps is hardcoded to 1 for downscaling, so the sample_start_times
         # are the full time range for the dataset
@@ -198,30 +197,16 @@ class DataLoaderConfig:
             )
         dataset = self._repeat_if_requested(dataset)
 
-        # TODO: follow up PR will remove topography from BatchItems
-        if requires_topography:
-            if self.topography is None:
-                raise ValueError(
-                    "Topography is required for this model, but no topography "
-                    "dataset was specified in the configuration."
-                )
-            else:
-                topography = get_normalized_topography(self.topography)
-        else:
-            topography = None
-
         dataset_subset = HorizontalSubsetDataset(
             dataset,
             properties=properties,
             lat_interval=self.lat_extent,
             lon_interval=self.lon_extent,
-            topography=topography,
         )
         return BatchItemDatasetAdapter(
             dataset_subset,
             dataset_subset.subset_latlon_coordinates,
             properties=properties,
-            topography=dataset_subset.subset_topography,
         )
 
     def build(
@@ -240,7 +225,6 @@ class DataLoaderConfig:
         dataset = self.build_batchitem_dataset(
             dataset=xr_dataset,
             properties=properties,
-            requires_topography=requirements.use_fine_topography,
         )
         all_times = xr_dataset.sample_start_times
         if dist is None:
@@ -446,7 +430,6 @@ class PairedDataLoaderConfig:
             properties=properties_fine,
             lat_interval=fine_lat_extent,
             lon_interval=fine_lon_extent,
-            topography=fine_topography,
         )
 
         dataset_coarse_subset = HorizontalSubsetDataset(
@@ -460,7 +443,6 @@ class PairedDataLoaderConfig:
         dataset_fine_subset = BatchItemDatasetAdapter(
             dataset_fine_subset,
             dataset_fine_subset.subset_latlon_coordinates,
-            topography=dataset_fine_subset.subset_topography,
             properties=properties_fine,
         )
 

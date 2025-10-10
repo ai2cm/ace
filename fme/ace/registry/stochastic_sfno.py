@@ -126,6 +126,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             convolution (DISCO) blocks, which apply local filters. See
             Ocampo et al. (2022)
             https://arxiv.org/abs/2209.13603 for more details.
+        normalize_big_skip: Whether to normalize the big_skip connection.
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
     """
@@ -157,6 +158,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     filter_residual: bool = False
     filter_output: bool = False
     local_blocks: list[int] | None = None
+    normalize_big_skip: bool = False
     affine_norms: bool = False
 
     def build(
