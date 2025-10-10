@@ -1,7 +1,9 @@
 import copy
+import dataclasses
 import datetime
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import cftime
 import numpy as np
@@ -25,6 +27,11 @@ IC_DIM = "sample"
 INIT_TIME = "init_time"
 INIT_TIME_UNITS = "microseconds since 1970-01-01 00:00:00"
 VALID_TIME = "valid_time"
+
+
+@dataclasses.dataclass
+class NetCDFWriterConfig:
+    name: Literal["netcdf"] = "netcdf"  # defined for yaml+dacite ease of use
 
 
 class PairedRawDataWriter:

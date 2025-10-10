@@ -14,7 +14,7 @@ from fme.core.dataset.time import TimeSlice
 from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
-from .raw import RawDataWriter
+from .raw import NetCDFWriterConfig, RawDataWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .utils import DIM_INFO_HEALPIX, DIM_INFO_LATLON
 from .zarr import SeparateICZarrWriterAdapter, ZarrWriterAdapter, ZarrWriterConfig
@@ -135,24 +135,25 @@ def _select_time(
 
 
 @dataclasses.dataclass
-class SubselectWriterConfig:
+class FileWriterConfig:
     """
-    Configuration for a subselection of data to write to file.
+    Configuration for writing output data.
 
     Parameters:
-        label: A label used for the filename output for this region.
-        names: The names of the variables to save. If not speciefied, all variables
-            in the dataset will be saved.
-        lat_extent: The latitude extent of the region as (min_lat, max_lat).
-        lon_extent: The longitude extent of the region as (min_lon, max_lon).
+        label: A label used for the filename output for this output dataset.
+        names: The names of the variables to save. If not specified, all available
+            variables will be saved.
+        lat_extent: The latitude extent of the region as (min_lat, max_lat). If not set,
+            all latitudes are included.
+        lon_extent: The longitude extent of the region as (min_lon, max_lon). If not
+            set, all longitudes are included.
         time_selection: Optional time selection criteria. Can be an Slice,
             MonthSelector, or TimeSlice. If None, all times are selected. A Slice
             can select an index range of steps in an inference, the MonthSelector can be
             used to target specific seasons or months for outputs, and a TimeSlice
             allows for datetime range selection.
         time_coarsen: Optional TimeCoarsen config for reducing in the time dimension.
-        zarr: Optional configuration for writing to zarr. If not specified, data
-            will be written to netcdf.
+        format: Configuration for the output format (i.e. netCDF or zarr).
         separate_ensemble_members: Option to write ensemble members to separate files.
             In this case, time is a datetime coordinate.
     """
@@ -164,7 +165,9 @@ class SubselectWriterConfig:
     time_selection: Slice | MonthSelector | TimeSlice | None = None
     save_reference: bool = False
     time_coarsen: TimeCoarsenConfig | None = None
-    zarr: ZarrWriterConfig = dataclasses.field(default_factory=ZarrWriterConfig)
+    format: NetCDFWriterConfig | ZarrWriterConfig = dataclasses.field(
+        default_factory=NetCDFWriterConfig
+    )
     separate_ensemble_members: bool = False
 
     def __post_init__(self):
@@ -188,7 +191,7 @@ class SubselectWriterConfig:
                     "Time coarsening is enabled. "
                     "Time subselection is applied *after* time coarsening."
                 )
-            if self.zarr.write_to_zarr:
+            if isinstance(self.format, ZarrWriterConfig):
                 raise NotImplementedError(
                     "Time selection is not currently supported when writing to zarr."
                 )
@@ -203,7 +206,7 @@ class SubselectWriterConfig:
         dataset_metadata: DatasetMetadata,
         prediction_suffix: str = "prediction",
         reference_suffix: str = "reference",
-    ) -> Union["PairedSubselectWriter", PairedTimeCoarsen]:
+    ) -> Union["PairedFileWriter", PairedTimeCoarsen]:
         prediction_writer = dataclasses.replace(
             self, label=f"{self.label}_{prediction_suffix}"
         ).build(
@@ -227,7 +230,7 @@ class SubselectWriterConfig:
             )
         else:
             reference_writer = None
-        paired_writer = PairedSubselectWriter(prediction_writer, reference_writer)
+        paired_writer = PairedFileWriter(prediction_writer, reference_writer)
         # Time coarsening is built around writer in the single build method
         return paired_writer
 
@@ -239,9 +242,9 @@ class SubselectWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
-    ) -> Union["SubselectWriter", TimeCoarsen]:
+    ) -> Union["FileWriter", TimeCoarsen]:
         """
-        Build a SubselectWriter object for saving data within the specified region.
+        Build a FileWriter object for saving data within the specified region.
 
         Args:
             experiment_dir: The directory where experiment outputs are saved.
@@ -273,7 +276,7 @@ class SubselectWriterConfig:
         subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
 
         raw_writer: RawDataWriter | ZarrWriterAdapter | SeparateICZarrWriterAdapter
-        if self.zarr.write_to_zarr:
+        if isinstance(self.format, ZarrWriterConfig):
             if self.time_coarsen:
                 n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
             else:
@@ -296,8 +299,8 @@ class SubselectWriterConfig:
                 data_vars=self.names,
                 variable_metadata=variable_metadata,
                 dataset_metadata=dataset_metadata,
-                chunks=self.zarr.chunks,
-                overwrite_check=self.zarr.overwrite_check,
+                chunks=self.format.chunks,
+                overwrite_check=self.format.overwrite_check,
             )
         else:
             if self.separate_ensemble_members:
@@ -314,21 +317,21 @@ class SubselectWriterConfig:
                 coords=subselect_coords_,
                 dataset_metadata=dataset_metadata,
             )
-        writer = SubselectWriter(self, raw_writer, full_coords=coords)
+        writer = FileWriter(self, raw_writer, full_coords=coords)
         if self.time_coarsen is not None:
             return self.time_coarsen.build(writer)
         else:
             return writer
 
 
-class SubselectWriter:
+class FileWriter:
     """
-    A data writer for outputting subselected ACE data for downscaling.
+    A data writer for saving outputs from ACE inference.
     """
 
     def __init__(
         self,
-        config: SubselectWriterConfig,
+        config: FileWriterConfig,
         writer: RawDataWriter | ZarrWriterAdapter | SeparateICZarrWriterAdapter,
         full_coords: Mapping[str, np.ndarray],
     ):
@@ -421,11 +424,11 @@ class SubselectWriter:
         self.writer.finalize()
 
 
-class PairedSubselectWriter:
+class PairedFileWriter:
     def __init__(
         self,
-        prediction_writer: SubselectWriter | TimeCoarsen,
-        reference_writer: SubselectWriter | TimeCoarsen | None,
+        prediction_writer: FileWriter | TimeCoarsen,
+        reference_writer: FileWriter | TimeCoarsen | None,
     ):
         self.prediction_writer = prediction_writer
         self.reference_writer = reference_writer

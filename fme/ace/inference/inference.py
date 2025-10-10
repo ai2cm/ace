@@ -190,11 +190,11 @@ class InferenceConfig:
                 self.forward_steps_in_memory,
                 self.n_forward_steps,
             )
-        if self.data_writer.subselection is not None:
-            for subselect_config in self.data_writer.subselection:
-                if subselect_config.time_coarsen is not None:
+        if self.data_writer.files is not None:
+            for file_config in self.data_writer.files:
+                if file_config.time_coarsen is not None:
                     validate_time_coarsen_config(
-                        subselect_config.time_coarsen,
+                        file_config.time_coarsen,
                         self.forward_steps_in_memory,
                         self.n_forward_steps,
                     )

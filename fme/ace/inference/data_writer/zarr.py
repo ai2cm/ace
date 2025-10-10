@@ -2,6 +2,7 @@ import copy
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Literal
 
 import cftime
 import numpy as np
@@ -59,7 +60,7 @@ def _get_ace_time_coords(batch_time: xr.DataArray, n_timesteps: int):
 
 @dataclass
 class ZarrWriterConfig:
-    write_to_zarr: bool = False
+    name: Literal["zarr"] = "zarr"  # defined for yaml+dacite ease of use
     chunks: dict[str, int] | None = field(
         default_factory=lambda: {"time": 1, "sample": 1}
     )
