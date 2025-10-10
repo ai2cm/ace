@@ -276,7 +276,6 @@ class CoupledStepperConfig:
         self._all_ocean_names = list(
             set(self.ocean.stepper.all_names).difference(self._all_atmosphere_names)
         )
-
         if self.ocean_fraction_prediction is not None:
             self._all_ocean_names.append(
                 self.ocean_fraction_prediction.land_fraction_name
@@ -507,10 +506,15 @@ class CoupledStepperConfig:
     def get_forcing_window_data_requirements(
         self, n_coupled_steps: int
     ) -> CoupledDataRequirements:
+        ocean_forcing_names = list(
+            set(self.ocean_forcing_exogenous_names).difference(
+                self.shared_forcing_exogenous_names
+            )
+        )
         return CoupledDataRequirements(
             ocean_timestep=self.ocean_timestep,
             ocean_requirements=DataRequirements(
-                self.ocean_forcing_exogenous_names, n_timesteps=n_coupled_steps + 1
+                ocean_forcing_names, n_timesteps=n_coupled_steps + 1
             ),
             atmosphere_timestep=self.atmosphere_timestep,
             atmosphere_requirements=DataRequirements(
