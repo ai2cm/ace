@@ -15,3 +15,5 @@ fto-ojyzoqli-cooldown_lr_2ep-ncs2|01K6DPHQZBAP1S1AKWSSTDA5XG|training|best_infer
 fto-v2025-08-22-atmos_2aw6z7n3-wu_to_half_lr_20ep|01K6Y0CNND1E5P30F2BA4E85PH|run_200yr0319|best_inference_ckpt|normal|--not-preemptible
 
 fto-484ss1vq-2aw6z7n3-wulr-ncs1-20ep||training|best_inference_ckpt|normal|--not-preemptible
+
+fto-484ss1vq-2aw6z7n3-wulr-ncs1-20ep|01K78PXMCQ5JNXT551C1G49BVV|training|best_inference_ckpt|normal|--not-preemptible
