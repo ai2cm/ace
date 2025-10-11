@@ -23,3 +23,5 @@ fto-41qhptht-2aw6z7n3-wulr-ncs1-20ep|01K78PY579MEM4N1KD3P148GD9|training|best_in
 fto-484ss1vq-2aw6z7n3-wulrh-ncs1-20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-41qhptht-2aw6z7n3-wulrh-ncs1-20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-41qhptht-2aw6z7n3-wu0p5xLR-ncs4-20ep|01K7A32CSFQXWJJPAYTBM7Z67A|training|best_inference_ckpt|normal|--not-preemptible
