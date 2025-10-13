@@ -163,7 +163,7 @@ class FileWriterConfig:
     lat_extent: Sequence[float] | None = None
     lon_extent: Sequence[float] | None = None
     time_selection: Slice | MonthSelector | TimeSlice | None = None
-    save_reference: bool = False
+    save_reference: bool = True
     time_coarsen: TimeCoarsenConfig | None = None
     format: NetCDFWriterConfig | ZarrWriterConfig = dataclasses.field(
         default_factory=NetCDFWriterConfig
@@ -204,8 +204,8 @@ class FileWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
-        prediction_suffix: str = "prediction",
-        reference_suffix: str = "reference",
+        prediction_suffix: str = "predictions",
+        reference_suffix: str = "target",
     ) -> Union["PairedFileWriter", PairedTimeCoarsen]:
         prediction_writer = dataclasses.replace(
             self, label=f"{self.label}_{prediction_suffix}"
