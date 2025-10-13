@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+from typing import Literal
+
 import numpy as np
 import torch
 import xarray as xr
@@ -29,29 +32,34 @@ class MeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         target_time: int = 1,
+        target: Literal["norm", "denorm"] = "denorm",
+        channel_mean_names: Sequence[str] | None = None,
     ):
         self._gridded_operations = gridded_operations
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
         self._target_time = target_time
         self._dist = Distributed.get_instance()
+        self._target = target
 
         device = get_device()
         self._variable_metrics: dict[str, ReducedMetric] = {}
         self._variable_metrics["weighted_rmse"] = AreaWeightedReducedMetric(
             device=device,
             compute_metric=self._gridded_operations.area_weighted_rmse_dict,
+            channel_mean_names=channel_mean_names,
         )
-        self._variable_metrics["weighted_bias"] = AreaWeightedReducedMetric(
-            device=device,
-            compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
-        )
-        self._variable_metrics["weighted_grad_mag_percent_diff"] = (
-            AreaWeightedReducedMetric(
+        if self._target == "denorm":
+            self._variable_metrics["weighted_bias"] = AreaWeightedReducedMetric(
                 device=device,
-                compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
+                compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
             )
-        )
+            self._variable_metrics["weighted_grad_mag_percent_diff"] = (
+                AreaWeightedReducedMetric(
+                    device=device,
+                    compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
+                )
+            )
 
     @torch.no_grad()
     def record_batch(
@@ -67,6 +75,9 @@ class MeanAggregator:
         time_dim = 1
         time_len = gen_data[list(gen_data.keys())[0]].shape[time_dim]
         target_time = self._target_time - i_time_start
+        if self._target == "norm":
+            target_data = target_data_norm
+            gen_data = gen_data_norm
         if target_time >= 0 and time_len > target_time:
             target_snapshot = {}
             gen_snapshot = {}
@@ -90,9 +101,13 @@ class MeanAggregator:
             raise ValueError("No batches have been recorded.")
         data: dict[str, torch.Tensor] = {"loss": self._loss / self._n_batches}
         for name, metric in self._variable_metrics.items():
-            metric_results = metric.get()  # TensorDict: {var_name: metric_data}
+            metric_results = metric.get()
             for key in metric_results:
                 data[f"{name}/{key}"] = metric_results[key] / self._n_batches
+            if self._target == "norm":
+                data[f"{name}/channel_mean"] = (
+                    metric.get_channel_mean() / self._n_batches
+                )
         for key in sorted(data.keys()):
             data[key] = float(self._dist.reduce_mean(data[key].detach()).cpu().numpy())
         return data

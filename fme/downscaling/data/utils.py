@@ -10,6 +10,12 @@ from fme.core.device import get_device
 from fme.core.metrics import spherical_area_weights
 
 
+def null_generator(num: int):
+    # Used to fill in null topography field when patch generator is used.
+    for _ in range(num):
+        yield None
+
+
 @dataclasses.dataclass
 class ClosedInterval:
     start: float

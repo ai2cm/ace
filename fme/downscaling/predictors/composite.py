@@ -3,9 +3,10 @@ import dataclasses
 import torch
 
 from fme.core.typing_ import TensorDict
-from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
+from fme.downscaling.data import BatchData, PairedBatchData, Topography, scale_tuple
+from fme.downscaling.data.patching import Patch, get_patches
+from fme.downscaling.data.utils import null_generator
 from fme.downscaling.models import DiffusionModel, Model, ModelOutputs
-from fme.downscaling.patching import Patch, get_patches
 
 
 @dataclasses.dataclass
@@ -104,6 +105,7 @@ class PatchPredictor:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
+        topography: Topography | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         predictions = []
@@ -113,11 +115,18 @@ class PatchPredictor:
             coarse_yx_extent=batch.coarse.horizontal_shape,
             fine_yx_extent=batch.fine.horizontal_shape,
         )
-
-        for paired_patch_data in batch.generate_from_patches(
+        batch_generator = batch.generate_from_patches(
             coarse_patches=coarse_patches, fine_patches=fine_patches
-        ):
-            model_output = self.model.generate_on_batch(paired_patch_data, n_samples)
+        )
+        if topography is not None:
+            topography_generator = topography.generate_from_patches(fine_patches)
+        else:
+            topography_generator = null_generator(len(fine_patches))
+
+        for data_patch, topography_patch in zip(batch_generator, topography_generator):
+            model_output = self.model.generate_on_batch(
+                data_patch, topography_patch, n_samples
+            )
             predictions.append(model_output.prediction)
             loss = loss + model_output.loss
 
@@ -135,6 +144,7 @@ class PatchPredictor:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
+        topography: Topography | None,
         n_samples: int = 1,
     ) -> TensorDict:
         coarse_yx_extent = batch.horizontal_shape
@@ -143,10 +153,16 @@ class PatchPredictor:
             coarse_yx_extent=coarse_yx_extent, fine_yx_extent=fine_yx_extent
         )
         predictions = []
-        for patch in batch.generate_from_patches(coarse_patches):
+        batch_generator = batch.generate_from_patches(coarse_patches)
+        if topography is not None:
+            topography_generator = topography.generate_from_patches(fine_patches)
+        else:
+            topography_generator = null_generator(len(fine_patches))
+        for data_patch, topo_patch in zip(batch_generator, topography_generator):
             predictions.append(
                 self.model.generate_on_batch_no_target(
-                    batch=patch,
+                    batch=data_patch,
+                    topography=topo_patch,
                     n_samples=n_samples,
                 )
             )

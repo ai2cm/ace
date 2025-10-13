@@ -37,7 +37,7 @@ from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
+from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import (
@@ -109,9 +109,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: ParameterInitializationConfig()
     )
     ocean: OceanConfig | None = None
-    loss: WeightedMappingLossConfig = dataclasses.field(
-        default_factory=lambda: WeightedMappingLossConfig()
-    )
+    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
@@ -503,9 +501,7 @@ class StepperConfig:
     """
 
     step: StepSelector
-    loss: WeightedMappingLossConfig = dataclasses.field(
-        default_factory=lambda: WeightedMappingLossConfig()
-    )
+    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
     crps_training: bool = False
@@ -529,7 +525,7 @@ class StepperConfig:
                 DeprecationWarning,
             )
             self.n_ensemble = 2
-            self.loss = WeightedMappingLossConfig(
+            self.loss = StepLossConfig(
                 type="EnsembleLoss",
                 kwargs={"crps_weight": 1.0},
             )
@@ -833,7 +829,7 @@ class Stepper(
         self._parameter_initializer = parameter_initializer
         self._train_n_forward_steps_sampler = config.train_n_forward_steps_sampler
 
-        def get_loss_obj():
+        def get_loss_obj() -> StepLoss:
             loss_normalizer = step.get_loss_normalizer()
             if config.loss is None:
                 raise ValueError("Loss is not configured")
@@ -847,7 +843,7 @@ class Stepper(
         self._loss_normalizer: StandardNormalizer | None = None
 
         self._get_loss_obj = get_loss_obj
-        self._loss_obj: WeightedMappingLoss | None = None
+        self._loss_obj: StepLoss | None = None
 
         self._parameter_initializer.apply_weights(
             step.modules,
@@ -888,7 +884,7 @@ class Stepper(
         return self._loss_normalizer
 
     @property
-    def loss_obj(self) -> WeightedMappingLoss:
+    def loss_obj(self) -> StepLoss:
         if self._loss_obj is None:
             self._loss_obj = self._get_loss_obj()
         return self._loss_obj
@@ -1387,7 +1383,7 @@ class Stepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self.loss_obj(gen_step, target_step)
+                step_loss = self.loss_obj(gen_step, target_step, step=step)
                 metrics[f"loss_step_{step}"] = step_loss.detach()
             if optimize_step:
                 optimization.accumulate_loss(step_loss)

@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -244,7 +244,7 @@ class TimeMeanEvaluatorAggregator:
         target: Literal["norm", "denorm"] = "denorm",
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         reference_means: xr.Dataset | None = None,
-        channel_mean_names: list[str] | None = None,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         """
         Args:

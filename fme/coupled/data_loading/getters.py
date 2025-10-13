@@ -28,6 +28,7 @@ from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceDataset,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -181,11 +182,13 @@ def get_inference_data(
     total_coupled_steps: int,
     window_requirements: CoupledDataRequirements,
     initial_condition: CoupledPrognosticState | CoupledPrognosticStateDataRequirements,
+    dataset_info: CoupledDatasetInfo | None = None,
 ) -> InferenceGriddedData:
     dataset = InferenceDataset(
         config,
         total_coupled_steps,
         window_requirements,
+        dataset_info,
     )
     properties = dataset.properties
 
@@ -224,6 +227,7 @@ def get_forcing_data(
     total_coupled_steps: int,
     window_requirements: CoupledDataRequirements,
     initial_condition: CoupledPrognosticState,
+    dataset_info: CoupledDatasetInfo,
 ) -> InferenceGriddedData:
     """Return a GriddedData loader for forcing data based on the initial condition.
     This function determines the start indices for the forcing data based on the initial
@@ -235,6 +239,7 @@ def get_forcing_data(
             inference.
         window_requirements: Data requirements for the forcing data.
         initial_condition: Initial condition for the inference.
+        dataset_info: Dataset info loaded from the stepper.
 
     Returns:
         A data loader for forcing data with coordinates and metadata.
@@ -270,4 +275,5 @@ def get_forcing_data(
         total_coupled_steps=total_coupled_steps,
         window_requirements=window_requirements,
         initial_condition=initial_condition,
+        dataset_info=dataset_info,
     )

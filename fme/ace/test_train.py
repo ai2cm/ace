@@ -65,7 +65,7 @@ from fme.core.generics.trainer import (
     epoch_checkpoint_enabled,
 )
 from fme.core.logging_utils import LoggingConfig
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import OptimizationConfig
@@ -270,7 +270,7 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=WeightedMappingLossConfig(type="MSE"),
+            loss=StepLossConfig(type="MSE"),
             crps_training=crps_training,
             train_n_forward_steps=TimeLengthProbabilities(
                 outcomes=[
@@ -526,10 +526,13 @@ def test_train_and_inference(
             yaml_config=train_config,
         )
         wandb_logs = wandb.get_logs()
-
         for log in wandb_logs:
             # ensure inference time series is not logged
             assert "inference/mean/forecast_step" not in log
+
+        epoch_logs = wandb_logs[-1]
+        assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
+        assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
     assert validation_output_dir.exists()

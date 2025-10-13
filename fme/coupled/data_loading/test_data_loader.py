@@ -61,7 +61,9 @@ def _save_netcdf(
         if name == "constant_mask" or name.startswith("mask_"):
             dim_sizes_to_use = dim_sizes_without_time
             rng = np.random.default_rng()
-            data = rng.integers(low=0, high=2, size=list(dim_sizes_to_use.values()))
+            data = rng.integers(
+                low=0, high=2, size=list(dim_sizes_to_use.values())
+            ).astype(np.float32)
         elif name == "land_fraction":
             dim_sizes_to_use = dim_sizes_without_time
             data = np.ones(tuple(dim_sizes_to_use.values()))
@@ -518,6 +520,7 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
         config=inference_config,
         total_coupled_steps=1,
         requirements=coupled_requirements,
+        dataset_info=data.dataset_info,
     )
     loader = torch.utils.data.DataLoader(
         dataset,
