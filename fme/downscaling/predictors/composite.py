@@ -7,6 +7,7 @@ from fme.downscaling.data import BatchData, PairedBatchData, Topography, scale_t
 from fme.downscaling.data.patching import Patch, get_patches
 from fme.downscaling.data.utils import null_generator
 from fme.downscaling.models import DiffusionModel, Model, ModelOutputs
+from fme.downscaling.predictors import CascadePredictor
 
 
 @dataclasses.dataclass
@@ -52,7 +53,7 @@ class PatchPredictor:
 
     def __init__(
         self,
-        model: DiffusionModel | Model,
+        model: DiffusionModel | Model | CascadePredictor,
         coarse_yx_patch_extent: tuple[int, int] | None = None,
         coarse_horizontal_overlap: int = 1,
     ):
