@@ -21,6 +21,7 @@ from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig
 from fme.ace.inference.evaluator import main as inference_evaluator_main
@@ -328,7 +329,9 @@ def _get_test_yaml_files(
         forward_steps_in_memory=2,
         checkpoint_path=str(results_dir / "training_checkpoints" / "best_ckpt.tar"),
         data_writer=DataWriterConfig(
-            save_prediction_files=True,
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
         ),
         aggregator=InferenceEvaluatorAggregatorConfig(
             log_video=True,
