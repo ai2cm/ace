@@ -46,3 +46,5 @@ ft-v2025-08-22-ncs2-atmos_2aw6z7n3_loss_ns2-wu_to_half_lr_50ep|01K76D1HEJ9KEFRCD
 ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|01K76DVXMK7FHZS9E8WFZT1N0B|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_w1jnkgkv-best_inf_ckpt_0005-wu_0p5xLR_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_c2ugn4wy-best_inf_ckpt_0011-wu_0p5xLR_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
