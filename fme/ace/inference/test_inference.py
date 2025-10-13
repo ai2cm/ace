@@ -184,7 +184,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         forcing_loader=forcing_loader,
         data_writer=DataWriterConfig(save_prediction_files=True),
         allow_incompatible_dataset=False,
-        n_ensemble_per_ic=2,
+        n_ensemble_per_ic=1,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:

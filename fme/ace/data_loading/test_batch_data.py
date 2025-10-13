@@ -209,7 +209,7 @@ def test_paired_data_forcing_target_data():
     assert paired_data.target == {"bar": target_data.data["bar"]}
 
 
-def test_ensemble_data_size():
+def test_ensemble_data():
     n_samples = 2
     n_times = 5
     n_lat = 8
@@ -233,18 +233,40 @@ def test_ensemble_data_size():
         horizontal_dims=horizontal_dims,
         n_lat=n_lat,
         n_lon=n_lon,
-        n_ensemble=n_ensemble,
     )
 
-    ensemble_target_data = target_data.ensemble_data
-    ensemble_gen_data = gen_data.ensemble_data
+    ensemble_target_data = target_data.broadcast_ensemble(n_ensemble=1)
+    ensemble_gen_data = gen_data.broadcast_ensemble(n_ensemble=n_ensemble)
 
     assert gen_data.data["bar"].shape == (n_samples, n_times, n_lat, n_lon)
-    assert ensemble_gen_data["bar"].shape == (
+    assert ensemble_gen_data.ensemble_data["bar"].shape == (
         n_samples,
         n_ensemble,
         n_times,
         n_lat,
         n_lon,
     )
-    assert ensemble_target_data["bar"].shape == (n_samples, 1, n_times, n_lat, n_lon)
+    assert ensemble_target_data.data["bar"].shape == (n_samples, n_times, n_lat, n_lon)
+    assert ensemble_target_data.ensemble_data["bar"].shape == (
+        n_samples,
+        1,
+        n_times,
+        n_lat,
+        n_lon,
+    )
+
+    torch.testing.assert_allclose(
+        ensemble_gen_data.ensemble_data["bar"][:, 0, ...],
+        ensemble_gen_data.ensemble_data["bar"][:, 1, ...],
+    )
+
+    torch.testing.assert_allclose(
+        gen_data.data["bar"],
+        ensemble_gen_data.ensemble_data["bar"][:, 0, ...],
+    )
+
+    assert ensemble_gen_data.labels[n_ensemble] == gen_data.labels[0]
+    assert ensemble_gen_data.labels[0] == gen_data.labels[0]
+
+    assert ensemble_gen_data.time[n_ensemble].equals(gen_data.time[0])
+    assert ensemble_gen_data.time[n_ensemble + 1].equals(gen_data.time[1])

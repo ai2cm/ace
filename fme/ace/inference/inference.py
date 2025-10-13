@@ -135,8 +135,8 @@ def get_initial_condition(
         time=initial_times,
         horizontal_dims=["lat", "lon"],
         labels=[set(labels)] * n_samples,
-        n_ensemble=n_ensemble,
     )
+    batch_data = batch_data.broadcast_ensemble(n_ensemble=n_ensemble)
     return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
 
 

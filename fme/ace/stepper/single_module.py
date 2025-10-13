@@ -1081,20 +1081,10 @@ class Stepper(
         Returns:
             Generator yielding the output data at each timestep.
         """
-        if (
-            forcing_data.n_ensemble == 1
-            or forcing_data.n_ensemble == initial_condition.as_batch_data().n_ensemble
-        ):
-            raise ValueError(
-                "Forcing data must have an either ensemble dimension of 1 ensemble "
-                "member or the same number of ensemble members as the initial "
-                "condition."
-            )
-
-        ic_ensemble_dict = initial_condition.as_batch_data().ensemble_data
-        forcing_ensemble_dict = forcing_data.ensemble_data
+        ic_dict = initial_condition.as_batch_data().data
+        forcing_dict = forcing_data.data
         return self._predict_generator(
-            ic_ensemble_dict, forcing_ensemble_dict, n_forward_steps, optimizer
+            ic_dict, forcing_dict, n_forward_steps, optimizer
         )
 
     @property
@@ -1105,23 +1095,23 @@ class Stepper(
 
     def _predict_generator(
         self,
-        ic_dict: EnsembleTensorDict,
-        forcing_dict: EnsembleTensorDict,
+        ic_dict: TensorMapping,
+        forcing_dict: TensorMapping,
         n_forward_steps: int,
         optimizer: OptimizationABC,
-    ) -> Generator[EnsembleTensorDict, None, None]:
-        state = {k: ic_dict[k].squeeze(self.TIME_DIM_ENSEMBLE) for k in ic_dict}
+    ) -> Generator[TensorDict, None, None]:
+        state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
                 k: (
-                    forcing_dict[k][:, :, step]
+                    forcing_dict[k][:, step]
                     if k not in self._step_obj.next_step_forcing_names
-                    else forcing_dict[k][:, :, step + 1]
+                    else forcing_dict[k][:, step + 1]
                 )
                 for k in self._input_only_names
             }
             next_step_input_dict = {
-                k: forcing_dict[k][:, :, step + 1]
+                k: forcing_dict[k][:, step + 1]
                 for k in self._step_obj.next_step_input_names
             }
             input_data = {**state, **input_forcing}
@@ -1165,6 +1155,12 @@ class Stepper(
         forcing_names = set(self._input_only_names).union(
             self._step_obj.next_step_input_names
         )
+
+        if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
+            forcing = forcing.broadcast_ensemble(
+                n_ensemble=initial_condition.as_batch_data().n_ensemble
+            )
+
         with timer.context("forward_prediction"):
             ic_batch_data = initial_condition.as_batch_data()
             if ic_batch_data.labels != forcing.labels:
@@ -1209,6 +1205,7 @@ class Stepper(
             time=data.time,
             horizontal_dims=data.horizontal_dims,
             labels=data.labels,
+            n_ensemble=data.n_ensemble,
         )
         return data, prognostic_state
 
@@ -1348,12 +1345,12 @@ class Stepper(
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
         n_ensemble = self._config.n_ensemble
 
-        input_data.as_batch_data().n_ensemble = n_ensemble
-        data.n_ensemble = n_ensemble
+        input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
+        forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
 
         output_generator = self._predict_generator(
-            input_data.as_batch_data().ensemble_data,
-            data.ensemble_data,
+            input_ensemble_data.data,
+            forcing_ensemble_data.data,
             n_forward_steps,
             optimization,
         )
@@ -1380,6 +1377,7 @@ class Stepper(
                 context = torch.no_grad()
             with context:
                 gen_step = next(output_iterator)
+                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
                 # Note: here we examine the loss for a single timestep,
                 # not a single model call (which may contain multiple timesteps).

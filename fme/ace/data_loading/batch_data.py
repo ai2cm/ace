@@ -9,6 +9,7 @@ import xarray as xr
 from torch.utils.data import default_collate
 
 from fme.core.device import get_device
+from fme.core.tensors import add_ensemble_dim, fold_ensemble_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
@@ -137,16 +138,7 @@ class BatchData:
         Returns:
             The tensor dict with an explicit ensemble dimension.
         """
-        if self.n_ensemble == 1:
-            return EnsembleTensorDict({k: v.unsqueeze(1) for k, v in self.data.items()})
-        return EnsembleTensorDict(
-            {
-                k: v.unsqueeze(1).expand(
-                    -1, self.n_ensemble, *([-1] * (v.ndim - 1))
-                )  # view, no copy
-                for k, v in self.data.items()
-            }
-        )
+        return unfold_ensemble_dim(TensorDict(self.data), n_ensemble=self.n_ensemble)
 
     def to_device(self) -> "BatchData":
         return self.__class__(
@@ -353,13 +345,21 @@ class BatchData:
 
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
         """
-        Broadcast n_ensemble ensembles to a new value.
+        Broadcast n_ensemble ensembles to a new BatchData obj.
         """
+        data = {**self.data}
+        data = add_ensemble_dim(data, repeats=n_ensemble)
+        data, _ = fold_ensemble_dim(data)
+
+        time = self.time
+        time = xr.concat([time] * n_ensemble, dim="sample")
+
+        labels = self.labels * n_ensemble
         return self.__class__(
-            data={k: v.to(get_device()) for k, v in self.data.items()},
-            time=self.time,
+            data={k: v.to(get_device()) for k, v in data.items()},
+            time=time,
             horizontal_dims=self.horizontal_dims,
-            labels=self.labels,
+            labels=labels,
             n_ensemble=n_ensemble,
         )
 
