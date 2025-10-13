@@ -265,24 +265,30 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     assert "inference/total_steps_per_second" in wandb_logs[-1]
 
 
-def test_get_initial_condition():
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_get_initial_condition(n_ensemble):
     time_da = xr.DataArray([0, 5], dims=["sample"])
+    sample = 2
     prognostic_da = xr.DataArray(
-        np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+        np.random.rand(sample, 16, 32), dims=["sample", "lat", "lon"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    initial_condition = get_initial_condition(data, ["prog"], labels=[], n_ensemble=1)
+    initial_condition = get_initial_condition(
+        data, ["prog"], labels=[], n_ensemble=n_ensemble
+    )
     assert isinstance(initial_condition, PrognosticState)
     batch_data = initial_condition.as_batch_data()
-    assert batch_data.time.shape == (2, 1)
+    assert batch_data.time.shape == (sample * n_ensemble, 1)
     initial_times = batch_data.time.isel(time=0)
-    assert initial_times.shape == (2,)
+    assert initial_times.shape == (sample * n_ensemble,)
     assert initial_times[0] == 0
     assert initial_times[1] == 5
-    assert batch_data.data["prog"].shape == (2, 1, 16, 32)
-    np.testing.assert_allclose(
-        batch_data.data["prog"].squeeze(dim=1).cpu().numpy(), data["prog"].values
-    )
+    assert batch_data.data["prog"].shape == (sample * n_ensemble, 1, 16, 32)
+    for i in range(n_ensemble):
+        np.testing.assert_allclose(
+            batch_data.data["prog"][i::n_ensemble, ...].squeeze(dim=1).cpu().numpy(),
+            data["prog"].values,
+        )
     assert batch_data.time.isel(time=0).equals(initial_times)
 
 
