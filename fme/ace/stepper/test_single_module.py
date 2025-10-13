@@ -1024,20 +1024,27 @@ def test_prescribe_sst_integration():
 
 
 def get_data_for_predict(
-    n_steps, forcing_names: list[str]
+    n_steps,
+    forcing_names: list[str],
+    n_ensemble: int = 1,
 ) -> tuple[PrognosticState, BatchData]:
     n_samples = 3
-    input_data = BatchData.new_on_device(
-        data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
-        time=xr.DataArray(
-            np.zeros((n_samples, 1)),
-            dims=["sample", "time"],
-        ),
-        labels=[set() for _ in range(n_samples)],
-    ).get_start(
-        prognostic_names=["a"],
-        n_ic_timesteps=1,
+    input_data = (
+        BatchData.new_on_device(
+            data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
+            time=xr.DataArray(
+                np.zeros((n_samples, 1)),
+                dims=["sample", "time"],
+            ),
+            labels=[set() for _ in range(n_samples)],
+        )
+        .broadcast_ensemble(n_ensemble)
+        .get_start(
+            prognostic_names=["a"],
+            n_ic_timesteps=1,
+        )
     )
+
     forcing_data = BatchData.new_on_device(
         data={
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
@@ -1047,7 +1054,7 @@ def get_data_for_predict(
             dims=["sample", "time"],
         ),
         labels=[set() for _ in range(n_samples)],
-    )
+    ).broadcast_ensemble(n_ensemble)
     return input_data, forcing_data
 
 
@@ -1073,10 +1080,13 @@ def test_predict():
     assert new_input_state.time.equals(output.time[:, -1:])
 
 
-def test_predict_with_forcing():
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_predict_with_forcing(n_ensemble):
     stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
     n_steps = 3
-    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["b"])
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=["b"], n_ensemble=n_ensemble
+    )
     output, new_input_data = stepper.predict(input_data, forcing_data)
     assert "b" not in output.data
     assert output.data["a"].size(dim=1) == n_steps
