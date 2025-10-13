@@ -1,5 +1,3 @@
 group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
-ft_5iqa5aw5-best_inf_ckpt-cos_half_lr_20ep|ace-samudra-coupled-cm4|5iqa5aw5|best_inference_ckpt|training|urgent|ceres|8|800GiB|3||optimization.lr=0.000025
-ft_5iqa5aw5-ema_ckpt-cos_half_lr_20ep|ace-samudra-coupled-cm4|5iqa5aw5|ema_ckpt|training|urgent|ceres|8|800GiB|3||optimization.lr=0.000025
-ft_5iqa5aw5-best_inf_ckpt-cos_0p1xLR_20ep|ace-samudra-coupled-cm4|5iqa5aw5|best_inference_ckpt|training|urgent|ceres|8|800GiB|3||optimization.lr=0.000005
-ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|ace-samudra-coupled-cm4|5iqa5aw5|best_inference_ckpt|train|urgent|ceres|8|800GiB|3||optimization.lr=0.0000005
+ft_w1jnkgkv-best_inf_ckpt_0005-wu_0p5xLR_20ep|ace-samudra-coupled-cm4|w1jnkgkv|best_inference_ckpt_0005|train|urgent|ceres|8|800GiB|0||optimization.lr=0.000025
+ft_c2ugn4wy-best_inf_ckpt_0011-wu_0p5xLR_20ep|ace-samudra-coupled-cm4|c2ugn4wy|best_inference_ckpt_0011|train|urgent|ceres|8|800GiB|0||optimization.lr=0.000025
