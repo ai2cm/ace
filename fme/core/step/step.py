@@ -159,7 +159,7 @@ class StepSelector(StepConfigABC):
     @classmethod
     def get_available_types(cls) -> set[str]:
         """This class method is used to expose all available types of Steps."""
-        return set(cls(type="", config={}).registry._types.keys())
+        return set(cls.registry._types.keys())
 
     def get_next_step_forcing_names(self) -> list[str]:
         return self._step_config_instance.get_next_step_forcing_names()
@@ -292,6 +292,18 @@ class StepABC(abc.ABC, nn.Module):
     def ocean_fraction_name(self) -> str | None:
         """
         Name of the ocean fraction variable, if one is available.
+        """
+        pass
+
+    @abc.abstractmethod
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        """
+        Prescribe target_data SST onto gen_data according to mask_data.
         """
         pass
 

@@ -760,8 +760,28 @@ class HEALPixCoordinates(HorizontalCoordinates):
     height: torch.Tensor
     width: torch.Tensor
 
+    def __post_init__(self):
+        if not len(self.face) == 12:
+            raise ValueError("HEALPixCoordinates must have 12 faces.")
+        if not len(self.height) == len(self.width):
+            raise ValueError(
+                "HEALPixCoordinates must have the same number of heights and widths."
+            )
+        order = int(math.log2(len(self.width)))
+        if 2**order != len(self.width):
+            raise ValueError(
+                "HEALPixCoordinates must have a width that is a power of 2."
+            )
+        self.nside = len(self.width)
+
     def __eq__(self, other) -> bool:
         if not isinstance(other, HEALPixCoordinates):
+            return False
+        if (
+            self.face.shape != other.face.shape
+            or self.height.shape != other.height.shape
+            or self.width.shape != other.width.shape
+        ):
             return False
         return (
             torch.allclose(self.face, other.face)
@@ -847,7 +867,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
                 "Use NullMaskProvider when getting gridded operations "
                 "for HEALPixCoordinates."
             )
-        return HEALPixOperations()
+        return HEALPixOperations(self.nside)
 
     @property
     def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:

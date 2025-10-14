@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
 import itertools
+import warnings
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Literal
 
@@ -10,7 +11,7 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.scheduler import SchedulerConfig
+from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -75,10 +76,14 @@ class Optimization(OptimizationABC):
     def __init__(
         self,
         parameters: Iterable[torch.nn.Parameter],
-        optimizer_type: Literal["Adam", "FusedAdam"],
+        optimizer_type: Literal[
+            "Adam",
+            "FusedAdam",
+            "AdamW",
+        ],
         lr: float,
         max_epochs: int,
-        scheduler: SchedulerConfig,
+        scheduler: SchedulerConfig | SequentialSchedulerConfig,
         enable_automatic_mixed_precision: bool,
         kwargs: Mapping[str, Any],
         use_gradient_accumulation: bool = False,
@@ -90,6 +95,8 @@ class Optimization(OptimizationABC):
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
         elif optimizer_type == "Adam":
             self.optimizer = torch.optim.Adam(parameters, lr=lr, **kwargs)
+        elif optimizer_type == "AdamW":
+            self.optimizer = torch.optim.AdamW(parameters, lr=lr, **kwargs)
         else:
             raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
@@ -123,18 +130,30 @@ class Optimization(OptimizationABC):
         for m in modules:
             m.train()
 
-    def step_scheduler(self, valid_loss: float):
+    def step_scheduler(
+        self,
+        valid_loss: float | None = None,
+        is_iteration: bool = False,
+    ):
         """
         Step the scheduler.
 
         Args:
             valid_loss: The validation loss. Used in schedulers which change the
                 learning rate based on whether the validation loss is decreasing.
+                If None, this indicates the call is from within a training iteration
+                rather than at the end of an epoch.
+            is_iteration: Whether the step is called from a training iteration or at
+                the end of an epoch. Default is epoch.
         """
-        if self.scheduler is not None:
+        if self.scheduler.should_step(is_iteration):
             try:
-                self.scheduler.step(metrics=valid_loss)
+                if valid_loss is not None:
+                    self.scheduler.step(metrics=valid_loss)
+                else:
+                    self.scheduler.step()
             except TypeError:
+                # Some schedulers don't accept metrics argument
                 self.scheduler.step()
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
@@ -178,9 +197,7 @@ class Optimization(OptimizationABC):
         """
         state = {
             "optimizer_state_dict": self.optimizer.state_dict(),
-            "scheduler_state_dict": (
-                self.scheduler.state_dict() if self.scheduler is not None else None
-            ),
+            "scheduler_state_dict": self.scheduler.state_dict(),
             "gscaler_state_dict": (
                 self.gscaler.state_dict() if self.gscaler is not None else None
             ),
@@ -192,8 +209,7 @@ class Optimization(OptimizationABC):
         Loads state from a serializable data structure.
         """
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
-        if self.scheduler is not None:
-            self.scheduler.load_state_dict(state["scheduler_state_dict"])
+        self.scheduler.load_state_dict(state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
 
@@ -224,17 +240,24 @@ class OptimizationConfig:
             your stepper (e.g. Stepper) for more details.
     """
 
-    optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
+    optimizer_type: Literal["Adam", "AdamW", "FusedAdam"] = "Adam"
     lr: float = 0.001
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     enable_automatic_mixed_precision: bool = False
-    scheduler: SchedulerConfig = dataclasses.field(
+    scheduler: SchedulerConfig | SequentialSchedulerConfig = dataclasses.field(
         default_factory=lambda: SchedulerConfig()
     )
     use_gradient_accumulation: bool = False
     checkpoint: CheckpointConfig = dataclasses.field(
         default_factory=lambda: CheckpointConfig()
     )
+
+    def __post_init__(self):
+        if self.optimizer_type == "FusedAdam":
+            warnings.warn(
+                "FusedAdam is deprecated. Use AdamW with fused=True in kwargs instead.",
+                DeprecationWarning,
+            )
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])
@@ -273,7 +296,9 @@ class NullOptimization(OptimizationABC):
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return module
 
-    def step_scheduler(self, valid_loss: float):
+    def step_scheduler(
+        self, valid_loss: float | None = None, is_iteration: bool = False
+    ):
         return
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:

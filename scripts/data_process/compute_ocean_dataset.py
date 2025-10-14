@@ -1,5 +1,5 @@
 """
-Utils for CM4 ocean data preprocessing. This script relies on a m2lines/ocean_emulators.
+Utils for CM4 ocean data preprocessing. This script relies on m2lines/ocean_emulators.
 
 The 200-year pre-industrial control simulation ocean preprocessing ran in about
 6 hours on LEAP's 2i2c JupyterHub in the default "notebook" conda environment
@@ -35,6 +35,7 @@ from ocean_emulators.preprocessing import (
     spatially_filter,
 )
 from ocean_emulators.simulation_preprocessing.gfdl_cm4 import cm4_preprocessing
+from time_utils import shift_timestamps_to_midpoint
 
 
 @dataclasses.dataclass
@@ -218,6 +219,8 @@ class OceanDatasetComputationConfig:
             output shard sizes. Defaults to a shard size of 360 along the time
             dimension. If None, then an unsharded zarr store will be written
             with chunks as specified in ``chunking``.
+        shift_timestamps_to_avg_interval_midpoint: If True, shift time axis labels
+            backwards by half the ocean step size.
     """
 
     ocean_zarr: str
@@ -245,9 +248,32 @@ class OceanDatasetComputationConfig:
     ocean_vertical_target_interface_levels: list = dataclasses.field(
         default_factory=list
     )
+    shift_timestamps_to_avg_interval_midpoint: bool = False
 
     def rename(self, ds: xr.Dataset):
         return _rename(ds, self.renaming)
+
+    def shift_timestamps(self, ds: xr.Dataset):
+        """
+        Shifts the time coordinate to the midpoint of the averaging interval.
+
+        This is useful for models where the timestamp represents the end of an
+        averaging period. This method shifts it to the middle of that period.
+
+        Args:
+            ds: The input xarray.Dataset with a 'time' coordinate.
+
+        Returns:
+            A new xr.Dataset with shifted timestamps if the config flag
+            is True, otherwise the original dataset.
+
+        """
+        if self.shift_timestamps_to_avg_interval_midpoint:
+            ds = shift_timestamps_to_midpoint(ds, time_dim=self.standard_names.time_dim)
+            ds[self.standard_names.time_dim].attrs["long_name"] = (
+                "time, avg interval midpoint"
+            )
+        return ds
 
 
 def insert_nans_on_land_surface(ds, standard_names: OceanStandardNameMapping):
@@ -596,6 +622,7 @@ def compute_lazy_dataset(
     drop_dims = [x for x in list(ds.dims) if x not in ocean_names.full_field_dims]
     ds = ds.drop_dims(drop_dims)
     ds = config.rename(ds)
+    ds = config.shift_timestamps(ds)
 
     return ds
 

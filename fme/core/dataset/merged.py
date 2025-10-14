@@ -44,24 +44,24 @@ class MergedXarrayDataset:
                          must have the same number of steps per sample item."
                 )
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
-        tensors = {}
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+        tensors: TensorDict = {}
         for dataset in self.datasets:
-            ds_tensors, time = dataset[idx]
+            ds_tensors, time, labels = dataset[idx]
             tensors.update(ds_tensors)
-        return tensors, time
+        return tensors, time, labels
 
     def __len__(self) -> int:
         return len(self.datasets[0])
 
     def get_sample_by_time_slice(
         self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray]:
+    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
         tensors: TensorDict = {}
         for dataset in self.datasets:
-            ds_tensors, time = dataset.get_sample_by_time_slice(time_slice)
+            ds_tensors, time, labels = dataset.get_sample_by_time_slice(time_slice)
             tensors.update(ds_tensors)
-        return tensors, time
+        return tensors, time, labels
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
@@ -91,9 +91,12 @@ class MergedXarrayDataset:
 @dataclasses.dataclass
 class MergeDatasetConfig(DatasetConfigABC):
     """
-    Configuration for merging multiple datasets.
+    Configuration for merging multiple datasets. Merging means combining
+    variables from multiple datasets, each of which must have the same
+    time coordinate.
+
     Parameters:
-        merge: List of ConcatDatasetConfig or XarrayDataConfig to merge.
+        merge: List of dataset configurations to merge.
     """
 
     merge: Sequence[ConcatDatasetConfig | XarrayDataConfig]
@@ -125,9 +128,13 @@ class MergeDatasetConfig(DatasetConfigABC):
 @dataclasses.dataclass
 class MergeNoConcatDatasetConfig(DatasetConfigABC):
     """
-    Configuration for merging multiple datasets. No concatenation is allowed.
+    Configuration for merging multiple datasets. Merging means combining
+    variables from multiple datasets, each of which must have the same
+    time coordinate. For this case, the datasets being merged may not be
+    concatenated datasets.
+
     Parameters:
-        merge: List of XarrayDataConfig to merge.
+        merge: List of dataset configurations to merge.
     """
 
     merge: Sequence[XarrayDataConfig]

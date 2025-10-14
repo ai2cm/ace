@@ -76,8 +76,8 @@ class PairedSphericalPowerSpectrumAggregator:
         self._target_aggregator.record_batch(target_data)
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, plt.Figure]:
-        logs = {}
+    def get_logs(self, label: str) -> dict[str, plt.Figure | float]:
+        logs: dict[str, plt.Figure | float] = {}
         gen_spectrum = self._gen_aggregator.get_mean()
         target_spectrum = self._target_aggregator.get_mean()
         if self._report_plot:

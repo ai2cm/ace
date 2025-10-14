@@ -33,13 +33,17 @@ import fme.core.registry
 
 # Fetch the dynamic data
 module_types = fme.core.registry.ModuleSelector.get_available_types()
+step_types = fme.core.step.StepSelector.get_available_types()
 
-# Create a dynamic rst snippet that can be included in your documentation
-rst_snippet = f".. code-block:: text\n\n   {module_types}"
+# Create dynamic rst snippets that can be included in your documentation
+module_rst_snippet = f".. code-block:: text\n\n   {module_types}"
+step_rst_snippet = f".. code-block:: text\n\n   {step_types}"
 
-# Save the rst snippet to a file that can be included in your Sphinx documentation
+# Save the rst snippets to files that can be included in your Sphinx documentation
 with open("available_modules.rst", "w") as f:
-    f.write(rst_snippet)
+    f.write(module_rst_snippet)
+with open("available_steps.rst", "w") as f:
+    f.write(step_rst_snippet)
 
 
 # Add any Sphinx extension module names here, as strings. They can be

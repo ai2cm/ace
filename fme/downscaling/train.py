@@ -22,7 +22,7 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator, GenerationAggregator
-from fme.downscaling.datasets import (
+from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
@@ -33,7 +33,6 @@ from fme.downscaling.models import (
     DownscalingModelConfig,
     Model,
 )
-from fme.downscaling.patching import paired_patch_generator_from_loader
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -129,9 +128,13 @@ class Trainer:
             ):
                 os.makedirs(self.config.checkpoint_dir)
 
-        self.best_valid_loss = float("inf")
         self.epoch_checkpoint_path: str | None = None
+
+        self.best_valid_loss = float("inf")
         self.best_checkpoint_path: str | None = None
+        self.best_histogram_tail_metric = float("inf")
+        self.best_histogram_tail_checkpoint_path: str | None = None
+
         if self.config.checkpoint_dir is not None:
             self.epoch_checkpoint_path = os.path.join(
                 self.config.checkpoint_dir, "latest.ckpt"
@@ -142,21 +145,28 @@ class Trainer:
             self.ema_checkpoint_path = os.path.join(
                 self.config.checkpoint_dir, "ema_ckpt.tar"
             )
+            self.best_histogram_tail_checkpoint_path = os.path.join(
+                self.config.checkpoint_dir, "best_histogram_tail.ckpt"
+            )
+
+        self._best_valid_loss_name = "generation/metrics/crps"
+        self._best_histogram_tail_name = (
+            "generation/histogram/abs_norm_tail_bias_above_percentile/99.99/"
+        )
 
     def _get_batch_generator(
         self, data: PairedGriddedData, random_offset: bool, shuffle: bool
     ):
         if self.patch_data:
-            batch_generator = paired_patch_generator_from_loader(
-                loader=data.loader,
-                coarse_yx_extent=data.coarse_shape,
-                coarse_yx_patch_extents=self.model.coarse_shape,
-                downscale_factor=self.model.downscale_factor,
+            batch_generator = data.get_patched_generator(
+                coarse_yx_patch_extent=self.model.coarse_shape,
+                overlap=0,
+                drop_partial_patches=True,
                 random_offset=random_offset,
                 shuffle=shuffle,
             )
         else:
-            batch_generator = data.loader
+            batch_generator = data.get_generator()
         return batch_generator
 
     def train_one_epoch(self) -> None:
@@ -174,10 +184,11 @@ class Trainer:
             self.train_data, random_offset=True, shuffle=True
         )
         outputs = None
-        for i, batch in enumerate(train_batch_generator):
+        for i, (batch, topography) in enumerate(train_batch_generator):
             self.num_batches_seen += 1
-            logging.info(f"Training on batch {i+1}")
-            outputs = self.model.train_on_batch(batch, self.optimization)
+            if i % 10 == 0:
+                logging.info(f"Training on batch {i+1}")
+            outputs = self.model.train_on_batch(batch, topography, self.optimization)
             self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -224,7 +235,7 @@ class Trainer:
         else:
             yield
 
-    def valid_one_epoch(self) -> float:
+    def valid_one_epoch(self) -> dict[str, float]:
         self.model.module.eval()
         if (
             self.patch_data
@@ -242,21 +253,26 @@ class Trainer:
             generation_aggregator = GenerationAggregator(
                 self.dims,
                 self.model.downscale_factor,
+                percentiles=[99.99, 99.9999],
                 include_positional_comparisons=include_positional_comparisons,
             )
             batch: PairedBatchData
             validation_batch_generator = self._get_batch_generator(
                 self.validation_data, random_offset=False, shuffle=False
             )
-            for batch in validation_batch_generator:
-                outputs = self.model.train_on_batch(batch, self.null_optimization)
+            for batch, topography in validation_batch_generator:
+                outputs = self.model.train_on_batch(
+                    batch, topography, self.null_optimization
+                )
                 validation_aggregator.record_batch(
                     outputs=outputs,
                     coarse=batch.coarse.data,
                     batch=batch,
                 )
                 generated_outputs = self.model.generate_on_batch(
-                    batch, n_samples=self.config.generate_n_samples
+                    batch,
+                    topography=topography,
+                    n_samples=self.config.generate_n_samples,
                 )
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
@@ -274,9 +290,14 @@ class Trainer:
             {**generation_metrics, **validation_metrics},
             self.num_batches_seen,
         )
-        channel_mean_crps = _get_crps(generation_metrics)
-
-        return channel_mean_crps
+        channel_mean_checkpoint_metrics = {
+            prefix: _get_channel_mean_scalar_metric(generation_metrics, prefix)
+            for prefix in [
+                self._best_valid_loss_name,
+                self._best_histogram_tail_name,
+            ]
+        }
+        return channel_mean_checkpoint_metrics
 
     @property
     def resuming(self) -> bool:
@@ -284,22 +305,38 @@ class Trainer:
             return False
         return os.path.isfile(self.epoch_checkpoint_path)
 
-    def save_best_checkpoint(self, valid_loss: float) -> None:
+    def save_best_checkpoint(self, valid_metrics: dict[str, float]) -> None:
         if self.best_checkpoint_path is not None:
-            logging.info(f"Saving best checkpoint")
             if self.validate_using_ema:
                 best_checkpoint_context = self._ema_context
             else:
                 best_checkpoint_context = contextlib.nullcontext  # type: ignore
-            if valid_loss < self.best_valid_loss:
+            # Best checkpoint is hard coded to use validation CRPS channel mean
+            if valid_metrics[self._best_valid_loss_name] < self.best_valid_loss:
                 logging.info("Saving best checkpoint")
-                self.best_valid_loss = valid_loss
+                self.best_valid_loss = valid_metrics[self._best_valid_loss_name]
                 with best_checkpoint_context():
                     _save_checkpoint(self, self.best_checkpoint_path)
             else:
                 logging.info(
                     "Validation loss did not improve, will not overwrite "
                     "best checkpoint."
+                )
+        if self.best_histogram_tail_checkpoint_path is not None:
+            if (
+                valid_metrics[self._best_histogram_tail_name]
+                < self.best_histogram_tail_metric
+            ):
+                logging.info("Saving checkpoint for best histogram tail.")
+                self.best_histogram_tail_metric = valid_metrics[
+                    self._best_histogram_tail_name
+                ]
+                with best_checkpoint_context():
+                    _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
+            else:
+                logging.info(
+                    "Histogram tail metric did not improve, will not overwrite "
+                    "best histogram tail checkpoint."
                 )
         else:
             raise ValueError("Best checkpoint path is not set")
@@ -339,13 +376,13 @@ class Trainer:
             train_end = time.time()
 
             self.startEpoch = epoch + 1
+            wandb.log({"epoch": epoch}, step=self.num_batches_seen)
             if self._validate_current_epoch(epoch):
                 logging.info("Running metrics on validation data.")
-                valid_loss = self.valid_one_epoch()
+                valid_metrics = self.valid_one_epoch()
                 valid_end = time.time()
-                wandb.log({"epoch": epoch}, step=self.num_batches_seen)
                 if dist.is_root():
-                    self.save_best_checkpoint(valid_loss)
+                    self.save_best_checkpoint(valid_metrics)
             else:
                 valid_end = train_end
             if dist.is_root():
@@ -438,19 +475,19 @@ class TrainerConfig:
         )
 
 
-def _get_crps(metrics, prefix="generation/metrics/crps"):
-    channel_crps = [v for k, v in metrics.items() if k.startswith(prefix)]
+def _get_channel_mean_scalar_metric(metrics, prefix="generation/metrics/crps"):
+    channel_metric = [v for k, v in metrics.items() if k.startswith(prefix)]
 
-    if len(channel_crps) != 1:
+    if len(channel_metric) != 1:
         warnings.warn(
-            "CRPS metric used for checkpoint selection is computed on "
+            f"Metric {prefix} used for checkpoint selection is computed on "
             "denormalized outputs. If multiple outputs are present, "
-            "the mean CRPS will not be evenly weighted across outputs."
+            "the mean will not be evenly weighted across outputs."
         )
-    if len(channel_crps) == 0:
+    if len(channel_metric) == 0:
         return float("inf")
     else:
-        return sum(channel_crps) / len(channel_crps)
+        return sum(channel_metric) / len(channel_metric)
 
 
 def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):

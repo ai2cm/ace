@@ -43,7 +43,7 @@ class XarrayConcat(torch.utils.data.Dataset):
     def __len__(self):
         return len(self._dataset)
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
         return self._dataset[idx]
 
     @property
@@ -72,11 +72,12 @@ def get_dataset(
 @dataclasses.dataclass
 class ConcatDatasetConfig(DatasetConfigABC):
     """
-    Configuration for concatenating multiple datasets.
+    Configuration for concatenating multiple datasets across time.
+
     Parameters:
         concat: List of XarrayDataConfig objects to concatenate.
         strict: Whether to enforce that the datasets to be concatenated
-            have the same dimensions and coordinates.
+            have the same dimensions and spatial coordinates.
     """
 
     concat: Sequence[XarrayDataConfig]

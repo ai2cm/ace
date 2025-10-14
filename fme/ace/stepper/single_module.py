@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import datetime
 import logging
@@ -22,6 +23,7 @@ from fme.ace.stepper.parameter_init import (
     WeightsAndHistoryLoader,
     null_weights_and_history,
 )
+from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
 from fme.core.coordinates import (
     NullPostProcessFn,
     SerializableVerticalCoordinate,
@@ -35,7 +37,7 @@ from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
+from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import (
@@ -108,9 +110,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: ParameterInitializationConfig()
     )
     ocean: OceanConfig | None = None
-    loss: WeightedMappingLossConfig = dataclasses.field(
-        default_factory=lambda: WeightedMappingLossConfig()
-    )
+    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
@@ -153,133 +153,12 @@ class SingleModuleStepperConfig:
                     "was provided."
                 )
 
-    def load(self):
-        self.normalization.load()
-        if self.loss_normalization is not None:
-            self.loss_normalization.load()
-        if self.residual_normalization is not None:
-            self.residual_normalization.load()
-
-    @property
-    def n_ic_timesteps(self) -> int:
-        return 1
-
-    def get_evaluation_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return DataRequirements(
-            names=self.all_names,
-            n_timesteps=self._window_steps_required(n_forward_steps),
-        )
-
-    def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
-        return PrognosticStateDataRequirements(
-            names=self.prognostic_names,
-            n_timesteps=self.n_ic_timesteps,
-        )
-
-    def _window_steps_required(self, n_forward_steps: int) -> int:
-        return n_forward_steps + self.n_ic_timesteps
-
-    def get_state(self):
-        self.load()
-        return dataclasses.asdict(self)
-
-    def get_stepper(
-        self,
-        dataset_info: DatasetInfo,
-        apply_parameter_init: bool = True,
-        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
-    ) -> "Stepper":
-        """
-        Args:
-            dataset_info: Information about the training dataset.
-            apply_parameter_init: Whether to apply parameter initialization.
-            load_weights_and_history: Function for loading weights and history.
-                Default implementation loads a Trainer checkpoint containing
-                a Stepper.
-        """
-        logging.info("Initializing stepper from provided legacy config")
-        normalizer = self.normalization.build(self.normalize_names)
-        combined_normalization_config = NetworkAndLossNormalizationConfig(
-            network=self.normalization,
-            loss=self.loss_normalization,
-            residual=self.residual_normalization,
-        )
-        loss_normalizer = combined_normalization_config.get_loss_normalizer(
-            self.normalize_names, residual_scaled_names=self.prognostic_names
-        )
-        new_config = self.to_stepper_config(
-            normalizer=normalizer, loss_normalizer=loss_normalizer
-        )
-        return new_config.get_stepper(
-            dataset_info=dataset_info,
-            apply_parameter_init=apply_parameter_init,
-            load_weights_and_history=load_weights_and_history,
-        )
-
-    def get_ocean(self) -> OceanConfig | None:
-        return self.ocean
-
     @classmethod
     def from_state(cls, state) -> "SingleModuleStepperConfig":
         state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
-
-    @property
-    def input_names(self) -> list[str]:
-        return self.in_names
-
-    @property
-    def output_names(self) -> list[str]:
-        return self.out_names
-
-    @property
-    def all_names(self):
-        """Names of all variables required, including auxiliary ones."""
-        extra_names = []
-        if self.ocean is not None:
-            extra_names.extend(self.ocean.forcing_names)
-        if self.multi_call is not None:
-            extra_names.extend(self.multi_call.names)
-        all_names = list(set(self.in_names).union(self.out_names).union(extra_names))
-        return all_names
-
-    @property
-    def normalize_names(self):
-        """Names of variables which require normalization. I.e. inputs/outputs."""
-        extra_names = []
-        if self.multi_call is not None:
-            extra_names.extend(self.multi_call.names)
-        return list(set(self.in_names).union(self.out_names).union(extra_names))
-
-    @property
-    def input_only_names(self) -> list[str]:
-        """Names of variables which are inputs only."""
-        return list(set(self.all_names) - set(self.out_names))
-
-    @property
-    def prognostic_names(self) -> list[str]:
-        """Names of variables which both inputs and outputs."""
-        return list(set(self.out_names).intersection(self.in_names))
-
-    @property
-    def loss_names(self) -> list[str]:
-        extra_names = []
-        if self.multi_call is not None:
-            extra_names.extend(self.multi_call.names)
-        return list(set(self.out_names).union(extra_names))
-
-    @property
-    def diagnostic_names(self) -> list[str]:
-        """Names of variables which are outputs only."""
-        extra_names = []
-        if self.multi_call is not None:
-            extra_names = self.multi_call.names
-        out_names = list(set(self.out_names).union(extra_names))
-        return list(set(out_names).difference(self.in_names))
 
     @classmethod
     def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
@@ -417,64 +296,6 @@ class SingleModuleStepperConfig:
             residual_prediction=self.residual_prediction,
         )
 
-    def replace_multi_call(self, multi_call: MultiCallConfig | None):
-        self.multi_call = multi_call
-
-    def replace_ocean(self, ocean: OceanConfig | None):
-        self.ocean = ocean
-
-
-@dataclasses.dataclass
-class ExistingStepperConfig:
-    """
-    Configuration for an existing stepper. This allows loading a serialized
-    stepper from a checkpoint without loading its configuration of the training
-    and optimization schedule, i.e., this allows for specifying a new
-    schedule in fine-tuning. Not used for training resumption.
-
-    Parameters:
-        checkpoint_path: The path to the serialized checkpoint; should be different
-        than the experiment output directory.
-    """
-
-    checkpoint_path: str
-
-    def __post_init__(self):
-        self._stepper_config = StepperConfig.from_stepper_state(
-            self._load_checkpoint()["stepper"]
-        )
-
-    def _load_checkpoint(self) -> Mapping[str, Any]:
-        return torch.load(
-            self.checkpoint_path, map_location=get_device(), weights_only=False
-        )
-
-    def get_evaluation_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return self._stepper_config.get_evaluation_window_data_requirements(
-            n_forward_steps
-        )
-
-    def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
-        return self._stepper_config.get_prognostic_state_data_requirements()
-
-    def get_forcing_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return self._stepper_config.get_forcing_window_data_requirements(
-            n_forward_steps
-        )
-
-    def get_stepper(
-        self,
-        dataset_info: DatasetInfo,
-        apply_parameter_init: bool = True,
-        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
-    ):
-        logging.info(f"Initializing stepper from {self.checkpoint_path}")
-        return Stepper.from_state(self._load_checkpoint()["stepper"])
-
 
 def _prepend_timesteps(
     data: EnsembleTensorDict, timesteps: TensorMapping, time_dim: int = 2
@@ -488,6 +309,16 @@ def _prepend_timesteps(
     return EnsembleTensorDict(
         {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
     )
+
+
+def _get_time_dim_size(data: TensorDict) -> int:
+    for v in data.values():
+        return v.shape[1]
+    raise ValueError("data is empty")
+
+
+def _clip_time_dim(data: TensorDict, time_dim_size: int) -> TensorDict:
+    return {k: v[:, :time_dim_size] for k, v in data.items()}
 
 
 @dataclasses.dataclass
@@ -511,6 +342,18 @@ class TrainOutput(TrainOutputABC):
     def ensemble_derive_func(
         self, data: EnsembleTensorDict, forcing_data: TensorMapping
     ) -> EnsembleTensorDict:
+        """
+        Compute derived variables for an ensemble of data.
+
+        Args:
+            data: The data to compute derived variables for.
+            forcing_data: The forcing data to use for the derived variables.
+                Time dimension must be at least as long as present in the data,
+                if longer it will be clipped.
+
+        Returns:
+            The derived variables.
+        """
         flattened_data, n_ensemble = fold_ensemble_dim(data)
         if n_ensemble > 1:
             ensemble_forcing_data = add_ensemble_dim(forcing_data, repeats=n_ensemble)
@@ -519,6 +362,9 @@ class TrainOutput(TrainOutputABC):
             )
         else:
             flattened_forcing_data = dict(forcing_data)
+        flattened_forcing_data = _clip_time_dim(
+            flattened_forcing_data, _get_time_dim_size(flattened_data)
+        )
         derived_data = self.derive_func(flattened_data, flattened_forcing_data)
         return unfold_ensemble_dim(derived_data, n_ensemble)
 
@@ -620,6 +466,7 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[TensorDict],
     time: xr.DataArray,
+    labels: list[set[str]],
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
     output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim=1)
@@ -627,6 +474,7 @@ def process_prediction_generator_list(
         data=output_timeseries,
         time=time,
         horizontal_dims=horizontal_dims,
+        labels=labels,
     )
 
 
@@ -638,6 +486,7 @@ class StepperConfig:
     Parameters:
         step: The step configuration.
         loss: The loss configuration.
+        optimize_last_step_only: Whether to optimize only the last step.
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
@@ -645,18 +494,29 @@ class StepperConfig:
             n_ensemble=2 with a CRPS loss instead.
         parameter_init: The parameter initialization configuration.
         input_masking: Config for masking step inputs.
+        train_n_forward_steps: The number of timesteps to train on and associated
+            sampling probabilities. By default, the stepper will train on the full
+            number of timesteps present in the training dataset samples. Values must
+            be less than or equal to the number of timesteps present
+            in the training dataset samples.
     """
 
     step: StepSelector
-    loss: WeightedMappingLossConfig = dataclasses.field(
-        default_factory=lambda: WeightedMappingLossConfig()
-    )
+    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
+    optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
     crps_training: bool = False
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
     input_masking: StaticMaskingConfig | None = None
+    train_n_forward_steps: TimeLengthProbabilities | int | None = None
+
+    @property
+    def train_n_forward_steps_sampler(self) -> TimeLengthProbabilities | None:
+        if isinstance(self.train_n_forward_steps, int):
+            return TimeLengthProbabilities.from_constant(self.train_n_forward_steps)
+        return self.train_n_forward_steps
 
     def __post_init__(self):
         if self.crps_training:
@@ -666,7 +526,7 @@ class StepperConfig:
                 DeprecationWarning,
             )
             self.n_ensemble = 2
-            self.loss = WeightedMappingLossConfig(
+            self.loss = StepLossConfig(
                 type="EnsembleLoss",
                 kwargs={"crps_weight": 1.0},
             )
@@ -679,6 +539,26 @@ class StepperConfig:
     @property
     def n_ic_timesteps(self) -> int:
         return self.step.n_ic_timesteps
+
+    def get_train_window_data_requirements(
+        self,
+        default_n_forward_steps: int | None,
+    ) -> DataRequirements:
+        if self.train_n_forward_steps is None:
+            if default_n_forward_steps is None:
+                raise ValueError(
+                    "default_n_forward_steps is required if "
+                    "train_n_forward_steps is not provided"
+                )
+            n_forward_steps = default_n_forward_steps
+        elif isinstance(self.train_n_forward_steps, int):
+            n_forward_steps = self.train_n_forward_steps
+        else:
+            n_forward_steps = self.train_n_forward_steps.max_n_forward_steps
+        return DataRequirements(
+            names=self.all_names,
+            n_timesteps=self._window_steps_required(n_forward_steps),
+        )
 
     def get_evaluation_window_data_requirements(
         self, n_forward_steps: int
@@ -890,6 +770,12 @@ class StepperConfig:
             load_weights_and_history=load_weights_and_history
         )
 
+    @classmethod
+    def from_state(cls, state) -> "StepperConfig":
+        return dacite.from_dict(
+            data_class=cls, data=state, config=dacite.Config(strict=True)
+        )
+
 
 class Stepper(
     TrainStepperABC[
@@ -941,8 +827,9 @@ class Stepper(
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
+        self._train_n_forward_steps_sampler = config.train_n_forward_steps_sampler
 
-        def get_loss_obj():
+        def get_loss_obj() -> StepLoss:
             loss_normalizer = step.get_loss_normalizer()
             if config.loss is None:
                 raise ValueError("Loss is not configured")
@@ -956,7 +843,7 @@ class Stepper(
         self._loss_normalizer: StandardNormalizer | None = None
 
         self._get_loss_obj = get_loss_obj
-        self._loss_obj: WeightedMappingLoss | None = None
+        self._loss_obj: StepLoss | None = None
 
         self._parameter_initializer.apply_weights(
             step.modules,
@@ -997,7 +884,7 @@ class Stepper(
         return self._loss_normalizer
 
     @property
-    def loss_obj(self) -> WeightedMappingLoss:
+    def loss_obj(self) -> StepLoss:
         if self._loss_obj is None:
             self._loss_obj = self._get_loss_obj()
         return self._loss_obj
@@ -1017,6 +904,23 @@ class Stepper(
     @property
     def ocean_fraction_name(self) -> str | None:
         return self._step_obj.ocean_fraction_name
+
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        """
+        Prescribe sea surface temperature onto the generated surface temperature field.
+
+        Args:
+            mask_data: Source for the prescriber mask field.
+            gen_data: Contains the generated surface temperature field.
+            target_data: Contains the target surface temperature that will
+                be prescribed onto the generated one according to the mask.
+        """
+        return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
     @property
     def training_dataset_info(self) -> DatasetInfo:
@@ -1159,7 +1063,7 @@ class Stepper(
         Predict multiple steps forward given initial condition and forcing data.
 
         Uses low-level inputs and does not compute derived variables, to separate
-        concerns from the public `predict` method.
+        concerns from the `predict` method.
 
         Args:
             initial_condition: The initial condition, containing tensors of shape
@@ -1248,11 +1152,17 @@ class Stepper(
             self._step_obj.next_step_input_names
         )
         with timer.context("forward_prediction"):
+            ic_batch_data = initial_condition.as_batch_data()
+            if ic_batch_data.labels != forcing.labels:
+                raise ValueError(
+                    "Initial condition and forcing data must have the same labels, "
+                    f"got {ic_batch_data.labels} and {forcing.labels}."
+                )
             forcing_data = forcing.subset_names(forcing_names)
-            if initial_condition.as_batch_data().n_timesteps != self.n_ic_timesteps:
+            if ic_batch_data.n_timesteps != self.n_ic_timesteps:
                 raise ValueError(
                     f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
-                    f"{initial_condition.as_batch_data().n_timesteps}."
+                    f"{ic_batch_data.n_timesteps}."
                 )
             n_forward_steps = forcing_data.n_timesteps - self.n_ic_timesteps
             output_list = list(
@@ -1267,6 +1177,7 @@ class Stepper(
             output_list,
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
+            labels=forcing.labels,
         )
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
@@ -1283,6 +1194,7 @@ class Stepper(
             data=data.data,
             time=data.time,
             horizontal_dims=data.horizontal_dims,
+            labels=data.labels,
         )
         return data, prognostic_state
 
@@ -1324,6 +1236,7 @@ class Stepper(
                     data=forward_data.data,
                     time=forward_data.time,
                     horizontal_dims=forward_data.horizontal_dims,
+                    labels=forward_data.labels,
                 ),
             ),
             new_initial_condition,
@@ -1433,17 +1346,42 @@ class Stepper(
             optimization,
         )
         output_list: list[EnsembleTensorDict] = []
-        for step, gen_step in enumerate(output_generator):
-            gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
-            output_list.append(gen_step)
-            # Note: here we examine the loss for a single timestep,
-            # not a single model call (which may contain multiple timesteps).
-            target_step = add_ensemble_dim(
-                {k: v.select(self.TIME_DIM, step) for k, v in target_data.data.items()}
+        output_iterator = iter(output_generator)
+        if self._train_n_forward_steps_sampler is not None:
+            stochastic_n_forward_steps = self._train_n_forward_steps_sampler.sample()
+            if stochastic_n_forward_steps > n_forward_steps:
+                raise RuntimeError(
+                    "The number of forward steps to train on "
+                    f"({stochastic_n_forward_steps}) is greater than the number of "
+                    f"forward steps in the data ({n_forward_steps}), "
+                    "This is supposed to be ensured by the StepperConfig when train "
+                    "data requirements are retrieved, so this is a bug."
+                )
+            n_forward_steps = stochastic_n_forward_steps
+        for step in range(n_forward_steps):
+            optimize_step = (
+                step == n_forward_steps - 1 or not self._config.optimize_last_step_only
             )
-            step_loss = self.loss_obj(gen_step, target_step)
-            metrics[f"loss_step_{step}"] = step_loss.detach()
-            optimization.accumulate_loss(step_loss)
+            if optimize_step:
+                context = contextlib.nullcontext()
+            else:
+                context = torch.no_grad()
+            with context:
+                gen_step = next(output_iterator)
+                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                output_list.append(gen_step)
+                # Note: here we examine the loss for a single timestep,
+                # not a single model call (which may contain multiple timesteps).
+                target_step = add_ensemble_dim(
+                    {
+                        k: v.select(self.TIME_DIM, step)
+                        for k, v in target_data.data.items()
+                    }
+                )
+                step_loss = self.loss_obj(gen_step, target_step, step=step)
+                metrics[f"loss_step_{step}"] = step_loss.detach()
+            if optimize_step:
+                optimization.accumulate_loss(step_loss)
         return output_list
 
     def update_training_history(self, training_job: TrainingJob) -> None:
@@ -1510,6 +1448,11 @@ class Stepper(
 
             if "img_shape" in state:
                 dataset_state["img_shape"] = state["img_shape"]
+            elif "data_shapes" in state:
+                for _, shape in state["data_shapes"].items():
+                    if len(shape) == 4:
+                        dataset_state["img_shape"] = shape[-2:]
+                        break
 
             normalizer = StandardNormalizer.from_state(
                 state.get("normalizer", state.get("normalization"))
@@ -1518,10 +1461,11 @@ class Stepper(
                 raise ValueError(
                     f"No normalizer state found, keys include {state.keys()}"
                 )
-            loss_normalizer = StandardNormalizer.from_state(
-                state.get("loss_normalizer", state.get("loss_normalization"))
-            )
-            if loss_normalizer is None:
+            if "loss_normalizer" in state or "loss_normalization" in state:
+                loss_normalizer = StandardNormalizer.from_state(
+                    state.get("loss_normalizer", state.get("loss_normalization"))
+                )
+            else:
                 loss_normalizer = normalizer
             config = legacy_config.to_stepper_config(
                 normalizer=normalizer, loss_normalizer=loss_normalizer

@@ -195,6 +195,7 @@ def test_inference_logs_labels_exist(tmpdir):
                 "ocean_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
             time=time,
+            labels=[set() for _ in range(n_sample)],
         ),
         atmosphere_data=PairedData(
             prediction={
@@ -204,6 +205,7 @@ def test_inference_logs_labels_exist(tmpdir):
                 "atmos_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
             time=time,
+            labels=[set() for _ in range(n_sample)],
         ),
     )
 
@@ -222,6 +224,8 @@ def test_inference_logs_labels_exist(tmpdir):
         "annual/r2/ocean_var_gen",
         "annual/r2/ocean_var_target",
         "mean_step_20/weighted_rmse/ocean_var",
+        "mean_step_20_norm/weighted_rmse/ocean_var",
+        "mean_step_20_norm/weighted_rmse/ocean_channel_mean",
         "mean_step_20/weighted_bias/ocean_var",
         "mean_step_20/weighted_grad_mag_percent_diff/ocean_var",
         "power_spectrum/ocean_var",
@@ -247,6 +251,8 @@ def test_inference_logs_labels_exist(tmpdir):
         "annual/r2/atmos_var_gen",
         "annual/r2/atmos_var_target",
         "mean_step_20/weighted_rmse/atmos_var",
+        "mean_step_20_norm/weighted_rmse/atmos_var",
+        "mean_step_20_norm/weighted_rmse/atmosphere_channel_mean",
         "mean_step_20/weighted_bias/atmos_var",
         "mean_step_20/weighted_grad_mag_percent_diff/atmos_var",
         "power_spectrum/atmos_var",

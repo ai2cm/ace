@@ -88,6 +88,7 @@ def _create_dataset_on_disk(
     in_variable_names=["foo", "bar", "baz"],
     out_variable_names=["foo", "bar"],
     filename="data.nc",
+    timestep_start=0,
 ) -> pathlib.Path:
     if data_dim_sizes is None:
         data_dim_sizes = {"time": n_times, "lat": 16, "lon": 32}
@@ -101,7 +102,14 @@ def _create_dataset_on_disk(
     ]
 
     data_path = data_dir / filename
-    _save_netcdf(data_path, data_dim_sizes, all_variable_names, calendar, timestep_size)
+    _save_netcdf(
+        data_path,
+        data_dim_sizes,
+        all_variable_names,
+        calendar,
+        timestep_size,
+        timestep_start,
+    )
 
     return data_path
 
@@ -531,19 +539,19 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     calendar = "proleptic_gregorian"
     total_forward_steps = 5
     forward_steps_in_memory = 2
-    _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10)
+    # forcing dataset starts 2 steps before initial condition time of 1970-01-01
+    _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10, timestep_start=-2)
     config = ForcingDataLoaderConfig(dataset=XarrayDataConfig(data_path=tmp_path))
     window_requirements = DataRequirements(
         names=["foo"],
         n_timesteps=forward_steps_in_memory + 1,
     )
-    time_values = [
-        [cftime.datetime(1970, 1, 1 + 2 * n, calendar=calendar)]
-        for n in range(n_initial_conditions)
-    ]
-    initial_condition = BatchData.new_on_cpu(
-        data={"foo": torch.randn(n_initial_conditions, 1, 1, 1)},
-        time=xr.DataArray(time_values, dims=["sample", "time"]),
+    initial_condition = BatchData.new_for_testing(
+        names=["foo"],
+        n_samples=n_initial_conditions,
+        n_timesteps=1,
+        t_initial=cftime.datetime(1970, 1, 1),
+        calendar=calendar,
     )
     data = get_forcing_data(
         config,
@@ -558,7 +566,7 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
     assert set(batch_data.data.keys()) == {"foo"}
-    assert batch_data.data["foo"].shape[0] == len(time_values)
+    assert batch_data.data["foo"].shape[0] == n_initial_conditions
     assert batch_data.data["foo"].shape[1] == forward_steps_in_memory + 1
     assert list(batch_data.time.dims) == ["sample", "time"]
     xr.testing.assert_allclose(batch_data.time[:, 0], initial_condition.time[:, 0])
@@ -666,6 +674,7 @@ def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
     initial_condition = BatchData.new_on_cpu(
         data={"foo": torch.randn(1, 1, 1, 1), "foo2": torch.randn(1, 1, 1, 1)},
         time=xr.DataArray(time_values, dims=["sample", "time"]),
+        labels=[set()],
     )
     data = get_forcing_data(
         config,

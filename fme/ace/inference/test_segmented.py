@@ -17,13 +17,14 @@ import yaml
 import fme
 from fme.ace.data_loading.inference import ForcingDataLoaderConfig, TimestampList
 from fme.ace.inference.data_writer import DataWriterConfig
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
     InitialConditionConfig,
     main,
     run_segmented_inference,
 )
 from fme.ace.registry import ModuleSelector
-from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import (
     DimSize,
@@ -33,7 +34,9 @@ from fme.core.coordinates import (
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.logging_utils import LoggingConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -53,13 +56,24 @@ def save_stepper(
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means={name: mean for name in all_names},
-            stds={name: std for name in all_names},
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": PlusOne()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={name: mean for name in all_names},
+                            stds={name: std for name in all_names},
+                        ),
+                    ),
+                ),
+            ),
         ),
     )
     horizontal_coordinate = LatLonCoordinates(
@@ -143,7 +157,11 @@ def test_inference_segmented_entrypoint():
                 start_indices=TimestampList(["2000-01-01T06:00:00"]),
             ),
             forcing_loader=forcing_loader,
-            data_writer=DataWriterConfig(save_prediction_files=True),
+            data_writer=DataWriterConfig(
+                save_prediction_files=False,
+                save_monthly_files=False,
+                files=[FileWriterConfig("autoregressive")],
+            ),
             allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info  # noqa: E501
         )
 
@@ -215,6 +233,9 @@ def _get_mock_config(experiment_dir: str) -> fme.ace.InferenceConfig:
         initial_condition=InitialConditionConfig(path="mock_ic"),
         forcing_loader=ForcingDataLoaderConfig(
             dataset=XarrayDataConfig(data_path="mock_forcing")
+        ),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False, save_monthly_files=False
         ),
     )
 

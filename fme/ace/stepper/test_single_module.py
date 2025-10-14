@@ -2,6 +2,8 @@ import dataclasses
 import datetime
 import os
 import pathlib
+import unittest
+import unittest.mock
 from collections import namedtuple
 from collections.abc import Iterable, Mapping
 from typing import Literal
@@ -45,7 +47,7 @@ from fme.core.coordinates import (
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
@@ -126,6 +128,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
             np.zeros((n_samples, n_time)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
     )
     return SphericalData(data, area_weights, vertical_coord)
 
@@ -180,7 +183,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
                     )
                 ),
             ),
-            loss=WeightedMappingLossConfig(type="MSE"),
+            loss=StepLossConfig(type="MSE"),
         )
 
     config = get_stepper_config(
@@ -254,7 +257,7 @@ def test_train_on_batch_addition_series():
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
@@ -317,7 +320,7 @@ def test_train_on_batch_crps_loss():
             ),
         ),
         n_ensemble=2,
-        loss=WeightedMappingLossConfig(
+        loss=StepLossConfig(
             type="EnsembleLoss",
             kwargs={
                 "crps_weight": 0.1,
@@ -330,6 +333,62 @@ def test_train_on_batch_crps_loss():
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, 2, n_steps + 1, 5, 5)
+
+
+@pytest.mark.parametrize("optimize_last_step_only", [True, False])
+def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
+    torch.manual_seed(0)
+
+    forward_calls_grad_enabled = []
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            forward_calls_grad_enabled.append(torch.is_grad_enabled())
+            return x + 1
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        optimize_last_step_only=optimize_last_step_only,
+        n_ensemble=2,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={
+                "crps_weight": 0.1,
+                "energy_score_weight": 0.9,
+            },
+        ),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    optimization = unittest.mock.Mock(wraps=NullOptimization())
+    stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    if optimize_last_step_only:
+        assert len(optimization.accumulate_loss.call_args_list) == 1
+        assert forward_calls_grad_enabled[-1]
+        assert not any(forward_calls_grad_enabled[:-1])
+    else:
+        assert len(optimization.accumulate_loss.call_args_list) == n_steps
+        assert all(forward_calls_grad_enabled)
 
 
 def test_train_on_batch_with_prescribed_ocean():
@@ -413,7 +472,7 @@ def test_reloaded_stepper_gives_same_prediction():
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
@@ -531,7 +590,7 @@ def _setup_and_train_on_batch(
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
 
     dataset_info = get_dataset_info()
@@ -760,6 +819,7 @@ def test_stepper_corrector(
     batch_data = BatchData.new_on_cpu(
         data=data,
         time=time,
+        labels=[set() for _ in range(time.shape[0])],
     ).to_device()
     # run the stepper on the data
     with torch.no_grad():
@@ -880,7 +940,7 @@ def _get_stepper(
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     return config.get_stepper(dataset_info)
@@ -941,6 +1001,28 @@ def test_step_with_prescribed_ocean():
     assert set(output) == {"a", "b"}
 
 
+def test_prescribe_sst_integration():
+    """Test that prescribe_sst produces the same prescription as step method."""
+    stepper = _get_stepper(
+        ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
+    )
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
+    prescribed_data = stepper.prescribe_sst(
+        mask_data=ocean_data,
+        gen_data=input_data,
+        target_data=ocean_data,
+    )
+    expected_prescribed_a = torch.where(
+        torch.round(ocean_data["mask"]).to(int) == 1,
+        ocean_data["a"],
+        input_data["a"],  # no +1
+    )
+    torch.testing.assert_close(prescribed_data["a"], expected_prescribed_a)
+    torch.testing.assert_close(prescribed_data["b"], input_data["b"])
+    assert set(prescribed_data) == {"a", "b"}
+
+
 def get_data_for_predict(
     n_steps, forcing_names: list[str]
 ) -> tuple[PrognosticState, BatchData]:
@@ -951,6 +1033,7 @@ def get_data_for_predict(
             np.zeros((n_samples, 1)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
     ).get_start(
         prognostic_names=["a"],
         n_ic_timesteps=1,
@@ -963,6 +1046,7 @@ def get_data_for_predict(
             np.zeros((n_samples, n_steps + 1)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
     )
     return input_data, forcing_data
 
@@ -1086,7 +1170,8 @@ def test_prepend_initial_condition():
     }
     ic = BatchData.new_on_device(
         data=ic_data,
-        time=xr.DataArray(np.zeros((3, 1)), dims=["sample", "time"]),
+        time=xr.DataArray(np.zeros((batch_size, 1)), dims=["sample", "time"]),
+        labels=[set() for _ in range(batch_size)],
     ).get_start(
         prognostic_names=["a", "b"],
         n_ic_timesteps=1,
@@ -1137,11 +1222,11 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     stepper_from_state = Stepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
-        assert stepper.loss_obj.normalizer.means == {
+        assert stepper.loss_obj._normalizer.means == {
             **residual_means,
             "diagnostic": full_field_means["diagnostic"],
         }
-        assert stepper.loss_obj.normalizer.stds == {
+        assert stepper.loss_obj._normalizer.stds == {
             **residual_stds,
             "diagnostic": full_field_stds["diagnostic"],
         }
@@ -1243,13 +1328,13 @@ def get_regression_stepper_and_data(
     all_names = list(set(in_names + out_names))
 
     if crps_training:
-        loss = WeightedMappingLossConfig(
+        loss = StepLossConfig(
             type="EnsembleLoss",
             kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
         )
         n_ensemble: int = 2
     else:
-        loss = WeightedMappingLossConfig(type="MSE")
+        loss = StepLossConfig(type="MSE")
         n_ensemble = 1
 
     config = StepperConfig(
@@ -1294,6 +1379,8 @@ def get_regression_stepper_and_data(
             np.zeros((n_samples, n_forward_steps + 1)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_samples)],
+        horizontal_dims=["lat", "lon"],
     )
     return stepper, data
 
