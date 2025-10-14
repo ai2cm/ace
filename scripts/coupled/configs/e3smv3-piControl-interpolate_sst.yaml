@@ -1,0 +1,28 @@
+# config for creating surface temperature and fractions dataset for coupled
+# training after uncoupled atmopshere pretraining with sst_from_ts
+
+coupled_ts:
+  how: interpolate_sst
+coupled_sea_ice:
+  sst_threshold: 291.75
+  extra_masked_names: ["sea_ice_volume"]
+output_name_prefix: E3SMv3-piControl-100yr-coupled
+version: "2025-09-09"
+output_directory: /pscratch/sd/e/elynnwu/fme-dataset
+atmosphere_timedelta: 6h
+atmosphere_fields:
+  surface_temperature_name: TS
+ocean:
+  zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-08-13-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+  time_chunk_size: 25
+  extra_names_and_prefixes: ["idepth_", "mask_"]
+  last_timestamp: "0499-12-29T12:00:00"
+sea_ice:
+  zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-09-09-e3smv3-piControl-sic-6h-to-5Davg.zarr
+  time_chunk_size: 25
+atmosphere:
+  zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-09-09-E3SMv3-coupled-piControl-atmosphere-100yr-preprocess-again.zarr
+  time_chunk_size: 500
+  extra_names_and_prefixes: ["ak_", "bk_"]
+output_writer:
+  n_dask_workers: 32

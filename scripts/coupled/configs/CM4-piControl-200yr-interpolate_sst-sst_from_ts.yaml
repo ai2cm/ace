@@ -2,24 +2,28 @@
 # atmosphere pretraining
 
 coupled_ts:
-  how: threshold
-  ocean_fraction_threshold: 0.5
+  how: interpolate_sst
   sst_from_ts: true
 coupled_sea_ice:
   sst_threshold: 291.75
   extra_masked_names: ["HI", "sea_ice_volume"]
+atmosphere_timedelta: 6h
 output_name_prefix: cm4-piControl-200yr-coupled
-version: "2025-07-11"
+version: "2025-08-22"
 output_directory: /climate-default
 ocean:
-  zarr_path: /climate-default/2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+  zarr_path: /climate-default/2025-08-07-cm4-piControl-200yr-ocean.zarr
   time_chunk_size: 25
-  timedelta: 5D
   extra_names_and_prefixes: ["idepth_", "mask_"]
+sea_ice:
+  zarr_path: /climate-default/2025-08-22-cm4-piControl-200yr-sic-6h-to-5Davg.zarr
+  time_chunk_size: 25
 atmosphere:
   zarr_path: /climate-default/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
   time_chunk_size: 500
-  timedelta: 6h
   extra_names_and_prefixes: ["ak_", "bk_"]
+ts_5D:
+  zarr_path: /climate-default/2025-08-22-cm4-piControl-200yr-ts-6h-to-5Davg.zarr
+  time_chunk_size: 25
 output_writer:
   n_dask_workers: 64

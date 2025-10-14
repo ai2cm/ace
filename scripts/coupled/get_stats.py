@@ -39,7 +39,7 @@ def get_stats(
 
 @click.command()
 @click.option("--input_zarr", help="Path to dataset zarr.")
-@click.option("--stats_dir", help="Path to dataset zarr.")
+@click.option("--stats_dir", help="Path to stats output.")
 @click.option(
     "--start",
     help="Start datetime in format 'YYYY-MM-DD HH:MM:SS'",
