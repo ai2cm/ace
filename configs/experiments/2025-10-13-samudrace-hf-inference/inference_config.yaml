@@ -1,7 +1,7 @@
 experiment_dir: /results
 n_coupled_steps: 140
 coupled_steps_in_memory: 20
-checkpoint_path: /climate-default/home/jamesd/samudrACE_CM4_piControl/samudrACE_CM4_piControl_ckpt.tar
+checkpoint_path: /climate-default/home/jamesd/SamudrACE-CM4-piControl/SamudrACE-CM4-piControl_ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: true
@@ -18,9 +18,9 @@ forcing_loader:
   num_data_workers: 1
 initial_condition:
   ocean:
-    path: "/climate-default/home/jamesd/samudrACE_CM4_piControl/initial_conditions/0311-01-01T00:00:00/ocean/initial_condition.nc"
+    path: "/climate-default/home/jamesd/SamudrACE-CM4-piControl/initial_conditions/0311-01-01T00:00:00/ocean/initial_condition.nc"
   atmosphere:
-    path: "/climate-default/home/jamesd/samudrACE_CM4_piControl/initial_conditions/0311-01-01T00:00:00/atmosphere/initial_condition.nc"
+    path: "/climate-default/home/jamesd/SamudrACE-CM4-piControl/initial_conditions/0311-01-01T00:00:00/atmosphere/initial_condition.nc"
   start_indices:
     first: 0
     n_initial_conditions: 1
