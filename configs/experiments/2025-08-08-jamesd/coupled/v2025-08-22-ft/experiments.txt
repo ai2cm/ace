@@ -48,3 +48,5 @@ ft_w1jnkgkv-best_inf_ckpt_0005-wu_0p5xLR_20ep|ex|training|best_inference_ckpt|no
 ft_c2ugn4wy-best_inf_ckpt_0011-wu_0p5xLR_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_w1jnkgkv-best_inf_ckpt_0005-wu_0p1xLR_20ep|01K7GGGX0K6NN7FFV2PY3GSXRQ|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_c2ugn4wy-best_inf_ckpt_0017-wu_0p1xLR_20ep|01K7GGHA9WQT9E5HCJQSJEAR48|training|best_inference_ckpt|normal|--not-preemptible
