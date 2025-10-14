@@ -134,10 +134,16 @@ optimization:
     fused: true
     weight_decay: 0.01
   scheduler:
-    type: CosineAnnealingLR
-    step_each_iteration: true
-    kwargs:
-      T_max: 14140
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 1414
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [1414]
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction

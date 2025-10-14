@@ -28,19 +28,21 @@ ft-wkyt377i-const_lr_20ep-ncs3-oloss_w0p1-fta_dec|01K63C4Q3QGCY88CJ8SYG2YQ7B|tra
 ft-v2025-08-22-const_lr_50ep-ncs4-fta_enc_dec|01K63V0VXWM5PSBXE59KZTYZ4E|training|best_inference_ckpt|normal|--not-preemptible
 ft-v2025-08-22-const_lr_50ep-ncs4-fta_enc_dec|01K6455X4S7APG3MEBE6BZD9H0|training|best_inference_ckpt|normal|--not-preemptible
 ft-eyu9akgo-cos_lr_20ep|TODO|training|best_inference_ckpt|normal|--not-preemptible
-ft-v2025-08-22-warmup_const_lr_50ep-ncs1-atmos_loss_ns20|01K6EE3M9S2NX82HTZRSYFHRV4|run_200yr|best_inference_ckpt|normal|--not-preemptible|data_writer.ocean.save_monthly_files=false data_writer.atmosphere.save_monthly_files=false
-ft-v2025-08-22-warmup_const_lr_50ep-ncs1-atmos_loss_ns20|01K6EE3M9S2NX82HTZRSYFHRV4|run_200yr|ema_ckpt|normal|--not-preemptible|data_writer.ocean.save_monthly_files=false data_writer.atmosphere.save_monthly_files=false
+ft-v2025-08-22-warmup_const_lr_50ep-ncs1-atmos_loss_ns20|01K6EE3M9S2NX82HTZRSYFHRV4|trained|best_inference_ckpt|normal|--not-preemptible|data_writer.ocean.save_monthly_files=false data_writer.atmosphere.save_monthly_files=false
 ft-mtvb2ct3_ema_ckpt-cooldown_10ep-ncs1-atmos_loss_ns20|01K6R23GV81ZSMYFDFX2Y9GV4X|training|best_inference_ckpt|normal|--not-preemptible
 ft-mtvb2ct3_best_inf_ckpt_ep25-wu1ep_cd4ep-ncs1-atmos_loss_ns20|01K6S569H4CMQMNWZV6K040TBE|training|best_inference_ckpt|normal|--not-preemptible
 ft-mtvb2ct3_best_inf_ckpt_ep25-wu1ep_cd4ep-ncs1-atmos_loss_ns20|01K6X4KY80YHMQVPQNVPMH61F4|training|best_inference_ckpt|normal|--not-preemptible
 ft-v2025-08-22-ncs2-atmos_2aw6z7n3_loss_ns2-wu_to_half_lr_50ep|01K6YCZT0YP0MG08PDYBVBMS23|training|best_inference_ckpt|normal|--not-preemptible
-
 ft_5iqa5aw5-best_inf_ckpt-cos_half_lr_20ep|01K73JTGGY9AFDRQ680N460HDR|training|best_inference_ckpt|normal|--not-preemptible
-
 ft_5iqa5aw5-ema_ckpt-cos_half_lr_20ep|01K73JTZ49B3H7AF864454H97A|training|best_inference_ckpt|normal|--not-preemptible
-
 ft_5iqa5aw5-best_inf_ckpt-cos_0p1xLR_20ep|01K750XSZFPGJ5W232WCF4EVKA|training|best_inference_ckpt|normal|--not-preemptible
-
 ft-v2025-08-22-ncs2-atmos_2aw6z7n3_loss_ns2-wu_to_half_lr_50ep|01K76D1HEJ9KEFRCDST163DQ0T|training|best_inference_ckpt|normal|--not-preemptible
-
-ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|01K76DVXMK7FHZS9E8WFZT1N0B|training|best_inference_ckpt|normal|--not-preemptible
+ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|01K76DVXMK7FHZS9E8WFZT1N0B|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|01K76DVXMK7FHZS9E8WFZT1N0B|run_200yr|best_inference_ckpt|normal|--not-preemptible
+ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|01K76DVXMK7FHZS9E8WFZT1N0B|run_200yr0311|best_inference_ckpt|normal|--not-preemptible
+ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|01K76DVXMK7FHZS9E8WFZT1N0B|run_200yr0313|best_inference_ckpt|normal|--not-preemptible
+ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|01K76DVXMK7FHZS9E8WFZT1N0B|run_200yr0315|best_inference_ckpt|normal|--not-preemptible
+ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|01K76DVXMK7FHZS9E8WFZT1N0B|run_200yr0317|best_inference_ckpt|normal|--not-preemptible
+ft_5iqa5aw5-best_inf_ckpt-cos_0p01xLR_20ep|01K76DVXMK7FHZS9E8WFZT1N0B|run_200yr0319|best_inference_ckpt|normal|--not-preemptible
+ft_w1jnkgkv-best_inf_ckpt_0005-wu_0p5xLR_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
+ft_c2ugn4wy-best_inf_ckpt_0011-wu_0p5xLR_20ep|ex|training|best_inference_ckpt|normal|--not-preemptible
