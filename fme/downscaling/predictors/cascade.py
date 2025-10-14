@@ -124,7 +124,7 @@ class CascadePredictor:
     ):
         current_coarse = coarse
         for i, (model, fine_topography) in enumerate(zip(self.models, topographies)):
-            sample_data = current_coarse[list(coarse.keys())[0]]
+            sample_data = next(iter(current_coarse.values()))
             batch_size = sample_data.shape[0]
             # n_samples are generated for the first step, and subsequent models
             # generate 1 sample
