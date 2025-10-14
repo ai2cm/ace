@@ -12,7 +12,7 @@ data_writer:
 forcing_loader:
   atmosphere:
     dataset:
-      data_path: /forcing_data
+      data_path: /climate-default/home/jamesd/SamudrACE-CM4-piControl/forcing_data
       file_pattern: forcing_0311.nc
       n_repeats: 2
   num_data_workers: 1
