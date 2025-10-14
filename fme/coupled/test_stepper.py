@@ -752,6 +752,135 @@ def test_config_atmosphere_forcing_exogenous_names(
     assert sorted(config.atmosphere_forcing_exogenous_names) == sorted(expectations)
 
 
+@pytest.mark.parametrize(
+    (
+        "in_out_names, ocean_fraction_prediction,"
+        "expected_atmos_names, expected_ocean_names"
+    ),
+    [
+        (
+            # atmosphere does not have sea ice input
+            # ocean does not predict ocean fraction
+            ForcingInputs(
+                ["land_fraction", "ocean_frac", "sfc_temp"],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag"],
+                ["sst"],
+            ),
+            None,
+            [  # expected_atmos_names
+                "land_fraction",
+                "ocean_frac",
+                "sfc_temp",
+                "a_diag",
+            ],
+            ["sst"],  # expected_ocean_names
+        ),
+        (
+            # atmosphere has sea ice input, ocean does not predict ocean fraction
+            ForcingInputs(
+                ["land_fraction", "ocean_frac", "sfc_temp", "sea_ice_fraction"],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag"],
+                ["sst"],
+            ),
+            None,
+            [  # expected_atmos_names
+                "sea_ice_fraction",
+                "land_fraction",
+                "ocean_frac",
+                "sfc_temp",
+                "a_diag",
+            ],
+            ["sst"],  # expected_ocean_names
+        ),
+        (
+            # atmosphere has sea ice input, ocean predicts same sea ice name
+            ForcingInputs(
+                [
+                    "land_fraction",
+                    "ocean_frac",
+                    "sfc_temp",
+                    OCN_FRAC.sea_ice_fraction_name,
+                ],
+                ["sfc_temp", "a_diag"],
+                [
+                    OCN_FRAC_OSIC.land_fraction_name,
+                    "sst",
+                    "a_diag",
+                    OCN_FRAC.sea_ice_fraction_name,
+                ],
+                ["sst", OCN_FRAC.sea_ice_fraction_name],
+            ),
+            OCN_FRAC,
+            [  # expected_atmos_names, no ocean_frac
+                "land_fraction",
+                "sfc_temp",
+                "a_diag",
+            ],
+            [  # expected_ocean_names
+                OCN_FRAC_OSIC.land_fraction_name,
+                "sst",
+                OCN_FRAC.sea_ice_fraction_name,
+            ],
+        ),
+        (
+            # atmosphere has sea ice input, ocean predicts a different sea ice name
+            ForcingInputs(
+                [
+                    "land_fraction",
+                    "ocean_frac",
+                    "sfc_temp",
+                    OCN_FRAC_OSIC.sea_ice_fraction_name_in_atmosphere,
+                ],
+                ["sfc_temp", "a_diag"],
+                [
+                    OCN_FRAC_OSIC.land_fraction_name,
+                    "sst",
+                    "a_diag",
+                    OCN_FRAC_OSIC.sea_ice_fraction_name,
+                ],
+                ["sst", OCN_FRAC_OSIC.sea_ice_fraction_name],
+            ),
+            OCN_FRAC_OSIC,
+            [  # expected_atmos_names, no ocean_frac
+                "land_fraction",
+                "sfc_temp",
+                "a_diag",
+            ],
+            [  # expected_ocean_names
+                OCN_FRAC_OSIC.land_fraction_name,
+                "sst",
+                OCN_FRAC_OSIC.sea_ice_fraction_name,
+            ],
+        ),
+    ],
+)
+def test_data_requirements_names(
+    in_out_names, ocean_fraction_prediction, expected_atmos_names, expected_ocean_names
+):
+    ocean_in_names = in_out_names.ocean_in
+    ocean_out_names = in_out_names.ocean_out
+    atmos_in_names = in_out_names.atmos_in
+    atmos_out_names = in_out_names.atmos_out
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_fraction_prediction=ocean_fraction_prediction,
+    )
+    ocean_reqs = config._get_ocean_data_requirements(1)
+    assert sorted(ocean_reqs.names) == sorted(expected_ocean_names)
+    atmos_reqs = config._get_atmosphere_data_requirements(1)
+    assert sorted(atmos_reqs.names) == sorted(expected_atmos_names)
+    if ocean_fraction_prediction is not None:
+        assert config.ocean_fraction_name not in atmos_reqs.names
+
+
 SphericalData = namedtuple(
     "SphericalData",
     [

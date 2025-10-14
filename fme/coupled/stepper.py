@@ -280,6 +280,17 @@ class CoupledStepperConfig:
             self._all_ocean_names.append(
                 self.ocean_fraction_prediction.land_fraction_name
             )
+            # TODO: clean this up with a helper
+            ofrac_pred_names = [self.ocean_fraction_name]
+            ofrac_pred_names.append(
+                self.ocean_fraction_prediction.sea_ice_fraction_name_in_atmosphere
+                or self.ocean_fraction_prediction.sea_ice_fraction_name
+            )
+            self._all_atmosphere_names = [
+                name
+                for name in self._all_atmosphere_names
+                if name not in ofrac_pred_names
+            ]
 
     @property
     def timestep(self) -> datetime.timedelta:
