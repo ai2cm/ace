@@ -24,7 +24,12 @@ from fme.downscaling.data import (
     GriddedData,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, Model
-from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
+from fme.downscaling.predictors import (
+    CascadePredictor,
+    CascadePredictorConfig,
+    PatchPredictionConfig,
+    PatchPredictor,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -107,7 +112,7 @@ class EventDownscaler:
         self,
         event_name: str,
         data: GriddedData,
-        model: DiffusionModel,
+        model: DiffusionModel | CascadePredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -186,7 +191,7 @@ class Downscaler:
     def __init__(
         self,
         data: GriddedData,
-        model: DiffusionModel,
+        model: DiffusionModel | CascadePredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -255,7 +260,7 @@ class Downscaler:
 
 @dataclasses.dataclass
 class DownscalerConfig:
-    model: CheckpointModelConfig
+    model: CheckpointModelConfig | CascadePredictorConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig

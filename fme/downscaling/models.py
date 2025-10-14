@@ -13,7 +13,12 @@ from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import BatchData, PairedBatchData, Topography
+from fme.downscaling.data import (
+    BatchData,
+    PairedBatchData,
+    Topography,
+    get_normalized_topography,
+)
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -570,7 +575,7 @@ class DiffusionModel:
         )
 
     @torch.no_grad()
-    def _generate(
+    def generate(
         self,
         coarse_data: TensorMapping,
         topography: torch.Tensor | None,
@@ -628,7 +633,7 @@ class DiffusionModel:
         topography: Topography | None,
         n_samples: int = 1,
     ) -> TensorDict:
-        generated, _, _ = self._generate(batch.data, topography, n_samples)
+        generated, _, _ = self.generate(batch.data, topography, n_samples)
         return generated
 
     @torch.no_grad()
@@ -639,7 +644,7 @@ class DiffusionModel:
         n_samples: int = 1,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
-        generated, generated_norm, latent_steps = self._generate(
+        generated, generated_norm, latent_steps = self.generate(
             coarse, topography, n_samples
         )
 
@@ -695,6 +700,7 @@ class _CheckpointModelConfigSelector:
 class CheckpointModelConfig:
     checkpoint_path: str
     rename: dict[str, str] | None = None
+    fine_topography_path: str | None = None
 
     def __post_init__(self) -> None:
         # For config validation testing, we don't want to load immediately
@@ -733,8 +739,8 @@ class CheckpointModelConfig:
 
     @property
     def data_requirements(self) -> DataRequirements:
-        in_names = self._checkpoint["model"]["config"]["in_names"]
-        out_names = self._checkpoint["model"]["config"]["out_names"]
+        in_names = self.in_names
+        out_names = self.out_names
         return DataRequirements(
             fine_names=out_names,
             coarse_names=list(set(in_names).union(out_names)),
@@ -743,3 +749,22 @@ class CheckpointModelConfig:
                 "use_fine_topography"
             ],
         )
+
+    @property
+    def in_names(self):
+        return self._checkpoint["model"]["config"]["in_names"]
+
+    @property
+    def out_names(self):
+        return self._checkpoint["model"]["config"]["out_names"]
+
+    def get_topography(self) -> Topography | None:
+        if self.data_requirements.use_fine_topography:
+            if self.fine_topography_path is None:
+                raise ValueError(
+                    "Topography path must be provided for model configured "
+                    "to use fine topography."
+                )
+            return get_normalized_topography(self.fine_topography_path).to_device()
+        else:
+            return None

@@ -19,6 +19,7 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.inference.data_writer import DataWriterConfig
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
     InferenceConfig,
     InitialConditionConfig,
@@ -182,7 +183,11 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         ),
         initial_condition=InitialConditionConfig(path=str(initial_condition_path)),
         forcing_loader=forcing_loader,
-        data_writer=DataWriterConfig(save_prediction_files=True),
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
         allow_incompatible_dataset=False,
         n_ensemble_per_ic=1,
     )

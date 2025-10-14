@@ -70,18 +70,23 @@ def adjust_fine_coord_range(
     coord_range: ClosedInterval,
     full_coarse_coord: torch.Tensor,
     full_fine_coord: torch.Tensor,
+    downscale_factor: int | None = None,
 ) -> ClosedInterval:
     """
     Arbitrary min/max bounds in the lat_range and lon_range config args are
     not guaranteed to subselect the fine data such that it exactly matches the
     edges of the subselected coarse data. This function adjusts the coordinate
     range for fine subselection to ensure this in the subselected dataset.
+
+    If downscale factor is not provided, it is assumed that the coarse and fine
+    coordinate tensors correspond to the same region bounds.
     """
-    if full_fine_coord.shape[0] % full_coarse_coord.shape[0] != 0:
-        raise ValueError(
-            "Full fine lat size must be evenly divisible by coarse lat size."
-        )
-    downscale_factor = full_fine_coord.shape[0] // full_coarse_coord.shape[0]
+    if downscale_factor is None:
+        if full_fine_coord.shape[0] % full_coarse_coord.shape[0] != 0:
+            raise ValueError(
+                "Full fine lat size must be evenly divisible by coarse lat size."
+            )
+        downscale_factor = full_fine_coord.shape[0] // full_coarse_coord.shape[0]
 
     if downscale_factor == 1:
         return coord_range
