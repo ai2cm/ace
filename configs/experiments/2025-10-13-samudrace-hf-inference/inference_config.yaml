@@ -1,6 +1,6 @@
 experiment_dir: /results
 n_coupled_steps: 140
-coupled_steps_in_memory: 20
+coupled_steps_in_memory: 4
 checkpoint_path: /climate-default/home/jamesd/SamudrACE-CM4-piControl/samudrACE_CM4_piControl_ckpt.tar
 data_writer:
   ocean:
