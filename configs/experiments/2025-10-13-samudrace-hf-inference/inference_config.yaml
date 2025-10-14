@@ -1,0 +1,32 @@
+experiment_dir: /results
+n_coupled_steps: 140
+coupled_steps_in_memory: 20
+checkpoint_path: /climate-default/home/jamesd/SamudrACE-CM4-piControl/samudrACE_CM4_piControl_ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: true
+    save_monthly_files: true
+  atmosphere:
+    save_prediction_files: true
+    save_monthly_files: true
+forcing_loader:
+  atmosphere:
+    dataset:
+      data_path: /climate-default/home/jamesd/SamudrACE-CM4-piControl/forcing_data
+      file_pattern: forcing_0311.nc
+      n_repeats: 2
+  num_data_workers: 1
+initial_condition:
+  ocean:
+    path: "/climate-default/home/jamesd/SamudrACE-CM4-piControl/initial_conditions/0311-01-01T00:00:00/ocean/initial_condition.nc"
+  atmosphere:
+    path: "/climate-default/home/jamesd/SamudrACE-CM4-piControl/initial_conditions/0311-01-01T00:00:00/atmosphere/initial_condition.nc"
+  start_indices:
+    first: 0
+    n_initial_conditions: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
