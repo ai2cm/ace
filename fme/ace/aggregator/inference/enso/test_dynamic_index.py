@@ -444,7 +444,6 @@ def test_paired_regional_index_aggregator(variable_name):
     metric_name = f"test/{variable_name}_nino34_index_power_spectrum"
     assert metric_name in logs
     assert isinstance(logs[metric_name], plt.Figure)
-
     for metric_name in [
         f"test/{variable_name}_nino34_index_std",
         f"test/{variable_name}_nino34_index_std_norm",
