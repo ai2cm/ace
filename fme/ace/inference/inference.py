@@ -103,7 +103,7 @@ def get_initial_condition(
         prognostic_names: Names of prognostic variables to extract from the dataset.
         labels: Labels for the initial conditions. If provided, these labels will be
             provided to the stepper for every initial condition.
-        n_ensemble: Number of initial condition-based ensembles
+        n_ensemble: Number of ensemble members per initial state
 
     Returns:
         The initial condition and the time coordinate.

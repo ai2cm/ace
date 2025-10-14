@@ -790,7 +790,6 @@ class Stepper(
     """
 
     TIME_DIM = 1
-    TIME_DIM_ENSEMBLE = 2
     CHANNEL_DIM = -3
 
     def __init__(

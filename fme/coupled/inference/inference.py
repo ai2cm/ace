@@ -120,7 +120,7 @@ class InferenceConfig:
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
-        n_ensemble_per_ic: Number of initial condition-based ensembles
+        n_ensemble_per_ic: Number of ensemble members per initial condition
     """
 
     experiment_dir: str

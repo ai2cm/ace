@@ -209,12 +209,12 @@ def test_paired_data_forcing_target_data():
     assert paired_data.target == {"bar": target_data.data["bar"]}
 
 
-def test_ensemble_data():
+@pytest.mark.parametrize("n_ensemble", [1, 2, 3])
+def test_ensemble_data(n_ensemble):
     n_samples = 2
     n_times = 5
     n_lat = 8
     n_lon = 16
-    n_ensemble = 2
     horizontal_dims = ["lat", "lon"]
 
     target_data = get_batch_data(
@@ -255,18 +255,20 @@ def test_ensemble_data():
         n_lon,
     )
 
-    torch.testing.assert_allclose(
-        ensemble_gen_data.ensemble_data["bar"][:, 0, ...],
-        ensemble_gen_data.ensemble_data["bar"][:, 1, ...],
-    )
+    for ensemble_idx in range(n_ensemble - 1):
+        torch.testing.assert_allclose(
+            ensemble_gen_data.ensemble_data["bar"][:, ensemble_idx, ...],
+            ensemble_gen_data.ensemble_data["bar"][:, ensemble_idx + 1, ...],
+        )
 
     torch.testing.assert_allclose(
         gen_data.data["bar"],
         ensemble_gen_data.ensemble_data["bar"][:, 0, ...],
     )
 
-    assert ensemble_gen_data.labels[n_ensemble] == gen_data.labels[0]
-    assert ensemble_gen_data.labels[0] == gen_data.labels[0]
+    if n_ensemble > 1:
+        assert ensemble_gen_data.labels[n_ensemble] == gen_data.labels[0]
+        assert ensemble_gen_data.labels[0] == gen_data.labels[0]
 
-    assert ensemble_gen_data.time[n_ensemble].equals(gen_data.time[0])
-    assert ensemble_gen_data.time[n_ensemble + 1].equals(gen_data.time[1])
+        assert ensemble_gen_data.time[n_ensemble].equals(gen_data.time[0])
+        assert ensemble_gen_data.time[n_ensemble + 1].equals(gen_data.time[1])

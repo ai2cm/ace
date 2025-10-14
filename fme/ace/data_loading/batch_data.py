@@ -9,7 +9,11 @@ import xarray as xr
 from torch.utils.data import default_collate
 
 from fme.core.device import get_device
-from fme.core.tensors import add_ensemble_dim, fold_ensemble_dim, unfold_ensemble_dim
+from fme.core.tensors import (
+    add_ensemble_dim,
+    fold_sized_ensemble_dim,
+    unfold_ensemble_dim,
+)
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
@@ -349,7 +353,7 @@ class BatchData:
         """
         data = {**self.data}
         data = add_ensemble_dim(data, repeats=n_ensemble)
-        data, _ = fold_ensemble_dim(data)
+        data = fold_sized_ensemble_dim(data, n_ensemble=n_ensemble)
 
         time = self.time
         time = xr.concat([time] * n_ensemble, dim="sample")
