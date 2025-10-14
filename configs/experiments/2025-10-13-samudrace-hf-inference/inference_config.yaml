@@ -12,8 +12,8 @@ data_writer:
 forcing_loader:
   atmosphere:
     dataset:
-      data_path: /climate-default/home/jamesd/SamudrACE-CM4-piControl/forcing_data
-      file_pattern: forcing_0311.nc
+      data_path: /climate-default/2025-08-29-coupled-inference-no-target-data-example/CM4
+      file_pattern: atmosphere-forcing-1yr-03110101.nc
       n_repeats: 2
   num_data_workers: 1
 initial_condition:
