@@ -13,9 +13,9 @@ from fme.ace.data_loading.perturbation import (
     PerturbationSelector,
     SSTPerturbation,
 )
+from fme.ace.inference.data_writer import DataWriterConfig, FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.evaluator import (
-    DataWriterConfig,
     InferenceDataLoaderConfig,
     InferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorConfig,
@@ -48,6 +48,7 @@ from fme.ace.stepper.parameter_init import (
     ParameterInitializationConfig,
 )
 from fme.ace.stepper.single_module import Stepper, StepperConfig, StepSelector
+from fme.core.cli import ResumeResultsConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
