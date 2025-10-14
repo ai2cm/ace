@@ -44,7 +44,7 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 320   # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
+  sample_with_replacement: 160   # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
   batch_size: 24 # 48 on 8 gpu
   num_data_workers: 4 #8
   fine:
@@ -94,7 +94,7 @@ validation_data:
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
 max_epochs: 1500 # using 320 samples per epoch, this is roughly 500k steps (200 epochs for the previous 2 yr training dataset)
-validate_interval: 25
+validate_interval: 10
 experiment_dir: /results
 save_checkpoints: true
 logging:
