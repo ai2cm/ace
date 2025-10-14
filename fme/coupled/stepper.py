@@ -469,7 +469,7 @@ class CoupledStepperConfig:
         self._atmosphere_forcing_exogenous_names = [
             name
             for name in self._atmosphere_forcing_exogenous_names
-            if name is not ocn_frac_name
+            if name != ocn_frac_name
         ]
         sea_ice_fraction_name = (
             self.ocean_fraction_prediction.sea_ice_fraction_name_in_atmosphere
@@ -479,7 +479,7 @@ class CoupledStepperConfig:
         self._atmosphere_forcing_exogenous_names = [
             name
             for name in self._atmosphere_forcing_exogenous_names
-            if name is not sea_ice_fraction_name
+            if name != sea_ice_fraction_name
         ]
 
     def get_evaluation_window_data_requirements(
