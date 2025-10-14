@@ -21,14 +21,14 @@ STATS_DATA=elynn/2025-09-09-E3SMv3-piControl-100yr-coupled-stats
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=1
+N_RANDOM_SEED_RUNS=2
 
-for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
+for RS in $(seq 2 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
     if [ $RS -gt 1 ]; then
         # only log validation maps for the first random seed
         OVERRIDE_ARGS="${GROUP_OVERRIDE_ARGS}"
-        PRIORITY="low"
+        PRIORITY="urgent"
         ALLOW_DIRTY=--allow-dirty # needed since experiments.txt will be updated
     else
         OVERRIDE_ARGS="${GROUP_OVERRIDE_ARGS}"
