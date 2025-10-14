@@ -22,8 +22,8 @@ initial_condition:
   atmosphere:
     path: "/climate-default/home/jamesd/ICx5/atmosphere/initial_condition.nc"
   start_indices:
-    first: 0
-    n_initial_conditions: 5
+    first: 1
+    n_initial_conditions: 4
 logging:
   log_to_screen: true
   log_to_wandb: true
