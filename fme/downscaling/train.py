@@ -27,12 +27,7 @@ from fme.downscaling.data import (
     PairedDataLoaderConfig,
     PairedGriddedData,
 )
-from fme.downscaling.models import (
-    DiffusionModel,
-    DiffusionModelConfig,
-    DownscalingModelConfig,
-    Model,
-)
+from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -91,7 +86,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 class Trainer:
     def __init__(
         self,
-        model: Model | DiffusionModel,
+        model: DiffusionModel,
         optimization: Optimization,
         train_data: PairedGriddedData,
         validation_data: PairedGriddedData,
@@ -398,7 +393,7 @@ class Trainer:
 
 @dataclasses.dataclass
 class TrainerConfig:
-    model: DownscalingModelConfig | DiffusionModelConfig
+    model: DiffusionModelConfig
     optimization: OptimizationConfig
     train_data: PairedDataLoaderConfig
     validation_data: PairedDataLoaderConfig
