@@ -1,29 +1,43 @@
 experiment_dir: /results
-n_coupled_steps: 140
-coupled_steps_in_memory: 4
+n_coupled_steps: 3650
+coupled_steps_in_memory: 25
 checkpoint_path: /climate-default/home/jamesd/SamudrACE-CM4-piControl/samudrACE_CM4_piControl_ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: true
+    names:
+      - HI
+      - sea_ice_fraction
+      - so_0
+      - sst
+      - zos
   atmosphere:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: true
+    names:
+      - PRATEsfc
+      - Q2m
+      - TMP2m
+      - UGRD10m
+      - VGRD10m
 forcing_loader:
   atmosphere:
     dataset:
       data_path: /climate-default/2025-08-29-coupled-inference-no-target-data-example/CM4
       file_pattern: atmosphere-forcing-1yr-03110101.nc
-      n_repeats: 11
+      n_repeats: 51
   num_data_workers: 1
+aggregator:
+  log_global_mean_time_series: false
 initial_condition:
   ocean:
-    path: "/climate-default/home/jamesd/ICx5/ocean/initial_condition.nc"
+    path: "/climate-default/home/jamesd/SamudrACE-CM4-piControl/initial_conditions/0311-01-01T00:00:00/ocean/initial_condition.nc"
   atmosphere:
-    path: "/climate-default/home/jamesd/ICx5/atmosphere/initial_condition.nc"
+    path: "/climate-default/home/jamesd/SamudrACE-CM4-piControl/initial_conditions/0311-01-01T00:00:00/atmosphere/initial_condition.nc"
   start_indices:
     first: 0
-    n_initial_conditions: 5
+    n_initial_conditions: 1
 logging:
   log_to_screen: true
   log_to_wandb: true
