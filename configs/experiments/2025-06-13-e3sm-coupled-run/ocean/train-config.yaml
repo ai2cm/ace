@@ -48,19 +48,19 @@ train_loader:
       file_pattern: 2025-09-09-E3SMv3-piControl-100yr-coupled-ocean.zarr
       engine: zarr
       subset:
-        start_time: '0421-01-03'
+        start_time: '0416-01-03'
         stop_time: '0499-12-29'
     - data_path: /climate-default
       file_pattern: 2025-09-05-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
       engine: zarr
       subset:
-        start_time: '0421-01-03'
+        start_time: '0416-01-03'
         stop_time: '0499-12-29'
     - data_path: /climate-default
       file_pattern: 2025-09-09-e3smv3-piControl-100yr-5daily-sfc-flux.zarr
       engine: zarr
       subset:
-        start_time: '0421-01-03'
+        start_time: '0416-01-03'
         stop_time: '0499-12-29'
 validation_loader:
   batch_size: 16

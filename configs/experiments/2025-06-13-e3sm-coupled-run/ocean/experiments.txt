@@ -52,3 +52,12 @@ BK-Samudra-E3SM-with-coupled-ocean-data-and-zos|4|01K11REKBVVDH3ME8Q62TAR3MD|ski
 2025-07-30-BK-Samudra-E3SM-baseline-config-updated-stats|1|01K1FFN0Z681QZPPH4WEN6SB2E|training|best_inference_ckpt
 2025-07-30-BK-Samudra-E3SM-baseline-config-updated-stats|1|01K1FFN0Z681QZPPH4WEN6SB2E|training|best_ckpt
 2025-07-30-BK-Samudra-E3SM-baseline-config-updated-stats|1|01K1FFN0Z681QZPPH4WEN6SB2E|training|ckpt
+BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last80|1|ex
+ws|training|best_inference_ckpt
+BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last80|1|ex
+ws|training|best_ckpt
+BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last80|1|ex
+ws|training|ckpt
+BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last85|1||training|best_inference_ckpt
+BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last85|1||training|best_ckpt
+BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last85|1||training|ckpt

@@ -13,7 +13,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last80" # should be the same as the evaluator run job group
+JOB_GROUP="BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last85" # should be the same as the evaluator run job group
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
