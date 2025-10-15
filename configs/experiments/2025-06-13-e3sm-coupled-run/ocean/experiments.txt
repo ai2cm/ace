@@ -67,3 +67,9 @@ BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last85|1|ex
 ws|training|best_ckpt
 BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last85|1|ex
 ws|training|ckpt
+BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last90|1|ex
+ws|training|best_inference_ckpt
+BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last90|1|ex
+ws|training|best_ckpt
+BK-Samudra-E3SM-filter-scale-4-wider-net-sst-loss-2x-last90|1|ex
+ws|training|ckpt
