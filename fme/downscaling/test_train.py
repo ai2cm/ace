@@ -15,7 +15,6 @@ import torch
 import xarray as xr
 import yaml
 
-from fme.core.optimization import NullOptimization
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
@@ -180,27 +179,6 @@ def _create_config_dict(
     return config
 
 
-def _update_model_type(trainer_config: dict, module_type: str):
-    """Inplace update of trainer_config model type"""
-
-    if "diffusion" in module_type:
-        model_config_kwargs = {
-            "num_diffusion_generation_steps": 2,
-            "churn": 0.0,
-            "p_mean": -1.2,
-            "p_std": 1.2,
-            "predict_residual": True,
-            "sigma_max": 80.0,
-            "sigma_min": 0.002,
-        }
-        trainer_config["model"].update(model_config_kwargs)
-        trainer_config["generate_n_samples"] = 2
-
-    trainer_config["model"]["module"]["type"] = module_type
-
-    return trainer_config
-
-
 def _update_in_out_names(
     trainer_config: dict, in_names: Sequence[str], out_names: Sequence[str]
 ):
@@ -227,14 +205,21 @@ def default_trainer_config(
     config = _create_config_dict(
         train_data_paths, validation_data_paths, stats_data_paths, tmp_path
     )
+    model_config_kwargs = {
+        "num_diffusion_generation_steps": 2,
+        "churn": 0.0,
+        "p_mean": -1.2,
+        "p_std": 1.2,
+        "predict_residual": True,
+        "sigma_max": 80.0,
+        "sigma_min": 0.002,
+    }
+    config["model"].update(model_config_kwargs)
+    config["generate_n_samples"] = 2
+    config["model"]["module"]["type"] = "unet_diffusion_song"
     return config
 
 
-@pytest.mark.parametrize(
-    "module_type",
-    ["unet_regression_song", "unet_diffusion_song"],
-    ids=["regression", "diffusion"],
-)
 @pytest.mark.parametrize(
     "in_names, out_names",
     [
@@ -249,7 +234,6 @@ def default_trainer_config(
     ],
 )
 def test_train_main_only(
-    module_type,
     in_names,
     out_names,
     default_trainer_config,
@@ -261,8 +245,7 @@ def test_train_main_only(
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 
-    config = _update_model_type(default_trainer_config, module_type)
-    config = _update_in_out_names(config, in_names, out_names)
+    config = _update_in_out_names(default_trainer_config, in_names, out_names)
     config["max_epochs"] = 1
     config_path = _store_config(tmp_path, config)
 
@@ -328,44 +311,6 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
         trainer1.optimization.optimizer,
         trainer2.optimization.optimizer,
     )
-
-
-def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
-    """Checks that at training time the model is stochastic (due to dropout) but
-    that at validation time, it is deterministic."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
-    trainer_config_dict = _update_model_type(
-        default_trainer_config, "unet_regression_song"
-    )
-
-    config = dacite.from_dict(data_class=TrainerConfig, data=trainer_config_dict)
-    trainer = config.build()
-
-    trainer.train_one_epoch()
-    assert trainer.model.module.training
-
-    null_optimization = NullOptimization()
-
-    batch = next(iter(trainer.train_data.loader))
-    outputs1 = trainer.model.train_on_batch(
-        batch, topography=None, optimization=null_optimization
-    )
-    outputs2 = trainer.model.train_on_batch(
-        batch, topography=None, optimization=null_optimization
-    )
-    assert not torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
-
-    trainer.valid_one_epoch()
-    assert not trainer.model.module.training
-    outputs1 = trainer.model.train_on_batch(
-        batch, topography=None, optimization=null_optimization
-    )
-    outputs2 = trainer.model.train_on_batch(
-        batch, topography=None, optimization=null_optimization
-    )
-    assert torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
 
 def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
