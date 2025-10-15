@@ -45,6 +45,8 @@ def test_labels_exist():
         "test/mean/weighted_rmse/a",
         "test/mean/weighted_bias/a",
         "test/mean/weighted_grad_mag_percent_diff/a",
+        "test/mean_norm/weighted_rmse/a",
+        "test/mean_norm/weighted_rmse/channel_mean",
         "test/snapshot/image-full-field/a",
         "test/snapshot/image-residual/a",
         "test/snapshot/image-error/a",

@@ -349,14 +349,22 @@ def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
     null_optimization = NullOptimization()
 
     batch = next(iter(trainer.train_data.loader))
-    outputs1 = trainer.model.train_on_batch(batch, null_optimization)
-    outputs2 = trainer.model.train_on_batch(batch, null_optimization)
+    outputs1 = trainer.model.train_on_batch(
+        batch, topography=None, optimization=null_optimization
+    )
+    outputs2 = trainer.model.train_on_batch(
+        batch, topography=None, optimization=null_optimization
+    )
     assert not torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
     trainer.valid_one_epoch()
     assert not trainer.model.module.training
-    outputs1 = trainer.model.train_on_batch(batch, null_optimization)
-    outputs2 = trainer.model.train_on_batch(batch, null_optimization)
+    outputs1 = trainer.model.train_on_batch(
+        batch, topography=None, optimization=null_optimization
+    )
+    outputs2 = trainer.model.train_on_batch(
+        batch, topography=None, optimization=null_optimization
+    )
     assert torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
 

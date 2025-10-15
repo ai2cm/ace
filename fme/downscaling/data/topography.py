@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Generator, Sequence
+from collections.abc import Generator
 
 import torch
 import xarray as xr
@@ -7,7 +7,7 @@ import xarray as xr
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.downscaling.data.patching import Patch
-from fme.downscaling.data.utils import BatchedLatLonCoordinates, ClosedInterval
+from fme.downscaling.data.utils import ClosedInterval
 
 
 def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
@@ -26,10 +26,6 @@ class Topography:
     def __post_init__(self):
         if len(self.data.shape) != 2:
             raise ValueError(f"Topography data must be 2D. Got shape {self.data.shape}")
-        if self.coords is None:
-            raise ValueError(
-                "Both topography data and coords must be provided or None."
-            )
         if self.data.shape[0] != len(self.coords.lat) or self.data.shape[1] != len(
             self.coords.lon
         ):
@@ -91,34 +87,6 @@ class Topography:
     ) -> Generator["Topography", None, None]:
         for patch in patches:
             yield self._apply_patch(patch)
-
-
-@dataclasses.dataclass
-class BatchedTopography:
-    data: torch.Tensor
-    coords: BatchedLatLonCoordinates
-
-    @classmethod
-    def from_sequence(
-        cls,
-        items: Sequence["Topography"],
-    ) -> "BatchedTopography":
-        topo = torch.utils.data.default_collate([i.data for i in items])
-        coords = BatchedLatLonCoordinates.from_sequence([i.coords for i in items])
-        return cls(topo, coords)
-
-    def __getitem__(self, k):
-        return Topography(self.data[k], self.coords[k])
-
-    def to_device(self) -> "BatchedTopography":
-        device = get_device()
-        return BatchedTopography(
-            data=self.data.to(device),
-            coords=BatchedLatLonCoordinates(
-                lat=self.coords.lat.to(device),
-                lon=self.coords.lon.to(device),
-            ),
-        )
 
 
 def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
