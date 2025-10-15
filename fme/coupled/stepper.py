@@ -114,7 +114,7 @@ class CoupledOceanFractionConfig:
         unfiltered_names: Iterable[str],
         ocean_fraction_name: str,
     ) -> list[str]:
-        """Remove ocean and sea ice fraction names from atmosphere forcing names.
+        """Remove ocean fraction and sea ice fraction from atmosphere forcing names.
 
         When ocean fraction is predicted from ocean model outputs, these
         variables should not be loaded from atmosphere data since they will be

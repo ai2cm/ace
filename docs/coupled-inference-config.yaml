@@ -1,0 +1,31 @@
+experiment_dir: inference_output
+n_coupled_steps: 40 # 200 days
+coupled_steps_in_memory: 20
+checkpoint_path: samudrACE_CM4_piControl_ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+forcing_loader:
+  atmosphere:
+    dataset:
+      data_path: forcing_data
+      file_pattern: forcing_0311.nc
+  num_data_workers: 1
+initial_condition:
+  ocean:
+    path: "initial_conditions/0311-01-01T00:00:00/ocean/initial_condition.nc"
+  atmosphere:
+    path: "initial_conditions/0311-01-01T00:00:00/atmosphere/initial_condition.nc"
+  start_indices:
+    first: 0
+    n_initial_conditions: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: project_name
+  entity: your_wandb_entity
