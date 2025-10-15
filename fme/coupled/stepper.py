@@ -109,6 +109,34 @@ class CoupledOceanFractionConfig:
                 "to be an ML forcing of the atmosphere model, but it is not."
             )
 
+    def filter_atmosphere_forcing_names(
+        self,
+        unfiltered_names: Iterable[str],
+        ocean_fraction_name: str,
+    ) -> list[str]:
+        """Remove ocean and sea ice fraction names from atmosphere forcing names.
+
+        When ocean fraction is predicted from ocean model outputs, these
+        variables should not be loaded from atmosphere data since they will be
+        computed at runtime.
+
+        Args:
+            unfiltered_names: The full list of atmosphere forcing names to filter.
+            ocean_fraction_name: Name of the ocean fraction field in atmosphere data.
+
+        Returns:
+            Filtered list of atmosphere forcing names.
+
+        """
+        filtered = [name for name in unfiltered_names if name != ocean_fraction_name]
+
+        sea_ice_fraction_name = (
+            self.sea_ice_fraction_name_in_atmosphere or self.sea_ice_fraction_name
+        )
+        filtered = [name for name in filtered if name != sea_ice_fraction_name]
+
+        return filtered
+
     def build_ocean_data(
         self, forcings_from_ocean: TensorMapping, atmos_forcing_data: TensorMapping
     ) -> OceanData:
@@ -237,12 +265,22 @@ class CoupledStepperConfig:
                 self.atmosphere.stepper.output_names
             )
         )
-        self._atmosphere_forcing_exogenous_names = list(
+        unfiltered_atmosphere_forcing_names = list(
             set(self.atmosphere.stepper.input_only_names).difference(
                 self.ocean.stepper.output_names
             )
         )
-        self._remove_sea_ice_fraction_when_ocean_fraction_is_predicted()
+        if self.ocean_fraction_prediction is not None:
+            self._atmosphere_forcing_exogenous_names = (
+                self.ocean_fraction_prediction.filter_atmosphere_forcing_names(
+                    unfiltered_atmosphere_forcing_names,
+                    self._atmosphere_ocean_config.ocean_fraction_name,
+                )
+            )
+        else:
+            self._atmosphere_forcing_exogenous_names = (
+                unfiltered_atmosphere_forcing_names
+            )
         self._shared_forcing_exogenous_names = list(
             set(self._ocean_forcing_exogenous_names).intersection(
                 self._atmosphere_forcing_exogenous_names
@@ -268,11 +306,20 @@ class CoupledStepperConfig:
         )
 
         # calculate names for each component's data requirements
-        self._all_atmosphere_names = list(
+        unfiltered_all_atmosphere_names = list(
             set(self.atmosphere.stepper.all_names).difference(
                 self.ocean.stepper.output_names
             )
         )
+        if self.ocean_fraction_prediction is not None:
+            self._all_atmosphere_names = (
+                self.ocean_fraction_prediction.filter_atmosphere_forcing_names(
+                    unfiltered_all_atmosphere_names,
+                    self.ocean_fraction_name,
+                )
+            )
+        else:
+            self._all_atmosphere_names = unfiltered_all_atmosphere_names
         self._all_ocean_names = list(
             set(self.ocean.stepper.all_names).difference(self._all_atmosphere_names)
         )
@@ -280,17 +327,6 @@ class CoupledStepperConfig:
             self._all_ocean_names.append(
                 self.ocean_fraction_prediction.land_fraction_name
             )
-            # TODO: clean this up with a helper
-            ofrac_pred_names = [self.ocean_fraction_name]
-            ofrac_pred_names.append(
-                self.ocean_fraction_prediction.sea_ice_fraction_name_in_atmosphere
-                or self.ocean_fraction_prediction.sea_ice_fraction_name
-            )
-            self._all_atmosphere_names = [
-                name
-                for name in self._all_atmosphere_names
-                if name not in ofrac_pred_names
-            ]
 
     @property
     def timestep(self) -> datetime.timedelta:
@@ -460,27 +496,6 @@ class CoupledStepperConfig:
         return DataRequirements(
             names=self._all_atmosphere_names, n_timesteps=n_forward_steps + 1
         )
-
-    def _remove_sea_ice_fraction_when_ocean_fraction_is_predicted(self):
-        if self.ocean_fraction_prediction is None:
-            return
-
-        ocn_frac_name = self._atmosphere_ocean_config.ocean_fraction_name
-        self._atmosphere_forcing_exogenous_names = [
-            name
-            for name in self._atmosphere_forcing_exogenous_names
-            if name != ocn_frac_name
-        ]
-        sea_ice_fraction_name = (
-            self.ocean_fraction_prediction.sea_ice_fraction_name_in_atmosphere
-            or self.ocean_fraction_prediction.sea_ice_fraction_name
-        )
-        # remove the sea ice fraction name used for atmosphere, if present
-        self._atmosphere_forcing_exogenous_names = [
-            name
-            for name in self._atmosphere_forcing_exogenous_names
-            if name != sea_ice_fraction_name
-        ]
 
     def get_evaluation_window_data_requirements(
         self, n_coupled_steps: int
