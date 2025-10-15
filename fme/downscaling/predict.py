@@ -23,7 +23,7 @@ from fme.downscaling.data import (
     DataLoaderConfig,
     GriddedData,
 )
-from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, Model
+from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predictors import (
     CascadePredictor,
     CascadePredictorConfig,
@@ -291,10 +291,6 @@ class DownscalerConfig:
             requirements=self.model.data_requirements,
         )
         model = self.model.build()
-        if isinstance(model, Model):
-            raise NotImplementedError(
-                "No-target generation is only enabled for DiffusionModel, not Model"
-            )
         downscaler = Downscaler(
             data=dataset,
             model=model,
