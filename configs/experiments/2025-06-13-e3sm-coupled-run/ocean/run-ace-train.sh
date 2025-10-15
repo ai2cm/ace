@@ -62,7 +62,7 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --gpus $N_GPUS \
           --shared-memory 400GiB \
           --budget ai2/climate \
-          --no-conda \
+          --system-python \
           --install "pip install --no-deps ." \
           -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH $OVERRIDE |
           tee /dev/tty |
