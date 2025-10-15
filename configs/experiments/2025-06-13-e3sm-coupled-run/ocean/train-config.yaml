@@ -24,7 +24,7 @@ inference:
       - data_path: /climate-default
         file_pattern: 2025-09-09-E3SMv3-piControl-100yr-coupled-ocean.zarr
         engine: zarr
-      - data_path:
+      - data_path: /climate-default
         file_pattern: 2025-09-05-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
         engine: zarr
       - data_path: /climate-default
