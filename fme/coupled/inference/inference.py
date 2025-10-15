@@ -46,6 +46,12 @@ StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampLis
 
 @dataclasses.dataclass
 class ComponentInitialConditionConfig:
+    """
+    Parameters:
+        path: Path to the component initial condition dataset.
+        engine: Backend used in xarray.open_dataset call.
+    """
+
     path: str
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
 
@@ -117,6 +123,7 @@ class InferenceConfig:
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
+        labels: Dataset labels to use for inference.
     """
 
     experiment_dir: str

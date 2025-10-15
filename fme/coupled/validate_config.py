@@ -13,7 +13,9 @@ CONFIG_CHOICES = ["train", "inference", "evaluator"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("path", type=str, help="Path to the coupled train config file.")
+    parser.add_argument(
+        "path", type=str, help="Path to the coupled train or inference config file."
+    )
     parser.add_argument(
         "--config_type",
         type=str,
