@@ -25,6 +25,12 @@ The following module builders are available:
    :show-inheritance:
    :noindex:
 
+.. autoclass:: fme.ace.NoiseConditionedSFNO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
 .. autoclass:: fme.ace.SFNO_V0_1_0
    :members:
    :undoc-members:
@@ -32,6 +38,18 @@ The following module builders are available:
    :noindex:
 
 .. autoclass:: fme.ace.HEALPixRecUNetBuilder
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. autoclass:: fme.ace.LandNetBuilder
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. autoclass:: fme.ace.SamudraBuilder
    :members:
    :undoc-members:
    :show-inheritance:

@@ -3,6 +3,7 @@ from typing import Any
 import pytest
 import torch
 
+from fme.core import get_device, set_seed
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorMapping
 
@@ -21,6 +22,13 @@ from fme.core.typing_ import TensorMapping
             {
                 "type": "HEALPixOperations",
                 "state": {},
+            },
+            HEALPixOperations,
+        ),
+        (
+            {
+                "type": "HEALPixOperations",
+                "state": {"nside": 4},
             },
             HEALPixOperations,
         ),
@@ -127,3 +135,47 @@ def test_latlon_area_weighted_std_dict_input():
         variance = ops.area_weighted_mean((data_dict[var_name] - mean_var1) ** 2)
         expected_std_var1 = variance.sqrt()
         torch.testing.assert_close(result[var_name], expected_std_var1)
+
+
+def test_latlon_sht_round_trip():
+    ops = LatLonOperations(area_weights=torch.ones(4, 5))
+    sht = ops.get_real_sht()
+    isht = ops.get_real_isht()
+    data = torch.randn(2, 4, 5)
+    data_sht = sht(data)
+    data_isht = isht(data_sht)
+    data_isht_reconstructed = isht(sht(data_isht))
+    torch.testing.assert_close(data_isht, data_isht_reconstructed)
+
+
+def test_healpix_sht_round_trip():
+    set_seed(0)
+    device = get_device()
+    nside = 4
+    ops = HEALPixOperations(nside=nside)
+    sht = ops.get_real_sht()
+    isht = ops.get_real_isht()
+    data = torch.randn(2, 1, 12 * nside * nside).to(device)
+    data_sht = sht(data)
+    data_isht = isht(data_sht)
+    data_isht_reconstructed = isht(sht(data_isht))
+    # HEALPix SHT does not round-trip, so we need to allow for some error
+    torch.testing.assert_close(data_isht, data_isht_reconstructed, atol=0.2, rtol=4)
+
+
+def test_healpix_sht_round_trip_face_ordering():
+    set_seed(0)
+    device = get_device()
+    nside = 64
+    ops = HEALPixOperations(nside=nside)
+    sht = ops.get_real_sht()
+    isht = ops.get_real_isht()
+    data = torch.randn(2, 12, nside, nside).to(device)
+    data_sht = sht(data)
+    data_isht = isht(data_sht)  # isht always returns ring ordering
+    assert data_isht.shape == (2, 1, 12 * nside * nside)
+    data_isht_reconstructed = isht(sht(data_isht))
+    # HEALPix SHT does not round-trip, so we need to allow for some error
+    torch.testing.assert_close(data_isht, data_isht_reconstructed, atol=0.1, rtol=40)
+    rmse = torch.sqrt(torch.mean((data_isht - data_isht_reconstructed) ** 2))
+    assert rmse < 0.002

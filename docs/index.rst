@@ -13,9 +13,11 @@ climate model emulators, such as the Ai2 Climate Emulator.
    training_config
    inference_config
    evaluator_config
+   coupled
    gcs_access
    builder
    modules
+   steps
    api
 
 Indices and tables

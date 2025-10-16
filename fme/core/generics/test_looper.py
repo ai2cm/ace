@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 import unittest.mock
 from collections import namedtuple
@@ -10,7 +11,7 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper.single_module import StepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -21,9 +22,11 @@ from fme.core.generics.inference import (
     get_record_to_wandb,
     run_inference,
 )
-from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.loss import StepLossConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.testing.wandb import mock_wandb
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -86,6 +89,7 @@ class MockLoader(torch.utils.data.DataLoader):
                 data=self._data,
                 time=self._time
                 + (self._current_window - 1) * (self._time.shape[1] - 1),
+                labels=[set() for _ in range(self._time.shape[0])],
             )
         else:
             raise StopIteration
@@ -120,15 +124,26 @@ def _get_stepper():
         lon=torch.zeros(img_shape[1]),
     )
     vertical_coordinate = spherical_data.vertical_coord
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": ChannelSum()}),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means=get_scalar_data(all_names, 0.0),
-            stds=get_scalar_data(all_names, 1.0),
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": ChannelSum()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(all_names, 0.0),
+                            stds=get_scalar_data(all_names, 1.0),
+                        ),
+                    ),
+                ),
+            ),
         ),
-        loss=WeightedMappingLossConfig(),
+        loss=StepLossConfig(),
     )
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(
@@ -140,11 +155,22 @@ def _get_stepper():
     return stepper, spherical_data, time, in_names, out_names
 
 
+def get_batch_data(
+    data: TensorMapping,
+    time: xr.DataArray,
+) -> BatchData:
+    return BatchData.new_on_device(
+        data=data,
+        time=time,
+        labels=[set() for _ in range(time.shape[0])],
+    )
+
+
 def test_looper():
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
     forcing_names = set(in_names) - set(out_names)
     shape = spherical_data.data[in_names[0]].shape
-    initial_condition = BatchData.new_on_device(
+    initial_condition = get_batch_data(
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
@@ -168,7 +194,7 @@ def test_looper_paired():
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
     forcing_names = set(in_names) - set(out_names)
     shape = spherical_data.data[in_names[0]].shape
-    initial_condition = BatchData.new_on_device(
+    initial_condition = get_batch_data(
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
@@ -206,8 +232,8 @@ def test_looper_paired_with_derived_variables():
     stepper._derive_func = mock_derive_func
     forcing_names = set(in_names) - set(out_names)
     shape = spherical_data.data[in_names[0]].shape
-    initial_condition = BatchData.new_on_device(
-        {n: spherical_data.data[n][:, :1] for n in spherical_data.data},
+    initial_condition = get_batch_data(
+        data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
         prognostic_names=stepper.prognostic_names,
@@ -229,7 +255,7 @@ def test_looper_paired_with_target_data():
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
     all_names = list(set(in_names + out_names))
     shape = spherical_data.data[in_names[0]].shape
-    initial_condition = BatchData.new_on_device(
+    initial_condition = get_batch_data(
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
@@ -255,7 +281,7 @@ def test_looper_paired_with_target_data_and_derived_variables():
     stepper._derive_func = mock_derive_func
     all_names = list(set(in_names + out_names))
     shape = spherical_data.data[in_names[0]].shape
-    initial_condition = BatchData.new_on_device(
+    initial_condition = get_batch_data(
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
@@ -274,9 +300,9 @@ def test_looper_paired_with_target_data_and_derived_variables():
     mock_derive_func.assert_called()
 
 
-def get_batch_data(
-    start_time,
-    n_timesteps,
+def get_batch_data_with_time(
+    start_time: int,
+    n_timesteps: int,
 ):
     n_samples = 1
     n_lat = 3
@@ -288,7 +314,7 @@ def get_batch_data(
         start_time + torch.arange(n_timesteps)[None, :], (n_samples, n_timesteps)
     )
     time = xr.DataArray(time_axis, dims=["sample", "time"])
-    return BatchData.new_on_device(
+    return get_batch_data(
         data={
             "var": torch.broadcast_to(
                 time_values, (n_samples, n_timesteps, n_lat, n_lon)
@@ -338,6 +364,7 @@ class PlusOneStepper:
         data = BatchData.new_on_device(
             data={"var": out_tensor},
             time=forcing.time[:, self.n_ic_timesteps :],
+            labels=[set() for _ in range(forcing.time.shape[0])],
         )
         if compute_derived_variables:
             data = data.compute_derived_variables(
@@ -367,14 +394,14 @@ def test_looper_simple_batch_data():
     stepper = PlusOneStepper(
         n_ic_timesteps=n_ic_timesteps, derive_func=mock_derive_func
     )
-    initial_condition = get_batch_data(
-        0,
+    initial_condition = get_batch_data_with_time(
+        start_time=0,
         n_timesteps=n_ic_timesteps,
     ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
     loader = [
-        get_batch_data(
-            i,
-            n_ic_timesteps + n_forward_steps,
+        get_batch_data_with_time(
+            start_time=i,
+            n_timesteps=n_ic_timesteps + n_forward_steps,
         )
         for i in range(0, n_iterations * n_forward_steps, n_forward_steps)
     ]
@@ -458,21 +485,21 @@ def test_run_inference_simple(
     stepper = PlusOneStepper(
         n_ic_timesteps=n_ic_timesteps, derive_func=mock_derive_func
     )
-    initial_condition = get_batch_data(
-        0,
+    initial_condition = get_batch_data_with_time(
+        start_time=0,
         n_timesteps=n_ic_timesteps,
     ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
     loader = [
-        get_batch_data(
-            i,
-            n_ic_timesteps + n_forward_steps,
+        get_batch_data_with_time(
+            start_time=i,
+            n_timesteps=n_ic_timesteps + n_forward_steps,
         )
         for i in range(0, n_iterations * n_forward_steps, n_forward_steps)
     ]
     mock_writer = get_mock_writer()
     mock_aggregator = get_mock_aggregator(n_ic_timesteps)
 
-    with GlobalTimer():
+    with GlobalTimer(), torch.no_grad():
         with mock_wandb() as wandb:
             wandb.configure(log_to_wandb=True)
             record_logs = unittest.mock.MagicMock(

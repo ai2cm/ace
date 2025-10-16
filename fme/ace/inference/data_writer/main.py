@@ -3,6 +3,7 @@ import datetime
 import warnings
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TypeAlias
 
 import numpy as np
 import torch
@@ -13,21 +14,16 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 
 from .dataset_metadata import DatasetMetadata
-from .histograms import PairedHistogramDataWriter
+from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
 from .raw import PairedRawDataWriter, RawDataWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
-from .video import PairedVideoDataWriter
 
-PairedSubwriter = (
-    PairedRawDataWriter
-    | PairedVideoDataWriter
-    | PairedHistogramDataWriter
-    | PairedTimeCoarsen
-    | PairedMonthlyDataWriter
+PairedSubwriter: TypeAlias = (
+    PairedRawDataWriter | PairedTimeCoarsen | PairedMonthlyDataWriter | PairedFileWriter
 )
 
-Subwriter = MonthlyDataWriter | RawDataWriter | TimeCoarsen
+Subwriter: TypeAlias = MonthlyDataWriter | RawDataWriter | TimeCoarsen | FileWriter
 
 
 @dataclasses.dataclass
@@ -36,34 +32,26 @@ class DataWriterConfig:
     Configuration for inference data writers.
 
     Parameters:
-        log_extended_video_netcdfs: Whether to enable writing of netCDF files
-            containing video metrics.
         save_prediction_files: Whether to enable writing of netCDF files
             containing the predictions and target values.
         save_monthly_files: Whether to enable writing of netCDF files
             containing the monthly predictions and target values.
-        names: Names of variables to save in the prediction, histogram, and monthly
+        names: Names of variables to save in the prediction and monthly
             netCDF files.
-        save_histogram_files: Enable writing of netCDF files containing histograms.
-        time_coarsen: Configuration for time coarsening of written outputs.
+        time_coarsen: Configuration for time coarsening of written outputs to the
+            raw data writer.
+        files: Configuration for a sequence of individual data writers.
     """
 
-    log_extended_video_netcdfs: bool = False
     save_prediction_files: bool = True
     save_monthly_files: bool = True
     names: Sequence[str] | None = None
-    save_histogram_files: bool = False
     time_coarsen: TimeCoarsenConfig | None = None
+    files: list[FileWriterConfig] | None = None
 
     def __post_init__(self):
         if (
-            not any(
-                [
-                    self.save_prediction_files,
-                    self.save_monthly_files,
-                    self.save_histogram_files,
-                ]
-            )
+            not any([self.save_prediction_files, self.save_monthly_files])
             and self.names is not None
         ):
             warnings.warn(
@@ -90,11 +78,10 @@ class DataWriterConfig:
             coords=coords,
             enable_prediction_netcdfs=self.save_prediction_files,
             enable_monthly_netcdfs=self.save_monthly_files,
-            enable_video_netcdfs=self.log_extended_video_netcdfs,
             save_names=self.names,
-            enable_histogram_netcdfs=self.save_histogram_files,
             time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
+            files=self.files,
         )
 
     def build(
@@ -107,16 +94,6 @@ class DataWriterConfig:
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
     ) -> "DataWriter":
-        if self.save_histogram_files:
-            raise NotImplementedError(
-                "Saving histograms is not supported for prediction-only data writers. "
-                "Make sure to set `save_histogram_files=False`."
-            )
-        if self.log_extended_video_netcdfs:
-            raise NotImplementedError(
-                "Saving 'extended video' netCDFs is not supported for prediction-only "
-                "data writers. Make sure to set `log_extended_video_netcdfs=False`."
-            )
         return DataWriter(
             path=experiment_dir,
             n_initial_conditions=n_initial_conditions,
@@ -129,6 +106,7 @@ class DataWriterConfig:
             save_names=self.names,
             time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
+            files=self.files,
         )
 
 
@@ -143,11 +121,10 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         timestep: datetime.timedelta,
         enable_prediction_netcdfs: bool,
         enable_monthly_netcdfs: bool,
-        enable_video_netcdfs: bool,
         save_names: Sequence[str] | None,
-        enable_histogram_netcdfs: bool,
         dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
+        files: list[FileWriterConfig] | None = None,
     ):
         """
         Args:
@@ -161,24 +138,18 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 containing the predictions and target values.
             enable_monthly_netcdfs: Whether to enable writing of netCDF files
                 containing the monthly predictions and target values.
-            enable_video_netcdfs: Whether to enable writing of netCDF files
-                containing video metrics.
-            save_names: Names of variables to save in the prediction, histogram,
+            save_names: Names of variables to save in the prediction
                 and monthly netCDF files.
-            enable_histogram_netcdfs: Whether to write netCDFs with histogram data.
             dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of written outputs.
+            files: Configurations for individual data writers.
+
         """
         self._writers: list[PairedSubwriter] = []
         self.path = path
         self.coords = coords
         self.variable_metadata = variable_metadata
         self.dataset_metadata = dataset_metadata
-
-        if time_coarsen is not None:
-            n_coarsened_timesteps = time_coarsen.n_coarsened_timesteps(n_timesteps)
-        else:
-            n_coarsened_timesteps = n_timesteps
 
         def _time_coarsen_builder(data_writer: PairedSubwriter) -> PairedSubwriter:
             if time_coarsen is not None:
@@ -211,30 +182,18 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                     dataset_metadata=dataset_metadata,
                 )
             )
-        if enable_video_netcdfs:
-            self._writers.append(
-                _time_coarsen_builder(
-                    PairedVideoDataWriter(
-                        path=path,
-                        n_timesteps=n_coarsened_timesteps,
+        if files is not None:
+            for writer_config in files:
+                self._writers.append(
+                    writer_config.build_paired(
+                        experiment_dir=path,
+                        n_initial_conditions=n_initial_conditions,
+                        n_timesteps=n_timesteps,
                         variable_metadata=variable_metadata,
                         coords=coords,
                         dataset_metadata=dataset_metadata,
                     )
                 )
-            )
-        if enable_histogram_netcdfs:
-            self._writers.append(
-                _time_coarsen_builder(
-                    PairedHistogramDataWriter(
-                        path=path,
-                        n_timesteps=n_coarsened_timesteps,
-                        variable_metadata=variable_metadata,
-                        save_names=save_names,
-                        dataset_metadata=dataset_metadata,
-                    )
-                )
-            )
         self._n_timesteps_seen = 0
 
     def write(self, data: PrognosticState, filename: str):
@@ -279,6 +238,10 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         for writer in self._writers:
             writer.flush()
 
+    def finalize(self):
+        for writer in self._writers:
+            writer.finalize()
+
 
 def _write(
     data: BatchData,
@@ -319,7 +282,7 @@ def _write(
 
     data_arrays = {}
     for name in data.data:
-        array = maybe_squeeze(data.data[name]).cpu().numpy()
+        array = maybe_squeeze(data.data[name]).detach().cpu().numpy()
         data_arrays[name] = xr.DataArray(array, dims=dims_to_write)
         if name in variable_metadata:
             data_arrays[name].attrs = {
@@ -346,6 +309,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         save_names: Sequence[str] | None,
         dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
+        files: list[FileWriterConfig] | None = None,
     ):
         """
         Args:
@@ -359,10 +323,11 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             enable_prediction_netcdfs: Whether to enable writing of netCDF files
                 containing the predictions and target values.
             enable_monthly_netcdfs: Whether to enable writing of netCDF files
-            save_names: Names of variables to save in the prediction, histogram,
+            save_names: Names of variables to save in the prediction
                 and monthly netCDF files.
             dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of raw outputs.
+            files: Configurations for individual data writers.
         """
         self._writers: list[Subwriter] = []
         if "face" in coords:
@@ -404,6 +369,19 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 )
             )
 
+        if files is not None:
+            for writer_config in files:
+                self._writers.append(
+                    writer_config.build(
+                        experiment_dir=path,
+                        n_initial_conditions=n_initial_conditions,
+                        n_timesteps=n_timesteps,
+                        variable_metadata=variable_metadata,
+                        coords=coords,
+                        dataset_metadata=dataset_metadata,
+                    )
+                )
+
         self.path = path
         self.variable_metadata = variable_metadata
         self.dataset_metadata = dataset_metadata
@@ -422,6 +400,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         unpaired_batch = BatchData.new_on_device(
             data=merged,
             time=batch.time,
+            labels=batch.labels,
         )
         self._append_batch(unpaired_batch)
 
@@ -440,6 +419,10 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+
+    def finalize(self):
+        for writer in self._writers:
+            writer.finalize()
 
     def write(self, data: PrognosticState, filename: str):
         _write(

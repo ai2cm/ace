@@ -91,6 +91,10 @@ class PairedMonthlyDataWriter:
         self._target_writer.flush()
         self._prediction_writer.flush()
 
+    def finalize(self):
+        self._target_writer.finalize()
+        self._prediction_writer.finalize()
+
 
 class MonthlyDataWriter:
     """
@@ -277,7 +281,7 @@ class MonthlyDataWriter:
                     [INIT_TIME, VALID_TIME, COUNTS]
                 )
 
-            array = data[variable_name].cpu().numpy()
+            array = data[variable_name].detach().cpu().numpy()
 
             # Add the data to the variable totals
             # Have to extract the data and write it back as `.at` does not play nicely
@@ -308,6 +312,10 @@ class MonthlyDataWriter:
         Flush the data to disk.
         """
         self.dataset.sync()
+
+    def finalize(self):
+        self.flush()
+        self.dataset.close()
 
 
 def add_data(

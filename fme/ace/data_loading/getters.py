@@ -1,22 +1,11 @@
 import logging
 
 import torch.utils.data
-from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data.sampler import RandomSampler
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.dataset.config import (
-    ConcatDatasetConfig,
-    MergeDatasetConfig,
-    MergeNoConcatDatasetConfig,
-)
-from fme.core.dataset.getters import (
-    get_dataset,
-    get_merged_datasets,
-    get_xarray_dataset,
-)
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -60,10 +49,8 @@ def _get_sampler(
             num_samples=local_sample_with_replacement_dataset_size,
             replacement=True,
         )
-    elif dist.is_distributed():
-        sampler = DistributedSampler(dataset, shuffle=train)
     else:
-        sampler = RandomSampler(dataset) if train else None
+        sampler = dist.get_sampler(dataset, shuffle=train)
     return sampler
 
 
@@ -80,31 +67,12 @@ def get_gridded_data(
         requirements: Data requirements for the model.
     """
     n_timesteps_preloaded = config.time_buffer + requirements.n_timesteps
-    # include requirements.n_timesteps - 1 steps of overlap so that no samples are
-    # skipped at the boundaries of the preloaded timesteps
-    start_every_n = config.time_buffer + 1
-    dataset: torch.utils.data.Dataset
-    if isinstance(config.dataset, XarrayDataConfig):
-        dataset, properties = get_xarray_dataset(
-            config.dataset,
-            requirements.names,
-            n_timesteps_preloaded,
-        )
-    elif isinstance(config.dataset, ConcatDatasetConfig):
-        dataset, properties = get_dataset(
-            config.dataset.concat,
-            requirements.names,
-            n_timesteps_preloaded,
-            strict=config.dataset.strict,
-        )
-    elif isinstance(config.dataset, MergeDatasetConfig):
-        dataset, properties = get_merged_datasets(
-            config.dataset,
-            requirements.names,
-            n_timesteps_preloaded,
-        )
+    dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
 
     if config.time_buffer > 0:
+        # include requirements.n_timesteps - 1 steps of overlap so that no samples are
+        # skipped at the boundaries of the preloaded timesteps
+        start_every_n = config.time_buffer + 1
         indices = range(len(dataset))[::start_every_n]
         dataset = torch.utils.data.Subset(dataset, indices)
 
@@ -125,7 +93,7 @@ def get_gridded_data(
     batch_size = dist.local_batch_size(int(config.batch_size))
 
     dataloader = get_data_loader(
-        dataset,
+        dataset=dataset,
         batch_size=batch_size,
         n_window_timesteps=requirements.n_timesteps,
         time_buffer=config.time_buffer,
@@ -153,6 +121,7 @@ def get_inference_data(
     total_forward_steps: int,
     window_requirements: DataRequirements,
     initial_condition: PrognosticState | PrognosticStateDataRequirements,
+    label_override: list[str] | None = None,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
 ) -> InferenceGriddedData:
@@ -165,6 +134,8 @@ def get_inference_data(
         initial_condition: Initial condition for the inference, or a requirements object
             specifying how to extract the initial condition from the first batch of
             data
+        label_override: Labels for the forcing data to be provided on each sample
+            instead of the labels in the dataset.
         surface_temperature_name: Name of the surface temperature variable. Can be
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
@@ -174,11 +145,12 @@ def get_inference_data(
         A data loader for inference with coordinates and metadata.
     """
     dataset = InferenceDataset(
-        config,
-        total_forward_steps,
-        window_requirements,
-        surface_temperature_name,
-        ocean_fraction_name,
+        config=config,
+        total_forward_steps=total_forward_steps,
+        requirements=window_requirements,
+        surface_temperature_name=surface_temperature_name,
+        ocean_fraction_name=ocean_fraction_name,
+        label_override=label_override,
     )
     properties = dataset.properties
 
@@ -219,6 +191,7 @@ def get_forcing_data(
     initial_condition: PrognosticState,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
+    label_override: list[str] | None = None,
 ) -> InferenceGriddedData:
     """Return a GriddedData loader for forcing data based on the initial condition.
     This function determines the start indices for the forcing data based on the initial
@@ -234,6 +207,8 @@ def get_forcing_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
+        label_override: Labels for the forcing data. If provided, these labels will be
+            provided on each sample instead of the labels in the dataset.
 
     Returns:
         A data loader for forcing data with coordinates and metadata.
@@ -269,4 +244,5 @@ def get_forcing_data(
         initial_condition=initial_condition,
         surface_temperature_name=surface_temperature_name,
         ocean_fraction_name=ocean_fraction_name,
+        label_override=label_override,
     )

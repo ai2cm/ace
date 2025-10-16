@@ -4,11 +4,12 @@ import numpy as np
 import xarray as xr
 
 from fme.core import logging_utils
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.testing.wandb import mock_wandb
 
+from ...core.dataset.concat import ConcatDatasetConfig
 from .benchmark import BenchmarkConfig, benchmark
-from .config import ConcatDatasetConfig, DataLoaderConfig
+from .config import DataLoaderConfig
 
 
 def get_test_data(path):

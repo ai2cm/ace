@@ -44,3 +44,6 @@ class NullDataWriter(WriterABC[Any, Any]):
 
     def write(self, data: Any, filename: str):
         pass
+
+    def finalize(self):
+        pass

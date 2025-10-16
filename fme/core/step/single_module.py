@@ -257,6 +257,19 @@ class SingleModuleStep(StepABC):
             return self._config.ocean.ocean_fraction_name
         return None
 
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        if self.ocean is None:
+            raise RuntimeError(
+                "The Ocean interface is missing but required to prescribe "
+                "sea surface temperature."
+            )
+        return self.ocean.prescriber(mask_data, gen_data, target_data)
+
     @property
     def modules(self) -> nn.ModuleList:
         """

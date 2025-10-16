@@ -6,7 +6,12 @@ import torch.multiprocessing as mp
 
 from fme import get_device
 
-from .distributed import Distributed, pad_tensor_at_end, unpad_tensor_at_end
+from .distributed import (
+    Distributed,
+    gather_irregular,
+    pad_tensor_at_end,
+    unpad_tensor_at_end,
+)
 
 
 @pytest.mark.parametrize(
@@ -79,3 +84,51 @@ def test_non_distributed_gather():
     assert gathered is not None, "Gathered tensor are none instead of List"
     assert len(gathered) == 1
     assert torch.allclose(gathered[0], tensor)
+
+
+def test_gather_irregular():
+    tensors = [torch.randn(10 + i) for i in range(8)]
+    tensor_lengths = set(len(t) for t in tensors)
+    max_length = torch.tensor(max(tensor_lengths))
+    reduce_max_seen = []
+
+    def reduce_max(tensor: torch.Tensor) -> torch.Tensor:
+        assert tensor.ndim == 0
+        reduce_max_seen.append(int(tensor))
+        tensor.fill_(max_length)
+        return tensor
+
+    gather_nonscalar_seen: list[torch.Tensor] = []
+    gather_scalar_seen: list[torch.Tensor] = []
+
+    def gather(tensor: torch.Tensor) -> list[torch.Tensor]:
+        if tensor.ndim == 0 or len(tensor) == 1:
+            gather_scalar_seen.append(tensor)
+            return gather_scalar_seen  # not correct, but it's OK for this test
+        else:
+            gather_nonscalar_seen.append(tensor)
+            return gather_nonscalar_seen
+
+    gathered = []
+    for tensor in tensors:
+        gathered_item = gather_irregular(
+            tensor, reduce_max, gather, is_distributed=True, fill_value=0.0
+        )
+        assert isinstance(gathered_item, list)
+        assert all(isinstance(item, torch.Tensor) for item in gathered_item)
+        gathered.append(gathered_item)
+    final_gathered = gathered_item
+    assert final_gathered is not None
+    assert set(reduce_max_seen) == tensor_lengths
+    assert set(tensor.shape[0] for tensor in final_gathered) == tensor_lengths, (
+        "Final gathered shapes are "
+        f"{set(tensor.shape[0] for tensor in final_gathered)} "
+        f"but expected {tensor_lengths}, "
+        "did the tensors get un-padded back to their original lengths?"
+    )
+    assert gathered is not None
+    assert len(gathered) == 8
+    gathered_nonscalar_shapes = [t.shape for t in gather_nonscalar_seen]
+    assert all(
+        shape == gathered_nonscalar_shapes[0] for shape in gathered_nonscalar_shapes
+    )

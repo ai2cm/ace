@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -10,9 +10,9 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.wandb import Image, WandB
+from fme.core.wandb import Image
 
-from ..plotting import get_cmap_limits, plot_imshow
+from ..plotting import plot_paneled_data
 
 
 @dataclasses.dataclass
@@ -58,6 +58,9 @@ class TimeMeanAggregator:
     _image_captions = {
         "bias_map": "{name} time-mean bias (generated - reference) [{units}]",
         "gen_map": "{name} time-mean generated [{units}]",
+        "gen_target_map": (
+            "{name} time-mean; (top) generated and (bottom) target [{units}]"
+        ),
     }
 
     def __init__(
@@ -146,18 +149,24 @@ class TimeMeanAggregator:
         return ret
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, float | Image]:
+    def get_logs(
+        self, label: str, target_maps: dict[str, torch.Tensor] | None = None
+    ) -> dict[str, float | Image]:
         logs: dict[str, float | Image] = {}
         data = self.get_data()
         gen_map_key = "gen_map"
-        wandb = WandB.get_instance()
         for name, pred in data.items():
-            vmin_pred, vmax_pred = get_cmap_limits(pred.cpu().numpy())
-            prediction_image = wandb.Image(
-                plot_imshow(pred.cpu().numpy()),
-                caption=self._get_caption(gen_map_key, name, vmin_pred, vmax_pred),
+            if target_maps is not None and name in target_maps:
+                gen_map_caption_key = gen_map_key
+                data_panels = [[pred.cpu().numpy()], [target_maps[name].cpu().numpy()]]
+            else:
+                gen_map_caption_key = "gen_target_map"
+                data_panels = [[pred.cpu().numpy()]]
+            prediction_image = plot_paneled_data(
+                data_panels,
+                diverging=False,
+                caption=self._get_caption(gen_map_caption_key, name),
             )
-            plt.close("all")
             logs.update(
                 {
                     f"{gen_map_key}/{name}": prediction_image,
@@ -172,14 +181,10 @@ class TimeMeanAggregator:
                     gen=pred,
                     ops=self._ops,
                 )
-                bias_map = pair.bias().cpu().numpy()
-                vmin_bias, vmax_bias = get_cmap_limits(bias_map, diverging=True)
-                bias_fig = plot_imshow(
-                    bias_map, vmin=vmin_bias, vmax=vmax_bias, cmap="RdBu_r"
-                )
-                bias_image = wandb.Image(
-                    bias_fig,
-                    caption=self._get_caption("bias_map", name, vmin_bias, vmax_bias),
+                bias_image = plot_paneled_data(
+                    [[pair.bias().cpu().numpy()]],
+                    diverging=True,
+                    caption=self._get_caption("bias_map", name),
                 )
                 logs.update({f"ref_bias/{name}": pair.weighted_mean_bias()})
                 logs.update({f"ref_rmse/{name}": pair.rmse()})
@@ -189,14 +194,13 @@ class TimeMeanAggregator:
             return {f"{label}/{key}": logs[key] for key in logs}
         return logs
 
-    def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
+    def _get_caption(self, key: str, name: str) -> str:
         if name in self._variable_metadata:
             caption_name = self._variable_metadata[name].long_name
             units = self._variable_metadata[name].units
         else:
             caption_name, units = name, "unknown_units"
         caption = self._image_captions[key].format(name=caption_name, units=units)
-        caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
         return caption
 
     def get_dataset(self) -> xr.Dataset:
@@ -231,7 +235,6 @@ class TimeMeanEvaluatorAggregator:
 
     _image_captions = {
         "bias_map": "{name} time-mean bias (generated - target) [{units}]",
-        "gen_map": "{name} time-mean generated [{units}]",
     }
 
     def __init__(
@@ -241,7 +244,7 @@ class TimeMeanEvaluatorAggregator:
         target: Literal["norm", "denorm"] = "denorm",
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         reference_means: xr.Dataset | None = None,
-        channel_mean_names: list[str] | None = None,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -309,22 +312,15 @@ class TimeMeanEvaluatorAggregator:
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, float | torch.Tensor | Image]:
-        logs = self._gen_agg.get_logs("")
+        logs = self._gen_agg.get_logs("", target_maps=self._target_agg.get_data())
         preds = self._get_target_gen_pairs()
         bias_map_key = "bias_map"
         rmse_all_channels = {}
-        wandb = WandB.get_instance()
         for pred in preds:
-            bias_data = pred.bias().cpu().numpy()
-            vmin_bias, vmax_bias = get_cmap_limits(bias_data, diverging=True)
-            bias_fig = plot_imshow(
-                bias_data, vmin=vmin_bias, vmax=vmax_bias, cmap="RdBu_r"
-            )
-            bias_image = wandb.Image(
-                bias_fig,
-                caption=self._get_caption(
-                    bias_map_key, pred.name, vmin_bias, vmax_bias
-                ),
+            bias_image = plot_paneled_data(
+                [[pred.bias().cpu().numpy()]],
+                diverging=True,
+                caption=self._get_caption(bias_map_key, pred.name),
             )
             plt.close("all")
             rmse_all_channels[pred.name] = pred.rmse()
@@ -350,14 +346,13 @@ class TimeMeanEvaluatorAggregator:
             return {f"{label}/{key}": logs[key] for key in logs}
         return logs
 
-    def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
+    def _get_caption(self, key: str, name: str) -> str:
         if name in self._variable_metadata:
             caption_name = self._variable_metadata[name].long_name
             units = self._variable_metadata[name].units
         else:
             caption_name, units = name, "unknown_units"
         caption = self._image_captions[key].format(name=caption_name, units=units)
-        caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
         return caption
 
     def get_dataset(self) -> xr.Dataset:

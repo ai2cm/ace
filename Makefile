@@ -15,12 +15,12 @@ build_docker_image:
 enter_docker_image: build_docker_image
 	docker run -it --rm $(IMAGE):$(VERSION) bash
 
-
 # recommended to deactivate current conda environment before running this
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME) python=3.11 $(CONDA_PACKAGES)
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) python -m pip install uv
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e .[dev,docs]
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install --no-build-isolation -c constraints.txt -r requirements-healpix.txt
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -r analysis-deps.txt
 
 test:

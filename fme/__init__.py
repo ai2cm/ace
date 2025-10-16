@@ -1,7 +1,7 @@
-__version__ = "2025.7.0"
+__version__ = "2025.10.0"
 
 
-from . import ace
+from . import ace, coupled
 from . import sht_fix as _sht_fix
 from .core import Packer, StandardNormalizer, get_device, get_normalizer, using_gpu
 from .core.metrics import (
@@ -36,4 +36,5 @@ __all__ = [
     "using_gpu",
     "weighted_std",
     "ace",
+    "coupled",
 ]
