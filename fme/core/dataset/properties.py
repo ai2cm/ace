@@ -13,7 +13,7 @@ class DatasetProperties:
         vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         mask_provider: MaskProvider,
-        timestep: datetime.timedelta,
+        timestep: datetime.timedelta | None,
         is_remote: bool,
         all_labels: set[str],
     ):
@@ -61,3 +61,6 @@ class DatasetProperties:
         if self.horizontal_coordinates != other.horizontal_coordinates:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
         self.all_labels.update(other.all_labels)
+
+    def update_mask_provider(self, mask_provider: MaskProvider):
+        self.mask_provider.update(mask_provider)

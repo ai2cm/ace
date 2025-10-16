@@ -20,6 +20,7 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
 )
 from fme.ace.inference.data_writer import DataWriterConfig
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
@@ -276,7 +277,6 @@ def inference_helper(
 ):
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     all_names = list(set(in_names).union(out_names))
-    forcing_names = list(set(in_names).difference(out_names))
     data = FV3GFSData(
         path=tmp_path,
         names=all_names,
@@ -320,10 +320,9 @@ def inference_helper(
             monthly_reference_data=monthly_reference_filename, log_video=True
         ),
         data_writer=DataWriterConfig(
-            save_prediction_files=True,
-            log_extended_video_netcdfs=True,
-            save_histogram_files=True,
+            save_prediction_files=False,
             save_monthly_files=save_monthly_files,
+            files=[FileWriterConfig("autoregressive")],
         ),
         forward_steps_in_memory=1,
         allow_incompatible_dataset=allow_incompatible_dataset_info,
@@ -409,36 +408,6 @@ def inference_helper(
         )
         np.testing.assert_allclose(ic_ds[example_output_var].values, 0.0)
 
-    metric_ds = xr.open_dataset(
-        tmp_path / "reduced_autoregressive_predictions.nc", decode_timedelta=False
-    )
-    assert example_output_var in metric_ds.data_vars
-    assert metric_ds.data_vars[example_output_var].attrs["units"] == "cm"
-    assert (
-        metric_ds.data_vars[example_output_var].attrs["long_name"]
-        == f"ensemble mean of an output variable"
-    )
-    assert f"rmse_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"rmse_{example_output_var}"].attrs["units"] == "cm"
-    assert (
-        metric_ds.data_vars[f"rmse_{example_output_var}"].attrs["long_name"]
-        == f"root mean squared error of an output variable"
-    )
-    assert f"bias_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"bias_{example_output_var}"].attrs["units"] == "cm"
-    assert f"min_err_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"min_err_{example_output_var}"].attrs["units"] == "cm"
-    assert f"max_err_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"max_err_{example_output_var}"].attrs["units"] == "cm"
-    assert f"gen_var_{example_output_var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"gen_var_{example_output_var}"].attrs["units"] == ""
-    assert (
-        metric_ds.data_vars[f"gen_var_{example_output_var}"].attrs["long_name"]
-        == f"prediction variance of an output variable as fraction of target variance"
-    )
-    assert "lat" in metric_ds.coords
-    assert "lon" in metric_ds.coords
-
     time_mean_diagnostics = xr.open_dataset(
         tmp_path / "time_mean_diagnostics.nc", decode_timedelta=False
     )
@@ -471,35 +440,11 @@ def inference_helper(
     assert f"gen-{example_output_var}" in actual_var_names
     assert (
         zonal_mean_diagnostics.data_vars[f"gen-{example_output_var}"].attrs["units"]
-        == ""
+        == "cm"
     )
     assert len(zonal_mean_diagnostics.coords) == 1
     assert "lat" in zonal_mean_diagnostics.coords
 
-    for source in ["target", "prediction"]:
-        histograms = xr.open_dataset(
-            tmp_path / f"histograms_{source}.nc", decode_timedelta=False
-        )
-        actual_var_names = sorted([str(k) for k in histograms.keys()])
-        # NOTE: target histograms include forcing variables
-        n_vars = (
-            len(all_out_names)
-            if source == "prediction"
-            else len(all_out_names) + len(forcing_names)
-        )
-        assert len(actual_var_names) == 2 * n_vars
-        assert example_output_var in actual_var_names
-        assert histograms.data_vars[example_output_var].attrs["units"] == "count"
-        assert f"{example_output_var}_bin_edges" in actual_var_names
-        assert (
-            histograms.data_vars[f"{example_output_var}_bin_edges"].attrs["units"]
-            == "cm"
-        )
-        var_counts_per_timestep = histograms[example_output_var].sum(dim=["bin"])
-        same_count_each_timestep = np.all(
-            var_counts_per_timestep.values == var_counts_per_timestep.values[0]
-        )
-        assert same_count_each_timestep
     if monthly_reference_filename is not None:
         assert f"inference/annual/{example_output_var}" in wandb_logs[-1]
         assert f"inference/annual/r2_gen_{example_output_var}" in wandb_logs[-1]
@@ -547,8 +492,9 @@ def test_inference_writer_boundaries(
         logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
-            save_prediction_files=True,
-            time_coarsen=None,
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
         ),
         forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
@@ -676,6 +622,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
         dim_sizes=dim_sizes,
         timestep_days=TIMESTEP.total_seconds() / 86400,
     )
+    time_coarsen_config = TimeCoarsenConfig(coarsen_factor=coarsen_factor)
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
         n_forward_steps=8,
@@ -688,10 +635,11 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
         ),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
-            save_prediction_files=True,
-            log_extended_video_netcdfs=True,
-            time_coarsen=TimeCoarsenConfig(coarsen_factor=coarsen_factor),
-            save_histogram_files=True,
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[
+                FileWriterConfig("autoregressive", time_coarsen=time_coarsen_config)
+            ],
         ),
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -707,19 +655,6 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
     assert (
         len(prediction_ds["time"]) == n_coarsened_timesteps
     ), "raw predictions time dimension size"
-    metric_ds = xr.open_dataset(
-        tmp_path / "reduced_autoregressive_predictions.nc", decode_timedelta=False
-    )
-    assert (
-        metric_ds.sizes["timestep"] == n_coarsened_timesteps
-    ), "reduced predictions time dimension size"
-    for source in ["target", "prediction"]:
-        histograms = xr.open_dataset(
-            tmp_path / f"histograms_{source}.nc", decode_timedelta=False
-        )
-        assert (
-            histograms.sizes["time"] == n_coarsened_timesteps
-        ), "histograms time dimension size"
 
 
 @pytest.mark.parametrize("has_required_fields", [True, False])
@@ -844,7 +779,11 @@ def test_derived_metrics_run_without_errors(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
-        data_writer=DataWriterConfig(save_prediction_files=True),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
         forward_steps_in_memory=1,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -894,7 +833,13 @@ def test_inference_config_raises_incompatible_timesteps(
         ),
     )
     base_config_dict["forward_steps_in_memory"] = forward_steps_in_memory
-    base_config_dict["data_writer"] = {"time_coarsen": {"coarsen_factor": time_coarsen}}
+    base_config_dict["data_writer"] = {
+        "save_prediction_files": False,
+        "save_monthly_files": False,
+        "files": [
+            {"label": "filename", "time_coarsen": {"coarsen_factor": time_coarsen}}
+        ],
+    }
     with pytest.raises(ValueError):
         dacite.from_dict(
             data_class=InferenceEvaluatorConfig,
@@ -951,7 +896,11 @@ def test_inference_override(tmp_path: pathlib.Path):
         checkpoint_path=str(stepper_path),
         logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
         loader=data.inference_data_loader_config,
-        data_writer=DataWriterConfig(save_prediction_files=True, time_coarsen=None),
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info

@@ -38,6 +38,7 @@ from fme.core.dataset.xarray import (
     _repeat_and_increment_time,
     get_xarray_dataset,
 )
+from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import Slice
 
 from .utils import as_broadcasted_tensor
@@ -632,8 +633,7 @@ def test_XarrayDataset_timestep(mock_monthly_netcdfs, infer_timestep):
         expected_timestep = pd.Timedelta(MOCK_DATA_FREQ).to_pytimedelta()
         assert dataset.timestep == expected_timestep
     else:
-        with pytest.raises(ValueError, match="Timestep was not inferred"):
-            assert dataset.timestep
+        assert dataset.timestep is None
 
 
 @pytest.mark.parametrize(
@@ -1178,3 +1178,14 @@ def test_parallel__get_raw_times(tmpdir):
 
     result = np.concatenate(_get_raw_times(paths, engine="netcdf4"))
     np.testing.assert_equal(result, times)
+
+
+def test_dataset_properties_update_masks(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    dataset = XarrayDataset(config, mock_data.var_names.all_names, 2)
+    data_properties = dataset.properties
+    assert not data_properties.mask_provider.masks
+    existing_mask = MaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    data_properties.update_mask_provider(existing_mask)
+    assert "mask_0" in dataset.properties.mask_provider.masks

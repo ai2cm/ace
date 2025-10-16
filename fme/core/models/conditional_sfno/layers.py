@@ -79,6 +79,7 @@ class ConditionalLayerNorm(nn.Module):
         context_config: ContextConfig,
         global_layer_norm: bool = False,
         epsilon: float = 1e-5,
+        elementwise_affine: bool = False,
     ):
         super(ConditionalLayerNorm, self).__init__()
         self.n_channels = n_channels
@@ -110,13 +111,13 @@ class ConditionalLayerNorm(nn.Module):
             self.norm = nn.LayerNorm(
                 (self.n_channels, img_shape[0], img_shape[1]),
                 eps=epsilon,
-                elementwise_affine=False,
+                elementwise_affine=elementwise_affine,
             )
         else:
             self.norm = nn.LayerNorm(
                 (self.n_channels,),
                 eps=epsilon,
-                elementwise_affine=False,
+                elementwise_affine=elementwise_affine,
             )
         self._global_layer_norm = global_layer_norm
         self.reset_parameters()

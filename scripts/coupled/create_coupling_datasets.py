@@ -17,18 +17,18 @@ from dask.distributed import Client
 INNER_CHUNKS = {"time": 1, "lon": -1, "lat": -1}
 OUTER_CHUNKS = {"time": 360, "lon": -1, "lat": -1}
 
-EPS = 1e-6
-
 
 @dataclasses.dataclass
 class InputDatasetConfig:
     zarr_path: str
     time_chunk_size: int
-    timedelta: str
     extra_names_and_prefixes: list[str] | None
+    first_timestamp: str | None = None
+    last_timestamp: str | None = None
 
     def get_dataset(self) -> xr.Dataset:
-        return xr.open_zarr(self.zarr_path, chunks={"time": self.time_chunk_size})
+        ds = xr.open_zarr(self.zarr_path, chunks={"time": self.time_chunk_size})
+        return ds.sel(time=slice(self.first_timestamp, self.last_timestamp))
 
     def copy_extra_data_vars(
         self, input_ds: xr.Dataset, output_ds: xr.Dataset
@@ -161,8 +161,10 @@ class CoupledSurfaceTemperatureConfig:
         how: How to compute the coupled surface temperature.
         ocean_fraction_threshold: Threshold above which ocean fractions values are
             treated as 1.
-        sst_from_ts: If true, then SSTs come from the ts field after computing the
-            mean on windows of size equal to the ocean's timedelta.
+        sst_from_ts: If true, then SSTs come from the ts field and are fixed at the
+            snapshot from the left endpoint of the ocean timestep interval. E.g., if the
+            ocean timestep is 5 days, then the SSTs for all snapshots in the interval
+            [t0, t0 + 5 days) are equal to the value at time t0.
 
     """
 
@@ -170,20 +172,16 @@ class CoupledSurfaceTemperatureConfig:
     ocean_fraction_threshold: float = 1.0
     sst_from_ts: bool = False
 
-    def get_window_mean_sst(
+    def get_sst(
         self,
         sst: xr.DataArray,
         ts: xr.DataArray,
-        sst_timedelta: str,
     ) -> xr.DataArray:
         if self.sst_from_ts:
             sst0 = sst.isel(time=0).drop_vars("time")  # for ocean mask
-            sst = (
-                ts.where(sst0.notnull())
-                .resample(time=sst_timedelta, closed="right", label="right")
-                .mean()
-            )
-        return sst.reindex(time=ts["time"], method="bfill")
+            sst = ts.sel(time=sst["time"]).where(sst0.notnull())
+        # sst kept fixed on the ocean timestep window
+        return sst.reindex(time=ts["time"], method="ffill")
 
     def apply_sst_to_ts(
         self,
@@ -259,6 +257,16 @@ class CoupledBoundaryConditionsConfig:
         output_directory: Directory where the output datasets will be created.
         ocean: Configuration of preprocessed ocean dataset.
         atmosphere: Configuration of preprocessed atmosphere dataset.
+        sea_ice: Optional configuration of a preprocessed sea ice dataset. Must have
+            sea_ice_fraction and sea_surface_fraction. Can be on the same temporal
+            resolution as either the atmosphere OR the ocean dataset. If it matches
+            the atmosphere dataset, then it is subsampled to have the same times as
+            the ocean dataset.
+        ts_5D: Optional configuration of a preprocessed dataset with the surface
+            temperature field. Must have the same temporal resolution as the ocean
+            dataset.
+        atmos_timedelta: Timedelta string which gives the atmosphere temporal
+            resolution.
         ocean_fields: Configuration of ocean variable names.
         atmosphere_fields: Configuration of atmosphere variable names.
         derived_fields: Configuration of names for derived variables.
@@ -272,6 +280,9 @@ class CoupledBoundaryConditionsConfig:
     output_directory: str
     ocean: InputDatasetConfig
     atmosphere: InputDatasetConfig
+    sea_ice: InputDatasetConfig | None = None
+    ts_5D: InputDatasetConfig | None = None
+    atmosphere_timedelta: str = "6h"
     ocean_fields: OceanInputFieldsConfig = dataclasses.field(
         default_factory=OceanInputFieldsConfig
     )
@@ -376,12 +387,11 @@ def main(
     atmos = config.atmosphere.get_dataset()
 
     # ensure matching horizontal coordinates
-    # FIXME: assumption about horizontal dim names
     ocean = ocean.assign_coords({"lat": atmos.lat, "lon": atmos.lon})
 
     # atmosphere inputs
     ts_name = config.atmosphere_fields.surface_temperature_name
-    sic_name = config.atmosphere_fields.sea_ice_fraction_name
+    ifrac_name = config.atmosphere_fields.sea_ice_fraction_name
     lfrac_name = config.atmosphere_fields.land_fraction_name
     ofrac_name = config.atmosphere_fields.ocean_fraction_name
 
@@ -390,52 +400,64 @@ def main(
     sst_name = config.ocean_fields.sea_surface_temperature_name
 
     # derived outputs
-    osic_name = config.derived_fields.ocean_sea_ice_fraction_name
+    sic_name = config.derived_fields.ocean_sea_ice_fraction_name
 
-    ts = atmos[ts_name]
     # FIXME: clipping and nan filling should be already be done in the input ds
-    sic = atmos[sic_name].clip(min=0.0, max=1.0)
     lfrac = atmos[lfrac_name].clip(min=0.0, max=1.0)
-    ofrac = atmos[ofrac_name].clip(min=0.0, max=1.0)
-    try:
-        sfrac = ocean[sfrac_name].fillna(0.0).clip(min=0.0, max=1.0)
-    except KeyError:
-        print(
-            f"Warning: {sfrac_name} not found in ocean dataset. "
-            "Assuming sea surface fraction is 1 - land fraction."
-        )
-        sfrac = 1 - lfrac
-        sfrac = sfrac.fillna(0.0).clip(min=0.0, max=1.0)
-        sfrac.attrs = {
-            "long_name": "sea surface fraction",
-            "units": "unitless",
-        }
     sst = ocean[sst_name]
 
+    if config.sea_ice is None:
+        ifrac = atmos[ifrac_name].clip(min=0.0, max=1.0)
+
+        try:
+            sfrac = ocean[sfrac_name].fillna(0.0).clip(min=0.0, max=1.0)
+        except KeyError:
+            print(
+                f"Warning: {sfrac_name} not found in ocean dataset. "
+                "Assuming sea surface fraction is 1 - land fraction."
+            )
+            sfrac = 1 - lfrac
+            sfrac = sfrac.fillna(0.0).clip(min=0.0, max=1.0)
+            sfrac.attrs = {
+                "long_name": "sea surface fraction",
+                "units": "unitless",
+            }
+    else:
+        sea_ice = config.sea_ice.get_dataset()
+        sea_ice = sea_ice.assign_coords({"lat": atmos.lat, "lon": atmos.lon})
+        ifrac = sea_ice[ifrac_name].fillna(0.0).clip(min=0.0, max=1.0)
+        try:
+            sfrac = sea_ice[sfrac_name].fillna(0.0).clip(min=0.0, max=1.0)
+            if "time" in sfrac.dims:
+                # FIXME: sfrac has a time dim in this window avg dataset
+                sfrac = sfrac.isel(time=0).drop("time")
+        except KeyError:
+            print(
+                f"Warning: {sfrac_name} not found in ice dataset. "
+                "Assuming sea surface fraction is 1 - land fraction."
+            )
+            sfrac = 1 - lfrac
+            sfrac = sfrac.fillna(0.0).clip(min=0.0, max=1.0)
+            sfrac.attrs = {
+                "long_name": "sea surface fraction",
+                "units": "unitless",
+            }
     # ensure agreement between atmosphere fractions and sea surface fraction
 
-    lfrac_mod = lfrac.where(lfrac > EPS, 0.0).where(sfrac > 0, 1.0)
-    ofrac_mod = ofrac.where(lfrac_mod < 1.0, 0.0)
-    sic_mod = sic.where(lfrac_mod < 1.0, 0.0).where(ofrac_mod < 1.0, 0.0)
+    sfrac_mod = (1 - lfrac).where(sfrac > 0, 0.0)
+    lfrac_mod = 1 - sfrac_mod
 
-    # get resampled mean of ocean and sea-ice fractions to match ocean step size
-
-    ofrac_mod = ofrac_mod.resample(
-        time=config.ocean.timedelta, closed="right", label="right"
-    ).mean()
-    ofrac_mod = ofrac_mod.where(ofrac_mod > EPS, 0.0)
-    sic_mod = sic_mod.resample(
-        time=config.ocean.timedelta, closed="right", label="right"
-    ).mean()
-    sic_mod = sic_mod.where(sic_mod > EPS, 0.0)
-
-    # compute ocean_sea_ice_fraction
-    osic = sic_mod / (1.0 - lfrac_mod)
-    osic = osic.where(lfrac_mod != 1.0, float("nan")).where(osic > EPS, 0.0)
-    osic.attrs = {
-        "long_name": "sea ice fraction / (1 - land_fraction)",
+    # compute sea ice concentratiion
+    sic_mod = (ifrac / sfrac).clip(0, 1).fillna(0.0)
+    sic_mod = sic_mod.sel(time=sst["time"])
+    sic_mod.attrs = {
+        "long_name": "sea ice concentration",
         "units": "unitless",
     }
+
+    # compute sea ice fraction and ocean fraction from sic
+    ifrac_mod = sic_mod * sfrac_mod
+    ofrac_mod = (1 - sic_mod) * sfrac_mod
 
     sea_ice_mask = config.coupled_sea_ice.compute_sea_ice_mask(sst)
     sea_ice_mask.attrs = {
@@ -446,8 +468,8 @@ def main(
     # create the ocean output dataset
 
     lfrac_mod.attrs = lfrac.attrs
-    ofrac_mod.attrs = ofrac.attrs
-    sic_mod.attrs = sic.attrs
+    ofrac_mod.attrs = atmos[ofrac_name].attrs
+    ifrac_mod.attrs = ifrac.attrs
 
     extra_sea_ice_masked_vars = {
         name: config.coupled_sea_ice.apply_mask(ocean[name])
@@ -461,12 +483,12 @@ def main(
         {
             lfrac_name: lfrac_mod,
             ofrac_name: ofrac_mod,
-            osic_name: config.coupled_sea_ice.apply_mask(osic),
             sic_name: config.coupled_sea_ice.apply_mask(sic_mod),
+            ifrac_name: config.coupled_sea_ice.apply_mask(ifrac_mod),
             sfrac_name: sfrac,
             sst_name: sst,
+            f"mask_{ifrac_name}": sea_ice_mask,
             f"mask_{sic_name}": sea_ice_mask,
-            f"mask_{osic_name}": sea_ice_mask,
             **extra_sea_ice_masked_vars,
         }
     )
@@ -490,24 +512,33 @@ def main(
 
     # apply SST to atmosphere surface temperature field
 
-    ofrac_reindex = ofrac_mod.reindex(time=ts["time"], method="bfill")
-    sic_reindex = sic_mod.reindex(time=ts["time"], method="bfill")
-    sst_reindex = config.coupled_ts.get_window_mean_sst(
-        sst,
-        ts,
-        config.ocean.timedelta,
-    )
+    ts = atmos[ts_name]
+
+    ofrac_reindex = ofrac_mod.reindex(time=atmos["time"], method="ffill")
+    ifrac_reindex = ifrac_mod.reindex(time=atmos["time"], method="ffill")
+
+    if config.ts_5D is None:
+        sst_reindex = config.coupled_ts.get_sst(
+            sst,
+            ts,
+        )
+    else:
+        sst_reindex = config.coupled_ts.get_sst(
+            config.ts_5D.get_dataset()[ts_name],
+            ts,
+        )
 
     ts_mod = config.coupled_ts.apply_sst_to_ts(
         ts,
         sst_reindex,
         ofrac_reindex,
     )
+    ts_mod.attrs = ts.attrs
 
     time = xr.date_range(
         str(atmos["time"].isel(time=0).values.item()),
         str(atmos["time"].isel(time=-1).values.item()),
-        freq=config.atmosphere.timedelta,
+        freq=config.atmosphere_timedelta,
         calendar=atmos["time"].isel(time=0).values.item().calendar,
         use_cftime=True,
     )  # this is needed for proper time coord serialization
@@ -518,7 +549,7 @@ def main(
         {
             lfrac_name: lfrac_mod,
             ofrac_name: ofrac_reindex,
-            sic_name: sic_reindex,
+            ifrac_name: ifrac_reindex,
             sfrac_name: sfrac,
             ts_name: ts_mod,
         }

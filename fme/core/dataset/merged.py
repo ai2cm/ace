@@ -91,9 +91,12 @@ class MergedXarrayDataset:
 @dataclasses.dataclass
 class MergeDatasetConfig(DatasetConfigABC):
     """
-    Configuration for merging multiple datasets.
+    Configuration for merging multiple datasets. Merging means combining
+    variables from multiple datasets, each of which must have the same
+    time coordinate.
+
     Parameters:
-        merge: List of ConcatDatasetConfig or XarrayDataConfig to merge.
+        merge: List of dataset configurations to merge.
     """
 
     merge: Sequence[ConcatDatasetConfig | XarrayDataConfig]
@@ -125,9 +128,13 @@ class MergeDatasetConfig(DatasetConfigABC):
 @dataclasses.dataclass
 class MergeNoConcatDatasetConfig(DatasetConfigABC):
     """
-    Configuration for merging multiple datasets. No concatenation is allowed.
+    Configuration for merging multiple datasets. Merging means combining
+    variables from multiple datasets, each of which must have the same
+    time coordinate. For this case, the datasets being merged may not be
+    concatenated datasets.
+
     Parameters:
-        merge: List of XarrayDataConfig to merge.
+        merge: List of dataset configurations to merge.
     """
 
     merge: Sequence[XarrayDataConfig]

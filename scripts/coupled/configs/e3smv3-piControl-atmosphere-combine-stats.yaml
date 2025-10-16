@@ -1,0 +1,5 @@
+input_directories:
+  # in priority order to handle name conflicts
+  - /pscratch/sd/e/elynnwu/fme-dataset/2025-09-09-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere-stats # surface_temperature -> sst
+  - /pscratch/sd/e/elynnwu/fme-dataset/2025-09-09-E3SMv3-coupled-piControl-atmosphere-100yr-preprocess-again-stats
+output_directory: /pscratch/sd/e/elynnwu/fme-dataset/2025-09-09-E3SMv3-piControl-100yr-coupled-stats/atmosphere

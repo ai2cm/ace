@@ -13,9 +13,9 @@ from fme.ace.data_loading.perturbation import (
     PerturbationSelector,
     SSTPerturbation,
 )
+from fme.ace.inference.data_writer import DataWriterConfig, FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.evaluator import (
-    DataWriterConfig,
     InferenceDataLoaderConfig,
     InferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorConfig,
@@ -48,6 +48,7 @@ from fme.ace.stepper.parameter_init import (
     ParameterInitializationConfig,
 )
 from fme.ace.stepper.single_module import Stepper, StepperConfig, StepSelector
+from fme.core.cli import ResumeResultsConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
@@ -56,7 +57,7 @@ from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import OverwriteConfig, XarrayDataConfig
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
@@ -76,7 +77,6 @@ from .train.train_config import (
     CopyWeightsConfig,
     DataLoaderConfig,
     EMAConfig,
-    ExistingStepperConfig,
     InlineInferenceConfig,
     LoggingConfig,
     OptimizationConfig,

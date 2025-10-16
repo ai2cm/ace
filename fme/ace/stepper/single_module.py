@@ -37,7 +37,7 @@ from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
+from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import (
@@ -110,9 +110,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: ParameterInitializationConfig()
     )
     ocean: OceanConfig | None = None
-    loss: WeightedMappingLossConfig = dataclasses.field(
-        default_factory=lambda: WeightedMappingLossConfig()
-    )
+    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
@@ -297,66 +295,6 @@ class SingleModuleStepperConfig:
             crps_training=self.crps_training,
             residual_prediction=self.residual_prediction,
         )
-
-
-@dataclasses.dataclass
-class ExistingStepperConfig:
-    """
-    Configuration for an existing stepper. This allows loading a serialized
-    stepper from a checkpoint without loading its configuration of the training
-    and optimization schedule, i.e., this allows for specifying a new
-    schedule in fine-tuning. Not used for training resumption.
-
-    Parameters:
-        checkpoint_path: The path to the serialized checkpoint; should be different
-        than the experiment output directory.
-    """
-
-    checkpoint_path: str
-
-    def __post_init__(self):
-        self._stepper_config = StepperConfig.from_stepper_state(
-            self._load_checkpoint()["stepper"]
-        )
-
-    def _load_checkpoint(self) -> Mapping[str, Any]:
-        return torch.load(
-            self.checkpoint_path, map_location=get_device(), weights_only=False
-        )
-
-    def get_train_window_data_requirements(
-        self,
-        default_n_forward_steps: int | None,
-    ) -> DataRequirements:
-        return self._stepper_config.get_train_window_data_requirements(
-            default_n_forward_steps
-        )
-
-    def get_evaluation_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return self._stepper_config.get_evaluation_window_data_requirements(
-            n_forward_steps
-        )
-
-    def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
-        return self._stepper_config.get_prognostic_state_data_requirements()
-
-    def get_forcing_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return self._stepper_config.get_forcing_window_data_requirements(
-            n_forward_steps
-        )
-
-    def get_stepper(
-        self,
-        dataset_info: DatasetInfo,
-        apply_parameter_init: bool = True,
-        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
-    ):
-        logging.info(f"Initializing stepper from {self.checkpoint_path}")
-        return Stepper.from_state(self._load_checkpoint()["stepper"])
 
 
 def _prepend_timesteps(
@@ -564,9 +502,7 @@ class StepperConfig:
     """
 
     step: StepSelector
-    loss: WeightedMappingLossConfig = dataclasses.field(
-        default_factory=lambda: WeightedMappingLossConfig()
-    )
+    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
     crps_training: bool = False
@@ -590,7 +526,7 @@ class StepperConfig:
                 DeprecationWarning,
             )
             self.n_ensemble = 2
-            self.loss = WeightedMappingLossConfig(
+            self.loss = StepLossConfig(
                 type="EnsembleLoss",
                 kwargs={"crps_weight": 1.0},
             )
@@ -893,7 +829,7 @@ class Stepper(
         self._parameter_initializer = parameter_initializer
         self._train_n_forward_steps_sampler = config.train_n_forward_steps_sampler
 
-        def get_loss_obj():
+        def get_loss_obj() -> StepLoss:
             loss_normalizer = step.get_loss_normalizer()
             if config.loss is None:
                 raise ValueError("Loss is not configured")
@@ -907,7 +843,7 @@ class Stepper(
         self._loss_normalizer: StandardNormalizer | None = None
 
         self._get_loss_obj = get_loss_obj
-        self._loss_obj: WeightedMappingLoss | None = None
+        self._loss_obj: StepLoss | None = None
 
         self._parameter_initializer.apply_weights(
             step.modules,
@@ -948,7 +884,7 @@ class Stepper(
         return self._loss_normalizer
 
     @property
-    def loss_obj(self) -> WeightedMappingLoss:
+    def loss_obj(self) -> StepLoss:
         if self._loss_obj is None:
             self._loss_obj = self._get_loss_obj()
         return self._loss_obj
@@ -1442,7 +1378,7 @@ class Stepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self.loss_obj(gen_step, target_step)
+                step_loss = self.loss_obj(gen_step, target_step, step=step)
                 metrics[f"loss_step_{step}"] = step_loss.detach()
             if optimize_step:
                 optimization.accumulate_loss(step_loss)
@@ -1512,6 +1448,11 @@ class Stepper(
 
             if "img_shape" in state:
                 dataset_state["img_shape"] = state["img_shape"]
+            elif "data_shapes" in state:
+                for _, shape in state["data_shapes"].items():
+                    if len(shape) == 4:
+                        dataset_state["img_shape"] = shape[-2:]
+                        break
 
             normalizer = StandardNormalizer.from_state(
                 state.get("normalizer", state.get("normalization"))
@@ -1520,10 +1461,11 @@ class Stepper(
                 raise ValueError(
                     f"No normalizer state found, keys include {state.keys()}"
                 )
-            loss_normalizer = StandardNormalizer.from_state(
-                state.get("loss_normalizer", state.get("loss_normalization"))
-            )
-            if loss_normalizer is None:
+            if "loss_normalizer" in state or "loss_normalization" in state:
+                loss_normalizer = StandardNormalizer.from_state(
+                    state.get("loss_normalizer", state.get("loss_normalization"))
+                )
+            else:
                 loss_normalizer = normalizer
             config = legacy_config.to_stepper_config(
                 normalizer=normalizer, loss_normalizer=loss_normalizer
