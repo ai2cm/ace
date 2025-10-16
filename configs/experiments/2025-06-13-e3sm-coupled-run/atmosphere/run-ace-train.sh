@@ -13,7 +13,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-E3SMv3-atmosphere-v0909-first-80-fill-nans-false"
+JOB_GROUP="BK-E3SMv3-atmosphere-v0909-last-80-fill-nans-false"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
@@ -21,9 +21,9 @@ STATS_DATA=elynn/2025-09-09-E3SMv3-piControl-100yr-coupled-stats
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=2
+N_RANDOM_SEED_RUNS=1
 
-for RS in $(seq 2 $N_RANDOM_SEED_RUNS); do
+for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
     if [ $RS -gt 1 ]; then
         # only log validation maps for the first random seed
