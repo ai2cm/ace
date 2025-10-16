@@ -433,8 +433,8 @@ class EnsembleLoss(torch.nn.Module):
                 f"Total ensemble loss {crps + energy_score_loss:.4f}, "
                 f"expected CRPS:ES {self.crps_weight}:{self.energy_score_weight} "
                 f"actual "
-                f"{(crps + energy_score_loss)/crps:.4f}:"
-                f"{(crps + energy_score_loss)/energy_score_loss:.4f}"
+                f"{crps/(crps + energy_score_loss):.4f}:"
+                f"{energy_score_loss/(crps + energy_score_loss):.4f}"
             )
         self.counter += 1
         return crps + energy_score_loss + area_weighted_crps + kernel_crps
