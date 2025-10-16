@@ -22,6 +22,7 @@ from .inference import (
 
 logger = logging.getLogger(__name__)
 
+from fme.ace.utils import comm
 
 class CollateFn:
     def __init__(self, horizontal_dims: list[str]):

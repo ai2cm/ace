@@ -144,8 +144,8 @@ class Distributed:
         return torch.utils.data.DistributedSampler(
             dataset,
             shuffle=shuffle,
-            num_replicas=self.world_size,
-            rank=self.rank,
+            num_replicas=comm.get_size("batch"),
+            rank=comm.get_rank("batch"),
             seed=self._seed,
             drop_last=drop_last,
         )
