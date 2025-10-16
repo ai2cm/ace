@@ -4,7 +4,7 @@ from typing import Literal
 from fme.ace.models.makani.sfnonet import (
     SphericalFourierNeuralOperatorNet as MakaniSFNO,
 )
-from fme.ace.models.modulus.sfnonet import SphericalFourierNeuralOperatorNet
+from fme.ace.models.modulus.sfnonet import SphericalFourierNeuralOperatorNet, SFNO
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 
 
@@ -46,7 +46,8 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         n_out_channels: int,
         img_shape: tuple[int, int],
     ):
-        sfno_net = SphericalFourierNeuralOperatorNet(
+        //sfno_net = SphericalFourierNeuralOperatorNet(
+        sfno_net = SFNO(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
