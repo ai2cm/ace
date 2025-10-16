@@ -9,6 +9,7 @@ ENABLE_COLDLINE ?= false
 
 RESOLUTION ?= 1deg
 LAYERS ?= 8layer
+OVERWRITE ?= false
 
 ROOT_BASE_CLIMSST_1DEG = gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360
 ROOT_BASE_CLIMSST_4DEG = gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_45_by_90
@@ -28,6 +29,8 @@ NAME_AMIP_1DEG = fv3gfs-AMIP-ensemble
 NAME_AMIP_4DEG = fv3gfs-AMIP-ensemble-4deg
 ATMOSPHERE_PROCESSING_IMAGE = us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing
 ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.03.1  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
+HEALPIX_PROCESSING_IMAGE = dlwp-ace-datapipe
+HEALPIX_PROCESSING_IMAGE_VERSION = v2025.09.0  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 
 ifeq ($(RESOLUTION),1deg)
 	ROOT_INTERMEDIATE ?= $(ROOT_INTERMEDIATE_CLIMSST_1DEG)
@@ -213,6 +216,22 @@ shield_som_c24_dataset:
 shield_som_c24_tuned_cdmbgwd_dataset:
 	./compute_dataset.sh --config configs/shield-som-c24-tuned-cdmbgwd-4deg-$(LAYERS).yaml
 
+.PHONY: healpix_dlwp_dataset
+healpix_dlwp_dataset:
+	./compute_dlwp_dataset.sh --config configs/healpix-1deg-8layer-1940-2022.yaml $(if $(filter true,$(OVERWRITE)),--overwrite)
+
+.PHONY: healpix_dlwp_dataset_gantry
+healpix_dlwp_dataset_gantry:
+	./compute_dlwp_dataset.sh --config configs/healpix-1deg-8layer-1940-2022.yaml --gantry $(if $(filter true,$(OVERWRITE)),--overwrite)
+
+.PHONY: healpix_ace_dataset
+healpix_ace_dataset:
+	./compute_hpx_dataset.sh --config configs/healpix-1deg-8layer-1940-2022.yaml $(if $(filter true,$(OVERWRITE)),--overwrite)
+
+.PHONY: healpix_ace_dataset_gantry
+healpix_ace_dataset_gantry:
+	./compute_hpx_dataset.sh --config configs/healpix-1deg-8layer-1940-2022.yaml --gantry $(if $(filter true,$(OVERWRITE)),--overwrite)
+
 # In total (not including full_field stats), this took 7 hours 15 minutes to
 # complete using a single Perlmutter CPU node.
 
@@ -283,6 +302,10 @@ shield_som_c96_increasing_co2_with_3d_heating_rate_diagnostics_dataset:
 shield_amip_c96_idealized_0p1_heating_ensemble_dataset:
 	./compute_dataset.sh --config configs/shield-amip-idealized-0p1-heating-ensemble-c96-1deg-$(LAYERS).yaml
 
+.PHONY: xshield_amip_dataset_and_stats
+xshield_amip_dataset_and_stats:
+	./compute_dataset.sh --config configs/X-SHiELD-AMIP-1deg-$(LAYERS)-11yr.yaml
+
 .PHONY: build_atmosphere_processing_image
 build_atmosphere_processing_image:
 	docker build -f atmosphere.Dockerfile -t $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION) .
@@ -290,3 +313,11 @@ build_atmosphere_processing_image:
 .PHONY: push_atmosphere_processing_image
 push_atmosphere_processing_image:
 	docker push $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION)
+
+.PHONY: build_healpix_processing_image
+build_healpix_processing_image:
+	docker build -f healpix.Dockerfile -t $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION) .
+
+.PHONY: push_healpix_image_to_beaker
+push_healpix_image_to_beaker:
+	beaker image create --name $(HEALPIX_PROCESSING_IMAGE)-$(HEALPIX_PROCESSING_IMAGE_VERSION) $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION)

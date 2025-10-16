@@ -21,6 +21,7 @@ from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig
 from fme.ace.inference.evaluator import main as inference_evaluator_main
@@ -34,6 +35,10 @@ from fme.ace.registry.test_hpx import (
     up_sampling_block_config,
 )
 from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLengthProbabilities,
+    TimeLengthProbability,
+)
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
@@ -54,14 +59,14 @@ from fme.core.coordinates import (
     LatLonCoordinates,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.generics.trainer import (
     _restore_checkpoint,
     count_parameters,
     epoch_checkpoint_enabled,
 )
 from fme.core.logging_utils import LoggingConfig
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import OptimizationConfig
@@ -105,7 +110,7 @@ def _get_test_yaml_files(
 ):
     input_time_size = 1
     output_time_size = 1
-    if use_healpix:
+    if nettype == "HEALPixRecUNet":
         in_channels = len(in_variable_names)
         out_channels = len(out_variable_names)
         prognostic_variables = min(
@@ -162,7 +167,11 @@ def _get_test_yaml_files(
             num_layers=2,
             embed_dim=12,
         )
-        spatial_dimensions_str = "latlon"
+        if use_healpix:
+            net_config["data_grid"] = "healpix"
+            spatial_dimensions_str = "healpix"
+        else:
+            spatial_dimensions_str = "latlon"
 
     if nettype == "SphericalFourierNeuralOperatorNet":
         corrector_config: AtmosphereCorrectorConfig | CorrectorSelector = (
@@ -262,8 +271,14 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=WeightedMappingLossConfig(type="MSE"),
+            loss=StepLossConfig(type="MSE"),
             crps_training=crps_training,
+            train_n_forward_steps=TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+                ]
+            ),
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -296,7 +311,6 @@ def _get_test_yaml_files(
         ),
         inference=inline_inference_config,
         weather_evaluation=weather_evaluation_config,
-        n_forward_steps=n_forward_steps,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
         save_checkpoint=True,
@@ -315,7 +329,9 @@ def _get_test_yaml_files(
         forward_steps_in_memory=2,
         checkpoint_path=str(results_dir / "training_checkpoints" / "best_ckpt.tar"),
         data_writer=DataWriterConfig(
-            save_prediction_files=True,
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
         ),
         aggregator=InferenceEvaluatorAggregatorConfig(
             log_video=True,
@@ -468,17 +484,22 @@ def _setup(
 
 
 @pytest.mark.parametrize(
-    "nettype, crps_training, log_validation_maps",
+    "nettype, crps_training, log_validation_maps, use_healpix",
     [
-        ("SphericalFourierNeuralOperatorNet", False, True),
-        ("NoiseConditionedSFNO", True, False),
-        ("HEALPixRecUNet", False, False),
-        ("Samudra", False, False),
-        ("NoiseConditionedSFNO", False, False),
+        ("SphericalFourierNeuralOperatorNet", False, True, False),
+        ("NoiseConditionedSFNO", True, False, False),
+        ("HEALPixRecUNet", False, False, True),
+        ("Samudra", False, False, False),
+        ("NoiseConditionedSFNO", False, False, False),
     ],
 )
 def test_train_and_inference(
-    tmp_path, nettype, crps_training, log_validation_maps: bool, very_fast_only: bool
+    tmp_path,
+    nettype,
+    crps_training,
+    log_validation_maps: bool,
+    use_healpix: bool,
+    very_fast_only: bool,
 ):
     """Ensure that ACE training and subsequent standalone inference run without errors.
 
@@ -497,7 +518,7 @@ def test_train_and_inference(
         timestep_days=20,
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
-        use_healpix=(nettype == "HEALPixRecUNet"),
+        use_healpix=use_healpix,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
         log_validation_maps=log_validation_maps,
@@ -508,10 +529,13 @@ def test_train_and_inference(
             yaml_config=train_config,
         )
         wandb_logs = wandb.get_logs()
-
         for log in wandb_logs:
             # ensure inference time series is not logged
             assert "inference/mean/forecast_step" not in log
+
+        epoch_logs = wandb_logs[-1]
+        assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
+        assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
     assert validation_output_dir.exists()
@@ -681,40 +705,6 @@ def test_resume_two_workers(tmp_path, nettype, skip_slow: bool, tmpdir: pathlib.
     ]
     resume_process = subprocess.run(resume_subprocess_args, cwd=tmpdir)
     resume_process.check_returncode()
-
-
-def _create_fine_tuning_config(path_to_train_config_yaml: str, path_to_checkpoint: str):
-    # TODO(gideond) rename to "overwrite" or something of that nature
-    with open(path_to_train_config_yaml) as config_file:
-        config_data = yaml.safe_load(config_file)
-        config_data["stepper"] = {"checkpoint_path": path_to_checkpoint}
-        current_experiment_dir = config_data["experiment_dir"]
-        new_experiment_dir = pathlib.Path(current_experiment_dir) / "fine_tuning"
-        config_data["experiment_dir"] = str(new_experiment_dir)
-        with tempfile.NamedTemporaryFile(
-            mode="w", delete=False, suffix=".yaml"
-        ) as new_config_file:
-            new_config_file.write(yaml.dump(config_data))
-
-    return new_config_file.name, new_experiment_dir
-
-
-@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
-def test_fine_tuning(tmp_path, nettype, very_fast_only: bool):
-    """Check that fine tuning config runs without errors."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-    train_config, _ = _setup(tmp_path, nettype)
-
-    train_main(yaml_config=train_config)
-
-    results_dir = tmp_path / "results"
-    ckpt = f"{results_dir}/training_checkpoints/best_ckpt.tar"
-
-    fine_tuning_config, new_results_dir = _create_fine_tuning_config(train_config, ckpt)
-
-    train_main(yaml_config=fine_tuning_config)
-    assert (new_results_dir / "training_checkpoints" / "ckpt.tar").exists()
 
 
 def _create_copy_weights_after_batch_config(

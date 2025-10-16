@@ -12,11 +12,13 @@ from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.perturbation import SSTPerturbation
 from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.dataset.config import MergeNoConcatDatasetConfig, XarrayDataConfig
-from fme.core.dataset.getters import get_per_dataset_names
-from fme.core.dataset.merged import MergedXarrayDataset
+from fme.core.dataset.merged import (
+    MergedXarrayDataset,
+    MergeNoConcatDatasetConfig,
+    get_per_dataset_names,
+)
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.xarray import XarrayDataset
+from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
 
@@ -196,17 +198,34 @@ class InferenceDataset(torch.utils.data.Dataset):
         config: InferenceDataLoaderConfig,
         total_forward_steps: int,
         requirements: DataRequirements,
+        label_override: list[str] | None = None,
         surface_temperature_name: str | None = None,
         ocean_fraction_name: str | None = None,
     ):
+        """
+        Parameters:
+            config: Configuration for the inference data.
+            total_forward_steps: Number of forward steps to take.
+            requirements: Requirements for the inference data.
+            label_override: Labels to override the labels in the dataset. If provided,
+                these labels will be provided on each sample instead of the labels
+                in the dataset.
+            surface_temperature_name: Name of the surface temperature variable.
+            ocean_fraction_name: Name of the ocean fraction variable.
+        """
+        self._label_override = (
+            set(label_override) if label_override is not None else None
+        )
         if isinstance(config.dataset, XarrayDataConfig):
-            dataset = XarrayDataset(
+            dataset: XarrayDataset | MergedXarrayDataset = XarrayDataset(
                 config.dataset, requirements.names, requirements.n_timesteps
             )
-            self._dataset = dataset
+            properties = dataset.properties
         elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
-            self._dataset = self._resolve_merged_datasets(config.dataset, requirements)
-        self._properties = self._dataset.properties
+            dataset = self._resolve_merged_datasets(config.dataset, requirements)
+            properties = dataset.properties
+        self._properties = properties
+        self._dataset = dataset
         self._forward_steps_in_memory = requirements.n_timesteps - 1
         self._total_forward_steps = total_forward_steps
         self._perturbations = config.perturbations
@@ -260,7 +279,11 @@ class InferenceDataset(torch.utils.data.Dataset):
                     self._total_forward_steps + self._start_indices[i_member] + 1
                 )
             window_time_slice = slice(i_window_start, i_window_end)
-            tensors, time = self._dataset.get_sample_by_time_slice(window_time_slice)
+            tensors, time, labels = self._dataset.get_sample_by_time_slice(
+                window_time_slice
+            )
+            if self._label_override is not None:
+                labels = self._label_override
             if self._perturbations is not None:
                 if (
                     self._surface_temperature_name is None
@@ -278,7 +301,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                         self._lons,
                         tensors[self._ocean_fraction_name],
                     )
-            sample_tuples.append((tensors, time))
+            sample_tuples.append((tensors, time, labels))
         return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),

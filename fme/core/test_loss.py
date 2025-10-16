@@ -10,9 +10,9 @@ from fme.core.loss import (
     EnergyScoreLoss,
     GlobalMeanLoss,
     LossConfig,
+    StepLossConfig,
     VariableWeightingLoss,
     WeightedMappingLoss,
-    WeightedMappingLossConfig,
     _construct_weight_tensor,
 )
 from fme.core.normalizer import StandardNormalizer
@@ -34,15 +34,15 @@ def test_loss_builds_and_runs(global_mean_type):
     assert isinstance(result, torch.Tensor)
 
 
-def test_spectral_energy_score():
+def test_spectral_energy_score(very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     torch.manual_seed(0)
     DEVICE = get_device()
     n_lat, n_lon = 16, 32
     pred = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
     target = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
-    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht(
-        grid="legendre-gauss"
-    )
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
     crps_loss = CRPSLoss(alpha=0.95)
     score = spectral_energy_score_loss(pred, target)
@@ -51,9 +51,7 @@ def test_spectral_energy_score():
     n_lat2, n_lon2 = 32, 64
     pred = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
     target = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
-    sht = LatLonOperations(torch.ones((n_lat2, n_lon2), device=DEVICE)).get_real_sht(
-        grid="legendre-gauss"
-    )
+    sht = LatLonOperations(torch.ones((n_lat2, n_lon2), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
     larger_domain_score = spectral_energy_score_loss(pred, target)
     torch.testing.assert_close(larger_domain_score, score, rtol=0.05, atol=0.0)
@@ -228,14 +226,14 @@ def test_VariableWeightingLoss():
     assert weighted_result == ((16 + 0.25) / 2.0)
 
 
-def test_WeightedMappingLossConfig_no_weights():
+def test_StepLossConfig_no_weights():
     loss_config = LossConfig()
     n_channels = 5
     out_names = [f"var_{i}" for i in range(n_channels)]
     channel_dim = -3
     area = torch.tensor([])  # area not used by this config
     gridded_operations: GriddedOperations = LatLonOperations(area)
-    mapping_loss_config = WeightedMappingLossConfig()
+    mapping_loss_config = StepLossConfig(sqrt_loss_step_decay_constant=0.0)
     loss = loss_config.build(reduction="mean", gridded_operations=gridded_operations)
     normalizer = StandardNormalizer(
         means={name: torch.as_tensor(0.0) for name in out_names},
@@ -254,14 +252,15 @@ def test_WeightedMappingLossConfig_no_weights():
     x = packer.pack(x_mapping, axis=channel_dim)
     y = packer.pack(y_mapping, axis=channel_dim)
 
-    assert loss(x, y) == mapping_loss(x_mapping, y_mapping)
+    assert loss(x, y) == mapping_loss(x_mapping, y_mapping, step=0)
+    assert loss(x, y) == mapping_loss(x_mapping, y_mapping, step=1)
 
 
-def test_WeightedMappingLossConfig_weights():
+def test_StepLossConfig_weights():
     out_names = ["var_0", "var_1"]
     channel_dim = -3
     area = torch.tensor([])  # area not used by this config
-    mapping_loss_config = WeightedMappingLossConfig(
+    mapping_loss_config = StepLossConfig(
         type="MSE", weights={"var_0": 4.0, "var_1": 1.0}
     )
     normalizer = StandardNormalizer(
@@ -286,7 +285,51 @@ def test_WeightedMappingLossConfig_weights():
     x_mapping = {"var_0": x0, "var_1": x1}
     y_mapping = {"var_0": y0, "var_1": y1}
 
-    assert mapping_loss(x_mapping, y_mapping) == ((16 + 0.25) / 2.0)
+    assert mapping_loss(x_mapping, y_mapping, step=0) == ((16 + 0.25) / 2.0)
+
+
+@pytest.mark.parametrize("sqrt_loss_step_decay_constant", [0.0, 0.1, 1.0])
+def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant):
+    out_names = ["var_0", "var_1"]
+    channel_dim = -3
+    area = torch.tensor([])  # area not used by this config
+    mapping_loss_config = StepLossConfig(
+        type="MSE",
+        weights={"var_0": 4.0, "var_1": 1.0},
+        sqrt_loss_step_decay_constant=sqrt_loss_step_decay_constant,
+    )
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+
+    gridded_operations: GriddedOperations = LatLonOperations(area)
+
+    mapping_loss = mapping_loss_config.build(
+        gridded_operations,
+        out_names=out_names,
+        channel_dim=channel_dim,
+        normalizer=normalizer,
+    )
+
+    x0 = torch.ones(4, 5, 5).to(get_device())
+    x1 = 2.0 * x0
+    y0 = 2.0 * x0
+    y1 = 2.5 * x0
+
+    x_mapping = {"var_0": x0, "var_1": x1}
+    y_mapping = {"var_0": y0, "var_1": y1}
+
+    torch.testing.assert_close(
+        mapping_loss(x_mapping, y_mapping, step=0),
+        mapping_loss(x_mapping, y_mapping, step=1)
+        * (1 + sqrt_loss_step_decay_constant) ** 0.5,
+    )
+    torch.testing.assert_close(
+        mapping_loss(x_mapping, y_mapping, step=0),
+        mapping_loss(x_mapping, y_mapping, step=2)
+        * (1 + sqrt_loss_step_decay_constant * 2) ** 0.5,
+    )
 
 
 @pytest.mark.parametrize("mean", [0.0, 1.0])

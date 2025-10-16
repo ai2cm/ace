@@ -11,11 +11,7 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.batch_data import BatchData, default_collate
-from fme.ace.data_loading.config import (
-    ConcatDatasetConfig,
-    DataLoaderConfig,
-    MergeDatasetConfig,
-)
+from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
@@ -26,8 +22,10 @@ from fme.core.coordinates import (
     AtmosphericDeriveFn,
     OptionalHybridSigmaPressureCoordinate,
 )
-from fme.core.dataset.getters import get_datasets, get_merged_datasets
+from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.merged import MergeDatasetConfig, get_merged_datasets
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.xarray import get_xarray_datasets
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -39,15 +37,16 @@ class CollateFn:
     horizontal_dims: List[str]
 
     def __call__(
-        self, samples: Sequence[Tuple[TensorMapping, xr.DataArray]]
+        self, samples: Sequence[Tuple[TensorMapping, xr.DataArray, set[str]]]
     ) -> "BatchData":
-        sample_data, sample_time = zip(*samples)
+        sample_data, sample_time, labels = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_time, dim="sample")
         return BatchData(
             data=batch_data,
             time=batch_time,
             horizontal_dims=self.horizontal_dims,
+            labels=list(labels),
         )
 
 
@@ -62,7 +61,7 @@ def get_data_loaders(
         )
     datasets: torch.utils.data.Dataset
     if isinstance(config.dataset, ConcatDatasetConfig):
-        datasets, properties = get_datasets(
+        datasets, properties = get_xarray_datasets(
             config.dataset.concat, requirements.names, requirements.n_timesteps
         )
     elif isinstance(config.dataset, MergeDatasetConfig):
@@ -142,6 +141,7 @@ class Config:
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def get_data_writer(self, data: "Data") -> MonthlyDataWriter:
+        assert data.properties.timestep is not None
         n_months = months_for_timesteps(data.n_timesteps, data.properties.timestep)
         coords = {
             **data.properties.horizontal_coordinates.coords,
@@ -170,6 +170,7 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
     for window_batch_data_list in zip(*loaders):
         tensors = [item.data for item in window_batch_data_list]
         time = [item.time for item in window_batch_data_list]
+        labels = [item.labels for item in window_batch_data_list]
         window_batch_data = {
             k: torch.concat([d[k] for d in tensors]) for k in tensors[0].keys()
         }
@@ -177,6 +178,7 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
         yield BatchData(
             data=window_batch_data,
             time=time,
+            labels=list(labels),
         )
 
 
@@ -190,6 +192,7 @@ def run(config: Config):
     assert isinstance(
         data.properties.vertical_coordinate, OptionalHybridSigmaPressureCoordinate
     )
+    assert data.properties.timestep is not None
     derive_func = AtmosphericDeriveFn(
         vertical_coordinate=data.properties.vertical_coordinate,
         timestep=data.properties.timestep,
@@ -214,7 +217,7 @@ def run(config: Config):
             logging.info(f"Writing batch {i + 1} of {n_batches}.")
             writer.flush()
 
-    writer.flush()
+    writer.finalize()
     logging.info("Finished writing data.")
 
 

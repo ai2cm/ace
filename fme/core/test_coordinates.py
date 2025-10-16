@@ -8,9 +8,13 @@ from fme.core.coordinates import (
     HEALPixCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
-    e2ghpx,
 )
 from fme.core.mask_provider import MaskProvider
+
+try:
+    from earth2grid import healpix as e2ghpx
+except ImportError:
+    e2ghpx = None
 
 
 @pytest.mark.parametrize(
@@ -30,14 +34,14 @@ from fme.core.mask_provider import MaskProvider
         ),
         (
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([7, 8, 9]),
+                face=torch.arange(12),
+                height=torch.arange(16),
+                width=torch.arange(16),
             ),
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([7, 8, 9]),
+                face=torch.arange(12),
+                height=torch.arange(16),
+                width=torch.arange(16),
             ),
         ),
         (
@@ -67,22 +71,22 @@ def test_equality(first, second):
         ),
         (
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([7, 8, 9]),
+                face=torch.arange(12),
+                height=torch.arange(16),
+                width=torch.arange(16),
             ),
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([8, 9, 10]),
+                face=torch.arange(12),
+                height=torch.arange(8),
+                width=torch.arange(8),
             ),
         ),
         (
             LatLonCoordinates(lat=torch.tensor([1, 2, 3]), lon=torch.tensor([4, 5, 6])),
             HEALPixCoordinates(
-                face=torch.tensor([1, 2, 3]),
-                height=torch.tensor([4, 5, 6]),
-                width=torch.tensor([7, 8, 9]),
+                face=torch.arange(12),
+                height=torch.arange(16),
+                width=torch.arange(16),
             ),
         ),
         (
@@ -240,12 +244,9 @@ def test_healpix_ops_raises_value_error_with_mask():
         healpix_coords.get_gridded_operations(mask_provider=mask_provider)
 
 
-@pytest.mark.skipif(e2ghpx is None, reason="earth2grid healpix not available")
+@pytest.mark.skipif(e2ghpx is None, reason="earth2grid is not available")
 @pytest.mark.parametrize("pad", [True, False])
-def test_healpix_coordinates_xyz(pad: bool, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests and healpix (earth2grid) tests")
-
+def test_healpix_coordinates_xyz(pad: bool):
     face = torch.arange(12)
     height = torch.arange(16)
     width = torch.arange(16)

@@ -11,6 +11,7 @@ from .metrics import (
 )
 from .normalizer import StandardNormalizer, get_normalizer
 from .packer import Packer
+from .rand import set_seed
 from .registry import Registry
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "AtmosphereData",
     "GriddedOperations",
     "Registry",
+    "set_seed",
 ]

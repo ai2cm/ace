@@ -214,6 +214,7 @@ class AggregatorBuilder(
             loss_scaling=self.loss_scaling,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
+            channel_mean_names=self.channel_mean_names,
         )
 
     def get_inference_aggregator(
@@ -256,9 +257,16 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         env_vars=env_vars,
         notes=beaker_url,
     )
+    if config.resume_results is not None:
+        logging.info(
+            f"Resuming training from results in {config.resume_results.existing_dir}"
+        )
     trainer = build_trainer(builders, config)
-    trainer.train()
-    logging.info(f"DONE ---- rank {dist.rank}")
+    try:
+        trainer.train()
+        logging.info(f"DONE ---- rank {dist.rank}")
+    finally:
+        dist.shutdown()
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
@@ -266,5 +274,8 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config = dacite.from_dict(
         data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
     )
-    prepare_directory(config.experiment_dir, config_data)
+    config.set_random_seed()
+    config.resume_results = prepare_directory(
+        config.experiment_dir, config_data, config.resume_results
+    )
     run_train_from_config(config)

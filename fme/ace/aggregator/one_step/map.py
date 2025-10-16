@@ -53,45 +53,45 @@ class MapAggregator:
         target_data_norm: TensorMapping,
         gen_data_norm: TensorMapping,
     ):
+        time_dim = 1
+        # note that we are only using the first timestep
+        # see https://github.com/ai2cm/full-model/issues/1005
+        target_time = 1
         self._loss = loss
         for name in target_data:
             if name in self._target_data:
-                self._target_data[name] += target_data[name].mean(dim=0)
+                self._target_data[name] += (
+                    target_data[name]
+                    .select(dim=time_dim, index=target_time)
+                    .mean(dim=0)
+                )
             else:
-                self._target_data[name] = target_data[name].mean(dim=0)
+                self._target_data[name] = (
+                    target_data[name]
+                    .select(dim=time_dim, index=target_time)
+                    .mean(dim=0)
+                )
         for name in gen_data:
             if name in self._gen_data:
-                self._gen_data[name] += gen_data[name].mean(dim=0)
+                self._gen_data[name] += (
+                    gen_data[name].select(dim=time_dim, index=target_time).mean(dim=0)
+                )
             else:
-                self._gen_data[name] = gen_data[name].mean(dim=0)
+                self._gen_data[name] = (
+                    gen_data[name].select(dim=time_dim, index=target_time).mean(dim=0)
+                )
         self._n_batches += 1
 
     def _get_data(self) -> tuple[TensorMapping, TensorMapping]:
         dist = Distributed.get_instance()
-        time_dim = 0
-        # note that we are only using the first timestep
-        # see https://github.com/ai2cm/full-model/issues/1005
-        target_time = 1
         gen, target = {}, {}
         for name in sorted(list(self._gen_data.keys())):
             gen[name] = (
-                (
-                    dist.reduce_mean(
-                        self._gen_data[name].select(dim=time_dim, index=target_time)
-                    )
-                    / self._n_batches
-                )
-                .cpu()
-                .numpy()
+                (dist.reduce_mean(self._gen_data[name]) / self._n_batches).cpu().numpy()
             )
         for name in sorted(list(self._target_data.keys())):
             target[name] = (
-                (
-                    dist.reduce_mean(
-                        self._target_data[name].select(dim=time_dim, index=target_time)
-                    )
-                    / self._n_batches
-                )
+                (dist.reduce_mean(self._target_data[name]) / self._n_batches)
                 .cpu()
                 .numpy()
             )

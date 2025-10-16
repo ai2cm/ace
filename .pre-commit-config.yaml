@@ -10,6 +10,10 @@ repos:
     hooks:
     - id: check-added-large-files
       args: [--maxkb=250]
+      exclude: |
+        (?x)^(
+        fme/ace/aggregator/inference/testdata/.*-regression.pt
+        )$
     - id: trailing-whitespace
     - id: file-contents-sorter
       files: |
@@ -28,4 +32,5 @@ repos:
         (?x)^(
         .+/conf.py |
         .+/conftest.py |
+        fme/ace/models/makani_fcn3/.*
         )$

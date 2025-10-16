@@ -1,7 +1,9 @@
 import copy
+import dataclasses
 import datetime
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import cftime
 import numpy as np
@@ -24,6 +26,11 @@ IC_DIM = "sample"
 INIT_TIME = "init_time"
 INIT_TIME_UNITS = "microseconds since 1970-01-01 00:00:00"
 VALID_TIME = "valid_time"
+
+
+@dataclasses.dataclass
+class NetCDFWriterConfig:
+    name: Literal["netcdf"] = "netcdf"  # defined for yaml+dacite ease of use
 
 
 class PairedRawDataWriter:
@@ -82,6 +89,10 @@ class PairedRawDataWriter:
     def flush(self):
         self._target_writer.flush()
         self._prediction_writer.flush()
+
+    def finalize(self):
+        self._target_writer.finalize()
+        self._prediction_writer.finalize()
 
 
 class RawDataWriter:
@@ -202,7 +213,7 @@ class RawDataWriter:
                     [INIT_TIME, VALID_TIME]
                 )
 
-            data_numpy = data[variable_name].cpu().numpy()
+            data_numpy = data[variable_name].detach().cpu().numpy()
             # Append the data to the variables
             self.dataset.variables[variable_name][
                 :,
@@ -259,6 +270,10 @@ class RawDataWriter:
         Flush the data to disk.
         """
         self.dataset.sync()
+
+    def finalize(self):
+        self.flush()
+        self.dataset.close()
 
 
 def get_batch_lead_time_microseconds(

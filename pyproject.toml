@@ -39,7 +39,11 @@ cache-keys = [
     { file = "requirements.txt" },
     { file = "requirements-dev.txt" },
     { file = "docs/requirements.txt" },
+    { file = "requirements-healpix.txt" },
 ]
+
+[tool.ruff]
+exclude = ["fme/ace/models/makani_fcn3/**"]
 
 [tool.ruff.lint]
 select = ["D", "E", "F", "I", "W", "UP"]
@@ -71,3 +75,7 @@ exclude_also = [
     # Don't complain about abstract methods, they aren't run:
     "@(abc\\.)?abstractmethod",
     ]
+
+
+[tool.pytest.ini_options]
+norecursedirs = ["filtered_repo"]

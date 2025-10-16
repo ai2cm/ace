@@ -25,6 +25,7 @@ def plot_imshow(
     cmap: str | Colormap | None = None,
     flip_lat: bool = True,
     use_colorbar: bool = True,
+    ax: plt.Axes | None = None,
 ) -> Figure:
     """Plot a 2D array using imshow, ensuring figure size is same as array size."""
     min_ = np.nanmin(data) if vmin is None else vmin
@@ -46,8 +47,13 @@ def plot_imshow(
 
     # make figure size (in pixels) be the same as array size
     figsize = np.array(data.T.shape) / plt.rcParams["figure.dpi"]
-    fig = Figure(figsize=figsize)  # create directly for cleanup when it leaves scope
-    ax = fig.add_axes([0, 0, 1, 1])
+    if ax is None:
+        fig = Figure(
+            figsize=figsize
+        )  # create directly for cleanup when it leaves scope
+        ax = fig.add_axes([0, 0, 1, 1])
+    else:
+        fig = ax.figure
     ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_axis_off()
     return fig
@@ -116,6 +122,8 @@ def plot_paneled_data(
     if diverging:
         vmax = max(abs(vmin), abs(vmax))
         vmin = -vmax
+    if vmin > vmax:  # occurs when all data is nan
+        vmin, vmax = 0, 0
     if caption is not None:
         caption += " "
     else:
