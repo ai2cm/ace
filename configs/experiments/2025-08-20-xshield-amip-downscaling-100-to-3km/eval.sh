@@ -5,7 +5,7 @@
 set -e
 
 JOB_NAME="eval-xshield-amip-100km-to-3km-global-histckpt-events"
-CONFIG_FILENAME="config-generate-on-perfect-pred-global.yaml"
+CONFIG_FILENAME="config-generate-on-perfect-pred-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -32,7 +32,7 @@ gantry run \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-ceres \
     --priority urgent \
-    --preemptible \
+    --not-preemptible \
     --cluster ai2/ceres \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
