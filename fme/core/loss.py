@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
@@ -397,6 +398,8 @@ class EnsembleLoss(torch.nn.Module):
         self.energy_score_weight = energy_score_weight
         self.kernel_crps_weight = kernel_crps_weight
 
+        self.counter = 0
+
     def forward(
         self,
         gen_norm: torch.Tensor,
@@ -425,6 +428,15 @@ class EnsembleLoss(torch.nn.Module):
             )
         else:
             kernel_crps = torch.tensor(0.0)
+        if self.counter % 100 == 0:
+            logging.info(
+                f"Total ensemble loss {crps + energy_score_loss:.4f}, "
+                f"expected CRPS:ES {self.crps_weight}:{self.energy_score_weight} "
+                f"actual "
+                f"{(crps + energy_score_loss)/crps:.4f}:"
+                f"{(crps + energy_score_loss)/energy_score_loss:.4f}"
+            )
+        self.counter += 1
         return crps + energy_score_loss + area_weighted_crps + kernel_crps
 
 
