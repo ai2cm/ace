@@ -43,6 +43,8 @@ from .utils import (
     load_series_data,
     load_series_data_zarr_async,
 )
+# import splitting logic
+from physicsnemo.distributed.utils import compute_split_shapes
 
 SLICE_NONE = slice(None)
 GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD = 12
@@ -427,6 +429,10 @@ class XarrayDataConfig(DatasetConfigABC):
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
         labels: Optional list of labels to be returned with the data.
+        io_grid:
+        io_rank:
+        crop_size:
+        crop_anchor:
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -458,6 +464,11 @@ class XarrayDataConfig(DatasetConfigABC):
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] = dataclasses.field(default_factory=list)
+    #NOTE: .copy
+    io_grid: list[int]=dataclasses.field(default_factory=[1, 1, 1].copy)
+    io_rank: list[int]=dataclasses.field(default_factory=[0, 0, 0].copy)
+    crop_size: tuple[int | None, int | None]=(None, None)
+    crop_anchor: tuple[int, int]=(0, 0)
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -853,7 +864,7 @@ class XarrayDataset(DatasetABC):
             else:
                 ds = self._open_file(file_idx)
                 ds = ds.isel(**self.isel)
-                tensor_dict = load_series_data(
+                tensor_dict_whole = load_series_data(
                     idx=start,
                     n_steps=n_steps,
                     ds=ds,
@@ -864,6 +875,16 @@ class XarrayDataset(DatasetABC):
                 )
                 ds.close()
                 del ds
+                read_anchor,read_shape = self.get_anchor_and_shape(self._shape_excluding_time_after_selection)
+                # load slice of data:
+                start_x = read_anchor[0]
+                end_x = start_x + read_shape[0]
+
+                start_y = read_anchor[1]
+                end_y = start_y + read_shape[1]
+                tensor_dict={}
+                for n in tensor_dict_whole:
+                  tensor_dict[n]=tensor_dict_whole[n][:,start_x:end_x, start_y:end_y]
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
 

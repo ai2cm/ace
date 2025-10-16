@@ -47,7 +47,7 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ):
-        //sfno_net = SphericalFourierNeuralOperatorNet(
+        #sfno_net = SphericalFourierNeuralOperatorNet(
         sfno_net = SFNO(
             params=self,
             in_chans=n_in_channels,
