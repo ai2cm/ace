@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-global-histckpt"
+JOB_NAME="eval-xshield-amip-100km-to-3km-global-histckpt-events"
 CONFIG_FILENAME="config-generate-on-perfect-pred-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -23,15 +23,15 @@ NGPU=2
 IMAGE=01JWJ96JMF89D812JS159VF37N
 
 #EXISTING_RESULTS_DATASET=01K3W6KD8SP2YD2ZF2SGMF3S5F
-EXISTING_RESULTS_DATASET=01K5712EFXYV31ACGS2TRVET1X  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
-#EXISTING_RESULTS_DATASET=01K57174GX3RNRWJWMX39G712H  # best crps checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
+#EXISTING_RESULTS_DATASET=01K5712EFXYV31ACGS2TRVET1X  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
+EXISTING_RESULTS_DATASET=01K57174GX3RNRWJWMX39G712H  # best crps checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
 wandb_group=""
 
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/downscaling \
-    --priority normal \
+    --workspace ai2/climate-ceres \
+    --priority urgent \
     --preemptible \
     --cluster ai2/ceres \
     --beaker-image $IMAGE \

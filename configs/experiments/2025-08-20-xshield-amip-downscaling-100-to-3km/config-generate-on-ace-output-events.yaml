@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_samples: 4
+n_samples: 2
 patch:
   divide_generation: true
   composite_prediction: true
@@ -74,4 +74,4 @@ events:
     start: 254
     stop: 270
   save_generated_samples: True
-  n_samples: 16
+  n_samples: 32

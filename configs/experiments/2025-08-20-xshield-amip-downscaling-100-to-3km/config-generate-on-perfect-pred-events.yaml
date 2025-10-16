@@ -44,7 +44,7 @@ events:
     start: 228
     stop: 244
   save_generated_samples: True
-  n_samples: 16
+  n_samples: 32
 - name: WPacific_hurricane_20230425
   date: 2023-04-25T18:00
   lat_extent:
@@ -54,7 +54,7 @@ events:
     start: 130.
     stop: 146.
   save_generated_samples: True
-  n_samples: 16
+  n_samples: 32
 - name: WPacific_hurricane_landfall_china_20230510
   date: 2023-05-10T12:00
   lat_extent:
@@ -64,7 +64,7 @@ events:
     start: 104
     stop: 120
   save_generated_samples: True
-  n_samples: 16
+  n_samples: 32
 - name: extratropical_cyclone_US_20230403
   date: 2023-04-03T12:00
   lat_extent:
@@ -74,4 +74,4 @@ events:
     start: 254
     stop: 270
   save_generated_samples: True
-  n_samples: 16
+  n_samples: 32
