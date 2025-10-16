@@ -265,7 +265,10 @@ class Trainer:
         self._started_training = False
 
         def on_terminate(signum, frame):
-            if self._current_epoch_num_batches_seen > 0:
+            dist = Distributed.get_instance()
+            # have all ranks check in to logs
+            dist.barrier()
+            if self._current_epoch_num_batches_seen > 0 and dist.is_root():
                 if self._in_ema_context:
                     logging.info(
                         "In EMA context during interrupt, not saving "
@@ -277,6 +280,7 @@ class Trainer:
                     )
                 else:
                     self._save_restart_checkpoints()
+            dist.shutdown()
 
         chain_signal_handler(signal.SIGTERM, on_terminate)
         chain_signal_handler(signal.SIGINT, on_terminate)
@@ -292,7 +296,6 @@ class Trainer:
         logging.info("Starting Training Loop...")
         dist = Distributed.get_instance()
 
-        self._epochs_trained = self._start_epoch
         inference_epochs = self.config.get_inference_epochs()
         if self.config.segment_epochs is None:
             segment_max_epochs = self.config.max_epochs
@@ -738,6 +741,7 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
         "current_epoch_num_batches_seen"
     ]
     trainer._start_epoch = checkpoint["epoch"]
+    trainer._epochs_trained = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
     ema_checkpoint = torch.load(

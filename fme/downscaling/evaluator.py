@@ -1,7 +1,6 @@
 import argparse
 import dataclasses
 import logging
-from typing import Literal
 
 import dacite
 import torch
@@ -12,8 +11,6 @@ from fme.core.cli import prepare_directory
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
-from fme.core.loss import LossConfig
-from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
 from fme.downscaling.data import (
@@ -21,69 +18,23 @@ from fme.downscaling.data import (
     PairedDataLoaderConfig,
     PairedGriddedData,
 )
-from fme.downscaling.models import (
-    CheckpointModelConfig,
-    DiffusionModel,
-    DownscalingModelConfig,
-    Model,
-    PairedNormalizationConfig,
-)
-from fme.downscaling.modules.registry import ModuleRegistrySelector
+from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predict import EventConfig
-from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
+from fme.downscaling.predictors import (
+    CascadePredictorConfig,
+    PatchPredictionConfig,
+    PatchPredictor,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
-
-
-@dataclasses.dataclass
-class InterpolateModelConfig:
-    mode: Literal["bicubic", "nearest"]
-    downscale_factor: int
-    in_names: list[str]
-    out_names: list[str]
-
-    def build(
-        self,
-    ) -> Model:
-        module = ModuleRegistrySelector(type="interpolate", config={"mode": self.mode})
-        var_names = list(set(self.in_names).union(set(self.out_names)))
-        normalization_config = PairedNormalizationConfig(
-            NormalizationConfig(
-                means={var_name: 0.0 for var_name in var_names},
-                stds={var_name: 1.0 for var_name in var_names},
-            ),
-            NormalizationConfig(
-                means={var_name: 0.0 for var_name in var_names},
-                stds={var_name: 1.0 for var_name in var_names},
-            ),
-        )
-
-        return DownscalingModelConfig(
-            module,
-            LossConfig("NaN"),
-            self.in_names,
-            self.out_names,
-            normalization_config,
-        ).build(
-            (-1, -1),
-            self.downscale_factor,
-        )
-
-    @property
-    def data_requirements(self) -> DataRequirements:
-        return DataRequirements(
-            fine_names=self.out_names,
-            coarse_names=list(set(self.in_names).union(self.out_names)),
-            n_timesteps=1,
-        )
 
 
 class Evaluator:
     def __init__(
         self,
         data: PairedGriddedData,
-        model: Model | DiffusionModel | PatchPredictor,
+        model: DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
         patch_data: bool = False,
@@ -104,16 +55,18 @@ class Evaluator:
         )
 
         if self.patch_data:
-            batch_generator = self.data.get_patched_batch_generator(
+            batch_generator = self.data.get_patched_generator(
                 coarse_yx_patch_extent=self.model.coarse_shape,
             )
         else:
-            batch_generator = self.data.loader
+            batch_generator = self.data.get_generator()
 
-        for i, batch in enumerate(batch_generator):
+        for i, (batch, topography) in enumerate(batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
-                outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
+                outputs = self.model.generate_on_batch(
+                    batch, topography, n_samples=self.n_samples
+                )
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
@@ -143,7 +96,7 @@ class EventEvaluator:
         self,
         event_name: str,
         data: PairedGriddedData,
-        model: Model | DiffusionModel | PatchPredictor,
+        model: DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
         save_generated_samples: bool = False,
@@ -178,7 +131,9 @@ class EventEvaluator:
                 f"Generating samples {start_idx} to {end_idx} "
                 f"for event {self.event_name}"
             )
-            outputs = self.model.generate_on_batch(batch, n_samples=end_idx - start_idx)
+            outputs = self.model.generate_on_batch(
+                batch, self.data.topography, n_samples=end_idx - start_idx
+            )
             sample_agg.record_batch(outputs.prediction)
 
         to_log = sample_agg.get_wandb()
@@ -222,7 +177,7 @@ class PairedEventConfig(EventConfig):
 
 @dataclasses.dataclass
 class EvaluatorConfig:
-    model: CheckpointModelConfig
+    model: CheckpointModelConfig | CascadePredictorConfig
     experiment_dir: str
     data: PairedDataLoaderConfig
     logging: LoggingConfig
@@ -248,7 +203,7 @@ class EvaluatorConfig:
         )
 
         model = self.model.build()
-        evaluator_model: Model | DiffusionModel | PatchPredictor
+        evaluator_model: DiffusionModel | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
                 model,
@@ -278,7 +233,7 @@ class EvaluatorConfig:
         event_config: PairedEventConfig,
     ) -> EventEvaluator:
         model = self.model.build()
-        evaluator_model: Model | DiffusionModel | PatchPredictor
+        evaluator_model: DiffusionModel | PatchPredictor
 
         dataset = event_config.get_paired_gridded_data(
             base_data_config=self.data, requirements=self.model.data_requirements

@@ -290,14 +290,14 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     initial_condition_requirements = (
         stepper_config.get_prognostic_state_data_requirements()
     )
+    stepper = config.load_stepper()
     data = get_inference_data(
         config=config.loader,
         total_coupled_steps=config.n_coupled_steps,
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
+        dataset_info=stepper.training_dataset_info,
     )
-
-    stepper = config.load_stepper()
     stepper.set_eval()
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
@@ -335,7 +335,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     timer.start("final_writer_flush")
     logging.info("Starting final flush of data writer")
-    writer.flush()
+    writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
     timer.stop()

@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="ace-samudra-coupled-CM4-inference-no-target-benchmark"
+JOB_NAME="ace-samudra-coupled-CM4-inference-no-target-with-dummy-forcing-dataset"
 JOB_GROUP="inference-no-target"
 EXISTING_RESULTS_DATASET="01JZHQJXC4EYAPTCSP188YSVC0"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="config.yaml"

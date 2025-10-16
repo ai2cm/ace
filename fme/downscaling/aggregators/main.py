@@ -442,7 +442,7 @@ class ZonalPowerSpectrumComparison:
         ds = self._mean_prediction_aggregator.get_dataset()
         target = self._mean_target_aggregator.get()
         target = {k: v.cpu().numpy() for k, v in target.items()}
-        ds = ds.update(
+        ds.update(
             {f"{self._name}target.{k}": (("wavenumber"), target[k]) for k in target}
         )
         return ds

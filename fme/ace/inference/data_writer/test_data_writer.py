@@ -11,13 +11,13 @@ from xarray.coding.times import CFDatetimeCoder
 
 from fme.ace.data_loading.batch_data import PairedData
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.main import (
     DataWriter,
     DataWriterConfig,
     PairedDataWriter,
 )
 from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
-from fme.ace.inference.data_writer.subselect import SubselectWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.core.device import get_device
@@ -77,7 +77,13 @@ class TestDataWriter:
         return request.param
 
     def get_batch_time(
-        self, start_time, end_time, freq, n_initial_conditions, calendar="julian"
+        self,
+        start_time,
+        end_time,
+        freq,
+        n_initial_conditions,
+        calendar="julian",
+        ic_timedelta: datetime.timedelta = datetime.timedelta(hours=0),
     ):
         datetime_class = CALENDAR_CFTIME[calendar]
         start_time = datetime_class(*start_time)
@@ -93,7 +99,8 @@ class TestDataWriter:
             dims="time",
         )
         return xr.concat(
-            [batch_time for _ in range(n_initial_conditions)], dim="sample"
+            [batch_time + ic_timedelta * i for i in range(n_initial_conditions)],
+            dim="sample",
         )
 
     @pytest.fixture
@@ -207,7 +214,7 @@ class TestDataWriter:
                 time=batch_time,
             ),
         )
-        writer.flush()
+        writer.finalize()
 
         # Open the file and check the data
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
@@ -346,7 +353,7 @@ class TestDataWriter:
                 time=batch_time,
             ),
         )
-        writer.flush()
+        writer.finalize()
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
         expected_variables = (
             set(save_names).intersection(sample_prediction_data)
@@ -435,18 +442,12 @@ class TestDataWriter:
             ),
         }
 
-        region_config = SubselectWriterConfig(
+        region_config = FileWriterConfig(
             label="test_region",
             names=["pressure"],
             lat_extent=(1, 2),
             lon_extent=(1, 3),
-            latitude_name="lat",
-            longitude_name="lon",
-            zarr=ZarrWriterConfig(
-                write_to_zarr=True,
-                allow_existing=True,
-                overwrite_check=False,
-            ),
+            format=ZarrWriterConfig(),
         )
 
         writer = DataWriter(
@@ -460,7 +461,7 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             save_names=None,
             time_coarsen=TimeCoarsenConfig(coarsen_factor),
-            subselection=[region_config],
+            files=[region_config],
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
@@ -495,7 +496,7 @@ class TestDataWriter:
                 time=batch_time,
             ),
         )
-        writer.flush()
+        writer.finalize()
 
         with xr.open_dataset(
             tmp_path / "autoregressive_predictions.nc",
@@ -541,6 +542,102 @@ class TestDataWriter:
             assert ds.pressure.encoding["chunks"] == (1, 1, 2, 3)
             assert ds.attrs["title"] == "ACE test region data"
             assert ds.attrs["source.inference_version"] == "1.0"
+
+    def test_append_batch_separate_ics(
+        self,
+        sample_metadata,
+        tmp_path,
+    ):
+        n_samples = 2
+        n_timesteps = 8
+        coarsen_factor = 2
+        calendar = "julian"
+        n_lat, n_lon = 4, 5
+
+        device = get_device()
+        prediction_data = {
+            "temp": torch.rand(
+                (n_samples, n_timesteps // coarsen_factor, n_lat, n_lon), device=device
+            ),
+            "pressure": torch.rand(
+                (n_samples, n_timesteps // coarsen_factor, n_lat, n_lon), device=device
+            ),
+        }
+        reference_data = {
+            "insolation": torch.rand(
+                (n_samples, n_timesteps // coarsen_factor, n_lat, n_lon), device=device
+            ),
+        }
+
+        region_config = FileWriterConfig(
+            label="test_region",
+            names=["pressure", "temp"],
+            separate_ensemble_members=True,
+            format=ZarrWriterConfig(),
+        )
+        writer = DataWriter(
+            str(tmp_path),
+            n_initial_conditions=n_samples,
+            n_timesteps=n_timesteps,
+            variable_metadata=sample_metadata,
+            coords={"lat": np.arange(n_lat), "lon": np.arange(n_lon)},
+            timestep=TIMESTEP,
+            enable_prediction_netcdfs=False,
+            enable_monthly_netcdfs=False,
+            save_names=None,
+            time_coarsen=None,
+            files=[region_config],
+            dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
+        )
+        start_time = (2020, 1, 1, 0, 0, 0)
+        end_time = (2020, 1, 1, 18, 0, 0)
+        batch_time = self.get_batch_time(
+            start_time=start_time,
+            end_time=end_time,
+            freq="6h",
+            n_initial_conditions=n_samples,
+            calendar=calendar,
+            ic_timedelta=datetime.timedelta(hours=6),
+        )
+        writer.append_batch(
+            batch=get_paired_data(
+                prediction=prediction_data, reference=reference_data, time=batch_time
+            ),
+        )
+        start_time_2 = (2020, 1, 2, 0, 0, 0)
+        end_time_2 = (2020, 1, 2, 18, 0, 0)
+        batch_time = self.get_batch_time(
+            start_time=start_time_2,
+            end_time=end_time_2,
+            freq="6h",
+            n_initial_conditions=n_samples,
+            calendar=calendar,
+            ic_timedelta=datetime.timedelta(hours=6),
+        )
+        writer.append_batch(
+            batch=get_paired_data(
+                prediction=prediction_data,
+                reference=reference_data,
+                time=batch_time,
+            ),
+        )
+        writer.finalize()
+
+        for i in range(n_samples):
+            expected_time = (
+                np.array(
+                    [
+                        cftime.DatetimeJulian(2020, 1, 1, 0, 0, 0) + i * TIMESTEP
+                        for i in range(n_timesteps)
+                    ],
+                )
+                + datetime.timedelta(hours=6) * i
+            )
+            with xr.open_dataset(tmp_path / f"test_region_ic000{i}.zarr") as ds:
+                assert "pressure" in ds
+                assert "temp" in ds
+                assert ds.pressure.shape == (n_timesteps, n_lat, n_lon)
+                np.testing.assert_equal(ds.time.values, expected_time)
 
 
 @pytest.mark.parametrize(
