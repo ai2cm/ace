@@ -38,7 +38,6 @@ from fme.ace.registry.hpx import (
     UNetDecoderConfig,
     UNetEncoderConfig,
 )
-from fme.ace.registry.land_net import LandNetBuilder
 from fme.ace.registry.m2lines import SamudraBuilder
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO
@@ -71,7 +70,6 @@ from fme.core.step import (
 )
 from fme.core.typing_ import Slice
 
-from . import step
 from .train.train import run_train
 from .train.train_config import (
     CopyWeightsConfig,
