@@ -42,6 +42,8 @@ from .utils import (
     load_series_data,
     load_series_data_zarr_async,
 )
+# import splitting logic
+from physicsnemo.distributed.utils import compute_split_shapes
 
 SLICE_NONE = slice(None)
 GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD = 12
@@ -426,6 +428,10 @@ class XarrayDataConfig(DatasetConfigABC):
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
         labels: Optional list of labels to be returned with the data.
+        io_grid:
+        io_rank:
+        crop_size:
+        crop_anchor:
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -457,6 +463,11 @@ class XarrayDataConfig(DatasetConfigABC):
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] = dataclasses.field(default_factory=list)
+    #NOTE: .copy
+    io_grid: list[int]=dataclasses.field(default_factory=[1, 1, 1].copy)
+    io_rank: list[int]=dataclasses.field(default_factory=[0, 0, 0].copy)
+    crop_size: tuple[int | None, int | None]=(None, None)
+    crop_anchor: tuple[int, int]=(0, 0)
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -536,6 +547,20 @@ class XarrayDataset(torch.utils.data.Dataset):
             )
         self.full_paths = self._raw_paths * config.n_repeats
         self.sample_n_times = n_timesteps
+        # multifiles dataloader doesn't support channel parallelism yet
+        # set the read slices
+        io_grid = config.io_grid
+        io_rank = config.io_rank
+        crop_size = config.crop_size
+        crop_anchor = config.crop_anchor
+
+        assert io_grid[0] == 1
+        self.io_grid = io_grid[1:]
+        self.io_rank = io_rank[1:]
+
+        # crop info
+        self.crop_size = crop_size
+        self.crop_anchor = crop_anchor
         self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
             self.full_paths[0],
@@ -790,6 +815,28 @@ class XarrayDataset(torch.utils.data.Dataset):
         time_slice = slice(idx, idx + self.sample_n_times)
         return self.get_sample_by_time_slice(time_slice)
 
+    def get_anchor_and_shape(self,
+                 img_shape: tuple[int, int],
+                 ):
+        crop_size_x, crop_size_y = self.crop_size
+        if crop_size_x is None:
+          crop_size_x = img_shape[0]
+        if crop_size_y is None:
+          crop_size_y = img_shape[1]
+        crop_size = (crop_size_x, crop_size_y)
+        assert self.crop_anchor[0] + crop_size[0] <= img_shape[0]
+        assert self.crop_anchor[1] + crop_size[1] <= img_shape[1]
+        # for x
+        split_shapes_x = compute_split_shapes(crop_size[0], self.io_grid[0])
+        read_shape_x = split_shapes_x[self.io_rank[0]]
+        read_anchor_x = self.crop_anchor[0] + sum(split_shapes_x[: self.io_rank[0]])
+
+        # for y
+        split_shapes_y = compute_split_shapes(crop_size[1], self.io_grid[1])
+        read_shape_y = split_shapes_y[self.io_rank[1]]
+        read_anchor_y = self.crop_anchor[1] + sum(split_shapes_y[: self.io_rank[1]])
+
+        return (read_anchor_x, read_anchor_y), (read_shape_x, read_shape_y)
     def get_sample_by_time_slice(
         self, time_slice: slice
     ) -> tuple[TensorDict, xr.DataArray, set[str]]:
@@ -830,7 +877,7 @@ class XarrayDataset(torch.utils.data.Dataset):
             else:
                 ds = self._open_file(file_idx)
                 ds = ds.isel(**self.isel)
-                tensor_dict = load_series_data(
+                tensor_dict_whole = load_series_data(
                     idx=start,
                     n_steps=n_steps,
                     ds=ds,
@@ -841,6 +888,16 @@ class XarrayDataset(torch.utils.data.Dataset):
                 )
                 ds.close()
                 del ds
+                read_anchor,read_shape = self.get_anchor_and_shape(self._shape_excluding_time_after_selection)
+                # load slice of data:
+                start_x = read_anchor[0]
+                end_x = start_x + read_shape[0]
+
+                start_y = read_anchor[1]
+                end_y = start_y + read_shape[1]
+                tensor_dict={}
+                for n in tensor_dict_whole:
+                  tensor_dict[n]=tensor_dict_whole[n][:,start_x:end_x, start_y:end_y]
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
 

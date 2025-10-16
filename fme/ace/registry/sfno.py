@@ -46,7 +46,7 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         n_out_channels: int,
         img_shape: tuple[int, int],
     ):
-        //sfno_net = SphericalFourierNeuralOperatorNet(
+        #sfno_net = SphericalFourierNeuralOperatorNet(
         sfno_net = SFNO(
             params=self,
             in_chans=n_in_channels,
