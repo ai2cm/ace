@@ -2,7 +2,6 @@ import dataclasses
 import logging
 from collections.abc import Callable, Mapping
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import xarray as xr
@@ -11,9 +10,9 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.wandb import Image, WandB
+from fme.core.wandb import Image
 
-from ..plotting import get_cmap_limits, plot_imshow
+from ..plotting import plot_paneled_data
 
 
 @dataclasses.dataclass
@@ -21,23 +20,27 @@ class _RawData:
     datum: torch.Tensor
     caption: str
     metadata: VariableMetadata
-    vmin: float | None = None
-    vmax: float | None = None
-    cmap: str | None = None
+    target_datum: torch.Tensor | None = None
+    diverging: bool = False
 
     def get_image(self) -> Image:
         # images are y, x from upper left corner
         # data is time, lat
-        # we want lat on y-axis (increasing upward) and time on x-axis
-        # so transpose and flip along lat axis
-        datum = np.flip(self.datum.transpose(), axis=0)
-        fig = plot_imshow(
-            datum, vmin=self.vmin, vmax=self.vmax, cmap=self.cmap, flip_lat=False
-        )
-        wandb = WandB.get_instance()
-        wandb_image = wandb.Image(fig, caption=self.caption)
-        plt.close(fig)
-        return wandb_image
+        # we want lat on y-axis and time on x-axis
+        datum = self.datum.transpose()
+        if self.target_datum is not None:
+            target_datum = self.target_datum.transpose()
+            return plot_paneled_data(
+                [[datum], [target_datum]],
+                diverging=self.diverging,
+                caption=self.caption,
+            )
+        else:
+            return plot_paneled_data(
+                [[datum]],
+                diverging=self.diverging,
+                caption=self.caption,
+            )
 
 
 class ZonalMeanAggregator:
@@ -234,32 +237,29 @@ class ZonalMeanAggregator:
                 .cpu()
                 .numpy()
             )
-            error = (
-                self._dist.reduce_mean(
-                    (self._gen_data[name] - self._target_data[name]) / self._n_batches
-                )
+            target = (
+                self._dist.reduce_mean(self._target_data[name] / self._n_batches)
                 .mean(sample_dim)
                 .cpu()
                 .numpy()
             )
+            error = gen - target
 
             metadata = self._variable_metadata.get(
                 name, VariableMetadata("unknown_units", name)
             )
-            vmin, vmax = get_cmap_limits(gen)
             data[f"gen/{name}"] = _RawData(
                 datum=gen,
-                caption=self._get_caption("gen", name, vmin, vmax),
+                target_datum=target,
+                caption=self._get_caption("gen", name),
                 metadata=metadata,
+                diverging=False,
             )
-            vmin, vmax = get_cmap_limits(error, diverging=True)
             data[f"error/{name}"] = _RawData(
                 datum=error,
-                caption=self._get_caption("error", name, vmin, vmax),
+                caption=self._get_caption("error", name),
                 metadata=metadata,
-                vmin=vmin,
-                vmax=vmax,
-                cmap="RdBu_r",
+                diverging=True,
             )
 
         return data
@@ -282,14 +282,13 @@ class ZonalMeanAggregator:
         ret = xr.Dataset(data)
         return ret
 
-    def _get_caption(self, key: str, varname: str, vmin: float, vmax: float) -> str:
+    def _get_caption(self, key: str, varname: str) -> str:
         if varname in self._variable_metadata:
             caption_name = self._variable_metadata[varname].long_name
             units = self._variable_metadata[varname].units
         else:
             caption_name, units = varname, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)
-        caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
         return caption
 
     def _coarsen_tensor(self, tensor: torch.Tensor) -> torch.Tensor:

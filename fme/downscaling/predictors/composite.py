@@ -197,6 +197,11 @@ def _composite_patch_tensors(
 def composite_patch_predictions(
     predictions: list[TensorDict], patches: list[Patch]
 ) -> TensorDict:
+    """
+    Take the predictions from patches and combine them into a single
+    tensor with the full extent of the patches. The predictions are
+    averaged in overlapping patch regions.
+    """
     combined_data = {}
     predicted_vars = list(predictions[0].keys())
     for var in predicted_vars:

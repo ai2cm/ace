@@ -304,7 +304,7 @@ class LatLonOperations(GriddedOperations):
         return self._zonal_mean
 
     def _zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
-        return data.mean(dim=self.HORIZONTAL_DIMS[1])
+        return data.nanmean(dim=self.HORIZONTAL_DIMS[1])
 
     def _get_area_weights(
         self,
