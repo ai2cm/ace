@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -58,6 +58,9 @@ class TimeMeanAggregator:
     _image_captions = {
         "bias_map": "{name} time-mean bias (generated - reference) [{units}]",
         "gen_map": "{name} time-mean generated [{units}]",
+        "gen_target_map": (
+            "{name} time-mean; (top) generated and (bottom) target [{units}]"
+        ),
     }
 
     def __init__(
@@ -146,15 +149,23 @@ class TimeMeanAggregator:
         return ret
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, float | Image]:
+    def get_logs(
+        self, label: str, target_maps: dict[str, torch.Tensor] | None = None
+    ) -> dict[str, float | Image]:
         logs: dict[str, float | Image] = {}
         data = self.get_data()
         gen_map_key = "gen_map"
         for name, pred in data.items():
+            if target_maps is not None and name in target_maps:
+                gen_map_caption_key = gen_map_key
+                data_panels = [[pred.cpu().numpy()], [target_maps[name].cpu().numpy()]]
+            else:
+                gen_map_caption_key = "gen_target_map"
+                data_panels = [[pred.cpu().numpy()]]
             prediction_image = plot_paneled_data(
-                [[pred.cpu().numpy()]],
+                data_panels,
                 diverging=False,
-                caption=self._get_caption(gen_map_key, name),
+                caption=self._get_caption(gen_map_caption_key, name),
             )
             logs.update(
                 {
@@ -233,7 +244,7 @@ class TimeMeanEvaluatorAggregator:
         target: Literal["norm", "denorm"] = "denorm",
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         reference_means: xr.Dataset | None = None,
-        channel_mean_names: list[str] | None = None,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -301,7 +312,7 @@ class TimeMeanEvaluatorAggregator:
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, float | torch.Tensor | Image]:
-        logs = self._gen_agg.get_logs("")
+        logs = self._gen_agg.get_logs("", target_maps=self._target_agg.get_data())
         preds = self._get_target_gen_pairs()
         bias_map_key = "bias_map"
         rmse_all_channels = {}

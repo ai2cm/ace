@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
 import numpy as np
@@ -59,6 +59,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -70,6 +71,8 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
                 used in loss computation.
             log_snapshots: Whether to include snapshots in diagnostics.
             log_mean_maps: Whether to include mean maps in diagnostics.
+            channel_mean_names: Names of variables whose RMSE will be averaged. If
+                not provided, all available variables will be used.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
@@ -79,6 +82,13 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         self._coords = horizontal_coordinates.coords
         self._aggregators: dict[str, _Aggregator] = {
             "mean": MeanAggregator(dataset_info.gridded_operations),
+            "mean_norm": MeanAggregator(
+                dataset_info.gridded_operations,
+                target="norm",
+                channel_mean_names=channel_mean_names,
+                include_bias=False,
+                include_grad_mag_percent_diff=False,
+            ),
         }
         try:
             self._aggregators["power_spectrum"] = SpectrumAggregator(
@@ -133,6 +143,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             logging.info(f"Getting logs for {agg_label} aggregator")
             for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
                 logs[f"{label}/{k}"] = v
+        logs.pop(f"{label}/mean_norm/loss")  # remove duplicate of mean/loss
         logging.info(f"Inserting loss-scaled MSE componenets into logs")
         logs.update(
             self._get_loss_scaled_mse_components(

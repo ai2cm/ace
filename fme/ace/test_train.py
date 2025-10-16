@@ -21,6 +21,7 @@ from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig
 from fme.ace.inference.evaluator import main as inference_evaluator_main
@@ -65,7 +66,7 @@ from fme.core.generics.trainer import (
     epoch_checkpoint_enabled,
 )
 from fme.core.logging_utils import LoggingConfig
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import OptimizationConfig
@@ -270,7 +271,7 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=WeightedMappingLossConfig(type="MSE"),
+            loss=StepLossConfig(type="MSE"),
             crps_training=crps_training,
             train_n_forward_steps=TimeLengthProbabilities(
                 outcomes=[
@@ -328,7 +329,9 @@ def _get_test_yaml_files(
         forward_steps_in_memory=2,
         checkpoint_path=str(results_dir / "training_checkpoints" / "best_ckpt.tar"),
         data_writer=DataWriterConfig(
-            save_prediction_files=True,
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
         ),
         aggregator=InferenceEvaluatorAggregatorConfig(
             log_video=True,
@@ -526,10 +529,13 @@ def test_train_and_inference(
             yaml_config=train_config,
         )
         wandb_logs = wandb.get_logs()
-
         for log in wandb_logs:
             # ensure inference time series is not logged
             assert "inference/mean/forecast_step" not in log
+
+        epoch_logs = wandb_logs[-1]
+        assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
+        assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
     assert validation_output_dir.exists()

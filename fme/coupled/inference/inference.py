@@ -46,6 +46,12 @@ StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampLis
 
 @dataclasses.dataclass
 class ComponentInitialConditionConfig:
+    """
+    Parameters:
+        path: Path to the component initial condition dataset.
+        engine: Backend used in xarray.open_dataset call.
+    """
+
     path: str
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
 
@@ -117,6 +123,7 @@ class InferenceConfig:
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
+        labels: Dataset labels to use for inference.
     """
 
     experiment_dir: str
@@ -250,6 +257,7 @@ def run_inference_from_config(config: InferenceConfig):
         total_coupled_steps=config.n_coupled_steps,
         window_requirements=data_requirements,
         initial_condition=initial_condition,
+        dataset_info=stepper.training_dataset_info,
     )
 
     aggregator_config: InferenceAggregatorConfig = config.aggregator
@@ -283,7 +291,7 @@ def run_inference_from_config(config: InferenceConfig):
 
     timer.start("final_writer_flush")
     logging.info("Starting final flush of data writer")
-    writer.flush()
+    writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
     timer.stop()

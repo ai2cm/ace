@@ -94,3 +94,7 @@ class CoupledPairedDataWriter(WriterABC[CoupledPrognosticState, CoupledPairedDat
     def flush(self):
         self._ocean_writer.flush()
         self._atmosphere_writer.flush()
+
+    def finalize(self):
+        self._ocean_writer.finalize()
+        self._atmosphere_writer.finalize()

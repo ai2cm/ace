@@ -200,7 +200,7 @@ def _create_writer(
     chunks,
     shards=None,
     overwrite_check=True,
-    allow_existing=False,
+    mode="w-",  # default to writer that errors for an existing store
     array_attributes=None,
     group_attributes=None,
 ):
@@ -227,7 +227,7 @@ def _create_writer(
         shards=shards,
         data_vars=["var"],
         overwrite_check=overwrite_check,
-        allow_existing=allow_existing,
+        mode=mode,
         array_attributes=array_attributes,
         group_attributes=group_attributes,
     )
@@ -255,7 +255,14 @@ def test_ZarrWriter_append_to_existing(
         data={"var": data["var"][slice(0, 4)]}, position_slices={"time": slice(0, 4)}
     )
 
-    writer_1 = ZarrWriter.from_existing_store(path)
+    writer_1 = _create_writer(
+        n_times=n_times,
+        path=path,
+        chunks={"time": 3},
+        array_attributes={"var": {"units": "K"}},
+        group_attributes={"description": "Test Zarr store"},
+        mode="a",
+    )
     writer_1.record_batch(
         data={"var": data["var"][slice(4, 8)]}, position_slices={"time": slice(4, 8)}
     )
@@ -301,10 +308,10 @@ def test_ZarrWriter_allow_existing(tmp_path):
         "var": np.random.rand(2, NLAT, NLON),
     }
 
-    writer0 = _create_writer(path, n_times=4, chunks={"time": 2}, allow_existing=True)
+    writer0 = _create_writer(path, n_times=4, chunks={"time": 2})
     writer0.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
 
-    writer1 = _create_writer(path, n_times=4, chunks={"time": 2}, allow_existing=True)
+    writer1 = _create_writer(path, n_times=4, chunks={"time": 2}, mode="a")
     writer1.record_batch(data=batch_data, position_slices={"time": slice(2, 4)})
 
 
@@ -330,7 +337,13 @@ def test_ZarrWriter_shards_file_count(tmp_path, time_chunk_size, time_shard_size
         data={"var": data["var"][slice(0, 4)]}, position_slices={"time": slice(0, 4)}
     )
 
-    writer_1 = ZarrWriter.from_existing_store(path)
+    writer_1 = _create_writer(
+        n_times=n_times,
+        path=path,
+        chunks={"time": time_chunk_size},
+        shards={"time": time_shard_size},
+        mode="a",
+    )
     writer_1.record_batch(
         data={"var": data["var"][slice(4, 8)]}, position_slices={"time": slice(4, 8)}
     )

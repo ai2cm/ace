@@ -48,6 +48,7 @@ git filter-repo --force --refs "refs/heads/main" \
     --path fme/ace/validate_config.py \
     --path fme/core \
     --path fme/core/__init__.py \
+    --path fme/coupled \
     --path fme/__init__.py \
     --path fme/require_gpu.py \
     --path fme/sht_fix.py \

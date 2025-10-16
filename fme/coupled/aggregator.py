@@ -1,7 +1,7 @@
 import dataclasses
 import os
 import warnings
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 import torch
 import xarray as xr
@@ -70,6 +70,8 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         ocean_loss_scaling: TensorMapping | None = None,
         atmosphere_loss_scaling: TensorMapping | None = None,
+        ocean_channel_mean_names: Sequence[str] | None = None,
+        atmosphere_channel_mean_names: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -81,6 +83,9 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                 used in loss computation for the ocean stepper.
             atmosphere_loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation for the atmosphere stepper.
+            ocean_channel_mean_names: Names to include in ocean channel-mean metrics.
+            atmosphere_channel_mean_names: Names to include in atmosphere channel-mean
+                metrics.
         """
         self._dist = Distributed.get_instance()
         self._loss = torch.tensor(0.0, device=get_device())
@@ -90,31 +95,43 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self._aggregators = {
             "ocean": OneStepAggregator_(
                 dataset_info.ocean,
-                loss_scaling=ocean_loss_scaling,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "ocean")
                     if output_dir is not None
                     else None
                 ),
+                loss_scaling=ocean_loss_scaling,
+                channel_mean_names=ocean_channel_mean_names,
             ),
             "atmosphere": OneStepAggregator_(
                 dataset_info.atmosphere,
-                loss_scaling=atmosphere_loss_scaling,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "atmosphere")
                     if output_dir is not None
                     else None
                 ),
+                loss_scaling=atmosphere_loss_scaling,
+                channel_mean_names=atmosphere_channel_mean_names,
             ),
         }
+        self._num_channels_ocean: int | None = None
+        if ocean_channel_mean_names is not None:
+            self._num_channels_ocean = len(ocean_channel_mean_names)
+        self._num_channels_atmos: int | None = None
+        if atmosphere_channel_mean_names is not None:
+            self._num_channels_atmos = len(atmosphere_channel_mean_names)
 
     @torch.no_grad()
     def record_batch(
         self,
         batch: CoupledTrainOutput,
     ):
+        if self._num_channels_ocean is None:
+            self._num_channels_ocean = len(batch.ocean.gen_data)
+        if self._num_channels_atmos is None:
+            self._num_channels_atmos = len(batch.atmosphere.gen_data)
         self._loss += batch.total_metrics["loss"]
         self._loss_ocean += batch.ocean.metrics["loss/ocean"]
         self._loss_atmos += batch.atmosphere.metrics["loss/atmosphere"]
@@ -130,11 +147,21 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         Args:
             label: Label to prepend to all log keys.
         """
+        if self._num_channels_ocean is None or self._num_channels_atmos is None:
+            raise ValueError("No data recorded.")
         ocean_logs = self._aggregators["ocean"].get_logs(label)
         atmos_logs = self._aggregators["atmosphere"].get_logs(label)
         # loss is not included in component metrics so these are both nans
         ocean_logs.pop(f"{label}/mean/loss")
         atmos_logs.pop(f"{label}/mean/loss")
+        prefix = f"{label}/mean_norm/weighted_rmse"
+        # rename channel_mean RMSEs
+        ocean_logs[f"{prefix}/ocean_channel_mean"] = ocean_logs.pop(
+            f"{prefix}/channel_mean"
+        )
+        atmos_logs[f"{prefix}/atmosphere_channel_mean"] = atmos_logs.pop(
+            f"{prefix}/channel_mean"
+        )
         duplicates = set(ocean_logs.keys()) & set(atmos_logs.keys())
         if len(duplicates) > 0:
             raise ValueError(
@@ -208,6 +235,8 @@ class InferenceEvaluatorAggregatorConfig:
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         save_diagnostics: bool = True,
         output_dir: str | None = None,
+        ocean_channel_mean_names: Sequence[str] | None = None,
+        atmosphere_channel_mean_names: Sequence[str] | None = None,
     ) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
             monthly_reference_data = None
@@ -253,6 +282,8 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean_reference_data=time_mean,
             ocean_normalize=ocean_normalize,
             atmosphere_normalize=atmosphere_normalize,
+            ocean_channel_mean_names=ocean_channel_mean_names,
+            atmosphere_channel_mean_names=atmosphere_channel_mean_names,
         )
 
 
@@ -335,6 +366,8 @@ class InferenceEvaluatorAggregator(
         monthly_reference_data: xr.Dataset | None = None,
         log_histograms: bool = False,
         time_mean_reference_data: xr.Dataset | None = None,
+        ocean_channel_mean_names: Sequence[str] | None = None,
+        atmosphere_channel_mean_names: Sequence[str] | None = None,
     ):
         self._record_ocean_step_20 = n_timesteps_ocean >= 20
         self._record_atmos_step_20 = n_timesteps_atmosphere >= 20
@@ -353,7 +386,7 @@ class InferenceEvaluatorAggregator(
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
                 record_step_20=self._record_ocean_step_20,
-                channel_mean_names=None,
+                channel_mean_names=ocean_channel_mean_names,
                 normalize=ocean_normalize,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
@@ -376,7 +409,7 @@ class InferenceEvaluatorAggregator(
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
                 record_step_20=self._record_atmos_step_20,
-                channel_mean_names=None,
+                channel_mean_names=atmosphere_channel_mean_names,
                 normalize=atmosphere_normalize,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
@@ -388,7 +421,11 @@ class InferenceEvaluatorAggregator(
             ),
         }
         self._num_channels_ocean: int | None = None
+        if ocean_channel_mean_names is not None:
+            self._num_channels_ocean = len(ocean_channel_mean_names)
         self._num_channels_atmos: int | None = None
+        if atmosphere_channel_mean_names is not None:
+            self._num_channels_atmos = len(atmosphere_channel_mean_names)
 
     @property
     def ocean(self) -> InferenceEvaluatorAggregator_:
@@ -398,14 +435,12 @@ class InferenceEvaluatorAggregator(
     def atmosphere(self) -> InferenceEvaluatorAggregator_:
         return self._aggregators["atmosphere"]
 
-    def _init_num_channels(self, data: CoupledPairedData):
-        if self._num_channels_ocean is None:
-            self._num_channels_ocean = len(data.ocean_data.prediction)
-            self._num_channels_atmos = len(data.atmosphere_data.prediction)
-
     @torch.no_grad()
     def record_batch(self, data: CoupledPairedData) -> InferenceLogs:
-        self._init_num_channels(data)
+        if self._num_channels_ocean is None:
+            self._num_channels_ocean = len(data.ocean_data.prediction)
+        if self._num_channels_atmos is None:
+            self._num_channels_atmos = len(data.atmosphere_data.prediction)
         ocean_logs = self.ocean.record_batch(data.ocean_data)
         atmos_logs = self.atmosphere.record_batch(data.atmosphere_data)
         n_times_ocean = data.ocean_data.time["time"].size
@@ -435,24 +470,30 @@ class InferenceEvaluatorAggregator(
             raise ValueError("No data recorded.")
         ocean_logs = self.ocean.get_summary_logs()
         atmos_logs = self.atmosphere.get_summary_logs()
-        ocean_channel_mean = ocean_logs.pop("time_mean_norm/rmse/channel_mean")
-        atmos_channel_mean = atmos_logs.pop("time_mean_norm/rmse/channel_mean")
-        ocean_logs["time_mean_norm/rmse/ocean_channel_mean"] = ocean_channel_mean
-        atmos_logs["time_mean_norm/rmse/atmosphere_channel_mean"] = atmos_channel_mean
-        # "mean_step_20/loss" is NaN since inference has no loss
-        ocean_logs.pop("mean_step_20/loss", None)
-        atmos_logs.pop("mean_step_20/loss", None)
+        prefix = "time_mean_norm/rmse"
+        ocean_channel_mean = ocean_logs.pop(f"{prefix}/channel_mean")
+        atmos_channel_mean = atmos_logs.pop(f"{prefix}/channel_mean")
+        ocean_logs[f"{prefix}/ocean_channel_mean"] = ocean_channel_mean
+        atmos_logs[f"{prefix}/atmosphere_channel_mean"] = atmos_channel_mean
+        channel_mean = (
+            ocean_channel_mean * self._num_channels_ocean
+            + atmos_channel_mean * self._num_channels_atmos
+        ) / (self._num_channels_ocean + self._num_channels_atmos)
+        prefix = "mean_step_20_norm/weighted_rmse"
+        if self._record_atmos_step_20:
+            atmos_logs[f"{prefix}/atmosphere_channel_mean"] = atmos_logs.pop(
+                f"{prefix}/channel_mean"
+            )
+        if self._record_ocean_step_20:
+            ocean_logs[f"{prefix}/ocean_channel_mean"] = ocean_logs.pop(
+                f"{prefix}/channel_mean"
+            )
         duplicates = set(ocean_logs.keys()) & set(atmos_logs.keys())
         if len(duplicates) > 0:
             raise ValueError(
                 "Duplicate keys found in ocean and atmosphere "
                 f"inference evaluator aggregator logs: {duplicates}."
             )
-        num_channels = self._num_channels_ocean + self._num_channels_atmos
-        channel_mean = (
-            ocean_channel_mean * self._num_channels_ocean
-            + atmos_channel_mean * self._num_channels_atmos
-        ) / num_channels
         return {
             "time_mean_norm/rmse/channel_mean": channel_mean,
             **ocean_logs,
