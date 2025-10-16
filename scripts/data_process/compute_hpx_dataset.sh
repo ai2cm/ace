@@ -12,7 +12,7 @@ function add_to_pythonpath() {
 add_to_pythonpath "~/full-model"
 
 ARGO=false
-
+GANTRY=false
 while [[ "$#" -gt 0 ]]
 do
     case $1 in
@@ -20,6 +20,10 @@ do
                   shift;;
         --argo) ARGO="$2"
                 shift;;
+        --gantry) GANTRY=true
+                  shift;;
+        --overwrite) OVERWRITE=true
+                     shift;;
         *) echo "Unknown parameter passed: $1"
            exit 1;;
     esac
@@ -37,16 +41,49 @@ output_directory=$(yq -r '.data_output_directory' ${CONFIG})
 
 if [[ "$ARGO" == "true" ]]
 then
-    output=$(argo submit full-model/scripts/data_process/compute_hpx_dataset_argo_workflow.yaml \
-        -p python_script="$(< full-model/scripts/data_process/compute_hpx_dataset.py)" \
-        -p config="$(< ${CONFIG})" \
-        -p run_directory="${run_directory}" \
-        -p output_directory="${output_directory}")
-
-    job_name=$(echo "$output" | grep 'Name:' | awk '{print $2}')
-    echo "Argo job submitted: $job_name"
+    echo "Argo workflow not supported for compute_hpx_dataset"
+elif [[ "$GANTRY" == "true" ]]
+then
+    JOB_NAME="compute-hpx-dataset"
+    BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+    REPO_ROOT=$(git rev-parse --show-toplevel)
+    cd $REPO_ROOT
+    gantry run --allow-dirty --no-python \
+        --name $JOB_NAME \
+        --task-name $JOB_NAME \
+        --workspace ai2/ace \
+        --not-preemptible \
+        --description 'Run HPX-ace dataset computation' \
+        --priority normal \
+        --beaker-image annad/dlwp-ace-datapipe-v2025.09.0 \
+        --cluster ai2/ceres-cirrascale \
+        --cluster ai2/saturn-cirrascale \
+        --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+        --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+        --gpus 0 \
+        --shared-memory 400GiB \
+        --weka climate-default:/climate-default \
+        --budget ai2/climate \
+        -- bash -c "gcloud auth activate-service-account --key-file=/tmp/google_application_credentials.json && python3 ./scripts/data_process/compute_hpx_dataset.py --config=\"./scripts/data_process/${CONFIG}\" --run-directory=\"${run_directory}\" --output-store=\"${output_directory}\" $(if [[ \"$OVERWRITE\" == \"true\" ]]; then echo \"--overwrite\"; fi) && echo '=== HEALPIX ACE DATASET COMPUTATION COMPLETED SUCCESSFULLY ===' && echo \"Output written to: ${output_directory}\" && echo \"Config used: ${CONFIG}\" && echo \"Timestamp: \$(date)\""
 else
-    python3 full-model/scripts/data_process/compute_hpx_dataset.py --config="${CONFIG}" \
-        --run-directory="${run_directory}" \
-        --output-store="${output_directory}"
+    if [[ "$OVERWRITE" == "true" ]]; then
+        python3 compute_hpx_dataset.py --config="${CONFIG}" \
+            --run-directory="${run_directory}" \
+            --output-store="${output_directory}" \
+            --overwrite
+    else
+        python3 compute_hpx_dataset.py --config="${CONFIG}" \
+            --run-directory="${run_directory}" \
+            --output-store="${output_directory}"
+    fi
+
+    if [ $? -eq 0 ]; then
+        echo "=== HEALPIX ACE DATASET COMPUTATION COMPLETED SUCCESSFULLY ==="
+        echo "Output written to: ${output_directory}"
+        echo "Config used: ${CONFIG}"
+        echo "Timestamp: $(date)"
+    else
+        echo "=== HEALPIX ACE DATASET COMPUTATION FAILED ==="
+        exit 1
+    fi
 fi

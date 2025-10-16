@@ -471,11 +471,49 @@ class LossConfig:
         return final_loss.to(device=get_device())
 
 
+class StepLoss(torch.nn.Module):
+    def __init__(
+        self, loss: WeightedMappingLoss, sqrt_loss_decay_constant: float = 0.0
+    ):
+        super().__init__()
+        self.loss = loss
+        self.sqrt_loss_decay_constant = sqrt_loss_decay_constant
+
+    @property
+    def _normalizer(self) -> StandardNormalizer:
+        # private because this is only used in unit tests
+        return self.loss.normalizer
+
+    @property
+    def effective_loss_scaling(self) -> dict[str, float]:
+        return self.loss.effective_loss_scaling
+
+    def forward(
+        self,
+        predict_dict: TensorMapping,
+        target_dict: TensorMapping,
+        step: int,
+    ) -> torch.Tensor:
+        """
+        Args:
+            predict_dict: The predicted data.
+            target_dict: The target data.
+            step: The step number, indexed from 0 for the first step.
+
+        Returns:
+            The loss.
+        """
+        step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
+        return self.loss(predict_dict, target_dict) * step_weight
+
+
 @dataclasses.dataclass
-class WeightedMappingLossConfig:
+class StepLossConfig:
     """
     Loss configuration class that has the same fields as LossConfig but also
-    has additional weights field. The build method will apply the weights to
+    has additional weights field, and optional step loss decay.
+
+    The build method will apply the weights to
     the inputs of the loss function. The loss returned by build will be a
     MappingLoss, which takes Dict[str, tensor] as inputs instead of packed
     tensors.
@@ -489,6 +527,9 @@ class WeightedMappingLossConfig:
             type to apply to the global mean of each sample
         global_mean_weight: the weight to apply to the global mean loss
             relative to the main loss
+        sqrt_loss_step_decay_constant: the constant to use for the square root
+            loss step decay, alpha in 1/sqrt(1.0 + alpha * step) where step is
+            indexed from 0 for the first step.
         weights: A dictionary of variable names with individual
             weights to apply to their normalized losses
     """
@@ -500,6 +541,7 @@ class WeightedMappingLossConfig:
         default_factory=lambda: {}
     )
     global_mean_weight: float = 1.0
+    sqrt_loss_step_decay_constant: float = 0.0
     weights: dict[str, float] = dataclasses.field(default_factory=lambda: {})
 
     def __post_init__(self):
@@ -517,15 +559,18 @@ class WeightedMappingLossConfig:
         out_names: list[str],
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
-    ) -> WeightedMappingLoss:
+    ) -> StepLoss:
         loss = self.loss_config.build(
             reduction="mean",
             gridded_operations=gridded_ops,
         )
-        return WeightedMappingLoss(
-            loss=loss,
-            weights=self.weights,
-            out_names=out_names,
-            channel_dim=channel_dim,
-            normalizer=normalizer,
+        return StepLoss(
+            WeightedMappingLoss(
+                loss=loss,
+                weights=self.weights,
+                out_names=out_names,
+                channel_dim=channel_dim,
+                normalizer=normalizer,
+            ),
+            sqrt_loss_decay_constant=self.sqrt_loss_step_decay_constant,
         )

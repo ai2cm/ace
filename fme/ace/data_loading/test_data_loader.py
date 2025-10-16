@@ -88,6 +88,7 @@ def _create_dataset_on_disk(
     in_variable_names=["foo", "bar", "baz"],
     out_variable_names=["foo", "bar"],
     filename="data.nc",
+    timestep_start=0,
 ) -> pathlib.Path:
     if data_dim_sizes is None:
         data_dim_sizes = {"time": n_times, "lat": 16, "lon": 32}
@@ -101,7 +102,14 @@ def _create_dataset_on_disk(
     ]
 
     data_path = data_dir / filename
-    _save_netcdf(data_path, data_dim_sizes, all_variable_names, calendar, timestep_size)
+    _save_netcdf(
+        data_path,
+        data_dim_sizes,
+        all_variable_names,
+        calendar,
+        timestep_size,
+        timestep_start,
+    )
 
     return data_path
 
@@ -531,7 +539,8 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     calendar = "proleptic_gregorian"
     total_forward_steps = 5
     forward_steps_in_memory = 2
-    _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10)
+    # forcing dataset starts 2 steps before initial condition time of 1970-01-01
+    _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10, timestep_start=-2)
     config = ForcingDataLoaderConfig(dataset=XarrayDataConfig(data_path=tmp_path))
     window_requirements = DataRequirements(
         names=["foo"],

@@ -11,7 +11,8 @@
 # it on our GKE cluster.
 
 import os
-import pdb
+
+# import pdb
 import sys
 from typing import Tuple
 
@@ -27,22 +28,122 @@ import torch
 import xarray as xr
 import xpartition  # noqa
 from compute_dataset import (
-    LATENT_HEAT_OF_VAPORIZATION,
     DatasetComputationConfig,
     DatasetConfig,
     DLWPChunkingConfig,
     DLWPNameMapping,
-    assert_column_integral_of_moisture_is_conserved,
-    assert_global_dry_air_mass_conservation,
-    assert_global_moisture_conservation,
+    clear_compressors_encoding,
     get_dataset_urls,
     open_datasets,
 )
 
+# After applying the regrid on 64 sides, this is always the pattern of nans.
+# it includes the diagonal of face 4, and corners of 0, 1, 2, 3, 8, 9, 10, 11
+NAN_INDICES = np.array(
+    [
+        [0, 0, 0],
+        [1, 0, 0],
+        [2, 0, 0],
+        [3, 0, 0],
+        [4, 0, 0],
+        [4, 1, 1],
+        [4, 2, 2],
+        [4, 3, 3],
+        [4, 4, 4],
+        [4, 5, 5],
+        [4, 6, 6],
+        [4, 7, 7],
+        [4, 8, 8],
+        [4, 9, 9],
+        [4, 10, 10],
+        [4, 11, 11],
+        [4, 12, 12],
+        [4, 13, 13],
+        [4, 14, 14],
+        [4, 15, 15],
+        [4, 16, 16],
+        [4, 17, 17],
+        [4, 18, 18],
+        [4, 19, 19],
+        [4, 20, 20],
+        [4, 21, 21],
+        [4, 22, 22],
+        [4, 23, 23],
+        [4, 24, 24],
+        [4, 25, 25],
+        [4, 26, 26],
+        [4, 27, 27],
+        [4, 28, 28],
+        [4, 29, 29],
+        [4, 30, 30],
+        [4, 31, 31],
+        [4, 32, 32],
+        [4, 33, 33],
+        [4, 34, 34],
+        [4, 35, 35],
+        [4, 36, 36],
+        [4, 37, 37],
+        [4, 38, 38],
+        [4, 39, 39],
+        [4, 40, 40],
+        [4, 41, 41],
+        [4, 42, 42],
+        [4, 43, 43],
+        [4, 44, 44],
+        [4, 45, 45],
+        [4, 46, 46],
+        [4, 47, 47],
+        [4, 48, 48],
+        [4, 49, 49],
+        [4, 50, 50],
+        [4, 51, 51],
+        [4, 52, 52],
+        [4, 53, 53],
+        [4, 54, 54],
+        [4, 55, 55],
+        [4, 56, 56],
+        [4, 57, 57],
+        [4, 58, 58],
+        [4, 59, 59],
+        [4, 60, 60],
+        [4, 61, 61],
+        [4, 62, 62],
+        [4, 63, 63],
+        [8, 63, 63],
+        [9, 63, 63],
+        [10, 63, 63],
+        [11, 63, 63],
+    ]
+)
+
+
+def fill_nans_with_neighbors(arr, nan_indices):
+    arr_filled = arr.copy()
+    n_face, n_height, n_width = arr.shape
+    for f, h, w in nan_indices:
+        neighbors = []
+        # Up
+        if h > 0:
+            neighbors.append(arr[f, h - 1, w])
+        # Down
+        if h < n_height - 1:
+            neighbors.append(arr[f, h + 1, w])
+        # Left
+        if w > 0:
+            neighbors.append(arr[f, h, w - 1])
+        # Right
+        if w < n_width - 1:
+            neighbors.append(arr[f, h, w + 1])
+        arr_filled[f, h, w] = np.mean(neighbors)
+    return arr_filled
+
 
 def regrid_tensor(x, regrid_func, shape):
     data = regrid_func(torch.tensor(x, dtype=torch.double))
-    return data.numpy().reshape(shape)
+    arr_hpx = data.numpy().reshape(shape)
+    # replace corner nans with mean-filling
+    arr_hpx = fill_nans_with_neighbors(arr_hpx, NAN_INDICES)
+    return arr_hpx
 
 
 def _pool_func(ds, store, n_partitions, partition_dims, i):
@@ -66,6 +167,8 @@ def hpx_regrid(
         level=level, pixel_order=earth2grid.healpix.HEALPIX_PAD_XY
     )
     src = earth2grid.latlon.LatLonGrid(lat=list(lats), lon=list(lons))
+    lat_hpx = hpx.lat  # shape (face, height, width)
+    lon_hpx = hpx.lon  # shape (face, height, width)
     # Regridder
     regrid = earth2grid.get_regridder(src, hpx)
 
@@ -86,13 +189,17 @@ def hpx_regrid(
     time_coords = ds.coords["time"]
     nside_coords = np.arange(n_side)
     grid_coords = np.arange(12)
+
     ds_regridded = ds_regridded.assign_coords(
         time=time_coords,
         face=grid_coords,
         height=nside_coords,
         width=nside_coords,
     )
-
+    ds_regridded = ds_regridded.assign_coords(
+        lat=lat_hpx.data,
+        lon=lon_hpx.data,
+    )
     return ds_regridded
 
 
@@ -129,8 +236,12 @@ def construct_hpx_dataset(
     print(f"After regrid: {ds}")
 
     # 2. chunk and save
-    chunks = config.chunking.get_chunks(dlwp_names)
-    ds = ds.chunk(chunks)
+    if config.sharding is None:
+        outer_chunks = config.chunking.get_chunks(dlwp_names)
+    else:
+        outer_chunks = config.sharding.get_chunks(dlwp_names)
+
+    ds = ds.chunk(outer_chunks)
     ds.attrs["history"] = (
         "Dataset computed by full-model/scripts/data_process"
         "/compute_hpx_dataset.py"
@@ -150,18 +261,30 @@ def construct_hpx_dataset(
 @click.option("--config", help="Path to dataset configuration YAML file.")
 @click.option("--run-directory", help="Path to reference run directory.")
 @click.option("--output-store", help="Path to output zarr store.")
-@click.option("--debug", is_flag=True, help="Print metadata instead of writing output.")
-@click.option("--subsample", is_flag=True, help="Subsample the data before writing.")
-@click.option("--check-conservation", is_flag=True, help="Check conservation.")
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    help="Print metadata instead of writing output.",
+)
+@click.option(
+    "--subsample",
+    is_flag=True,
+    default=False,
+    help="Subsample the data before writing.",
+)
 @click.option("--num-processes", default=16, help="Number of processes to spin up.")
+@click.option(
+    "--overwrite", is_flag=True, default=False, help="Overwrite the existing store."
+)
 def main(
     config,
     run_directory,
     output_store,
     debug,
     subsample,
-    check_conservation,
     num_processes,
+    overwrite,
 ):
     config = DatasetConfig.from_file(config).dataset_computation
     dlwp_names = config.standard_names
@@ -175,33 +298,16 @@ def main(
     )
     if subsample:
         ds = ds.isel(time=slice(10, 13))
-    if check_conservation:
-        assert_column_integral_of_moisture_is_conserved(
-            ds,
-            precipitable_water_path_name=dlwp_names.precipitable_water_path,
-            total_water_path_name=dlwp_names.total_water_path,
-        )
-        assert_global_dry_air_mass_conservation(
-            ds,
-            dims=dlwp_names.horizontal_dims,
-            surface_pressure_name=dlwp_names.surface_pressure,
-            total_water_path_name=dlwp_names.total_water_path,
-            latitude_dim=dlwp_names.latitude_dim,
-            time_dim=dlwp_names.time_dim,
-        )
-        assert_global_moisture_conservation(
-            ds,
-            dims=dlwp_names.horizontal_dims,
-            latitude_dim=dlwp_names.latitude_dim,
-            total_water_path_name=dlwp_names.total_water_path,
-            latent_heat_flux_name=dlwp_names.latent_heat_flux,
-            latent_heat_of_vaporization=LATENT_HEAT_OF_VAPORIZATION,
-            precip_rate_name=dlwp_names.precip_rate,
-            time_dim=dlwp_names.time_dim,
-        )
     drop_vars = [var for var in dlwp_names.dropped_variables if var in ds]
     ds = ds.drop(drop_vars)
     print(f"Output dataset size is {ds.nbytes / 1e9} GB")
+
+    if config.sharding is None:
+        inner_chunks = None
+    else:
+        inner_chunks = config.chunking.get_chunks(dlwp_names)
+
+    ds = clear_compressors_encoding(ds)
 
     if debug:
         with xr.set_options(display_max_rows=500):
@@ -210,8 +316,21 @@ def main(
         n_partitions = config.n_split
         partition_dims = [dlwp_names.time_dim]
         store = f"{output_store}.zarr"
-        ds.partition.initialize_store(store)
+        if overwrite:
+            # Mode "w" is used to overwrite the existing store.
+            ds.partition.initialize_store(store, mode="w", inner_chunks=inner_chunks)
+        else:
+            try:
+                ds.partition.initialize_store(
+                    store, mode="w-", inner_chunks=inner_chunks
+                )
+            except FileExistsError:
+                raise ValueError(
+                    "Store already exists. Use --overwrite to overwrite, \
+                or change config to write to a new store."
+                )
 
+        print("Initialized store, now writing partitions")
         with mp.get_context("forkserver").Pool(num_processes) as pool:
             pool.map(
                 partial(_pool_func, ds, store, n_partitions, partition_dims),
@@ -224,5 +343,5 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         print(f"An error occurred: {e}", file=sys.stderr)
-        pdb.post_mortem()  # Start the debugger
+        # pdb.post_mortem()  # Start the debugger
         raise  # Re-raise the exception to preserve the traceback

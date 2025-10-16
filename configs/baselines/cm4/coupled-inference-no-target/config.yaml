@@ -4,10 +4,10 @@ coupled_steps_in_memory: 20
 checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
-    save_prediction_files: true
+    save_prediction_files: false
     save_monthly_files: true
   atmosphere:
-    save_prediction_files: true
+    save_prediction_files: false
     save_monthly_files: true
 forcing_loader:
   atmosphere:
@@ -16,12 +16,6 @@ forcing_loader:
       file_pattern: cm4-atmosphere-forcing-1yr.zarr
       engine: zarr
       n_repeats: 3
-  ocean:
-    dataset:
-      data_path: /climate-default/2025-08-29-coupled-inference-no-target-data-example/CM4
-      file_pattern: cm4-ocn-forcing.zarr
-      engine: zarr
-      n_repeats: 100
   num_data_workers: 1
 initial_condition:
   ocean:

@@ -1,0 +1,11 @@
+input_directories:
+  # in priority order to handle name conflicts
+  - /pscratch/sd/e/elynnwu/fme-dataset/2025-09-09-E3SMv3-piControl-100yr-coupled-ocean-stats # coupling vars
+  - /pscratch/sd/e/elynnwu/fme-dataset/2025-09-09-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere-stats # surface_temperature -> sst
+  - /pscratch/sd/e/elynnwu/fme-dataset/2025-08-13-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4-stats # non-coupling vars
+  - /pscratch/sd/e/elynnwu/fme-dataset/2025-09-09-e3smv3-piControl-100yr-5daily-sfc-flux-stats # 5-daily sfc fluxes
+rename:
+  - data_var: TS
+    new_name: sst
+    drop: true
+output_directory: /pscratch/sd/e/elynnwu/fme-dataset/2025-09-09-E3SMv3-piControl-100yr-coupled-stats/ocean
