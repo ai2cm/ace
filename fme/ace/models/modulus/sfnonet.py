@@ -33,6 +33,10 @@ from .initialization import trunc_normal_
 from .layers import MLP, DropPath, RealFFT2, SpectralAttention2d
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
 
+# for annotation of models
+from dataclasses import dataclass
+import physicsnemo
+from physicsnemo.models.meta import ModelMetaData
 # layer normalization
 try:
     from apex.normalization import FusedLayerNorm
@@ -747,3 +751,15 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             x = self.decoder(x)
 
         return x
+# this part exposes the model to modulus by constructing modulus Modules
+@dataclass
+class SphericalFourierNeuralOperatorNetMetaData(ModelMetaData):
+    name: str = "SFNO"
+
+    jit: bool = False
+    cuda_graphs: bool = False
+    amp_cpu: bool = False
+    amp_gpu: bool = True
+
+
+SFNO = physicsnemo.Module.from_torch(SphericalFourierNeuralOperatorNet, SphericalFourierNeuralOperatorNetMetaData())
