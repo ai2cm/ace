@@ -28,7 +28,7 @@ run_training() {
     --description 'Run ACE training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/climate-ceres \
-    --priority urgent \
+    --priority high \
     --preemptible \
     --cluster ai2/ceres \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
