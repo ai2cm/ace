@@ -1,8 +1,6 @@
 docs/available_modules.rst
 docs/available_steps.rst
 docs/_build
-filtered_repo/
-files_excluded_by_filter.txt
 
 .vscode
 
