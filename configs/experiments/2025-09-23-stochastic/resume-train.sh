@@ -10,7 +10,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=8
 
 # Override arguments (add any config overrides here)
-OVERRIDE_ARGS="resume_results.resume_wandb=true"
+OVERRIDE_ARGS=""
 
 # Change to the repo root so paths are valid no matter where we run the script from
 cd "$REPO_ROOT"
@@ -33,10 +33,11 @@ resume_training() {
         --name "resume-${job_name}" \
         --description "Resume training" \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/climate-ceres \
+        --workspace ai2/ace \
         --priority high \
         --preemptible \
-        --cluster ai2/ceres-cirrascale \
+        --cluster ai2/ceres \
+        --cluster ai2/jupiter \
         --weka climate-default:/climate-default \
         --env WANDB_USERNAME="$WANDB_USERNAME" \
         --env WANDB_NAME="$job_name" \
@@ -58,5 +59,7 @@ resume_training() {
 
 base_name="stochastic"
 
-resume_training "train-era5-n384-e9c1-gauss-1step.yaml" "$base_name-era5-n384-e9c1-gauss-1step" "01K6X4TBDSBVV7TSXCZECKT79A"
-resume_training "train-era5-n512-e9c1-1step.yaml" "$base_name-era5-n512-e9c1-1step" "01K6DR1108GVPXVHEBSC0DWYZJ"
+# resume_training "train-era5-n384-e9c1-gauss-1step.yaml" "$base_name-era5-n384-e9c1-gauss-1step" "01K6X4TBDSBVV7TSXCZECKT79A"
+# resume_training "train-era5-n512-e9c1-1step.yaml" "$base_name-era5-n512-e9c1-1step" "01K6DR1108GVPXVHEBSC0DWYZJ"
+resume_training "train-era5-n512-e9c1-1step.yaml" "$base_name-era5-n512-e9c1-1step" "01K702HRVH17011GBF0HPNDYT2"
+
