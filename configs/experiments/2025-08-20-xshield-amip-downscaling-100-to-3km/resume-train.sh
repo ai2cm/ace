@@ -20,7 +20,7 @@ N_GPUS=4 # TODO: change to 8 after testing
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-PREVIOUS_RESULTS_DATASET="01K7Q4MX41MJMD69RBNA2FW6EF"
+PREVIOUS_RESULTS_DATASET="01K7SH1T3QE4F003BJ7SRCKEHD"
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
 
