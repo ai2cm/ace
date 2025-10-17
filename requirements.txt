@@ -19,3 +19,4 @@ torch>=2
 wandb[media]>=0.19.0
 xarray
 zarr>=3
+nvidia-physicsnemo
