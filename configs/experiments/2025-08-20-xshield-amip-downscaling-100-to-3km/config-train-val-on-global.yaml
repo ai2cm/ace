@@ -83,7 +83,7 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 27
+      step: 19
   lat_extent:
     start: -66.0
     stop: 70.0
