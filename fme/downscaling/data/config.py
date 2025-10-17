@@ -466,7 +466,7 @@ class PairedDataLoaderConfig:
             num_workers=self.num_data_workers,
             shuffle=(sampler is None) and train,
             sampler=sampler,
-            drop_last=True,
+            drop_last=False,
             pin_memory=using_gpu(),
             collate_fn=PairedBatchData.from_sequence,
             multiprocessing_context=self._mp_context(),

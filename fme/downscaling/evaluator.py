@@ -72,7 +72,7 @@ class Evaluator:
                     coarse=coarse,
                     batch=batch,
                 )
-
+        self.dist.barrier()
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()
         wandb.log(logs, step=0)
@@ -132,6 +132,7 @@ class EventEvaluator:
             )
             sample_agg.record_batch(outputs.prediction)
 
+        self.dist.barrier()
         to_log = sample_agg.get_wandb()
         wandb = WandB.get_instance()
         wandb.log({f"{self.event_name}/{k}": v for k, v in to_log.items()}, step=0)
