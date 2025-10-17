@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-prate-lower-batchsz-tropics-val"
-CONFIG_FILENAME="config-train-prate-lower-batchsz.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-global-val"
+CONFIG_FILENAME="config-train-val-on-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
