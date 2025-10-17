@@ -66,7 +66,7 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 64 #128 on 8 gpu
+  batch_size: 76 #128 on 8 gpu
   num_data_workers: 4 #8
   fine:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -75,7 +75,7 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 27
+      step: 19
   coarse:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
