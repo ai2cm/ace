@@ -1,9 +1,12 @@
 # arg: --dataset oliverwm/era5-1deg-8layer-stats-1990-2019-v2:/statsdata
-# arg: --dataset 01K6B8YGFXS0HHZE31Q5HEKJZB:/weights
+# arg: --dataset 01K702HRVH17011GBF0HPNDYT2:/weights
 experiment_dir: /results
+# train_aggregator:
+#   rmse: true
+#  spherical_power_spectrum: true
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 120
+max_epochs: 480
 ema:
   decay: 0.999
 inference:
@@ -117,7 +120,7 @@ validation_loader:
       stop_time: '1997-12-31'
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.00001
+  lr: 0.0001
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
   kwargs:
@@ -127,12 +130,42 @@ stepper:
   train_n_forward_steps:
     outcomes:
       - steps: 1
-        probability: 0.6
+        probability: 0.05
       - steps: 2
-        probability: 0.2
+        probability: 0.05
+      - steps: 3
+        probability: 0.05
       - steps: 4
-        probability: 0.1
+        probability: 0.05
+      - steps: 5
+        probability: 0.05
+      - steps: 6
+        probability: 0.05
+      - steps: 7
+        probability: 0.05
+      - steps: 8
+        probability: 0.05
+      - steps: 9
+        probability: 0.05
+      - steps: 10
+        probability: 0.05
+      - steps: 11
+        probability: 0.05
       - steps: 12
+        probability: 0.05
+      - steps: 13
+        probability: 0.05
+      - steps: 14
+        probability: 0.05
+      - steps: 15
+        probability: 0.05
+      - steps: 16
+        probability: 0.05
+      - steps: 17
+        probability: 0.05
+      - steps: 18
+        probability: 0.05
+      - steps: 19
         probability: 0.05
       - steps: 20
         probability: 0.05
@@ -160,8 +193,7 @@ stepper:
       PRESsfc: 3
     kwargs:
       crps_weight: 0.1
-      energy_score_weight: 0.0
-      area_weighted_crps_weight: 0.9
+      energy_score_weight: 0.9
   parameter_init:
     weights_path: /weights/training_checkpoints/best_ckpt.tar
   step:
@@ -171,7 +203,7 @@ stepper:
       builder:
         type: NoiseConditionedSFNO
         config:
-          embed_dim: 384
+          embed_dim: 512
           noise_embed_dim: 64
           noise_type: isotropic
           filter_type: linear
