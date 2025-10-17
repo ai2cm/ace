@@ -470,7 +470,9 @@ class TrainerConfig:
         )
 
 
-def _get_channel_mean_scalar_metric(metrics, prefix="generation/metrics/crps"):
+def _get_channel_mean_scalar_metric(
+    metrics, prefix="generation/metrics/relative_crps_bicubic"
+):
     channel_metric = [v for k, v in metrics.items() if k.startswith(prefix)]
 
     if len(channel_metric) != 1:
