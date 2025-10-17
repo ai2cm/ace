@@ -19,6 +19,7 @@ import tensorly as tl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from fme.ace.utils import comm
 
 tl.set_backend("pytorch")
 import torch_harmonics as th
@@ -106,10 +107,10 @@ class SpectralConvS2(nn.Module):
             weight_shape += [out_channels]
 
         if isinstance(self.inverse_transform, thd.DistributedInverseRealSHT):
-            self.modes_lat_local = self.inverse_transform.lmax_local
-            self.modes_lon_local = self.inverse_transform.mmax_local
-            self.lpad_local = self.inverse_transform.lpad_local
-            self.mpad_local = self.inverse_transform.mpad_local
+            self.modes_lat_local = self.inverse_transform.l_shapes[comm.get_rank("h")]
+            self.modes_lon_local = self.inverse_transform.m_shapes[comm.get_rank("w")]
+            self.nlat_local = self.inverse_transform.lat_shapes[comm.get_rank("h")]
+            self.nlon_local = self.inverse_transform.lon_shapes[comm.get_rank("w")]
         else:
             self.modes_lat_local = self.modes_lat
             self.modes_lon_local = self.modes_lon
@@ -148,8 +149,13 @@ class SpectralConvS2(nn.Module):
             self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
             if self.operator_type == "dhconv":
                 self.weight.is_shared_mp = ["matmul", "w"]
+                self.weight.sharded_dims_mp = [None for _ in weight_shape]
+                self.weight.sharded_dims_mp[-1] = "h"
             else:
                 self.weight.is_shared_mp = ["matmul"]
+                self.weight.sharded_dims_mp = [None for _ in weight_shape]
+                self.weight.sharded_dims_mp[-1] = "w"
+                self.weight.sharded_dims_mp[-2] = "h"
 
         # get the contraction handle
         self._contract = get_contract_fun(
@@ -158,6 +164,8 @@ class SpectralConvS2(nn.Module):
 
         if bias:
             self.bias = nn.Parameter(scale * torch.zeros(1, out_channels, 1, 1))
+            self.bias.is_shared_mp = ["model"]
+            self.bias.sharded_dims_mp = [None, None, None, None]
 
     def forward(self, x):  # pragma: no cover
         dtype = x.dtype
