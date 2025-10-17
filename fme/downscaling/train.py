@@ -144,7 +144,7 @@ class Trainer:
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_name = "generation/metrics/crps"
+        self._best_valid_loss_name = "generation/metrics/relative_crps_bicubic"
         self._best_histogram_tail_name = (
             "generation/histogram/abs_norm_tail_bias_above_percentile/99.99/"
         )
