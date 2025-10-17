@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=2
+NGPU=1
 
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
@@ -30,10 +30,10 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/climate-ceres \
-    --priority urgent \
+    --workspace ai2/downscaling \
+    --priority normal \
     --not-preemptible \
-    --cluster ai2/ceres \
+    --cluster ai2/neptune \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
