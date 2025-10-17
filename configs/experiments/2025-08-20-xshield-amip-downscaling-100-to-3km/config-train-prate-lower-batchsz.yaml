@@ -75,7 +75,7 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 3
+      step: 7
   coarse:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
@@ -83,13 +83,10 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 3
+      step: 7
   lat_extent:
-    start: 22.0
-    stop: 50.0
-  lon_extent:
-    start: 230.0
-    stop: 295.0
+    start: -18
+    stop: 18.0
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
