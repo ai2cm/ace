@@ -214,5 +214,5 @@ class InverseRealSHT(nn.Module):
 
         return x
 
-torch_harmonics.RealSHT = RealSHT
-torch_harmonics.InverseRealSHT = InverseRealSHT
+# torch_harmonics.RealSHT = RealSHT
+# torch_harmonics.InverseRealSHT = InverseRealSHT
