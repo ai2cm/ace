@@ -9,6 +9,7 @@ from fme.core.loss import (
     CRPSLoss,
     EnergyScoreLoss,
     GlobalMeanLoss,
+    KernelCRPSLoss,
     LossConfig,
     StepLossConfig,
     VariableWeightingLoss,
@@ -56,6 +57,20 @@ def test_spectral_energy_score(very_fast_only: bool):
     larger_domain_score = spectral_energy_score_loss(pred, target)
     torch.testing.assert_close(larger_domain_score, score, rtol=0.05, atol=0.0)
     torch.testing.assert_close(score, crps, rtol=0.5, atol=0.0)
+
+
+def test_kernel_crps_loss():
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_lat, n_lon = 16, 32
+    pred = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
+    target = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
+    crps_loss = CRPSLoss(alpha=0.95)
+    kernel_crps_loss = KernelCRPSLoss(alpha=0.95, kernel_size=3)
+    crps = crps_loss(pred, target)
+    kernel_crps = kernel_crps_loss(pred, target)
+    assert kernel_crps < crps
+    assert kernel_crps > 0.5 * crps
 
 
 def test_loss_of_zeros_is_variance():

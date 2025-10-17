@@ -300,12 +300,57 @@ class CRPSLoss(torch.nn.Module):
         return get_crps(x, y, alpha=self.alpha).mean()
 
 
+class KernelCRPSLoss(torch.nn.Module):
+    """
+    Compute the CRPS loss of random convolutions of the input
+    with uniform values in [-1, 1].
+
+    Supports almost-fair modification to CRPS from
+    https://arxiv.org/html/2412.15832v1, which claims to be helpful in
+    avoiding numerical issues with fair CRPS.
+    """
+
+    def __init__(self, alpha: float, kernel_size: int):
+        super().__init__()
+        self.alpha = alpha
+        self.kernel_size = kernel_size
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        if len(x.shape) != 4:
+            raise ValueError(f"x must have 4 dimensions, got {len(x.shape)}")
+        if len(y.shape) != 4:
+            raise ValueError(f"y must have 4 dimensions, got {len(y.shape)}")
+        if x.shape[-3] != y.shape[-3]:
+            raise ValueError(
+                "x and y must have the same number of channels, "
+                f"got {x.shape[-3]} and {y.shape[-3]}"
+            )
+        kernel = (
+            torch.rand((x.shape[-3], 1, self.kernel_size, self.kernel_size)).to(
+                x.device
+            )
+            * 2
+            - 1
+        )
+        # normalize each kernel so E[var(conv)] ≈ var(x)
+        kernel = kernel / torch.sqrt((kernel**2).sum(dim=(1, 2, 3), keepdim=True))
+        x_hat = torch.nn.functional.conv2d(
+            x, kernel, groups=x.shape[-3], padding=self.kernel_size // 2
+        )
+        y_hat = torch.nn.functional.conv2d(
+            y, kernel, groups=x.shape[-3], padding=self.kernel_size // 2
+        )
+        return get_crps(x_hat, y_hat, alpha=self.alpha).mean()
+
+
 class EnsembleLoss(torch.nn.Module):
     def __init__(
         self,
         crps_weight: float,
         energy_score_weight: float,
         sht: Callable[[torch.Tensor], torch.Tensor],
+        kernel_crps_weight: float = 0.0,
+        kernel_size: int = 4,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -320,9 +365,11 @@ class EnsembleLoss(torch.nn.Module):
             )
         self.crps_loss = CRPSLoss(alpha=0.95)
         self.energy_score_loss = EnergyScoreLoss(sht=sht)
+        self.kernel_crps_loss = KernelCRPSLoss(alpha=0.95, kernel_size=kernel_size)
 
         self.crps_weight = crps_weight
         self.energy_score_weight = energy_score_weight
+        self.kernel_crps_weight = kernel_crps_weight
 
     def forward(
         self,
@@ -339,7 +386,13 @@ class EnsembleLoss(torch.nn.Module):
             )
         else:
             energy_score_loss = torch.tensor(0.0)
-        return crps + energy_score_loss
+        if self.kernel_crps_weight > 0:
+            kernel_crps = self.kernel_crps_weight * self.kernel_crps_loss(
+                gen_norm, target_norm
+            )
+        else:
+            kernel_crps = torch.tensor(0.0)
+        return crps + energy_score_loss + kernel_crps
 
 
 @dataclasses.dataclass
