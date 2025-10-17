@@ -27,10 +27,11 @@ run_training() {
     --name "$job_name" \
     --description 'Run ACE training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/climate-ceres \
+    --workspace ai2/ace \
     --priority high \
     --preemptible \
     --cluster ai2/ceres \
+    --cluster ai2/jupiter \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -52,10 +53,11 @@ base_name="stochastic"
 
 # run_training "train-era5-n384-e9c1-1step.yaml" "$base_name-era5-n384-e9c1-1step"
 # run_training "train-era5-n384-amc9c1-1step.yaml" "$base_name-era5-n384-amc9c1-1step"
+run_training "train-era5-n384-amc9c1-1step-ft-20step-v2.yaml" "$base_name-era5-n384-amc9c1-1step-ft-20step-v2"
 # run_training "train-era5-n384-e9c1-gauss-1step.yaml" "$base_name-era5-n384-e9c1-gauss-1step"
 # run_training "train-era5-n512-e9c1-1step.yaml" "$base_name-era5-n512-e9c1-1step"
 # run_training "train-era5-n384-e1c9-1step.yaml" "$base_name-era5-n384-e1c9-1step"
 # run_training "train-amip-e9c1-1step.yaml" "$base_name-amip-e9c1-1step"
 # run_training "train-amip-e9c1-gauss-1step.yaml" "$base_name-amip-e9c1-gauss-1step"
 # run_training "train-era5-n512-e5c5-1step.yaml" "$base_name-era5-n512-e5c5-1step"
-run_training "train-era5-n512-e9c1-1step-ft-20step.yaml" "$base_name-era5-n512-e9c1-1step-ft-20step"
+# run_training "train-era5-n512-e9c1-1step-ft-20step.yaml" "$base_name-era5-n512-e9c1-1step-ft-20step"
