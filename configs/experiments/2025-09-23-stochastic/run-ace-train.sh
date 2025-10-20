@@ -31,7 +31,7 @@ run_training() {
     --priority high \
     --preemptible \
     --cluster ai2/ceres \
-    --cluster ai2/jupiter \
+    # --cluster ai2/jupiter \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -62,4 +62,4 @@ run_training "train-era5-n384-amc9c1-1step-ft-20step-v2.yaml" "$base_name-era5-n
 # run_training "train-era5-n512-e5c5-1step.yaml" "$base_name-era5-n512-e5c5-1step"
 # run_training "train-era5-n512-e9c1-1step-ft-20step.yaml" "$base_name-era5-n512-e9c1-1step-ft-20step"
 run_training "train-era5-n512-e9c1-1step-ft-20su.yaml" "$base_name-era5-n512-e9c1-1step-ft-20su"
-run_training "train-era5-n512-e9c1-1step-ft-20su-e6c2k2.yaml" "$base_name-era5-n512-e9c1-1step-ft-20su-e6c2k2"
+# run_training "train-era5-n512-e9c1-1step-ft-20su-e6c2k2.yaml" "$base_name-era5-n512-e9c1-1step-ft-20su-e6c2k2"
