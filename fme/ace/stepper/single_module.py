@@ -55,7 +55,6 @@ from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
     fold_sized_ensemble_dim,
-    repeat_interleave_batch_dim,
     unfold_ensemble_dim,
 )
 from fme.core.timing import GlobalTimer
@@ -1151,6 +1150,12 @@ class Stepper(
         forcing_names = set(self._input_only_names).union(
             self._step_obj.next_step_input_names
         )
+
+        if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
+            forcing = forcing.broadcast_ensemble(
+                n_ensemble=initial_condition.as_batch_data().n_ensemble
+            )
+
         with timer.context("forward_prediction"):
             ic_batch_data = initial_condition.as_batch_data()
             if ic_batch_data.labels != forcing.labels:
@@ -1195,6 +1200,7 @@ class Stepper(
             time=data.time,
             horizontal_dims=data.horizontal_dims,
             labels=data.labels,
+            n_ensemble=data.n_ensemble,
         )
         return data, prognostic_state
 
@@ -1333,15 +1339,13 @@ class Stepper(
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
         n_ensemble = self._config.n_ensemble
-        input_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
-            input_data.as_batch_data().data, repeats=n_ensemble
-        )
-        forcing_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
-            data.data, repeats=n_ensemble
-        )
+
+        input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
+        forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
+
         output_generator = self._predict_generator(
-            input_ensemble_data,
-            forcing_ensemble_data,
+            input_ensemble_data.data,
+            forcing_ensemble_data.data,
             n_forward_steps,
             optimization,
         )
