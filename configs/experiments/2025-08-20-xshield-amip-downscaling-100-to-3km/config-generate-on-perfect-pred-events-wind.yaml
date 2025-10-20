@@ -24,7 +24,7 @@ data:
     file_pattern: 3km.zarr
     subset:
       start: 0
-      stop: 4
+      stop: 2
   lat_extent:
     start: 22.0
     stop: 38
@@ -99,5 +99,15 @@ events:
   lon_extent:
     start: 2
     stop: 18
+  save_generated_samples: True
+  n_samples: 32
+- name: hindu_kush_20230122
+  date: 2023-01-22T06:00
+  lat_extent:
+    start: 28
+    stop: 44
+  lon_extent:
+    start: 60
+    stop: 76
   save_generated_samples: True
   n_samples: 32

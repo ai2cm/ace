@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-global-val-hist-ckpt"
-CONFIG_FILENAME="config-generate-on-perfect-pred-global-hist-ckpt.yaml"
+JOB_NAME="eval-xshield-amip-100km-to-3km-multivar-wind-events"
+CONFIG_FILENAME="config-generate-on-perfect-pred-events-wind.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,14 +17,14 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=1
+NGPU=2
 
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
 
 #EXISTING_RESULTS_DATASET=01K3W6KD8SP2YD2ZF2SGMF3S5F
 #EXISTING_RESULTS_DATASET=01K5712EFXYV31ACGS2TRVET1X  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
-EXISTING_RESULTS_DATASET=01K81EDFWZZ7DCQCWC5GV34WYJ # best crps checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
+EXISTING_RESULTS_DATASET=01K7SPXVME1MP459K3C6B3J5GF # best crps checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
 wandb_group=""
 
 gantry run \
@@ -43,7 +43,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:/checkpoints \
+    --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
