@@ -19,6 +19,8 @@ import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
+from fme.core.distributed import Distributed
+from fme.ace.utils import comm
 from fme.core.coordinates import (
     DepthCoordinate,
     HorizontalCoordinates,
@@ -429,10 +431,6 @@ class XarrayDataConfig(DatasetConfigABC):
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
         labels: Optional list of labels to be returned with the data.
-        io_grid:
-        io_rank:
-        crop_size:
-        crop_anchor:
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -464,11 +462,6 @@ class XarrayDataConfig(DatasetConfigABC):
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] = dataclasses.field(default_factory=list)
-    #NOTE: .copy
-    io_grid: list[int]=dataclasses.field(default_factory=[1, 1, 1].copy)
-    io_rank: list[int]=dataclasses.field(default_factory=[0, 0, 0].copy)
-    crop_size: tuple[int | None, int | None]=(None, None)
-    crop_anchor: tuple[int, int]=(0, 0)
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
