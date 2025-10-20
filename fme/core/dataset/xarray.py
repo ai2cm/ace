@@ -19,6 +19,8 @@ import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
+from fme.core.distributed import Distributed
+from fme.ace.utils import comm
 from fme.core.coordinates import (
     DepthCoordinate,
     HorizontalCoordinates,
@@ -428,10 +430,6 @@ class XarrayDataConfig(DatasetConfigABC):
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
         labels: Optional list of labels to be returned with the data.
-        io_grid:
-        io_rank:
-        crop_size:
-        crop_anchor:
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -463,11 +461,6 @@ class XarrayDataConfig(DatasetConfigABC):
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] = dataclasses.field(default_factory=list)
-    #NOTE: .copy
-    io_grid: list[int]=dataclasses.field(default_factory=[1, 1, 1].copy)
-    io_rank: list[int]=dataclasses.field(default_factory=[0, 0, 0].copy)
-    crop_size: tuple[int | None, int | None]=(None, None)
-    crop_anchor: tuple[int, int]=(0, 0)
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -549,14 +542,16 @@ class XarrayDataset(torch.utils.data.Dataset):
         self.sample_n_times = n_timesteps
         # multifiles dataloader doesn't support channel parallelism yet
         # set the read slices
-        io_grid = config.io_grid
-        io_rank = config.io_rank
-        crop_size = config.crop_size
-        crop_anchor = config.crop_anchor
-
-        assert io_grid[0] == 1
-        self.io_grid = io_grid[1:]
-        self.io_rank = io_rank[1:]
+        dist = Distributed.get_instance()
+        crop_size=(None, None)
+        crop_anchor=(0, 0)
+        if dist._distributed:
+          # this should always be safe now that data comm is orthogonal to
+          self.io_grid = [comm.get_size("h"), comm.get_size("w")]
+          self.io_rank = [comm.get_rank("h"), comm.get_rank("w")]
+        else:
+          self.io_grid = [ 1, 1]
+          self.io_rank = [0, 0]
 
         # crop info
         self.crop_size = crop_size
