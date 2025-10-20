@@ -24,11 +24,11 @@ model:
     type: unet_diffusion_song
   normalization:
     coarse:
-      global_means_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering.nc
-      global_stds_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field.nc
     fine:
-      global_means_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering.nc
-      global_stds_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field.nc
   num_diffusion_generation_steps: 18
   churn: 0.0
   p_mean: -1.2
@@ -48,7 +48,7 @@ train_data:
   batch_size: 20  # 48  for 8 GPUs
   num_data_workers: 8
   fine:
-  - data_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 3km.zarr
     engine: zarr
     subset:
@@ -56,7 +56,7 @@ train_data:
       stop: 160
       step: 4
   coarse:
-  - data_path:  /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 100km.zarr
     engine: zarr
     subset:
@@ -71,14 +71,14 @@ validation_data:
   batch_size: 16 #128 for 8 gpus
   num_data_workers: 8
   fine:
-  - data_path:  /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 3km.zarr
     subset:
       start: 20
       stop: 36
   coarse:
-  - data_path:  /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
     subset:

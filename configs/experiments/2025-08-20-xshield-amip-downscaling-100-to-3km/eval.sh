@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-multivariate"
+JOB_NAME="eval-xshield-amip-100km-to-3km-global-val-best-ckpt"
 CONFIG_FILENAME="config-generate-on-perfect-pred-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -24,7 +24,7 @@ IMAGE=01JWJ96JMF89D812JS159VF37N
 
 #EXISTING_RESULTS_DATASET=01K3W6KD8SP2YD2ZF2SGMF3S5F
 #EXISTING_RESULTS_DATASET=01K5712EFXYV31ACGS2TRVET1X  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
-EXISTING_RESULTS_DATASET=01K8065NJ38P3CS33EW63H479X # best crps checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
+EXISTING_RESULTS_DATASET=01K81EDFWZZ7DCQCWC5GV34WYJ # best crps checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
 wandb_group=""
 
 gantry run \
@@ -43,7 +43,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
+    --dataset $EXISTING_RESULTS_DATASET:/checkpoints \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \

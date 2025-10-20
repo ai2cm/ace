@@ -11,9 +11,9 @@ model:
   #  eastward_wind_at_ten_meters: UGRD10m
   #  northward_wind_at_ten_meters: VGRD10m
 data:
-  topography: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   coarse:
-  - data_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/
     engine: zarr
     file_pattern: 100km.zarr
     #infer_timestep: false
@@ -21,7 +21,7 @@ data:
       start_time: 2023-01-01T00:00
       step: 7
   fine:
-  - data_path: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/
     engine: zarr
     file_pattern: 3km.zarr
     #infer_timestep: false
