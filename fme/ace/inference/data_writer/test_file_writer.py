@@ -6,6 +6,8 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.core.dataset.time import TimeSlice
 from fme.core.typing_ import Slice
 
@@ -17,6 +19,7 @@ from .file_writer import (
     _month_string_to_int,
     _select_time,
 )
+from .raw import NetCDFWriterConfig
 from .time_coarsen import TimeCoarsen
 from .zarr import ZarrWriterConfig
 
@@ -175,47 +178,151 @@ def test_month_selector_select():
     np.testing.assert_array_equal(selected_data["temperature"].values, expected)
 
 
-def test__select_time():
-    data = xr.Dataset(
-        {
-            "temperature": (("time", "lat", "lon"), np.random.rand(7, 3, 3)),
-            "time": xr.date_range(
-                "2020-01-01", periods=7, freq="2MS"
-            ),  # every 2 months
-        }
+@pytest.mark.parametrize(
+    ["time_selection"],
+    [
+        pytest.param(
+            TimeSlice(start_time="2020-01-01", stop_time="2020-01-02"), id="TimeSlice"
+        ),
+        pytest.param(MonthSelector(months=["Jan"]), id="MonthSelector"),
+        pytest.param(Slice(start=0, stop=3, step=2), id="Slice"),
+        pytest.param(None, id="None"),
+    ],
+)
+def test__select_time_file_writer_single_sample(time_selection, tmpdir):
+    n_samples = 1
+    n_timesteps = 40
+    batch_data = BatchData.new_for_testing(
+        names=["temperature"],
+        n_samples=n_samples,
+        n_timesteps=n_timesteps,
+        t_initial="2020-01-01T00:00:00",
+        freq="1D",
+    )
+    file_writer_config = FileWriterConfig(
+        label="test_writer",
+        names=["temperature"],
+        format=NetCDFWriterConfig(name="netcdf"),
+        time_selection=time_selection,
+    )
+    file_writer = file_writer_config.build(
+        experiment_dir=str(tmpdir),
+        n_initial_conditions=n_samples,
+        n_timesteps=-1,  # unused for netcdf
+        coords={},
+        variable_metadata={},
+        dataset_metadata=DatasetMetadata(),
+    )
+    file_writer.append_batch(
+        data=dict(batch_data.data),
+        start_timestep=0,
+        batch_time=batch_data.time,
     )
 
-    # Test with TimeSlice
-    time_slice = TimeSlice(start_time="2020-01", stop_time="2020-04")
-    selected_data = _select_time(data, time_slice)
-    assert len(selected_data.time) == 2
-    np.testing.assert_array_equal(
-        data.temperature[0:2, :, :], selected_data.temperature
+    with xr.open_dataset(tmpdir / "test_writer.nc") as subselected_data:
+        assert len(subselected_data.sample) == n_samples
+        if isinstance(time_selection, TimeSlice):
+            assert len(subselected_data.time) == 2
+            np.testing.assert_almost_equal(
+                batch_data.data["temperature"][0, 0:2, :].cpu().numpy(),
+                subselected_data.squeeze().temperature,
+            )
+        elif isinstance(time_selection, MonthSelector):
+            assert len(subselected_data.time) == 31
+            np.testing.assert_almost_equal(
+                batch_data.data["temperature"][0, 0:31, :].cpu().numpy(),
+                subselected_data.squeeze().temperature,
+            )
+        elif isinstance(time_selection, Slice):
+            assert len(subselected_data.time) == 2
+            np.testing.assert_almost_equal(
+                batch_data.data["temperature"][0, 0:3:2, :].cpu().numpy(),
+                subselected_data.squeeze().temperature,
+            )
+        else:  # time_selection is None
+            assert len(subselected_data.time) == n_timesteps
+            np.testing.assert_almost_equal(
+                batch_data.data["temperature"][0, :].cpu().numpy(),
+                subselected_data.squeeze().temperature,
+            )
+
+
+@pytest.mark.parametrize(
+    ["time_selection"],
+    [
+        pytest.param(
+            TimeSlice(start_time="2020-01-01", stop_time="2020-01-02"), id="TimeSlice"
+        ),
+        pytest.param(MonthSelector(months=["Jan"]), id="MonthSelector"),
+        pytest.param(Slice(start=0, stop=3, step=2), id="Slice"),
+        pytest.param(None, id="None"),
+    ],
+)
+def test__select_time_file_writer_multiple_samples(time_selection, tmpdir):
+    n_samples = 2
+    n_timesteps = 40
+    batch_data = BatchData.new_for_testing(
+        names=["temperature"],
+        n_samples=n_samples,
+        n_timesteps=n_timesteps,
+        t_initial="2020-01-01T00:00:00",
+        freq="1D",
+        increment_times=True,
+    )
+    file_writer_config = FileWriterConfig(
+        label="test_writer",
+        names=["temperature"],
+        format=NetCDFWriterConfig(name="netcdf"),
+        time_selection=time_selection,
     )
 
-    # Test with MonthSelector string
-    month_selector = MonthSelector(months=["Jan"])
-    selected_data = _select_time(data, month_selector)
-    assert len(selected_data.time) == 2
-    expected = np.concatenate(
-        [data.temperature[0:1, :, :], data.temperature[-1:, :, :]], axis=0
+    if isinstance(time_selection, TimeSlice) or isinstance(
+        time_selection, MonthSelector
+    ):
+        with pytest.raises(NotImplementedError):
+            file_writer = file_writer_config.build(
+                experiment_dir=str(tmpdir),
+                n_initial_conditions=n_samples,
+                n_timesteps=-1,  # unused for netcdf
+                coords={},
+                variable_metadata={},
+                dataset_metadata=DatasetMetadata(),
+            )
+        return
+
+    file_writer = file_writer_config.build(
+        experiment_dir=str(tmpdir),
+        n_initial_conditions=n_samples,
+        n_timesteps=-1,  # unused for netcdf
+        coords={},
+        variable_metadata={},
+        dataset_metadata=DatasetMetadata(),
     )
-    np.testing.assert_array_equal(expected, selected_data.temperature)
-
-    # Test with Slice index
-    selected_data = _select_time(data, Slice(start=0, stop=5, step=2))
-    assert len(selected_data.time) == 3
-    np.testing.assert_array_equal(
-        data.temperature[:5:2, :, :], selected_data.temperature
+    file_writer.append_batch(
+        data=dict(batch_data.data),
+        start_timestep=0,
+        batch_time=batch_data.time,
     )
 
-    # Test with None
-    selected_data = _select_time(data, None)
-    assert len(selected_data.time) == 7
-    np.testing.assert_array_equal(data.temperature, selected_data.temperature)
+    with xr.open_dataset(tmpdir / "test_writer.nc") as subselected_data:
+        assert len(subselected_data.sample) == n_samples
+        if isinstance(time_selection, Slice):
+            assert len(subselected_data.time) == 2
+            np.testing.assert_almost_equal(
+                batch_data.data["temperature"][:, 0:3:2, :].cpu().numpy(),
+                subselected_data.temperature,
+            )
+        else:  # time_selection is None
+            assert len(subselected_data.time) == n_timesteps
+            np.testing.assert_almost_equal(
+                batch_data.data["temperature"].cpu().numpy(),
+                subselected_data.temperature,
+            )
 
+
+def test_subset_time_invalid_time_selection():
     with pytest.raises(ValueError):
-        _select_time(data, 0.1)  # type: ignore
+        _select_time(xr.Dataset(), 0.1)  # type: ignore
 
 
 def get_file_writer(**kwarg_updates):
@@ -250,7 +357,7 @@ def test_file_writer__subselect_data_limits_variables():
     }
     batch_time = xr.DataArray(xr.date_range("2020-01-01", periods=10, freq="D"))
 
-    subselected_data = writer._subselect_data(data, batch_time)
+    subselected_data, _ = writer._subselect_data(data, batch_time)
 
     assert "pressure" not in subselected_data
     assert set(subselected_data.keys()) == {"temperature", "humidity"}
@@ -270,11 +377,12 @@ def test_file_writer__subselect_data_empty_time():
         xr.date_range("2021-01-01", periods=10, freq="D"), dims="time"
     )
 
-    subselected_data = writer._subselect_data(data, batch_time)
+    subselected_data, subselected_time = writer._subselect_data(data, batch_time)
 
     assert (
         not subselected_data
     )  # Should return empty dict if no time steps are selected
+    assert subselected_time.sizes["time"] == 0
 
 
 def test_file_writer_no_names_specified_saves_all():
@@ -287,7 +395,7 @@ def test_file_writer_no_names_specified_saves_all():
     }
     batch_time = xr.DataArray(xr.date_range("2020-01-01", periods=10, freq="D"))
 
-    subselected_data = file_writer._subselect_data(data, batch_time)
+    subselected_data, _ = file_writer._subselect_data(data, batch_time)
 
     assert set(subselected_data.keys()) == {"temperature", "humidity", "pressure"}
 
