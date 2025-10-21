@@ -70,7 +70,6 @@ while read PRETRAINING; do
     ATMOS_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f7)
     STATUS=$(echo "$PRETRAINING" | cut -d"|" -f8)
     PRIORITY=$(echo "$PRETRAINING" | cut -d"|" -f9)
-    CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f10)
     N_GPUS=$(echo "$PRETRAINING" | cut -d"|" -f11)
     SHARED_MEM=$(echo "$PRETRAINING" | cut -d"|" -f12)
     RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f13)
@@ -100,22 +99,21 @@ while read PRETRAINING; do
         beaker experiment get $OCEAN_EXPER_ID --format json |
             jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4
     )
+    if [[ -z "$WORKSPACE" ]]; then
+        WORKSPACE=ai2/ace
+    fi
     declare -a CLUSTER_ARGS
-    if [[ "$CLUSTER" == "titan" ]]; then
-        if [[ -z "$WORKSPACE" ]]; then
-            WORKSPACE=ai2/climate-titan
-        fi
-        CLUSTER_ARGS=(
-            --workspace "$WORKSPACE"
-            --cluster titan
-        )
-    else
-        if [[ -z "$WORKSPACE" ]]; then
-            WORKSPACE=ai2/climate-ceres
-        fi
+    if [[ -z "$CLUSTER" ]]; then
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
             --cluster ceres
+            --cluster jupiter
+        )
+        CLUSTER="ceres / jupiter"
+    else
+        CLUSTER_ARGS=(
+            --workspace "$WORKSPACE"
+            --cluster "$CLUSTER"
         )
     fi
 
