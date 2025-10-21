@@ -67,73 +67,75 @@ class Distributed:
         self._seed = 0
 
     def _init_distributed(self):
-        #NOTE: I am commenting this out for now to make testing easier. 
-        #We can review this block of code once spatial parallelism 
+        #NOTE: I am commenting this out for now to make testing easier.
+        #We can review this block of code once spatial parallelism
         #is functioning correctly in a full test.
-        #if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
-        #    if using_gpu():
-        #        torch.distributed.init_process_group(
-        #            backend="nccl", init_method="env://"
-        #        )
-        #    else:
-        #        torch.distributed.init_process_group(
-        #            backend="gloo", init_method="env://"
-        #        )
-        #    self.world_size = torch.distributed.get_world_size()
-        #    self.local_rank = int(os.environ["LOCAL_RANK"])
-        #    self.rank = torch.distributed.get_rank()
-        #    if using_gpu():
-        #        self._device_id = self.local_rank
-        #        torch.cuda.set_device(self._device_id)
-        #    distributed = True
-        #elif using_srun():  # executing with srun
-        #    shared_dist_file = os.environ["SRUN_DIST_FILE_PATH"]
-        #    self.rank = int(os.environ["SLURM_PROCID"])
-        #    self.world_size = int(os.environ["SLURM_NTASKS"])
-        #    self.local_rank = int(os.environ["SLURM_LOCALID"])
-        #    backend = "nccl" if using_gpu() else "gloo"
-        #    torch.distributed.init_process_group(
-        #        backend=backend,
-        #        init_method=f"file://{shared_dist_file}",
-        #        rank=self.rank,
-        #        world_size=self.world_size,
-        #    )
-        #    if using_gpu():
-        #        # this assumes one GPU per process in the SLURM setting
-        #        # --gpus-per-task=1 --gpu-bind=closest
-        #        self._device_id = 0
-        #        torch.cuda.set_device(self._device_id)
-        #    distributed = True
-        #else:
-        #    self.world_size = 1
-        #    self.rank = 0
-        #    self.local_rank = 0
-        #    distributed = False
         #TODO: Pass dist inputs instead of hard-coding them.
         fin_parallel_size=1#args.fin_parallel_size
         fout_parallel_size=1#args.fout_parallel_size
         h_parallel_size=1#args.h_parallel_size
         w_parallel_size=1#args.w_parallel_size
-        params={}
-        params["fin_parallel_size"] = fin_parallel_size
-        params["fout_parallel_size"] = fout_parallel_size
-        params["h_parallel_size"] = h_parallel_size
-        params["w_parallel_size"] = w_parallel_size
+        if (h_parallel_size>1) or (w_parallel_size >1):
+          params={}
+          params["fin_parallel_size"] = fin_parallel_size
+          params["fout_parallel_size"] = fout_parallel_size
+          params["h_parallel_size"] = h_parallel_size
+          params["w_parallel_size"] = w_parallel_size
 
-        params["model_parallel_sizes"] = [h_parallel_size, w_parallel_size, fin_parallel_size, fout_parallel_size]
-        params["model_parallel_names"] = ["h", "w", "fin", "fout"]
+          params["model_parallel_sizes"] = [h_parallel_size, w_parallel_size, fin_parallel_size, fout_parallel_size]
+          params["model_parallel_names"] = ["h", "w", "fin", "fout"]
 
-        comm.init(model_parallel_sizes=params["model_parallel_sizes"], model_parallel_names=params["model_parallel_names"], verbose=False)
+          comm.init(model_parallel_sizes=params["model_parallel_sizes"], model_parallel_names=params["model_parallel_names"], verbose=False)
 
-        self.world_size = comm.get_world_size()
-        self.rank = comm.get_world_rank()
-        self.local_rank = comm.get_local_rank()
-        distributed = True
-        torch.cuda.set_device(comm.get_local_rank())
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        return distributed
+          self.world_size = comm.get_world_size()
+          self.rank = comm.get_world_rank()
+          self.local_rank = comm.get_local_rank()
+          distributed = True
+          torch.cuda.set_device(comm.get_local_rank())
+          torch.backends.cudnn.benchmark = True
+          torch.backends.cuda.matmul.allow_tf32 = True
+          torch.backends.cudnn.allow_tf32 = True
+        elif "RANK" in os.environ and not using_srun():  # we were executed with torchrun
+           if using_gpu():
+               torch.distributed.init_process_group(
+                   backend="nccl", init_method="env://"
+               )
+           else:
+               torch.distributed.init_process_group(
+                   backend="gloo", init_method="env://"
+               )
+           self.world_size = torch.distributed.get_world_size()
+           self.local_rank = int(os.environ["LOCAL_RANK"])
+           self.rank = torch.distributed.get_rank()
+           if using_gpu():
+               self._device_id = self.local_rank
+               torch.cuda.set_device(self._device_id)
+           distributed = True
+        elif using_srun():  # executing with srun
+           shared_dist_file = os.environ["SRUN_DIST_FILE_PATH"]
+           self.rank = int(os.environ["SLURM_PROCID"])
+           self.world_size = int(os.environ["SLURM_NTASKS"])
+           self.local_rank = int(os.environ["SLURM_LOCALID"])
+           backend = "nccl" if using_gpu() else "gloo"
+           torch.distributed.init_process_group(
+               backend=backend,
+               init_method=f"file://{shared_dist_file}",
+               rank=self.rank,
+               world_size=self.world_size,
+           )
+           if using_gpu():
+               # this assumes one GPU per process in the SLURM setting
+               # --gpus-per-task=1 --gpu-bind=closest
+               self._device_id = 0
+               torch.cuda.set_device(self._device_id)
+           distributed = True
+        else:
+           self.world_size = 1
+           self.rank = 0
+           self.local_rank = 0
+           distributed = False
+
+
 
     def get_sampler(
         self,
@@ -141,11 +143,17 @@ class Distributed:
         shuffle: bool,
         drop_last: bool = False,
     ) -> torch.utils.data.Sampler:
+        if self._distributed:
+          num_replicas=comm.get_size("batch")
+          rank=comm.get_rank("batch")
+        else:
+          num_replicas=self.world_size
+          rank=self.rank
         return torch.utils.data.DistributedSampler(
             dataset,
             shuffle=shuffle,
-            num_replicas=comm.get_size("batch"),
-            rank=comm.get_rank("batch"),
+            num_replicas=num_replicas,
+            rank=rank,
             seed=self._seed,
             drop_last=drop_last,
         )
