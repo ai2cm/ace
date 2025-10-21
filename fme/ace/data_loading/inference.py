@@ -201,6 +201,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         label_override: list[str] | None = None,
         surface_temperature_name: str | None = None,
         ocean_fraction_name: str | None = None,
+        n_ensemble: int | None = None,
     ):
         """
         Parameters:
@@ -232,6 +233,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._surface_temperature_name = surface_temperature_name
         self._ocean_fraction_name = ocean_fraction_name
         self._n_initial_conditions = config.n_initial_conditions
+        self._n_ensemble = n_ensemble if n_ensemble is not None else 1
         if isinstance(config.start_indices, TimestampList):
             self._start_indices = config.start_indices.as_indices(
                 self._dataset.all_times
@@ -305,6 +307,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
+            n_ensemble=self._n_ensemble,
         )
 
     def __getitem__(self, index) -> BatchData:

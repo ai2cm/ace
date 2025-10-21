@@ -126,6 +126,9 @@ class InferenceEvaluatorConfig:
             This should be used with caution, as it may allow the stepper to make
             scientifically invalid predictions, but it can allow running inference with
             incorrectly formatted or missing grid information.
+        n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
+            stochastic model weather inference. n_ensemble_per_ic = 1 is default
+            inference behavior.
     """
 
     experiment_dir: str
@@ -143,6 +146,7 @@ class InferenceEvaluatorConfig:
     )
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
+    n_ensemble_per_ic: int = 1
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -269,6 +273,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         total_forward_steps=config.n_forward_steps,
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
+        n_ensemble=config.n_ensemble_per_ic,
     )
 
     stepper = config.load_stepper()
@@ -319,6 +324,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             total_forward_steps=config.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
+            n_ensemble=config.n_ensemble_per_ic,
         )
         deriver = _Deriver(
             n_ic_timesteps=stepper_config.n_ic_timesteps,

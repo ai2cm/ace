@@ -229,6 +229,7 @@ class BatchData:
         samples: Sequence[tuple[TensorMapping, xr.DataArray, set[str]]],
         sample_dim_name: str = "sample",
         horizontal_dims: list[str] | None = None,
+        n_ensemble: int = 1,
     ) -> "BatchData":
         sample_data, sample_times, sample_labels = zip(*samples)
         batch_data = default_collate(sample_data)
@@ -238,6 +239,7 @@ class BatchData:
             time=batch_time,
             labels=list(sample_labels),
             horizontal_dims=horizontal_dims,
+            n_ensemble=n_ensemble,
         )
 
     def compute_derived_variables(

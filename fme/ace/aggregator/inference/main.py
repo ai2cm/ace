@@ -17,7 +17,12 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
 )
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import (
+    EnsembleMapping,
+    EnsembleTensorDict,
+    TensorDict,
+    TensorMapping,
+)
 from fme.core.wandb import Table, WandB
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
@@ -63,6 +68,24 @@ class _EvaluatorAggregator(Protocol):
         self,
         target_data: TensorMapping,
         gen_data: TensorMapping,
+        target_data_norm: EnsembleTensorDict,
+        gen_data_norm: TensorMapping,
+        i_time_start: int = 0,
+    ): ...
+
+    @torch.no_grad()
+    def get_logs(self, label: str): ...
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset: ...
+
+
+class _EvaluatorEnsembleAggregator(Protocol):
+    @torch.no_grad()
+    def record_batch(
+        self,
+        target_data: EnsembleMapping,
+        gen_data: TensorMapping,
         target_data_norm: TensorMapping,
         gen_data_norm: TensorMapping,
         i_time_start: int = 0,
@@ -75,19 +98,19 @@ class _EvaluatorAggregator(Protocol):
     def get_dataset(self) -> xr.Dataset: ...
 
 
-class _TimeDependentAggregator(Protocol):
-    @torch.no_grad()
-    def record_batch(
-        self,
-        time: xr.DataArray,
-        data: TensorMapping,
-    ): ...
+# class _TimeDependentAggregator(Protocol):
+#     @torch.no_grad()
+#     def record_batch(
+#         self,
+#         time: xr.DataArray,
+#         data: TensorMapping,
+#     ): ...
 
-    @torch.no_grad()
-    def get_logs(self, label: str): ...
+#     @torch.no_grad()
+#     def get_logs(self, label: str): ...
 
-    @torch.no_grad()
-    def get_dataset(self) -> xr.Dataset: ...
+#     @torch.no_grad()
+#     def get_dataset(self) -> xr.Dataset: ...
 
 
 class _TimeDependentEvaluatorAggregator(Protocol):
