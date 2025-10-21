@@ -70,6 +70,7 @@ while read PRETRAINING; do
     ATMOS_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f7)
     STATUS=$(echo "$PRETRAINING" | cut -d"|" -f8)
     PRIORITY=$(echo "$PRETRAINING" | cut -d"|" -f9)
+    CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f10)
     N_GPUS=$(echo "$PRETRAINING" | cut -d"|" -f11)
     SHARED_MEM=$(echo "$PRETRAINING" | cut -d"|" -f12)
     RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f13)
