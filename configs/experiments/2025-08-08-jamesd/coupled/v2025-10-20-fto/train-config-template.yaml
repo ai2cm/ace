@@ -20,12 +20,12 @@ inference:
           file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-03T12:00:00' # earlier times nan
+            start_time: '0151-01-03T12:00:00'
         - data_path: /climate-default
           file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-03T12:00:00' # earlier times nan
+            start_time: '0151-01-03T12:00:00'
       atmosphere:
         merge:
         - data_path: /climate-default
@@ -33,13 +33,13 @@ inference:
           engine: zarr
           subset:
             # NOTE: this is required to align the atmosphere and ocean start times
-            start_time: '0151-01-03T12:00:00' # earlier times nan
+            start_time: '0151-01-03T12:00:00' # earlier times nan sea ice
         - data_path: /climate-default
           file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
           engine: zarr
           subset:
             # NOTE: this is required to align the atmosphere and ocean start times
-            start_time: '0151-01-03T12:00:00' # earlier times nan
+            start_time: '0151-01-03T12:00:00'
     start_indices:
       times:
       - '0151-01-03T12:00:00'
@@ -84,13 +84,13 @@ train_loader:
           file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-03T12:00:00' # earlier times nan
+            start_time: '0151-01-03T12:00:00' # earlier times nan sea ice
             stop_time: '0306-01-03T12:00:00'
         - data_path: /climate-default
           file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
           engine: zarr
           subset:
-            start_time: '0151-01-03T12:00:00' # earlier times nan
+            start_time: '0151-01-03T12:00:00'
             stop_time: '0306-01-03T12:00:00'
 validation_loader:
   batch_size: 16
