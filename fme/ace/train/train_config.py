@@ -23,8 +23,9 @@ from fme.ace.requirements import (
     NullDataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.ace.stepper import ExistingStepperConfig, Stepper
+from fme.ace.stepper import Stepper
 from fme.ace.stepper.single_module import StepperConfig
+from fme.core.cli import ResumeResultsConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
@@ -197,11 +198,16 @@ class TrainConfig:
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
+        resume_results:  Configuration for resuming a previously stopped or finished
+            training job. When provided and experiment_dir has no training_checkpoints
+            subdirectory, then it is assumed that this is a new run to resume a
+            previously completed run and resume_results.existing_dir is recursively
+            copied to experiment_dir.
     """
 
     train_loader: DataLoaderConfig
     validation_loader: DataLoaderConfig
-    stepper: ExistingStepperConfig | StepperConfig
+    stepper: StepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
@@ -227,6 +233,7 @@ class TrainConfig:
     )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
         if (
@@ -365,7 +372,7 @@ class TrainBuilders:
         normalize: Callable[[TensorMapping], TensorDict],
         output_dir: str,
         variable_metadata: Mapping[str, VariableMetadata],
-        channel_mean_names: Sequence[str],
+        channel_mean_names: Sequence[str] | None,
         save_diagnostics: bool,
         n_ic_timesteps: int,
     ) -> EndOfEpochCallback:

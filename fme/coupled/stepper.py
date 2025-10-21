@@ -109,6 +109,34 @@ class CoupledOceanFractionConfig:
                 "to be an ML forcing of the atmosphere model, but it is not."
             )
 
+    def filter_atmosphere_forcing_names(
+        self,
+        unfiltered_names: Iterable[str],
+        ocean_fraction_name: str,
+    ) -> list[str]:
+        """Remove ocean fraction and sea ice fraction from atmosphere forcing names.
+
+        When ocean fraction is predicted from ocean model outputs, these
+        variables should not be loaded from atmosphere data since they will be
+        computed at runtime.
+
+        Args:
+            unfiltered_names: The full list of atmosphere forcing names to filter.
+            ocean_fraction_name: Name of the ocean fraction field in atmosphere data.
+
+        Returns:
+            Filtered list of atmosphere forcing names.
+
+        """
+        filtered = [name for name in unfiltered_names if name != ocean_fraction_name]
+
+        sea_ice_fraction_name = (
+            self.sea_ice_fraction_name_in_atmosphere or self.sea_ice_fraction_name
+        )
+        filtered = [name for name in filtered if name != sea_ice_fraction_name]
+
+        return filtered
+
     def build_ocean_data(
         self, forcings_from_ocean: TensorMapping, atmos_forcing_data: TensorMapping
     ) -> OceanData:
@@ -237,11 +265,22 @@ class CoupledStepperConfig:
                 self.atmosphere.stepper.output_names
             )
         )
-        self._atmosphere_forcing_exogenous_names = list(
+        unfiltered_atmosphere_forcing_names = list(
             set(self.atmosphere.stepper.input_only_names).difference(
                 self.ocean.stepper.output_names
             )
         )
+        if self.ocean_fraction_prediction is not None:
+            self._atmosphere_forcing_exogenous_names = (
+                self.ocean_fraction_prediction.filter_atmosphere_forcing_names(
+                    unfiltered_atmosphere_forcing_names,
+                    self._atmosphere_ocean_config.ocean_fraction_name,
+                )
+            )
+        else:
+            self._atmosphere_forcing_exogenous_names = (
+                unfiltered_atmosphere_forcing_names
+            )
         self._shared_forcing_exogenous_names = list(
             set(self._ocean_forcing_exogenous_names).intersection(
                 self._atmosphere_forcing_exogenous_names
@@ -267,16 +306,27 @@ class CoupledStepperConfig:
         )
 
         # calculate names for each component's data requirements
-        self._all_atmosphere_names = list(
+        unfiltered_all_atmosphere_names = list(
             set(self.atmosphere.stepper.all_names).difference(
                 self.ocean.stepper.output_names
             )
         )
+        if self.ocean_fraction_prediction is not None:
+            self._all_atmosphere_names = (
+                self.ocean_fraction_prediction.filter_atmosphere_forcing_names(
+                    unfiltered_all_atmosphere_names,
+                    self.ocean_fraction_name,
+                )
+            )
+        else:
+            self._all_atmosphere_names = unfiltered_all_atmosphere_names
+        # NOTE: this removes "shared" forcings from the ocean data requirements
         self._all_ocean_names = list(
             set(self.ocean.stepper.all_names).difference(self._all_atmosphere_names)
         )
-
         if self.ocean_fraction_prediction is not None:
+            # NOTE: land_fraciton is necessary to derive sea_ice_fraction from
+            # ocean_sea_ice_fraction
             self._all_ocean_names.append(
                 self.ocean_fraction_prediction.land_fraction_name
             )
@@ -482,6 +532,26 @@ class CoupledStepperConfig:
             atmosphere=self.atmosphere.stepper.get_prognostic_state_data_requirements(),
         )
 
+    def get_forcing_window_data_requirements(
+        self, n_coupled_steps: int
+    ) -> CoupledDataRequirements:
+        ocean_forcing_names = list(
+            set(self.ocean_forcing_exogenous_names).difference(
+                self.shared_forcing_exogenous_names
+            )
+        )
+        return CoupledDataRequirements(
+            ocean_timestep=self.ocean_timestep,
+            ocean_requirements=DataRequirements(
+                ocean_forcing_names, n_timesteps=n_coupled_steps + 1
+            ),
+            atmosphere_timestep=self.atmosphere_timestep,
+            atmosphere_requirements=DataRequirements(
+                names=self.atmosphere_forcing_exogenous_names,
+                n_timesteps=n_coupled_steps * self.n_inner_steps + 1,
+            ),
+        )
+
     def _get_ocean_stepper(
         self,
         dataset_info: DatasetInfo,
@@ -536,14 +606,14 @@ class CoupledStepperConfig:
 
     def get_ocean_loss(
         self,
-        loss_obj: Callable[[TensorMapping, TensorMapping], torch.Tensor],
+        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
         time_dim: int,
     ) -> StepLossABC:
         return self.ocean.loss_contributions.build(loss_obj, time_dim)
 
     def get_atmosphere_loss(
         self,
-        loss_obj: Callable[[TensorMapping, TensorMapping], torch.Tensor],
+        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
         time_dim: int,
     ) -> StepLossABC:
         return self.atmosphere.loss_contributions.build(loss_obj, time_dim)
@@ -802,6 +872,10 @@ class CoupledStepper(
     def load_state(self, state: dict[str, Any]):
         self.atmosphere.load_state(state["atmosphere_state"])
         self.ocean.load_state(state["ocean_state"])
+
+    @property
+    def training_dataset_info(self) -> CoupledDatasetInfo:
+        return self._dataset_info
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -1153,15 +1227,12 @@ class CoupledStepper(
         )
         return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmos_data)
 
-    def predict_paired(
+    def _predict(
         self,
         initial_condition: CoupledPrognosticState,
         forcing: CoupledBatchData,
         compute_derived_variables: bool = False,
-    ) -> tuple[CoupledPairedData, CoupledPrognosticState]:
-        """
-        Predict multiple steps forward given initial condition and reference data.
-        """
+    ):
         timer = GlobalTimer.get_instance()
         output_list = list(
             self.get_prediction_generator(
@@ -1183,6 +1254,18 @@ class CoupledStepper(
                         n_ic_timesteps_atmosphere=self.atmosphere.n_ic_timesteps,
                     )
                 )
+        return gen_data
+
+    def predict_paired(
+        self,
+        initial_condition: CoupledPrognosticState,
+        forcing: CoupledBatchData,
+        compute_derived_variables: bool = False,
+    ) -> tuple[CoupledPairedData, CoupledPrognosticState]:
+        """
+        Predict multiple steps forward given initial condition and reference data.
+        """
+        gen_data = self._predict(initial_condition, forcing, compute_derived_variables)
         atmos_forward_data = self.atmosphere.get_forward_data(
             forcing.atmosphere_data, compute_derived_variables=compute_derived_variables
         )
@@ -1196,6 +1279,29 @@ class CoupledStepper(
                     ocean_data=ocean_forward_data,
                     atmosphere_data=atmos_forward_data,
                 ),
+            ),
+            CoupledPrognosticState(
+                ocean_data=gen_data.ocean_data.get_end(
+                    self.ocean.prognostic_names,
+                    self.n_ic_timesteps,
+                ),
+                atmosphere_data=gen_data.atmosphere_data.get_end(
+                    self.atmosphere.prognostic_names,
+                    self.atmosphere.n_ic_timesteps,
+                ),
+            ),
+        )
+
+    def predict(
+        self,
+        initial_condition: CoupledPrognosticState,
+        forcing: CoupledBatchData,
+        compute_derived_variables: bool = False,
+    ) -> tuple[CoupledBatchData, CoupledPrognosticState]:
+        gen_data = self._predict(initial_condition, forcing, compute_derived_variables)
+        return (
+            CoupledBatchData(
+                ocean_data=gen_data.ocean_data, atmosphere_data=gen_data.atmosphere_data
             ),
             CoupledPrognosticState(
                 ocean_data=gen_data.ocean_data.get_end(

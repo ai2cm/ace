@@ -55,7 +55,7 @@ Once downloaded, you can install the sources in development mode (``-e`` flag) w
 
 .. code-block:: shell
 
-    pip install -c constraints.txt -e fme[dev]
+    pip install -c constraints.txt -e .[dev]
 
 Docker
 ------

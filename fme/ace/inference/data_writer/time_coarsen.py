@@ -21,6 +21,9 @@ class _PairedDataWriter(Protocol):
     def flush(self):
         pass
 
+    def finalize(self):
+        pass
+
 
 class _DataWriter(Protocol):
     def append_batch(
@@ -32,6 +35,9 @@ class _DataWriter(Protocol):
         pass
 
     def flush(self):
+        pass
+
+    def finalize(self):
         pass
 
 
@@ -104,6 +110,9 @@ class PairedTimeCoarsen:
     def flush(self):
         self._data_writer.flush()
 
+    def finalize(self):
+        self._data_writer.finalize()
+
 
 class TimeCoarsen:
     """Wraps a data writer and coarsens its arguments in time before passing them on."""
@@ -134,6 +143,9 @@ class TimeCoarsen:
     def flush(self):
         self._data_writer.flush()
 
+    def finalize(self):
+        self._data_writer.finalize()
+
 
 def coarsen_batch(
     data: dict[str, torch.Tensor],
@@ -142,9 +154,9 @@ def coarsen_batch(
     coarsen_factor: int,
 ) -> tuple[dict[str, torch.Tensor], int, xr.DataArray]:
     data_coarsened = _coarsen_tensor_dict(data, coarsen_factor)
-    start_timestep = start_timestep // coarsen_factor
+    start_timestep_coarsened = start_timestep // coarsen_factor
     batch_time_coarsened = batch_time.coarsen({TIME_DIM_NAME: coarsen_factor}).mean()
-    return data_coarsened, start_timestep, batch_time_coarsened
+    return data_coarsened, start_timestep_coarsened, batch_time_coarsened
 
 
 def _coarsen_tensor_dict(

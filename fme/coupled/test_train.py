@@ -65,7 +65,7 @@ inference:
         - '1970-01-03T00:00:00'
   n_coupled_steps: {inference_n_coupled_steps}
   aggregator:
-    log_zonal_mean_images: {log_zonal_mean_images}
+    log_zonal_mean_images: True
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
@@ -192,7 +192,6 @@ def _write_test_yaml_files(
     n_coupled_steps: int = 1,
     max_epochs: int = 1,
     inline_inference_n_coupled_steps: int = 3,
-    log_zonal_mean_images: bool = False,
     inference_n_coupled_steps: int = 6,
     coupled_steps_in_memory: int = 2,
     save_per_epoch_diagnostics: bool = True,
@@ -223,7 +222,6 @@ def _write_test_yaml_files(
         land_frac_name=land_frac_name,
         atmos_sfc_temp_name=atmos_sfc_temp_name,
         ocean_frac_name=ocean_frac_name,
-        log_zonal_mean_images=str(log_zonal_mean_images).lower(),
         save_per_epoch_diagnostics=str(save_per_epoch_diagnostics).lower(),
         loss_atmos_n_steps=loss_atmos_n_steps,
         loss_ocean_weight=loss_ocean_weight,
@@ -248,25 +246,10 @@ def _write_test_yaml_files(
 
 
 @pytest.mark.parametrize(
-    "log_zonal_mean_images,loss_atmos_n_steps",
-    [
-        (False, 3),
-        (False, 0),
-        pytest.param(
-            True,
-            1,
-            marks=pytest.mark.xfail(
-                reason=(
-                    "There is an unresolved bug when logging "
-                    "zonal mean images during coupled inference"
-                )
-            ),
-        ),
-    ],
+    "loss_atmos_n_steps",
+    [3, 0],
 )
-def test_train_and_inference(
-    tmp_path, log_zonal_mean_images, loss_atmos_n_steps, very_fast_only: bool
-):
+def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool):
     """Ensure that coupled training and standalone inference run without errors."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
@@ -347,6 +330,7 @@ def test_train_and_inference(
     all_out_names = (
         ocean_out_names + ocean_derived_names + atmos_out_names + atmos_derived_names
     )
+    all_out_normed_names = ocean_out_names + atmos_out_names
 
     train_config_fname, inference_config_fname = _write_test_yaml_files(
         tmp_path,
@@ -361,7 +345,6 @@ def test_train_and_inference(
         land_frac_name="land_fraction",
         atmos_sfc_temp_name="surface_temperature",
         ocean_frac_name="ocean_fraction",
-        log_zonal_mean_images=log_zonal_mean_images,
         n_coupled_steps=2,
         max_epochs=1,
         inline_inference_n_coupled_steps=3,
@@ -411,22 +394,54 @@ def test_train_and_inference(
     # atmos loss contributions
     assert "val/mean/loss/atmosphere" in epoch_logs
     if loss_atmos_n_steps == 0:
-        assert np.isclose(epoch_logs["val/mean/loss/atmosphere"], 0.0)
-    assert "inference/time_mean_norm/rmse/channel_mean" in epoch_logs
-    assert "inference/time_mean_norm/rmse/ocean_channel_mean" in epoch_logs
-    assert "inference/time_mean_norm/rmse/atmosphere_channel_mean" in epoch_logs
-    ocean_weight = len(ocean_out_names + ocean_derived_names) / len(all_out_names)
-    assert np.isclose(
-        epoch_logs["inference/time_mean_norm/rmse/channel_mean"],
-        (
-            ocean_weight
-            * epoch_logs["inference/time_mean_norm/rmse/ocean_channel_mean"]
-            + (1 - ocean_weight)
-            * epoch_logs["inference/time_mean_norm/rmse/atmosphere_channel_mean"]
-        ),
-    )
+        np.testing.assert_allclose(epoch_logs["val/mean/loss/atmosphere"], 0.0)
+
     for name in all_out_names:
         assert f"inference/time_mean/rmse/{name}" in epoch_logs
+        if name in all_out_normed_names:
+            assert f"val/mean_norm/weighted_rmse/{name}" in epoch_logs
+            assert f"inference/time_mean_norm/rmse/{name}" in epoch_logs
+        else:
+            assert f"val/mean_norm/weighted_rmse/{name}" not in epoch_logs
+            assert f"inference/time_mean_norm/rmse/{name}" not in epoch_logs
+
+    ocean_weight = len(ocean_out_names + ocean_derived_names) / len(all_out_names)
+    atol, rtol = 1e-6, 1e-6
+    for prefix in ["inference/time_mean_norm/rmse", "val/mean_norm/weighted_rmse"]:
+        assert f"{prefix}/ocean_channel_mean" in epoch_logs
+        ocean_channel_mean = sum(
+            [epoch_logs[f"{prefix}/{name}"] for name in ocean_out_names]
+        ) / len(ocean_out_names)
+        np.testing.assert_allclose(
+            epoch_logs[f"{prefix}/ocean_channel_mean"],
+            ocean_channel_mean,
+            rtol=rtol,
+            atol=atol,
+        )
+
+        assert f"{prefix}/atmosphere_channel_mean" in epoch_logs
+        atmos_channel_mean = sum(
+            [epoch_logs[f"{prefix}/{name}"] for name in atmos_out_names]
+        ) / len(atmos_out_names)
+        np.testing.assert_allclose(
+            epoch_logs[f"{prefix}/atmosphere_channel_mean"],
+            atmos_channel_mean,
+            rtol=rtol,
+            atol=atol,
+        )
+
+        if "time_mean_norm" in prefix:
+            assert f"{prefix}/channel_mean" in epoch_logs
+            np.testing.assert_allclose(
+                epoch_logs[f"{prefix}/channel_mean"],
+                (
+                    ocean_weight * epoch_logs[f"{prefix}/ocean_channel_mean"]
+                    + (1 - ocean_weight)
+                    * epoch_logs[f"{prefix}/atmosphere_channel_mean"]
+                ),
+                rtol=rtol,
+                atol=atol,
+            )
 
     # check that inference map captions includes expected units
     for map_name in ["val/mean_map/image-error", "inference/time_mean/bias_map"]:
@@ -485,7 +500,7 @@ def test_train_and_inference(
     assert len(inference_logs) == n_ic_timesteps + n_forward_steps + n_summary_steps
 
     for name in atmos_out_names + ocean_out_names:
-        assert np.isclose(
+        np.testing.assert_allclose(
             inference_logs[0][f"inference/mean/weighted_mean_target/{name}"],
             inference_logs[0][f"inference/mean/weighted_mean_gen/{name}"],
         )

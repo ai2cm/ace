@@ -1,1 +1,1 @@
-from .fcn2 import FCN2Config, FCN2Selector, FCN2StepConfig
+from .fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig

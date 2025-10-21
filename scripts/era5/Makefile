@@ -1,5 +1,5 @@
-VERSION ?= 2024-07-10-era5-xarray-beam-pipelines
-IMAGE_NAME ?= us.gcr.io/vcm-ml/era5-ingest-dataflow:$(VERSION)
+VERSION ?= 2025-10-07-era5-xarray-beam-pipelines
+IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/era5-ingest-dataflow:$(VERSION)
 LOCAL_ENVIRONMENT ?= era5-ingestion
 
 ingest_ncar_variables:
@@ -11,7 +11,7 @@ create_environment:
 	conda run --no-capture-output -n era5-ingestion pip install metview jupyterlab matplotlib cfgrib
 
 build_dataflow:
-	docker build -t $(IMAGE_NAME) .
+	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
 
 push_dataflow: build_dataflow
 	docker push $(IMAGE_NAME)

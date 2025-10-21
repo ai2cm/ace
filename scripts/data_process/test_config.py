@@ -16,8 +16,13 @@ APPEND_CONFIG_YAMLS = [
     if f.endswith(".yaml") and "append" in f
 ]
 IGNORE_CONFIG_YAMLS = [
-    "2025-08-07-cm4-piControl-200yr-5daily-sfc-flux.yaml",
-    "2025-08-13-e3smv3-piControl-100yr-5daily-sfc-flux.yaml",
+    "CM4-piControl-sea-ice-1deg-200yr.yaml",
+    "CM4-piControl-200yr-sic-6h-to-5Davg.yaml",
+    "CM4-piControl-200yr-ts-6h-to-5Davg.yaml",
+    "CM4-piControl-200yr-5daily-sfc-flux.yaml",
+    "E3SMv3-piControl-100yr-5daily-sfc-flux.yaml",
+    "E3SMv3-piControl-100yr-sic-6h-to5Davg.yaml",
+    "e3smv3-piControl-100yr-ts-6h-to-5Davg.yaml",
 ]
 CONFIG_YAMLS = [
     os.path.join(DIRNAME + "/configs", f)

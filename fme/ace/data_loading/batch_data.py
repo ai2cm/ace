@@ -10,8 +10,13 @@ from torch.utils.data import default_collate
 
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
-from fme.core.tensors import repeat_interleave_batch_dim
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.tensors import (
+    add_ensemble_dim,
+    fold_sized_ensemble_dim,
+    repeat_interleave_batch_dim,
+    unfold_ensemble_dim,
+)
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
 
@@ -66,6 +71,7 @@ class BatchData:
     horizontal_dims: list[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
+    n_ensemble: int = 1
 
     @classmethod
     def new_for_testing(
@@ -130,6 +136,16 @@ class BatchData:
     def n_timesteps(self) -> int:
         return self.time["time"].values.size
 
+    @property
+    def ensemble_data(self) -> EnsembleTensorDict:
+        """
+        Add an explicit ensemble dimension to a data tensor dict.
+
+        Returns:
+            The tensor dict with an explicit ensemble dimension.
+        """
+        return unfold_ensemble_dim(TensorDict(self.data), n_ensemble=self.n_ensemble)
+
     def to_device(self) -> "BatchData":
         return self.__class__(
             data={k: v.to(get_device()) for k, v in self.data.items()},
@@ -161,6 +177,7 @@ class BatchData:
         time: xr.DataArray,
         labels: BatchLabels,
         horizontal_dims: list[str] | None = None,
+        n_ensemble: int = 1,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         kwargs = cls._get_kwargs(horizontal_dims)
@@ -168,6 +185,7 @@ class BatchData:
             data=data,
             time=time,
             labels=labels,
+            n_ensemble=n_ensemble,
             **kwargs,
         )
 
@@ -178,6 +196,7 @@ class BatchData:
         time: xr.DataArray,
         labels: BatchLabels,
         horizontal_dims: list[str] | None = None,
+        n_ensemble: int = 1,
     ) -> "BatchData":
         """
         Move the data to the current global device specified by get_device().
@@ -188,6 +207,7 @@ class BatchData:
             data=data,
             time=time,
             labels=labels,
+            n_ensemble=n_ensemble,
             **kwargs,
         )
 
@@ -339,6 +359,26 @@ class BatchData:
             time=xr.concat([initial_batch_data.time, self.time], dim="time"),
             horizontal_dims=self.horizontal_dims,
             labels=self.labels,
+        )
+
+    def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
+        """
+        Broadcast n_ensemble ensembles to a new BatchData obj.
+        """
+        data = {**self.data}
+        data = add_ensemble_dim(data, repeats=n_ensemble)
+        data = fold_sized_ensemble_dim(data, n_ensemble=n_ensemble)
+
+        time = self.time
+        time = xr.concat([time] * n_ensemble, dim="sample")
+
+        labels = self.labels * n_ensemble
+        return self.__class__(
+            data={k: v.to(get_device()) for k, v in data.items()},
+            time=time,
+            horizontal_dims=self.horizontal_dims,
+            labels=labels,
+            n_ensemble=n_ensemble,
         )
 
 

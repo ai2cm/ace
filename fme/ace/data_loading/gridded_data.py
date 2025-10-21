@@ -222,6 +222,11 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
 
     @property
     def timestep(self) -> datetime.timedelta:
+        if self._properties.timestep is None:
+            raise ValueError(
+                "ACE datasets must have a valid, uniform timestep. "
+                "Requires XarrayDataConfig.infer_timestep==True"
+            )
         return self._properties.timestep
 
     @property

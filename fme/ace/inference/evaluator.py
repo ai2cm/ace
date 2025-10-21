@@ -151,6 +151,14 @@ class InferenceEvaluatorConfig:
                 self.forward_steps_in_memory,
                 self.n_forward_steps,
             )
+        if self.data_writer.files is not None:
+            for file_config in self.data_writer.files:
+                if file_config.time_coarsen is not None:
+                    validate_time_coarsen_config(
+                        file_config.time_coarsen,
+                        self.forward_steps_in_memory,
+                        self.n_forward_steps,
+                    )
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -335,7 +343,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     timer.start("final_writer_flush")
     logging.info("Starting final flush of data writer")
-    writer.flush()
+    writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
     timer.stop()

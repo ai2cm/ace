@@ -48,7 +48,7 @@ from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.labels import BatchLabels
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
@@ -184,7 +184,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
                     )
                 ),
             ),
-            loss=WeightedMappingLossConfig(type="MSE"),
+            loss=StepLossConfig(type="MSE"),
         )
 
     config = get_stepper_config(
@@ -258,7 +258,7 @@ def test_train_on_batch_addition_series():
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
@@ -321,7 +321,7 @@ def test_train_on_batch_crps_loss():
             ),
         ),
         n_ensemble=2,
-        loss=WeightedMappingLossConfig(
+        loss=StepLossConfig(
             type="EnsembleLoss",
             kwargs={
                 "crps_weight": 0.1,
@@ -371,7 +371,7 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
         ),
         optimize_last_step_only=optimize_last_step_only,
         n_ensemble=2,
-        loss=WeightedMappingLossConfig(
+        loss=StepLossConfig(
             type="EnsembleLoss",
             kwargs={
                 "crps_weight": 0.1,
@@ -473,7 +473,7 @@ def test_reloaded_stepper_gives_same_prediction():
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
@@ -591,7 +591,7 @@ def _setup_and_train_on_batch(
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
 
     dataset_info = get_dataset_info()
@@ -941,7 +941,7 @@ def _get_stepper(
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
+        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     return config.get_stepper(dataset_info)
@@ -1032,20 +1032,27 @@ def test_prescribe_sst_integration():
 
 
 def get_data_for_predict(
-    n_steps, forcing_names: list[str]
+    n_steps,
+    forcing_names: list[str],
+    n_ensemble: int = 1,
 ) -> tuple[PrognosticState, BatchData]:
     n_samples = 3
-    input_data = BatchData.new_on_device(
-        data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
-        time=xr.DataArray(
-            np.zeros((n_samples, 1)),
-            dims=["sample", "time"],
-        ),
-        labels=[set() for _ in range(n_samples)],
-    ).get_start(
-        prognostic_names=["a"],
-        n_ic_timesteps=1,
+    input_data = (
+        BatchData.new_on_device(
+            data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
+            time=xr.DataArray(
+                np.zeros((n_samples, 1)),
+                dims=["sample", "time"],
+            ),
+            labels=[set() for _ in range(n_samples)],
+        )
+        .broadcast_ensemble(n_ensemble)
+        .get_start(
+            prognostic_names=["a"],
+            n_ic_timesteps=1,
+        )
     )
+
     forcing_data = BatchData.new_on_device(
         data={
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
@@ -1055,7 +1062,7 @@ def get_data_for_predict(
             dims=["sample", "time"],
         ),
         labels=[set() for _ in range(n_samples)],
-    )
+    ).broadcast_ensemble(n_ensemble)
     return input_data, forcing_data
 
 
@@ -1081,10 +1088,13 @@ def test_predict():
     assert new_input_state.time.equals(output.time[:, -1:])
 
 
-def test_predict_with_forcing():
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_predict_with_forcing(n_ensemble):
     stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
     n_steps = 3
-    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["b"])
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=["b"], n_ensemble=n_ensemble
+    )
     output, new_input_data = stepper.predict(input_data, forcing_data)
     assert "b" not in output.data
     assert output.data["a"].size(dim=1) == n_steps
@@ -1230,11 +1240,11 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     stepper_from_state = Stepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
-        assert stepper.loss_obj.normalizer.means == {
+        assert stepper.loss_obj._normalizer.means == {
             **residual_means,
             "diagnostic": full_field_means["diagnostic"],
         }
-        assert stepper.loss_obj.normalizer.stds == {
+        assert stepper.loss_obj._normalizer.stds == {
             **residual_stds,
             "diagnostic": full_field_stds["diagnostic"],
         }
@@ -1336,13 +1346,13 @@ def get_regression_stepper_and_data(
     all_names = list(set(in_names + out_names))
 
     if crps_training:
-        loss = WeightedMappingLossConfig(
+        loss = StepLossConfig(
             type="EnsembleLoss",
             kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
         )
         n_ensemble: int = 2
     else:
-        loss = WeightedMappingLossConfig(type="MSE")
+        loss = StepLossConfig(type="MSE")
         n_ensemble = 1
 
     config = StepperConfig(

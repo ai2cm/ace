@@ -6,7 +6,11 @@ from typing import Literal
 import torch
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
-from fme.core.models.conditional_sfno.sfnonet import Context, ContextConfig
+from fme.core.models.conditional_sfno.sfnonet import (
+    Context,
+    ContextConfig,
+    get_lat_lon_sfnonet,
+)
 from fme.core.models.conditional_sfno.sfnonet import (
     SphericalFourierNeuralOperatorNet as ConditionalSFNO,
 )
@@ -91,6 +95,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
 
     Attributes:
         spectral_transform: Type of spherical transform to use.
+            Kept for backwards compatibility.
         filter_type: Type of filter to use.
         operator_type: Type of operator to use.
         residual_filter_factor: Factor by which to downsample the residual.
@@ -123,9 +128,12 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             convolution (DISCO) blocks, which apply local filters. See
             Ocampo et al. (2022)
             https://arxiv.org/abs/2209.13603 for more details.
+        normalize_big_skip: Whether to normalize the big_skip connection.
+        affine_norms: Whether to use element-wise affine parameters in the
+            normalization layers.
     """
 
-    spectral_transform: str = "sht"
+    spectral_transform: Literal["sht"] = "sht"
     filter_type: str = "non-linear"
     operator_type: str = "diagonal"
     residual_filter_factor: int = 1
@@ -152,6 +160,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     filter_residual: bool = False
     filter_output: bool = False
     local_blocks: list[int] | None = None
+    normalize_big_skip: bool = False
+    affine_norms: bool = False
 
     def build(
         self,
@@ -160,7 +170,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         n_labels: int,
         img_shape: tuple[int, int],
     ):
-        sfno_net = ConditionalSFNO(
+        sfno_net = get_lat_lon_sfnonet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,

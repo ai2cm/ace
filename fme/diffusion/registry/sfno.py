@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Literal
 
-from fme.core.models.conditional_sfno.sfnonet import ContextConfig
+from fme.core.models.conditional_sfno.sfnonet import ContextConfig, get_lat_lon_sfnonet
 from fme.core.models.conditional_sfno.sfnonet import (
     SphericalFourierNeuralOperatorNet as ConditionalSFNO,
 )
@@ -46,8 +46,8 @@ class ConditionalSFNOBuilder(ModuleConfig):
         n_out_channels: int,
         img_shape: tuple[int, int],
         n_sigma_embedding_channels: int,
-    ):
-        sfno_net = ConditionalSFNO(
+    ) -> ConditionalSFNO:
+        sfno_net = get_lat_lon_sfnonet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
