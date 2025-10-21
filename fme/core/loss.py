@@ -320,6 +320,26 @@ class AreaWeightedCRPSLoss(torch.nn.Module):
         return torch.mean(self.area_weighted_mean(get_crps(x, y, alpha=self.alpha)))
 
 
+def _conv2d_two_batch_dims(
+    x: torch.Tensor, kernel: torch.Tensor, groups: int, padding: int
+) -> torch.Tensor:
+    """
+    Wrapper around torch.nn.functional.conv2d that handles two batch dimensions.
+
+    Args:
+        x: The input tensor.
+        kernel: The kernel tensor.
+        groups: The number of groups to use for the convolution.
+        padding: The padding to use for the convolution.
+
+    Returns: The result of the convolution.
+    """
+    x_shape = x.shape
+    x = x.reshape(x_shape[0] * x_shape[1], *x_shape[2:])
+    result = torch.nn.functional.conv2d(x, kernel, groups=groups, padding=padding)
+    return result.reshape(x_shape[0], x_shape[1], *result.shape[1:])
+
+
 class KernelCRPSLoss(torch.nn.Module):
     """
     Compute the CRPS loss of random convolutions of the input
@@ -336,10 +356,10 @@ class KernelCRPSLoss(torch.nn.Module):
         self.kernel_size = kernel_size
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        if len(x.shape) != 4:
-            raise ValueError(f"x must have 4 dimensions, got {len(x.shape)}")
-        if len(y.shape) != 4:
-            raise ValueError(f"y must have 4 dimensions, got {len(y.shape)}")
+        if len(x.shape) != 5:
+            raise ValueError(f"x must have 5 dimensions, got {len(x.shape)}")
+        if len(y.shape) != 5:
+            raise ValueError(f"y must have 5 dimensions, got {len(y.shape)}")
         if x.shape[-3] != y.shape[-3]:
             raise ValueError(
                 "x and y must have the same number of channels, "
@@ -354,10 +374,10 @@ class KernelCRPSLoss(torch.nn.Module):
         )
         # normalize each kernel so E[var(conv)] ≈ var(x)
         kernel = kernel / torch.sqrt((kernel**2).sum(dim=(1, 2, 3), keepdim=True))
-        x_hat = torch.nn.functional.conv2d(
+        x_hat = _conv2d_two_batch_dims(
             x, kernel, groups=x.shape[-3], padding=self.kernel_size // 2
         )
-        y_hat = torch.nn.functional.conv2d(
+        y_hat = _conv2d_two_batch_dims(
             y, kernel, groups=x.shape[-3], padding=self.kernel_size // 2
         )
         return get_crps(x_hat, y_hat, alpha=self.alpha).mean()

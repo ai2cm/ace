@@ -63,8 +63,9 @@ def test_kernel_crps_loss():
     torch.manual_seed(0)
     DEVICE = get_device()
     n_lat, n_lon = 16, 32
-    pred = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
-    target = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
+    shape = (2000, 2, 5, n_lat, n_lon)
+    pred = torch.rand(*shape, device=DEVICE)
+    target = torch.rand(*shape, device=DEVICE)
     crps_loss = CRPSLoss(alpha=0.95)
     kernel_crps_loss = KernelCRPSLoss(alpha=0.95, kernel_size=3)
     crps = crps_loss(pred, target)

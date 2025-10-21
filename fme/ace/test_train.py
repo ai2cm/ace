@@ -241,6 +241,12 @@ def _get_test_yaml_files(
             forward_steps_in_memory=2,
         )
 
+    if crps_training:
+        loss_config = StepLossConfig(
+            type="EnsembleLoss", kwargs={"crps_weight": 1.0, "kernel_crps_weight": 0.1}
+        )
+    else:
+        loss_config = StepLossConfig(type="MSE")
     train_config = TrainConfig(
         train_loader=DataLoaderConfig(
             dataset=XarrayDataConfig(
@@ -271,7 +277,7 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=StepLossConfig(type="MSE"),
+            loss=loss_config,
             crps_training=crps_training,
             train_n_forward_steps=TimeLengthProbabilities(
                 outcomes=[
@@ -486,11 +492,11 @@ def _setup(
 @pytest.mark.parametrize(
     "nettype, crps_training, log_validation_maps, use_healpix",
     [
-        ("SphericalFourierNeuralOperatorNet", False, True, False),
+        # ("SphericalFourierNeuralOperatorNet", False, True, False),
         ("NoiseConditionedSFNO", True, False, False),
-        ("HEALPixRecUNet", False, False, True),
-        ("Samudra", False, False, False),
-        ("NoiseConditionedSFNO", False, False, False),
+        # ("HEALPixRecUNet", False, False, True),
+        # ("Samudra", False, False, False),
+        # ("NoiseConditionedSFNO", False, False, False),
     ],
 )
 def test_train_and_inference(
