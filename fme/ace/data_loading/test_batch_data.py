@@ -259,7 +259,6 @@ def test_broadcast_ensemble(n_ensemble):
     assert len(ensemble_gen_data.time.sample) == n_ensemble * n_samples
     assert len(ensemble_gen_data.time.time) == n_times
 
-    print(" ensemble_gen_data.time", ensemble_gen_data.time)
     for i in range(n_ensemble):
         assert (
             ensemble_gen_data.labels[i * n_samples : (i * n_samples) + n_samples]
