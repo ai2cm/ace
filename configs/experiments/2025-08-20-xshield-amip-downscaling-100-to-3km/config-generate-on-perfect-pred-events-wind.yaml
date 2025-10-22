@@ -17,14 +17,14 @@ data:
     file_pattern: 100km.zarr
     subset:
       start: 0
-      stop: 2
+      stop: 4
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/
     engine: zarr
     file_pattern: 3km.zarr
     subset:
       start: 0
-      stop: 2
+      stop: 4
   lat_extent:
     start: 22.0
     stop: 38
