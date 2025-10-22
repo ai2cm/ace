@@ -2,5 +2,3 @@
 fto-no_smoothing-41qhptht-2aw6z7n3-wuLR-ncs4-20ep|01K82K3N19RSSMR22NJ7B122JZ|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-no_smoothing-484ss1vq-2aw6z7n3-wuLR-ncs4-20ep|01K83XPNNNDC3AXQHEAGV3CK6P|training|best_inference_ckpt|normal|--not-preemptible
-
-fto-no_smoothing-484ss1vq-2aw6z7n3-wuLR-ncs4-20ep||training|best_inference_ckpt|normal|--not-preemptible
