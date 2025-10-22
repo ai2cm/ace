@@ -19,6 +19,7 @@ from fme.core.generics.aggregator import (
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
+from fme.ace.utils import comm
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
@@ -35,6 +36,7 @@ from .spectrum import PairedSphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanEvaluatorAggregator
 from .video import VideoAggregator
 from .zonal_mean import ZonalMeanAggregator
+from physicsnemo.distributed.utils import compute_split_shapes
 
 wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
@@ -163,6 +165,30 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean = xr.open_dataset(
                 self.time_mean_reference_data, decode_timedelta=False
             )
+        distributed = comm.is_distributed("spatial")
+        if distributed:
+          lat_length = len(monthly_reference_data.coords['lat'])
+          lon_length = len(monthly_reference_data.coords['lon'])
+          crop_shape = (lat_length, lon_length)
+          crop_offset=(0, 0)
+
+          if comm.get_size("h") > 1:
+            shapes_h = compute_split_shapes(crop_shape[0], comm.get_size("h"))
+            local_shape_h = shapes_h[comm.get_rank("h")]
+            local_offset_h = crop_offset[0] + sum(shapes_h[: comm.get_rank("h")])
+          else:
+            local_shape_h = crop_shape[0]
+            local_offset_h = crop_offset[0]
+
+          if self.distributed and (comm.get_size("w") > 1):
+            shapes_w = compute_split_shapes(crop_shape[1], comm.get_size("w"))
+            local_shape_w = shapes_w[comm.get_rank("w")]
+            local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
+          else:
+            local_shape_w = crop_shape[1]
+            local_offset_w = crop_offset[1]
+          #CHECK that the array is split correctly.
+          monthly_reference_data = monthly_reference_data.sel(lat=slice(local_offset_h, local_offset_h + local_shape_h-1), lon=slice(local_offset_w, local_offset_w + local_shape_w-1))
         return InferenceEvaluatorAggregator(
             dataset_info=dataset_info,
             n_timesteps=n_timesteps,

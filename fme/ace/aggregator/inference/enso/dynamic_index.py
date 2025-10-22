@@ -15,6 +15,8 @@ from matplotlib import pyplot as plt
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.ace.utils import comm
+from physicsnemo.distributed.utils import compute_split_shapes
 
 from ...plotting import plot_mean_and_samples
 
@@ -47,6 +49,29 @@ class LatLonRegion(Region):
         self._regional_weights = torch.where(
             torch.logical_and(lat_mask, lon_mask), 1.0, 0.0
         )
+        
+        distributed = comm.is_distributed("spatial")
+        if  distributed:
+          crop_shape = self._regional_weights.shape
+          crop_offset=(0, 0)
+          if (comm.get_size("h") > 1):
+            shapes_h = compute_split_shapes(crop_shape[0], comm.get_size("h"))
+            local_shape_h = shapes_h[comm.get_rank("h")]
+            local_offset_h = crop_offset[0] + sum(shapes_h[: comm.get_rank("h")])
+          else:
+            local_shape_h = crop_shape[0]
+            local_offset_h = crop_offset[0]
+
+          # for w
+          if (comm.get_size("w") > 1):
+            shapes_w = compute_split_shapes(crop_shape[1], comm.get_size("w"))
+            local_shape_w = shapes_w[comm.get_rank("w")]
+            local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
+          else:
+            local_shape_w = crop_shape[1]
+            local_offset_w = crop_offset[1]
+
+          self._regional_weights = self._regional_weights[local_offset_h : local_offset_h + local_shape_h, local_offset_w : local_offset_w + local_shape_w]
 
     @property
     def regional_weights(self) -> torch.Tensor:

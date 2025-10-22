@@ -586,6 +586,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.w_loc = self.itrans.lon_shapes[comm.get_rank("w")]
         else:
             self.img_shape_loc = (self.trans_down.nlat, self.trans_down.nlon)
+            #CHECK: should be itrans_up?
             self.img_shape_eff = (self.trans_down.nlat, self.trans_down.nlon)
             self.h_loc = self.itrans.nlat
             self.w_loc = self.itrans.nlon
