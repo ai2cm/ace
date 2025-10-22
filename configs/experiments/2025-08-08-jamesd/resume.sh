@@ -3,10 +3,11 @@
 set -e
 
 if [[ "$#" -lt 1 ]]; then
-  echo "Usage: $0 <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>]"
+  echo "Usage: $0 <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>]"
   echo "  - <config_subdirectory>: Subdirectory containing the 'resuming.txt' file."
   echo "  - --atmos_stats: Override atmosphere stats data path (optional)"
   echo "  - --ocean_stats: Override ocean stats data path (optional)"
+  echo "  - --coupled_stats: Override with coupled stats dataset containing coupled_atmosphere and uncoupled_ocean subdirs (optional, mutually exclusive with --atmos_stats/--ocean_stats)"
   exit 1
 fi
 
@@ -25,12 +26,22 @@ while [[ $# -gt 0 ]]; do
       OCEAN_STATS_DATA="$2"
       shift 2
       ;;
+    --coupled_stats)
+      COUPLED_STATS_DATA="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown option: $1"
       exit 1
       ;;
   esac
 done
+
+# Validate mutual exclusivity of --coupled_stats with --atmos_stats/--ocean_stats
+if [[ -n "$COUPLED_STATS_DATA" ]] && [[ -n "$ATMOS_STATS_DATA" || -n "$OCEAN_STATS_DATA" ]]; then
+  echo "Error: --coupled_stats cannot be used together with --atmos_stats or --ocean_stats"
+  exit 1
+fi
 
 # Get the absolute directory where this script is located.
 SCRIPT_DIR=$(git rev-parse --show-prefix)
@@ -41,11 +52,13 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # Set default values if not provided via CLI args
-if [[ -z "$ATMOS_STATS_DATA" ]]; then
-    ATMOS_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-atmosphere
-fi
-if [[ -z "$OCEAN_STATS_DATA" ]]; then
-    OCEAN_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean
+if [[ -z "$COUPLED_STATS_DATA" ]]; then
+    if [[ -z "$ATMOS_STATS_DATA" ]]; then
+        ATMOS_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-atmosphere
+    fi
+    if [[ -z "$OCEAN_STATS_DATA" ]]; then
+        OCEAN_STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean
+    fi
 fi
 
 # Change to the repo root so paths are valid no matter where we run the script from.
@@ -108,6 +121,19 @@ while read RESUMING; do
         )
     fi
 
+    declare -a STATS_DATASET_ARGS
+    if [[ -n "$COUPLED_STATS_DATA" ]]; then
+        STATS_DATASET_ARGS=(
+            --dataset "$COUPLED_STATS_DATA:coupled_atmosphere:/atmos_stats"
+            --dataset "$COUPLED_STATS_DATA:uncoupled_ocean:/ocean_stats"
+        )
+    else
+        STATS_DATASET_ARGS=(
+            --dataset "$ATMOS_STATS_DATA:/atmos_stats"
+            --dataset "$OCEAN_STATS_DATA:/ocean_stats"
+        )
+    fi
+
     echo
     echo "Resuming ${CONFIG_SUBDIR} training job:"
     echo " - Job name: ${JOB_NAME}"
@@ -136,8 +162,7 @@ while read RESUMING; do
             --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-            --dataset $ATMOS_STATS_DATA:/atmos_stats \
-            --dataset $OCEAN_STATS_DATA:/ocean_stats \
+            "${STATS_DATASET_ARGS[@]}" \
             --dataset "$EXISTING_RESULTS_DATASET:/existing-results" \
             --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/ckpt.tar:/ckpt.tar \
             --gpus "${N_GPUS}" \
