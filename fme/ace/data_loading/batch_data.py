@@ -4,6 +4,7 @@ from typing import Any, TypeVar
 
 import cftime
 import numpy as np
+import pandas as pd
 import torch
 import xarray as xr
 from torch.utils.data import default_collate
@@ -79,6 +80,7 @@ class BatchData:
         n_timesteps: int = 10,
         t_initial: cftime.datetime = cftime.datetime(2020, 1, 1),
         freq="6h",
+        increment_times: bool = False,
         calendar="julian",
         img_shape: tuple[int, ...] = (9, 18),
         horizontal_dims: list[str] = ["lat", "lon"],
@@ -94,6 +96,8 @@ class BatchData:
             n_timesteps: The number of timesteps to create.
             t_initial: The initial time.
             freq: The frequency of the time steps.
+            increment_times: Whether to increment the initial time for each sample
+                when creating the time coordinate.
             calendar: The calendar of the time steps.
             img_shape: The shape of the horizontal dimensions of the data.
             horizontal_dims: The horizontal dimensions of the data.
@@ -113,7 +117,13 @@ class BatchData:
             ),
             dims=["time"],
         ).drop_vars(["time"])
-        sample_times = xr.concat([time] * n_samples, dim="sample")
+        if increment_times:
+            sample_times = xr.concat(
+                [time + pd.to_timedelta(freq) * i for i in range(n_samples)],
+                dim="sample",
+            )
+        else:
+            sample_times = xr.concat([time] * n_samples, dim="sample")
         if labels is None:
             labels = [set() for _ in range(n_samples)]
         return BatchData(
