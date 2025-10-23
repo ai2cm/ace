@@ -9,7 +9,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from fme.core.device import get_device, using_gpu, using_srun
 from fme.ace.utils import comm
-
+from physicsnemo.distributed.utils import compute_split_shapes
 logger = logging.getLogger(__name__)
 
 
@@ -135,7 +135,26 @@ class Distributed:
            self.local_rank = 0
            distributed = False
 
+    def is_spatial_distributed(self):
+      return comm.is_distributed("spatial")
 
+    def get_local_shape_and_offset(self,crop_shape):
+      crop_offset=(0, 0)
+      local_shape_h = crop_shape[0]
+      local_offset_h = crop_offset[0]
+      local_shape_w = crop_shape[1]
+      local_offset_w = crop_offset[1]
+      if self._distributed:
+        if comm.is_distributed("spatial"):
+          if (comm.get_size("h") > 1):
+            shapes_h = compute_split_shapes(crop_shape[0], comm.get_size("h"))
+            local_shape_h = shapes_h[comm.get_rank("h")]
+            local_offset_h = crop_offset[0] + sum(shapes_h[: comm.get_rank("h")])
+          if (comm.get_size("w") > 1):
+            shapes_w = compute_split_shapes(crop_shape[1], comm.get_size("w"))
+            local_shape_w = shapes_w[comm.get_rank("w")]
+            local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
+      return local_shape_h, local_offset_h, local_shape_w, local_offset_w
 
     def get_sampler(
         self,
