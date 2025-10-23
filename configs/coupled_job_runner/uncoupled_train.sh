@@ -40,10 +40,13 @@ FME_MODULE="fme.ace.train"
 INPUT_FILE="training.txt"
 CONFIG_FILENAME="train-config.yaml"
 
-# Construct full paths
+# Construct absolute paths for file operations
 FULL_EXPERIMENT_DIR="$REPO_ROOT/$EXPERIMENT_DIR"
 CONFIG_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/$CONFIG_FILENAME"
 INPUT_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/$INPUT_FILE"
+
+# Construct relative paths for gantry/python commands
+CONFIG_PATH_REL="$EXPERIMENT_DIR/$CONFIG_SUBDIR/$CONFIG_FILENAME"
 
 # Change to repo root so paths are valid
 cd "$REPO_ROOT"
@@ -80,7 +83,7 @@ while read TRAINING; do
     echo
     echo "Launching uncoupled training job:"
     echo " - Job name: ${JOB_NAME}"
-    echo " - Config: ${CONFIG_PATH}"
+    echo " - Config: ${CONFIG_PATH_REL}"
     echo " - Priority: ${PRIORITY}"
     echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
     echo " - GPUs: ${N_GPUS}"
@@ -88,16 +91,16 @@ while read TRAINING; do
     echo " - Workspace: ${WORKSPACE}"
     echo " - Override: ${OVERRIDE_ARGS}"
 
-    # Validate config
-    python -m fme.ace.validate_config "$CONFIG_PATH" --config_type train $OVERRIDE_ARGS
+    # Validate config (use relative path)
+    python -m fme.ace.validate_config "$CONFIG_PATH_REL" --config_type train $OVERRIDE_ARGS
 
-    # Commit config if changed
+    # Commit config if changed (use absolute path)
     git_commit_and_push "$CONFIG_PATH" "${JOB_NAME}" "$GIT_BRANCH"
 
     echo
 
-    # Run the job
-    EXPERIMENT_ID=$(run_gantry_training_job "Run uncoupled pretraining: ${JOB_GROUP}")
+    # Run the job (use relative path for CONFIG_PATH)
+    CONFIG_PATH="$CONFIG_PATH_REL" EXPERIMENT_ID=$(run_gantry_training_job "Run uncoupled pretraining: ${JOB_GROUP}")
 
     # Append to experiments.txt
     { echo;

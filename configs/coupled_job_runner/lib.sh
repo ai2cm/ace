@@ -148,12 +148,13 @@ git_commit_and_push() {
 # This function expects several variables to be set by the caller:
 #   Required:
 #     JOB_NAME, JOB_GROUP, PRIORITY, RETRIES, N_GPUS, SHARED_MEM
-#     FME_MODULE, CONFIG_PATH, BEAKER_USERNAME
+#     FME_MODULE, CONFIG_PATH (relative to repo root), BEAKER_USERNAME
 #     CLUSTER_ARGS (array), STATS_DATASET_ARGS (array)
 #   Optional:
 #     CHECKPOINT_DATASET_ARGS (array) - additional dataset mounts
 #     OVERRIDE_ARGS - config override arguments
 #     PREEMPTIBLE (default: --preemptible)
+#   Note: CONFIG_PATH must be relative to repo root for gantry run
 # Returns: Experiment ID
 run_gantry_training_job() {
     local REPO_ROOT=$(git rev-parse --show-toplevel)

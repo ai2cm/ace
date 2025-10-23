@@ -41,11 +41,14 @@ INPUT_FILE="finetuning.txt"
 CONFIG_FILENAME="finetune-config.yaml"
 TEMPLATE_CONFIG_FILENAME="finetune-config-template.yaml"
 
-# Construct full paths
+# Construct absolute paths for file operations
 FULL_EXPERIMENT_DIR="$REPO_ROOT/$EXPERIMENT_DIR"
 CONFIG_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/$CONFIG_FILENAME"
 TEMPLATE_CONFIG_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/$TEMPLATE_CONFIG_FILENAME"
 INPUT_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/$INPUT_FILE"
+
+# Construct relative paths for gantry/python commands
+CONFIG_PATH_REL="$EXPERIMENT_DIR/$CONFIG_SUBDIR/$CONFIG_FILENAME"
 
 # Change to repo root so paths are valid
 cd "$REPO_ROOT"
@@ -100,7 +103,7 @@ while read FINETUNING; do
     echo
     echo "Launching uncoupled fine-tuning job:"
     echo " - Job name: ${JOB_NAME}"
-    echo " - Config: ${CONFIG_PATH}"
+    echo " - Config: ${CONFIG_PATH_REL}"
     echo " - Pretraining results dataset ID: ${EXISTING_RESULTS_DATASET}"
     echo " - Checkpoint type: ${CKPT_TYPE}"
     echo " - Priority: ${PRIORITY}"
@@ -110,16 +113,16 @@ while read FINETUNING; do
     echo " - Shared memory: ${SHARED_MEM}"
     echo " - Override: ${OVERRIDE_ARGS}"
 
-    # Validate config
-    python -m fme.ace.validate_config "$CONFIG_PATH" --config_type train $OVERRIDE_ARGS
+    # Validate config (use relative path)
+    python -m fme.ace.validate_config "$CONFIG_PATH_REL" --config_type train $OVERRIDE_ARGS
 
-    # Commit config if changed
+    # Commit config if changed (use absolute path)
     git_commit_and_push "$CONFIG_PATH" "${JOB_NAME}" "$GIT_BRANCH"
 
     echo
 
-    # Run the job
-    EXPERIMENT_ID=$(run_gantry_training_job "Run uncoupled fine-tuning: ${JOB_GROUP}")
+    # Run the job (use relative path for CONFIG_PATH)
+    CONFIG_PATH="$CONFIG_PATH_REL" EXPERIMENT_ID=$(run_gantry_training_job "Run uncoupled fine-tuning: ${JOB_GROUP}")
 
     # Append to experiments.txt
     { echo;
