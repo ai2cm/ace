@@ -182,10 +182,12 @@ def test_month_selector_select():
     ["time_selection"],
     [
         pytest.param(
-            TimeSlice(start_time="2020-01-01", stop_time="2020-01-02"), id="TimeSlice"
+            TimeSlice(start_time="2020-01-01", stop_time="2020-01-02"),
+            id="TimeSlice",
         ),
         pytest.param(MonthSelector(months=["Jan"]), id="MonthSelector"),
         pytest.param(Slice(start=0, stop=3, step=2), id="Slice"),
+        pytest.param(Slice(start=5, stop=15), id="Slice_non_initial"),
         pytest.param(None, id="None"),
     ],
 )
@@ -215,7 +217,7 @@ def test__select_time_file_writer_single_sample(time_selection, tmpdir):
     )
     file_writer.append_batch(
         data=dict(batch_data.data),
-        start_timestep=0,
+        start_timestep=-1,  # unused for RawDataWriter
         batch_time=batch_data.time,
     )
 
@@ -234,11 +236,18 @@ def test__select_time_file_writer_single_sample(time_selection, tmpdir):
                 subselected_data.squeeze().temperature,
             )
         elif isinstance(time_selection, Slice):
-            assert len(subselected_data.time) == 2
-            np.testing.assert_almost_equal(
-                batch_data.data["temperature"][0, 0:3:2, :].cpu().numpy(),
-                subselected_data.squeeze().temperature,
-            )
+            if time_selection.start == 0:
+                assert len(subselected_data.time) == 2  # timesteps 0 and 2
+                np.testing.assert_almost_equal(
+                    batch_data.data["temperature"][0, 0:3:2, :].cpu().numpy(),
+                    subselected_data.squeeze().temperature,
+                )
+            else:
+                assert len(subselected_data.time) == 10  # timesteps 5 to 14
+                np.testing.assert_almost_equal(
+                    batch_data.data["temperature"][0, 5:15, :].cpu().numpy(),
+                    subselected_data.squeeze().temperature,
+                )
         else:  # time_selection is None
             assert len(subselected_data.time) == n_timesteps
             np.testing.assert_almost_equal(
