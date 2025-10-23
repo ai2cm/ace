@@ -20,7 +20,6 @@ import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
 from fme.core.distributed import Distributed
-from fme.ace.utils import comm
 from fme.core.coordinates import (
     DepthCoordinate,
     HorizontalCoordinates,
@@ -45,8 +44,7 @@ from .utils import (
     load_series_data,
     load_series_data_zarr_async,
 )
-# import splitting logic
-from physicsnemo.distributed.utils import compute_split_shapes
+
 
 SLICE_NONE = slice(None)
 GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD = 12
@@ -543,7 +541,11 @@ class XarrayDataset(DatasetABC):
                 f"No files found matching '{self.path}/{self.file_pattern}'."
             )
         self.full_paths = self._raw_paths * config.n_repeats
+<<<<<<< HEAD
         self._sample_n_times = n_timesteps
+=======
+        self.sample_n_times = n_timesteps
+>>>>>>> 35741f5b5 (Fixing the xarray test with spatial parallelism.)
         self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
             self.full_paths[0],
@@ -584,6 +586,7 @@ class XarrayDataset(DatasetABC):
         self._check_isel_dimensions(first_dataset.sizes)
         self._labels = set(config.labels)
         self._infer_timestep = config.infer_timestep
+        self._dist = Distributed.get_instance()
 
     def _check_isel_dimensions(self, data_dim_sizes):
         # Horizontal dimensions are not currently supported, as the current isel code
@@ -857,7 +860,15 @@ class XarrayDataset(DatasetABC):
             else:
                 ds = self._open_file(file_idx)
                 ds = ds.isel(**self.isel)
-                tensor_dict_whole = load_series_data(
+                has_lat="lat" in ds.dims
+                has_lon="lon" in ds.dims
+                if self._dist.is_spatial_distributed() and has_lat and has_lon :
+                   crop_shape = self._shape_excluding_time_after_selection
+                   local_shape_h, local_offset_h, local_shape_w, local_offset_w = self._dist.get_local_shape_and_offset(crop_shape)
+                   ds = ds.sel(lat=slice(local_offset_h, local_offset_h + local_shape_h-1), lon=slice(local_offset_w, local_offset_w + local_shape_w-1))
+                   shape[1]=local_shape_h
+                   shape[2]=local_shape_w
+                tensor_dict = load_series_data(
                     idx=start,
                     n_steps=n_steps,
                     ds=ds,
@@ -868,16 +879,6 @@ class XarrayDataset(DatasetABC):
                 )
                 ds.close()
                 del ds
-                read_anchor,read_shape = self.get_anchor_and_shape(self._shape_excluding_time_after_selection)
-                # load slice of data:
-                start_x = read_anchor[0]
-                end_x = start_x + read_shape[0]
-
-                start_y = read_anchor[1]
-                end_y = start_y + read_shape[1]
-                tensor_dict={}
-                for n in tensor_dict_whole:
-                  tensor_dict[n]=tensor_dict_whole[n][:,start_x:end_x, start_y:end_y]
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
 
