@@ -1,0 +1,2 @@
+
+1pct_nosmooth-nfs4-150ep-rs1||training|best_inference_ckpt|normal|--not-preemptible
