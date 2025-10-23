@@ -15,9 +15,6 @@ from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
 from fme.core.tensors import assert_dict_allclose
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.distributed import Distributed
-from fme.ace.utils import comm
-# import splitting logic
-from physicsnemo.distributed.utils import compute_split_shapes
 
 
 class GriddedOperations(abc.ABC):
@@ -297,30 +294,14 @@ class LatLonOperations(GriddedOperations):
                 "Area weights must be longitudinally uniform, "
                 "as assumed for zonal mean."
             )
-        dist = Distributed.get_instance()
-        distributed = comm.is_distributed("spatial")
-        if  distributed: 
-          crop_shape = area_weights.shape
-          crop_offset=(0, 0)
-          if self.distributed and (comm.get_size("h") > 1):
-            shapes_h = compute_split_shapes(crop_shape[0], comm.get_size("h"))
-            local_shape_h = shapes_h[comm.get_rank("h")]
-            local_offset_h = crop_offset[0] + sum(shapes_h[: comm.get_rank("h")])
-          else:
-            local_shape_h = crop_shape[0]
-            local_offset_h = crop_offset[0]
 
-          # for w
-          if self.distributed and (comm.get_size("w") > 1):
-            shapes_w = compute_split_shapes(crop_shape[1], comm.get_size("w"))
-            local_shape_w = shapes_w[comm.get_rank("w")]
-            local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
-          else:
-            local_shape_w = crop_shape[1]
-            local_offset_w = crop_offset[1]
+        dist = Distributed.get_instance()
+        if dist.is_spatial_distributed():
+          local_shape_h, local_offset_h, local_shape_w, local_offset_w = dist.get_local_shape_and_offset(area_weights.shape)
           area_weights=area_weights[local_offset_h : local_offset_h + local_shape_h, local_offset_w : local_offset_w + local_shape_w]
 
         self._device_area = area_weights.to(get_device())
+        #NOTE: we do not need the *.to("cpu") lines.
         self._cpu_area = area_weights.to("cpu")
         self._device_mask_provider = mask_provider.to(get_device())
         self._cpu_mask_provider = mask_provider.to("cpu")
