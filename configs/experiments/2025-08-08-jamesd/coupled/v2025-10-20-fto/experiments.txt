@@ -6,3 +6,5 @@ fto-no_smoothing-484ss1vq-2aw6z7n3-wuLR-ncs4-20ep|01K83XPNNNDC3AXQHEAGV3CK6P|tra
 fto-no_smoothing-484ss1vq-2aw6z7n3-wuLR-ncs4-20ep|01K874R8VWDE7PW96RRQ91K3HP|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-no_smoothing-484ss1vq-2aw6z7n3-wuLR-ncs4-20ep|01K87625DD28R31GFRWKW59B64|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-no_smoothing-484ss1vq-2aw6z7n3-wuLR-ncs4-20ep|01K87NNB4W57WQQMZ2E7ZRYY7J|training|best_inference_ckpt|normal|--not-preemptible
