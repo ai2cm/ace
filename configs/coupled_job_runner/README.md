@@ -109,19 +109,24 @@ Each job type reads from a pipe-delimited text file:
 - **Coupled fine-tuning**: `finetuning.txt` (14 fields)
 - **Uncoupled fine-tuning**: `finetuning.txt` (14 fields)
 - **Resume**: `resuming.txt` (12 fields)
-- **Evaluate**: `experiments.txt` (9 fields)
+- **Evaluate**: `experiments.txt` (10 fields)
 
 ### TAG Field (Optional)
 
-All training and finetuning input files now include an optional `tag` field as the second column (immediately after `group`):
+All training, finetuning, and evaluation input files now include an optional `tag` field as the second column (immediately after `group`):
 - **Position**: Field 2 (after `group`)
-- **Purpose**: When provided, modifies the job name from `{GROUP}-train` to `{GROUP}-{TAG}-train`
+- **Purpose**:
+  - Training/finetuning: Modifies the job name from `{GROUP}-train` to `{GROUP}-{TAG}-train`
+  - Evaluation: Modifies the job name from `{GROUP}-evaluator_{CKPT}-{CONFIG}` to `{GROUP}-{TAG}-evaluator_{CKPT}-{CONFIG}`
+  - WandB run group: Changes from `{GROUP}` to `{GROUP}-{TAG}` to group related runs together
 - **Format**: Can be empty (leave blank between pipes) or contain an alphanumeric identifier
+- **Propagation**: TAG is automatically written to `experiments.txt` by training scripts and read by evaluation scripts
 - **Example headers**:
   - Uncoupled training: `group|tag|skip_or_train|priority|...`
   - Coupled training: `group|tag|ocean_project|ocean_wandb_id|...`
   - Uncoupled finetuning: `group|tag|wandb_project|wandb_id|...`
   - Coupled finetuning: `group|tag|wandb_project|wandb_id|...`
+  - Experiments: `group|tag|exper_id|status|ckpt_type|priority|...`
 
 ## Extending to Other Experiment Directories
 

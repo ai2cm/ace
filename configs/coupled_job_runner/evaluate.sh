@@ -37,14 +37,15 @@ cd "$REPO_ROOT"
 
 while read TRAIN_EXPER; do
     JOB_GROUP=$(echo "$TRAIN_EXPER" | cut -d"|" -f1)
-    EXPER_ID=$(echo "$TRAIN_EXPER" | cut -d"|" -f2)
-    STATUS=$(echo "$TRAIN_EXPER" | cut -d"|" -f3)
-    CKPT=$(echo "$TRAIN_EXPER" | cut -d"|" -f4)
-    PRIORITY=$(echo "$TRAIN_EXPER" | cut -d"|" -f5)
-    PREEMPTIBLE=$(echo "$TRAIN_EXPER" | cut -d"|" -f6)
-    OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
-    EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
-    WORKSPACE=$(echo "$TRAIN_EXPER" | cut -d"|" -f9)
+    TAG=$(echo "$TRAIN_EXPER" | cut -d"|" -f2)
+    EXPER_ID=$(echo "$TRAIN_EXPER" | cut -d"|" -f3)
+    STATUS=$(echo "$TRAIN_EXPER" | cut -d"|" -f4)
+    CKPT=$(echo "$TRAIN_EXPER" | cut -d"|" -f5)
+    PRIORITY=$(echo "$TRAIN_EXPER" | cut -d"|" -f6)
+    PREEMPTIBLE=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
+    OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
+    EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f9)
+    WORKSPACE=$(echo "$TRAIN_EXPER" | cut -d"|" -f10)
 
     # Check if STATUS starts with "run_"
     if [[ ! "$STATUS" =~ ^run_ ]]; then
@@ -58,7 +59,12 @@ while read TRAIN_EXPER; do
     CURRENT_CONFIG_TAG=${STATUS#run_}
     CURRENT_CONFIG_FILENAME="evaluator-config-${CURRENT_CONFIG_TAG}.yaml"
 
-    JOB_NAME="${JOB_GROUP}-evaluator_${CKPT}-${CURRENT_CONFIG_TAG}"
+    # Construct JOB_NAME using TAG if present
+    if [[ -n "$TAG" ]]; then
+        JOB_NAME="${JOB_GROUP}-${TAG}-evaluator_${CKPT}-${CURRENT_CONFIG_TAG}"
+    else
+        JOB_NAME="${JOB_GROUP}-evaluator_${CKPT}-${CURRENT_CONFIG_TAG}"
+    fi
 
     # Construct absolute path for file operations
     CONFIG_PATH="${FULL_EXPERIMENT_DIR}/${CONFIG_SUBDIR}/${CURRENT_CONFIG_FILENAME}"
@@ -102,6 +108,13 @@ while read TRAIN_EXPER; do
     # Validate config (use relative path)
     python -m $FME_MODULE_VALIDATE --config_type evaluator "$CONFIG_PATH_REL" --override $OVERRIDE_ARGS
 
+    # Construct WANDB_RUN_GROUP using TAG if present
+    if [[ -n "$TAG" ]]; then
+        WANDB_RUN_GROUP="${JOB_GROUP}-${TAG}"
+    else
+        WANDB_RUN_GROUP="$JOB_GROUP"
+    fi
+
     echo "$JOB_NAME"
     gantry run \
         --name "$JOB_NAME" \
@@ -115,7 +128,7 @@ while read TRAIN_EXPER; do
         --env WANDB_USERNAME="$BEAKER_USERNAME" \
         --env WANDB_NAME="$JOB_NAME" \
         --env WANDB_JOB_TYPE=inference \
-        --env WANDB_RUN_GROUP="$JOB_GROUP" \
+        --env WANDB_RUN_GROUP="$WANDB_RUN_GROUP" \
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \

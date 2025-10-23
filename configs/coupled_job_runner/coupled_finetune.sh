@@ -131,7 +131,7 @@ while read FINETUNING; do
 
     # Append to experiments.txt
     { echo;
-      echo "${JOB_GROUP}|${EXPERIMENT_ID}|training|best_inference_ckpt|normal|--not-preemptible";
+      echo "${JOB_GROUP}|${TAG}|${EXPERIMENT_ID}|training|best_inference_ckpt|normal|--not-preemptible";
     } >> "${FULL_EXPERIMENT_DIR}/${CONFIG_SUBDIR}/experiments.txt"
 
     git_commit_and_push "${FULL_EXPERIMENT_DIR}/${CONFIG_SUBDIR}/experiments.txt" \
