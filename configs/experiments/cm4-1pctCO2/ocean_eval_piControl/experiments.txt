@@ -10,3 +10,5 @@
 1pct_nosmooth-nfs4-150ep-rs4|ex|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth-nfs4-150ep-rs1|ex|training|best_inference_ckpt|normal|--not-preemptible
+
+1pct_nosmooth-nfs4-150ep-rs2|ex|training|best_inference_ckpt|normal|--not-preemptible
