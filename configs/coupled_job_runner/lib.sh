@@ -59,19 +59,18 @@ build_cluster_args() {
     local CLUSTER="$1"
     local WORKSPACE="${2:-}"
 
-    if [[ "$CLUSTER" == "titan" ]]; then
-        if [[ -z "$WORKSPACE" ]]; then
-            WORKSPACE=ai2/climate-titan
-        fi
+    if [[ -z "$WORKSPACE" ]]; then
+        WORKSPACE=ai2/ace
+    fi
+    if [[ "$CLUSTER" == "a100+h100" ]]; then
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
-            --cluster titan
+            --cluster ceres
+            --cluster jupiter
+            --cluster saturn
         )
     elif [[ -z "$CLUSTER" ]]; then
-        # Default: try both ceres and jupiter
-        if [[ -z "$WORKSPACE" ]]; then
-            WORKSPACE=ai2/ace
-        fi
+        # Default: h100
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
             --cluster ceres
@@ -79,9 +78,6 @@ build_cluster_args() {
         )
     else
         # Specific cluster provided
-        if [[ -z "$WORKSPACE" ]]; then
-            WORKSPACE=ai2/climate-ceres
-        fi
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
             --cluster "$CLUSTER"
