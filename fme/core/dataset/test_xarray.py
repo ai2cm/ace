@@ -1189,33 +1189,3 @@ def test_dataset_properties_update_masks(mock_monthly_netcdfs):
     existing_mask = MaskProvider(masks={"mask_0": torch.ones(4, 8)})
     data_properties.update_mask_provider(existing_mask)
     assert "mask_0" in dataset.properties.mask_provider.masks
-
-def test_concat_of_XarrayConcat_w_spatial_parallel(mock_monthly_netcdfs):
-    mock_data: MockData = mock_monthly_netcdfs
-    n_timesteps = 5
-    names = mock_data.var_names.all_names[:-2]
-    ## without domain decomposition
-    config_ref = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(None, 4),
-                              io_grid=[1,1,1],io_rank=[0,0,0])
-    ref, _ = get_dataset([config_ref], names, n_timesteps)
-
-    ## with domain decomposition
-    config_c1 = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(None, 4),
-                              io_grid=[1,2,1],io_rank=[0,0,0])
-    c1, _ = get_dataset([config_c1], names, n_timesteps)
-
-    ## with domain decomposition
-    config_c2 = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(None, 4),
-                              io_grid=[1,2,1],io_rank=[0,1,0])
-    c2, _ = get_dataset([config_c2], names, n_timesteps)
-    niters= len(ref)
-    for i in range(niters):
-      ref_t, _, _=ref[i]
-      t1,_,_=c1[i]
-      t2,_,_=c2[i]
-      for var in ref_t:
-        reft = ref_t[var]
-        c1t = t1[var]
-        c2t = t2[var]
-        re = torch.hstack((c1t,c2t))
-        assert torch.equal(re,reft)

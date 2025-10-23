@@ -60,21 +60,18 @@ class Distributed:
         return singleton
 
     def __init__(self):
-        if torch.distributed.is_available() and not torch.distributed.is_initialized():
+        if torch.distributed.is_available() and not torch.distributed.is_initialized() and not comm.is_distributed("spatial"):
             self._distributed = self._init_distributed()
         else:
             self._distributed = False
         self._seed = 0
 
-    def _init_distributed(self):
-        #NOTE: I am commenting this out for now to make testing easier.
+    def _init_distributed(self, h_parallel_size : int =  1,
+                                w_parallel_size : int =  1):
         #We can review this block of code once spatial parallelism
         #is functioning correctly in a full test.
-        #TODO: Pass dist inputs instead of hard-coding them.
         fin_parallel_size=1#args.fin_parallel_size
         fout_parallel_size=1#args.fout_parallel_size
-        h_parallel_size=1#args.h_parallel_size
-        w_parallel_size=1#args.w_parallel_size
         if (h_parallel_size>1) or (w_parallel_size >1):
           params={}
           params["fin_parallel_size"] = fin_parallel_size
@@ -134,9 +131,13 @@ class Distributed:
            self.rank = 0
            self.local_rank = 0
            distributed = False
+        self._distributed= distributed
+        return distributed
 
     def is_spatial_distributed(self):
       return comm.is_distributed("spatial")
+    def get_comm(self):
+      return comm
 
     def get_local_shape_and_offset(self,crop_shape):
       crop_offset=(0, 0)
@@ -144,13 +145,13 @@ class Distributed:
       local_offset_h = crop_offset[0]
       local_shape_w = crop_shape[1]
       local_offset_w = crop_offset[1]
-      if self._distributed:
-        if comm.is_distributed("spatial"):
-          if (comm.get_size("h") > 1):
+      #NOTE: self.is_distributed() is always false in xarray
+      if comm.is_distributed("spatial"):
+        if (comm.get_size("h") > 1):
             shapes_h = compute_split_shapes(crop_shape[0], comm.get_size("h"))
             local_shape_h = shapes_h[comm.get_rank("h")]
             local_offset_h = crop_offset[0] + sum(shapes_h[: comm.get_rank("h")])
-          if (comm.get_size("w") > 1):
+        if (comm.get_size("w") > 1):
             shapes_w = compute_split_shapes(crop_shape[1], comm.get_size("w"))
             local_shape_w = shapes_w[comm.get_rank("w")]
             local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
