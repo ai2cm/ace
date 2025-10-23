@@ -55,18 +55,19 @@ cd "$REPO_ROOT"
 
 while read FINETUNING; do
     GROUP=$(echo "$FINETUNING" | cut -d"|" -f1)
-    WANDB_PROJECT=$(echo "$FINETUNING" | cut -d"|" -f2)
-    WANDB_ID=$(echo "$FINETUNING" | cut -d"|" -f3)
-    CKPT_TYPE=$(echo "$FINETUNING" | cut -d"|" -f4)
-    STATUS=$(echo "$FINETUNING" | cut -d"|" -f5)
-    PRIORITY=$(echo "$FINETUNING" | cut -d"|" -f6)
-    CLUSTER=$(echo "$FINETUNING" | cut -d"|" -f7)
-    N_GPUS=$(echo "$FINETUNING" | cut -d"|" -f8)
-    SHARED_MEM=$(echo "$FINETUNING" | cut -d"|" -f9)
-    RETRIES=$(echo "$FINETUNING" | cut -d"|" -f10)
-    WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f11)
-    OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f12)
-    EXISTING_RESULTS_DATASET=$(echo "$FINETUNING" | cut -d"|" -f13)
+    TAG=$(echo "$FINETUNING" | cut -d"|" -f2)
+    WANDB_PROJECT=$(echo "$FINETUNING" | cut -d"|" -f3)
+    WANDB_ID=$(echo "$FINETUNING" | cut -d"|" -f4)
+    CKPT_TYPE=$(echo "$FINETUNING" | cut -d"|" -f5)
+    STATUS=$(echo "$FINETUNING" | cut -d"|" -f6)
+    PRIORITY=$(echo "$FINETUNING" | cut -d"|" -f7)
+    CLUSTER=$(echo "$FINETUNING" | cut -d"|" -f8)
+    N_GPUS=$(echo "$FINETUNING" | cut -d"|" -f9)
+    SHARED_MEM=$(echo "$FINETUNING" | cut -d"|" -f10)
+    RETRIES=$(echo "$FINETUNING" | cut -d"|" -f11)
+    WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f12)
+    OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f13)
+    EXISTING_RESULTS_DATASET=$(echo "$FINETUNING" | cut -d"|" -f14)
 
     if [[ "$STATUS" != "train" ]]; then
         continue
@@ -77,7 +78,11 @@ while read FINETUNING; do
     fi
 
     JOB_GROUP="${GROUP}"
-    JOB_NAME="${JOB_GROUP}-train"
+    if [[ -n "$TAG" ]]; then
+        JOB_NAME="${JOB_GROUP}-${TAG}-train"
+    else
+        JOB_NAME="${JOB_GROUP}-train"
+    fi
 
     # Get experiment dataset
     if [[ -z $EXISTING_RESULTS_DATASET ]]; then

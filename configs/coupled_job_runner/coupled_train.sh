@@ -57,20 +57,21 @@ cd "$REPO_ROOT"
 
 while read PRETRAINING; do
     GROUP=$(echo "$PRETRAINING" | cut -d"|" -f1)
-    OCEAN_PROJECT=$(echo "$PRETRAINING" | cut -d"|" -f2)
-    OCEAN_WANDB_ID=$(echo "$PRETRAINING" | cut -d"|" -f3)
-    OCEAN_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f4)
-    ATMOS_PROJECT=$(echo "$PRETRAINING" | cut -d"|" -f5)
-    ATMOS_WANDB_ID=$(echo "$PRETRAINING" | cut -d"|" -f6)
-    ATMOS_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f7)
-    STATUS=$(echo "$PRETRAINING" | cut -d"|" -f8)
-    PRIORITY=$(echo "$PRETRAINING" | cut -d"|" -f9)
-    CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f10)
-    N_GPUS=$(echo "$PRETRAINING" | cut -d"|" -f11)
-    SHARED_MEM=$(echo "$PRETRAINING" | cut -d"|" -f12)
-    RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f13)
-    WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f14)
-    OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f15)
+    TAG=$(echo "$PRETRAINING" | cut -d"|" -f2)
+    OCEAN_PROJECT=$(echo "$PRETRAINING" | cut -d"|" -f3)
+    OCEAN_WANDB_ID=$(echo "$PRETRAINING" | cut -d"|" -f4)
+    OCEAN_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f5)
+    ATMOS_PROJECT=$(echo "$PRETRAINING" | cut -d"|" -f6)
+    ATMOS_WANDB_ID=$(echo "$PRETRAINING" | cut -d"|" -f7)
+    ATMOS_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f8)
+    STATUS=$(echo "$PRETRAINING" | cut -d"|" -f9)
+    PRIORITY=$(echo "$PRETRAINING" | cut -d"|" -f10)
+    CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f11)
+    N_GPUS=$(echo "$PRETRAINING" | cut -d"|" -f12)
+    SHARED_MEM=$(echo "$PRETRAINING" | cut -d"|" -f13)
+    RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f14)
+    WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f15)
+    OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
 
     if [[ "$STATUS" != "train" ]]; then
         continue
@@ -81,7 +82,11 @@ while read PRETRAINING; do
     fi
 
     JOB_GROUP="${GROUP}"
-    JOB_NAME="${JOB_GROUP}-train"
+    if [[ -n "$TAG" ]]; then
+        JOB_NAME="${JOB_GROUP}-${TAG}-train"
+    else
+        JOB_NAME="${JOB_GROUP}-train"
+    fi
 
     # Get experiment IDs and datasets
     ATMOS_EXPER_ID=$(get_experiment_from_wandb "$ATMOS_PROJECT" "$ATMOS_WANDB_ID")

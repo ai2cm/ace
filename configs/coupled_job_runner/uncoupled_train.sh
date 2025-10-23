@@ -53,14 +53,15 @@ cd "$REPO_ROOT"
 
 while read TRAINING; do
     GROUP=$(echo "$TRAINING" | cut -d"|" -f1)
-    STATUS=$(echo "$TRAINING" | cut -d"|" -f2)
-    PRIORITY=$(echo "$TRAINING" | cut -d"|" -f3)
-    CLUSTER=$(echo "$TRAINING" | cut -d"|" -f4)
-    N_GPUS=$(echo "$TRAINING" | cut -d"|" -f5)
-    SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f6)
-    RETRIES=$(echo "$TRAINING" | cut -d"|" -f7)
-    WORKSPACE=$(echo "$TRAINING" | cut -d"|" -f8)
-    OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f9)
+    TAG=$(echo "$TRAINING" | cut -d"|" -f2)
+    STATUS=$(echo "$TRAINING" | cut -d"|" -f3)
+    PRIORITY=$(echo "$TRAINING" | cut -d"|" -f4)
+    CLUSTER=$(echo "$TRAINING" | cut -d"|" -f5)
+    N_GPUS=$(echo "$TRAINING" | cut -d"|" -f6)
+    SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f7)
+    RETRIES=$(echo "$TRAINING" | cut -d"|" -f8)
+    WORKSPACE=$(echo "$TRAINING" | cut -d"|" -f9)
+    OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f10)
 
     if [[ "$STATUS" != "train" ]]; then
         continue
@@ -71,7 +72,11 @@ while read TRAINING; do
     fi
 
     JOB_GROUP="${GROUP}"
-    JOB_NAME="${JOB_GROUP}-train"
+    if [[ -n "$TAG" ]]; then
+        JOB_NAME="${JOB_GROUP}-${TAG}-train"
+    else
+        JOB_NAME="${JOB_GROUP}-train"
+    fi
 
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"

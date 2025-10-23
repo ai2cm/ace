@@ -104,12 +104,24 @@ If none are specified, defaults to:
 
 Each job type reads from a pipe-delimited text file:
 
-- **Coupled training**: `pretraining.txt` (15 fields)
-- **Uncoupled training**: `training.txt` (9 fields)
-- **Coupled fine-tuning**: `finetuning.txt` (13 fields)
-- **Uncoupled fine-tuning**: `finetuning.txt` (13 fields)
+- **Coupled training**: `pretraining.txt` (16 fields)
+- **Uncoupled training**: `training.txt` (10 fields)
+- **Coupled fine-tuning**: `finetuning.txt` (14 fields)
+- **Uncoupled fine-tuning**: `finetuning.txt` (14 fields)
 - **Resume**: `resuming.txt` (12 fields)
 - **Evaluate**: `experiments.txt` (9 fields)
+
+### TAG Field (Optional)
+
+All training and finetuning input files now include an optional `tag` field as the second column (immediately after `group`):
+- **Position**: Field 2 (after `group`)
+- **Purpose**: When provided, modifies the job name from `{GROUP}-train` to `{GROUP}-{TAG}-train`
+- **Format**: Can be empty (leave blank between pipes) or contain an alphanumeric identifier
+- **Example headers**:
+  - Uncoupled training: `group|tag|skip_or_train|priority|...`
+  - Coupled training: `group|tag|ocean_project|ocean_wandb_id|...`
+  - Uncoupled finetuning: `group|tag|wandb_project|wandb_id|...`
+  - Coupled finetuning: `group|tag|wandb_project|wandb_id|...`
 
 ## Extending to Other Experiment Directories
 
