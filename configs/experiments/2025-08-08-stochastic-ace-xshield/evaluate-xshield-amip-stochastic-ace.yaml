@@ -1,0 +1,29 @@
+experiment_dir: /results
+n_forward_steps: 40
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 2
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+aggregator:
+ log_histograms: true
+loader:
+  start_indices:
+    times:
+      - '2014-01-01T00:00:00'
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2025-08-08-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+    engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
+  names:
+    - PRATEsfc
+    - UGRD10m
+    - VGRD10m
