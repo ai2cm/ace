@@ -6,7 +6,6 @@ import os
 import shutil
 import time
 import uuid
-import warnings
 
 import dacite
 import torch
@@ -27,12 +26,7 @@ from fme.downscaling.data import (
     PairedDataLoaderConfig,
     PairedGriddedData,
 )
-from fme.downscaling.models import (
-    DiffusionModel,
-    DiffusionModelConfig,
-    DownscalingModelConfig,
-    Model,
-)
+from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -91,7 +85,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 class Trainer:
     def __init__(
         self,
-        model: Model | DiffusionModel,
+        model: DiffusionModel,
         optimization: Optimization,
         train_data: PairedGriddedData,
         validation_data: PairedGriddedData,
@@ -149,7 +143,7 @@ class Trainer:
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_name = "generation/metrics/crps"
+        self._best_valid_loss_name = "generation/metrics/relative_crps_bicubic"
         self._best_histogram_tail_name = (
             "generation/histogram/abs_norm_tail_bias_above_percentile/99.99/"
         )
@@ -398,7 +392,7 @@ class Trainer:
 
 @dataclasses.dataclass
 class TrainerConfig:
-    model: DownscalingModelConfig | DiffusionModelConfig
+    model: DiffusionModelConfig
     optimization: OptimizationConfig
     train_data: PairedDataLoaderConfig
     validation_data: PairedDataLoaderConfig
@@ -475,15 +469,10 @@ class TrainerConfig:
         )
 
 
-def _get_channel_mean_scalar_metric(metrics, prefix="generation/metrics/crps"):
+def _get_channel_mean_scalar_metric(
+    metrics, prefix="generation/metrics/relative_crps_bicubic"
+):
     channel_metric = [v for k, v in metrics.items() if k.startswith(prefix)]
-
-    if len(channel_metric) != 1:
-        warnings.warn(
-            f"Metric {prefix} used for checkpoint selection is computed on "
-            "denormalized outputs. If multiple outputs are present, "
-            "the mean will not be evenly weighted across outputs."
-        )
     if len(channel_metric) == 0:
         return float("inf")
     else:

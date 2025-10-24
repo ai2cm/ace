@@ -46,6 +46,12 @@ StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampLis
 
 @dataclasses.dataclass
 class ComponentInitialConditionConfig:
+    """
+    Parameters:
+        path: Path to the component initial condition dataset.
+        engine: Backend used in xarray.open_dataset call.
+    """
+
     path: str
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
 
@@ -79,6 +85,7 @@ class CoupledInitialConditionConfig:
         ocean_prognostic_names: Sequence[str],
         atmosphere_prognostic_names: Sequence[str],
         labels: list[str],
+        n_ensemble_per_ic: int,
     ) -> CoupledPrognosticState:
         ocean = self.ocean.get_dataset(self.start_indices)
         # time is a required variable but not necessarily a dimension
@@ -91,11 +98,13 @@ class CoupledInitialConditionConfig:
                 ds=ocean,
                 prognostic_names=ocean_prognostic_names,
                 labels=labels,
+                n_ensemble=n_ensemble_per_ic,
             ),
             atmosphere_data=get_initial_condition(
                 ds=atmos,
                 prognostic_names=atmosphere_prognostic_names,
                 labels=labels,
+                n_ensemble=n_ensemble_per_ic,
             ),
         )
 
@@ -117,6 +126,8 @@ class InferenceConfig:
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
+        labels: Dataset labels to use for inference.
+        n_ensemble_per_ic: Number of ensemble members per initial condition
     """
 
     experiment_dir: str
@@ -133,6 +144,7 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     labels: list[str] = dataclasses.field(default_factory=list)
+    n_ensemble_per_ic: int = 1
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -241,6 +253,7 @@ def run_inference_from_config(config: InferenceConfig):
         ocean_prognostic_names=stepper_config.ocean.stepper.prognostic_names,
         atmosphere_prognostic_names=stepper_config.atmosphere.stepper.prognostic_names,
         labels=config.labels,
+        n_ensemble_per_ic=config.n_ensemble_per_ic,
     )
     stepper = config.load_stepper()
     stepper.set_eval()

@@ -23,8 +23,13 @@ from fme.downscaling.data import (
     DataLoaderConfig,
     GriddedData,
 )
-from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, Model
-from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
+from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
+from fme.downscaling.predictors import (
+    CascadePredictor,
+    CascadePredictorConfig,
+    PatchPredictionConfig,
+    PatchPredictor,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -107,7 +112,7 @@ class EventDownscaler:
         self,
         event_name: str,
         data: GriddedData,
-        model: DiffusionModel,
+        model: DiffusionModel | CascadePredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -186,7 +191,7 @@ class Downscaler:
     def __init__(
         self,
         data: GriddedData,
-        model: DiffusionModel,
+        model: DiffusionModel | CascadePredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -255,7 +260,7 @@ class Downscaler:
 
 @dataclasses.dataclass
 class DownscalerConfig:
-    model: CheckpointModelConfig
+    model: CheckpointModelConfig | CascadePredictorConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig
@@ -286,10 +291,6 @@ class DownscalerConfig:
             requirements=self.model.data_requirements,
         )
         model = self.model.build()
-        if isinstance(model, Model):
-            raise NotImplementedError(
-                "No-target generation is only enabled for DiffusionModel, not Model"
-            )
         downscaler = Downscaler(
             data=dataset,
             model=model,

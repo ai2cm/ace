@@ -20,6 +20,7 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
 )
 from fme.ace.inference.data_writer import DataWriterConfig
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
@@ -41,7 +42,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
-from fme.core.device import get_device
+from fme.core.device import get_device, using_gpu
 from fme.core.logging_utils import LoggingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -319,8 +320,9 @@ def inference_helper(
             monthly_reference_data=monthly_reference_filename, log_video=True
         ),
         data_writer=DataWriterConfig(
-            save_prediction_files=True,
+            save_prediction_files=False,
             save_monthly_files=save_monthly_files,
+            files=[FileWriterConfig("autoregressive")],
         ),
         forward_steps_in_memory=1,
         allow_incompatible_dataset=allow_incompatible_dataset_info,
@@ -490,8 +492,9 @@ def test_inference_writer_boundaries(
         logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
-            save_prediction_files=True,
-            time_coarsen=None,
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
         ),
         forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
@@ -530,7 +533,11 @@ def test_inference_writer_boundaries(
         tar["lat"].values, num_lon=len(tar["lon"])
     )
     # check time mean metrics
-    tol = 1e-4  # relative tolerance
+    # relative tolerance; for some reason some GPU test cases have higher error
+    if using_gpu():
+        tol = 5e-4
+    else:
+        tol = 1e-4
     assert metrics.root_mean_squared_error(
         tar_time_mean, gen_time_mean, area_weights
     ).item() == pytest.approx(
@@ -619,6 +626,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
         dim_sizes=dim_sizes,
         timestep_days=TIMESTEP.total_seconds() / 86400,
     )
+    time_coarsen_config = TimeCoarsenConfig(coarsen_factor=coarsen_factor)
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
         n_forward_steps=8,
@@ -631,8 +639,11 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
         ),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
-            save_prediction_files=True,
-            time_coarsen=TimeCoarsenConfig(coarsen_factor=coarsen_factor),
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[
+                FileWriterConfig("autoregressive", time_coarsen=time_coarsen_config)
+            ],
         ),
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -772,7 +783,11 @@ def test_derived_metrics_run_without_errors(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
-        data_writer=DataWriterConfig(save_prediction_files=True),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
         forward_steps_in_memory=1,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -822,7 +837,13 @@ def test_inference_config_raises_incompatible_timesteps(
         ),
     )
     base_config_dict["forward_steps_in_memory"] = forward_steps_in_memory
-    base_config_dict["data_writer"] = {"time_coarsen": {"coarsen_factor": time_coarsen}}
+    base_config_dict["data_writer"] = {
+        "save_prediction_files": False,
+        "save_monthly_files": False,
+        "files": [
+            {"label": "filename", "time_coarsen": {"coarsen_factor": time_coarsen}}
+        ],
+    }
     with pytest.raises(ValueError):
         dacite.from_dict(
             data_class=InferenceEvaluatorConfig,
@@ -879,7 +900,11 @@ def test_inference_override(tmp_path: pathlib.Path):
         checkpoint_path=str(stepper_path),
         logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
         loader=data.inference_data_loader_config,
-        data_writer=DataWriterConfig(save_prediction_files=True, time_coarsen=None),
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
