@@ -36,7 +36,7 @@ logging:
   log_to_file: true
   project: ace
   entity: ai2cm
-rain_loader:
+train_loader:
   batch_size: 8
   num_data_workers: 8
   prefetch_factor: 4
