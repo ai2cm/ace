@@ -67,4 +67,6 @@ base_name="stochastic"
 # run_training "train-era5-n512-e9c1-1step-ft-20step.yaml" "$base_name-era5-n512-e9c1-1step-ft-20step"
 # run_training "train-era5-n512-e9c1-1step-ft-20su.yaml" "$base_name-era5-n512-e9c1-1step-ft-20su"
 # run_training "train-era5-n512-e9c1-1step-ft-20su-e6c2k2.yaml" "$base_name-era5-n512-e9c1-1step-ft-20su-e6c2k2"
-run_training "train-era5-n384-e1c9-1step-ft-20su.yaml" "$base_name-era5-n384-e1c9-1step-ft-20su"
+# run_training "train-era5-n384-e1c9-1step-ft-20su.yaml" "$base_name-era5-n384-e1c9-1step-ft-20su"
+run_training "train-x-shield-n384-e1c9-1step-ft-20su.yaml" "$base_name-era5-n384-e1c9-1step-ft-20su"
+
