@@ -79,4 +79,4 @@ optimization:
     weight_decay: 0.01
 stepper:
   parameter_init:
-    weights_paths: /ckpt.tar
+    weights_path: /ckpt.tar
