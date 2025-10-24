@@ -95,7 +95,7 @@ while read FINETUNING; do
     build_stats_dataset_args
 
     # Create config from template
-    bash "$FULL_EXPERIMENT_DIR/create_coupled_finetune_config.sh" \
+    bash "$SCRIPT_DIR/create_coupled_finetune_config.sh" \
         "$EXISTING_RESULTS_DATASET" \
         "$TEMPLATE_CONFIG_PATH" \
         "$CONFIG_PATH"

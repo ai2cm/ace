@@ -99,7 +99,7 @@ while read PRETRAINING; do
     build_stats_dataset_args
 
     # Create config from template
-    bash "$FULL_EXPERIMENT_DIR/create_coupled_train_config.sh" \
+    bash "$SCRIPT_DIR/create_coupled_train_config.sh" \
         "$EXISTING_RESULTS_ATMOS_DATASET" \
         "$EXISTING_RESULTS_OCEAN_DATASET" \
         "$TEMPLATE_CONFIG_PATH" \
