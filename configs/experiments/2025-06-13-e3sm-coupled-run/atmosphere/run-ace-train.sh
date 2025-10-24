@@ -53,7 +53,6 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --retries 5 \
           --cluster ai2/ceres \
           --cluster ai2/jupiter \
-          --cluster
           --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$WANDB_USERNAME \
           --env WANDB_NAME="${JOB_NAME}" \
