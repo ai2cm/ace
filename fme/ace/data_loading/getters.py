@@ -156,7 +156,6 @@ def get_inference_data(
         n_ensemble=n_ensemble,
     )
     properties = dataset.properties
-
     if config.zarr_engine_used:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow

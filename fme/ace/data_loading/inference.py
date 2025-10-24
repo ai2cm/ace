@@ -319,7 +319,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                 updated_data[key] = value.expand_as(result.data[key])
             result.data = {**result.data, **updated_data}
         assert result.time.shape[0] == self._n_initial_conditions // dist.world_size
-        return result
+        return result.broadcast_ensemble(n_ensemble=self._n_ensemble)
 
     def __len__(self) -> int:
         # The ceil is necessary so if the last batch is smaller

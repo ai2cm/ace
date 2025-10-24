@@ -150,6 +150,7 @@ class BatchData:
             time=self.time,
             horizontal_dims=self.horizontal_dims,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def to_cpu(self) -> "BatchData":
@@ -158,6 +159,7 @@ class BatchData:
             time=self.time,
             horizontal_dims=self.horizontal_dims,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     @classmethod
