@@ -307,6 +307,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
         output_dir=config.experiment_dir,
+        n_ensemble_per_ic=config.n_ensemble_per_ic,
     )
 
     writer = config.get_data_writer(

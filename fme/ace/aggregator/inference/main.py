@@ -85,9 +85,9 @@ class _EvaluatorEnsembleAggregator(Protocol):
     def record_batch(
         self,
         target_data: EnsembleMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
+        gen_data: EnsembleMapping,
+        target_data_norm: EnsembleMapping,
+        gen_data_norm: EnsembleMapping,
         i_time_start: int = 0,
     ): ...
 
@@ -96,21 +96,6 @@ class _EvaluatorEnsembleAggregator(Protocol):
 
     @torch.no_grad()
     def get_dataset(self) -> xr.Dataset: ...
-
-
-# class _TimeDependentAggregator(Protocol):
-#     @torch.no_grad()
-#     def record_batch(
-#         self,
-#         time: xr.DataArray,
-#         data: TensorMapping,
-#     ): ...
-
-#     @torch.no_grad()
-#     def get_logs(self, label: str): ...
-
-#     @torch.no_grad()
-#     def get_dataset(self) -> xr.Dataset: ...
 
 
 class _TimeDependentEvaluatorAggregator(Protocol):
@@ -171,6 +156,7 @@ class InferenceEvaluatorAggregatorConfig:
         record_step_20: bool = False,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
     ) -> "InferenceEvaluatorAggregator":
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
@@ -204,6 +190,7 @@ class InferenceEvaluatorAggregatorConfig:
             channel_mean_names=channel_mean_names,
             normalize=normalize,
             save_diagnostics=save_diagnostics,
+            n_ensemble_per_ic=n_ensemble_per_ic,
         )
 
 
@@ -237,6 +224,7 @@ class InferenceEvaluatorAggregator(
         channel_mean_names: Sequence[str] | None = None,
         log_nino34_index: bool = True,
         save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
     ):
         """
         Args:
@@ -263,11 +251,15 @@ class InferenceEvaluatorAggregator(
                 provided, all available variables will be used.
             log_nino34_index: Whether to log the Nino34 index.
             save_diagnostics: Whether to save reduced diagnostics to disk.
+            n_ensemble_per_ic: Number of ensemble members per initial condition.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
         self._channel_mean_names = channel_mean_names
         self._aggregators: dict[str, _EvaluatorAggregator] = {}
+        if n_ensemble_per_ic > 1:
+            self.n_ensemble_per_ic = n_ensemble_per_ic
+            self._ensemble_aggregators: dict[str, _EvaluatorEnsembleAggregator] = {}
         self._time_dependent_aggregators: dict[
             str, _TimeDependentEvaluatorAggregator
         ] = {}
