@@ -191,7 +191,8 @@ class InferenceEvaluatorConfig:
     ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            n_initial_conditions=self.loader.n_initial_conditions,
+            n_initial_conditions=self.loader.n_initial_conditions
+            * self.n_ensemble_per_ic,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,
             variable_metadata=variable_metadata,
