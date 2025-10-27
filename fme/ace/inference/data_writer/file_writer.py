@@ -111,6 +111,8 @@ def _select_time(
     data: xr.Dataset,
     time_selection: TimeSlice | MonthSelector | Slice | None,
     start_timestep: int = 0,
+    sample_dim: str = "sample",
+    time_dim: str = "time",
 ) -> xr.Dataset:
     """
     Filter the dataset based on the time selection.
@@ -118,20 +120,46 @@ def _select_time(
     if time_selection is None:
         return data
 
-    if "time" not in data.coords:
-        raise ValueError("Dataset must contain a 'time' coordinate for time selection.")
+    if time_dim not in data.coords:
+        raise ValueError(
+            f"Dataset must contain a '{time_dim}' coordinate for time selection."
+        )
 
-    if isinstance(time_selection, TimeSlice):
-        return data.sel(time=time_selection.as_raw_slice())
+    if sample_dim not in data.dims:
+        raise ValueError(
+            f"Dataset must contain a '{sample_dim}' dimension for time selection."
+        )
 
-    if isinstance(time_selection, MonthSelector):
-        return time_selection.select(data)
+    def _time_subselector(sample_ds: xr.Dataset) -> xr.Dataset:
+        if isinstance(time_selection, TimeSlice):
+            ds_subselected = sample_ds.sel(**{time_dim: time_selection.as_raw_slice()})
+        elif isinstance(time_selection, MonthSelector):
+            ds_subselected = time_selection.select(sample_ds)
+        elif isinstance(time_selection, Slice):
+            sl = Slice.shift_left(time_selection, start_timestep)
+            ds_subselected = sample_ds.isel(**{time_dim: sl.slice})
+        else:
+            raise ValueError(f"Unsupported time selection type: {type(time_selection)}")
+        return ds_subselected
 
-    if isinstance(time_selection, Slice):
-        sl = Slice.shift_left(time_selection, start_timestep)
-        return data.isel(time=sl.slice)
-
-    raise ValueError(f"Unsupported time selection type: {type(time_selection)}")
+    data_arrays, time_arrays = [], []
+    for i_sample in range(len(data[sample_dim])):
+        sample_ds = data.isel({sample_dim: i_sample})
+        sample_ds_subselected = _time_subselector(
+            sample_ds.assign_coords({time_dim: sample_ds[time_dim]})
+        )
+        data_arrays.append(
+            sample_ds_subselected.drop_vars(time_dim).expand_dims({sample_dim: 1})
+        )
+        time_arrays.append(
+            sample_ds_subselected[time_dim]
+            .drop_vars(time_dim)
+            .expand_dims({sample_dim: 1})
+        )
+    combined_subsampled_data = xr.concat(data_arrays, dim=sample_dim)
+    combined_time = xr.concat(time_arrays, dim=sample_dim)
+    combined_data = combined_subsampled_data.assign({time_dim: combined_time})
+    return combined_data
 
 
 @dataclasses.dataclass
@@ -163,7 +191,7 @@ class FileWriterConfig:
     lat_extent: Sequence[float] | None = None
     lon_extent: Sequence[float] | None = None
     time_selection: Slice | MonthSelector | TimeSlice | None = None
-    save_reference: bool = False
+    save_reference: bool = True
     time_coarsen: TimeCoarsenConfig | None = None
     format: NetCDFWriterConfig | ZarrWriterConfig = dataclasses.field(
         default_factory=NetCDFWriterConfig
@@ -204,8 +232,8 @@ class FileWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
-        prediction_suffix: str = "prediction",
-        reference_suffix: str = "reference",
+        prediction_suffix: str = "predictions",
+        reference_suffix: str = "target",
     ) -> Union["PairedFileWriter", PairedTimeCoarsen]:
         prediction_writer = dataclasses.replace(
             self, label=f"{self.label}_{prediction_suffix}"
@@ -266,6 +294,19 @@ class FileWriterConfig:
             raise ValueError(
                 "Coordinates must include 'lat' and 'lon' if using lat/lon extents. "
                 f"Got {list(coords.keys())}."
+            )
+
+        if isinstance(self.time_selection, TimeSlice) and n_initial_conditions > 1:
+            raise NotImplementedError(
+                "TimeSlice selection is not currently supported for multiple "
+                "initial conditions."
+            )
+        elif (
+            isinstance(self.time_selection, MonthSelector) and n_initial_conditions > 1
+        ):
+            raise NotImplementedError(
+                "MonthSelector selection is not currently supported for multiple "
+                "initial conditions."
             )
 
         subset_coords = xr.Dataset(coords)
@@ -349,22 +390,24 @@ class FileWriter:
         data: dict[str, torch.Tensor],
         batch_time: xr.DataArray,
         start_timestep: int = 0,
-    ) -> dict[str, torch.Tensor]:
+        sample_dim: str = "sample",
+        time_dim: str = "time",
+    ) -> tuple[dict[str, torch.Tensor], xr.DataArray]:
         use_names = self.config.names or data.keys()
         data_xr = xr.Dataset(
             {
                 k: xr.DataArray(
                     v.cpu().numpy(),
                     dims=[
-                        "batch",
-                        "time",
+                        sample_dim,
+                        time_dim,
                         *[d.name for d in self._spatial_dims],
                     ],
                 )
                 for k, v in data.items()
                 if k in use_names
             },
-            coords={"time": batch_time, **self.full_coords},
+            coords={time_dim: batch_time, **self.full_coords},
         )
 
         if self.config.lat_extent or self.config.lon_extent:
@@ -377,13 +420,18 @@ class FileWriter:
             )
 
         data_xr = _select_time(
-            data_xr, self.config.time_selection, start_timestep=start_timestep
+            data_xr,
+            self.config.time_selection,
+            start_timestep=start_timestep,
+            sample_dim=sample_dim,
+            time_dim=time_dim,
         )
-        return {
+        subselected_data = {
             str(k): torch.from_numpy(v.values)
             for k, v in data_xr.items()
             if v.sizes["time"] > 0
         }
+        return subselected_data, data_xr["time"]
 
     def append_batch(
         self,
@@ -394,11 +442,11 @@ class FileWriter:
         """
         Filter region and times and append a batch of data to the writer.
         """
-        subselected = self._subselect_data(data, batch_time)
+        subselected_data, subselected_time = self._subselect_data(data, batch_time)
 
         # Warn on empty batch, but it might be expected in some cases
         # so ignore after 10 warnings
-        if not subselected:
+        if not subselected_data:
             self._no_write_count += 1
             if self._no_write_count < 10:
                 logging.warning(
@@ -409,9 +457,9 @@ class FileWriter:
                 logging.warning("Further warnings about empty data will be suppressed.")
             return
         self.writer.append_batch(
-            data=subselected,
+            data=subselected_data,
             start_timestep=start_timestep,
-            batch_time=batch_time,
+            batch_time=subselected_time,
         )
 
     def flush(self):
