@@ -1,5 +1,5 @@
-group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
-1pct_nosmooth-nfs4-150ep-rs1|train|high|a100+h100|2|200GiB|0||
-1pct_nosmooth-nfs4-150ep-rs2|train|high|a100+h100|2|200GiB|0||
-1pct_nosmooth-nfs4-150ep-rs3|train|high|a100+h100|2|200GiB|0||
-1pct_nosmooth-nfs4-150ep-rs4|train|high|a100+h100|2|200GiB|0||
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+1pct_nosmooth-nfs4-150ep_wulr|rs1|train|high|a100+h100|2|200GiB|0||
+1pct_nosmooth-nfs4-150ep_wulr|rs2|train|high|a100+h100|2|200GiB|0||
+1pct_nosmooth-nfs4-150ep_wulr|rs3|train|high|a100+h100|2|200GiB|0||
+1pct_nosmooth-nfs4-150ep_wulr|rs4|train|high|a100+h100|2|200GiB|0||
