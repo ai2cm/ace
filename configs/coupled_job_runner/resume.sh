@@ -54,17 +54,18 @@ cd "$REPO_ROOT"
 
 while read RESUMING; do
     GROUP=$(echo "$RESUMING" | cut -d"|" -f1)
-    WANDB_PROJECT=$(echo "$RESUMING" | cut -d"|" -f2)
-    WANDB_ID=$(echo "$RESUMING" | cut -d"|" -f3)
-    STATUS=$(echo "$RESUMING" | cut -d"|" -f4)
-    PRIORITY=$(echo "$RESUMING" | cut -d"|" -f5)
-    CLUSTER=$(echo "$RESUMING" | cut -d"|" -f6)
-    N_GPUS=$(echo "$RESUMING" | cut -d"|" -f7)
-    SHARED_MEM=$(echo "$RESUMING" | cut -d"|" -f8)
-    RETRIES=$(echo "$RESUMING" | cut -d"|" -f9)
-    WORKSPACE=$(echo "$RESUMING" | cut -d"|" -f10)
-    OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f11)
-    EXISTING_RESULTS_DATASET=$(echo "$RESUMING" | cut -d"|" -f12)
+    TAG=$(echo "$TRAINING" | cut -d"|" -f2)
+    WANDB_PROJECT=$(echo "$RESUMING" | cut -d"|" -f3)
+    WANDB_ID=$(echo "$RESUMING" | cut -d"|" -f4)
+    STATUS=$(echo "$RESUMING" | cut -d"|" -f5)
+    PRIORITY=$(echo "$RESUMING" | cut -d"|" -f6)
+    CLUSTER=$(echo "$RESUMING" | cut -d"|" -f7)
+    N_GPUS=$(echo "$RESUMING" | cut -d"|" -f8)
+    SHARED_MEM=$(echo "$RESUMING" | cut -d"|" -f9)
+    RETRIES=$(echo "$RESUMING" | cut -d"|" -f10)
+    WORKSPACE=$(echo "$RESUMING" | cut -d"|" -f11)
+    OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f12)
+    EXISTING_RESULTS_DATASET=$(echo "$RESUMING" | cut -d"|" -f13)
 
     if [[ "$STATUS" != "train" ]]; then
         continue
@@ -75,7 +76,11 @@ while read RESUMING; do
     fi
 
     JOB_GROUP="${GROUP}"
-    JOB_NAME="${JOB_GROUP}-train"
+    if [[ -n "$TAG" ]]; then
+        JOB_NAME="${JOB_GROUP}-${TAG}-train"
+    else
+        JOB_NAME="${JOB_GROUP}-train"
+    fi
 
     # Get experiment dataset
     if [[ -z $EXISTING_RESULTS_DATASET ]]; then
