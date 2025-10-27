@@ -1,5 +1,4 @@
 experiment_dir: /results
-log_train_every_n_batches: 20
 save_checkpoint: true
 validate_using_ema: false
 ema:
