@@ -67,7 +67,7 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.0002
   optimizer_type: AdamW
   kwargs:
     fused: true
