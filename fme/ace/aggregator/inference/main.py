@@ -17,14 +17,10 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
 )
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.typing_ import (
-    EnsembleMapping,
-    EnsembleTensorDict,
-    TensorDict,
-    TensorMapping,
-)
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
+from ..one_step.ensemble import get_one_step_ensemble_aggregator
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
 from .enso import (
@@ -68,7 +64,7 @@ class _EvaluatorAggregator(Protocol):
         self,
         target_data: TensorMapping,
         gen_data: TensorMapping,
-        target_data_norm: EnsembleTensorDict,
+        target_data_norm: TensorMapping,
         gen_data_norm: TensorMapping,
         i_time_start: int = 0,
     ): ...
@@ -84,10 +80,10 @@ class _EvaluatorEnsembleAggregator(Protocol):
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: EnsembleMapping,
-        gen_data: EnsembleMapping,
-        target_data_norm: EnsembleMapping,
-        gen_data_norm: EnsembleMapping,
+        target_data: EnsembleTensorDict,
+        gen_data: EnsembleTensorDict,
+        # target_data_norm: EnsembleMapping,
+        # gen_data_norm: EnsembleMapping,
         i_time_start: int = 0,
     ): ...
 
@@ -257,8 +253,8 @@ class InferenceEvaluatorAggregator(
             raise ValueError("Output directory must be set to save diagnostics")
         self._channel_mean_names = channel_mean_names
         self._aggregators: dict[str, _EvaluatorAggregator] = {}
+        self.n_ensemble_per_ic = n_ensemble_per_ic
         if n_ensemble_per_ic > 1:
-            self.n_ensemble_per_ic = n_ensemble_per_ic
             self._ensemble_aggregators: dict[str, _EvaluatorEnsembleAggregator] = {}
         self._time_dependent_aggregators: dict[
             str, _TimeDependentEvaluatorAggregator
@@ -299,6 +295,15 @@ class InferenceEvaluatorAggregator(
                 target="norm",
                 channel_mean_names=self._channel_mean_names,
             )
+            if n_ensemble_per_ic > 1:
+                self._ensemble_aggregators["ensemble_step_20"] = (
+                    get_one_step_ensemble_aggregator(
+                        gridded_operations=ops,
+                        target_time=20,
+                        log_mean_maps=False,
+                        metadata=dataset_info.variable_metadata,
+                    )
+                )
         try:
             self._aggregators["power_spectrum"] = (
                 PairedSphericalPowerSpectrumAggregator(
@@ -426,6 +431,15 @@ class InferenceEvaluatorAggregator(
                 gen_data_norm=gen_data_norm,
                 i_time_start=self._n_timesteps_seen,
             )
+        if self.n_ensemble_per_ic > 1:
+            unfolded_target_data, unfolded_prediction_data = data.ensemble_data()
+            for ensemble_aggregator in self._ensemble_aggregators.values():
+                ensemble_aggregator.record_batch(
+                    target_data=unfolded_target_data,
+                    gen_data=unfolded_prediction_data,
+                    i_time_start=self._n_timesteps_seen,
+                )
+
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
                 time=data.time,

@@ -382,6 +382,7 @@ class PairedData:
     reference: TensorMapping
     labels: list[set[str]]
     time: xr.DataArray
+    n_ensemble: int = 1
 
     @property
     def forcing(self) -> TensorMapping:
@@ -390,6 +391,20 @@ class PairedData:
     @property
     def target(self) -> TensorMapping:
         return {k: v for k, v in self.reference.items() if k in self.prediction}
+
+    def ensemble_data(self) -> tuple[EnsembleTensorDict, EnsembleTensorDict]:
+        """
+        Add an explicit ensemble dimension to a data tensor dict.
+
+        Returns:
+            The tensor dict with an explicit ensemble dimension.
+        """
+        return (
+            unfold_ensemble_dim(TensorDict(self.reference), n_ensemble=1),
+            unfold_ensemble_dim(
+                TensorDict(self.prediction), n_ensemble=self.n_ensemble
+            ),
+        )
 
     @classmethod
     def from_batch_data(
@@ -404,6 +419,7 @@ class PairedData:
             reference=reference.data,
             labels=prediction.labels,
             time=prediction.time,
+            n_ensemble=prediction.n_ensemble,
         )
 
     @classmethod
@@ -413,6 +429,7 @@ class PairedData:
         reference: TensorMapping,
         labels: list[set[str]],
         time: xr.DataArray,
+        n_ensemble: int = 1,
     ) -> "PairedData":
         device = get_device()
         _check_device(prediction, device)
@@ -422,6 +439,7 @@ class PairedData:
             reference=reference,
             labels=labels,
             time=time,
+            n_ensemble=n_ensemble,
         )
 
     @classmethod
@@ -431,6 +449,7 @@ class PairedData:
         reference: TensorMapping,
         labels: list[set[str]],
         time: xr.DataArray,
+        n_ensemble: int = 1,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))
         _check_device(reference, torch.device("cpu"))
@@ -439,4 +458,5 @@ class PairedData:
             reference=reference,
             labels=labels,
             time=time,
+            n_ensemble=n_ensemble,
         )
