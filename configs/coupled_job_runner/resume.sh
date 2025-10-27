@@ -54,7 +54,7 @@ cd "$REPO_ROOT"
 
 while read RESUMING; do
     GROUP=$(echo "$RESUMING" | cut -d"|" -f1)
-    TAG=$(echo "$TRAINING" | cut -d"|" -f2)
+    TAG=$(echo "$RESUMING" | cut -d"|" -f2)
     WANDB_PROJECT=$(echo "$RESUMING" | cut -d"|" -f3)
     WANDB_ID=$(echo "$RESUMING" | cut -d"|" -f4)
     STATUS=$(echo "$RESUMING" | cut -d"|" -f5)
