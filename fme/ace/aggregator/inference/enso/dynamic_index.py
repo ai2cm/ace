@@ -20,7 +20,7 @@ from ...plotting import plot_mean_and_samples
 
 SAMPLE_DIM, TIME_DIM, LAT_DIM, LON_DIM = 0, 1, -2, -1
 
-SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "surface_temperature", "TS"]
+SEA_SURFACE_TEMPERATURE_NAMES = ["sst"]
 
 
 class Region(abc.ABC):

@@ -1,0 +1,55 @@
+experiment_dir: /results
+n_coupled_steps: 14600
+coupled_steps_in_memory: 25
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+      - HI
+      - sea_ice_fraction
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+      - surface_temperature
+      - PRATEsfc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-ocean.zarr
+        engine: zarr
+        n_repeats: 2
+      - data_path: /climate-default
+        file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+        engine: zarr
+        n_repeats: 2
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
+        engine: zarr
+        subset:
+          # NOTE: this is required to align the atmosphere and ocean start times
+          start_time: '0151-01-06'
+        n_repeats: 2
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+        subset:
+          # NOTE: this is required to align the atmosphere and ocean start times
+          start_time: '0151-01-06'
+        n_repeats: 2
+  start_indices:
+    times:
+      - '0311-01-01T00:00:00'

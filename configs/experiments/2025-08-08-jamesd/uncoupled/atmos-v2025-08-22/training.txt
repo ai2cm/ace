@@ -1,0 +1,3 @@
+group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs1|train|urgent|ceres|8|600GiB|3||max_epochs=50
+v2025-08-22-ts_unc-TMP2m_Q2m_lw2-const_lr_50ep-rs2|train|urgent|ceres|8|600GiB|3||max_epochs=50

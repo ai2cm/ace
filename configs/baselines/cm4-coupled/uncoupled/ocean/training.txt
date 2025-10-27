@@ -1,0 +1,2 @@
+group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+v2025-08-22-mnsf-correctHI-rs1|skip|high|ceres|4|200GiB|3||
