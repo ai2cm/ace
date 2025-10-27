@@ -24,3 +24,5 @@
 1pct_nosmooth-nfs4-150ep-rs3|ex|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth-nfs4-150ep-rs4|ex|training|best_inference_ckpt|normal|--not-preemptible
+
+1pct_nosmooth-nfs4-150ep_wulr|rs1|01K8J054V3RRY08S690C2QF74W|training|best_inference_ckpt|normal|--not-preemptible
