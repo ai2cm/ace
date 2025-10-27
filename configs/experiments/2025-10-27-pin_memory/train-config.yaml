@@ -10,7 +10,7 @@ validation_aggregator:
   log_snapshots: false
   log_mean_maps: false
 inference:
-  n_forward_steps: 29200
+  n_forward_steps: 2920
   forward_steps_in_memory: 50
   loader:
     start_indices:
