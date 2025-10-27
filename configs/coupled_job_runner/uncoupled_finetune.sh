@@ -119,7 +119,7 @@ while read FINETUNING; do
     echo " - Override: ${OVERRIDE_ARGS}"
 
     # Validate config (use relative path)
-    python -m fme.ace.validate_config "$CONFIG_PATH_REL" --config_type train $OVERRIDE_ARGS
+    python -m fme.ace.validate_config "$CONFIG_PATH_REL" --config_type train --override $OVERRIDE_ARGS
 
     # Commit config if changed (use absolute path)
     git_commit_and_push "$CONFIG_PATH" "${JOB_NAME}" "$GIT_BRANCH"

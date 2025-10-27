@@ -160,7 +160,7 @@ run_gantry_training_job() {
     # Build override string
     local OVERRIDE=""
     if [[ -n "${OVERRIDE_ARGS:-}" ]]; then
-        OVERRIDE="$OVERRIDE_ARGS"
+        OVERRIDE="--override ${OVERRIDE_ARGS}"
     fi
 
     # Initialize checkpoint args if not set
