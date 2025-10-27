@@ -4,3 +4,5 @@ no_pin_memory-no_time_buffer|rs0||training|best_inference_ckpt|normal|--not-pree
 no_pin_memory-no_time_buffer|rs0|01K8KT1E2CNSX7E0WYN0YFXFGV|training|best_inference_ckpt|normal|--not-preemptible
 
 no_pin_memory-no_time_buffer|rs1|01K8KT1TSAY09V5YKVVHA8SMRR|training|best_inference_ckpt|normal|--not-preemptible
+
+no_pin_memory-time_buffer_10|rs0|01K8KVFP75ZQZW0ATB3P7S657C|training|best_inference_ckpt|normal|--not-preemptible
