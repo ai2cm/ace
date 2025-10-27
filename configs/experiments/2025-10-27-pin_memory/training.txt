@@ -1,3 +1,3 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
-no_pin_memory-no_time_buffer|rs0|train|high|h100|2|300GiB|0||seed=0
-no_pin_memory-no_time_buffer|rs1|train|high|h100|2|300GiB|0||seed=1
+no_pin_memory-no_time_buffer|rs0|train|high||2|300GiB|0||seed=0
+no_pin_memory-no_time_buffer|rs1|train|high||2|300GiB|0||seed=1
