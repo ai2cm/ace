@@ -80,10 +80,6 @@ def _restore_checkpoint_flexible(
         state_dict = scatter_model_state_dict(model, state_dict, strict)
 
     # load state dict
-    # print(state_dict.keys())
-    for t in state_dict:
-      print(t,state_dict[t].shape)
-    print("......")
     model.load_state_dict(state_dict, strict=strict)
 
     # the loss is also restored in the case that it has a state

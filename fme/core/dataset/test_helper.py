@@ -2,6 +2,7 @@ import os
 
 import torch
 import torch.distributed as dist
+from physicsnemo.distributed.utils import split_tensor_along_dim
 
 # this computes a relative error compatible with torch.allclose or np.allclose
 def relative_error(tensor1, tensor2):
@@ -34,10 +35,28 @@ def gather_helper(tensor, dim=None, group=None):
 
     return tensor_gather
 
+def split_helper(tensor, dim=None, group=None):
+    with torch.no_grad():
+        if (dim is not None) and dist.get_world_size(group=group):
+            gsize = dist.get_world_size(group=group)
+            grank = dist.get_rank(group=group)
+            # split in dim
+            tensor_list_local = split_tensor_along_dim(tensor, dim=dim, num_chunks=gsize)
+            tensor_local = tensor_list_local[grank]
+        else:
+            tensor_local = tensor.clone()
+
+    return tensor_local
+
 def gather_helper_conv(tensor, hdim=-2, wdim=-1, w_group=1, h_group=1):
   tensor_gather = gather_helper(tensor, dim=hdim, group=h_group)
   tensor_gather = gather_helper(tensor_gather, dim=wdim, group=w_group)
   return tensor_gather
+
+def split_helper_conv(tensor, hdim=-2, wdim=-1, w_group=1, h_group=1):
+  tensor_local = split_helper(tensor, dim=hdim, group=h_group)
+  tensor_local = split_helper(tensor_local, dim=wdim, group=w_group)
+  return tensor_local
 
 def init_seed(seed):
   torch.manual_seed(seed)
