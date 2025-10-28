@@ -3,7 +3,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 50
+max_epochs: 10
 n_forward_steps: 4
 inference:
   n_forward_steps: 1440

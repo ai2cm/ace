@@ -9,12 +9,12 @@ CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=8
-PRIORITY="low"
+PRIORITY="high"
 WORKSPACE="ai2/ace"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="2025-08-28-baseline-padding-fix-bilnear-only" # update when training a new baseline
+JOB_GROUP="2025-08-28-baseline-padding-fix-pad-only" # update when training a new baseline
 RS=1
 JOB_NAME="${JOB_GROUP}-rs${RS}-train"
 echo "Job name: ${JOB_NAME}"
