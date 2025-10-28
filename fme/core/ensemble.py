@@ -21,19 +21,31 @@ def get_crps(
     Returns:
         The CRPS loss.
     """
-    if gen.shape[1] != 2:
-        raise NotImplementedError(
-            "CRPS loss is written here specifically for 2 ensemble members, "
-            f"got {gen.shape[1]} ensemble members. "
-            "Update this function (and its tests) to support more."
-        )
+    n_ens = gen.shape[1]
+
     # CRPS is `E[|X - y|] - 1/2 E[|X - X'|]`
     # below we compute the first term as the average of two ensemble members
     # meaning the 0.5 factor can be pulled out
     alpha = 0.95
     epsilon = (1 - alpha) / 2
+
+    # E[|X - y|]
     target_term = torch.abs(gen - target).mean(axis=1)
-    internal_term = -0.5 * torch.abs(gen[:, 0, ...] - gen[:, 1, ...])
+
+    # Second term: -0.5 * E[|X - X'|]
+    # Instead of pairwise differences, use expectation identity:
+    # E[|X - X'|] = 2/(n_ens^2) * sum_{i<j} |X_i - X_j|
+    # = 2 * mean_{i<j} |X_i - X_j|
+    # Efficiently compute using broadcasting tricks.
+    sorted_gen, _ = torch.sort(gen, dim=1)
+    weights = (
+        2 * (torch.arange(n_ens, device=gen.device, dtype=gen.dtype) + 1) - n_ens - 1
+    )
+    weights = weights.view(1, n_ens, *([1] * (gen.ndim - 2)))  # shape [1, n_ens, ...]
+
+    # Equivalent to mean(|X_i - X_j|) across all pairs
+    internal_term = -(sorted_gen * weights).mean(dim=1)
+
     return target_term + (1 - epsilon) * internal_term
 
 
