@@ -54,9 +54,6 @@ CONFIG_PATH_REL="$EXPERIMENT_DIR/$CONFIG_SUBDIR/$CONFIG_FILENAME"
 print_stats_config
 
 # Change to repo root so paths are valid
-echo "Changing to repo root: $REPO_ROOT"
-echo "Input path: $INPUT_PATH"
-echo "Full experiment dir: $FULL_EXPERIMENT_DIR"
 cd "$REPO_ROOT"
 
 while read PRETRAINING; do
@@ -78,11 +75,7 @@ while read PRETRAINING; do
     OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$PRETRAINING" | cut -d"|" -f17)
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$PRETRAINING" | cut -d"|" -f18)
-    echo "Group: $GROUP"
-    echo "Staus: $STATUS"
-    echo "Priority: $PRIORITY"
-    echo "Existing Atmos Dataset: $EXISTING_RESULTS_ATMOS_DATASET"
-    echo "Existing Ocean Dataset: $EXISTING_RESULTS_OCEAN_DATASET"
+
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi

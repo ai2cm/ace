@@ -9,11 +9,13 @@ CONFIG_PATH=${4}
 
 beaker dataset fetch ${EXISTING_RESULTS_ATMOS_DATASET} --prefix config.yaml
 mv ./config.yaml ./atmos-config.yaml
-sed -i '' 's/statsdata/atmos_stats/g' ./atmos-config.yaml
+sed -i.bak -E 's#(global_means_path: )[^[:space:]]*/([^/]+\.nc)#\1/atmos_stats/\2#' ./atmos-config.yaml
+sed -i.bak -E 's#(global_stds_path: )[^[:space:]]*/([^/]+\.nc)#\1/atmos_stats/\2#' ./atmos-config.yaml
 
 beaker dataset fetch ${EXISTING_RESULTS_OCEAN_DATASET} --prefix config.yaml
 mv ./config.yaml ./ocean-config.yaml
-sed -i '' 's/statsdata/ocean_stats/g' ./ocean-config.yaml
+sed -i.bak -E 's#(global_means_path: )[^[:space:]]*/([^/]+\.nc)#\1/ocean_stats/\2#' ./ocean-config.yaml
+sed -i.bak -E 's#(global_stds_path: )[^[:space:]]*/([^/]+\.nc)#\1/ocean_stats/\2#' ./ocean-config.yaml
 
 # try to get sea_ice_fraction_name from step config
 # SIC_NAME=$(yq '.stepper.step.config.corrector.config.sea_ice_fraction_correction.sea_ice_fraction_name' ./ocean-config.yaml)
