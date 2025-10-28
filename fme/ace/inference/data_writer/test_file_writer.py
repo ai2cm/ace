@@ -1,3 +1,4 @@
+import datetime
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -20,7 +21,7 @@ from .file_writer import (
     _select_time,
 )
 from .raw import NetCDFWriterConfig
-from .time_coarsen import TimeCoarsen
+from .time_coarsen import MonthlyCoarsenConfig, TimeCoarsen
 from .zarr import ZarrWriterConfig
 
 
@@ -41,6 +42,7 @@ def test_file_writer_config_build():
             n_initial_conditions=1,
             n_timesteps=10,
             variable_metadata={},
+            timestep=datetime.timedelta(days=1),
             coords={
                 "lat": np.array([-20, -10.0, 0.0, 10.0, 20.0]),
                 "lon": np.array([-30.0, -20.0, 0.0, 20.0, 30.0]),
@@ -83,6 +85,7 @@ def test_file_writer_config_build_missing_coords():
             experiment_dir="test_experiment",
             n_initial_conditions=1,
             n_timesteps=10,
+            timestep=datetime.timedelta(days=1),
             variable_metadata={},
             coords=coords,
             dataset_metadata=MagicMock(),
@@ -182,10 +185,12 @@ def test_month_selector_select():
     ["time_selection"],
     [
         pytest.param(
-            TimeSlice(start_time="2020-01-01", stop_time="2020-01-02"), id="TimeSlice"
+            TimeSlice(start_time="2020-01-01", stop_time="2020-01-02"),
+            id="TimeSlice",
         ),
         pytest.param(MonthSelector(months=["Jan"]), id="MonthSelector"),
         pytest.param(Slice(start=0, stop=3, step=2), id="Slice"),
+        pytest.param(Slice(start=5, stop=15), id="Slice_non_initial"),
         pytest.param(None, id="None"),
     ],
 )
@@ -209,13 +214,14 @@ def test__select_time_file_writer_single_sample(time_selection, tmpdir):
         experiment_dir=str(tmpdir),
         n_initial_conditions=n_samples,
         n_timesteps=-1,  # unused for netcdf
+        timestep=datetime.timedelta(days=1),
         coords={},
         variable_metadata={},
         dataset_metadata=DatasetMetadata(),
     )
     file_writer.append_batch(
         data=dict(batch_data.data),
-        start_timestep=0,
+        start_timestep=-1,  # unused for RawDataWriter
         batch_time=batch_data.time,
     )
 
@@ -234,11 +240,18 @@ def test__select_time_file_writer_single_sample(time_selection, tmpdir):
                 subselected_data.squeeze().temperature,
             )
         elif isinstance(time_selection, Slice):
-            assert len(subselected_data.time) == 2
-            np.testing.assert_almost_equal(
-                batch_data.data["temperature"][0, 0:3:2, :].cpu().numpy(),
-                subselected_data.squeeze().temperature,
-            )
+            if time_selection.start == 0:
+                assert len(subselected_data.time) == 2  # timesteps 0 and 2
+                np.testing.assert_almost_equal(
+                    batch_data.data["temperature"][0, 0:3:2, :].cpu().numpy(),
+                    subselected_data.squeeze().temperature,
+                )
+            else:
+                assert len(subselected_data.time) == 10  # timesteps 5 to 14
+                np.testing.assert_almost_equal(
+                    batch_data.data["temperature"][0, 5:15, :].cpu().numpy(),
+                    subselected_data.squeeze().temperature,
+                )
         else:  # time_selection is None
             assert len(subselected_data.time) == n_timesteps
             np.testing.assert_almost_equal(
@@ -284,6 +297,7 @@ def test__select_time_file_writer_multiple_samples(time_selection, tmpdir):
                 experiment_dir=str(tmpdir),
                 n_initial_conditions=n_samples,
                 n_timesteps=-1,  # unused for netcdf
+                timestep=datetime.timedelta(days=1),
                 coords={},
                 variable_metadata={},
                 dataset_metadata=DatasetMetadata(),
@@ -294,6 +308,7 @@ def test__select_time_file_writer_multiple_samples(time_selection, tmpdir):
         experiment_dir=str(tmpdir),
         n_initial_conditions=n_samples,
         n_timesteps=-1,  # unused for netcdf
+        timestep=datetime.timedelta(days=1),
         coords={},
         variable_metadata={},
         dataset_metadata=DatasetMetadata(),
@@ -429,10 +444,11 @@ def test_file_writer_with_healpix_data_and_zarr(tmpdir):
     writer = config.build(
         experiment_dir=str(tmpdir),
         n_initial_conditions=n_samples,
+        n_timesteps=n_timesteps,
+        timestep=datetime.timedelta(days=1),
         variable_metadata={},
         coords=coords,
         dataset_metadata=MagicMock(),
-        n_timesteps=n_timesteps,
     )
     data = {"temperature": torch.rand(n_samples, n_timesteps, *shape)}
     data_first_half = {k: v[:, :3] for k, v in data.items()}
@@ -501,3 +517,31 @@ def test_file_writer_append_batch_time_coarsened():
         kwargs["data"]["temperature"], time_coarsened_temperature
     )
     xr.testing.assert_equal(kwargs["batch_time"], coarsened_times)
+
+
+def test_file_writer_monthly(tmpdir):
+    label = "output"
+    config = FileWriterConfig(label=label, time_coarsen=MonthlyCoarsenConfig())
+    n_timesteps = 24
+    n_samples = 1
+    writer = config.build(
+        experiment_dir=str(tmpdir),
+        n_initial_conditions=n_samples,
+        n_timesteps=n_timesteps,
+        timestep=datetime.timedelta(days=5),
+        variable_metadata={},
+        coords={"lat": np.linspace(-90, 90, 5), "lon": np.linspace(-180, 180, 5)},
+        dataset_metadata=MagicMock(),
+    )
+    data = {"foo": torch.rand(n_samples, n_timesteps, 5, 5)}
+    batch_time = xr.DataArray(
+        xr.date_range("2020-01-01", periods=n_timesteps, freq="5D"), dims=["time"]
+    )
+    batch_time = xr.concat([batch_time] * n_samples, dim="sample")
+    writer.append_batch(data, start_timestep=0, batch_time=batch_time)
+    ds = xr.open_dataset(tmpdir / f"monthly_mean_{label}.nc")
+    assert "counts" in ds.coords
+    assert "foo" in ds.data_vars
+    assert dict(ds.sizes) == {"sample": 1, "time": 6, "lat": 5, "lon": 5}
+    assert ds.valid_time.isel(sample=0, time=0).values == np.datetime64("2020-01-15")
+    assert ds.valid_time.isel(sample=0, time=1).values == np.datetime64("2020-02-15")

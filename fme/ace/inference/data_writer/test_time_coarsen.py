@@ -6,7 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
-from .time_coarsen import coarsen_batch
+from .time_coarsen import TimeCoarsenConfig, coarsen_batch
 
 DIM_SIZES = (2, 4, 2, 2)  # n_samples_in_batch, n_timesteps_in_window, n_lat, n_lon
 VARNAME = "foo"
@@ -153,3 +153,8 @@ def test_time_coarsen(
         xr.testing.assert_allclose(time_coarsened, expected_coarsened_time),
         "time initial condition value",
     )
+
+
+def test_time_coarsen_invalid_config():
+    with pytest.raises(ValueError, match="coarsen_factor must be 1 or greater"):
+        TimeCoarsenConfig(coarsen_factor=0)

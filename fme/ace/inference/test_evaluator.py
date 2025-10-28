@@ -815,7 +815,6 @@ def test_derived_metrics_run_without_errors(
     "time_coarsen,n_forward_steps,forward_steps_in_memory",
     [
         pytest.param(3, 12, 4, id="not_multiple_of_forward_steps_in_memory"),
-        pytest.param(-1, 12, 4, id="invalid_time_coarsen"),
         pytest.param(2, 5, 4, id="not_multiple_of_n_forward_steps"),
     ],
 )
