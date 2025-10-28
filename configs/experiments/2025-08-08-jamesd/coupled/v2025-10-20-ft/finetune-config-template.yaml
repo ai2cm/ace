@@ -159,7 +159,8 @@ stepper:
   atmosphere:
     timedelta: 6h
     loss_contributions:
-      n_steps: 0
+      n_steps: 2
+      weight: 1.0
     stepper:
       parameter_init:
         weights_path: null # required
