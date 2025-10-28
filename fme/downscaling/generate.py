@@ -30,11 +30,17 @@ from .train import count_parameters
 class OutputTarget:
     def __init__(
         self,
+        name: str,
+        save_vars: list[str],
+        n_ens: int,
         data: GriddedData,
         patch: PatchPredictionConfig,
-        chunks: dict[str, int] | None = None,
-        shards: dict[str, int] | None = None,
+        chunks: dict[str, int],
+        shards: dict[str, int] | None,
     ) -> None:
+        self.name = name
+        self.save_vars = save_vars
+        self.n_ens = n_ens
         self.data = data
         self.patch = patch
         self.chunks = chunks
@@ -89,7 +95,10 @@ class OutputTargetConfig(ABC):
         return [data_config]
 
     @staticmethod
-    def _replace_loader_config(time, coarse, lat_extent, lon_extent, loader_config):
+    def _replace_loader_config(
+        time, coarse, lat_extent, lon_extent, loader_config
+    ) -> DataLoaderConfig:
+        # return a new DataloaderConfig with replaced values
         new_coarse = [replace(coarse[0], subset=time)]
 
         new_loader_config = replace(
@@ -100,6 +109,57 @@ class OutputTargetConfig(ABC):
         )
         return new_loader_config
 
+    def _get_chunks(
+        self, data_shape: tuple[int, ...], bytes_per_element: int
+    ) -> dict[str, int]:
+        # time, ensemble, latitude, longitude
+        if len(data_shape) != 4:
+            raise ValueError(
+                "Data shape must be of length 4 (time, ensemble, latitude, longitude)."
+            )
+
+        def _total_size_mb(shape: tuple[int, ...], bytes_per_element: int) -> int:
+            total_elements = 1
+            for dim_size in shape:
+                total_elements *= dim_size
+            return total_elements * bytes_per_element // (1024 * 1024)
+
+        class NotReducibleError(Exception):
+            pass
+
+        def _recursive_chunksize_search(
+            shape: tuple[int, ...], bytes_per_element: int, reduce_dim: int
+        ) -> dict[str, int]:
+            chunk = {
+                "time": shape[0],
+                "ensemble": shape[1],
+                "latitude": shape[2],
+                "longitude": shape[3],
+            }
+            if _total_size_mb(shape, bytes_per_element) <= 20:
+                return chunk
+
+            reduce_dim_size = shape[reduce_dim] // 2
+            if reduce_dim_size < 1:
+                # don't adjust move reduce dim
+                reduce_dim += 1
+                if reduce_dim >= len(shape):
+                    raise NotReducibleError()
+            elif reduce_dim == 2:
+                # switch between lat and lon reductions for final search:
+                reduce_dim = 3
+            elif reduce_dim == 3:
+                reduce_dim = 2
+
+            new_shape = list(shape)
+            new_shape[reduce_dim] = reduce_dim_size
+
+            return _recursive_chunksize_search(
+                tuple(new_shape), bytes_per_element, reduce_dim
+            )
+
+        return _recursive_chunksize_search(data_shape, bytes_per_element, reduce_dim=0)
+
     def _build(
         self,
         time: TimeSlice | RepeatedInterval | Slice,
@@ -108,19 +168,30 @@ class OutputTargetConfig(ABC):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
-        coarse: list[XarrayDataConfig]
-        | Sequence[XarrayDataConfig | XarrayEnsembleDataConfig],
+        coarse: list[XarrayDataConfig],
     ) -> OutputTarget:
-        coarse = self._single_xarray_config(coarse)
         updated_loader_config = self._replace_loader_config(
             time, coarse, lat_extent, lon_extent, loader_config
         )
         data = updated_loader_config.build(requirements=requirements)
 
+        sample_dict = next(iter(data.loader))
+        sample_tensor = next(iter(sample_dict.values()))
+        if self.zarr_chunks is None:
+            chunks = self._get_chunks(
+                data_shape=sample_tensor.shape,
+                bytes_per_element=sample_tensor.element_size(),
+            )
+        else:
+            chunks = self.zarr_chunks
+
         return OutputTarget(
+            name=self.name,
+            save_vars=self.save_vars,
+            n_ens=self.n_ens,
             data=data,
             patch=patch,
-            chunks=self.zarr_chunks,
+            chunks=chunks,
             shards=self.zarr_shards,
         )
 
@@ -144,19 +215,21 @@ class EventConfig(OutputTargetConfig):
             raise ValueError("event_time must be specified for EventConfig.")
 
     def _adjust_batchsize_if_distributed(
-        self, loader_config: DataLoaderConfig, dist: Distributed
-    ) -> DataLoaderConfig:
+        self,
+        coarse: list[XarrayDataConfig],
+        loader_config: DataLoaderConfig,
+        dist: Distributed,
+    ) -> tuple[list[XarrayDataConfig], DataLoaderConfig]:
         # For single events there will not be enough samples to distribute.
         # Repeat so each GPU gets one sample.
         if dist.is_distributed():
             batch_size = dist.world_size
-            new_coarse = self._single_xarray_config(loader_config.coarse)
-            new_coarse = [replace(new_coarse[0], n_repeats=batch_size)]
+            coarse = [replace(coarse[0], n_repeats=batch_size)]
             loader_config = replace(
                 loader_config,
-                coarse=new_coarse,
+                batch_size=batch_size,
             )
-        return loader_config
+        return coarse, loader_config
 
     def build(
         self,
@@ -175,11 +248,9 @@ class EventConfig(OutputTargetConfig):
         else:
             time = Slice(self.event_time, self.event_time + 1)
 
-        if self.coarse is not None:
-            loader_config = replace(loader_config, coarse=self.coarse)
-
-        loader_config = self._adjust_batchsize_if_distributed(
-            loader_config, Distributed.get_instance()
+        coarse = self._single_xarray_config(self.coarse or loader_config.coarse)
+        coarse, loader_config = self._adjust_batchsize_if_distributed(
+            coarse, loader_config, Distributed.get_instance()
         )
 
         return self._build(
@@ -189,7 +260,7 @@ class EventConfig(OutputTargetConfig):
             loader_config=loader_config,
             requirements=requirements,
             patch=self.patch or patch,
-            coarse=loader_config.coarse,
+            coarse=coarse,
         )
 
 
@@ -226,6 +297,7 @@ class TimeseriesConfig(OutputTargetConfig):
             self.lon_point - self.latlon_tolerance,
             self.lon_point + self.latlon_tolerance,
         )
+        coarse = self._single_xarray_config(self.coarse or loader_config.coarse)
 
         return self._build(
             time=self.time_range,
@@ -234,7 +306,7 @@ class TimeseriesConfig(OutputTargetConfig):
             loader_config=loader_config,
             requirements=requirements,
             patch=self.patch or patch,
-            coarse=self.coarse or loader_config.coarse,
+            coarse=coarse,
         )
 
 
@@ -260,6 +332,7 @@ class RegionConfig(OutputTargetConfig):
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
     ) -> OutputTarget:
+        coarse = self._single_xarray_config(self.coarse or loader_config.coarse)
         return self._build(
             time=self.time_range,
             lat_extent=self.lat_extent,
@@ -267,7 +340,7 @@ class RegionConfig(OutputTargetConfig):
             loader_config=loader_config,
             requirements=requirements,
             patch=self.patch or patch,
-            coarse=self.coarse or loader_config.coarse,
+            coarse=coarse,
         )
 
 
@@ -281,7 +354,8 @@ class Downscaler:
         self.output_targets = output_targets
 
     def run(self):
-        pass
+        for target in self.output_targets:
+            logging.info(f"Generating downscaled outputs for target: {target.name}")
 
 
 @dataclass
