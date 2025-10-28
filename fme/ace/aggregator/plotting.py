@@ -55,7 +55,7 @@ def plot_imshow(
     else:
         fig = ax.figure
     lon_dim = -1
-    data_center_lon_0 = np.roll(data, data.shape[lon_dim] // 2, axis=lon_dim)
+    data_center_lon_0 = np.roll(data, data.shape[lon_dim] // 2 - 10, axis=lon_dim)
     ax.imshow(data_center_lon_0, cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_axis_off()
     return fig

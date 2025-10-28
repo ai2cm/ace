@@ -113,7 +113,7 @@ class Samudra(torch.nn.Module):
                 upscale_factor=self.upscale_factor,
             )
         )
-        layers.append(ZonallyPeriodicBilinearUpsample(in_channels=b, out_channels=b))
+        layers.append(BilinearUpsample(in_channels=b, out_channels=b))
         ch_width_with_input_reversed = ch_width_with_input[::-1]
         dilation_reversed = self.dilation[::-1]
         n_layers_reversed = self.n_layers[::-1]
@@ -130,9 +130,7 @@ class Samudra(torch.nn.Module):
                     upscale_factor=self.upscale_factor,
                 )
             )
-            layers.append(
-                ZonallyPeriodicBilinearUpsample(in_channels=b, out_channels=b)
-            )
+            layers.append(BilinearUpsample(in_channels=b, out_channels=b))
         layers.append(
             ConvNeXtBlock(
                 b,
@@ -176,13 +174,10 @@ class Samudra(torch.nn.Module):
                         temp[int(2 * self.num_steps - count - 1)].shape[2:]
                     )
                     pads = shape - crop
-                    pads = [
-                        pads[1] // 2,
-                        pads[1] - pads[1] // 2,
-                        pads[0] // 2,
-                        pads[0] - pads[0] // 2,
-                    ]
-                    fts = nn.functional.pad(fts, pads)
+                    pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
+                    pads_tb = (0, 0, pads[0] // 2, pads[0] - pads[0] // 2)
+                    fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
+                    fts = nn.functional.pad(fts, pads_tb, mode="constant")
                     fts += temp[int(2 * self.num_steps - count - 1)]
                     count += 1
         return fts
