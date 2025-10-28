@@ -14,7 +14,7 @@ inference:
   loader:
     start_indices:
       times:
-        - '0151-01-03T12:00:00' # earlier times nan
+        - '0151-01-03T12:00:00'
         - '0171-01-01T06:00:00'
     dataset:
       data_path: /climate-default
@@ -39,7 +39,7 @@ train_loader:
     file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
     engine: zarr
     subset:
-      start_time: '0151-01-03T12:00:00' # earlier times nan
+      start_time: '0151-01-03T12:00:00'
       stop_time: '0156-01-03T12:00:00'
 validation_loader:
   batch_size: 16
