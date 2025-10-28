@@ -34,6 +34,7 @@ set_default_stats
 REPO_ROOT=$(git rev-parse --show-toplevel)
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 
 # Mode-specific configuration
 FME_MODULE="fme.coupled.train"
@@ -53,6 +54,9 @@ CONFIG_PATH_REL="$EXPERIMENT_DIR/$CONFIG_SUBDIR/$CONFIG_FILENAME"
 print_stats_config
 
 # Change to repo root so paths are valid
+echo "Changing to repo root: $REPO_ROOT"
+echo "Input path: $INPUT_PATH"
+echo "Full experiment dir: $FULL_EXPERIMENT_DIR"
 cd "$REPO_ROOT"
 
 while read PRETRAINING; do
@@ -72,7 +76,13 @@ while read PRETRAINING; do
     RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f14)
     WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f15)
     OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
-
+    EXISTING_RESULTS_ATMOS_DATASET=$(echo "$PRETRAINING" | cut -d"|" -f17)
+    EXISTING_RESULTS_OCEAN_DATASET=$(echo "$PRETRAINING" | cut -d"|" -f18)
+    echo "Group: $GROUP"
+    echo "Staus: $STATUS"
+    echo "Priority: $PRIORITY"
+    echo "Existing Atmos Dataset: $EXISTING_RESULTS_ATMOS_DATASET"
+    echo "Existing Ocean Dataset: $EXISTING_RESULTS_OCEAN_DATASET"
     if [[ "$STATUS" != "train" ]]; then
         continue
     fi
@@ -89,11 +99,16 @@ while read PRETRAINING; do
     fi
 
     # Get experiment IDs and datasets
-    ATMOS_EXPER_ID=$(get_experiment_from_wandb "$ATMOS_PROJECT" "$ATMOS_WANDB_ID")
-    OCEAN_EXPER_ID=$(get_experiment_from_wandb "$OCEAN_PROJECT" "$OCEAN_WANDB_ID")
-    EXISTING_RESULTS_ATMOS_DATASET=$(get_beaker_dataset_from_experiment "$ATMOS_EXPER_ID")
-    EXISTING_RESULTS_OCEAN_DATASET=$(get_beaker_dataset_from_experiment "$OCEAN_EXPER_ID")
+    if [[ -z "${EXISTING_RESULTS_ATMOS_DATASET}" ]]; then
+        ATMOS_EXPER_ID=$(get_experiment_from_wandb "$ATMOS_PROJECT" "$ATMOS_WANDB_ID")
+        EXISTING_RESULTS_ATMOS_DATASET=$(get_beaker_dataset_from_experiment "$ATMOS_EXPER_ID")
+    fi
 
+    if [[ -z "${EXISTING_RESULTS_OCEAN_DATASET}" ]]; then
+        echo "Getting ocean experiment ID from wandb..."
+        OCEAN_EXPER_ID=$(get_experiment_from_wandb "$OCEAN_PROJECT" "$OCEAN_WANDB_ID")
+        EXISTING_RESULTS_OCEAN_DATASET=$(get_beaker_dataset_from_experiment "$OCEAN_EXPER_ID")
+    fi
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"
     build_stats_dataset_args

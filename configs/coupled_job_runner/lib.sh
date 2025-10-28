@@ -178,7 +178,7 @@ run_gantry_training_job() {
             --retries "$RETRIES" \
             "${CLUSTER_ARGS[@]}" \
             --weka climate-default:/climate-default \
-            --env WANDB_USERNAME="$BEAKER_USERNAME" \
+            --env WANDB_USERNAME="$WANDB_USERNAME" \
             --env WANDB_NAME="$JOB_NAME" \
             --env WANDB_JOB_TYPE=training \
             --env WANDB_RUN_GROUP="$JOB_GROUP" \
