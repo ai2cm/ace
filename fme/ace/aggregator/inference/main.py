@@ -398,13 +398,22 @@ class InferenceEvaluatorAggregator(
                     variable_metadata=dataset_info.variable_metadata,
                 )
             )
-        self._summary_aggregators = {
-            name: agg
-            for name, agg in list(self._aggregators.items())
-            + list(self._time_dependent_aggregators.items())
-            + list(self._ensemble_aggregators.items())
-            if name not in ["mean", "mean_norm"]
-        }
+
+        if self.n_ensemble_per_ic > 1:
+            self._summary_aggregators = {
+                name: agg
+                for name, agg in list(self._aggregators.items())
+                + list(self._time_dependent_aggregators.items())
+                + list(self._ensemble_aggregators.items())
+                if name not in ["mean", "mean_norm"]
+            }
+        else:
+            self._summary_aggregators = {
+                name: agg
+                for name, agg in list(self._aggregators.items())
+                + list(self._time_dependent_aggregators.items())
+                if name not in ["mean", "mean_norm"]
+            }
         self._n_timesteps_seen = 0
         self._normalize = normalize
 
