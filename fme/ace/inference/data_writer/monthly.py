@@ -54,7 +54,7 @@ class PairedMonthlyDataWriter:
         n_months = months_for_timesteps(n_timesteps, timestep)
         self._target_writer = MonthlyDataWriter(
             path=path,
-            label="target",
+            label="monthly_mean_target",
             n_samples=n_samples,
             n_months=n_months,
             save_names=save_names,
@@ -64,7 +64,7 @@ class PairedMonthlyDataWriter:
         )
         self._prediction_writer = MonthlyDataWriter(
             path=path,
-            label="predictions",
+            label="monthly_mean_predictions",
             n_samples=n_samples,
             n_months=n_months,
             save_names=save_names,
@@ -127,7 +127,7 @@ class MonthlyDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
-        filename = str(Path(path) / f"monthly_mean_{label}.nc")
+        filename = str(Path(path) / f"{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata
         self.coords = coords
@@ -151,7 +151,7 @@ class MonthlyDataWriter:
         self.dataset.variables[VALID_TIME].units = TIME_UNITS
         self.dataset.variables[COUNTS][:] = 0
         dataset_metadata = copy.copy(dataset_metadata)
-        dataset_metadata.title = f"ACE monthly {label} data file"
+        dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         for key, value in dataset_metadata.as_flat_str_dict().items():
             self.dataset.setncattr(key, value)
         self._init_years = np.full([n_samples], -1, dtype=int)

@@ -520,7 +520,7 @@ def test_file_writer_append_batch_time_coarsened():
 
 
 def test_file_writer_monthly(tmpdir):
-    label = "output"
+    label = "monthly_mean_output"
     config = FileWriterConfig(label=label, time_coarsen=MonthlyCoarsenConfig())
     n_timesteps = 24
     n_samples = 1
@@ -539,9 +539,35 @@ def test_file_writer_monthly(tmpdir):
     )
     batch_time = xr.concat([batch_time] * n_samples, dim="sample")
     writer.append_batch(data, start_timestep=0, batch_time=batch_time)
-    ds = xr.open_dataset(tmpdir / f"monthly_mean_{label}.nc")
+    ds = xr.open_dataset(tmpdir / f"{label}.nc")
     assert "counts" in ds.coords
     assert "foo" in ds.data_vars
     assert dict(ds.sizes) == {"sample": 1, "time": 6, "lat": 5, "lon": 5}
     assert ds.valid_time.isel(sample=0, time=0).values == np.datetime64("2020-01-15")
     assert ds.valid_time.isel(sample=0, time=1).values == np.datetime64("2020-02-15")
+
+
+@pytest.mark.parametrize("save_reference", [True, False])
+def test_file_writer_paired_save_reference(tmpdir, save_reference: bool):
+    config = FileWriterConfig(
+        label="test_writer",
+        names=["temperature"],
+        save_reference=save_reference,
+    )
+    writer = config.build_paired(
+        experiment_dir=str(tmpdir),
+        n_initial_conditions=1,
+        n_timesteps=10,
+        timestep=datetime.timedelta(days=1),
+        variable_metadata={},
+        coords={},
+        dataset_metadata=DatasetMetadata(),
+    )
+    writer.finalize()
+    if save_reference:
+        expected_filenames = {"test_writer_predictions.nc", "test_writer_target.nc"}
+        for expected_filename in expected_filenames:
+            assert (tmpdir / expected_filename).exists()
+    else:
+        expected_filename = "test_writer.nc"
+        assert (tmpdir / expected_filename).exists()

@@ -187,10 +187,16 @@ class FileWriterConfig:
             used to target specific seasons or months for outputs, and a TimeSlice
             allows for datetime range selection.
         save_reference: Whether to save the reference/target data alongside predictions.
+            If true, "_target" will be appended to the label for the target data, and
+            "_predictions" will be appended to the label for the predictions data.
+            Ignored if building a single writer via the `build` method.
         time_coarsen: Configuration for time averaging of outputs.
         format: Configuration for the output format (i.e. netCDF or zarr).
         separate_ensemble_members: Option to write ensemble members to separate files.
-            In this case, time is a datetime coordinate.
+            In this case, time is a datetime coordinate. Only supported when using zarr
+            format. Filenames will have the suffix `_ic{member_index}` appended before
+            the file extension.
+
     """
 
     label: str
@@ -244,6 +250,18 @@ class FileWriterConfig:
                     "coarsening."
                 )
 
+    @property
+    def filenames(self) -> list[str]:
+        base_filenames = [
+            self.label,
+            f"{self.label}_target",
+            f"{self.label}_predictions",
+        ]
+        return [
+            ".".join([base_filename, self.format.suffix])
+            for base_filename in base_filenames
+        ]
+
     def build_paired(
         self,
         experiment_dir: str,
@@ -256,21 +274,10 @@ class FileWriterConfig:
         prediction_suffix: str = "predictions",
         reference_suffix: str = "target",
     ) -> Union["PairedFileWriter", PairedTimeCoarsen]:
-        prediction_writer = dataclasses.replace(
-            self, label=f"{self.label}_{prediction_suffix}"
-        ).build(
-            experiment_dir=experiment_dir,
-            n_initial_conditions=n_initial_conditions,
-            n_timesteps=n_timesteps,
-            timestep=timestep,
-            variable_metadata=variable_metadata,
-            coords=coords,
-            dataset_metadata=dataset_metadata,
-        )
         if self.save_reference:
-            reference_writer = dataclasses.replace(
-                self, label=f"{self.label}_{reference_suffix}"
-            ).build(
+            reference_label = f"{self.label}_{reference_suffix}"
+            prediction_label = f"{self.label}_{prediction_suffix}"
+            reference_writer = dataclasses.replace(self, label=reference_label).build(
                 experiment_dir=experiment_dir,
                 n_initial_conditions=n_initial_conditions,
                 n_timesteps=n_timesteps,
@@ -280,7 +287,17 @@ class FileWriterConfig:
                 dataset_metadata=dataset_metadata,
             )
         else:
+            prediction_label = self.label
             reference_writer = None
+        prediction_writer = dataclasses.replace(self, label=prediction_label).build(
+            experiment_dir=experiment_dir,
+            n_initial_conditions=n_initial_conditions,
+            n_timesteps=n_timesteps,
+            timestep=timestep,
+            variable_metadata=variable_metadata,
+            coords=coords,
+            dataset_metadata=dataset_metadata,
+        )
         paired_writer = PairedFileWriter(prediction_writer, reference_writer)
         # Time coarsening is built around writer in the single build method
         return paired_writer
@@ -393,7 +410,7 @@ class FileWriterConfig:
             else:
                 raw_writer = RawDataWriter(
                     path=experiment_dir,
-                    label=f"{self.label}.nc",
+                    label=self.label,
                     n_initial_conditions=n_initial_conditions,
                     save_names=self.names,
                     variable_metadata=variable_metadata,

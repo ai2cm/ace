@@ -40,7 +40,8 @@ class DataWriterConfig:
             netCDF files.
         time_coarsen: Configuration for time coarsening of written outputs to the
             raw data writer.
-        files: Configuration for a sequence of individual data writers.
+        files: Configuration for a sequence of individual data writers. Each data
+            writer must have a unique label to avoid filename collisions.
     """
 
     save_prediction_files: bool = True
@@ -58,6 +59,18 @@ class DataWriterConfig:
                 "names provided but all options to "
                 "save subsettable output files are False."
             )
+        all_filenames = self._get_all_filenames()
+        if len(set(all_filenames)) != len(all_filenames):
+            raise ValueError(
+                "Duplicate filenames found in file writer configurations. "
+                f"Filenames: {all_filenames}"
+            )
+
+    def _get_all_filenames(self) -> list[str]:
+        filenames = []
+        for file in self.files or []:
+            filenames.extend(file.filenames)
+        return filenames
 
     def build_paired(
         self,
@@ -346,7 +359,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 _time_coarsen_builder(
                     RawDataWriter(
                         path=path,
-                        label="autoregressive_predictions.nc",
+                        label="autoregressive_predictions",
                         n_initial_conditions=n_initial_conditions,
                         save_names=save_names,
                         variable_metadata=variable_metadata,
@@ -360,7 +373,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             self._writers.append(
                 MonthlyDataWriter(
                     path=path,
-                    label="predictions",
+                    label="monthly_mean_predictions",
                     n_samples=n_initial_conditions,
                     n_months=months_for_timesteps(n_timesteps, timestep),
                     save_names=save_names,

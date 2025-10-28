@@ -31,6 +31,7 @@ VALID_TIME = "valid_time"
 @dataclasses.dataclass
 class NetCDFWriterConfig:
     name: Literal["netcdf"] = "netcdf"  # defined for yaml+dacite ease of use
+    suffix: str = "nc"
 
 
 class PairedRawDataWriter:
@@ -51,7 +52,7 @@ class PairedRawDataWriter:
     ):
         self._target_writer = RawDataWriter(
             path=path,
-            label="autoregressive_target.nc",
+            label="autoregressive_target",
             n_initial_conditions=n_initial_conditions,
             save_names=save_names,
             variable_metadata=variable_metadata,
@@ -60,7 +61,7 @@ class PairedRawDataWriter:
         )
         self._prediction_writer = RawDataWriter(
             path=path,
-            label="autoregressive_predictions.nc",
+            label="autoregressive_predictions",
             n_initial_conditions=n_initial_conditions,
             save_names=save_names,
             variable_metadata=variable_metadata,
@@ -122,7 +123,7 @@ class RawDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
-        filename = str(Path(path) / label)
+        filename = str(Path(path) / f"{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata
         self.coords = coords
@@ -137,9 +138,7 @@ class RawDataWriter:
         self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
         self._dataset_dims_created = False
         dataset_metadata = copy.copy(dataset_metadata)
-        dataset_metadata.title = (
-            f"ACE {label.removesuffix('.nc').replace('_', ' ')} data file"
-        )
+        dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         for key, value in dataset_metadata.as_flat_str_dict().items():
             self.dataset.setncattr(key, value)
 

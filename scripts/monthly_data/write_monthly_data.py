@@ -149,7 +149,7 @@ class Config:
         }
         return MonthlyDataWriter(
             path=self.experiment_dir,
-            label="data",
+            label="monthly_mean_data",
             save_names=None,  # save all data given
             n_samples=self.data_loader.batch_size * len(data.loaders),
             n_months=n_months,
