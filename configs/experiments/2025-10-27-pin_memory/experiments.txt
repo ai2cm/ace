@@ -24,3 +24,5 @@ no_pin_memory-time_buffer_10|ex|training|best_inference_ckpt|normal|--not-preemp
 no_pin_memory-no_time_buffer|01K8M041KWDVJEH67TP62N6V28|training|best_inference_ckpt|normal|--not-preemptible
 
 no_pin_memory-time_buffer_10|01K8M047G4115ERMAG69GK7HT3|training|best_inference_ckpt|normal|--not-preemptible
+
+no_pin_memory-time_buffer_10-nw8-pf2|rs0|01K8MF134DPVJ6DSXEYGF64FJQ|training|best_inference_ckpt|normal|--not-preemptible
