@@ -512,6 +512,9 @@ class InferenceEvaluatorAggregator(
             logs.update(aggregator.get_logs(label=name))
         for name, time_dependent_aggregator in self._time_dependent_aggregators.items():
             logs.update(time_dependent_aggregator.get_logs(label=name))
+        if self.n_ensemble_per_ic > 1:
+            for name, ensemble_aggregator in self._ensemble_aggregators.items():
+                logs.update(ensemble_aggregator.get_logs(label=name))
         return logs
 
     @torch.no_grad()
