@@ -151,6 +151,7 @@ from .data import (
     DataLoaderConfig,
     GriddedData,
     LatLonCoordinates,
+    Topography,
 )
 from .data.config import XarrayEnsembleDataConfig
 from .models import CheckpointModelConfig, DiffusionModel
@@ -681,6 +682,12 @@ class TimeseriesConfig(OutputTargetConfig):
         if self.time_range == Slice(-1, 1):
             raise ValueError("time_range must be specified for TimeseriesConfig.")
 
+        raise NotImplementedError(
+            "TimeseriesConfig is not yet implemented because it requires more "
+            "complex handling of how to make sure we still have the necessary coarse "
+            "input patch (e.g., 16x16).  Just use a RegionConfig for now."
+        )
+
     def build(
         self,
         loader_config: DataLoaderConfig,
@@ -780,21 +787,52 @@ class ZarrGenerator:
         self.output_dir = output_dir
         self.dist = Distributed.get_instance()
 
-    def _setup_model(self) -> DiffusionModel | PatchPredictor | CascadePredictor:
-        """Set up the model, wrapping with PatchPredictor if needed."""
-        if self.target.patch.needs_patch_predictor:
+    def _setup_model(
+        self, topography: Topography
+    ) -> DiffusionModel | PatchPredictor | CascadePredictor:
+        """
+        Set up the model, wrapping with PatchPredictor if needed.  While models are
+        probably capable of generating any domain size, we haven't tested for domains
+        smaller than the model patch size, so we raise an error in that case, and prompt
+        the user to use patching for larger domains because that provides better
+        generations.
+        """
+        model_patch_shape = self.base_model.coarse_shape
+        actual_shape = tuple(topography.data.shape)
+
+        if model_patch_shape == actual_shape:
+            # short circuit, no patching necessary
+            return self.base_model
+        elif any(
+            expected > actual
+            for expected, actual in zip(model_patch_shape, actual_shape)
+        ):
+            # we don't support generating regions smaller than the model patch size
+            raise ValueError(
+                f"Model coarse shape {model_patch_shape} is larger than "
+                f"actual topography shape {actual_shape} for target {self.target.name}."
+            )
+        elif self.target.patch.needs_patch_predictor:
+            # Use a patch predictor
             logging.info(f"Using PatchPredictor for target: {self.target.name}")
             return PatchPredictor(
                 model=self.base_model,
                 coarse_horizontal_overlap=self.target.patch.coarse_horizontal_overlap,
             )
-        return self.base_model
+        else:
+            # User should enable patching
+            raise ValueError(
+                f"Model coarse shape {model_patch_shape} does not match "
+                f"actual input shape {actual_shape} for target {self.target.name}, "
+                "and patch prediction is not configured. Generation for larger domains "
+                "requires patch prediction."
+            )
 
     def run(self):
         """Execute the generation loop for this target."""
         logging.info(f"Generating downscaled outputs for target: {self.target.name}")
 
-        model = self._setup_model()
+        model = None
         writer = None
         total_batches = len(self.target.data.loader)
 
@@ -805,6 +843,8 @@ class ZarrGenerator:
                     latlon_coords=topography.coords,
                     output_dir=self.output_dir,
                 )
+            if model is None:
+                model = self._setup_model(topography=topography)
 
             # Calculate insert slices for this batch's time
             insert_slices = self.target.get_insert_slices(data)
