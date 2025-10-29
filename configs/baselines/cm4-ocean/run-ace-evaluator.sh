@@ -25,7 +25,7 @@ while read TRAIN_EXPER; do
         continue
     fi
 
-    EXISTING_RESULTS_DATASET=01K72042R4MTJVT9KHS78X7QEY
+    EXISTING_RESULTS_DATASET=01K8NYPZRG7E62ZQ85ASNGXXHV
     #$(beaker experiment get $EXPER_ID --format json | jq '.[].jobs[-1].result' | grep "beaker" | cut -d'"' -f4)
     echo
     echo "Launching evaluator job:"
@@ -49,7 +49,10 @@ while read TRAIN_EXPER; do
         --workspace ai2/ace \
         --priority high \
         --not-preemptible \
-        --cluster ai2/ceres-cirrascale \
+        --cluster ai2/ceres \
+        --cluster ai2/jupiter \
+        --cluster ai2/neptune \
+        --cluster ai2/saturn \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
         --env WANDB_JOB_TYPE=inference \

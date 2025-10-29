@@ -1,2 +1,3 @@
 2025-08-28-baseline|1|01K3SEWJ5C90J1SEVJRH6RB53K|skip|best_inference_ckpt
-2025-08-28-baseline-padding-fix|1|01K70A4J1TRS3K2JCSFQ7FP2TN|completed|best_inference_ckpt
+2025-08-28-baseline-padding-fix|1|01K70A4J1TRS3K2JCSFQ7FP2TN|skip|best_inference_ckpt
+2025-08-28-baseline-padding-fix-pad-only|1|01K8NYPZRG7E62ZQ85ASNGXXHV|completed|best_inference_ckpt
