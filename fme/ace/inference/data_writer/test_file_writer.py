@@ -224,6 +224,7 @@ def test__select_time_file_writer_single_sample(time_selection, tmpdir):
         start_timestep=-1,  # unused for RawDataWriter
         batch_time=batch_data.time,
     )
+    file_writer.finalize()
 
     with xr.open_dataset(tmpdir / "test_writer.nc") as subselected_data:
         assert len(subselected_data.sample) == n_samples
@@ -318,6 +319,7 @@ def test__select_time_file_writer_multiple_samples(time_selection, tmpdir):
         start_timestep=0,
         batch_time=batch_data.time,
     )
+    file_writer.finalize()
 
     with xr.open_dataset(tmpdir / "test_writer.nc") as subselected_data:
         assert len(subselected_data.sample) == n_samples
