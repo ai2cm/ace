@@ -321,3 +321,15 @@ build_healpix_processing_image:
 .PHONY: push_healpix_image_to_beaker
 push_healpix_image_to_beaker:
 	beaker image create --name $(HEALPIX_PROCESSING_IMAGE)-$(HEALPIX_PROCESSING_IMAGE_VERSION) $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION)
+
+.PHONY: cm4_piControl_200yr_coupled_no_smoothing
+cm4_piControl_200yr_coupled_no_smoothing:
+	python ./create_coupled_datasets.py --yaml configs/CM4-piControl-200yr-coupled.yaml
+
+.PHONY: cm4_1pctCO2_140yr_coupled_no_smoothing
+cm4_1pctCO2_140yr_coupled_no_smoothing:
+	python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-140yr-coupled.yaml
+
+.PHONY: e3smv3_piControl_100yr_coupled
+e3smv3_piControl_100yr_coupled:
+	python ./create_coupled_datasets.py --yaml configs/E3SMv3-piControl-100yr-coupled.yaml

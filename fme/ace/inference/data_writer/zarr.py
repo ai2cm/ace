@@ -65,6 +65,7 @@ class ZarrWriterConfig:
         default_factory=lambda: {"time": 1, "sample": 1}
     )
     overwrite_check: bool = False
+    suffix: str = "zarr"
 
 
 class ZarrWriterAdapter:
