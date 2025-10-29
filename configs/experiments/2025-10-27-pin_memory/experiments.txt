@@ -30,3 +30,5 @@ no_pin_memory-time_buffer_10-nw8-pf2|rs0|01K8MF134DPVJ6DSXEYGF64FJQ|training|bes
 no_pin_memory-time_buffer_10-nw8-pf2|rs1|01K8MF1FGD4F5S1V2DMKFS365N|training|best_inference_ckpt|normal|--not-preemptible
 
 no_pin_memory-noise_embed_dim_64|rs0|01K8RMKT39JKA119K43VZ2KR74|training|best_inference_ckpt|normal|--not-preemptible
+
+no_pin_memory-noise_embed_dim_64_isotropic|rs0|01K8RMM5X08BFYYBCDH6XKQ4A1|training|best_inference_ckpt|normal|--not-preemptible
