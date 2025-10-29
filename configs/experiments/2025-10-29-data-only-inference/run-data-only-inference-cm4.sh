@@ -19,7 +19,7 @@ python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
-    --description 'Run CM4 data-only evaluator' \
+    --description 'Run CM4 data-only evaluator (no frozen precipitation)' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority low \
