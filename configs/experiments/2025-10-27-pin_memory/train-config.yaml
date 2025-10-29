@@ -3,7 +3,7 @@ save_checkpoint: true
 validate_using_ema: false
 ema:
   decay: 0.999
-max_epochs: 5
+max_epochs: 2
 n_forward_steps: 2
 validation_aggregator:
   log_snapshots: false
