@@ -4,7 +4,7 @@ set -e
 
 JOB_NAME="2025-10-29-ace2-cm4-data-only-evaluator"
 JOB_GROUP="ace2-cm4"
-EXISTING_RESULTS_DATASET="01K013CYF8HX12KJK91YJ8MM92"  # this contains the checkpoint to use for inference
+EXISTING_RESULTS_DATASET="01K0JF7H54WVDF5FGSAFAP04GJ"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-evaluator-config-cm4.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
