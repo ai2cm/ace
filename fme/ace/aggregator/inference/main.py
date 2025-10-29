@@ -158,6 +158,16 @@ class InferenceEvaluatorAggregatorConfig:
             monthly_reference_data = xr.open_dataset(
                 self.monthly_reference_data, decode_timedelta=False
             )
+            dist = Distributed.get_instance()
+            if dist.is_spatial_distributed():
+              # CHECK: Is there another way to get lat_length and lon_length?
+              # Should we move this splitting operation inside the InferenceEvaluatorAggregator?
+              lat_length = len(monthly_reference_data.coords['lat'])
+              lon_length = len(monthly_reference_data.coords['lon'])
+              crop_shape = (lat_length, lon_length)
+              local_shape_h, local_offset_h, local_shape_w, local_offset_w = dist.get_local_shape_and_offset(crop_shape)
+              monthly_reference_data = monthly_reference_data.isel(lat=slice(local_offset_h, local_offset_h + local_shape_h), lon=slice(local_offset_w, local_offset_w + local_shape_w))
+
         if self.time_mean_reference_data is None:
             time_mean = None
         else:
@@ -165,15 +175,6 @@ class InferenceEvaluatorAggregatorConfig:
                 self.time_mean_reference_data, decode_timedelta=False
             )
 
-        dist = Distributed.get_instance()
-        if dist.is_spatial_distributed():
-          # CHECK:
-          lat_length = len(monthly_reference_data.coords['lat'])
-          lon_length = len(monthly_reference_data.coords['lon'])
-          crop_shape = (lat_length, lon_length)
-          local_shape_h, local_offset_h, local_shape_w, local_offset_w = dist.get_local_shape_and_offset(crop_shape)
-          #CHECK that the array is split correctly.
-          monthly_reference_data = monthly_reference_data.sel(lat=slice(local_offset_h, local_offset_h + local_shape_h-1), lon=slice(local_offset_w, local_offset_w + local_shape_w-1))
 
         return InferenceEvaluatorAggregator(
             dataset_info=dataset_info,
