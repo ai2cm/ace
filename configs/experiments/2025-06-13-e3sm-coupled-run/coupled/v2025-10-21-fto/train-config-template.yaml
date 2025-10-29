@@ -49,7 +49,7 @@ inference:
       - '0461-01-03T12:00:00'
       - '0471-01-03T12:00:00'
       - '0481-01-03T12:00:00'
-      - '0489-12-04T12:00:00'
+      - '0488-12-04T12:00:00'
   aggregator:
     log_zonal_mean_images: false
     log_histograms: false
