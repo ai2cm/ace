@@ -5,7 +5,7 @@ set -e
 JOB_NAME="2025-10-29-ace2-era5-data-only-evaluator"
 JOB_GROUP="ace2-era5"
 EXISTING_RESULTS_DATASET="01K013CYF8HX12KJK91YJ8MM92"  # this contains the checkpoint to use for inference
-CONFIG_FILENAME="ace-evaluator-config.yaml"
+CONFIG_FILENAME="ace-evaluator-config-era5.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
