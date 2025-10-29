@@ -461,22 +461,23 @@ class Downscaler:
                     coarse_horizontal_overlap=target.patch.coarse_horizontal_overlap,
                 )
 
-            insert_slices, writer = None, None
+            writer = None
             for i, (data, topography) in enumerate(target.data.loader):
                 # TODO: could use some kind of checkpointing to allow restarts
                 if i == 0:
-                    insert_slices = target.get_insert_slices(data)
                     writer = target.get_writer(
                         sample_data=data, output_dir=self.output_dir
                     )
                 else:
-                    assert insert_slices is not None
                     assert writer is not None
+
+                # Calculate insert slices for this batch
+                insert_slices = target.get_insert_slices(data)
 
                 for insert_slice in insert_slices:
                     logging.info(
-                        f"Generating batch {i}, ensemble slice {insert_slice} "
-                        f"for target: {target.name}"
+                        f"Generating batch {i}/{len(target.data.loader)}, ensemble "
+                        f"slice {insert_slice} for target: {target.name}"
                     )
                     n_ens_sl = insert_slice["ensemble"]
                     n_ens = n_ens_sl.stop - n_ens_sl.start
