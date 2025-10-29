@@ -145,7 +145,13 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.typing_ import Slice
 from fme.core.writer import ZarrWriter
 
-from .data import BatchData, ClosedInterval, DataLoaderConfig, GriddedData
+from .data import (
+    BatchData,
+    ClosedInterval,
+    DataLoaderConfig,
+    GriddedData,
+    LatLonCoordinates,
+)
 from .data.config import XarrayEnsembleDataConfig
 from .models import CheckpointModelConfig, DiffusionModel
 from .predictors import (
@@ -200,18 +206,19 @@ class OutputTarget:
         self.dims = list(data.dims)
         self.dims.insert(1, "ensemble")  # insert ensemble dim after time
 
-    def get_writer(self, sample_data: BatchData, output_dir: str) -> ZarrWriter:
+    def get_writer(
+        self, latlon_coords: LatLonCoordinates, output_dir: str
+    ) -> ZarrWriter:
         """
         Create a ZarrWriter for this target.
 
         Args:
-            sample_data: Sample batch used to extract spatial coordinates
-            output_dir: Base directory for output zarr files
+            latlon_coords: High-resolution spatial coordinates for outputs
+            output_dir: Directory to store output zarr file
 
         Returns:
             Configured ZarrWriter for incremental writes
         """
-        latlon_coords = sample_data.latlon_coordinates[0]
         ensemble = list(range(self.n_ens))
         coords = dict(
             zip(
@@ -783,25 +790,6 @@ class ZarrGenerator:
             )
         return self.base_model
 
-    def _initialize_writer(self, sample_data: BatchData) -> ZarrWriter:
-        """Initialize ZarrWriter using the first data batch."""
-        return self.target.get_writer(
-            sample_data=sample_data, output_dir=self.output_dir
-        )
-
-    def _generate_ensemble_slice(
-        self,
-        model: DiffusionModel | PatchPredictor | CascadePredictor,
-        data: BatchData,
-        topography,
-        n_samples: int,
-    ) -> dict[str, np.ndarray]:
-        """Generate outputs and transfer to CPU."""
-        output = model.generate_on_batch_no_target(
-            data, topography=topography, n_samples=n_samples
-        )
-        return {k: output[k].cpu().numpy() for k in self.target.save_vars}
-
     def run(self):
         """Execute the generation loop for this target."""
         logging.info(f"Generating downscaled outputs for target: {self.target.name}")
@@ -813,7 +801,10 @@ class ZarrGenerator:
         for i, (data, topography) in enumerate(self.target.data.loader):
             # Initialize writer on first batch
             if writer is None:
-                writer = self._initialize_writer(data)
+                writer = self.target.get_writer(
+                    latlon_coords=topography.coords,
+                    output_dir=self.output_dir,
+                )
 
             # Calculate insert slices for this batch's time
             insert_slices = self.target.get_insert_slices(data)
@@ -829,10 +820,11 @@ class ZarrGenerator:
                     f"(generating {n_ens} members)"
                 )
 
-                output_numpy = self._generate_ensemble_slice(
-                    model, data, topography, n_samples=n_ens
+                output = model.generate_on_batch_no_target(
+                    data, topography=topography, n_samples=n_ens
                 )
-                writer.record_batch(output_numpy, position_slices=insert_slice)
+                output_np = {k: output[k].cpu().numpy() for k in self.target.save_vars}
+                writer.record_batch(output_np, position_slices=insert_slice)
 
         logging.info(f"Completed generation for target: {self.target.name}")
 
