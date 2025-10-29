@@ -278,4 +278,8 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config.resume_results = prepare_directory(
         config.experiment_dir, config_data, config.resume_results
     )
+    dist = Distributed()
+    h_parallel_size=1
+    w_parallel_size=1
+    dist._init_distributed(h_parallel_size =  h_parallel_size, w_parallel_size=w_parallel_size)
     run_train_from_config(config)
