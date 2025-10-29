@@ -1,4 +1,126 @@
-"""Generate and save downscaled data using a trained FME model."""
+"""
+Generate and save downscaled data using a trained FME model.
+
+This module provides a flexible API for generating high-resolution downscaled
+outputs from trained diffusion models. It supports:
+
+Usage:
+    python -m fme.downscaling.generate config.yaml
+
+    # Multi-GPU
+    torchrun --nproc_per_node=8 -m fme.downscaling.generate config.yaml
+
+Example YAML Configuration:
+    ```yaml
+    # Model configuration
+    model:
+      checkpoint_path: /path/to/trained/model.ckpt
+      fine_topography_path: /path/to/fine/topography.zarr  # Optional
+
+    # Base data configuration (inherited by all targets)
+    data:
+      coarse:
+        - data_path: /data/coarse
+          file_pattern: coarse_*.zarr
+          engine: zarr
+      batch_size: 8
+      num_data_workers: 4
+      strict_ensemble: true
+
+    # Output directory for all generated zarr files
+    output_dir: /results/downscaling_run
+
+    # Logging configuration
+    logging:
+      project: downscaling-generation
+      log_to_screen: true
+      log_to_file: true
+      log_to_wandb: false
+
+    # Default patch configuration for large domains
+    patch:
+      divide_generation: true
+      coarse_horizontal_overlap: 1
+
+    # Output targets - can mix different types
+    output_targets:
+      # 1. Event: Single time snapshot over a region
+      - name: hurricane_landfall
+        event_time: "2020-08-27T12:00:00"
+        lat_extent:
+          lower: 25.0
+          upper: 35.0
+        lon_extent:
+          lower: 270.0
+          upper: 280.0
+        n_ens: 32
+        save_vars:
+          - PRATEsfc
+          - WIND10m
+        n_item_per_gpu: 4
+
+      # 2. Time series: Point location over time
+      - name: miami_timeseries
+        time_range:
+          start: "2021-07-01T00:00:00"
+          stop: "2021-08-01T00:00:00"
+        lat_point: 25.77
+        lon_point: 279.93  # -80.07 in 0-360 convention
+        n_ens: 16
+        save_vars:
+          - TMP2m
+          - PRATEsfc
+
+      # 3. Region: Full spatiotemporal generation
+      - name: conus_summer_2021
+        time_range:
+          start: "2021-06-01T00:00:00"
+          stop: "2021-09-01T00:00:00"
+        lat_extent:
+          lower: 22.0
+          upper: 50.0
+        lon_extent:
+          lower: 227.0
+          upper: 299.0
+        n_ens: 8
+        save_vars:
+          - PRATEsfc
+          - TMP2m
+          - eastward_wind_at_ten_meters
+        # Optional: specify zarr chunking
+        zarr_chunks:
+          time: 1
+          ensemble: 1
+          latitude: 448
+          longitude: 1152
+        zarr_shards:
+          time: 8
+          ensemble: 8
+          latitude: 448
+          longitude: 1152
+        # Optional: override default patch config for this target
+        patch:
+          divide_generation: false
+    ```
+
+Output Structure:
+    Each target generates a zarr file at: {output_dir}/{target_name}.zarr
+
+    Zarr dimensions: (time, ensemble, latitude, longitude)
+
+Example:
+        /results/downscaling_run/
+        ├── hurricane_landfall.zarr/
+        │   ├── PRATEsfc/
+        │   └── WIND10m/
+        ├── miami_timeseries.zarr/
+        └── conus_summer_2021.zarr/
+
+Memory Management:
+    - n_item_per_gpu: Controls GPU memory by limiting time×ensemble items per batch
+    - Decrease if encountering OOM errors
+    - Typical values: 2-8 depending on domain size and GPU memory
+"""
 
 import argparse
 import logging
@@ -37,6 +159,24 @@ from .train import count_parameters
 
 
 class OutputTarget:
+    """
+    Container for a single output generation target.
+
+    Encapsulates all data and metadata needed to generate downscaled outputs
+    for a specific region, time range, and ensemble configuration.
+
+    Attributes:
+        name: Identifier for this target (used as output filenames)
+        save_vars: List of variable names to save to zarr
+        n_ens: Total number of ensemble members to generate
+        n_items_per_gpu: Number of time×ensemble items per GPU batch (memory control)
+        data: GriddedData containing the input coarse data and loader
+        patch: Configuration for patching large domains
+        chunks: Zarr chunk sizes for each dimension
+        shards: Zarr shard sizes (optional, for grouping chunks)
+        dims: Dimension names including ensemble (time, ensemble, lat, lon)
+    """
+
     def __init__(
         self,
         name: str,
@@ -61,6 +201,16 @@ class OutputTarget:
         self.dims.insert(1, "ensemble")  # insert ensemble dim after time
 
     def get_writer(self, sample_data: BatchData, output_dir: str) -> ZarrWriter:
+        """
+        Create a ZarrWriter for this target.
+
+        Args:
+            sample_data: Sample batch used to extract spatial coordinates
+            output_dir: Base directory for output zarr files
+
+        Returns:
+            Configured ZarrWriter for incremental writes
+        """
         latlon_coords = sample_data.latlon_coordinates[0]
         ensemble = list(range(self.n_ens))
         coords = dict(
@@ -86,6 +236,7 @@ class OutputTarget:
         )
 
     def _get_time_slice(self, time: xr.DataArray) -> slice:
+        """Convert time coordinate to zarr array index slice."""
         start_time = time[0].item()
         end_time = time[-1].item()
         if start_time == end_time:
@@ -100,6 +251,11 @@ class OutputTarget:
         return time_slice
 
     def _get_ens_slices(self) -> list[slice]:
+        """
+        Divide ensemble members into GPU-friendly slices.
+
+        Returns list of slices based on n_items_per_gpu to control memory usage.
+        """
         ens_start = 0
         ens_slices = []
         while ens_start < self.n_ens:
@@ -110,9 +266,21 @@ class OutputTarget:
         return ens_slices
 
     def get_insert_slices(self, data: BatchData) -> list[dict[str, slice]]:
+        """
+        Calculate zarr insertion slices for a batch of data.
+
+        For each time batch, generates multiple ensemble slices based on
+        n_items_per_gpu to control memory usage during generation.
+
+        Args:
+            data: Batch containing time coordinates
+
+        Returns:
+            List of dimension-to-slice mappings for zarr writes
+        """
         time_slice = self._get_time_slice(data.time)
         ens_slices = self._get_ens_slices()
-        # Always storing the entire region
+        # Always storing the entire spatial region
         lat_slice = slice(None)
         lon_slice = slice(None)
 
@@ -124,7 +292,31 @@ class OutputTarget:
 
 @dataclass
 class OutputTargetConfig(ABC):
-    """Base class for output target configurations."""
+    """
+    Base class for configuring downscaling output generation targets.
+
+    Output targets define what data to generate, where to generate it, and how
+    to save it. Different subclasses support different spatiotemporal patterns:
+    - EventConfig: Single time snapshot over a spatial region
+    - TimeseriesConfig: Time series at a single point
+    - RegionConfig: Time series over a spatial region
+
+    Attributes:
+        name: Unique identifier for this target (used in output filename)
+        n_ens: Number of ensemble members to generate
+        save_vars: List of variable names to save to zarr output
+        zarr_chunks: Optional chunk sizes for zarr dimensions. If None, automatically
+            calculated to target 2-20MB per chunk.
+        zarr_shards: Optional shard sizes for grouping chunks. Recommended when
+            total chunks exceed ~1000 for better I/O performance.
+        coarse: Optional override for coarse input data source. If None, uses
+            the data config from GenerationConfig.
+        patch: Optional override for patch prediction config. If None, uses
+            the default from GenerationConfig.
+        n_item_per_gpu: Number of time×ensemble items to generate per GPU batch.
+            Controls memory usage - decrease if encountering OOM errors.
+            Default: 4
+    """
 
     name: str
     n_ens: int
@@ -142,7 +334,17 @@ class OutputTargetConfig(ABC):
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
     ) -> OutputTarget:
-        """Build the output target from this configuration."""
+        """
+        Build an OutputTarget from this configuration.
+
+        Args:
+            loader_config: Base data loader configuration to modify
+            requirements: Model's data requirements (variable names, etc.)
+            patch: Default patch prediction configuration
+
+        Returns:
+            Configured OutputTarget ready for generation
+        """
         pass
 
     @staticmethod
@@ -203,34 +405,74 @@ class OutputTargetConfig(ABC):
     def _get_chunks(
         self, dims: list[str], data_shape: tuple[int, ...], bytes_per_element: int
     ) -> dict[str, int]:
+        """
+        Calculate optimal zarr chunk sizes for the output data.
+
+        Automatically determines chunk sizes targeting 2-20MB per chunk by
+        recursively halving dimensions until the target size is reached.
+
+        Strategy:
+        - Reduces dimensions in order: time, ensemble, lon/lat (alternating)
+        - Each dimension is repeatedly halved until moving to the next
+        - Spatial dimensions (lat/lon) alternate for balanced subdivisions
+        - Raises error if target size cannot be achieved
+
+        Args:
+            dims: Dimension names (time, ensemble, latitude, longitude)
+            data_shape: Shape tuple matching dims
+            bytes_per_element: Size of data type (e.g., 4 for float32)
+
+        Returns:
+            Dictionary mapping dimension names to chunk sizes
+
+        Raises:
+            ValueError: If data_shape is not 4D or cannot be reduced to target size
+        """
         if len(data_shape) != 4:
             raise ValueError(
                 "Data shape must be of length 4 (time, ensemble, latitude, longitude)."
             )
 
         def _total_size_mb(shape: tuple[int, ...], bytes_per_element: int) -> int:
+            """Calculate total size in MB for a given shape."""
             total_elements = 1
             for dim_size in shape:
                 total_elements *= dim_size
             return total_elements * bytes_per_element // (1024 * 1024)
 
         class NotReducibleError(Exception):
+            """Raised when shape cannot be reduced below target size."""
+
             pass
 
         def _recursive_chunksize_search(
             shape: tuple[int, ...], bytes_per_element: int, reduce_dim: int
         ) -> tuple[int, ...]:
+            """
+            Recursively find optimal chunk shape by halving dimensions.
+
+            Args:
+                shape: Current shape to evaluate
+                bytes_per_element: Size of data type in bytes
+                reduce_dim: Index of dimension to try reducing (0-3)
+
+            Returns:
+                Optimized chunk shape
+
+            Raises:
+                NotReducibleError: If all dimensions exhausted but still over target
+            """
             if _total_size_mb(shape, bytes_per_element) <= 20:
                 return shape
 
             reduce_dim_size = shape[reduce_dim] // 2
             if reduce_dim_size < 1:
-                # don't adjust move reduce dim
+                # Current dimension can't be reduced further, move to next
                 reduce_dim += 1
                 if reduce_dim >= len(shape):
                     raise NotReducibleError()
             elif reduce_dim == 2:
-                # switch between lat and lon reductions for final search:
+                # Switch between lat and lon reductions for balanced spatial chunks
                 reduce_dim = 3
             elif reduce_dim == 3:
                 reduce_dim = 2
@@ -293,7 +535,33 @@ class OutputTargetConfig(ABC):
 
 @dataclass
 class EventConfig(OutputTargetConfig):
-    """Single time snapshot over a spatial region."""
+    """
+    Configuration for generating a single time snapshot over a spatial region.
+
+    Useful for capturing specific events like hurricane landfall, extreme weather
+    events, or any single-timestep high-resolution snapshot of a region.
+
+    In distributed mode, the data is replicated across GPUs since there's only
+    one time step to process. All ensemble generation still happens in parallel.
+
+    Attributes:
+        event_time: Timestamp or integer index of the event. If string, must match
+            time_format. Required field.
+        time_format: strptime format for parsing event_time string.
+            Default: "%Y-%m-%dT%H:%M:%S" (ISO 8601)
+        lat_extent: Latitude bounds in degrees [-90, 90]. Default: full globe
+        lon_extent: Longitude bounds in degrees [0, 360]. Default: full globe
+
+    Example:
+        >>> config = EventConfig(
+        ...     name="hurricane_landfall",
+        ...     event_time="2020-08-27T12:00:00",
+        ...     lat_extent=ClosedInterval(25.0, 35.0),
+        ...     lon_extent=ClosedInterval(270.0, 280.0),
+        ...     n_ens=32,
+        ...     save_vars=["PRATEsfc", "WIND10m"]
+        ... )
+    """
 
     # event_time required, but must specify default to allow subclassing
     event_time: str | int = ""
@@ -361,7 +629,35 @@ class EventConfig(OutputTargetConfig):
 
 @dataclass
 class TimeseriesConfig(OutputTargetConfig):
-    """Time range at a single spatial point."""
+    """
+    Configuration for generating a time series at a single spatial point.
+
+    Useful for generating high-resolution time series at specific locations of
+    interest (cities, weather stations, etc.). The point is expanded to a small
+    region based on latlon_tolerance to capture the nearest grid cell(s).
+
+    Attributes:
+        time_range: Time selection specification. Can be:
+            - TimeSlice: Start/stop timestamps (e.g.,
+              TimeSlice("2021-01-01", "2021-02-01"))
+            - Slice: Integer indices (e.g., Slice(0, 100))
+            - RepeatedInterval: Repeating time pattern
+            Required field.
+        lat_point: Latitude of point in degrees [-90, 90]. Required field.
+        lon_point: Longitude of point in degrees [0, 360]. Required field.
+        latlon_tolerance: Distance in degrees to expand around point to capture
+            grid cell. Default: 0.25 degrees (~27km at equator)
+
+    Example:
+        >>> config = TimeseriesConfig(
+        ...     name="miami_timeseries",
+        ...     time_range=TimeSlice("2021-07-01T00:00:00", "2021-08-01T00:00:00"),
+        ...     lat_point=25.77,
+        ...     lon_point=279.93,  # -80.07 in 0-360 convention
+        ...     n_ens=16,
+        ...     save_vars=["TMP2m", "PRATEsfc"]
+        ... )
+    """
 
     # time_range, lat_point, and lon_point are required, but must specify default
     # to allow subclassing
@@ -407,7 +703,23 @@ class TimeseriesConfig(OutputTargetConfig):
 
 @dataclass
 class RegionConfig(OutputTargetConfig):
-    """Time range over a spatial region."""
+    """
+    Configuration for generating a time series over a spatial region.
+
+    This is the most common and flexible configuration, suitable for generating
+    downscaled data over regions like CONUS, continental areas, or custom domains
+    over extended time periods.
+
+    Attributes:
+        time_range: Time selection specification. Can be:
+            - TimeSlice: Start/stop timestamps (e.g.,
+              TimeSlice("2021-01-01", "2021-12-31"))
+            - Slice: Integer indices (e.g., Slice(0, 365))
+            - RepeatedInterval: Repeating time pattern
+            Required field.
+        lat_extent: Latitude bounds in degrees [-90, 90]. Default: full globe
+        lon_extent: Longitude bounds in degrees [0, 360]. Default: full globe
+    """
 
     time_range: TimeSlice | RepeatedInterval | Slice = Slice(-1, 1)
     lat_extent: ClosedInterval = field(
@@ -439,7 +751,101 @@ class RegionConfig(OutputTargetConfig):
         )
 
 
+class ZarrGenerator:
+    """
+    Handles generation and writing of downscaled outputs for a single target.
+
+    Responsible for:
+    - Setting up the model (with PatchPredictor if needed)
+    - Creating the ZarrWriter
+    - Running the generation loop over time batches and ensemble slices
+    - Writing outputs to zarr incrementally
+    """
+
+    def __init__(
+        self,
+        target: OutputTarget,
+        model: DiffusionModel | CascadePredictor,
+        output_dir: str,
+    ):
+        self.target = target
+        self.base_model = model
+        self.output_dir = output_dir
+        self.dist = Distributed.get_instance()
+
+    def _setup_model(self) -> DiffusionModel | PatchPredictor | CascadePredictor:
+        """Set up the model, wrapping with PatchPredictor if needed."""
+        if self.target.patch.needs_patch_predictor:
+            logging.info(f"Using PatchPredictor for target: {self.target.name}")
+            return PatchPredictor(
+                model=self.base_model,
+                coarse_horizontal_overlap=self.target.patch.coarse_horizontal_overlap,
+            )
+        return self.base_model
+
+    def _initialize_writer(self, sample_data: BatchData) -> ZarrWriter:
+        """Initialize ZarrWriter using the first data batch."""
+        return self.target.get_writer(
+            sample_data=sample_data, output_dir=self.output_dir
+        )
+
+    def _generate_ensemble_slice(
+        self,
+        model: DiffusionModel | PatchPredictor | CascadePredictor,
+        data: BatchData,
+        topography,
+        n_samples: int,
+    ) -> dict[str, np.ndarray]:
+        """Generate outputs and transfer to CPU."""
+        output = model.generate_on_batch_no_target(
+            data, topography=topography, n_samples=n_samples
+        )
+        return {k: output[k].cpu().numpy() for k in self.target.save_vars}
+
+    def run(self):
+        """Execute the generation loop for this target."""
+        logging.info(f"Generating downscaled outputs for target: {self.target.name}")
+
+        model = self._setup_model()
+        writer = None
+        total_batches = len(self.target.data.loader)
+
+        for i, (data, topography) in enumerate(self.target.data.loader):
+            # Initialize writer on first batch
+            if writer is None:
+                writer = self._initialize_writer(data)
+
+            # Calculate insert slices for this batch's time
+            insert_slices = self.target.get_insert_slices(data)
+
+            # Generate each ensemble slice for this time batch
+            for ens_idx, insert_slice in enumerate(insert_slices):
+                n_ens_sl = insert_slice["ensemble"]
+                n_ens = n_ens_sl.stop - n_ens_sl.start
+
+                logging.info(
+                    f"[{self.target.name}] Batch {i+1}/{total_batches}, "
+                    f"Ensemble slice {ens_idx+1}/{len(insert_slices)} "
+                    f"(generating {n_ens} members)"
+                )
+
+                output_numpy = self._generate_ensemble_slice(
+                    model, data, topography, n_samples=n_ens
+                )
+                writer.record_batch(output_numpy, position_slices=insert_slice)
+
+        logging.info(f"Completed generation for target: {self.target.name}")
+
+
 class Downscaler:
+    """
+    Orchestrates downscaling generation across multiple output targets.
+
+    Each target can have different spatial extents, time ranges, and ensemble sizes.
+    Generation is performed sequentially across targets, with GPU memory cleared
+    between targets.
+    """
+
     def __init__(
         self,
         model: DiffusionModel | CascadePredictor,
@@ -451,59 +857,85 @@ class Downscaler:
         self.output_dir = output_dir
 
     def run(self):
+        """Run generation for all output targets."""
+        logging.info(f"Starting generation for {len(self.output_targets)} target(s)")
+
         for target in self.output_targets:
-            logging.info(f"Generating downscaled outputs for target: {target.name}")
+            # Clear GPU cache before each target
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
-            _model: DiffusionModel | PatchPredictor | CascadePredictor = self.model
-            if target.patch.needs_patch_predictor:
-                _model = PatchPredictor(
-                    model=self.model,
-                    coarse_horizontal_overlap=target.patch.coarse_horizontal_overlap,
-                )
+            # Create generator for this target and run
+            generator = ZarrGenerator(
+                target=target,
+                model=self.model,
+                output_dir=self.output_dir,
+            )
+            generator.run()
 
-            writer = None
-            for i, (data, topography) in enumerate(target.data.loader):
-                # TODO: could use some kind of checkpointing to allow restarts
-                if i == 0:
-                    writer = target.get_writer(
-                        sample_data=data, output_dir=self.output_dir
-                    )
-                else:
-                    assert writer is not None
-
-                # Calculate insert slices for this batch
-                insert_slices = target.get_insert_slices(data)
-
-                for insert_slice in insert_slices:
-                    logging.info(
-                        f"Generating batch {i}/{len(target.data.loader)}, ensemble "
-                        f"slice {insert_slice} for target: {target.name}"
-                    )
-                    n_ens_sl = insert_slice["ensemble"]
-                    n_ens = n_ens_sl.stop - n_ens_sl.start
-                    output = _model.generate_on_batch_no_target(
-                        data, topography=topography, n_samples=n_ens
-                    )
-                    output_numpy = {
-                        k: output[k].cpu().numpy() for k in target.save_vars
-                    }
-                    writer.record_batch(output_numpy, position_slices=insert_slice)
+        logging.info("All targets completed successfully")
 
 
 @dataclass
 class GenerationConfig:
+    """
+    Top-level configuration for downscaling generation.
+
+    Defines the model, base data source, and one or more output targets to generate.
+    Fine-resolution outputs are generated from coarse-resolution inputs without
+    requiring fine-resolution target data (unlike training/evaluation).
+
+    Each output target can specify different spatial regions, time ranges, ensemble
+    sizes, and output variables. Targets are processed sequentially, with generation
+    parallelized across GPUs using distributed data loading.
+
+    Attributes:
+        model: Model configuration (checkpoint or cascade predictor)
+        data: Base data loader configuration. Individual targets can override
+            specific aspects (time range, spatial extent) while inheriting the
+            base configuration.
+        output_dir: Directory for saving generated zarr files and logs
+        output_targets: List of output specifications (EventConfig, TimeseriesConfig,
+            or RegionConfig). Each target generates a separate zarr file.
+        logging: Logging configuration (file, screen, wandb)
+        patch: Default patch prediction configuration. Individual targets can override
+            this if needed for their specific domain size.
+
+    Example:
+        >>> config = GenerationConfig(
+        ...     model=CheckpointModelConfig(checkpoint_path="/path/to/model.ckpt"),
+        ...     data=DataLoaderConfig(
+        ...         coarse=[XarrayDataConfig(
+        ...             data_path="/data/coarse",
+        ...             file_pattern="coarse.zarr",
+        ...             engine="zarr"
+        ...         )],
+        ...         batch_size=8,
+        ...         num_data_workers=4,
+        ...         strict_ensemble=True,
+        ...     ),
+        ...     output_dir="/results/generation",
+        ...     output_targets=[
+        ...         RegionConfig(
+        ...             name="conus_summer",
+        ...             time_range=TimeSlice("2021-06-01", "2021-09-01"),
+        ...             lat_extent=ClosedInterval(22.0, 50.0),
+        ...             lon_extent=ClosedInterval(227.0, 299.0),
+        ...             n_ens=8,
+        ...             save_vars=["PRATEsfc", "TMP2m"]
+        ...         )
+        ...     ],
+        ...     logging=LoggingConfig(log_to_screen=True, log_to_wandb=False),
+        ...     patch=PatchPredictionConfig(divide_generation=True)
+        ... )
+    """
+
     model: CheckpointModelConfig | CascadePredictorConfig
     data: DataLoaderConfig
     output_dir: str
     output_targets: list[OutputTargetConfig]
     logging: LoggingConfig
     patch: PatchPredictionConfig = field(default_factory=PatchPredictionConfig)
-    """
-    This class is used to configure the downscaling generation of target regions.
-    Fine-resolution outputs are generated from coarse-resolution inputs.
-    In contrast to the Evaluator, there is no fine-resolution target data
-    to compare the generated outputs against.
-    """
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.output_dir, log_filename)
