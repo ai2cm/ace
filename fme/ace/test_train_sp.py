@@ -12,7 +12,6 @@ import pytest
 import torch
 import xarray as xr
 import yaml
-from pathlib import Path
 import fme
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
@@ -83,13 +82,6 @@ JOB_SUBMISSION_SCRIPT_PATH = (
     pathlib.PurePath(__file__).parent / "run-train-and-inference.sh"
 )
 
-@pytest.fixture
-def custom_tmp_path(request):
-    # Create a temporary directory
-    temp_dir = tempfile.mkdtemp()
-
-    # Yield the path to the temporary directory
-    yield Path(temp_dir)
 
 def _get_test_yaml_files(
     *,
@@ -320,6 +312,7 @@ def _get_test_yaml_files(
         weather_evaluation=weather_evaluation_config,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
+        #FIXME
         save_checkpoint=False,
         logging=logging_config,
         experiment_dir=str(results_dir),
@@ -523,10 +516,24 @@ def test_train_and_inference(
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
         use_healpix=use_healpix,
         crps_training=crps_training,
+        #FIXME
         save_per_epoch_diagnostics=False,
         log_validation_maps=log_validation_maps,
     )
-
-    train_main(
+    # using pdb requires calling main functions directly
+    with mock_wandb() as wandb:
+        train_main(
             yaml_config=train_config,
         )
+        wandb_logs = wandb.get_logs()
+        # for log in wandb_logs:
+        #     # ensure inference time series is not logged
+        #     assert "inference/mean/forecast_step" not in log
+
+        # epoch_logs = wandb_logs[-1]
+        # assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
+        # assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+
+    # train_main(
+    #         yaml_config=train_config,
+    #     )
