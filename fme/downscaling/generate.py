@@ -454,7 +454,7 @@ class Downscaler:
         for target in self.output_targets:
             logging.info(f"Generating downscaled outputs for target: {target.name}")
 
-            _model: DiffusionModel | PatchPredictor | CascadePredictor
+            _model: DiffusionModel | PatchPredictor | CascadePredictor = self.model
             if target.patch.needs_patch_predictor:
                 _model = PatchPredictor(
                     model=self.model,
@@ -462,7 +462,7 @@ class Downscaler:
                 )
 
             insert_slices, writer = None, None
-            for i, (data, topography) in target.data.loader:
+            for i, (data, topography) in enumerate(target.data.loader):
                 # TODO: could use some kind of checkpointing to allow restarts
                 if i == 0:
                     insert_slices = target.get_insert_slices(data)
@@ -473,12 +473,20 @@ class Downscaler:
                     assert insert_slices is not None
                     assert writer is not None
 
-                output = _model.generate_on_batch_no_target(
-                    data, topography=topography, n_samples=target.n_ens
-                )
-                current_insert = insert_slices[i]
-                output_numpy = {k: output[k].cpu().numpy() for k in target.save_vars}
-                writer.record_batch(output_numpy, position_slices=current_insert)
+                for insert_slice in insert_slices:
+                    logging.info(
+                        f"Generating batch {i}, ensemble slice {insert_slice} "
+                        f"for target: {target.name}"
+                    )
+                    n_ens_sl = insert_slice["ensemble"]
+                    n_ens = n_ens_sl.stop - n_ens_sl.start
+                    output = _model.generate_on_batch_no_target(
+                        data, topography=topography, n_samples=n_ens
+                    )
+                    output_numpy = {
+                        k: output[k].cpu().numpy() for k in target.save_vars
+                    }
+                    writer.record_batch(output_numpy, position_slices=insert_slice)
 
 
 @dataclass
