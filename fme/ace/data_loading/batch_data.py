@@ -10,6 +10,7 @@ import xarray as xr
 from torch.utils.data import default_collate
 
 from fme.core.device import get_device
+from fme.core.labels import BatchLabels
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_sized_ensemble_dim,
@@ -66,7 +67,7 @@ class BatchData:
 
     data: TensorMapping
     time: xr.DataArray
-    labels: list[set[str]]
+    labels: BatchLabels
     horizontal_dims: list[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
@@ -84,7 +85,7 @@ class BatchData:
         calendar="julian",
         img_shape: tuple[int, ...] = (9, 18),
         horizontal_dims: list[str] = ["lat", "lon"],
-        labels: list[set[str]] | None = None,
+        labels: BatchLabels | None = None,
         device: torch.device | None = None,
     ) -> "BatchData":
         """
@@ -183,7 +184,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        labels: list[set[str]],
+        labels: BatchLabels,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
     ) -> "BatchData":
@@ -202,7 +203,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        labels: list[set[str]],
+        labels: BatchLabels,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
     ) -> "BatchData":
@@ -386,7 +387,7 @@ class PairedData:
 
     prediction: TensorMapping
     reference: TensorMapping
-    labels: list[set[str]]
+    labels: BatchLabels
     time: xr.DataArray
 
     @property
@@ -417,7 +418,7 @@ class PairedData:
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
-        labels: list[set[str]],
+        labels: BatchLabels,
         time: xr.DataArray,
     ) -> "PairedData":
         device = get_device()
@@ -435,7 +436,7 @@ class PairedData:
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
-        labels: list[set[str]],
+        labels: BatchLabels,
         time: xr.DataArray,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))
