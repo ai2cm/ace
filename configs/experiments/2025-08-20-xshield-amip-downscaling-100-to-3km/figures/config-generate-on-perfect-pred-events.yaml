@@ -24,7 +24,7 @@ data:
     file_pattern: 3km.zarr
     subset:
       start: 0
-      stop: 4
+      stop: 2
   lat_extent:
     start: 22.0
     stop: 38
