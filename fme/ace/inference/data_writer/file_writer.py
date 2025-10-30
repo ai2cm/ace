@@ -504,7 +504,9 @@ class FileWriter:
         """
         Filter region and times and append a batch of data to the writer.
         """
-        subselected_data, subselected_time = self._subselect_data(data, batch_time)
+        subselected_data, subselected_time = self._subselect_data(
+            data, batch_time, start_timestep=start_timestep
+        )
 
         # Warn on empty batch, but it might be expected in some cases
         # so ignore after 10 warnings

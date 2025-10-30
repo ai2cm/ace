@@ -2,6 +2,7 @@ import datetime
 from typing import cast
 from unittest.mock import MagicMock, patch
 
+import cftime
 import numpy as np
 import pytest
 import torch
@@ -182,27 +183,43 @@ def test_month_selector_select():
 
 
 @pytest.mark.parametrize(
-    ["time_selection"],
+    "time_selection, expected_time_indices",
     [
         pytest.param(
             TimeSlice(start_time="2020-01-01", stop_time="2020-01-02"),
+            slice(0, 2),
             id="TimeSlice",
         ),
-        pytest.param(MonthSelector(months=["Jan"]), id="MonthSelector"),
-        pytest.param(Slice(start=0, stop=3, step=2), id="Slice"),
-        pytest.param(Slice(start=5, stop=15), id="Slice_non_initial"),
-        pytest.param(None, id="None"),
+        pytest.param(MonthSelector(months=["Jan"]), slice(0, 31), id="MonthSelector"),
+        pytest.param(Slice(start=0, stop=3, step=2), slice(0, 3, 2), id="Slice"),
+        pytest.param(Slice(start=5, stop=15), slice(5, 15), id="Slice_non_initial"),
+        pytest.param(Slice(start=50, stop=55), slice(50, 55), id="Slice_second_batch"),
+        pytest.param(None, slice(None), id="None"),
     ],
 )
-def test__select_time_file_writer_single_sample(time_selection, tmpdir):
+def test__select_time_file_writer_single_sample(
+    time_selection, expected_time_indices, tmpdir
+):
     n_samples = 1
     n_timesteps = 40
+    freq = "1D"
     batch_data = BatchData.new_for_testing(
         names=["temperature"],
         n_samples=n_samples,
         n_timesteps=n_timesteps,
-        t_initial="2020-01-01T00:00:00",
-        freq="1D",
+        t_initial=cftime.datetime(2020, 1, 1),
+        freq=freq,
+    )
+    second_batch_data = BatchData.new_for_testing(
+        names=["temperature"],
+        n_samples=n_samples,
+        n_timesteps=n_timesteps,
+        t_initial=cftime.datetime(2020, 1, 1) + datetime.timedelta(days=n_timesteps),
+        freq=freq,
+    )
+    all_time = xr.concat([batch_data.time, second_batch_data.time], dim="time")
+    all_temperature = torch.cat(
+        [batch_data.data["temperature"], second_batch_data.data["temperature"]], dim=1
     )
     file_writer_config = FileWriterConfig(
         label="test_writer",
@@ -221,44 +238,26 @@ def test__select_time_file_writer_single_sample(time_selection, tmpdir):
     )
     file_writer.append_batch(
         data=dict(batch_data.data),
-        start_timestep=-1,  # unused for RawDataWriter
+        start_timestep=0,
         batch_time=batch_data.time,
+    )
+    file_writer.append_batch(
+        data=dict(second_batch_data.data),
+        start_timestep=n_timesteps,
+        batch_time=second_batch_data.time,
     )
     file_writer.finalize()
 
-    with xr.open_dataset(tmpdir / "test_writer.nc") as subselected_data:
+    with xr.open_dataset(
+        tmpdir / "test_writer.nc", decode_times=False
+    ) as subselected_data:
         assert len(subselected_data.sample) == n_samples
-        if isinstance(time_selection, TimeSlice):
-            assert len(subselected_data.time) == 2
-            np.testing.assert_almost_equal(
-                batch_data.data["temperature"][0, 0:2, :].cpu().numpy(),
-                subselected_data.squeeze().temperature,
-            )
-        elif isinstance(time_selection, MonthSelector):
-            assert len(subselected_data.time) == 31
-            np.testing.assert_almost_equal(
-                batch_data.data["temperature"][0, 0:31, :].cpu().numpy(),
-                subselected_data.squeeze().temperature,
-            )
-        elif isinstance(time_selection, Slice):
-            if time_selection.start == 0:
-                assert len(subselected_data.time) == 2  # timesteps 0 and 2
-                np.testing.assert_almost_equal(
-                    batch_data.data["temperature"][0, 0:3:2, :].cpu().numpy(),
-                    subselected_data.squeeze().temperature,
-                )
-            else:
-                assert len(subselected_data.time) == 10  # timesteps 5 to 14
-                np.testing.assert_almost_equal(
-                    batch_data.data["temperature"][0, 5:15, :].cpu().numpy(),
-                    subselected_data.squeeze().temperature,
-                )
-        else:  # time_selection is None
-            assert len(subselected_data.time) == n_timesteps
-            np.testing.assert_almost_equal(
-                batch_data.data["temperature"][0, :].cpu().numpy(),
-                subselected_data.squeeze().temperature,
-            )
+        expected_time_length = all_time.isel(time=expected_time_indices).sizes["time"]
+        assert len(subselected_data.time) == expected_time_length
+        np.testing.assert_almost_equal(
+            all_temperature[0, expected_time_indices].cpu().numpy(),
+            subselected_data.squeeze().temperature,
+        )
 
 
 @pytest.mark.parametrize(
