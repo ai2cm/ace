@@ -42,7 +42,7 @@ cd $REPO_ROOT && gantry run \
     --install "pip install --no-deps ." \
     -- python -I -m fme.ace.evaluator $CONFIG_PATH
 
-OVERRIDE="n_forward_steps=204396 loader.start_indices.times=['0211-01-01T06:00:00'] prediction_loader.start_indices.times=['0211-01-01T06:00:00'] loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr prediction_loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr"
+OVERRIDE="allow_incompatible_dataset=true n_forward_steps=204396 loader.start_indices.times=['0211-01-01T06:00:00'] prediction_loader.start_indices.times=['0211-01-01T06:00:00'] loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr prediction_loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr"
 JOB_NAME="2025-10-30-ace2-cm4-data-only-evaluator-frozen-precipitation-1pctCO2"
 python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH --override $OVERRIDE
 cd $REPO_ROOT && gantry run \
