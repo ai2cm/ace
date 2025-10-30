@@ -29,9 +29,8 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km training global' \
     --workspace ai2/ace \
-    --priority low \
+    --priority high \
     --preemptible \
-    --cluster ai2/titan \
     --cluster ai2/ceres \
     --cluster ai2/jupiter \
     --beaker-image $IMAGE \
