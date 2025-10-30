@@ -165,6 +165,27 @@ from .requirements import DataRequirements
 from .train import count_parameters
 
 
+@dataclass
+class SliceItem:
+    """Work item for generation: which data batch and which ensemble slice."""
+
+    data_idx: list[int]  # Index into the dataset
+    time_slice: slice  # Which times from all_times
+    ens_slice: slice  # Which ensemble members to generate
+    is_padding: bool = False  # For even GPU distribution
+
+
+# Dataloader can be used to create a dataset and GriddedData with information
+# about underlying
+# Create a new dataset that will be used to actually have each work item
+# (time indexes and ensemble size/slice)
+# each work item will include a load from gridded data of correct temporal
+# data batch
+# generate the requested ensemble and insert into the zarr
+# also need to padd work items to evenly distribute across gpus, but will not
+# insert padding items into the zarr
+
+
 class OutputTarget:
     """
     Container for a single output generation target.
@@ -182,6 +203,9 @@ class OutputTarget:
         chunks: Zarr chunk sizes for each dimension
         shards: Zarr shard sizes (optional, for grouping chunks)
         dims: Dimension names including ensemble (time, ensemble, lat, lon)
+        distribute_ensemble: Whether to distribute ensemble members across GPUs. Useful
+            for the case where there are not multiple times to distribute but many
+            ensemble members.
     """
 
     def __init__(
@@ -194,6 +218,8 @@ class OutputTarget:
         patch: PatchPredictionConfig,
         chunks: dict[str, int],
         shards: dict[str, int] | None,
+        distribute_ensemble: bool = False,
+        dist: Distributed | None = None,
     ) -> None:
         self.name = name
         self.save_vars = save_vars
@@ -203,6 +229,8 @@ class OutputTarget:
         self.patch = patch
         self.chunks = chunks
         self.shards = shards
+        self._distribute_ensemble = distribute_ensemble
+        self._dist = dist or Distributed.get_instance()
 
         self.dims = list(data.dims)
         self.dims.insert(1, "ensemble")  # insert ensemble dim after time
@@ -264,6 +292,16 @@ class OutputTarget:
 
         Returns list of slices based on n_items_per_gpu to control memory usage.
         """
+        if self._distribute_ensemble:
+            # total_n_ens_per_gpu = max(1, self.n_ens // self._dist.world_size)
+            # n_ens_per_slice = min(total_n_ens_per_gpu, self.n_items_per_gpu)
+
+            if self.n_ens // self._dist.world_size == 0:
+                raise ValueError(
+                    "Cannot distribute ensemble members across GPUs: "
+                    f"n_ens={self.n_ens} < world_size={self._dist.world_size}."
+                )
+
         ens_start = 0
         ens_slices = []
         while ens_start < self.n_ens:
