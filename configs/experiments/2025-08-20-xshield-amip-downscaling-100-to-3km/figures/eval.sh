@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-wa-ar-fig"
-CONFIG_FILENAME="config-generate-on-perfect-pred-events.yaml"
+JOB_NAME="eval-xshield-amip-100km-to-3km-wa-ar-fig-histckpt"
+CONFIG_FILENAME="config-generate-on-perfect-pred-events-histckpt.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -22,7 +22,9 @@ NGPU=2
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
 
-EXISTING_RESULTS_DATASET=01K8P3P5205396WR50FCMZR6P7 # best crps checkpoint from job using global validation
+#EXISTING_RESULTS_DATASET=01K8P3P5205396WR50FCMZR6P7 # best crps checkpoint from job using global validation
+EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD # best hist checkpoint from job using global validation
+
 wandb_group=""
 
 gantry run \
