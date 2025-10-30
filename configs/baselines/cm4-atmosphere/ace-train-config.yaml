@@ -3,60 +3,14 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 50 # this is about equivalent to the amount of trainign for ACE2-ERA5/ACE2-SHiELD
+max_epochs: 1 # this is about equivalent to the amount of trainign for ACE2-ERA5/ACE2-SHiELD
 n_forward_steps: 2
-inference:
-  n_forward_steps: 7300 # 5 years
-  forward_steps_in_memory: 50
-  loader:
-    start_indices:
-      times:
-        # total of 120 years with 5yr rollouts
-        - "0301-01-01T06:00:00"
-        - "0301-03-01T00:00:00"
-        - "0301-04-29T00:00:00"
-        - "0301-06-26T18:00:00"
-        - "0301-08-24T18:00:00"
-        - "0301-10-22T12:00:00"
-        - "0301-12-20T12:00:00"
-        - "0302-02-17T06:00:00"
-        - "0302-04-17T06:00:00"
-        - "0302-06-15T00:00:00"
-        - "0302-08-13T00:00:00"
-        - "0302-10-10T18:00:00"
-        - "0302-12-08T18:00:00"
-        - "0303-02-05T12:00:00"
-        - "0303-04-05T12:00:00"
-        - "0303-06-03T06:00:00"
-        - "0303-08-01T06:00:00"
-        - "0303-09-29T00:00:00"
-        - "0303-11-27T00:00:00"
-        - "0304-01-24T18:00:00"
-        - "0304-03-24T18:00:00"
-        - "0304-05-22T12:00:00"
-        - "0304-07-20T12:00:00"
-        - "0304-09-17T06:00:00"
-        - "0304-11-15T06:00:00"
-        - "0305-01-13T00:00:00"
-        - "0305-03-13T00:00:00"
-        - "0305-05-10T18:00:00"
-        - "0305-07-08T18:00:00"
-        - "0305-09-05T12:00:00"
-        - "0305-11-03T12:00:00"
-        - "0306-01-01T06:00:00"
-    dataset:
-      data_path: /climate-default
-      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-      engine: zarr
-    num_data_workers: 4
-  aggregator:
-    log_histograms: true
-    time_mean_reference_data: /statsdata/time-mean.nc
+inference: null
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace2-cm4
+  project: ace-energy-conservation
   entity: ai2cm
 train_loader:
   batch_size: 16
@@ -67,7 +21,7 @@ train_loader:
     file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
     engine: zarr
     subset:
-      stop_time: '0301-01-01T06:00:00'
+      stop_time: '0151-02-01T06:00:00'
 validation_loader:
   batch_size: 64
   num_data_workers: 16
@@ -78,7 +32,7 @@ validation_loader:
     engine: zarr
     subset:
       start_time: '0301-01-01T06:00:00'
-      stop_time: '0311-01-01T06:00:00'
+      stop_time: '0301-02-01T06:00:00'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
@@ -253,3 +207,5 @@ stepper:
       # ocean coupling variables (diagnostic for now)
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
+      # for a better energy budget
+      - total_frozen_precipitation_rate

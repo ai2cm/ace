@@ -2,15 +2,15 @@
 
 set -e
 
-JOB_NAME="ace2-cm4-atmosphere-train"
+JOB_NAME="ace2-cm4-atmosphere-train-with-frozen-precipitation"
 JOB_GROUP="ace2-cm4-atmosphere"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+BEAKER_USERNAME=spencerc_ai2
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8
+N_GPUS=4
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -22,11 +22,11 @@ gantry run \
     --description 'Run ACE training for CM4 atmosphere data' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
+    --priority low \
     --preemptible \
-    --cluster ai2/ceres-cirrascale \
-    --cluster ai2/saturn-cirrascale \
-    --cluster ai2/titan-cirrascale \
+    --cluster ai2/titan \
+    --cluster ai2/jupiter \
+    --cluster ai2/ceres \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=training \
