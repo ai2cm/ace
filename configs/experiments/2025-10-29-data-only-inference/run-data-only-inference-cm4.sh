@@ -14,7 +14,8 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH --override loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr prediction_loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+OVERRIDE="n_forward_steps=204396 loader.start_indices.times=['0211-01-01T06:00:00'] prediction_loader.start_indices.times=['0211-01-01T06:00:00'] loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr prediction_loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr"
+python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH --override $OVERRIDE
 
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
@@ -41,4 +42,4 @@ cd $REPO_ROOT && gantry run \
     --budget ai2/climate \
     --system-python \
     --install "pip install --no-deps ." \
-    -- python -I -m fme.ace.evaluator $CONFIG_PATH --override loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr prediction_loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+    -- python -I -m fme.ace.evaluator $CONFIG_PATH --override $OVERRIDE
