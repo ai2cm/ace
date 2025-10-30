@@ -50,6 +50,7 @@ def _save_checkpoint(trainer: "Trainer", path: str) -> None:
                 "num_batches_seen": trainer.num_batches_seen,
                 "startEpoch": trainer.startEpoch,
                 "best_valid_loss": trainer.best_valid_loss,
+                "best_histogram_tail_metric": trainer.best_histogram_tail_metric,
                 "validate_using_ema": trainer.validate_using_ema,
             },
             temporary_location,
@@ -73,6 +74,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
     trainer.best_valid_loss = checkpoint["best_valid_loss"]
+    trainer.best_histogram_tail_metric = checkpoint.get(
+        "best_histogram_tail_metric", float("inf")
+    )
 
     trainer.validate_using_ema = checkpoint["validate_using_ema"]
     ema_checkpoint = torch.load(

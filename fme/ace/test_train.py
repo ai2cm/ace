@@ -71,12 +71,13 @@ from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import OptimizationConfig
+from fme.core.rand import set_seed
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
-from fme.core.testing.model import compare_restored_parameters
+from fme.core.testing.model import compare_parameters, compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice
 
@@ -655,6 +656,48 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
             assert (
                 max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 2
             )
+
+
+def _get_reproducible_trainer(config_dict, seed):
+    set_seed(seed)
+    # TrainConfig objects may create rng (e.g., TimeLengthProbabilities), so it
+    # has to be rebuilt after setting the seed.
+    config = dacite.from_dict(
+        data_class=TrainConfig, data=config_dict, config=dacite.Config(strict=True)
+    )
+    prepare_directory(config.experiment_dir, config_dict)
+    builders = TrainBuilders(config)
+    return build_trainer(builders, config)
+
+
+@pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO"])
+def test_set_seed(tmp_path, nettype, very_fast_only: bool):
+    """Test that set_seed leads to identical training outcomes."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    config_path, _ = _setup(tmp_path, nettype)
+    with open(config_path) as f:
+        config_dict = yaml.safe_load(f)
+
+    trainer1 = _get_reproducible_trainer(config_dict, seed=0)
+    trainer2 = _get_reproducible_trainer(config_dict, seed=0)
+
+    compare_parameters(
+        trainer1.stepper.modules.named_parameters(),
+        trainer2.stepper.modules.named_parameters(),
+    )
+
+    set_seed(0)
+    trainer1.train_one_epoch()
+
+    set_seed(0)
+    trainer2.train_one_epoch()
+
+    compare_parameters(
+        trainer1.stepper.modules.named_parameters(),
+        trainer2.stepper.modules.named_parameters(),
+    )
 
 
 def test_restore_checkpoint(tmp_path, very_fast_only: bool):

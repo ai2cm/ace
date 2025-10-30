@@ -31,6 +31,7 @@ VALID_TIME = "valid_time"
 @dataclasses.dataclass
 class NetCDFWriterConfig:
     name: Literal["netcdf"] = "netcdf"  # defined for yaml+dacite ease of use
+    suffix: str = "nc"
 
 
 class PairedRawDataWriter:
@@ -51,7 +52,7 @@ class PairedRawDataWriter:
     ):
         self._target_writer = RawDataWriter(
             path=path,
-            label="autoregressive_target.nc",
+            label="autoregressive_target",
             n_initial_conditions=n_initial_conditions,
             save_names=save_names,
             variable_metadata=variable_metadata,
@@ -60,7 +61,7 @@ class PairedRawDataWriter:
         )
         self._prediction_writer = RawDataWriter(
             path=path,
-            label="autoregressive_predictions.nc",
+            label="autoregressive_predictions",
             n_initial_conditions=n_initial_conditions,
             save_names=save_names,
             variable_metadata=variable_metadata,
@@ -122,7 +123,7 @@ class RawDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
-        filename = str(Path(path) / label)
+        filename = str(Path(path) / f"{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata
         self.coords = coords
@@ -137,9 +138,7 @@ class RawDataWriter:
         self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
         self._dataset_dims_created = False
         dataset_metadata = copy.copy(dataset_metadata)
-        dataset_metadata.title = (
-            f"ACE {label.removesuffix('.nc').replace('_', ' ')} data file"
-        )
+        dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         for key, value in dataset_metadata.as_flat_str_dict().items():
             self.dataset.setncattr(key, value)
 
@@ -159,7 +158,7 @@ class RawDataWriter:
 
         Args:
             data: Data to be written to file.
-            start_timestep: Timestep (lead time dim) at which to start writing.
+            start_timestep: Timestep (lead time dim) at which to start writing. Unused.
             batch_time: Time coordinate for each sample in the batch.
         """
         if self.dataset is None:
@@ -193,6 +192,7 @@ class RawDataWriter:
             self._dataset_dims_created = True
 
         save_names = self._get_variable_names_to_save(data.keys())
+        current_lead_time_size = self.dataset.dimensions[LEAD_TIME_DIM].size
         for variable_name in save_names:
             # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:
@@ -217,7 +217,7 @@ class RawDataWriter:
             # Append the data to the variables
             self.dataset.variables[variable_name][
                 :,
-                start_timestep : start_timestep + data_numpy.shape[1],
+                current_lead_time_size : current_lead_time_size + data_numpy.shape[1],
                 :,
             ] = data_numpy
 
@@ -227,30 +227,31 @@ class RawDataWriter:
         if not hasattr(self.dataset.variables[VALID_TIME], "calendar"):
             self.dataset.variables[VALID_TIME].calendar = batch_time.dt.calendar
 
-        if start_timestep == 0:
-            init_times: np.ndarray = batch_time.isel(time=0).values
-            init_times_numeric: np.ndarray = cftime.date2num(
+        if current_lead_time_size > 0:
+            init_times_numeric: np.ndarray = self.dataset.variables[INIT_TIME][:]
+            init_times_numeric = (
+                init_times_numeric.filled()
+            )  # convert masked array to ndarray
+            init_times: np.ndarray = cftime.num2date(
+                init_times_numeric,
+                units=self.dataset.variables[INIT_TIME].units,
+                calendar=self.dataset.variables[INIT_TIME].calendar,
+            )
+        else:
+            init_times = batch_time.isel(time=0).values
+            init_times_numeric = cftime.date2num(
                 init_times,
                 units=self.dataset.variables[INIT_TIME].units,
                 calendar=self.dataset.variables[INIT_TIME].calendar,
             )
             self.dataset.variables[INIT_TIME][:] = init_times_numeric
-        else:
-            init_times_numeric = self.dataset.variables[INIT_TIME][:]
-            init_times_numeric = (
-                init_times_numeric.filled()
-            )  # convert masked array to ndarray
-            init_times = cftime.num2date(
-                init_times_numeric,
-                units=self.dataset.variables[INIT_TIME].units,
-                calendar=self.dataset.variables[INIT_TIME].calendar,
-            )
         lead_time_microseconds = get_batch_lead_time_microseconds(
             init_times,
             batch_time.values,
         )
         self.dataset.variables[LEAD_TIME_DIM][
-            start_timestep : start_timestep + lead_time_microseconds.shape[0]
+            current_lead_time_size : current_lead_time_size
+            + lead_time_microseconds.shape[0]
         ] = lead_time_microseconds
 
         valid_times_numeric: np.ndarray = cftime.date2num(
@@ -260,7 +261,8 @@ class RawDataWriter:
         )
         self.dataset.variables[VALID_TIME][
             :,
-            start_timestep : start_timestep + lead_time_microseconds.shape[0],
+            current_lead_time_size : current_lead_time_size
+            + lead_time_microseconds.shape[0],
         ] = valid_times_numeric
 
         self.dataset.sync()  # Flush the data to disk

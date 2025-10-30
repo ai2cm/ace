@@ -1,0 +1,49 @@
+coupled_datasets:
+  version: "2025-10-21"
+  family_name: cm4-1pctCO2-140yr-no-smoothing-coupled
+  output_directory: /climate-default
+  coupled_ts:
+    how: interpolate_sst
+  coupled_sea_surface:
+    precomputed_sea_ice_mask:
+      zarr_path: /climate-default/2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
+    ocean_extra_masked_names: ["HI", "sea_ice_volume"]
+    surface_flux_window_avg:
+      window_timedelta: 120h
+      first_timestamp: "0211-01-03T12:00:00"
+      last_timestamp: "0350-12-29T12:00:00"
+      subset_names:
+        - DLWRFsfc
+        - DSWRFsfc
+        - ULWRFsfc
+        - USWRFsfc
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - eastward_surface_wind_stress
+        - northward_surface_wind_stress
+    sea_ice_window_avg:
+      window_timedelta: 120h
+      first_timestamp: "0211-01-06T00:00:00"
+      shift_timestamps_to_avg_interval_midpoint: true
+  output_writer:
+    n_dask_workers: 32
+
+input_datasets:
+  climate_data_type: "CM4"
+  atmosphere:
+    zarr_path: /climate-default/2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+    time_chunk_size: 500
+    extra_fields:
+      names_and_prefixes: ["ak_", "bk_"]
+  sea_ice:
+    zarr_path: /climate-default/2025-09-16-cm4-1pctCO2-140yr-sea-ice.zarr
+    time_chunk_size: 500
+  ocean:
+    zarr_path: /climate-default/2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+    time_chunk_size: 25
+    extra_fields:
+      names_and_prefixes: ["idepth_", "mask_"]
+  stats:
+    atmosphere_dir: /climate-default/2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-stats/combined
+    ocean_dir: /climate-default/2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing-stats
