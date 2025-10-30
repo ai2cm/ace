@@ -15,7 +15,6 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
-
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
@@ -42,3 +41,33 @@ cd $REPO_ROOT && gantry run \
     --system-python \
     --install "pip install --no-deps ." \
     -- python -I -m fme.ace.evaluator $CONFIG_PATH
+
+OVERRIDE="loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr prediction_loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr"
+JOB_NAME="2025-10-30-ace2-cm4-data-only-evaluator-frozen-precipitation-1pctCO2"
+python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH --override $OVERRIDE
+cd $REPO_ROOT && gantry run \
+    --name $JOB_NAME \
+    --task-name $JOB_NAME \
+    --description 'Run CM4 data-only evaluator (with frozen precipitation)' \
+    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
+    --workspace ai2/ace \
+    --priority low \
+    --cluster ai2/ceres \
+    --cluster ai2/jupiter \
+    --cluster ai2/saturn \
+    --cluster ai2/titan \
+    --env WANDB_USERNAME=$WANDB_USERNAME \
+    --env WANDB_NAME=$JOB_NAME \
+    --env WANDB_JOB_TYPE=inference \
+    --env WANDB_RUN_GROUP=$JOB_GROUP \
+    --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+    --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+    --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    --gpus 1 \
+    --shared-memory 50GiB \
+    --weka climate-default:/climate-default \
+    --budget ai2/climate \
+    --system-python \
+    --install "pip install --no-deps ." \
+    -- python -I -m fme.ace.evaluator $CONFIG_PATH --override $OVERRIDE
