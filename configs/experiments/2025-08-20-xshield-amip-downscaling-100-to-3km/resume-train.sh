@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-global-resume-multivar"
+JOB_NAME="xshield-downscaling-100km-to-3km-global-val-resume"
 CONFIG_FILENAME="config-train-resume.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -20,7 +20,7 @@ N_GPUS=4 # TODO: change to 8 after testing
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-PREVIOUS_RESULTS_DATASET="01K7SH1T3QE4F003BJ7SRCKEHD"
+PREVIOUS_RESULTS_DATASET="01K8NMQ7HK7N8CKT45QS9AMX8R"
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
 
@@ -28,10 +28,10 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km training global' \
     --workspace ai2/ace \
-    --priority low \
+    --priority high \
     --preemptible \
     --cluster ai2/ceres \
-    --cluster ai2/titan \
+    --cluster ai2/jupiter \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \

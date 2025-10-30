@@ -1,13 +1,11 @@
 resume_results_dir: /previous_results
 model:
   out_names:
-  - eastward_wind_at_ten_meters
-  - northward_wind_at_ten_meters
   - PRATEsfc
   in_names:
+  - PRATEsfc
   - eastward_wind_at_ten_meters
   - northward_wind_at_ten_meters
-  - PRATEsfc
   loss:
     type: MSE
   module:
@@ -47,9 +45,9 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 100  # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
-  batch_size: 16 #48 for 8
-  num_data_workers: 4
+  sample_with_replacement: 160   # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
+  batch_size: 24 # 48 on 8 gpu
+  num_data_workers: 4 #8
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 3km.zarr
@@ -69,8 +67,8 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 24  #128 for 8
-  num_data_workers: 4
+  batch_size: 76 #128 on 8 gpu
+  num_data_workers: 4 #8
   fine:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
@@ -78,7 +76,7 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 3
+      step: 19
   coarse:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
@@ -86,13 +84,13 @@ validation_data:
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2024-01-01T00:00:00"
-      step: 3
+      step: 19
   lat_extent:
-    start: 22.0
-    stop: 50.0
-  lon_extent:
-    start: 230.0
-    stop: 295.0
+    start: -66.0
+    stop: 70.0
+  # lon_extent:
+  #   start: 230.0
+  #   stop: 295.0
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
