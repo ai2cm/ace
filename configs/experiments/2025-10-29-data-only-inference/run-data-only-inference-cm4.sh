@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="2025-10-29-ace2-cm4-data-only-evaluator"
+JOB_NAME="2025-10-29-ace2-cm4-data-only-evaluator-1pctCO2"
 JOB_GROUP="ace2-cm4"
 EXISTING_RESULTS_DATASET="01K0JF7H54WVDF5FGSAFAP04GJ"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-evaluator-config-cm4.yaml"
@@ -14,7 +14,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
+python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH --override loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr --prediction_loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
 
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
@@ -41,4 +41,4 @@ cd $REPO_ROOT && gantry run \
     --budget ai2/climate \
     --system-python \
     --install "pip install --no-deps ." \
-    -- python -I -m fme.ace.evaluator $CONFIG_PATH
+    -- python -I -m fme.ace.evaluator $CONFIG_PATH --override loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr --prediction_loader.dataset.file_pattern=2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
