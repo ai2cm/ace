@@ -11,7 +11,7 @@ model:
     type: MSE
   module:
     config:
-      model_channels: 128
+      model_channels: 256
       attn_resolutions: []
       num_blocks: 1
       channel_mult_emb: 6
@@ -46,8 +46,8 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 100  # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
-  batch_size: 16 #48 for 8
+  sample_with_replacement: 320 # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
+  batch_size: 32 #48 for 8
   num_data_workers: 4
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -68,35 +68,32 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 24  #128 for 8
+  batch_size: 48  #128 for 8
   num_data_workers: 4
   fine:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 3km.zarr
     subset:
-      start_time: "2023-01-01T00:00:00"
-      stop_time: "2024-01-01T00:00:00"
-      step: 3
+      start_time: "2023-01-01T12:00:00"
+      stop_time: "2024-01-01T12:00:00"
+      step: 23
   coarse:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
     subset:
-      start_time: "2023-01-01T00:00:00"
-      stop_time: "2024-01-01T00:00:00"
-      step: 3
+      start_time: "2023-01-01T12:00:00"
+      stop_time: "2024-01-01T12:00:00"
+      step: 23
   lat_extent:
-    start: 22.0
-    stop: 50.0
-  lon_extent:
-    start: 230.0
-    stop: 295.0
+    start: -66.0
+    stop: 70.0
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
 max_epochs: 1500 # using 320 samples per epoch, this is roughly 500k steps (200 epochs for the previous 2 yr training dataset)
-validate_interval: 10
+validate_interval: 12
 experiment_dir: /results
 save_checkpoints: true
 logging:
