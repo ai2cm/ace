@@ -969,12 +969,17 @@ def test_time_buffer(
         assert sum(window_matches) == 1
 
 
-def test_pinned_memory(tmp_path):
+@pytest.mark.parametrize(
+    "time_buffer",
+    [0, pytest.param(2, marks=pytest.mark.xfail(reason="already on gpu", strict=True))],
+)
+def test_pinned_memory(tmp_path, time_buffer: int):
     _create_dataset_on_disk(tmp_path, n_times=10)
     config = DataLoaderConfig(
         dataset=XarrayDataConfig(data_path=tmp_path),
         batch_size=1,
         num_data_workers=0,
+        time_buffer=time_buffer,
     )
     requirements = DataRequirements(["foo"], 3)
     data = get_gridded_data(config, True, requirements)

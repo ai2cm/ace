@@ -319,7 +319,7 @@ class SlidingWindowDataLoader(DataLoaderABC):
 
     def __next__(self) -> BatchData:
         if self._current_batch is None:
-            self._current_batch = next(self._loaditer)
+            self._current_batch = next(self._loaditer).to_device()
             self._i_batch += 1
             self._counter = 0
             assert self._current_batch.n_timesteps == self._input_n_timesteps
