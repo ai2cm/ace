@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-conus-save-coords"
+JOB_NAME="eval-xshield-amip-100km-to-3km-conus-lower-sbound"
 CONFIG_FILENAME="config-eval-conus.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -16,7 +16,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-N_NODES=1
+N_NODES=4
 NGPU=1
 
 #IMAGE with B200 pytorch installed

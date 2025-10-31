@@ -14,28 +14,26 @@ data:
     file_pattern: 100km.zarr
     #infer_timestep: false
     subset:
-      start: 0
-      stop: 2
+      start_time: 2023-01-01T00:00
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 3km.zarr
     #infer_timestep: false
     subset:
-      start: 0
-      stop: 2
+      start_time: 2023-01-01T00:00
   lat_extent:
     start: 22.0
     stop: 50.0
   lon_extent:
-    start: 230.0
+    start: 222.0
     stop: 295.0
-  batch_size: 2
+  batch_size: 4
   num_data_workers: 2
   strict_ensemble: False
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: annak-downscaling
+  project: andrep-downscaling
   entity: ai2cm
