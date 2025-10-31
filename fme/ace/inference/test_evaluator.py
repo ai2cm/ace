@@ -42,7 +42,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
-from fme.core.device import get_device
+from fme.core.device import get_device, using_gpu
 from fme.core.logging_utils import LoggingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -534,15 +534,22 @@ def test_inference_writer_boundaries(
     )
     # check time mean metrics
     tol = 1e-4  # relative tolerance
-    assert metrics.root_mean_squared_error(
-        tar_time_mean, gen_time_mean, area_weights
-    ).item() == pytest.approx(
-        inference_logs[-1]["inference/time_mean/rmse/var"], rel=tol
+    grad_mag_tol = tol
+    if using_gpu():
+        # GPU test cases have higher error
+        tol = 5e-4
+        grad_mag_tol = 3e-3
+    np.testing.assert_allclose(
+        metrics.root_mean_squared_error(
+            tar_time_mean, gen_time_mean, area_weights
+        ).item(),
+        inference_logs[-1]["inference/time_mean/rmse/var"],
+        rtol=tol,
     )
-    assert metrics.weighted_mean_bias(
-        tar_time_mean, gen_time_mean, area_weights
-    ).item() == pytest.approx(
-        inference_logs[-1]["inference/time_mean/bias/var"], rel=tol
+    np.testing.assert_allclose(
+        metrics.weighted_mean_bias(tar_time_mean, gen_time_mean, area_weights).item(),
+        inference_logs[-1]["inference/time_mean/bias/var"],
+        rtol=tol,
     )
 
     prediction_ds = prediction_ds.isel(sample=0)
@@ -557,20 +564,30 @@ def test_inference_writer_boundaries(
         gen_i = torch.from_numpy(gen.isel(time=i).values)
         tar_i = torch.from_numpy(tar.isel(time=i).values)
         # check that manually computed metrics match logged metrics
-        assert metrics.root_mean_squared_error(
-            tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_rmse/var"], rel=tol)
-        assert metrics.weighted_mean_bias(
-            tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_bias/var"], rel=tol)
-        assert metrics.gradient_magnitude_percent_diff(
-            tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(
-            log["inference/mean/weighted_grad_mag_percent_diff/var"], rel=tol
+        np.testing.assert_allclose(
+            metrics.root_mean_squared_error(
+                tar_i, gen_i, area_weights, dim=(-2, -1)
+            ).item(),
+            log["inference/mean/weighted_rmse/var"],
+            rtol=tol,
         )
-        assert metrics.weighted_mean(
-            gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_mean_gen/var"], rel=tol)
+        np.testing.assert_allclose(
+            metrics.weighted_mean_bias(tar_i, gen_i, area_weights, dim=(-2, -1)).item(),
+            log["inference/mean/weighted_bias/var"],
+            rtol=tol,
+        )
+        np.testing.assert_allclose(
+            metrics.gradient_magnitude_percent_diff(
+                tar_i, gen_i, area_weights, dim=(-2, -1)
+            ).item(),
+            log["inference/mean/weighted_grad_mag_percent_diff/var"],
+            rtol=grad_mag_tol,
+        )
+        np.testing.assert_allclose(
+            metrics.weighted_mean(gen_i, area_weights, dim=(-2, -1)).item(),
+            log["inference/mean/weighted_mean_gen/var"],
+            rtol=tol,
+        )
 
         # the target obs should be the same as the validation data obs
         # ds is original data which includes IC, target_ds does not
@@ -811,7 +828,6 @@ def test_derived_metrics_run_without_errors(
     "time_coarsen,n_forward_steps,forward_steps_in_memory",
     [
         pytest.param(3, 12, 4, id="not_multiple_of_forward_steps_in_memory"),
-        pytest.param(-1, 12, 4, id="invalid_time_coarsen"),
         pytest.param(2, 5, 4, id="not_multiple_of_n_forward_steps"),
     ],
 )

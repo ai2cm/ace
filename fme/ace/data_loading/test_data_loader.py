@@ -33,6 +33,7 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.device import using_gpu
 from fme.core.typing_ import Slice
 
 
@@ -969,3 +970,17 @@ def test_time_buffer(
             for window_times in dataset_window_times
         ]
         assert sum(window_matches) == 1
+
+
+def test_pinned_memory(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=10)
+    config = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        batch_size=1,
+        num_data_workers=0,
+    )
+    requirements = DataRequirements(["foo"], 3)
+    data = get_gridded_data(config, True, requirements)
+    for batch in data._loader:
+        tensor = next(iter(batch.data.values()))
+        assert tensor.is_pinned() is using_gpu()

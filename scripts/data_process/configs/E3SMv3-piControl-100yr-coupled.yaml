@@ -1,0 +1,48 @@
+coupled_datasets:
+  version: "2025-10-21"
+  family_name: E3SMv3-piControl-100yr-coupled
+  output_directory: /pscratch/sd/e/elynnwu/fme-dataset
+  coupled_ts:
+    how: interpolate_sst
+  coupled_sea_surface:
+    sst_threshold: 291.75
+    ocean_extra_masked_names: ["sea_ice_volume"]
+    surface_flux_window_avg:
+      window_timedelta: 120h
+      first_timestamp: "0401-01-03T12:00:00"
+      last_timestamp: "0499-12-29T12:00:00"
+      subset_names:
+        - surface_upward_longwave_flux
+        - surface_upward_shortwave_flux
+        - FLDS
+        - FSDS
+        - LHFLX
+        - SHFLX
+        - surface_precipitation_rate
+        - TAUX
+        - TAUY
+    sea_ice_window_avg:
+      window_timedelta: 120h
+      first_timestamp: "0401-01-06T00:00:00"
+      shift_timestamps_to_avg_interval_midpoint: true
+  output_writer:
+    n_dask_workers: 32
+  input_field_names:
+    atmosphere:
+      surface_temperature_name: TS
+
+input_datasets:
+  climate_data_type: "E3SMV2"
+  atmosphere:
+    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+    time_chunk_size: 500
+    extra_fields:
+      names_and_prefixes: ["ak_", "bk_"]
+  ocean:
+    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-09-05-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+    time_chunk_size: 25
+    extra_fields:
+      names_and_prefixes: ["idepth_", "mask_"]
+  stats:
+    atmosphere_dir: /pscratch/sd/e/elynnwu/fme-dataset/2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr-stats
+    ocean_dir: /pscratch/sd/e/elynnwu/fme-dataset/2025-08-13-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4-stats
