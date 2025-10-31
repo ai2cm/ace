@@ -82,8 +82,6 @@ class _EvaluatorEnsembleAggregator(Protocol):
         self,
         target_data: EnsembleTensorDict,
         gen_data: EnsembleTensorDict,
-        # target_data_norm: EnsembleMapping,
-        # gen_data_norm: EnsembleMapping,
         i_time_start: int = 0,
     ): ...
 
@@ -443,6 +441,8 @@ class InferenceEvaluatorAggregator(
             )
         if self.n_ensemble_per_ic > 1:
             unfolded_target_data, unfolded_prediction_data = data.ensemble_data()
+            print("unfolded_target_data", unfolded_target_data["a"].size())
+            print("unfolded_prediction_data", unfolded_prediction_data["a"].size())
             for ensemble_aggregator in self._ensemble_aggregators.values():
                 ensemble_aggregator.record_batch(
                     target_data=unfolded_target_data,

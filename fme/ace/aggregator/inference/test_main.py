@@ -7,7 +7,7 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
-from fme.ace.data_loading.batch_data import PairedData
+from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -20,8 +20,10 @@ def get_ds_info(nx: int, ny: int) -> DatasetInfo:
     )
 
 
+@pytest.mark.parametrize("n_ensemble", [1, 2])
 @pytest.mark.parametrize("channel_mean_names", [None, ["a", "b"]])
 def test_inference_evaluator_aggregator_channel_mean_names(
+    n_ensemble: int,
     channel_mean_names: Sequence[str] | None,
 ):
     n_timesteps = 3
@@ -29,7 +31,7 @@ def test_inference_evaluator_aggregator_channel_mean_names(
     batch_size = 2
 
     ds_info = get_ds_info(nx, ny)
-    initial_time = xr.DataArray(np.zeros((batch_size,)), dims=["sample"])
+    initial_time = xr.DataArray(np.zeros((batch_size * n_ensemble,)), dims=["sample"])
 
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
@@ -45,26 +47,47 @@ def test_inference_evaluator_aggregator_channel_mean_names(
         channel_mean_names=channel_mean_names,
         log_nino34_index=False,
         save_diagnostics=False,
+        n_ensemble_per_ic=n_ensemble,
     )
 
     target_data = {
-        "a": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()),
-        "b": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 3,
-        "c": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 4,
+        "a": torch.ones(
+            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
+        ),
+        "b": torch.ones(
+            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
+        )
+        * 3,
+        "c": torch.ones(
+            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
+        )
+        * 4,
     }
     gen_data = {
-        "a": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 2.0,
-        "b": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 5,
-        "c": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 6,
+        "a": torch.ones(
+            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
+        )
+        * 2.0,
+        "b": torch.ones(
+            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
+        )
+        * 5,
+        "c": torch.ones(
+            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
+        )
+        * 6,
     }
 
-    time = xr.DataArray(np.zeros((batch_size, n_timesteps)), dims=["sample", "time"])
+    time = xr.DataArray(
+        np.zeros((batch_size * n_ensemble, n_timesteps)), dims=["sample", "time"]
+    )
 
     paired_data = PairedData.new_on_device(
         prediction=gen_data,
         reference=target_data,
-        labels=[set() for _ in range(batch_size)],
+        labels=[set() for _ in range(batch_size * n_ensemble)],
         time=time,
+        n_ensemble=n_ensemble,
     )
     agg.record_batch(paired_data)
 
@@ -83,3 +106,59 @@ def test_inference_evaluator_aggregator_channel_mean_names(
         actual_channel_mean_rmse,
         expected_channel_mean_rmse,
     )
+
+
+def test_inference_evaluator_aggregator_ensemble():
+    channel_mean_names = ["a", "b"]
+    n_timesteps = 40
+    nx, ny = 4, 4
+    batch_size = 2
+    n_ensemble = 2
+
+    ds_info = get_ds_info(nx, ny)
+    initial_time = xr.DataArray(np.zeros((batch_size,)), dims=["sample"])
+
+    agg = InferenceEvaluatorAggregator(
+        dataset_info=ds_info,
+        n_timesteps=n_timesteps,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        log_zonal_mean_images=False,
+        log_video=False,
+        log_seasonal_means=False,
+        log_global_mean_time_series=False,
+        log_global_mean_norm_time_series=False,
+        log_histograms=False,
+        channel_mean_names=channel_mean_names,
+        log_nino34_index=False,
+        save_diagnostics=False,
+        n_ensemble_per_ic=n_ensemble,
+        record_step_20=True,
+    )
+
+    target_data = BatchData.new_for_testing(
+        names=["a", "b", "c"],
+        n_samples=1,
+        n_timesteps=n_timesteps,
+        img_shape=(nx, ny),
+    )
+
+    gen_data = BatchData.new_for_testing(
+        names=["a", "b", "c"],
+        n_samples=1,
+        n_timesteps=n_timesteps,
+        img_shape=(nx, ny),
+    )
+
+    target_data = target_data.broadcast_ensemble(n_ensemble=n_ensemble)
+    gen_data = gen_data.broadcast_ensemble(n_ensemble=n_ensemble)
+
+    paired_data = PairedData.from_batch_data(prediction=gen_data, reference=target_data)
+    agg.record_batch(paired_data)
+
+    summary_logs = agg.get_summary_logs()
+    print("summary_logs", summary_logs)
+    for varname in ["a", "b", "c"]:
+        assert f"ensemble_step_20/crps/{varname}" in summary_logs
+    for varname in ["a", "b", "c"]:
+        assert f"ensemble_step_20/ssr_bias/{varname}" in summary_logs
