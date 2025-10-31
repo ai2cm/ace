@@ -45,20 +45,21 @@ launch_job () {
         --shared-memory 20GiB \
         --weka climate-default:/climate-default \
         --budget ai2/climate \
+        --allow-dirty \
         --system-python \
         --install "pip install --no-deps ." \
         -- /bin/bash -c "\
-            python -I -m fme.ace.evaluator $CONFIG_PATH
+            python -I -m fme.ace.evaluator $CONFIG_PATH \
           "
 
 }
 
 # checkpoint datasets
-WEIGHTS=01K3VNAJF6TGVF019GFHGSC352
+WEIGHTS=01K8MSK8RDWJB9GD7MEKAW2KEG
 
 
-JOB_NAME="ace-inference-x-shield-pt-era5-multi-20-downscale-data-test-multi-ics"
+JOB_NAME="ace-inference-era5-pt-era5-multi-20-multi-ics-agg"
 
-CONFIG_PATH="${SCRIPT_PATH}evaluate-xshield-amip-stochastic-ace.yaml"
+CONFIG_PATH="${SCRIPT_PATH}evaluator-era5-stochastic-weather-skill.yaml"
 
 launch_job $JOB_NAME $WEIGHTS $CONFIG_PATH
