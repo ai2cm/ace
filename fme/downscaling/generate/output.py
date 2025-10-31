@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 import numpy as np
+import torch
 import xarray as xr
 from torch.utils.data import DataLoader, DistributedSampler
 
@@ -265,10 +266,12 @@ class OutputTargetConfig(ABC):
         )
 
         if self.zarr_chunks is None:
+            # Get element size from dtype by creating a dummy tensor
+            element_size = torch.tensor([], dtype=slice_dataset.dtype).element_size()
             chunks = determine_zarr_chunks(
                 dims=DIMS,
                 data_shape=slice_dataset.max_output_shape,
-                bytes_per_element=slice_dataset.dtype.element_size(),
+                bytes_per_element=element_size,
             )
         else:
             chunks = self.zarr_chunks
@@ -276,7 +279,7 @@ class OutputTargetConfig(ABC):
         return OutputTarget(
             name=self.name,
             save_vars=self.save_vars,
-            all_times=xr_dataset.all_times,
+            all_times=xr_dataset.sample_start_times,
             n_ens=self.n_ens,
             n_items_per_gpu=self.n_item_per_gpu,
             data=loader,
