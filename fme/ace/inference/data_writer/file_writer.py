@@ -442,6 +442,7 @@ class FileWriter:
         self.writer = writer
         self.full_coords = full_coords
         self._no_write_count = 0
+        self._n_timesteps_seen = 0
         if "face" in full_coords:
             self._spatial_dims = DIM_INFO_HEALPIX
         else:
@@ -498,15 +499,16 @@ class FileWriter:
     def append_batch(
         self,
         data: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         """
         Filter region and times and append a batch of data to the writer.
         """
+        start_timestep = self._n_timesteps_seen
         subselected_data, subselected_time = self._subselect_data(
             data, batch_time, start_timestep=start_timestep
         )
+        self._n_timesteps_seen += batch_time.sizes.get("time", 0)
 
         # Warn on empty batch, but it might be expected in some cases
         # so ignore after 10 warnings
@@ -522,7 +524,6 @@ class FileWriter:
             return
         self.writer.append_batch(
             data=subselected_data,
-            start_timestep=start_timestep,
             batch_time=subselected_time,
         )
 
@@ -549,18 +550,15 @@ class PairedFileWriter:
         self,
         target: dict[str, torch.Tensor],
         prediction: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         self.prediction_writer.append_batch(
             data=prediction,
-            start_timestep=start_timestep,
             batch_time=batch_time,
         )
         if self.reference_writer:
             self.reference_writer.append_batch(
                 data=target,
-                start_timestep=start_timestep,
                 batch_time=batch_time,
             )
 

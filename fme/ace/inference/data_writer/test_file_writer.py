@@ -238,12 +238,10 @@ def test__select_time_file_writer_single_sample(
     )
     file_writer.append_batch(
         data=dict(batch_data.data),
-        start_timestep=0,
         batch_time=batch_data.time,
     )
     file_writer.append_batch(
         data=dict(second_batch_data.data),
-        start_timestep=n_timesteps,
         batch_time=second_batch_data.time,
     )
     file_writer.finalize()
@@ -315,7 +313,6 @@ def test__select_time_file_writer_multiple_samples(time_selection, tmpdir):
     )
     file_writer.append_batch(
         data=dict(batch_data.data),
-        start_timestep=0,
         batch_time=batch_data.time,
     )
     file_writer.finalize()
@@ -424,7 +421,7 @@ def test_file_writer_append_batch():
         "humidity": torch.rand(3, 10, 5, 5),
     }
     batch_time = xr.DataArray(xr.date_range("2020-01-01", periods=10, freq="D"))
-    file_writer.append_batch(data, start_timestep=0, batch_time=batch_time)
+    file_writer.append_batch(data, batch_time=batch_time)
 
     # Check if the data was subselected correctly
     expected_temperature = data["temperature"][
@@ -461,8 +458,8 @@ def test_file_writer_with_healpix_data_and_zarr(tmpdir):
     batch_time = xr.concat([batch_time_single_sample] * n_samples, dim="sample")
     batch_time_first_half = batch_time.isel(time=slice(0, 3))
     batch_time_second_half = batch_time.isel(time=slice(3, None))
-    writer.append_batch(data_first_half, 0, batch_time=batch_time_first_half)
-    writer.append_batch(data_second_half, 3, batch_time=batch_time_second_half)
+    writer.append_batch(data_first_half, batch_time=batch_time_first_half)
+    writer.append_batch(data_second_half, batch_time=batch_time_second_half)
     writer.finalize()
     zarr_data = xr.open_zarr(tmpdir / "filename.zarr")
     assert dict(zarr_data.sizes) == {
@@ -495,7 +492,7 @@ def test_file_writer_append_batch_time_coarsened():
         xr.date_range("2020-01-01", periods=10, freq="D"), dims=["time"]
     )
 
-    time_coarsen_writer.append_batch(data, start_timestep=0, batch_time=batch_time)
+    time_coarsen_writer.append_batch(data, batch_time=batch_time)
 
     subselected_temperature = data["temperature"][:, :, 1:4, 1:4]
 
@@ -539,7 +536,7 @@ def test_file_writer_monthly(tmpdir):
         xr.date_range("2020-01-01", periods=n_timesteps, freq="5D"), dims=["time"]
     )
     batch_time = xr.concat([batch_time] * n_samples, dim="sample")
-    writer.append_batch(data, start_timestep=0, batch_time=batch_time)
+    writer.append_batch(data, batch_time=batch_time)
     ds = xr.open_dataset(tmpdir / f"{label}.nc")
     assert "counts" in ds.coords
     assert "foo" in ds.data_vars
