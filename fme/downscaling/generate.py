@@ -10,99 +10,6 @@ Usage:
     # Multi-GPU
     torchrun --nproc_per_node=8 -m fme.downscaling.generate config.yaml
 
-Example YAML Configuration:
-    ```yaml
-    # Model configuration
-    model:
-      checkpoint_path: /path/to/trained/model.ckpt
-      fine_topography_path: /path/to/fine/topography.zarr  # Optional
-
-    # Base data configuration (inherited by all targets)
-    data:
-      coarse:
-        - data_path: /data/coarse
-          file_pattern: coarse_*.zarr
-          engine: zarr
-      batch_size: 8
-      num_data_workers: 4
-      strict_ensemble: true
-
-    # Output directory for all generated zarr files
-    output_dir: /results/downscaling_run
-
-    # Logging configuration
-    logging:
-      project: downscaling-generation
-      log_to_screen: true
-      log_to_file: true
-      log_to_wandb: false
-
-    # Default patch configuration for large domains
-    patch:
-      divide_generation: true
-      coarse_horizontal_overlap: 1
-
-    # Output targets - can mix different types
-    output_targets:
-      # 1. Event: Single time snapshot over a region
-      - name: hurricane_landfall
-        event_time: "2020-08-27T12:00:00"
-        lat_extent:
-          lower: 25.0
-          upper: 35.0
-        lon_extent:
-          lower: 270.0
-          upper: 280.0
-        n_ens: 32
-        save_vars:
-          - PRATEsfc
-          - WIND10m
-        n_item_per_gpu: 4
-
-      # 2. Time series: Point location over time
-      - name: miami_timeseries
-        time_range:
-          start: "2021-07-01T00:00:00"
-          stop: "2021-08-01T00:00:00"
-        lat_point: 25.77
-        lon_point: 279.93  # -80.07 in 0-360 convention
-        n_ens: 16
-        save_vars:
-          - TMP2m
-          - PRATEsfc
-
-      # 3. Region: Full spatiotemporal generation
-      - name: conus_summer_2021
-        time_range:
-          start: "2021-06-01T00:00:00"
-          stop: "2021-09-01T00:00:00"
-        lat_extent:
-          lower: 22.0
-          upper: 50.0
-        lon_extent:
-          lower: 227.0
-          upper: 299.0
-        n_ens: 8
-        save_vars:
-          - PRATEsfc
-          - TMP2m
-          - eastward_wind_at_ten_meters
-        # Optional: specify zarr chunking
-        zarr_chunks:
-          time: 1
-          ensemble: 1
-          latitude: 448
-          longitude: 1152
-        zarr_shards:
-          time: 8
-          ensemble: 8
-          latitude: 448
-          longitude: 1152
-        # Optional: override default patch config for this target
-        patch:
-          divide_generation: false
-    ```
-
 Output Structure:
     Each target generates a zarr file at: {output_dir}/{target_name}.zarr
 
@@ -115,11 +22,6 @@ Example:
         │   └── WIND10m/
         ├── miami_timeseries.zarr/
         └── conus_summer_2021.zarr/
-
-Memory Management:
-    - n_item_per_gpu: Controls GPU memory by limiting time×ensemble items per batch
-    - Decrease if encountering OOM errors
-    - Typical values: 2-8 depending on domain size and GPU memory
 """
 
 import argparse
@@ -128,12 +30,14 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
+from itertools import product
 
 import dacite
 import numpy as np
 import torch
 import xarray as xr
 import yaml
+from torch.utils.data import DataLoader, DistributedSampler
 
 from fme.core import logging_utils
 from fme.core.cli import prepare_directory
@@ -149,11 +53,10 @@ from .data import (
     BatchData,
     ClosedInterval,
     DataLoaderConfig,
-    GriddedData,
     LatLonCoordinates,
     Topography,
 )
-from .data.config import XarrayEnsembleDataConfig
+from .data.config import BatchItemDatasetAdapter, XarrayEnsembleDataConfig
 from .models import CheckpointModelConfig, DiffusionModel
 from .predictors import (
     CascadePredictor,
@@ -164,26 +67,120 @@ from .predictors import (
 from .requirements import DataRequirements
 from .train import count_parameters
 
+TIME_NAME = "time"
+ENSEMBLE_NAME = "ensemble"
+LAT_NAME = "latitude"
+LON_NAME = "longitude"
+DIMS = (TIME_NAME, ENSEMBLE_NAME, LAT_NAME, LON_NAME)
+
 
 @dataclass
-class SliceItem:
-    """Work item for generation: which data batch and which ensemble slice."""
+class _SliceWorkItem:
+    """
+    Work item specification for generation: which time and ensemble slices to process.
 
-    data_idx: list[int]  # Index into the dataset
-    time_slice: slice  # Which times from all_times
-    ens_slice: slice  # Which ensemble members to generate
+    This is an immutable specification of work to be done. To attach batch data,
+    use the `with_batch()` class method to create a `_LoadedWorkItem`.
+    """
+
+    time_slice: slice  # times to grab from the dataset
+    ens_slice: slice  # ensemble members to generate
     is_padding: bool = False  # For even GPU distribution
 
+    def __post_init__(self):
+        self.n_ens = self.ens_slice.stop - self.ens_slice.start
 
-# Dataloader can be used to create a dataset and GriddedData with information
-# about underlying
-# Create a new dataset that will be used to actually have each work item
-# (time indexes and ensemble size/slice)
-# each work item will include a load from gridded data of correct temporal
-# data batch
-# generate the requested ensemble and insert into the zarr
-# also need to padd work items to evenly distribute across gpus, but will not
-# insert padding items into the zarr
+    @property
+    def time_indices(self) -> list[int]:
+        """Get list of time indices to load from the dataset."""
+        sl_ = self.time_slice
+        return list(range(sl_.start, sl_.stop))
+
+    @property
+    def insert_slices(self) -> dict[str, slice]:
+        """Get zarr position slices for writing output."""
+        return {
+            TIME_NAME: self.time_slice,
+            ENSEMBLE_NAME: self.ens_slice,
+        }
+
+    @classmethod
+    def with_batch(
+        cls, work_item: "_SliceWorkItem", batch: BatchData
+    ) -> "_LoadedWorkItem":
+        """
+        Create a LoadedWorkItem with batch data attached.
+        """
+        return _LoadedWorkItem(
+            time_slice=work_item.time_slice,
+            ens_slice=work_item.ens_slice,
+            is_padding=work_item.is_padding,
+            batch=batch,
+        )
+
+
+@dataclass
+class _LoadedWorkItem(_SliceWorkItem):
+    """
+    Work item with batch data attached, ready for generation.
+
+    Created via _SliceWorkItem.with_batch() after loading data from the dataset.
+    """
+
+    batch: BatchData | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.batch is None:
+            raise ValueError(
+                "LoadedWorkItem must be created with batch data via with_batch()"
+            )
+
+
+class _SliceItemDataset:
+    """
+    Dataset that loads a batch of data with metadata about time
+    and ensemble slices for generation and saving out to Zarr.
+    """
+
+    def __init__(
+        self,
+        slice_items: list[_SliceWorkItem],
+        dataset: BatchItemDatasetAdapter,
+        topography: Topography,
+    ) -> None:
+        self.slice_items = slice_items
+        self.dataset = dataset
+        self.topography = topography
+        self._dtype = None
+
+    def __len__(self) -> int:
+        return len(self.slice_items)
+
+    def __getitem__(self, idx: int) -> tuple[_LoadedWorkItem, Topography]:
+        work_spec = self.slice_items[idx]
+        data_items = [self.dataset[i] for i in work_spec.time_indices]
+        batch = BatchData.from_sequence(data_items)
+        loaded_item = _SliceWorkItem.with_batch(work_spec, batch)
+        return loaded_item, self.topography
+
+    @property
+    def max_output_shape(self):
+        first_item = self.slice_items[0]
+        n_times = first_item.time_slice.stop - first_item.time_slice.start
+        n_ensembles = first_item.ens_slice.stop - first_item.ens_slice.start
+        spatial = self.topography.data.shape
+        return (n_times, n_ensembles, *spatial)
+
+    @property
+    def dtype(self) -> torch.dtype:
+        if self._dtype is not None:
+            return self._dtype
+
+        sample_item = self.dataset[0]
+        sample_tensor = next(iter(sample_item.data.values()))
+        self._dtype = sample_tensor.dtype
+        return self._dtype
 
 
 class OutputTarget:
@@ -196,6 +193,7 @@ class OutputTarget:
     Attributes:
         name: Identifier for this target (used as output filenames)
         save_vars: List of variable names to save to zarr
+        all_times: DataArray of the full time coordinate of the target output
         n_ens: Total number of ensemble members to generate
         n_items_per_gpu: Number of time×ensemble items per GPU batch (memory control)
         data: GriddedData containing the input coarse data and loader
@@ -203,40 +201,36 @@ class OutputTarget:
         chunks: Zarr chunk sizes for each dimension
         shards: Zarr shard sizes (optional, for grouping chunks)
         dims: Dimension names including ensemble (time, ensemble, lat, lon)
-        distribute_ensemble: Whether to distribute ensemble members across GPUs. Useful
-            for the case where there are not multiple times to distribute but many
-            ensemble members.
     """
 
     def __init__(
         self,
         name: str,
         save_vars: list[str],
+        all_times: xr.DataArray,
         n_ens: int,
         n_items_per_gpu: int,
-        data: GriddedData,
+        data: DataLoader,
         patch: PatchPredictionConfig,
         chunks: dict[str, int],
         shards: dict[str, int] | None,
-        distribute_ensemble: bool = False,
-        dist: Distributed | None = None,
+        dims: tuple[str, ...] = DIMS,
     ) -> None:
         self.name = name
         self.save_vars = save_vars
+        self.all_times = all_times
         self.n_ens = n_ens
         self.n_items_per_gpu = n_items_per_gpu
         self.data = data
         self.patch = patch
         self.chunks = chunks
         self.shards = shards
-        self._distribute_ensemble = distribute_ensemble
-        self._dist = dist or Distributed.get_instance()
-
-        self.dims = list(data.dims)
-        self.dims.insert(1, "ensemble")  # insert ensemble dim after time
+        self.dims = dims
 
     def get_writer(
-        self, latlon_coords: LatLonCoordinates, output_dir: str
+        self,
+        latlon_coords: LatLonCoordinates,
+        output_dir: str,
     ) -> ZarrWriter:
         """
         Create a ZarrWriter for this target.
@@ -244,16 +238,13 @@ class OutputTarget:
         Args:
             latlon_coords: High-resolution spatial coordinates for outputs
             output_dir: Directory to store output zarr file
-
-        Returns:
-            Configured ZarrWriter for incremental writes
         """
         ensemble = list(range(self.n_ens))
         coords = dict(
             zip(
                 self.dims,
                 [
-                    self.data.all_times.to_numpy(),
+                    self.all_times,
                     np.array(ensemble),
                     latlon_coords.lat.numpy(),
                     latlon_coords.lon.numpy(),
@@ -271,69 +262,158 @@ class OutputTarget:
             shards=self.shards,
         )
 
-    def _get_time_slice(self, time: xr.DataArray) -> slice:
-        """Convert time coordinate to zarr array index slice."""
-        start_time = time[0].item()
-        end_time = time[-1].item()
-        if start_time == end_time:
-            time_idx = self.data.all_times.get_loc(start_time)
-            time_slice = slice(time_idx, time_idx + 1)
-        else:
-            time_idxs = self.data.all_times.get_indexer(
-                {"time": [start_time, end_time]}
+
+def _generate_slices(total: int, step: int) -> list[slice]:
+    """Generate list of slices to cover a total range using a fixed step size."""
+    slices = []
+    start = 0
+    while start < total:
+        end = min(start + step, total)
+        slices.append(slice(start, end))
+        start = end
+    return slices
+
+
+def _get_work_items(
+    n_times: int, n_ens: int, n_items_per_gpu: int, dist: Distributed | None = None
+) -> list[_SliceWorkItem]:
+    """
+    Create work items for generation based on time and ensemble slices.
+
+    Args:
+        n_times: Number of time steps in the data
+        n_ens: Total number of ensemble members to generate
+        n_items_per_gpu: Number of time×ensemble items per GPU batch
+        dist: Distributed instance for inferring padding work items (optional)
+    """
+    # 6 ens, 4 times, 4 items per gpu
+    # item 0: (time=[0], ens=[0, 1, 2, 3])
+    # item 1: (time=[0], ens=[4, 5])
+    # item 2:
+    work_items: list[_SliceWorkItem] = []
+    n_ens_per_slice = min(n_ens, n_items_per_gpu)
+    n_time_per_slice = max(1, n_items_per_gpu // n_ens_per_slice)
+
+    ens_slices = _generate_slices(n_ens, n_ens_per_slice)
+    time_slices = _generate_slices(n_times, n_time_per_slice)
+
+    work_items = [
+        _SliceWorkItem(time_sl, ens_sl)
+        for (time_sl, ens_sl) in product(time_slices, ens_slices)
+    ]
+
+    # Pad work items to evenly distribute across GPUs
+    dist = dist or Distributed.get_instance()
+    if dist.is_distributed():
+        remainder = len(work_items) % dist.world_size
+        if remainder != 0:
+            n_padding = dist.world_size - remainder
+            # repeat last item as padding
+            padding_item = _SliceWorkItem(
+                time_slice=work_items[-1].time_slice,
+                ens_slice=work_items[-1].ens_slice,
+                is_padding=True,
             )
-            time_slice = slice(time_idxs[0], time_idxs[1] + 1)
+            work_items.extend([padding_item] * n_padding)
 
-        return time_slice
+    return work_items
 
-    def _get_ens_slices(self) -> list[slice]:
-        """
-        Divide ensemble members into GPU-friendly slices.
 
-        Returns list of slices based on n_items_per_gpu to control memory usage.
-        """
-        if self._distribute_ensemble:
-            # total_n_ens_per_gpu = max(1, self.n_ens // self._dist.world_size)
-            # n_ens_per_slice = min(total_n_ens_per_gpu, self.n_items_per_gpu)
+def _total_size_mb(shape: tuple[int, ...], bytes_per_element: int) -> int:
+    """Calculate total size in MB for a given shape."""
+    total_elements = np.prod(shape)
+    return total_elements * bytes_per_element // (1024 * 1024)
 
-            if self.n_ens // self._dist.world_size == 0:
-                raise ValueError(
-                    "Cannot distribute ensemble members across GPUs: "
-                    f"n_ens={self.n_ens} < world_size={self._dist.world_size}."
-                )
 
-        ens_start = 0
-        ens_slices = []
-        while ens_start < self.n_ens:
-            ens_end = min(ens_start + self.n_items_per_gpu, self.n_ens)
-            ens_slices.append(slice(ens_start, ens_end))
-            ens_start = ens_end
+class NotReducibleError(Exception):
+    """Raised when shape cannot be reduced below target size."""
 
-        return ens_slices
+    pass
 
-    def get_insert_slices(self, data: BatchData) -> list[dict[str, slice]]:
-        """
-        Calculate zarr insertion slices for a batch of data.
 
-        For each time batch, generates multiple ensemble slices based on
-        n_items_per_gpu to control memory usage during generation.
+def _recursive_chunksize_search(
+    shape: tuple[int, ...], bytes_per_element: int, reduce_dim: int, target_mb: int = 20
+) -> tuple[int, ...]:
+    """
+    Recursively find optimal chunk shape by halving dimensions.
 
-        Args:
-            data: Batch containing time coordinates
+    Strategy:
+    - Reduces dimensions in order: time, ensemble, lat/lon (alternating)
+    - Each dimension is repeatedly halved until moving to the next
+    - Spatial dimensions (lat/lon) alternate for balanced subdivisions
+    - Raises error if target size cannot be achieved
 
-        Returns:
-            List of dimension-to-slice mappings for zarr writes
-        """
-        time_slice = self._get_time_slice(data.time)
-        ens_slices = self._get_ens_slices()
-        # Always storing the entire spatial region
-        lat_slice = slice(None)
-        lon_slice = slice(None)
+    Args:
+        shape: Current shape to evaluate
+        bytes_per_element: Size of data type in bytes
+        reduce_dim: Index of dimension to try reducing (0-3)
+        target_mb: Target size in MB (default: 20)
 
-        return [
-            dict(zip(self.dims, (time_slice, ens_slice, lat_slice, lon_slice)))
-            for ens_slice in ens_slices
-        ]
+    Returns:
+        Optimized chunk shape meeting target size
+
+    Raises:
+        NotReducibleError: If all dimensions exhausted but still over target
+    """
+    if _total_size_mb(shape, bytes_per_element) <= target_mb:
+        return shape
+    elif bytes_per_element / 1024**2 > target_mb:
+        raise NotReducibleError(
+            f"Element size {bytes_per_element} bytes exceeds target chunk size "
+            f"{target_mb}MB."
+        )
+
+    # Try to halve the current dimension
+    reduce_dim_size = shape[reduce_dim] // 2
+
+    if reduce_dim_size < 1:
+        # Current dimension can't be reduced further, move to next
+        reduce_dim += 1
+        return _recursive_chunksize_search(
+            shape, bytes_per_element, reduce_dim, target_mb
+        )
+
+    # Successfully halved the dimension, update shape
+    new_shape = list(shape)
+    new_shape[reduce_dim] = reduce_dim_size
+
+    # Determine next dimension to try
+    next_reduce_dim = reduce_dim
+    if reduce_dim == 2:
+        # Alternate between lat and lon for balanced spatial chunks
+        next_reduce_dim = 3
+    elif reduce_dim == 3:
+        next_reduce_dim = 2
+    # For dimensions 0 (time) and 1 (ensemble), keep reducing the same dimension
+
+    return _recursive_chunksize_search(
+        tuple(new_shape), bytes_per_element, next_reduce_dim, target_mb
+    )
+
+
+def _determine_zarr_chunks(
+    dims: list[str], data_shape: tuple[int, ...], bytes_per_element: int
+) -> dict[str, int]:
+    """
+    Auto-generate zarr chunk sizes for the output data.
+
+    Automatically determines chunk sizes targeting <=20MB per chunk by
+    recursively halving dimensions until the target size is reached.
+
+    Args:
+        dims: Dimension names (time, ensemble, latitude, longitude)
+        data_shape: Shape tuple matching dims
+        bytes_per_element: Size of data type (e.g., 4 for float32)
+    """
+    if len(data_shape) != 4:
+        raise ValueError(
+            "Data shape must be of length 4 (time, ensemble, latitude, longitude)."
+        )
+
+    chunk_shape = _recursive_chunksize_search(
+        data_shape, bytes_per_element, reduce_dim=0, target_mb=20
+    )
+    return dict(zip(dims, chunk_shape))
 
 
 @dataclass
@@ -342,26 +422,22 @@ class OutputTargetConfig(ABC):
     Base class for configuring downscaling output generation targets.
 
     Output targets define what data to generate, where to generate it, and how
-    to save it. Different subclasses support different spatiotemporal patterns:
-    - EventConfig: Single time snapshot over a spatial region
-    - TimeseriesConfig: Time series at a single point
-    - RegionConfig: Time series over a spatial region
+    to save it.
 
     Attributes:
         name: Unique identifier for this target (used in output filename)
-        n_ens: Number of ensemble members to generate
+        n_ens: Number of ensemble members to generate when downscaling
         save_vars: List of variable names to save to zarr output
         zarr_chunks: Optional chunk sizes for zarr dimensions. If None, automatically
-            calculated to target 2-20MB per chunk.
-        zarr_shards: Optional shard sizes for grouping chunks. Recommended when
-            total chunks exceed ~1000 for better I/O performance.
+            calculated to target <=20MB per chunk.
+        zarr_shards: Optional shard sizes for grouping chunks. Recommended
+            when using many chunks with remote stores.
         coarse: Optional override for coarse input data source. If None, uses
             the data config from GenerationConfig.
         patch: Optional override for patch prediction config. If None, uses
             the default from GenerationConfig.
-        n_item_per_gpu: Number of time×ensemble items to generate per GPU batch.
-            Controls memory usage - decrease if encountering OOM errors.
-            Default: 4
+        n_item_per_gpu: Number of time x ensemble items to generate per GPU batch.
+            Controls memory usage and time to generate.
     """
 
     name: str
@@ -387,9 +463,6 @@ class OutputTargetConfig(ABC):
             loader_config: Base data loader configuration to modify
             requirements: Model's data requirements (variable names, etc.)
             patch: Default patch prediction configuration
-
-        Returns:
-            Configured OutputTarget ready for generation
         """
         pass
 
@@ -398,7 +471,12 @@ class OutputTargetConfig(ABC):
         coarse: list[XarrayDataConfig]
         | Sequence[XarrayDataConfig | XarrayEnsembleDataConfig],
     ) -> list[XarrayDataConfig]:
-        # TODO: We really only should be supporting a single xarray config
+        """
+        Ensures that the data configuration is a single xarray config.
+        Necessary because we will be using the top-level DataLoaderConfig
+        to build the data, and we'll be replacing time and spatial extents.
+        """
+        # TODO: Consider only supporting a single xarray config
         #       for this run type since we use Zarr not netCDF.  Just more
         #       complexity to enforce all possible rather than just supporting
         #       a single config.
@@ -424,19 +502,8 @@ class OutputTargetConfig(ABC):
         lat_extent,
         lon_extent,
         loader_config: DataLoaderConfig,
-        dist: Distributed,
     ) -> DataLoaderConfig:
-        # return a new DataloaderConfig with replaced values
         new_coarse = [replace(coarse[0], subset=time)]
-
-        local_batch_size = dist.local_batch_size(loader_config.batch_size)
-        n_ens = self.n_ens
-        n_items_per_gpu = self.n_item_per_gpu
-
-        n_ens_per_slice = min(n_ens, n_items_per_gpu)
-        n_time_per_slice = max(1, n_items_per_gpu // n_ens_per_slice)
-        local_batch_size = min(local_batch_size, n_time_per_slice)
-        new_batch_size = dist.world_size * local_batch_size
 
         # TODO: log the replacements for debugging
         new_loader_config = replace(
@@ -444,96 +511,8 @@ class OutputTargetConfig(ABC):
             coarse=new_coarse,
             lat_extent=lat_extent,
             lon_extent=lon_extent,
-            batch_size=new_batch_size,
         )
         return new_loader_config
-
-    def _get_chunks(
-        self, dims: list[str], data_shape: tuple[int, ...], bytes_per_element: int
-    ) -> dict[str, int]:
-        """
-        Calculate optimal zarr chunk sizes for the output data.
-
-        Automatically determines chunk sizes targeting 2-20MB per chunk by
-        recursively halving dimensions until the target size is reached.
-
-        Strategy:
-        - Reduces dimensions in order: time, ensemble, lon/lat (alternating)
-        - Each dimension is repeatedly halved until moving to the next
-        - Spatial dimensions (lat/lon) alternate for balanced subdivisions
-        - Raises error if target size cannot be achieved
-
-        Args:
-            dims: Dimension names (time, ensemble, latitude, longitude)
-            data_shape: Shape tuple matching dims
-            bytes_per_element: Size of data type (e.g., 4 for float32)
-
-        Returns:
-            Dictionary mapping dimension names to chunk sizes
-
-        Raises:
-            ValueError: If data_shape is not 4D or cannot be reduced to target size
-        """
-        if len(data_shape) != 4:
-            raise ValueError(
-                "Data shape must be of length 4 (time, ensemble, latitude, longitude)."
-            )
-
-        def _total_size_mb(shape: tuple[int, ...], bytes_per_element: int) -> int:
-            """Calculate total size in MB for a given shape."""
-            total_elements = 1
-            for dim_size in shape:
-                total_elements *= dim_size
-            return total_elements * bytes_per_element // (1024 * 1024)
-
-        class NotReducibleError(Exception):
-            """Raised when shape cannot be reduced below target size."""
-
-            pass
-
-        def _recursive_chunksize_search(
-            shape: tuple[int, ...], bytes_per_element: int, reduce_dim: int
-        ) -> tuple[int, ...]:
-            """
-            Recursively find optimal chunk shape by halving dimensions.
-
-            Args:
-                shape: Current shape to evaluate
-                bytes_per_element: Size of data type in bytes
-                reduce_dim: Index of dimension to try reducing (0-3)
-
-            Returns:
-                Optimized chunk shape
-
-            Raises:
-                NotReducibleError: If all dimensions exhausted but still over target
-            """
-            if _total_size_mb(shape, bytes_per_element) <= 20:
-                return shape
-
-            reduce_dim_size = shape[reduce_dim] // 2
-            if reduce_dim_size < 1:
-                # Current dimension can't be reduced further, move to next
-                reduce_dim += 1
-                if reduce_dim >= len(shape):
-                    raise NotReducibleError()
-            elif reduce_dim == 2:
-                # Switch between lat and lon reductions for balanced spatial chunks
-                reduce_dim = 3
-            elif reduce_dim == 3:
-                reduce_dim = 2
-
-            new_shape = list(shape)
-            new_shape[reduce_dim] = reduce_dim_size
-
-            return _recursive_chunksize_search(
-                tuple(new_shape), bytes_per_element, reduce_dim
-            )
-
-        chunk_shape = _recursive_chunksize_search(
-            data_shape, bytes_per_element, reduce_dim=0
-        )
-        return dict(zip(dims, chunk_shape))
 
     def _build(
         self,
@@ -544,6 +523,7 @@ class OutputTargetConfig(ABC):
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
         coarse: list[XarrayDataConfig],
+        dist: Distributed | None = None,
     ) -> OutputTarget:
         updated_loader_config = self._replace_loader_config(
             time,
@@ -551,18 +531,59 @@ class OutputTargetConfig(ABC):
             lat_extent,
             lon_extent,
             loader_config,
-            Distributed.get_instance(),
         )
         data = updated_loader_config.build(requirements=requirements)
+        xr_dataset, properties = updated_loader_config.get_xarray_dataset(
+            names=requirements.coarse_names, n_timesteps=1
+        )
+        coords = properties.horizontal_coordinates
+        if not isinstance(coords, LatLonCoordinates):
+            raise ValueError(
+                "Downscaling data loader only supports datasets with latlon coords."
+            )
+        dataset = updated_loader_config.build_batchitem_dataset(xr_dataset, properties)
+        topography = updated_loader_config.build_topography(
+            coords,
+            requires_topography=requirements.use_fine_topography,
+        )
+        if topography is None:
+            raise ValueError("Topography is required for downscaling generation.")
 
-        sample_batch: BatchData = next(iter(data.loader))
-        sample_tensor: torch.Tensor = next(iter(sample_batch.data.values()))
+        work_items = _get_work_items(
+            n_times=len(dataset),
+            n_ens=self.n_ens,
+            n_items_per_gpu=self.n_item_per_gpu,
+        )
+
+        slice_dataset = _SliceItemDataset(
+            slice_items=work_items,
+            dataset=dataset,
+            topography=topography,
+        )
+
+        # each item loads its own batch, so batch_size=1
+        dist = dist or Distributed.get_instance()
+        loader = DataLoader(
+            slice_dataset,
+            batch_size=1,
+            shuffle=False,
+            num_workers=loader_config.num_data_workers,
+            collate_fn=lambda x: x,  # type: ignore
+            drop_last=False,
+            multiprocessing_context=loader_config.mp_context,
+            persistent_workers=True if loader_config.num_data_workers > 0 else False,
+            sampler=(
+                DistributedSampler(slice_dataset, shuffle=False)
+                if dist.is_distributed()
+                else None
+            ),
+        )
 
         if self.zarr_chunks is None:
-            chunks = self._get_chunks(
+            chunks = _determine_zarr_chunks(
                 dims=data.dims,
-                data_shape=tuple(sample_tensor.shape),
-                bytes_per_element=sample_tensor.element_size(),
+                data_shape=slice_dataset.max_output_shape,
+                bytes_per_element=slice_dataset.dtype.element_size(),
             )
         else:
             chunks = self.zarr_chunks
@@ -570,9 +591,10 @@ class OutputTargetConfig(ABC):
         return OutputTarget(
             name=self.name,
             save_vars=self.save_vars,
+            all_times=xr_dataset.all_times,
             n_ens=self.n_ens,
             n_items_per_gpu=self.n_item_per_gpu,
-            data=data,
+            data=loader,
             patch=patch,
             chunks=chunks,
             shards=self.zarr_shards,
@@ -623,23 +645,6 @@ class EventConfig(OutputTargetConfig):
         if not self.event_time:
             raise ValueError("event_time must be specified for EventConfig.")
 
-    def _adjust_batchsize_if_distributed(
-        self,
-        coarse: list[XarrayDataConfig],
-        loader_config: DataLoaderConfig,
-        dist: Distributed,
-    ) -> tuple[list[XarrayDataConfig], DataLoaderConfig]:
-        # For single events there will not be enough samples to distribute.
-        # Repeat so each GPU gets one sample.
-        if dist.is_distributed():
-            batch_size = dist.world_size
-            coarse = [replace(coarse[0], n_repeats=batch_size)]
-            loader_config = replace(
-                loader_config,
-                batch_size=batch_size,
-            )
-        return coarse, loader_config
-
     def build(
         self,
         loader_config: DataLoaderConfig,
@@ -651,16 +656,13 @@ class EventConfig(OutputTargetConfig):
         if isinstance(self.event_time, str):
             stop_time = (
                 datetime.strptime(self.event_time, self.time_format)
-                + timedelta(hours=12)
+                + timedelta(hours=3)  # half timestep to not include next time
             ).strftime(self.time_format)
             time = TimeSlice(self.event_time, stop_time)
         else:
             time = Slice(self.event_time, self.event_time + 1)
 
         coarse = self._single_xarray_config(self.coarse or loader_config.coarse)
-        coarse, loader_config = self._adjust_batchsize_if_distributed(
-            coarse, loader_config, Distributed.get_instance()
-        )
 
         return self._build(
             time=time,
@@ -707,7 +709,9 @@ class TimeseriesConfig(OutputTargetConfig):
 
     # time_range, lat_point, and lon_point are required, but must specify default
     # to allow subclassing
-    time_range: TimeSlice | RepeatedInterval | Slice = Slice(-1, 1)
+    time_range: TimeSlice | RepeatedInterval | Slice = field(
+        default_factory=lambda: Slice(-1, 1)
+    )
     lat_point: float = -1000.0
     lon_point: float = -1000.0
     latlon_tolerance: float = 0.25
@@ -773,7 +777,9 @@ class RegionConfig(OutputTargetConfig):
         lon_extent: Longitude bounds in degrees [0, 360]. Default: full globe
     """
 
-    time_range: TimeSlice | RepeatedInterval | Slice = Slice(-1, 1)
+    time_range: TimeSlice | RepeatedInterval | Slice = field(
+        default_factory=lambda: Slice(-1, 1)
+    )
     lat_extent: ClosedInterval = field(
         default_factory=lambda: ClosedInterval(-90.0, 90.0)
     )
@@ -803,117 +809,12 @@ class RegionConfig(OutputTargetConfig):
         )
 
 
-class ZarrGenerator:
-    """
-    Handles generation and writing of downscaled outputs for a single target.
-
-    Responsible for:
-    - Setting up the model (with PatchPredictor if needed)
-    - Creating the ZarrWriter
-    - Running the generation loop over time batches and ensemble slices
-    - Writing outputs to zarr incrementally
-    """
-
-    def __init__(
-        self,
-        target: OutputTarget,
-        model: DiffusionModel | CascadePredictor,
-        output_dir: str,
-    ):
-        self.target = target
-        self.base_model = model
-        self.output_dir = output_dir
-        self.dist = Distributed.get_instance()
-
-    def _setup_model(
-        self, topography: Topography
-    ) -> DiffusionModel | PatchPredictor | CascadePredictor:
-        """
-        Set up the model, wrapping with PatchPredictor if needed.  While models are
-        probably capable of generating any domain size, we haven't tested for domains
-        smaller than the model patch size, so we raise an error in that case, and prompt
-        the user to use patching for larger domains because that provides better
-        generations.
-        """
-        model_patch_shape = self.base_model.coarse_shape
-        actual_shape = tuple(topography.data.shape)
-
-        if model_patch_shape == actual_shape:
-            # short circuit, no patching necessary
-            return self.base_model
-        elif any(
-            expected > actual
-            for expected, actual in zip(model_patch_shape, actual_shape)
-        ):
-            # we don't support generating regions smaller than the model patch size
-            raise ValueError(
-                f"Model coarse shape {model_patch_shape} is larger than "
-                f"actual topography shape {actual_shape} for target {self.target.name}."
-            )
-        elif self.target.patch.needs_patch_predictor:
-            # Use a patch predictor
-            logging.info(f"Using PatchPredictor for target: {self.target.name}")
-            return PatchPredictor(
-                model=self.base_model,
-                coarse_horizontal_overlap=self.target.patch.coarse_horizontal_overlap,
-            )
-        else:
-            # User should enable patching
-            raise ValueError(
-                f"Model coarse shape {model_patch_shape} does not match "
-                f"actual input shape {actual_shape} for target {self.target.name}, "
-                "and patch prediction is not configured. Generation for larger domains "
-                "requires patch prediction."
-            )
-
-    def run(self):
-        """Execute the generation loop for this target."""
-        logging.info(f"Generating downscaled outputs for target: {self.target.name}")
-
-        model = None
-        writer = None
-        total_batches = len(self.target.data.loader)
-
-        for i, (data, topography) in enumerate(self.target.data.loader):
-            # Initialize writer on first batch
-            if writer is None:
-                writer = self.target.get_writer(
-                    latlon_coords=topography.coords,
-                    output_dir=self.output_dir,
-                )
-            if model is None:
-                model = self._setup_model(topography=topography)
-
-            # Calculate insert slices for this batch's time
-            insert_slices = self.target.get_insert_slices(data)
-
-            # Generate each ensemble slice for this time batch
-            for ens_idx, insert_slice in enumerate(insert_slices):
-                n_ens_sl = insert_slice["ensemble"]
-                n_ens = n_ens_sl.stop - n_ens_sl.start
-
-                logging.info(
-                    f"[{self.target.name}] Batch {i+1}/{total_batches}, "
-                    f"Ensemble slice {ens_idx+1}/{len(insert_slices)} "
-                    f"(generating {n_ens} members)"
-                )
-
-                output = model.generate_on_batch_no_target(
-                    data, topography=topography, n_samples=n_ens
-                )
-                output_np = {k: output[k].cpu().numpy() for k in self.target.save_vars}
-                writer.record_batch(output_np, position_slices=insert_slice)
-
-        logging.info(f"Completed generation for target: {self.target.name}")
-
-
 class Downscaler:
     """
     Orchestrates downscaling generation across multiple output targets.
 
     Each target can have different spatial extents, time ranges, and ensemble sizes.
-    Generation is performed sequentially across targets, with GPU memory cleared
-    between targets.
+    Generation is performed sequentially across targets.
     """
 
     def __init__(
@@ -926,7 +827,7 @@ class Downscaler:
         self.output_targets = output_targets
         self.output_dir = output_dir
 
-    def run(self):
+    def run_all(self):
         """Run generation for all output targets."""
         logging.info(f"Starting generation for {len(self.output_targets)} target(s)")
 
@@ -935,15 +836,88 @@ class Downscaler:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-            # Create generator for this target and run
-            generator = ZarrGenerator(
-                target=target,
-                model=self.model,
-                output_dir=self.output_dir,
-            )
-            generator.run()
+            self.run_target_generation(target=target)
 
         logging.info("All targets completed successfully")
+
+    def _get_generation_model(
+        self,
+        topography: Topography,
+        target: OutputTarget,
+    ) -> DiffusionModel | PatchPredictor | CascadePredictor:
+        """
+        Set up the model, wrapping with PatchPredictor if needed.  While models are
+        probably capable of generating any domain size, we haven't tested for domains
+        smaller than the model patch size, so we raise an error in that case, and prompt
+        the user to use patching for larger domains because that provides better
+        generations.
+        """
+        model_patch_shape = self.model.coarse_shape
+        actual_shape = tuple(topography.data.shape)
+
+        if model_patch_shape == actual_shape:
+            # short circuit, no patching necessary
+            return self.model
+        elif any(
+            expected > actual
+            for expected, actual in zip(model_patch_shape, actual_shape)
+        ):
+            # we don't support generating regions smaller than the model patch size
+            raise ValueError(
+                f"Model coarse shape {model_patch_shape} is larger than "
+                f"actual topography shape {actual_shape} for target {target.name}."
+            )
+        elif target.patch.needs_patch_predictor:
+            # Use a patch predictor
+            logging.info(f"Using PatchPredictor for target: {target.name}")
+            return PatchPredictor(
+                model=self.model,
+                coarse_horizontal_overlap=target.patch.coarse_horizontal_overlap,
+            )
+        else:
+            # User should enable patching
+            raise ValueError(
+                f"Model coarse shape {model_patch_shape} does not match "
+                f"actual input shape {actual_shape} for target {target.name}, "
+                "and patch prediction is not configured. Generation for larger domains "
+                "requires patch prediction."
+            )
+
+    def run_target_generation(self, target: OutputTarget):
+        """Execute the generation loop for this target."""
+        logging.info(f"Generating downscaled outputs for target: {target.name}")
+
+        # initialize writer and model in loop for coord info
+        model = None
+        writer = None
+        total_batches = len(target.data)
+
+        loaded_item: _LoadedWorkItem
+        topography: Topography
+        for i, (loaded_item, topography) in enumerate(target.data):
+            if writer is None:
+                writer = target.get_writer(
+                    latlon_coords=topography.coords,
+                    output_dir=self.output_dir,
+                )
+            if model is None:
+                model = self._get_generation_model(topography=topography, target=target)
+
+            logging.info(
+                f"[{target.name}] Batch {i+1}/{total_batches}, "
+                f"generating work slice {loaded_item.insert_slices} "
+            )
+
+            output = model.generate_on_batch_no_target(
+                loaded_item.batch, topography=topography, n_samples=loaded_item.n_ens
+            )
+            if not loaded_item.is_padding:
+                output_np = {k: output[k].cpu().numpy() for k in target.save_vars}
+                writer.record_batch(
+                    output_np, position_slices=loaded_item.insert_slices
+                )
+
+        logging.info(f"Completed generation for target: {target.name}")
 
 
 @dataclass
@@ -1049,7 +1023,7 @@ def main(config_path: str):
     logging.info("Starting downscaling generation...")
     downscaler = generation_config.build()
     logging.info(f"Number of parameters: {count_parameters(downscaler.model.modules)}")
-    downscaler.run()
+    downscaler.run_all()
 
 
 def parse_args():
