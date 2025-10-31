@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-wa-ar-fig-histckpt"
-CONFIG_FILENAME="config-generate-on-perfect-pred-events-histckpt.yaml"
+JOB_NAME="eval-xshield-amip-100km-to-3km-conus-save-coords"
+CONFIG_FILENAME="config-eval-conus.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=2
+NGPU=1
 
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
