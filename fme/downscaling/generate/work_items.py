@@ -23,7 +23,19 @@ class SliceWorkItem:
     ens_slice: slice  # ensemble members to generate
     is_padding: bool = False  # For even GPU distribution
 
+    @staticmethod
+    def _check_slice_no_none(slice_: slice) -> None:
+        # check for valid work slices, no None and positive, monotonic
+        if slice_.start is None or slice_.stop is None:
+            raise ValueError("Slice start and stop must be defined (not None)")
+        if slice_.start < 0 or slice_.stop < 0:
+            raise ValueError("Slice start and stop must be positive")
+        if slice_.start >= slice_.stop:
+            raise ValueError("Slice start must be less than stop")
+
     def __post_init__(self):
+        self._check_slice_no_none(self.time_slice)
+        self._check_slice_no_none(self.ens_slice)
         self.n_ens = self.ens_slice.stop - self.ens_slice.start
 
     @property
