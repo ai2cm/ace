@@ -218,7 +218,6 @@ class OutputTargetConfig(ABC):
             lon_extent,
             loader_config,
         )
-        data = updated_loader_config.build(requirements=requirements)
         xr_dataset, properties = updated_loader_config.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
         )
@@ -267,7 +266,7 @@ class OutputTargetConfig(ABC):
 
         if self.zarr_chunks is None:
             chunks = determine_zarr_chunks(
-                dims=data.dims,
+                dims=DIMS,
                 data_shape=slice_dataset.max_output_shape,
                 bytes_per_element=slice_dataset.dtype.element_size(),
             )
@@ -284,6 +283,7 @@ class OutputTargetConfig(ABC):
             patch=patch,
             chunks=chunks,
             shards=self.zarr_shards,
+            dims=DIMS,
         )
 
 

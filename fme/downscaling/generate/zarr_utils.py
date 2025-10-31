@@ -78,7 +78,7 @@ def _recursive_chunksize_search(
 
 
 def determine_zarr_chunks(
-    dims: list[str], data_shape: tuple[int, ...], bytes_per_element: int
+    dims: tuple[str, ...], data_shape: tuple[int, ...], bytes_per_element: int
 ) -> dict[str, int]:
     """
     Auto-generate zarr chunk sizes for the output data.
