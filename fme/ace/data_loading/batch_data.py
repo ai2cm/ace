@@ -400,7 +400,7 @@ class PairedData:
             The tensor dict with an explicit ensemble dimension.
         """
         return (
-            unfold_ensemble_dim(TensorDict(self.reference), n_ensemble=1),
+            unfold_ensemble_dim(TensorDict(self.reference), n_ensemble=self.n_ensemble),
             unfold_ensemble_dim(
                 TensorDict(self.prediction), n_ensemble=self.n_ensemble
             ),
