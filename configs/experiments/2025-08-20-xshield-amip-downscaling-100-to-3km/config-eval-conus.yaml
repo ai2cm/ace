@@ -5,7 +5,7 @@ patch:
   composite_prediction: true
   coarse_horizontal_overlap: 0
 model:
-  checkpoint_path: /checkpoints/best.ckpt
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
 data:
   topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   coarse:
