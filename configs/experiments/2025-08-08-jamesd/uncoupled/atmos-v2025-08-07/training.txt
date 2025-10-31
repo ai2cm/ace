@@ -1,2 +1,2 @@
-group|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|override_args
-v2025-08-07-ts_uncoupled-rs1|train|urgent|titan|4|400GiB|10
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+v2025-08-07-ts_uncoupled-rs1||train|urgent|titan|4|400GiB|10||
