@@ -9,7 +9,7 @@ def get_crps(
 
     Supports almost-fair modification to CRPS from
     https://arxiv.org/html/2412.15832v1, which claims to be helpful in
-    avoiding numerical issues with fair CRPS. This is not vectorized over
+    avoiding numerical issues with fair CRPS. TODO This is not vectorized over
     ensemble dimension for clarity.
 
     Args:
