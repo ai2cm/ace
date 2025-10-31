@@ -378,6 +378,16 @@ class BatchData:
             n_ensemble=n_ensemble,
         )
 
+    def pin_memory(self: SelfType) -> SelfType:
+        """Used by torch.utils.data.DataLoader when pin_memory=True to page-lock
+        tensors in CPU memory, resulting in faster transfers from CPU to GPU.
+
+        See https://docs.pytorch.org/docs/stable/data.html#memory-pinning
+
+        """
+        self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
+        return self
+
 
 @dataclasses.dataclass
 class PairedData:
