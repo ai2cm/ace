@@ -47,7 +47,7 @@ ema:
 validate_using_ema: true
 train_data:
   sample_with_replacement: 320 # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
-  batch_size: 32 #48 for 8
+  batch_size: 24 #48 for 8
   num_data_workers: 4
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -68,7 +68,7 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 48  #128 for 8
+  batch_size: 24 #128 for 8
   num_data_workers: 4
   fine:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling

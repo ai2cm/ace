@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-global-val-resume"
+JOB_NAME="xshield-downscaling-100km-to-3km-global-val-resume-from-besthist"
 CONFIG_FILENAME="config-train-resume.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -16,11 +16,11 @@ wandb_group=""
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4 # TODO: change to 8 after testing
+N_GPUS=8 # TODO: change to 8 after testing
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-PREVIOUS_RESULTS_DATASET="01K8NMQ7HK7N8CKT45QS9AMX8R"
+PREVIOUS_RESULTS_DATASET="01K8XGEEAJRHN8JRZE4WXQRDVD"
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
 
