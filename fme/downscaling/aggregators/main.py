@@ -20,7 +20,7 @@ from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import ComparedDynamicHistogramsAdapter
-from fme.downscaling.data import PairedBatchData
+from fme.downscaling.data import BatchedLatLonCoordinates, PairedBatchData
 
 from ..metrics_and_maths import (
     compute_zonal_power_spectrum,
@@ -786,12 +786,14 @@ class Aggregator:
         ]
 
         # Turned off for random subsetting where average maps don't make sense
+        self.include_positional_comparisons = include_positional_comparisons
         if include_positional_comparisons:
             self._comparisons += [
                 MeanMapAggregator(variable_metadata, name="time_mean"),
             ]
 
         self.loss = Mean(torch.mean)
+        self._fine_latlon_coordinates: BatchedLatLonCoordinates | None = None
 
     @torch.no_grad()
     def record_batch(
@@ -810,6 +812,8 @@ class Aggregator:
             batch: Paired batch data with spatial information.
         """
         _check_batch_dims_for_recording(outputs, coarse, 3)
+        if self.include_positional_comparisons:
+            self._fine_latlon_coordinates = batch.fine.latlon_coordinates
         target, prediction = outputs.target, outputs.prediction
         target = filter_tensor_mapping(target, prediction.keys())
 
@@ -860,4 +864,8 @@ class Aggregator:
         for coarse_comparison in self._coarse_comparisons:
             if hasattr(coarse_comparison, "get_dataset"):
                 ds = ds.merge(coarse_comparison.get_dataset())
+        if self._fine_latlon_coordinates is not None:
+            lat = self._fine_latlon_coordinates.lat.cpu().numpy()[0]
+            lon = self._fine_latlon_coordinates.lon.cpu().numpy()[0]
+            ds = ds.assign_coords({"lat": lat, "lon": lon})
         return ds
