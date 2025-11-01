@@ -254,7 +254,7 @@ class OutputTargetConfig(ABC):
             batch_size=1,
             shuffle=False,
             num_workers=loader_config.num_data_workers,
-            collate_fn=lambda x: x,  # type: ignore
+            collate_fn=lambda x: x[0],  # type: ignore
             drop_last=False,
             multiprocessing_context=loader_config.mp_context,
             persistent_workers=True if loader_config.num_data_workers > 0 else False,

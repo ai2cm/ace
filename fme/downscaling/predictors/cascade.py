@@ -108,6 +108,10 @@ class CascadePredictor:
         return self.models[0].coarse_shape
 
     @property
+    def fine_shape(self):
+        return self.models[-1].fine_shape
+
+    @property
     def downscale_factor(self):
         return math.prod([model.downscale_factor for model in self.models])
 

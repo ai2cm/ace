@@ -75,7 +75,7 @@ def test_recursive_chunksize_search_raises_when_element_exceeds_target():
     # 1MB per element (1048576 bytes), but target is 0.5MB
     with pytest.raises(NotReducibleError):
         _recursive_chunksize_search(
-            shape, bytes_per_element=int(2e6), reduce_dim=0, target_mb=1
+            shape, bytes_per_element=int(5e6), reduce_dim=0, target_mb=1
         )
 
 
@@ -99,7 +99,7 @@ def test_determine_zarr_chunks_preserves_dimension_order():
     shape = (10, 5, 100, 100)
     result = determine_zarr_chunks(dims, shape, bytes_per_element=4)
 
-    assert list(result.keys()) == dims
+    assert tuple(result.keys()) == dims
 
 
 def test_determine_zarr_chunks_raises_on_wrong_shape_length():

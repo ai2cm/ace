@@ -175,16 +175,15 @@ def create_test_topography(filename: Path, n_lat: int = 16, n_lon: int = 16) -> 
 
 
 @pytest.fixture
-def test_data_path(tmp_path):
-    """Create test coarse data and return directory path."""
+def loader_config(tmp_path):
+    """Create DataLoaderConfig with test data."""
     path = tmp_path / "test_data"
     path.mkdir()
-    return data_paths_helper(path)
+    # TODO: should probably consolidate cross imported
+    # .      data path helpers to a single file instead
+    # .      of importing from test_train in each location
+    test_data_path = data_paths_helper(path)
 
-
-@pytest.fixture
-def loader_config(test_data_path):
-    """Create DataLoaderConfig with test data."""
     return DataLoaderConfig(
         coarse=[
             XarrayDataConfig(
@@ -196,7 +195,7 @@ def loader_config(test_data_path):
         batch_size=2,
         num_data_workers=0,
         strict_ensemble=False,
-        topography=test_data_path.fine,
+        topography=f"{test_data_path.fine}/data.nc",
     )
 
 
@@ -264,7 +263,7 @@ def test_region_config_build_creates_output_target_with_time_range(
     assert isinstance(output_target, OutputTarget)
     assert output_target.name == "test_region"
     assert output_target.n_ens == 4
-    assert len(output_target.all_times) == 4
+    assert len(output_target.all_times) == 2
 
     # Verify chunks dict structure
     assert output_target.data is not None

@@ -19,7 +19,7 @@ from ..predictors import (
     PatchPredictor,
 )
 from ..train import count_parameters
-from .output import OutputTarget, OutputTargetConfig
+from .output import EventConfig, OutputTarget, RegionConfig
 from .work_items import LoadedWorkItem
 
 
@@ -66,7 +66,7 @@ class Downscaler:
         the user to use patching for larger domains because that provides better
         generations.
         """
-        model_patch_shape = self.model.coarse_shape
+        model_patch_shape = self.model.fine_shape
         actual_shape = tuple(topography.data.shape)
 
         if model_patch_shape == actual_shape:
@@ -190,13 +190,13 @@ class GenerationConfig:
 
     model: CheckpointModelConfig | CascadePredictorConfig
     data: DataLoaderConfig
-    output_dir: str
-    output_targets: list[OutputTargetConfig]
+    experiment_dir: str
+    output_targets: list[EventConfig | RegionConfig]
     logging: LoggingConfig
     patch: PatchPredictionConfig = field(default_factory=PatchPredictionConfig)
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.output_dir, log_filename)
+        self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def configure_wandb(self, resumable: bool = False, **kwargs):
         config = to_flat_dict(asdict(self))
@@ -215,7 +215,9 @@ class GenerationConfig:
             for target_cfg in self.output_targets
         ]
         model = self.model.build()
-        return Downscaler(model=model, output_targets=targets)
+        return Downscaler(
+            model=model, output_targets=targets, output_dir=self.experiment_dir
+        )
 
 
 def main(config_path: str):
@@ -227,7 +229,7 @@ def main(config_path: str):
         data=config,
         config=dacite.Config(strict=True),
     )
-    prepare_directory(generation_config.output_dir, config)
+    prepare_directory(generation_config.experiment_dir, config)
 
     generation_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
