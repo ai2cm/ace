@@ -17,13 +17,8 @@ from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import NoTargetAggregator, SampleAggregator
-from fme.downscaling.data import (
-    BatchData,
-    ClosedInterval,
-    DataLoaderConfig,
-    GriddedData,
-)
-from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, Model
+from fme.downscaling.data import ClosedInterval, DataLoaderConfig, GriddedData
+from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predictors import (
     CascadePredictor,
     CascadePredictorConfig,
@@ -145,7 +140,7 @@ class EventDownscaler:
 
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
-        batch: BatchData = next(iter(self.data.loader))
+        batch, topography = next(iter(self.data.get_generator()))
         coarse_coords = batch[0].latlon_coordinates
         fine_coords = LatLonCoordinates(
             lat=_downscale_coord(coarse_coords.lat, self.model.downscale_factor),
@@ -168,7 +163,7 @@ class EventDownscaler:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch_no_target(
-                batch, topography=self.data.topography, n_samples=end_idx - start_idx
+                batch, topography=topography, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs)
         to_log = sample_agg.get_wandb()
@@ -291,10 +286,6 @@ class DownscalerConfig:
             requirements=self.model.data_requirements,
         )
         model = self.model.build()
-        if isinstance(model, Model):
-            raise NotImplementedError(
-                "No-target generation is only enabled for DiffusionModel, not Model"
-            )
         downscaler = Downscaler(
             data=dataset,
             model=model,

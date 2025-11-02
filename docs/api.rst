@@ -15,3 +15,9 @@ fme.ace
 
 .. automodule:: fme.ace
    :members:
+
+fme.coupled
+===========
+
+.. automodule:: fme.coupled
+   :members:

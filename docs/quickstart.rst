@@ -1,6 +1,12 @@
 ==========
 Quickstart
 ==========
+.. _quickstart:
+
+.. important::
+
+    This page documents the **uncoupled** model configuration.
+    For information on using the coupled atmosphere-ocean model, see :ref:`Coupled Emulation <coupled>`.
 
 Install
 =======

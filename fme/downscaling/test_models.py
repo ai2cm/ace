@@ -12,15 +12,13 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.downscaling.data import Topography
 from fme.downscaling.models import (
+    DiffusionModel,
     DiffusionModelConfig,
-    DownscalingModelConfig,
-    Model,
     PairedNormalizationConfig,
     _repeat_batch_by_samples,
     _separate_interleaved_samples,
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
-from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -29,26 +27,24 @@ class LinearDownscaling(torch.nn.Module):
         self,
         factor: int,
         fine_img_shape: tuple[int, int],
-        n_channels: int = 1,
+        n_channels_in: int = 1,
+        n_channels_out: int | None = None,
     ):
         super().__init__()
         self.img_shape = fine_img_shape
-        self.n_channels = n_channels
+        self.n_channels_in = n_channels_in
+        self.n_channels_out = n_channels_out or n_channels_in
         height, width = fine_img_shape
         self.linear = torch.nn.Linear(
-            ((height * width) // factor**2) * n_channels,
-            height * width * n_channels,
+            ((height * width) // factor**2) * n_channels_in,
+            height * width * self.n_channels_out,
             bias=False,
         )
         self._coarse_img_shape = (height // factor, width // factor)
 
     def forward(self, x):
-        if tuple(x.shape[-2:]) != self._coarse_img_shape:
-            raise ValueError(
-                f"Expected input shape {self._coarse_img_shape}, got {x.shape[-2:]}"
-            )
         x = self.linear(torch.flatten(x, start_dim=1))
-        x = x.view(x.shape[0], self.n_channels, *self.img_shape)
+        x = x.view(x.shape[0], self.n_channels_out, *self.img_shape)
         return x
 
 
@@ -74,136 +70,33 @@ def get_mock_paired_batch(coarse_shape, fine_shape):
     return FineResCoarseResPair(fine=fine, coarse=coarse)
 
 
-@pytest.mark.parametrize("use_opt", [True, False])
-def test_train_and_generate(use_opt):
-    fine_shape = (8, 16)
-    coarse_shape = (4, 8)
-    upscaling_factor = 2
-    normalization_config = PairedNormalizationConfig(
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
-    )
-
-    batch_size = 3
-    module_selector = ModuleRegistrySelector(
-        "prebuilt",
-        {
-            "module": LinearDownscaling(
-                factor=upscaling_factor,
-                fine_img_shape=fine_shape,
-            )
-        },
-        expects_interpolated_input=False,
-    )
-    model = DownscalingModelConfig(
-        module_selector,
-        LossConfig(type="MSE"),
-        ["x"],
-        ["x"],
-        normalization_config,
-    ).build(
-        coarse_shape,
-        upscaling_factor,
-    )
-    batch = get_mock_paired_batch(
-        [batch_size, *coarse_shape], [batch_size, *fine_shape]
-    )
-    if use_opt:
-        optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
-        outputs = model.train_on_batch(
-            batch, topography=None, optimization=optimization
-        )
-    else:
-        outputs = model.generate_on_batch(batch, topography=None)
-
-    assert outputs.prediction.keys() == outputs.target.keys()
-    for k in outputs.prediction:
-        assert outputs.prediction[k].shape == outputs.target[k].shape
-
-
-@pytest.mark.parametrize(
-    "in_names, out_names",
-    [
-        pytest.param(["x"], ["x"], id="in_names = out_names"),
-        pytest.param(["x", "y"], ["x"], id="in_names > out_names"),
-        pytest.param(["x"], ["x", "y"], id="in_names < out_names"),
-    ],
-)
-def test_build_downscaling_model_config_runs(in_names, out_names):
-    normalization = PairedNormalizationConfig(
-        fine=NormalizationConfig(
-            means={n: 0.0 for n in out_names}, stds={n: 1.0 for n in out_names}
-        ),
-        coarse=NormalizationConfig(
-            means={n: 0.0 for n in in_names}, stds={n: 1.0 for n in in_names}
-        ),
-    )
-
-    img_shape, downscale_factor = (4, 8), 4
-    loss = LossConfig(type="L1")
-    model_config = DownscalingModelConfig(
-        ModuleRegistrySelector(
-            "prebuilt",
-            {"module": LinearDownscaling(4, (4, 8))},
-            expects_interpolated_input=False,
-        ),
-        loss,
-        ["x"],
-        ["x"],
-        normalization,
-    )
-    model_config.build(
-        img_shape,
-        downscale_factor,
-    )
-
-
-def test_serialization(tmp_path):
-    fine_shape = (16, 32)
+def test_module_serialization(tmp_path):
     coarse_shape = (8, 16)
-    downscale_factor = 2
-    module = LinearDownscaling(factor=2, fine_img_shape=fine_shape)
-    normalizer = PairedNormalizationConfig(
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        predict_residual=True,
+        use_fine_topography=False,
     )
-    model = DownscalingModelConfig(
-        ModuleRegistrySelector(
-            "prebuilt", {"module": module}, expects_interpolated_input=False
-        ),
-        LossConfig(type="MSE"),
-        ["x"],
-        ["x"],
-        normalizer,
-    ).build(coarse_shape, downscale_factor)
-
-    batch_size = 3
-    batch = get_mock_paired_batch(
-        [batch_size, *coarse_shape], [batch_size, *fine_shape]
-    )
-    expected = model.generate_on_batch(
-        batch,
-        topography=None,
-    ).prediction["x"]
-
-    model_from_state = Model.from_state(
+    model_from_state = DiffusionModel.from_state(
         model.get_state(),
     )
-    torch.testing.assert_close(
-        expected,
-        model_from_state.generate_on_batch(batch, topography=None).prediction["x"],
+    assert all(
+        torch.equal(p1, p2)
+        for p1, p2 in zip(
+            model.module.parameters(), model_from_state.module.parameters()
+        )
     )
 
     torch.save(model.get_state(), tmp_path / "test.ckpt")
-    model_from_disk = Model.from_state(
+    model_from_disk = DiffusionModel.from_state(
         torch.load(tmp_path / "test.ckpt", weights_only=False),
     )
-    torch.testing.assert_close(
-        expected,
-        model_from_disk.generate_on_batch(
-            batch,
-            topography=None,
-        ).prediction["x"],
+    assert all(
+        torch.equal(p1, p2)
+        for p1, p2 in zip(
+            model.module.parameters(), model_from_disk.module.parameters()
+        )
     )
 
 
@@ -298,35 +191,18 @@ def test_interleaved_samples_round_trip():
 
 
 def test_normalizer_serialization(tmp_path):
-    fine_shape = (16, 32)
     coarse_shape = (8, 16)
-    downscale_factor = 2
-    module = LinearDownscaling(factor=2, fine_img_shape=fine_shape)
 
     means = xr.Dataset({"x": 0.0})
     stds = xr.Dataset({"x": 1.0})
     means.to_netcdf(tmp_path / "means.nc")
     stds.to_netcdf(tmp_path / "stds.nc")
-
-    normalizer = PairedNormalizationConfig(
-        NormalizationConfig(
-            global_means_path=tmp_path / "means.nc",
-            global_stds_path=tmp_path / "stds.nc",
-        ),
-        NormalizationConfig(
-            global_means_path=tmp_path / "means.nc",
-            global_stds_path=tmp_path / "stds.nc",
-        ),
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        predict_residual=False,
+        use_fine_topography=False,
     )
-    model = DownscalingModelConfig(
-        ModuleRegistrySelector(
-            "prebuilt", {"module": module}, expects_interpolated_input=False
-        ),
-        LossConfig(type="MSE"),
-        ["x"],
-        ["x"],
-        normalizer,
-    ).build(coarse_shape, downscale_factor)
     torch.save(model.get_state(), tmp_path / "test.ckpt")
 
     # normalization should be loaded into model config when get_state called,
@@ -334,7 +210,7 @@ def test_normalizer_serialization(tmp_path):
     os.remove(tmp_path / "means.nc")
     os.remove(tmp_path / "stds.nc")
 
-    model_from_disk = Model.from_state(
+    model_from_disk = DiffusionModel.from_state(
         torch.load(tmp_path / "test.ckpt", weights_only=False),
     )
 
@@ -344,10 +220,7 @@ def test_normalizer_serialization(tmp_path):
     assert model_from_disk.normalizer.coarse.stds == {"x": 1}
 
 
-# TODO: it's a pain to write for Downscaling and Diffusion models
-#       should find a way to consolidate
-@pytest.mark.parametrize("model_config", ["deterministic", "diffusion"])
-def test_model_error_cases(model_config):
+def test_model_error_cases():
     fine_shape = (8, 16)
     coarse_shape = (4, 8)
     upscaling_factor = 2
@@ -357,24 +230,18 @@ def test_model_error_cases(model_config):
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
 
-    model_class: type[DownscalingModelConfig] | type[DiffusionModelConfig]
-    selector: type[ModuleRegistrySelector] | type[DiffusionModuleRegistrySelector]
-    if model_config == "deterministic":
-        model_class = DownscalingModelConfig
-        selector = ModuleRegistrySelector
-        extra_kwargs = {}
-    else:
-        model_class = DiffusionModelConfig
-        selector = DiffusionModuleRegistrySelector
-        extra_kwargs = {
-            "p_mean": -1.0,
-            "p_std": 1.0,
-            "sigma_min": 0.1,
-            "sigma_max": 1.0,
-            "churn": 0.5,
-            "num_diffusion_generation_steps": 3,
-            "predict_residual": True,
-        }
+    selector: type[DiffusionModuleRegistrySelector]
+    model_class = DiffusionModelConfig
+    selector = DiffusionModuleRegistrySelector
+    extra_kwargs = {
+        "p_mean": -1.0,
+        "p_std": 1.0,
+        "sigma_min": 0.1,
+        "sigma_max": 1.0,
+        "churn": 0.5,
+        "num_diffusion_generation_steps": 3,
+        "predict_residual": True,
+    }
 
     # Incompatible on init check
     invalid_selector = selector(
