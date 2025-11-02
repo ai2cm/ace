@@ -1,5 +1,4 @@
 experiment_dir: /results
-n_samples: 2
 patch:
   divide_generation: true
   composite_prediction: true
