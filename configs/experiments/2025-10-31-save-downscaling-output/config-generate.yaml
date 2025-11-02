@@ -19,22 +19,22 @@ output_targets:
   save_vars: ["PRATEsfc"]
   n_ens: 128
   n_item_per_gpu: 8
-  event_time: "2023-02-06T06:00"
-  lat_extent: 
+  event_time: "2023-02-06T06:00:00"
+  lat_extent:
     start: 36.0
     stop:  52.0
-  lon_extent: 
+  lon_extent:
     start: 228.0
     stop: 244.0
 - name: "WPacific_hurricane_landfall_china_20230510"
   save_vars: ["PRATEsfc"]
   n_ens: 128
   n_item_per_gpu: 8
-  event_time: "2023-05-10T12:00"
-  lat_extent: 
+  event_time: "2023-05-10T12:00:00"
+  lat_extent:
     start: 7.0
     stop: 23.0
-  lon_extent: 
+  lon_extent:
     start: 104.0
     stop: 120.0
 logging:
