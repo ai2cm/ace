@@ -23,6 +23,16 @@ from .work_items import SliceItemDataset, get_work_items
 from .zarr_utils import determine_zarr_chunks
 
 
+def _identity_collate(batch):
+    """
+    Collate function that returns the single batch item.
+
+    Used with batch_size=1 to extract the single item from the batch list.
+    Must be a module-level function (not lambda) to be picklable for multiprocessing.
+    """
+    return batch[0]
+
+
 class OutputTarget:
     """
     Container for a single output generation target.
@@ -254,7 +264,7 @@ class OutputTargetConfig(ABC):
             batch_size=1,
             shuffle=False,
             num_workers=loader_config.num_data_workers,
-            collate_fn=lambda x: x[0],  # type: ignore
+            collate_fn=_identity_collate,
             drop_last=False,
             multiprocessing_context=loader_config.mp_context,
             persistent_workers=True if loader_config.num_data_workers > 0 else False,
