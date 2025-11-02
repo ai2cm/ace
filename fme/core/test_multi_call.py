@@ -1,3 +1,4 @@
+import dataclasses
 from datetime import timedelta
 
 import numpy as np
@@ -6,16 +7,18 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.ace.stepper.single_module import StepperConfig
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
-from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.loss import StepLossConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.module import ModuleSelector
+from fme.core.step.multi_call import MultiCallStepConfig
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.timing import GlobalTimer
 
-from ..ace.stepper import SingleModuleStepperConfig
 from .multi_call import MultiCallConfig, get_multi_call_name
 
 TEST_CONFIG = MultiCallConfig(
@@ -86,17 +89,35 @@ def _get_stepper_config(
         def eval(self):
             pass
 
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": CustomModule()}),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means=get_scalar_data(all_names, 0.0),
-            stds=get_scalar_data(all_names, 1.0),
+    config = StepperConfig(
+        step=StepSelector(
+            type="multi_call",
+            config=dataclasses.asdict(
+                MultiCallStepConfig(
+                    wrapped_step=StepSelector(
+                        type="single_module",
+                        config=dataclasses.asdict(
+                            SingleModuleStepConfig(
+                                builder=ModuleSelector(
+                                    type="prebuilt", config={"module": CustomModule()}
+                                ),
+                                in_names=in_names,
+                                out_names=out_names,
+                                normalization=NetworkAndLossNormalizationConfig(
+                                    network=NormalizationConfig(
+                                        means=get_scalar_data(all_names, 0.0),
+                                        stds=get_scalar_data(all_names, 1.0),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    config=multi_call_config,
+                    include_multi_call_in_loss=include_loss,
+                ),
+            ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE", weights={"temperature": 1.0}),
-        multi_call=multi_call_config,
-        include_multi_call_in_loss=include_loss,
+        loss=StepLossConfig(type="MSE", weights={"temperature": 1.0}),
     )
 
     return config
@@ -105,7 +126,10 @@ def _get_stepper_config(
 def test_integration_with_stepper():
     img_shape = (5, 5)
     full_shape = (1, 3, *img_shape)
-    gridded_ops = LatLonOperations(torch.ones(img_shape, device=fme.get_device()))
+    horizontal_coord = LatLonCoordinates(
+        torch.zeros(img_shape[0], device=fme.get_device()),
+        torch.zeros(img_shape, device=fme.get_device()),
+    )
     vertical_coord = HybridSigmaPressureCoordinate(
         torch.tensor([1.0], device=fme.get_device()),
         torch.tensor([0.0], device=fme.get_device()),
@@ -125,14 +149,10 @@ def test_integration_with_stepper():
         in_names, out_names, expected_all_names, multi_call_config, True
     )
 
-    assert set(config.diagnostic_names) == set(out_names).difference(in_names).union(
-        multi_call_names
-    )
     assert set(config.all_names) == expected_all_names
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(
-            img_shape=img_shape,
-            gridded_operations=gridded_ops,
+            horizontal_coordinates=horizontal_coord,
             vertical_coordinate=vertical_coord,
             timestep=timestep,
         ),
@@ -144,6 +164,7 @@ def test_integration_with_stepper():
             for n in expected_all_names
         },
         time,
+        labels=[set() for _ in range(full_shape[0])],
     )
     with GlobalTimer():
         output = stepper.train_on_batch(data, NullOptimization())
@@ -182,8 +203,7 @@ def test_integration_with_stepper():
     )
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(
-            img_shape=img_shape,
-            gridded_operations=gridded_ops,
+            horizontal_coordinates=horizontal_coord,
             vertical_coordinate=vertical_coord,
             timestep=timestep,
         ),

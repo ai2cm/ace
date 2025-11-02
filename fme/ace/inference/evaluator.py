@@ -151,6 +151,14 @@ class InferenceEvaluatorConfig:
                 self.forward_steps_in_memory,
                 self.n_forward_steps,
             )
+        if self.data_writer.files is not None:
+            for file_config in self.data_writer.files:
+                if file_config.time_coarsen is not None:
+                    validate_time_coarsen_config(
+                        file_config.time_coarsen,
+                        self.forward_steps_in_memory,
+                        self.n_forward_steps,
+                    )
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -196,7 +204,7 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         config=dacite.Config(strict=True),
     )
     prepare_directory(config.experiment_dir, config_data)
-    with GlobalTimer():
+    with GlobalTimer(), torch.no_grad():
         return run_evaluator_from_config(config)
 
 
@@ -271,8 +279,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
         except IncompatibleDatasetInfo as err:
             raise IncompatibleDatasetInfo(
-                "Inference dataset is not compatible with dataset "
-                f"used for stepper training: {str(err)}"
+                "Inference dataset is not compatible with dataset used for stepper "
+                "training. Set allow_incompatible_dataset to True to ignore this "
+                f"error. The incompatiblity found was: {str(err)}"
             ) from err
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
@@ -284,12 +293,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         stepper_metadata=stepper.training_variable_metadata,
         stepper_all_names=stepper_config.all_names,
     )
+    dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
     aggregator = aggregator_config.build(
-        horizontal_coordinates=data.horizontal_coordinates,
-        timestep=data.timestep,
+        dataset_info=dataset_info,
         record_step_20=config.n_forward_steps >= 20,
         n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
-        variable_metadata=variable_metadata,
         initial_time=initial_time,
         channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
@@ -335,7 +343,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     timer.start("final_writer_flush")
     logging.info("Starting final flush of data writer")
-    writer.flush()
+    writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
     timer.stop()

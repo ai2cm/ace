@@ -1,6 +1,8 @@
+import abc
+import logging
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeVar
 
 import torch
 
@@ -10,21 +12,49 @@ from fme.core.typing_ import TensorDict, TensorMapping
 LEVEL_PATTERN = re.compile(r"_(\d+)$")
 
 
-class _NullMaskProvider:
+class MaskProviderABC(abc.ABC):
+    SelfType = TypeVar("SelfType", bound="MaskProviderABC")
+
+    @abc.abstractmethod
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None: ...
+
+    @abc.abstractmethod
+    def to(self: SelfType, device: str) -> SelfType: ...
+
+    @abc.abstractmethod
+    def update(self: SelfType, other: SelfType) -> None: ...
+
+    @abc.abstractmethod
+    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
+
+    @abc.abstractmethod
+    def to_state(self) -> dict[str, Any]: ...
+
+
+class _NullMaskProvider(MaskProviderABC):
     def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         return None
 
     def to(self, device: str) -> "_NullMaskProvider":
         return self
 
+    def update(self, other: MaskProviderABC) -> None:
+        if not isinstance(other, _NullMaskProvider):
+            raise ValueError(
+                f"Attempted to update NullMaskProvider with non-null {other}"
+            )
+
     def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
         return NullMasking()
+
+    def to_state(self) -> dict[str, Any]:
+        return {"masks": {}}
 
 
 NullMaskProvider = _NullMaskProvider()
 
 
-class MaskProvider:
+class MaskProvider(MaskProviderABC):
     """
     Stores and returns 2D mask tensors.
 
@@ -104,11 +134,15 @@ class MaskProvider:
         other_keys = set(other.masks.keys())
         intersection = self_keys.intersection(other_keys)
         if intersection:
-            raise ValueError(
-                "Cannot update MaskProvider with overlapping mask names: "
-                f"{', '.join(sorted(list(intersection)))}"
+            logging.info(
+                f"Skipping overlapping mask names: {', '.join(sorted(intersection))}"
             )
-        self._masks.update(other.masks)
+            other_masks_filtered = {
+                k: v for k, v in other.masks.items() if k not in intersection
+            }
+            return self._masks.update(other_masks_filtered)
+        else:
+            self._masks.update(other.masks)
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, MaskProvider):
@@ -123,7 +157,11 @@ class MaskProvider:
         return True
 
     def __repr__(self) -> str:
-        return f"MaskProvider(\n    masks={self.masks}\n)"
+        return (
+            "MaskProvider(\n    masks=[\n        "
+            + ",\n        ".join(sorted(list(self.masks.keys())))
+            + ",\n    ]\n)"
+        )
 
     def to_state(self) -> dict[str, Any]:
         return {"masks": self.masks}

@@ -11,7 +11,6 @@ import torch
 import xarray as xr
 import yaml
 
-import fme
 from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
@@ -20,6 +19,7 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.inference.data_writer import DataWriterConfig
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
     InferenceConfig,
     InitialConditionConfig,
@@ -27,7 +27,7 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
-from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import (
     DimSize,
@@ -36,10 +36,11 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.testing import mock_wandb
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -56,30 +57,44 @@ def save_stepper(
     out_names: list[str],
     mean: float,
     std: float,
-    data_shape: list[int],
+    horizontal_coords: dict[str, xr.DataArray],
+    nz_interface: int,
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means={name: mean for name in all_names},
-            stds={name: std for name in all_names},
-        ),
-        ocean=OceanConfig(
-            surface_temperature_name="sst",
-            ocean_fraction_name="ocean_fraction",
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": PlusOne()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={name: mean for name in all_names},
+                            stds={name: std for name in all_names},
+                        ),
+                    ),
+                    ocean=OceanConfig(
+                        surface_temperature_name="sst",
+                        ocean_fraction_name="ocean_fraction",
+                    ),
+                ),
+            ),
         ),
     )
-    area = torch.ones(data_shape[-2:], device=fme.get_device())
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.tensor(horizontal_coords["lat"].values, dtype=torch.float32),
+        lon=torch.tensor(horizontal_coords["lon"].values, dtype=torch.float32),
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
+        ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
     )
     dataset_info = DatasetInfo(
-        img_shape=(data_shape[-2], data_shape[-1]),
-        gridded_operations=LatLonOperations(area),
+        horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=timestep,
         variable_metadata={
@@ -103,19 +118,12 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     out_names = ["prog", "sst", "ULWRFtoa", "USWRFtoa"]
     stepper_path = tmp_path / "stepper"
     horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    nz_interface = 4
 
     dim_sizes = DimSizes(
         n_time=9,
         horizontal=horizontal,
         nz_interface=4,
-    )
-    save_stepper(
-        stepper_path,
-        in_names=in_names,
-        out_names=out_names,
-        mean=0.0,
-        std=1.0,
-        data_shape=dim_sizes.shape_nd,
     )
     data = FV3GFSData(
         path=tmp_path,
@@ -123,6 +131,15 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         dim_sizes=dim_sizes,
         timestep_days=0.25,
         save_vertical_coordinate=False,
+    )
+    save_stepper(
+        stepper_path,
+        in_names=in_names,
+        out_names=out_names,
+        mean=0.0,
+        std=1.0,
+        horizontal_coords=data.horizontal_coords,
+        nz_interface=nz_interface,
     )
     dims = ["sample", "lat", "lon"]
     initial_condition = xr.Dataset(
@@ -166,8 +183,12 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         ),
         initial_condition=InitialConditionConfig(path=str(initial_condition_path)),
         forcing_loader=forcing_loader,
-        data_writer=DataWriterConfig(save_prediction_files=True),
-        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        allow_incompatible_dataset=False,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -230,7 +251,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     ops = LatLonCoordinates(
         lat=torch.as_tensor(saved_data["lat"].values.astype(np.float32)),
         lon=torch.as_tensor(saved_data["lon"].values.astype(np.float32)),
-    ).gridded_operations
+    ).get_gridded_operations()
     # check that inference logs match raw output
     for i in range(1, config.n_forward_steps + 1):
         for log_name in wandb_logs[i]:
@@ -254,7 +275,7 @@ def test_get_initial_condition():
         np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    initial_condition = get_initial_condition(data, ["prog"])
+    initial_condition = get_initial_condition(data, ["prog"], labels=[])
     assert isinstance(initial_condition, PrognosticState)
     batch_data = initial_condition.as_batch_data()
     assert batch_data.time.shape == (2, 1)
@@ -276,7 +297,7 @@ def test_get_initial_condition_raises_bad_variable_shape():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, ["prog"], labels=[])
 
 
 def test_get_initial_condition_raises_missing_time():
@@ -285,7 +306,7 @@ def test_get_initial_condition_raises_missing_time():
     )
     data = xr.Dataset({"prog": prognostic_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, ["prog"], labels=[])
 
 
 def test_get_initial_condition_raises_mismatched_time_length():
@@ -295,7 +316,7 @@ def test_get_initial_condition_raises_mismatched_time_length():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, ["prog"], labels=[])
 
 
 @pytest.mark.parametrize(

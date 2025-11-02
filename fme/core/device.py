@@ -9,6 +9,13 @@ def using_gpu() -> bool:
     return get_device().type == "cuda"
 
 
+def using_srun() -> bool:
+    """If using srun instead of torchrun, set FME_USE_SRUN=1 in the environment."""
+    if os.environ.get("FME_USE_SRUN", "0") == "1":
+        return True
+    return False
+
+
 def get_device() -> torch.device:
     """If CUDA is available, return a CUDA device. Otherwise, return a CPU device
     unless FME_USE_MPS is set, in which case return an MPS device if available.

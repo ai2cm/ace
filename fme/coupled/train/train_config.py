@@ -4,20 +4,21 @@ import os
 
 import torch
 
-from fme.core.dataset.config import Slice
+from fme.core.cli import ResumeResultsConfig
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.rand import set_seed
+from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
-from fme.coupled.data_loading.getters import get_data_loader, get_inference_data
+from fme.coupled.data_loading.getters import get_gridded_data, get_inference_data
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -83,6 +84,9 @@ class TrainConfig:
         inference: Configuration for inline inference.
         n_coupled_steps: Number of coupled forward steps to take gradient over.
             This is equal to the number of forward steps of the ocean model.
+        seed: Random seed for reproducibility. If set, is used for all types of
+            randomization, including data shuffling and model initialization.
+            If unset, weight initialization is not reproducible but data shuffling is.
         copy_weights_after_batch: Configuration for copying weights from the
             base model to the training model after each batch.
         ema: Configuration for exponential moving average of model weights.
@@ -97,6 +101,7 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        checkpoint_every_n_batches: How often to save checkpoints.
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
@@ -104,7 +109,14 @@ class TrainConfig:
             training, validation and inline inference aggregators.
         evaluate_before_training: Whether to run validation and inline inference before
             any training is done.
-
+        save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
+            for each epoch where best_inference_error achieves a new minimum.
+            Checkpoints are saved as best_inference_ckpt_XXXX.tar.
+        resume_results: Configuration for resuming a previously stopped or finished
+            training job. When provided and experiment_dir has no training_checkpoints
+            subdirectory, then it is assumed that this is a new run to resume a
+            previously completed run and resume_results.existing_dir is recursively
+            copied to experiment_dir.
     """
 
     train_loader: CoupledDataLoaderConfig
@@ -117,6 +129,7 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig
     n_coupled_steps: int
+    seed: int | None = None
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
     )
@@ -125,9 +138,12 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
+    checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = True
+    save_best_inference_epoch_checkpoints: bool = False
+    resume_results: ResumeResultsConfig | None = None
 
     @property
     def n_forward_steps(self) -> int:
@@ -148,6 +164,10 @@ class TrainConfig:
     @property
     def inference_n_coupled_steps(self) -> int:
         return self.inference.n_coupled_steps
+
+    def set_random_seed(self):
+        if self.seed is not None:
+            set_seed(self.seed)
 
     def get_inference_epochs(self) -> list[int]:
         start_epoch = 0 if self.evaluate_before_training else 1
@@ -176,7 +196,7 @@ class TrainBuilders:
 
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.train_loader,
             requirements=data_requirements,
             train=True,
@@ -184,13 +204,15 @@ class TrainBuilders:
 
     def get_validation_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.validation_loader,
             requirements=data_requirements,
             train=False,
         )
 
-    def get_evaluation_inference_data(self) -> InferenceGriddedData:
+    def get_evaluation_inference_data(
+        self,
+    ) -> InferenceGriddedData:
         return get_inference_data(
             config=self.config.inference.loader,
             total_coupled_steps=self.config.inference.n_coupled_steps,
@@ -209,23 +231,8 @@ class TrainBuilders:
     def ocean_timestep(self) -> datetime.timedelta:
         return self.config.stepper.ocean_timestep
 
-    def get_stepper(
-        self,
-        img_shape: tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: CoupledVerticalCoordinate,
-        timestep: datetime.timedelta,
-    ) -> CoupledStepper:
-        if timestep != self.config.stepper.timestep:
-            raise ValueError(
-                f"The ocean stepper config timedelta {self.config.stepper.timestep} "
-                f"doesn't match the data's timedelta of {timestep}."
-            )
-        return self.config.stepper.get_stepper(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-        )
+    def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledStepper:
+        return self.config.stepper.get_stepper(dataset_info)
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)

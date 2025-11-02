@@ -4,6 +4,7 @@ from copy import copy
 from typing import Any, TypeVar
 
 import torch
+from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.multi_call import MultiCall, MultiCallConfig, StepMethod
@@ -90,8 +91,9 @@ class MultiCallStepConfig(StepConfigABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ) -> "MultiCallStep":
-        wrapped = self.wrapped_step.get_step(dataset_info)
+        wrapped = self.wrapped_step.get_step(dataset_info, init_weights)
         if self.config is not None:
             self.config.validate(wrapped.input_names, wrapped.output_names)
         return MultiCallStep(
@@ -270,6 +272,14 @@ class MultiCallStep(StepABC):
     @property
     def ocean_fraction_name(self) -> str | None:
         return self._wrapped_step.ocean_fraction_name
+
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        return self._wrapped_step.prescribe_sst(mask_data, gen_data, target_data)
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()

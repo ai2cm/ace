@@ -13,14 +13,10 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.data_loading.config import (
-    ConcatDatasetConfig,
-    DataLoaderConfig,
-    MergeDatasetConfig,
-)
+from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import (
-    get_data_loader,
     get_forcing_data,
+    get_gridded_data,
     get_inference_data,
 )
 from fme.ace.data_loading.inference import (
@@ -34,7 +30,9 @@ from fme.ace.data_loading.inference import (
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.coordinates import HybridSigmaPressureCoordinate
-from fme.core.dataset.config import MergeNoConcatDatasetConfig, XarrayDataConfig
+from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.typing_ import Slice
 
 
@@ -90,6 +88,7 @@ def _create_dataset_on_disk(
     in_variable_names=["foo", "bar", "baz"],
     out_variable_names=["foo", "bar"],
     filename="data.nc",
+    timestep_start=0,
 ) -> pathlib.Path:
     if data_dim_sizes is None:
         data_dim_sizes = {"time": n_times, "lat": 16, "lon": 32}
@@ -103,7 +102,14 @@ def _create_dataset_on_disk(
     ]
 
     data_path = data_dir / filename
-    _save_netcdf(data_path, data_dim_sizes, all_variable_names, calendar, timestep_size)
+    _save_netcdf(
+        data_path,
+        data_dim_sizes,
+        all_variable_names,
+        calendar,
+        timestep_size,
+        timestep_start,
+    )
 
     return data_path
 
@@ -133,7 +139,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_timesteps - window_timesteps + 1
 
-    data = get_data_loader(config, True, requirements)
+    data = get_gridded_data(config, True, requirements)
     assert data.n_batches == samples_per_member * num_ensemble_members
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
@@ -166,7 +172,7 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
 
-    data = get_data_loader(config, True, requirements)
+    data = get_gridded_data(config, True, requirements)
     assert data.n_batches == n_samples * num_ensemble_members
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
@@ -183,9 +189,28 @@ def test_xarray_loader(tmp_path):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_data_loader(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, True, requirements)  # type: ignore
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
+
+
+def test_xarray_loader_sample_with_replacement(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=3)
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+        sample_with_replacement=10,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], window_timesteps)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+    assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert data._vertical_coordinate.ak.device == fme.get_device()
+    epoch_samples = list(data.loader)
+    assert len(epoch_samples) == 10
 
 
 def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
@@ -216,7 +241,7 @@ def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo", "foo2"], window_timesteps)
-    data = get_data_loader(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, True, requirements)  # type: ignore
     assert "foo" in data.variable_metadata.keys()
     assert "foo2" in data.variable_metadata.keys()
 
@@ -258,7 +283,7 @@ def test_xarray_loader_using_merged_dataset_errors_if_different_time(
         ValueError,
         match="All datasets in a merged dataset must have the same sample start times",
     ):
-        get_data_loader(config, True, requirements)  # type: ignore
+        get_gridded_data(config, True, requirements)  # type: ignore
 
     # subset source2 to have the same time stamps as source1
     config = DataLoaderConfig(
@@ -280,7 +305,7 @@ def test_xarray_loader_using_merged_dataset_errors_if_different_time(
         batch_size=1,
         num_data_workers=0,
     )
-    get_data_loader(config, True, requirements)  # type: ignore
+    get_gridded_data(config, True, requirements)  # type: ignore
 
 
 def test_xarray_loader_hpx(tmp_path):
@@ -301,7 +326,7 @@ def test_xarray_loader_hpx(tmp_path):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_data_loader(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, True, requirements)  # type: ignore
     for batch in data.loader:
         assert batch is not None
         # expect healpix shape
@@ -371,7 +396,6 @@ def test_inference_data_loader(tmp_path):
     assert batch_data.time.sizes["sample"] == batch_size
     assert batch_data.time.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.time.dt.calendar == "proleptic_gregorian"
-    assert data._n_batches == 2
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
     initial_condition = data.initial_condition.as_batch_data()
@@ -405,7 +429,7 @@ def test_data_loader_outputs(tmp_path, calendar):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_data_loader(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, True, requirements)  # type: ignore
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
@@ -505,9 +529,9 @@ def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_err
     requirements = DataRequirements(["foo"], window_timesteps)
     if raises_error:
         with pytest.raises(ValueError):
-            get_data_loader(config, True, requirements)  # type: ignore
+            get_gridded_data(config, True, requirements)  # type: ignore
     else:
-        get_data_loader(config, True, requirements)  # type: ignore
+        get_gridded_data(config, True, requirements)  # type: ignore
 
 
 @pytest.mark.parametrize("n_initial_conditions", [1, 2])
@@ -515,19 +539,19 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     calendar = "proleptic_gregorian"
     total_forward_steps = 5
     forward_steps_in_memory = 2
-    _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10)
+    # forcing dataset starts 2 steps before initial condition time of 1970-01-01
+    _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10, timestep_start=-2)
     config = ForcingDataLoaderConfig(dataset=XarrayDataConfig(data_path=tmp_path))
     window_requirements = DataRequirements(
         names=["foo"],
         n_timesteps=forward_steps_in_memory + 1,
     )
-    time_values = [
-        [cftime.datetime(1970, 1, 1 + 2 * n, calendar=calendar)]
-        for n in range(n_initial_conditions)
-    ]
-    initial_condition = BatchData.new_on_cpu(
-        data={"foo": torch.randn(n_initial_conditions, 1, 1, 1)},
-        time=xr.DataArray(time_values, dims=["sample", "time"]),
+    initial_condition = BatchData.new_for_testing(
+        names=["foo"],
+        n_samples=n_initial_conditions,
+        n_timesteps=1,
+        t_initial=cftime.datetime(1970, 1, 1),
+        calendar=calendar,
     )
     data = get_forcing_data(
         config,
@@ -535,12 +559,14 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
         window_requirements=window_requirements,
         initial_condition=PrognosticState(initial_condition),
     )
-    assert data._n_samples == math.ceil(total_forward_steps / forward_steps_in_memory)
+    assert len(data._loader.dataset) == math.ceil(  # type: ignore
+        total_forward_steps / forward_steps_in_memory
+    )
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
     assert set(batch_data.data.keys()) == {"foo"}
-    assert batch_data.data["foo"].shape[0] == len(time_values)
+    assert batch_data.data["foo"].shape[0] == n_initial_conditions
     assert batch_data.data["foo"].shape[1] == forward_steps_in_memory + 1
     assert list(batch_data.time.dims) == ["sample", "time"]
     xr.testing.assert_allclose(batch_data.time[:, 0], initial_condition.time[:, 0])
@@ -648,6 +674,7 @@ def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
     initial_condition = BatchData.new_on_cpu(
         data={"foo": torch.randn(1, 1, 1, 1), "foo2": torch.randn(1, 1, 1, 1)},
         time=xr.DataArray(time_values, dims=["sample", "time"]),
+        labels=[set()],
     )
     data = get_forcing_data(
         config,
@@ -818,3 +845,124 @@ def test_data_loader_maintains_backward_concat_compatibility(recwarn):
     assert isinstance(data_loader.dataset, ConcatDatasetConfig)
     warning = recwarn.pop(DeprecationWarning)
     assert "Dataset list format is deprecated" in str(warning.message)
+
+
+@pytest.mark.parametrize(
+    (
+        "shuffle",
+        "steps_on_disk",
+        "n_timesteps_requirement",
+        "time_buffer",
+        "expected_start_indices",
+    ),
+    (
+        pytest.param(
+            False,
+            7,
+            2,
+            0,
+            list(range(0, 6)),
+            id="time_buffer=0",
+        ),
+        pytest.param(
+            False,
+            7,
+            2,
+            2,
+            list(range(0, 6)),
+            id="time_buffer=2",
+        ),
+        pytest.param(
+            False,
+            10,
+            2,
+            2,
+            list(range(0, 9)),
+            id="time_buffer=2, steps_on_disk=10",
+        ),
+        pytest.param(
+            False,
+            6,
+            2,
+            2,
+            list(range(0, 3)),
+            id=(
+                "time_buffer=2, steps_on_disk=6 "
+                "(lose some samples due to dropping last 'preloaded' batch)"
+            ),
+        ),
+        pytest.param(
+            False,
+            8,
+            3,
+            2,
+            list(range(0, 6)),
+            id="time_buffer=2, steps_on_disk=10, n_timesteps_requirement=3",
+        ),
+        pytest.param(
+            False,
+            10,
+            3,
+            2,
+            list(range(0, 6)),
+            id=(
+                "time_buffer=2, steps_on_disk=10, n_timesteps_requirement=3 "
+                "(lose some samples due to dropping last 'preloaded' batch)"
+            ),
+        ),
+        pytest.param(
+            True,
+            13,
+            2,
+            2,
+            list(range(0, 12)),
+            id="time_buffer=2, shuffle=True",
+        ),
+    ),
+)
+def test_time_buffer(
+    tmp_path,
+    shuffle,
+    steps_on_disk,
+    n_timesteps_requirement,
+    time_buffer,
+    expected_start_indices,
+):
+    _create_dataset_on_disk(tmp_path, n_times=steps_on_disk)
+    dataset_times = xr.open_dataset(
+        os.path.join(tmp_path, "data.nc"),
+        decode_times=xr.coders.CFDatetimeCoder(use_cftime=True),
+    )["time"].values
+    window_size = time_buffer + 1
+    i_window_starts = [
+        i
+        for i in range(0, len(dataset_times), window_size)
+        if i + window_size <= len(dataset_times) - n_timesteps_requirement + 1
+    ]
+    dataset_window_times = [dataset_times[i : i + window_size] for i in i_window_starts]
+    config = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        batch_size=1,
+        num_data_workers=0,
+        time_buffer=time_buffer,
+    )
+    requirements = DataRequirements(["foo"], n_timesteps_requirement)
+    data = get_gridded_data(config, shuffle, requirements)
+    assert len(data.loader) == len(expected_start_indices)
+    start_times = []
+    for batch in data.loader:
+        start_times.append(batch.time[0, 0].item())
+        assert batch.n_timesteps == n_timesteps_requirement
+    if shuffle:
+        assert set(start_times) == set(dataset_times[expected_start_indices])
+    else:
+        assert start_times == list(dataset_times[expected_start_indices])
+    for i_window_start in i_window_starts:
+        # confirm that a "window's worth" of data is loaded consecutively;
+        # with shuffling we know that it will match one window, but not which one
+        loaded_times = start_times[i_window_start : i_window_start + window_size]
+        window_matches = [
+            set(loaded_times) == set(window_times)
+            for window_times in dataset_window_times
+        ]
+        assert sum(window_matches) == 1

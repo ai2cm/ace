@@ -24,8 +24,17 @@ class StepConfigABC(abc.ABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ) -> "StepABC":
         """
+        Args:
+            dataset_info: Information about the training dataset.
+            init_weights: Function to initialize the weights of the step before
+                wrapping in DistributedDataParallel. This is particularly useful
+                when freezing parameters, as the DistributedDataParallel will
+                otherwise expect frozen weights to have gradients, and will
+                raise an exception.
+
         Returns:
             The state of the stepper.
         """
@@ -131,13 +140,26 @@ class StepSelector(StepConfigABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None] = lambda x: None,
     ) -> "StepABC":
-        return self._step_config_instance.get_step(dataset_info)
+        """
+        Args:
+            dataset_info: Information about the training dataset.
+            init_weights: Function to initialize the weights of the step before
+                wrapping in DistributedDataParallel. This is particularly useful
+                when freezing parameters, as the DistributedDataParallel will
+                otherwise expect frozen weights to have gradients, and will
+                raise an exception.
+
+        Returns:
+            The state of the stepper.
+        """
+        return self._step_config_instance.get_step(dataset_info, init_weights)
 
     @classmethod
     def get_available_types(cls) -> set[str]:
         """This class method is used to expose all available types of Steps."""
-        return set(cls(type="", config={}).registry._types.keys())
+        return set(cls.registry._types.keys())
 
     def get_next_step_forcing_names(self) -> list[str]:
         return self._step_config_instance.get_next_step_forcing_names()
@@ -270,6 +292,18 @@ class StepABC(abc.ABC, nn.Module):
     def ocean_fraction_name(self) -> str | None:
         """
         Name of the ocean fraction variable, if one is available.
+        """
+        pass
+
+    @abc.abstractmethod
+    def prescribe_sst(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        """
+        Prescribe target_data SST onto gen_data according to mask_data.
         """
         pass
 

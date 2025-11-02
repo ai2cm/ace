@@ -1,7 +1,7 @@
 import dataclasses
-from collections.abc import Mapping
+import logging
+from collections.abc import Callable, Mapping
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import xarray as xr
@@ -10,9 +10,9 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.wandb import Image, WandB
+from fme.core.wandb import Image
 
-from ..plotting import get_cmap_limits, plot_imshow
+from ..plotting import plot_paneled_data
 
 
 @dataclasses.dataclass
@@ -20,23 +20,27 @@ class _RawData:
     datum: torch.Tensor
     caption: str
     metadata: VariableMetadata
-    vmin: float | None = None
-    vmax: float | None = None
-    cmap: str | None = None
+    target_datum: torch.Tensor | None = None
+    diverging: bool = False
 
     def get_image(self) -> Image:
         # images are y, x from upper left corner
         # data is time, lat
-        # we want lat on y-axis (increasing upward) and time on x-axis
-        # so transpose and flip along lat axis
-        datum = np.flip(self.datum.transpose(), axis=0)
-        fig = plot_imshow(
-            datum, vmin=self.vmin, vmax=self.vmax, cmap=self.cmap, flip_lat=False
-        )
-        wandb = WandB.get_instance()
-        wandb_image = wandb.Image(fig, caption=self.caption)
-        plt.close(fig)
-        return wandb_image
+        # we want lat on y-axis and time on x-axis
+        datum = self.datum.transpose()
+        if self.target_datum is not None:
+            target_datum = self.target_datum.transpose()
+            return plot_paneled_data(
+                [[datum], [target_datum]],
+                diverging=self.diverging,
+                caption=self.caption,
+            )
+        else:
+            return plot_paneled_data(
+                [[datum]],
+                diverging=self.diverging,
+                caption=self.caption,
+            )
 
 
 class ZonalMeanAggregator:
@@ -53,24 +57,73 @@ class ZonalMeanAggregator:
             "x-axis is time increasing to right, y-axis is latitude increasing upward"
         ),
         "gen": (
-            "{name} zonal-mean generated [{units}], "
+            "{name} zonal-mean; "
+            "(top) generated and (bottom) target [{units}], "
             "x-axis is time increasing to right, y-axis is latitude increasing upward"
         ),
     }
+    _max_matplotlib_size = 2**15  # max number of timesteps before breaking matplotlib
+    _time_dim = 1
 
     def __init__(
         self,
+        zonal_mean: Callable[[torch.Tensor], torch.Tensor],
         n_timesteps: int,
+        zonal_mean_max_size: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         """
         Args:
+            zonal_mean: Function that computes the zonal mean of a tensor.
             n_timesteps: Number of timesteps of inference that will be run.
             variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
+            zonal_mean_max_size: Maximum number of timesteps to log zonal mean images.
+                If zonal_mean_max_size > _max_matplotlib_size, it will be set to
+                _max_matplotlib_size.
         """
-        self._n_timesteps = n_timesteps
+        if zonal_mean_max_size > self._max_matplotlib_size:
+            logging.warning(
+                "Zonal mean images support images with a maximum of "
+                f"{self._max_matplotlib_size} timesteps. "
+                f"Coarsening to {self._max_matplotlib_size} timesteps."
+            )
+            zonal_mean_max_size = self._max_matplotlib_size
+
+        if zonal_mean_max_size > n_timesteps:
+            logging.warning(
+                f"Zonal mean max size {zonal_mean_max_size} is greater than "
+                f"the number of timesteps {n_timesteps}. Setting zonal mean max size "
+                "to the number of timesteps."
+            )
+            zonal_mean_max_size = n_timesteps
+
+        self._max_size = zonal_mean_max_size
+
+        if n_timesteps > self._max_size:
+            # warn users that we are automatically coarsening the time dimension of
+            # zonal mean images to avoid memory issues
+            logging.info(
+                f"Automatic time coarsening is enabled for zonal mean images due to "
+                f"timesteps being greater than {self._max_size}. If you want to "
+                f"override this, set log_zonal_mean_images to a value up to "
+                f"{self._max_matplotlib_size}."
+            )
+            self.time_coarsening_factor = np.ceil(n_timesteps / self._max_size).astype(
+                int
+            )
+            self._n_timesteps = n_timesteps // self.time_coarsening_factor
+
+            logging.info(
+                f"Zonal mean time coarsening factor is  "
+                f"{self.time_coarsening_factor} with image size of {self._n_timesteps}."
+            )
+        else:
+            self.time_coarsening_factor = 1
+            self._n_timesteps = n_timesteps
+
         self._dist = Distributed.get_instance()
+
         if variable_metadata is None:
             self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
@@ -79,8 +132,13 @@ class ZonalMeanAggregator:
         self._target_data: TensorDict | None = None
         self._gen_data: TensorDict | None = None
         self._n_batches = torch.zeros(
-            n_timesteps, dtype=torch.int32, device=get_device()
+            self._n_timesteps, dtype=torch.int32, device=get_device()
         )[None, :, None]  # sample, time, lat
+        self._zonal_mean = zonal_mean
+        self.last_step = 0
+        self.logged_batch_skip = False
+        self._buffer_target: TensorDict | None = None
+        self._buffer_gen: TensorDict | None = None
 
     def record_batch(
         self,
@@ -90,7 +148,6 @@ class ZonalMeanAggregator:
         gen_data_norm: TensorMapping,
         i_time_start: int,
     ):
-        lon_dim = 3
         if self._target_data is None:
             self._target_data = self._initialize_zeros_zonal_mean_from_batch(
                 target_data, self._n_timesteps
@@ -101,14 +158,71 @@ class ZonalMeanAggregator:
             )
 
         window_steps = next(iter(target_data.values())).shape[1]
-        time_slice = slice(i_time_start, i_time_start + window_steps)
-        # we can average along longitude without area weighting
+
+        if window_steps < self.time_coarsening_factor:
+            # skip this batch if its not possible to coarsen
+            if not self.logged_batch_skip:
+                logging.info(
+                    f"Skipping batch with {window_steps} steps because it is less than "
+                    f"the zonal mean time coarsening factor of "
+                    f"{self.time_coarsening_factor}."
+                )
+                self.logged_batch_skip = True
+            return
+
+        # if we have a buffer that means we didnt record the last batch
+        if self._buffer_gen:
+            start_idx = self.last_step
+        else:
+            start_idx = i_time_start // self.time_coarsening_factor
+
+        time_slice = slice(
+            start_idx,
+            (i_time_start + window_steps) // self.time_coarsening_factor,
+        )
+
+        self.last_step = (i_time_start + window_steps) // self.time_coarsening_factor
+
+        buffer_size = (
+            i_time_start + window_steps
+        ) - self.last_step * self.time_coarsening_factor
+
+        buffer = {}
         for name, tensor in target_data.items():
             if name in self._target_data:
-                self._target_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
+                if self._buffer_target:
+                    tensor = torch.cat(
+                        [
+                            self._buffer_target[name],
+                            tensor[:, 0 : window_steps - buffer_size, :],
+                        ],
+                        dim=self._time_dim,
+                    )
+                self._target_data[name][:, time_slice, :] += self._coarsen_tensor(
+                    self._zonal_mean(tensor)
+                )
+                if buffer_size > 0:
+                    buffer[name] = tensor[:, -buffer_size:, :]
+        self._buffer_target = buffer
+
+        buffer = {}
         for name, tensor in gen_data.items():
             if name in self._gen_data:
-                self._gen_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
+                if self._buffer_gen:
+                    tensor = torch.cat(
+                        [
+                            self._buffer_gen[name],
+                            tensor[:, 0 : window_steps - buffer_size, :],
+                        ],
+                        dim=self._time_dim,
+                    )
+                self._gen_data[name][:, time_slice, :] += self._coarsen_tensor(
+                    self._zonal_mean(tensor)
+                )
+                if buffer_size > 0:
+                    buffer[name] = tensor[:, -buffer_size:, :]
+        self._buffer_gen = buffer
+
         self._n_batches[:, time_slice, :] += 1
 
     def _get_data(self) -> dict[str, _RawData]:
@@ -124,33 +238,29 @@ class ZonalMeanAggregator:
                 .cpu()
                 .numpy()
             )
-            error = (
-                self._dist.reduce_mean(
-                    (self._gen_data[name] - self._target_data[name]) / self._n_batches
-                )
+            target = (
+                self._dist.reduce_mean(self._target_data[name] / self._n_batches)
                 .mean(sample_dim)
                 .cpu()
                 .numpy()
             )
+            error = gen - target
 
             metadata = self._variable_metadata.get(
                 name, VariableMetadata("unknown_units", name)
             )
-            vmin, vmax = get_cmap_limits(gen)
             data[f"gen/{name}"] = _RawData(
                 datum=gen,
-                caption=self._get_caption("gen", name, vmin, vmax),
-                # generated data is not considered to have units
-                metadata=VariableMetadata(units="", long_name=metadata.long_name),
+                target_datum=target,
+                caption=self._get_caption("gen", name),
+                metadata=metadata,
+                diverging=False,
             )
-            vmin, vmax = get_cmap_limits(error, diverging=True)
             data[f"error/{name}"] = _RawData(
                 datum=error,
-                caption=self._get_caption("error", name, vmin, vmax),
+                caption=self._get_caption("error", name),
                 metadata=metadata,
-                vmin=vmin,
-                vmax=vmax,
-                cmap="RdBu_r",
+                diverging=True,
             )
 
         return data
@@ -173,15 +283,22 @@ class ZonalMeanAggregator:
         ret = xr.Dataset(data)
         return ret
 
-    def _get_caption(self, key: str, varname: str, vmin: float, vmax: float) -> str:
+    def _get_caption(self, key: str, varname: str) -> str:
         if varname in self._variable_metadata:
             caption_name = self._variable_metadata[varname].long_name
             units = self._variable_metadata[varname].units
         else:
             caption_name, units = varname, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)
-        caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
         return caption
+
+    def _coarsen_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Coarsen tensor along a given axis by a given factor."""
+        return tensor.unfold(
+            dimension=self._time_dim,
+            size=self.time_coarsening_factor,
+            step=self.time_coarsening_factor,
+        ).mean(dim=-1)
 
     @staticmethod
     def _initialize_zeros_zonal_mean_from_batch(

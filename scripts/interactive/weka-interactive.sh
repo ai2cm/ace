@@ -16,7 +16,7 @@ if [ "$image_override" = "default" ]; then
 elif [ ! -z "$image_override" ]; then
     image_flag="--image beaker://${image_override}"
 else
-    image_flag="--image beaker://jeremym/fme-deps-only-5a6649b8"
+    image_flag="--image beaker://andrep/fme-deps-only-1fe731217"
 fi
 
 beaker session create --remote --bare --cluster ${cluster_name} \

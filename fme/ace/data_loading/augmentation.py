@@ -93,7 +93,10 @@ class RotateModifier(BatchModifierABC):
                 f"{batch.horizontal_dims}"
             )
         example_value = next(iter(batch.data.values()))
-        apply = torch.rand(example_value.shape[0]) < self.rotate_probability
+        apply = (
+            torch.rand(example_value.shape[0]).to(example_value.device)
+            < self.rotate_probability
+        )
         while len(apply.shape) < len(example_value.shape):
             apply = apply.unsqueeze(-1)
         new_data = {}
@@ -102,7 +105,12 @@ class RotateModifier(BatchModifierABC):
             if self._pattern.match(name):
                 new_value = -1 * new_value
             new_data[name] = torch.where(apply, new_value, value)
-        return BatchData(new_data, batch.time, batch.horizontal_dims)
+        return BatchData(
+            data=new_data,
+            time=batch.time,
+            horizontal_dims=batch.horizontal_dims,
+            labels=batch.labels,
+        )
 
 
 class NullModifier(BatchModifierABC):

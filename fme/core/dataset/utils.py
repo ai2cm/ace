@@ -1,6 +1,8 @@
 import asyncio
+import dataclasses
 import datetime
 from collections.abc import Hashable, MutableMapping, Sequence
+from typing import Literal
 
 import numpy as np
 import torch
@@ -12,9 +14,6 @@ from fme.core.coordinates import (
     HorizontalCoordinates,
     LatLonCoordinates,
 )
-from fme.core.dataset.config import FillNaNsConfig
-from fme.core.mask_provider import NullMaskProvider
-from fme.core.masking import HasGetMaskTensorFor
 
 SLICE_NONE = slice(None)
 
@@ -126,6 +125,20 @@ def _load_all_variables(
     return ds[variables].compute()
 
 
+@dataclasses.dataclass
+class FillNaNsConfig:
+    """
+    Configuration to fill NaNs with a constant value or others.
+
+    Parameters:
+        method: Type of fill operation. Currently only 'constant' is supported.
+        value: Value to fill NaNs with.
+    """
+
+    method: Literal["constant"] = "constant"
+    value: float = 0.0
+
+
 def load_series_data_zarr_async(
     idx: int,
     n_steps: int,
@@ -179,7 +192,6 @@ def get_horizontal_coordinates(
     ds: xr.Dataset,
     spatial_dimensions: str,
     dtype: torch.dtype | None,
-    mask_provider: HasGetMaskTensorFor = NullMaskProvider,
 ) -> tuple[HorizontalCoordinates, list[str]]:
     """Return the horizontal coordinate class and dimension names."""
     min_ndim = 3 if spatial_dimensions == "latlon" else 4
@@ -193,7 +205,6 @@ def get_horizontal_coordinates(
         coords = LatLonCoordinates(
             lon=torch.tensor(ds[lon_name].values, dtype=dtype),
             lat=torch.tensor(ds[lat_name].values, dtype=dtype),
-            mask_provider=mask_provider,
         )
         return coords, dims[-2:]
     elif spatial_dimensions == "healpix":

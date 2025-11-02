@@ -102,7 +102,7 @@ def pytest_runtest_call(item):
 
 @pytest.fixture(autouse=True)
 def mock_gc_collect(monkeypatch):
-    def mock_collect():
+    def mock_collect(*args, **kwargs):
         pass
 
     monkeypatch.setattr(gc, "collect", mock_collect)

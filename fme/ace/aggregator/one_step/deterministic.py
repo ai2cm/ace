@@ -1,14 +1,13 @@
 import dataclasses
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
 import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.coordinates import HorizontalCoordinates
-from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -54,17 +53,17 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
 
     def __init__(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
+        dataset_info: DatasetInfo,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         """
         Args:
-            horizontal_coordinates: Horizontal coordinates of the data.
+            dataset_info: Dataset coordinates and metadata.
             save_diagnostics: Whether to save diagnostics.
             output_dir: Directory to write diagnostics to.
             variable_metadata: Metadata for each variable.
@@ -72,28 +71,38 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
                 used in loss computation.
             log_snapshots: Whether to include snapshots in diagnostics.
             log_mean_maps: Whether to include mean maps in diagnostics.
+            channel_mean_names: Names of variables whose RMSE will be averaged. If
+                not provided, all available variables will be used.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
         self._output_dir = output_dir
         self._save_diagnostics = save_diagnostics
+        horizontal_coordinates = dataset_info.horizontal_coordinates
         self._coords = horizontal_coordinates.coords
         self._aggregators: dict[str, _Aggregator] = {
-            "mean": MeanAggregator(horizontal_coordinates.gridded_operations),
+            "mean": MeanAggregator(dataset_info.gridded_operations),
+            "mean_norm": MeanAggregator(
+                dataset_info.gridded_operations,
+                target="norm",
+                channel_mean_names=channel_mean_names,
+            ),
         }
-        if horizontal_coordinates.area_weights is not None:
+        try:
             self._aggregators["power_spectrum"] = SpectrumAggregator(
-                nlat=horizontal_coordinates.area_weights.shape[-2],
-                nlon=horizontal_coordinates.area_weights.shape[-1],
-                grid=horizontal_coordinates.grid,
+                dataset_info.gridded_operations,
+            )
+        except NotImplementedError:
+            logging.warning(
+                "Spectrum aggregator not implemented for this grid type, omitting."
             )
         if log_snapshots:
             self._aggregators["snapshot"] = SnapshotAggregator(
-                horizontal_coordinates.dims, variable_metadata
+                horizontal_coordinates.dims, dataset_info.variable_metadata
             )
         if log_mean_maps:
             self._aggregators["mean_map"] = MapAggregator(
-                horizontal_coordinates.dims, variable_metadata
+                horizontal_coordinates.dims, dataset_info.variable_metadata
             )
 
         self._loss_scaling = loss_scaling or {}
@@ -132,6 +141,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             logging.info(f"Getting logs for {agg_label} aggregator")
             for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
                 logs[f"{label}/{k}"] = v
+        logs.pop(f"{label}/mean_norm/loss")  # remove duplicate of mean/loss
         logging.info(f"Inserting loss-scaled MSE componenets into logs")
         logs.update(
             self._get_loss_scaled_mse_components(

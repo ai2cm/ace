@@ -7,7 +7,7 @@ from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
-from fme.core.device import get_device, using_gpu
+from fme.core.device import get_device, using_gpu, using_srun
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +63,10 @@ class Distributed:
             self._distributed = self._init_distributed()
         else:
             self._distributed = False
+        self._seed = 0
 
     def _init_distributed(self):
-        if "RANK" in os.environ:  # we were executed with torchrun
+        if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
             if using_gpu():
                 torch.distributed.init_process_group(
                     backend="nccl", init_method="env://"
@@ -78,7 +79,26 @@ class Distributed:
             self.local_rank = int(os.environ["LOCAL_RANK"])
             self.rank = torch.distributed.get_rank()
             if using_gpu():
-                torch.cuda.set_device(self.local_rank)
+                self._device_id = self.local_rank
+                torch.cuda.set_device(self._device_id)
+            distributed = True
+        elif using_srun():  # executing with srun
+            shared_dist_file = os.environ["SRUN_DIST_FILE_PATH"]
+            self.rank = int(os.environ["SLURM_PROCID"])
+            self.world_size = int(os.environ["SLURM_NTASKS"])
+            self.local_rank = int(os.environ["SLURM_LOCALID"])
+            backend = "nccl" if using_gpu() else "gloo"
+            torch.distributed.init_process_group(
+                backend=backend,
+                init_method=f"file://{shared_dist_file}",
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+            if using_gpu():
+                # this assumes one GPU per process in the SLURM setting
+                # --gpus-per-task=1 --gpu-bind=closest
+                self._device_id = 0
+                torch.cuda.set_device(self._device_id)
             distributed = True
         else:
             self.world_size = 1
@@ -86,6 +106,21 @@ class Distributed:
             self.local_rank = 0
             distributed = False
         return distributed
+
+    def get_sampler(
+        self,
+        dataset: torch.utils.data.Dataset,
+        shuffle: bool,
+        drop_last: bool = False,
+    ) -> torch.utils.data.Sampler:
+        return torch.utils.data.DistributedSampler(
+            dataset,
+            shuffle=shuffle,
+            num_replicas=self.world_size,
+            rank=self.rank,
+            seed=self._seed,
+            drop_last=drop_last,
+        )
 
     def local_batch_size(self, batch_size: int) -> int:
         """
@@ -206,8 +241,8 @@ class Distributed:
         """
         if self.is_distributed() and any(p.requires_grad for p in module.parameters()):
             if using_gpu():
-                device_ids = [self.local_rank]
-                output_device = [self.local_rank]
+                device_ids = [self._device_id]
+                output_device = [self._device_id]
             else:
                 device_ids = None
                 output_device = None
@@ -227,6 +262,24 @@ class Distributed:
             logger.debug(f"Barrier on rank {self.rank}")
             torch.distributed.barrier()
 
+    def set_seed(self, seed: int):
+        """
+        Set the random seed.
+        """
+        self._seed = seed
+
+    def get_seed(self) -> int:
+        """
+        Get the random seed.
+        """
+        return self._seed
+
+    def shutdown(self):
+        self.barrier()
+        if self._distributed:
+            logger.debug(f"Shutting down rank {self.rank}")
+            torch.distributed.destroy_process_group()
+
 
 singleton: Distributed | None = None
 
@@ -240,10 +293,11 @@ def gather_irregular(
 ) -> list[torch.Tensor] | None:
     """
     Gather a tensor from all processes to the root process. The rank tensors
-    may have diferent dimension lengths, but must have the same number of dimensions.
-    temporarily padded with `fill_value` where its dimension length is smaller than the
-    maxmimum dimension length, but the padding is removed prior to returning the
-    gathered tensors.
+    may have different dimension lengths, but must have the same number of dimensions.
+
+    To accomplish this, the tensor is temporarily padded with `fill_value` where
+    its dimension length is smaller than the maximum dimension length for the purpose of
+    communication, and the padding is removed prior to returning the gathered tensors.
 
     Args:
         tensor: The tensor to gather.

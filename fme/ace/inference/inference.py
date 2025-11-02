@@ -91,7 +91,7 @@ class InitialConditionConfig:
 
 
 def get_initial_condition(
-    ds: xr.Dataset, prognostic_names: Sequence[str]
+    ds: xr.Dataset, prognostic_names: Sequence[str], labels: list[str]
 ) -> PrognosticState:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
@@ -101,6 +101,8 @@ def get_initial_condition(
             as variables, and they must each have shape (n_samples, n_lat, n_lon).
             Dataset must also include a 'time' variable with length n_samples.
         prognostic_names: Names of prognostic variables to extract from the dataset.
+        labels: Labels for the initial conditions. If provided, these labels will be
+            provided to the stepper for every initial condition.
 
     Returns:
         The initial condition and the time coordinate.
@@ -131,6 +133,7 @@ def get_initial_condition(
         data=initial_condition,
         time=initial_times,
         horizontal_dims=["lat", "lon"],
+        labels=[set(labels)] * n_samples,
     )
     return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
 
@@ -158,6 +161,8 @@ class InferenceConfig:
             be used with caution, as it may allow the stepper to make scientifically
             invalid predictions, but it can allow running inference with incorrectly
             formatted or missing grid information.
+        labels: Dataset labels to use for inference. If provided, these labels will be
+            provided to the stepper for every initial condition.
     """
 
     experiment_dir: str
@@ -175,6 +180,7 @@ class InferenceConfig:
     )
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
+    labels: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -183,6 +189,14 @@ class InferenceConfig:
                 self.forward_steps_in_memory,
                 self.n_forward_steps,
             )
+        if self.data_writer.files is not None:
+            for file_config in self.data_writer.files:
+                if file_config.time_coarsen is not None:
+                    validate_time_coarsen_config(
+                        file_config.time_coarsen,
+                        self.forward_steps_in_memory,
+                        self.n_forward_steps,
+                    )
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -234,81 +248,82 @@ def main(
         config=dacite.Config(strict=True),
     )
     prepare_directory(config.experiment_dir, config_data)
-    if segments is None:
-        with GlobalTimer():
-            return run_inference_from_config(config)
-    else:
-        config.configure_logging(log_filename="inference_out.log")
-        run_segmented_inference(config, segments)
+    with torch.no_grad():
+        if segments is None:
+            with GlobalTimer():
+                return run_inference_from_config(config)
+        else:
+            config.configure_logging(log_filename="inference_out.log")
+            run_segmented_inference(config, segments)
 
 
 def run_inference_from_config(config: InferenceConfig):
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
-    timer.start("initialization")
+    with timer.context("initialization"):
+        if not os.path.isdir(config.experiment_dir):
+            os.makedirs(config.experiment_dir, exist_ok=True)
+        config.configure_logging(log_filename="inference_out.log")
+        env_vars = logging_utils.retrieve_env_vars()
+        beaker_url = logging_utils.log_beaker_url()
+        config.configure_wandb(env_vars=env_vars, notes=beaker_url)
 
-    if not os.path.isdir(config.experiment_dir):
-        os.makedirs(config.experiment_dir, exist_ok=True)
-    config.configure_logging(log_filename="inference_out.log")
-    env_vars = logging_utils.retrieve_env_vars()
-    beaker_url = logging_utils.log_beaker_url()
-    config.configure_wandb(env_vars=env_vars, notes=beaker_url)
+        if fme.using_gpu():
+            torch.backends.cudnn.benchmark = True
 
-    if fme.using_gpu():
-        torch.backends.cudnn.benchmark = True
+        logging_utils.log_versions()
+        logging.info(f"Current device is {fme.get_device()}")
 
-    logging_utils.log_versions()
-    logging.info(f"Current device is {fme.get_device()}")
+        stepper_config = config.load_stepper_config()
+        data_requirements = stepper_config.get_forcing_window_data_requirements(
+            n_forward_steps=config.forward_steps_in_memory
+        )
+        logging.info("Loading initial condition data")
+        initial_condition = get_initial_condition(
+            config.initial_condition.get_dataset(),
+            stepper_config.prognostic_names,
+            config.labels,
+        )
+        stepper = config.load_stepper()
+        stepper.set_eval()
+        logging.info("Initializing forcing data loader")
+        data = get_forcing_data(
+            config=config.forcing_loader,
+            total_forward_steps=config.n_forward_steps,
+            window_requirements=data_requirements,
+            initial_condition=initial_condition,
+            surface_temperature_name=stepper.surface_temperature_name,
+            ocean_fraction_name=stepper.ocean_fraction_name,
+            label_override=config.labels,
+        )
+        if not config.allow_incompatible_dataset:
+            try:
+                stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
+            except IncompatibleDatasetInfo as err:
+                raise IncompatibleDatasetInfo(
+                    "Inference dataset is not compatible with dataset used for stepper "
+                    "training. Set allow_incompatible_dataset to True to ignore this "
+                    f"error. The incompatiblity found was: {str(err)}"
+                ) from err
 
-    stepper_config = config.load_stepper_config()
-    data_requirements = stepper_config.get_forcing_window_data_requirements(
-        n_forward_steps=config.forward_steps_in_memory
-    )
-    logging.info("Loading initial condition data")
-    initial_condition = get_initial_condition(
-        config.initial_condition.get_dataset(), stepper_config.prognostic_names
-    )
-    stepper = config.load_stepper()
-    stepper.set_eval()
-    logging.info("Initializing forcing data loader")
-    data = get_forcing_data(
-        config=config.forcing_loader,
-        total_forward_steps=config.n_forward_steps,
-        window_requirements=data_requirements,
-        initial_condition=initial_condition,
-        surface_temperature_name=stepper.surface_temperature_name,
-        ocean_fraction_name=stepper.ocean_fraction_name,
-    )
-    if not config.allow_incompatible_dataset:
-        try:
-            stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
-        except IncompatibleDatasetInfo as err:
-            raise IncompatibleDatasetInfo(
-                "Inference dataset is not compatible with dataset "
-                "used for stepper training"
-            ) from err
+        variable_metadata = resolve_variable_metadata(
+            dataset_metadata=data.variable_metadata,
+            stepper_metadata=stepper.training_variable_metadata,
+            stepper_all_names=stepper_config.all_names,
+        )
+        dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
+        aggregator = config.aggregator.build(
+            dataset_info=dataset_info,
+            n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
+            output_dir=config.experiment_dir,
+        )
 
-    variable_metadata = resolve_variable_metadata(
-        dataset_metadata=data.variable_metadata,
-        stepper_metadata=stepper.training_variable_metadata,
-        stepper_all_names=stepper_config.all_names,
-    )
-    aggregator = config.aggregator.build(
-        horizontal_coordinates=data.horizontal_coordinates,
-        n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
-        timestep=data.timestep,
-        variable_metadata=variable_metadata,
-        output_dir=config.experiment_dir,
-    )
-
-    writer = config.get_data_writer(
-        n_initial_conditions=data.n_initial_conditions,
-        timestep=data.timestep,
-        coords=data.coords,
-        variable_metadata=variable_metadata,
-    )
-
-    timer.stop()
+        writer = config.get_data_writer(
+            n_initial_conditions=data.n_initial_conditions,
+            timestep=data.timestep,
+            coords=data.coords,
+            variable_metadata=variable_metadata,
+        )
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")
     run_inference(
@@ -319,12 +334,11 @@ def run_inference_from_config(config: InferenceConfig):
         record_logs=record_logs,
     )
 
-    timer.start("final_writer_flush")
-    logging.info("Starting final flush of data writer")
-    writer.flush()
-    logging.info("Writing reduced metrics to disk in netcdf format.")
-    aggregator.flush_diagnostics()
-    timer.stop()
+    with timer.context("final_writer_flush"):
+        logging.info("Starting final flush of data writer")
+        writer.finalize()
+        logging.info("Writing reduced metrics to disk in netcdf format.")
+        aggregator.flush_diagnostics()
 
     timer.stop_outer("inference")
     total_steps = config.n_forward_steps * data.n_initial_conditions

@@ -36,9 +36,13 @@ def add_ensemble_dim(d: TensorMapping, repeats: int = 1) -> EnsembleTensorDict:
     Returns:
         The tensor dict with an explicit ensemble dimension.
     """
+    if repeats == 1:
+        return EnsembleTensorDict({k: v.unsqueeze(1) for k, v in d.items()})
     return EnsembleTensorDict(
         {
-            k: v[:, None, ...].repeat(1, repeats, *([1] * (v.ndim - 1)))
+            k: v.unsqueeze(1).expand(
+                -1, repeats, *([-1] * (v.ndim - 1))
+            )  # view, no copy
             for k, v in d.items()
         }
     )
@@ -66,7 +70,12 @@ def fold_sized_ensemble_dim(d: EnsembleTensorDict, n_ensemble: int) -> TensorDic
         return d  # empty data
     if input_n_ensemble == 1 and n_ensemble != 1:
         d = EnsembleTensorDict(
-            {k: v.repeat(1, n_ensemble, *([1] * (v.ndim - 2))) for k, v in d.items()}
+            {
+                k: v.expand(
+                    -1, n_ensemble, *([-1] * (v.ndim - 2))
+                )  # view instead of repeat
+                for k, v in d.items()
+            }
         )
     elif input_n_ensemble != n_ensemble:
         raise ValueError(
@@ -117,7 +126,10 @@ def repeat_interleave_batch_dim(data: TensorMapping, repeats: int) -> TensorDict
     """
     if repeats == 1:
         return dict(data)  # no-op
-    return {k: v.repeat_interleave(repeats, dim=0) for k, v in data.items()}
+    return {
+        k: v.unsqueeze(1).expand(-1, repeats, *v.shape[1:]).reshape(-1, *v.shape[1:])
+        for k, v in data.items()  # view-only, no copy
+    }
 
 
 def unfold_ensemble_dim(d: TensorDict, n_ensemble: int) -> EnsembleTensorDict:

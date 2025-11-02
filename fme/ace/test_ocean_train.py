@@ -160,6 +160,7 @@ stepper:
           sea_ice_fraction_correction:
             sea_ice_fraction_name: sea_ice_fraction
             land_fraction_name: land_fraction
+          ocean_heat_content_correction: true
 inference:
   aggregator:
     monthly_reference_data: {monthly_data_filename}
@@ -183,7 +184,7 @@ checkpoint_path: {results_dir}/training_checkpoints/best_ckpt.tar
 data_writer:
   save_prediction_files: true
 aggregator:
-  log_video: true
+  log_video: false
 logging:
   log_to_screen: true
   log_to_wandb: {log_to_wandb}
@@ -289,6 +290,9 @@ def _setup(
         "thetao_0",
         "thetao_1",
         "sst",
+        "hfds",
+        "hfgeou",
+        "sea_surface_fraction",
         "sea_ice_fraction",
         "land_fraction",
     ]

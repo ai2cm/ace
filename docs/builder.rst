@@ -11,6 +11,7 @@ The Builder Pattern is a design pattern that lets user configuration change the 
 Those objects are then used by the code, without that code ever knowing about or handling user configuration.
 
 At its core, the builder pattern contains two components:
+
 - A class that represents the configuration, called the Config, which has a build method returning a built instance.
 - A class built by the configuration, called the Product or the "instance".
 
@@ -102,6 +103,7 @@ The result is a user-configurable instance we can use to optimize model weights.
         amsgrad: False
         betas: [0.9, 0.999]
         capturable: False
+        decoupled_weight_decay: False
         differentiable: False
         eps: 1e-08
         foreach: None

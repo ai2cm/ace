@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 import torch
 import xarray as xr
@@ -6,15 +7,23 @@ from fme.core import get_device, metrics
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
+from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatchData
 
 from .. import metrics_and_maths
-from ..datasets import BatchData, BatchedLatLonCoordinates, PairedBatchData
 from ..models import ModelOutputs
 from .generation import GenerationAggregator
-from .main import Mean, MeanComparison, MeanMapAggregator, SnapshotAggregator
+from .main import (
+    Mean,
+    MeanComparison,
+    MeanMapAggregator,
+    SnapshotAggregator,
+    _get_spectrum_metrics,
+)
+from .no_target import NoTargetAggregator, TimeSeriesAggregator
 from .shape_helpers import (
     _check_all_datasets_compatible_sample_dim,
     _check_batch_dims_for_recording,
+    upsample_tensor,
 )
 
 
@@ -136,6 +145,35 @@ def test_snapshot_runs():
     snapshot._get()
 
 
+@pytest.mark.parametrize("batch_size", (1, 8))
+def test_time_series_aggregator(batch_size):
+    n_batches = 3
+    n_samples, height, width = 3, 4, 5
+    downscale_factor = 2
+    aggregator = TimeSeriesAggregator()
+    for n in range(n_batches):
+        data = {
+            "x": torch.rand(
+                batch_size,
+                n_samples,
+                height * downscale_factor,
+                width * downscale_factor,
+            ),
+            "y": torch.rand(
+                batch_size,
+                n_samples,
+                height * downscale_factor,
+                width * downscale_factor,
+            ),
+        }
+        times = xr.DataArray(list(range(n * batch_size, (n + 1) * batch_size)))
+        aggregator.record_batch(prediction=data, coarse=data, time=times)
+    ds = aggregator.get_dataset()
+    assert set(ds.dims) == {"time", "generated_sample"}
+    assert len(ds.time) == n_batches * batch_size
+    assert len(ds.generated_sample) == n_samples
+
+
 @pytest.mark.parametrize("n_steps", (1, 2))
 def test_map_aggregator(n_steps: int):
     batch_size, height, width = 3, 4, 5
@@ -226,6 +264,13 @@ def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
         aggregator.get_wandb(prefix="test")
         aggregator.get_dataset()
 
+        no_target_aggregator = NoTargetAggregator(downscale_factor=downscale_factor)
+        no_target_aggregator.record_batch(
+            prediction=prediction, coarse=coarse, time=batch.fine.time
+        )
+        no_target_aggregator.get_wandb(prefix="test_no_target")
+        no_target_aggregator.get_dataset()
+
 
 @pytest.mark.parametrize("valid_shape", [(2, 4, 8), (2, 3, 4, 8)])
 def test_check_batch_dims_valid_cases(valid_shape):
@@ -297,3 +342,21 @@ def test_check_all_datasets_compatible_sample_dim():
 
     with pytest.raises(ValueError):
         _check_all_datasets_compatible_sample_dim([prediction, invalid_dims])
+
+
+def test__get_spectrum_metrics():
+    gen_spectrum = {"x": np.array([0, 1, 2, 3, 4])}
+    target_spectrum = {"x": np.array([0, 2, 4, 1, 2])}
+    spectrum_metrics = _get_spectrum_metrics(
+        gen_spectrum,
+        target_spectrum,
+    )
+    assert spectrum_metrics["positive_norm_bias/x"] == 0.6
+    assert spectrum_metrics["negative_norm_bias/x"] == -0.2
+    assert spectrum_metrics["mean_abs_norm_bias/x"] == 0.8
+
+
+def test_upsample_tensor():
+    t = torch.tensor([[1, 2], [3, 4]])
+    expected = torch.tensor([[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 4, 4], [3, 3, 4, 4]])
+    assert torch.equal(expected, upsample_tensor(t, 2))

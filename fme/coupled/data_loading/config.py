@@ -1,7 +1,8 @@
 import dataclasses
 from collections.abc import Sequence
 
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
 
@@ -13,11 +14,31 @@ class CoupledDatasetConfig:
         atmosphere: Configuration for the atmosphere dataset.
     """
 
-    ocean: XarrayDataConfig
-    atmosphere: XarrayDataConfig
+    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
 
     @property
-    def data_configs(self) -> Sequence[XarrayDataConfig]:
+    def data_configs(
+        self,
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+        return [self.ocean, self.atmosphere]
+
+
+@dataclasses.dataclass
+class CoupledDatasetWithOptionalOceanConfig:
+    """
+    Parameters:
+        ocean: Optional configuration for the ocean dataset.
+        atmosphere: Configuration for the atmosphere dataset.
+    """
+
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
+    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
+
+    @property
+    def data_configs(
+        self,
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig | None]:
         return [self.ocean, self.atmosphere]
 
 
@@ -50,9 +71,10 @@ class CoupledDataLoaderConfig:
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
         self._zarr_engine_used = any(
-            ds.engine == "zarr"
+            ds.zarr_engine_used
             for ds_coupled in self.dataset
             for ds in ds_coupled.data_configs
+            if ds is not None
         )
 
     @property

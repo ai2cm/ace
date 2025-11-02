@@ -1,8 +1,7 @@
 import dataclasses
 import logging
 import os
-from collections.abc import Callable, Mapping, Sequence
-from datetime import timedelta
+from collections.abc import Callable, Sequence
 
 import dacite
 import torch
@@ -11,12 +10,10 @@ import xarray as xr
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import HorizontalCoordinates
-from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.aggregator import (
     InferenceEvaluatorAggregatorConfig,
@@ -27,6 +24,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
 
@@ -37,17 +35,12 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     logging.info("Initializing validation data loader")
     validation_data = builder.get_validation_data()
     logging.info("Initializing inline inference data loader")
+    dataset_info = train_data.dataset_info
     inference_data = builder.get_evaluation_inference_data()
 
-    batch = next(iter(train_data.loader))
-    img_shape = next(iter(batch.ocean_data.data.values())).shape[-2:]
+    variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
     logging.info("Starting model initialization")
-    stepper = builder.get_stepper(
-        img_shape=img_shape,
-        gridded_operations=train_data.gridded_operations,
-        vertical_coordinate=train_data.vertical_coordinate,
-        timestep=train_data.timestep,
-    )
+    stepper = builder.get_stepper(dataset_info)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
     batch = next(iter(inference_data.loader))
@@ -59,10 +52,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     )
     aggregator_builder = CoupledAggregatorBuilder(
         inference_config=config.inference_aggregator,
-        gridded_operations=train_data.gridded_operations,
-        horizontal_coordinates=train_data.horizontal_coordinates,
-        ocean_timestep=builder.ocean_timestep,
-        atmosphere_timestep=builder.atmosphere_timestep,
+        dataset_info=dataset_info.update_variable_metadata(variable_metadata),
         initial_inference_times=initial_inference_times,
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
@@ -70,7 +60,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
         ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
         atmosphere_loss_scaling=stepper.atmosphere.effective_loss_scaling,
-        variable_metadata=train_data.variable_metadata,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
@@ -93,10 +82,7 @@ class CoupledAggregatorBuilder(
     def __init__(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
-        gridded_operations: GriddedOperations,
-        horizontal_coordinates: HorizontalCoordinates,
-        ocean_timestep: timedelta,
-        atmosphere_timestep: timedelta,
+        dataset_info: CoupledDatasetInfo,
         initial_inference_times: xr.DataArray,
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
@@ -105,23 +91,22 @@ class CoupledAggregatorBuilder(
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         ocean_loss_scaling: TensorMapping | None = None,
         atmosphere_loss_scaling: TensorMapping | None = None,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        ocean_channel_mean_names: Sequence[str] | None = None,
+        atmosphere_channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
-        self.gridded_operations = gridded_operations
-        self.horizontal_coordinates = horizontal_coordinates
-        self.ocean_timestep = ocean_timestep
-        self.atmosphere_timestep = atmosphere_timestep
+        self.dataset_info = dataset_info
         self.initial_inference_times = initial_inference_times
         self.n_timesteps_ocean = n_timesteps_ocean
         self.n_timesteps_atmosphere = n_timesteps_atmosphere
         self.output_dir = output_dir
-        self.variable_metadata = variable_metadata
         self.ocean_normalize = ocean_normalize
         self.atmosphere_normalize = atmosphere_normalize
         self.ocean_loss_scaling = ocean_loss_scaling
         self.atmosphere_loss_scaling = atmosphere_loss_scaling
+        self.ocean_channel_mean_names = ocean_channel_mean_names
+        self.atmosphere_channel_mean_names = atmosphere_channel_mean_names
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
@@ -129,27 +114,27 @@ class CoupledAggregatorBuilder(
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
-            horizontal_coordinates=self.horizontal_coordinates,
-            variable_metadata=self.variable_metadata,
-            ocean_loss_scaling=self.ocean_loss_scaling,
-            atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+            dataset_info=self.dataset_info,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
+            ocean_loss_scaling=self.ocean_loss_scaling,
+            atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+            ocean_channel_mean_names=self.ocean_channel_mean_names,
+            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )
 
     def get_inference_aggregator(self):
         return self.inference_config.build(
-            horizontal_coordinates=self.horizontal_coordinates,
-            ocean_timestep=self.ocean_timestep,
-            atmosphere_timestep=self.atmosphere_timestep,
+            dataset_info=self.dataset_info,
             n_timesteps_ocean=self.n_timesteps_ocean,
             n_timesteps_atmosphere=self.n_timesteps_atmosphere,
             initial_time=self.initial_inference_times,
             ocean_normalize=self.ocean_normalize,
             atmosphere_normalize=self.atmosphere_normalize,
-            variable_metadata=self.variable_metadata,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "inference"),
+            ocean_channel_mean_names=self.ocean_channel_mean_names,
+            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )
 
 
@@ -167,9 +152,17 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
     config.logging.configure_wandb(
         config=config_as_dict, env_vars=env_vars, notes=beaker_url
     )
+    if config.resume_results is not None:
+        logging.info(
+            f"Resuming training from results in {config.resume_results.existing_dir}"
+        )
+        config.resume_results.verify_wandb_resumption(config.experiment_dir)
     trainer = build_trainer(builders, config)
-    trainer.train()
-    logging.info(f"DONE ---- rank {dist.rank}")
+    try:
+        trainer.train()
+        logging.info(f"DONE ---- rank {dist.rank}")
+    finally:
+        dist.shutdown()
 
 
 def run_train_from_config(config: TrainConfig):
@@ -183,5 +176,8 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         data=data,
         config=dacite.Config(strict=True),
     )
-    prepare_directory(train_config.experiment_dir, data)
+    train_config.set_random_seed()
+    train_config.resume_results = prepare_directory(
+        train_config.experiment_dir, data, train_config.resume_results
+    )
     run_train_from_config(train_config)

@@ -9,16 +9,18 @@ import torch
 from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregator
 from fme.ace.data_loading.config import DataLoaderConfig
-from fme.ace.data_loading.getters import get_data_loader, get_inference_data
+from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.train.train_config import InlineInferenceConfig
+from fme.core.cli import ResumeResultsConfig
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.rand import set_seed
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
@@ -41,6 +43,9 @@ class TrainConfig:
         experiment_dir: Directory where checkpoints and logs are saved.
         inference: Configuration for inline inference.
         n_forward_steps: Number of forward steps to take gradient over.
+        seed: Random seed for reproducibility. If set, is used for all types of
+            randomization, including data shuffling and model initialization.
+            If unset, weight initialization is not reproducible but data shuffling is.
         copy_weights_after_batch: Configuration for copying weights from the
             base model to the training model after each batch.
         ema: Configuration for exponential moving average of model weights.
@@ -55,6 +60,7 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        checkpoint_every_n_batches: How often to save checkpoints.
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
@@ -62,6 +68,14 @@ class TrainConfig:
             training, validation and inline inference aggregators.
         evaluate_before_training: Whether to run validation and inline inference before
             any training is done.
+        save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
+            for each epoch where best_inference_error achieves a new minimum.
+            Checkpoints are saved as best_inference_ckpt_XXXX.tar.
+        resume_results: Configuration for resuming a previously stopped or finished
+            training job. When provided and experiment_dir has no training_checkpoints
+            subdirectory, then it is assumed that this is a new run to resume a
+            previously completed run and resume_results.existing_dir is recursively
+            copied to experiment_dir.
     """
 
     train_loader: DataLoaderConfig
@@ -74,6 +88,7 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig
     n_forward_steps: int
+    seed: int | None = None
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
     )
@@ -82,13 +97,20 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
+    checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = False
+    save_best_inference_epoch_checkpoints: bool = False
+    resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
         if self.n_forward_steps != 1:
             raise NotImplementedError("Only n_forward_steps=1 is currently supported")
+
+    def set_random_seed(self):
+        if self.seed is not None:
+            set_seed(self.seed)
 
     @property
     def inference_n_forward_steps(self) -> int:
@@ -139,7 +161,7 @@ class TrainBuilders:
 
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.train_loader,
             requirements=data_requirements,
             train=True,
@@ -147,7 +169,7 @@ class TrainBuilders:
 
     def get_validation_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_data_loader(
+        return get_gridded_data(
             self.config.validation_loader,
             requirements=data_requirements,
             train=False,
@@ -184,9 +206,10 @@ class TrainBuilders:
         return self.config.ema.build(modules)
 
     def get_end_of_batch_ops(
-        self, modules: list[torch.nn.Module]
+        self,
+        modules: list[torch.nn.Module],
+        base_weights: list[Mapping[str, Any]] | None,
     ) -> EndOfBatchCallback:
-        base_weights = self.config.stepper.get_base_weights()
         if base_weights is not None:
             copy_after_batch = self.config.copy_weights_after_batch
             return lambda: copy_after_batch.apply(weights=base_weights, modules=modules)

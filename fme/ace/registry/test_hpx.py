@@ -16,12 +16,14 @@ from fme.ace.models.healpix.healpix_encoder import UNetEncoder
 from fme.ace.models.healpix.healpix_layers import HEALPixPadding
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
-from fme.ace.stepper import SingleModuleStepperConfig
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.ace.stepper import StepperConfig
+from fme.core.coordinates import HEALPixCoordinates, HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.registry.module import ModuleSelector
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 
 TIMESTEP = datetime.timedelta(hours=6)
 logger = logging.getLogger("__name__")
@@ -146,12 +148,7 @@ def insolation_data():
     return generate_insolation_data
 
 
-@pytest.mark.parametrize(
-    "shape",
-    [
-        pytest.param((8, 16)),
-    ],
-)
+@pytest.mark.parametrize("shape", [pytest.param((8, 16))])
 def test_hpx_init(shape):
     in_channels = 7
     out_channels = 7
@@ -173,38 +170,44 @@ def test_hpx_init(shape):
     )
 
     hpx_config_data = {
-        "type": "HEALPixRecUNet",
-        "config": {
-            "encoder": dataclasses.asdict(encoder),
-            "decoder": dataclasses.asdict(decoder),
-            "prognostic_variables": prognostic_variables,
-            "n_constants": n_constants,
-            "decoder_input_channels": decoder_input_channels,
-            "input_time_size": input_time_size,
-            "output_time_size": output_time_size,
-        },
+        "encoder": dataclasses.asdict(encoder),
+        "decoder": dataclasses.asdict(decoder),
+        "prognostic_variables": prognostic_variables,
+        "n_constants": n_constants,
+        "decoder_input_channels": decoder_input_channels,
+        "input_time_size": input_time_size,
+        "output_time_size": output_time_size,
     }
 
-    stepper_config_data = {
-        "builder": hpx_config_data,
-        "in_names": ["x"],
-        "out_names": ["x"],
-        "normalization": dataclasses.asdict(
-            NormalizationConfig(
-                means={"x": float(np.random.randn(1).item())},
-                stds={"x": float(np.random.randn(1).item())},
-            )
-        ),
-    }
-    area = th.ones((1, 16, 32)).to(device)
+    horizontal_coordinates = HEALPixCoordinates(
+        th.arange(12), th.arange(8), th.arange(8)
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=th.arange(7), bk=th.arange(7)
     ).to(device)
-    stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
+    stepper_config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="HEALPixRecUNet", config=hpx_config_data
+                    ),
+                    in_names=["x"],
+                    out_names=["x"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"x": float(np.random.randn(1).item())},
+                            stds={"x": float(np.random.randn(1).item())},
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
     stepper = stepper_config.get_stepper(
         dataset_info=DatasetInfo(
-            img_shape=shape,
-            gridded_operations=LatLonOperations(area),
+            horizontal_coordinates=horizontal_coordinates,
             vertical_coordinate=vertical_coordinate,
             timestep=TIMESTEP,
         ),

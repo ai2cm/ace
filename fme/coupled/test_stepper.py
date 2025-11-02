@@ -1,3 +1,5 @@
+import dataclasses
+import datetime
 from collections import namedtuple
 from collections.abc import Iterable
 from typing import Literal
@@ -10,30 +12,40 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper import StepperConfig
+from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
-from fme.core.gridded_ops import LatLonOperations
-from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig
-from fme.core.ocean import OceanConfig
+from fme.core.dataset_info import DatasetInfo
+from fme.core.loss import StepLossConfig
+from fme.core.mask_provider import MaskProvider
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
+from fme.coupled.dataset_info import CoupledDatasetInfo
 
 from .data_loading.batch_data import (
     CoupledBatchData,
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from .data_loading.data_typing import CoupledVerticalCoordinate
+from .data_loading.data_typing import (
+    CoupledHorizontalCoordinates,
+    CoupledVerticalCoordinate,
+)
 from .stepper import (
     ComponentConfig,
     CoupledOceanFractionConfig,
+    CoupledParameterInitConfig,
     CoupledStepper,
     CoupledStepperConfig,
 )
@@ -41,26 +53,101 @@ from .stepper import (
 NZ = 3  # number of vertical interface levels in mock data from get_data
 N_LAT = 5
 N_LON = 5
+LON, LAT = torch.linspace(0, 360, N_LON), torch.linspace(-89.5, 89.5, N_LAT)
+OCEAN_TIMEDELTA = "2D"
+ATMOS_TIMEDELTA = "1D"
+OCEAN_TIMESTEP = datetime.timedelta(days=2)
+ATMOS_TIMESTEP = datetime.timedelta(days=1)
 
-ATMOS_STEPPER_CONFIG = SingleModuleStepperConfig(
-    builder=Mock(),
-    in_names=["a", "f"],
-    out_names=["a"],
-    normalization=Mock(),
-    loss=Mock(),
-    ocean=OceanConfig(
-        surface_temperature_name="a",
-        ocean_fraction_name="f",
+
+ATMOS_STEPPER_CONFIG = StepperConfig(
+    step=StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                ),
+                in_names=["a", "f"],
+                out_names=["a"],
+                normalization=NetworkAndLossNormalizationConfig(
+                    network=NormalizationConfig(
+                        means={"a": 0.0, "f": 0.0},
+                        stds={"a": 1.0, "f": 1.0},
+                    ),
+                ),
+                ocean=OceanConfig(
+                    surface_temperature_name="a",
+                    ocean_fraction_name="f",
+                ),
+            ),
+        ),
     ),
 )
 
-OCEAN_STEPPER_CONFIG = SingleModuleStepperConfig(
-    builder=Mock(),
-    in_names=["sst"],
-    out_names=["sst"],
-    normalization=Mock(),
-    loss=Mock(),
+OCEAN_STEPPER_CONFIG = StepperConfig(
+    step=StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                ),
+                in_names=["sst"],
+                out_names=["sst"],
+                normalization=NetworkAndLossNormalizationConfig(
+                    network=NormalizationConfig(
+                        means={"sst": 0.0},
+                        stds={"sst": 1.0},
+                    ),
+                ),
+            ),
+        ),
+    ),
 )
+
+
+@dataclasses.dataclass
+class CoupledDatasetInfoBuilder:
+    vcoord: CoupledVerticalCoordinate
+    hcoord: CoupledHorizontalCoordinates | None = None
+    ocean_timestep: datetime.timedelta = OCEAN_TIMESTEP
+    atmos_timestep: datetime.timedelta = ATMOS_TIMESTEP
+    ocean_mask_provider: MaskProvider = dataclasses.field(
+        default_factory=lambda: MaskProvider()
+    )
+    atmos_mask_provider: MaskProvider = dataclasses.field(
+        default_factory=lambda: MaskProvider()
+    )
+
+    def __post_init__(self):
+        if self.hcoord is None:
+            lat = torch.arange(N_LAT)
+            lon = torch.arange(N_LON)
+            self.hcoord = CoupledHorizontalCoordinates(
+                ocean=LatLonCoordinates(lon=lon, lat=lat),
+                atmosphere=LatLonCoordinates(lon=lon, lat=lat),
+            )
+
+    @property
+    def dataset_info(self) -> CoupledDatasetInfo:
+        assert self.hcoord is not None
+        return CoupledDatasetInfo(
+            ocean=DatasetInfo(
+                horizontal_coordinates=self.hcoord.ocean,
+                vertical_coordinate=self.vcoord.ocean,
+                mask_provider=self.ocean_mask_provider,
+                timestep=self.ocean_timestep,
+            ),
+            atmosphere=DatasetInfo(
+                horizontal_coordinates=self.hcoord.atmosphere,
+                vertical_coordinate=self.vcoord.atmosphere,
+                mask_provider=self.atmos_mask_provider,
+                timestep=self.atmos_timestep,
+            ),
+        )
 
 
 ForcingInputs = namedtuple(
@@ -114,15 +201,29 @@ def test_config_names(inputs, expectations):
     atmos_out = inputs.atmos_out + ["a_sfc_temp"]
     atmosphere = ComponentConfig(
         timedelta="6h",
-        stepper=SingleModuleStepperConfig(
-            builder=Mock(),
-            in_names=atmos_in,
-            out_names=atmos_out,
-            normalization=Mock(),
-            loss=Mock(),
-            ocean=OceanConfig(
-                surface_temperature_name="a_sfc_temp",
-                ocean_fraction_name="frac",
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=atmos_in,
+                        out_names=atmos_out,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"a_sfc_temp": 0.0},
+                                stds={"a_sfc_temp": 1.0},
+                            ),
+                        ),
+                        ocean=OceanConfig(
+                            surface_temperature_name="a_sfc_temp",
+                            ocean_fraction_name="frac",
+                        ),
+                    ),
+                ),
             ),
         ),
     )
@@ -130,13 +231,27 @@ def test_config_names(inputs, expectations):
     ocean_out = inputs.ocean_out + ["o_sfc_temp"]
     ocean = ComponentConfig(
         timedelta="12h",
-        stepper=SingleModuleStepperConfig(
-            builder=Mock(),
-            in_names=ocean_in,
-            out_names=ocean_out,
-            next_step_forcing_names=expectations.atmos_to_ocean_forcings,
-            normalization=Mock(),
-            loss=Mock(),
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=ocean_in,
+                        out_names=ocean_out,
+                        next_step_forcing_names=expectations.atmos_to_ocean_forcings,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"o_sfc_temp": 0.0},
+                                stds={"o_sfc_temp": 1.0},
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         ),
     )
     config = CoupledStepperConfig(
@@ -179,15 +294,29 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
     atmos_out = inputs.atmos_out + ["atmos_surface_temp"]
     atmosphere = ComponentConfig(
         timedelta="6h",
-        stepper=SingleModuleStepperConfig(
-            builder=Mock(),
-            in_names=atmos_in,
-            out_names=atmos_out,
-            normalization=Mock(),
-            loss=Mock(),
-            ocean=OceanConfig(
-                surface_temperature_name="atmos_surface_temp",
-                ocean_fraction_name="frac",
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=atmos_in,
+                        out_names=atmos_out,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"atmos_surface_temp": 0.0},
+                                stds={"atmos_surface_temp": 1.0},
+                            ),
+                        ),
+                        ocean=OceanConfig(
+                            surface_temperature_name="atmos_surface_temp",
+                            ocean_fraction_name="frac",
+                        ),
+                    ),
+                ),
             ),
         ),
     )
@@ -195,13 +324,27 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
     ocean_out = inputs.ocean_out + ["ocean_surface_temp"]
     ocean = ComponentConfig(
         timedelta="12h",
-        stepper=SingleModuleStepperConfig(
-            builder=Mock(),
-            in_names=ocean_in,
-            out_names=ocean_out,
-            next_step_forcing_names=expectations.atmos_to_ocean_forcings,
-            normalization=Mock(),
-            loss=Mock(),
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=ocean_in,
+                        out_names=ocean_out,
+                        next_step_forcing_names=expectations.atmos_to_ocean_forcings,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"ocean_surface_temp": 0.0},
+                                stds={"ocean_surface_temp": 1.0},
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         ),
     )
     config = CoupledStepperConfig(
@@ -272,16 +415,33 @@ def test_config_init_atmos_stepper_with_slab_ocean_error():
     # atmosphere is required to have stepper.ocean attribute
     atmosphere = ComponentConfig(
         timedelta="6h",
-        stepper=SingleModuleStepperConfig(
-            builder=Mock(),
-            in_names=["a", "f"],
-            out_names=["a"],
-            normalization=Mock(),
-            loss=Mock(),
-            ocean=OceanConfig(
-                surface_temperature_name="a",
-                ocean_fraction_name="f",
-                slab=Mock(),
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=["a", "f"],
+                        out_names=["a"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"a": 0.0, "f": 0.0},
+                                stds={"a": 1.0, "f": 1.0},
+                            ),
+                        ),
+                        ocean=OceanConfig(
+                            surface_temperature_name="a",
+                            ocean_fraction_name="f",
+                            slab=SlabOceanConfig(
+                                mixed_layer_depth_name="mixed_layer_depth",
+                                q_flux_name="q_flux",
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
     )
@@ -339,13 +499,27 @@ def test_config_missing_next_step_forcings_error():
     )
     ocean = ComponentConfig(
         timedelta="5D",
-        stepper=SingleModuleStepperConfig(
-            builder=Mock(),
-            in_names=["sst", "a", "b"],
-            out_names=["sst"],
-            next_step_forcing_names=["b"],
-            normalization=Mock(),
-            loss=Mock(),
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=["sst", "a", "b"],
+                        out_names=["sst"],
+                        next_step_forcing_names=["b"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"sst": 0.0, "a": 0.0, "b": 0.0},
+                                stds={"sst": 1.0, "a": 1.0, "b": 1.0},
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         ),
     )
     with pytest.raises(ValueError, match=r".* next_step_forcing_names: \['a'\]\."):
@@ -355,27 +529,55 @@ def test_config_missing_next_step_forcings_error():
 def test_config_ocean_diag_to_atmos_forcing_error():
     atmosphere = ComponentConfig(
         timedelta="6h",
-        stepper=SingleModuleStepperConfig(
-            builder=Mock(),
-            in_names=["a_sfc", "o_diag", "o_frac"],
-            out_names=["a_sfc", "a_diag"],
-            normalization=Mock(),
-            loss=Mock(),
-            ocean=OceanConfig(
-                surface_temperature_name="a_sfc",
-                ocean_fraction_name="o_frac",
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=["a_sfc", "o_diag", "o_frac"],
+                        out_names=["a_sfc", "a_diag"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"a_sfc": 0.0, "a_diag": 0.0},
+                                stds={"a_sfc": 1.0, "a_diag": 1.0},
+                            ),
+                        ),
+                        ocean=OceanConfig(
+                            surface_temperature_name="a_sfc",
+                            ocean_fraction_name="o_frac",
+                        ),
+                    ),
+                ),
             ),
         ),
     )
     ocean = ComponentConfig(
         timedelta="5D",
-        stepper=SingleModuleStepperConfig(
-            builder=Mock(),
-            in_names=["sst", "a_diag"],
-            out_names=["sst", "o_diag"],
-            next_step_forcing_names=["a_diag"],
-            normalization=Mock(),
-            loss=Mock(),
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=["sst", "a_diag"],
+                        out_names=["sst", "o_diag"],
+                        next_step_forcing_names=["a_diag"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"sst": 0.0, "a_diag": 0.0},
+                                stds={"sst": 1.0, "a_diag": 1.0},
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         ),
     )
     with pytest.raises(
@@ -385,11 +587,176 @@ def test_config_ocean_diag_to_atmos_forcing_error():
         _ = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
 
 
+def test_config_parameter_init_error():
+    mock_param_init = Mock()
+    mock_param_init.weights_path = "ckpt.pt"
+    atmosphere = ComponentConfig(
+        timedelta="6h",
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=["a", "f"],
+                        out_names=["a"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"a": 0.0, "f": 0.0},
+                                stds={"a": 1.0, "f": 1.0},
+                            ),
+                        ),
+                        ocean=OceanConfig(
+                            surface_temperature_name="a",
+                            ocean_fraction_name="f",
+                        ),
+                    ),
+                ),
+            ),
+            parameter_init=mock_param_init,
+        ),
+    )
+    ocean = ComponentConfig(
+        timedelta="5D",
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=["sst"],
+                        out_names=["sst"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"sst": 0.0},
+                                stds={"sst": 1.0},
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            parameter_init=mock_param_init,
+        ),
+    )
+    mock_coupled_param_init = Mock()
+    mock_coupled_param_init.checkpoint_path = "ckpt.pt"
+    with pytest.raises(
+        ValueError,
+        match="Please specify CoupledParameterInitConfig",
+    ):
+        _ = CoupledStepperConfig(
+            atmosphere=atmosphere,
+            ocean=ocean,
+            parameter_init=mock_coupled_param_init,
+        )
+
+
+OCN_FRAC = CoupledOceanFractionConfig(
+    sea_ice_fraction_name="sea_ice_fraction",
+    land_fraction_name="land_fraction",
+)
+
+OCN_FRAC_OSIC = CoupledOceanFractionConfig(
+    sea_ice_fraction_name="ocean_sea_ice_fraction",
+    land_fraction_name="land_fraction",
+    sea_ice_fraction_name_in_atmosphere="sea_ice_fraction",
+)
+
+
+@pytest.mark.parametrize(
+    "in_out_names, ocean_fraction_prediction, expectations",
+    [
+        (  # atmosphere does not have sea ice input
+            # ocean does not predict ocean fraction
+            ForcingInputs(
+                ["land_fraction", "ocean_frac", "sfc_temp"],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag"],
+                ["sst"],
+            ),
+            None,
+            [
+                "land_fraction",
+                "ocean_frac",
+            ],
+        ),
+        (  # atmosphere has sea ice input, ocean does not predict ocean fraction
+            ForcingInputs(
+                ["land_fraction", "ocean_frac", "sfc_temp", "sea_ice_fraction"],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag"],
+                ["sst"],
+            ),
+            None,
+            [
+                "sea_ice_fraction",
+                "land_fraction",
+                "ocean_frac",
+            ],
+        ),
+        (  # atmosphere has sea ice input, ocean predicts same sea ice name
+            ForcingInputs(
+                [
+                    "land_fraction",
+                    "ocean_frac",
+                    "sfc_temp",
+                    OCN_FRAC.sea_ice_fraction_name,
+                ],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag", OCN_FRAC.sea_ice_fraction_name],
+                ["sst", OCN_FRAC.sea_ice_fraction_name],
+            ),
+            OCN_FRAC,
+            ["land_fraction"],
+        ),
+        (  # atmosphere has sea ice input, ocean predicts a different sea ice name
+            ForcingInputs(
+                [
+                    "land_fraction",
+                    "ocean_frac",
+                    "sfc_temp",
+                    OCN_FRAC_OSIC.sea_ice_fraction_name_in_atmosphere,
+                ],
+                ["sfc_temp", "a_diag"],
+                ["land_fraction", "sst", "a_diag", OCN_FRAC_OSIC.sea_ice_fraction_name],
+                ["sst", OCN_FRAC_OSIC.sea_ice_fraction_name],
+            ),
+            OCN_FRAC_OSIC,
+            ["land_fraction"],
+        ),
+    ],
+)
+def test_config_atmosphere_forcing_exogenous_names(
+    in_out_names, ocean_fraction_prediction, expectations
+):
+    ocean_in_names = in_out_names.ocean_in
+    ocean_out_names = in_out_names.ocean_out
+    atmos_in_names = in_out_names.atmos_in
+    atmos_out_names = in_out_names.atmos_out
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_fraction_prediction=ocean_fraction_prediction,
+    )
+    assert sorted(config.atmosphere_forcing_exogenous_names) == sorted(expectations)
+
+
 SphericalData = namedtuple(
     "SphericalData",
     [
         "data",
-        "area_weights",
+        "horizontal_coord",
         "vertical_coord",
     ],
 )
@@ -399,13 +766,12 @@ def get_data(
     names: Iterable[str], n_samples, n_time, realm: Literal["atmosphere", "ocean"]
 ) -> SphericalData:
     data_dict = {}
-
-    lats = torch.linspace(-89.5, 89.5, N_LAT)  # arbitary choice
     for name in names:
         data_dict[name] = torch.rand(
             n_samples, n_time, N_LAT, N_LON, device=fme.get_device()
         )
-    area_weights = fme.spherical_area_weights(lats, N_LON).to(fme.get_device())
+    lats = torch.linspace(-89.5, 89.5, N_LAT)
+    horizontal_coords = LatLonCoordinates(lat=lats, lon=torch.linspace(0, 360, N_LON))
     vertical_coord: VerticalCoordinate
     if realm == "atmosphere":
         ak, bk = torch.arange(NZ), torch.arange(NZ)
@@ -420,8 +786,10 @@ def get_data(
             np.zeros((n_samples, n_time)),
             dims=["sample", "time"],
         ),
+        labels=[set() for _ in range(n_time)],
+        horizontal_dims=["lat", "lon"],
     )
-    return SphericalData(data, area_weights, vertical_coord)
+    return SphericalData(data, horizontal_coords, vertical_coord)
 
 
 def get_coupled_data(
@@ -440,7 +808,9 @@ def get_coupled_data(
     assert nz == NZ, f"expected 7 interfaces in mock data vertical coord but got {nz}"
     return SphericalData(
         data,
-        atmos_data.area_weights,
+        CoupledHorizontalCoordinates(
+            ocean_data.horizontal_coord, atmos_data.horizontal_coord
+        ),
         CoupledVerticalCoordinate(
             ocean=ocean_data.vertical_coord, atmosphere=atmos_data.vertical_coord
         ),
@@ -469,10 +839,17 @@ def get_stepper_config(
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: ModuleSelector | None = None,
     atmosphere_builder: ModuleSelector | None = None,
-    ocean_timedelta: str = "2D",
-    atmosphere_timedelta: str = "1D",
+    ocean_timedelta: str = OCEAN_TIMEDELTA,
+    atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    ocean_parameter_init: ParameterInitializationConfig | None = None,
+    atmosphere_parameter_init: ParameterInitializationConfig | None = None,
+    checkpoint_path: str | None = None,
 ):
+    if ocean_parameter_init is None:
+        ocean_parameter_init = ParameterInitializationConfig()
+    if atmosphere_parameter_init is None:
+        atmosphere_parameter_init = ParameterInitializationConfig()
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
     # ocean fraction forcing variable
@@ -496,38 +873,59 @@ def get_stepper_config(
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
             timedelta=atmosphere_timedelta,
-            stepper=SingleModuleStepperConfig(
-                builder=atmosphere_builder,
-                in_names=atmosphere_in_names,
-                out_names=atmosphere_out_names,
-                normalization=NormalizationConfig(
-                    means={name: 0.0 for name in atmos_norm_names},
-                    stds={name: 1.0 for name in atmos_norm_names},
+            stepper=StepperConfig(
+                step=StepSelector(
+                    type="single_module",
+                    config=dataclasses.asdict(
+                        SingleModuleStepConfig(
+                            builder=atmosphere_builder,
+                            in_names=atmosphere_in_names,
+                            out_names=atmosphere_out_names,
+                            normalization=NetworkAndLossNormalizationConfig(
+                                network=NormalizationConfig(
+                                    means={name: 0.0 for name in atmos_norm_names},
+                                    stds={name: 1.0 for name in atmos_norm_names},
+                                ),
+                            ),
+                            ocean=OceanConfig(
+                                surface_temperature_name=sfc_temp_name_in_atmosphere_data,
+                                ocean_fraction_name=ocean_fraction_name,
+                            ),
+                        ),
+                    ),
                 ),
-                loss=WeightedMappingLossConfig(type="MSE"),
-                ocean=OceanConfig(
-                    surface_temperature_name=sfc_temp_name_in_atmosphere_data,
-                    ocean_fraction_name=ocean_fraction_name,
-                ),
+                parameter_init=atmosphere_parameter_init,
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
             timedelta=ocean_timedelta,
-            stepper=SingleModuleStepperConfig(
-                builder=ocean_builder,
-                in_names=ocean_in_names,
-                out_names=ocean_out_names,
-                next_step_forcing_names=next_step_forcing_names,
-                normalization=NormalizationConfig(
-                    means={name: 0.0 for name in ocean_norm_names},
-                    stds={name: 1.0 for name in ocean_norm_names},
+            stepper=StepperConfig(
+                step=StepSelector(
+                    type="single_module",
+                    config=dataclasses.asdict(
+                        SingleModuleStepConfig(
+                            builder=ocean_builder,
+                            in_names=ocean_in_names,
+                            out_names=ocean_out_names,
+                            next_step_forcing_names=next_step_forcing_names,
+                            normalization=NetworkAndLossNormalizationConfig(
+                                network=NormalizationConfig(
+                                    means={name: 0.0 for name in ocean_norm_names},
+                                    stds={name: 1.0 for name in ocean_norm_names},
+                                ),
+                            ),
+                            corrector=CorrectorSelector("ocean_corrector", {}),
+                        ),
+                    ),
                 ),
-                loss=WeightedMappingLossConfig(type="MSE"),
-                corrector=CorrectorSelector("ocean_corrector", {}),
+                parameter_init=ocean_parameter_init,
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name=sst_name_in_ocean_data,
         ocean_fraction_prediction=ocean_fraction_prediction,
+        parameter_init=CoupledParameterInitConfig(checkpoint_path=checkpoint_path),
     )
     return config
 
@@ -545,6 +943,8 @@ def get_stepper_and_batch(
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: ModuleSelector | None = None,
     atmosphere_builder: ModuleSelector | None = None,
+    ocean_timedelta: str = OCEAN_TIMEDELTA,
+    atmosphere_timedelta: str = ATMOS_TIMEDELTA,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmosphere_in_names + atmosphere_out_names)
@@ -577,15 +977,13 @@ def get_stepper_and_batch(
         # when stepping the batch forward... if you need consistency between the
         # timedeltas and batch time dims then you should use
         # n_forward_times_atmosphere = 2 * n_forward_times_ocean
-        ocean_timedelta="2D",
-        atmosphere_timedelta="1D",
+        ocean_timedelta=ocean_timedelta,
+        atmosphere_timedelta=atmosphere_timedelta,
     )
-
-    coupler = config.get_stepper(
-        img_shape=(N_LAT, N_LON),
-        gridded_operations=LatLonOperations(coupled_data.area_weights),
-        vertical_coordinate=coupled_data.vertical_coord,
-    )
+    dataset_info = CoupledDatasetInfoBuilder(
+        vcoord=coupled_data.vertical_coord
+    ).dataset_info
+    coupler = config.get_stepper(dataset_info)
     return coupler, coupled_data
 
 
@@ -596,10 +994,18 @@ def get_stepper_and_batch(
         (None, False),
         (
             CoupledOceanFractionConfig(
-                sea_ice_fraction_name="sea_ice_frac",
-                land_fraction_name="land_frac",
+                sea_ice_fraction_name="sea_ice_fraction",
+                land_fraction_name="land_fraction",
             ),
-            True,  # required
+            True,  # NOTE: required
+        ),
+        (
+            CoupledOceanFractionConfig(
+                sea_ice_fraction_name="ocean_sea_ice_fraction",
+                land_fraction_name="land_fraction",
+                sea_ice_fraction_name_in_atmosphere="sea_ice_fraction",
+            ),
+            True,  # NOTE: required
         ),
     ],
 )
@@ -610,15 +1016,23 @@ def test__get_atmosphere_forcings(
     sea_ice_frac_is_ocean_prog,
 ):
     torch.manual_seed(0)
-    ocean_in_names = ["land_frac", "sst", "a_diag"]
+    ocean_in_names = ["land_fraction", "sst", "a_diag"]
     ocean_out_names = ["sst"]
+    sea_ice_frac_name = "sea_ice_frac"
+    sea_ice_frac_name_in_atmos = sea_ice_frac_name
+    if ocean_fraction_prediction:
+        sea_ice_frac_name = ocean_fraction_prediction.sea_ice_fraction_name
+        sea_ice_frac_name_in_atmos = (
+            ocean_fraction_prediction.sea_ice_fraction_name_in_atmosphere
+            or sea_ice_frac_name
+        )
     if sea_ice_frac_is_ocean_prog:
-        ocean_in_names.append("sea_ice_frac")
-        ocean_out_names.append("sea_ice_frac")
-    atmos_in_names = ["land_frac", "ocean_frac", "sfc_temp"]
+        ocean_in_names.append(sea_ice_frac_name)
+        ocean_out_names.append(sea_ice_frac_name)
+    atmos_in_names = ["land_fraction", "ocean_frac", "sfc_temp"]
     atmos_out_names = ["sfc_temp", "a_diag"]
     if sea_ice_frac_is_input_to_atmos:
-        atmos_in_names.append("sea_ice_frac")
+        atmos_in_names.append(sea_ice_frac_name)
     config = get_stepper_config(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
@@ -630,27 +1044,26 @@ def test__get_atmosphere_forcings(
         ocean_fraction_prediction=ocean_fraction_prediction,
     )
     vertical_coord = Mock(spec=CoupledVerticalCoordinate)
-    vertical_coord.atmosphere = Mock(spec=HybridSigmaPressureCoordinate)
-    vertical_coord.ocean = Mock(spec=DepthCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
     sst_mask = torch.ones(N_LAT, N_LON).to(fme.get_device())
     sst_mask[0, 0] = 0
-    vertical_coord.ocean.get_mask_level.return_value = sst_mask
-    coupler = config.get_stepper(
-        img_shape=(N_LAT, N_LON),
-        gridded_operations=LatLonOperations(torch.ones(N_LAT, N_LON)),
-        vertical_coordinate=vertical_coord,
-    )
+    dataset_info = CoupledDatasetInfoBuilder(
+        vcoord=vertical_coord,
+        ocean_mask_provider=MaskProvider({"mask_2d": sst_mask}),
+    ).dataset_info
+    coupler = config.get_stepper(dataset_info)
     shape_ocean = (1, 1, N_LAT, N_LON)
     shape_atmos = (1, coupler.n_inner_steps + 1, N_LAT, N_LON)
     forcings_from_ocean = {
-        "sea_ice_frac": torch.rand(*shape_ocean, device=fme.get_device()),
+        sea_ice_frac_name: torch.rand(*shape_ocean, device=fme.get_device()),
         "sst": torch.rand(*shape_ocean, device=fme.get_device()),
     }
     for tensor in forcings_from_ocean.values():
         # apply mask to ocean data
         tensor[..., 0, 0] = float("nan")
     atmos_forcing_data = {
-        "land_frac": torch.rand(*shape_atmos, device=fme.get_device()),
+        "land_fraction": torch.rand(*shape_atmos, device=fme.get_device()),
         "ocean_frac": torch.rand(*shape_atmos, device=fme.get_device()),
     }
     expected_forcings_from_ocean = {
@@ -660,30 +1073,53 @@ def test__get_atmosphere_forcings(
         expected_forcings_from_ocean["ocean_frac"] = atmos_forcing_data[
             "ocean_frac"
         ].clone()
-    else:
+    elif ocean_fraction_prediction.sea_ice_fraction_name == "sea_ice_fraction":
         expected_forcings_from_ocean["ocean_frac"] = torch.clip(
-            1 - (atmos_forcing_data["land_frac"] + forcings_from_ocean["sea_ice_frac"]),
+            1
+            - (
+                atmos_forcing_data["land_fraction"]
+                + forcings_from_ocean[sea_ice_frac_name]
+            ),
             min=0.0,
         )
+    elif ocean_fraction_prediction.sea_ice_fraction_name == "ocean_sea_ice_fraction":
+        # back sea_ice_fraction out of ocean_sea_ice_fraction
+        sic = forcings_from_ocean[sea_ice_frac_name] * (
+            1 - atmos_forcing_data["land_fraction"]
+        )
+        expected_forcings_from_ocean[sea_ice_frac_name_in_atmos] = sic
+        expected_forcings_from_ocean["ocean_frac"] = torch.clip(
+            1 - (atmos_forcing_data["land_fraction"] + sic),
+            min=0.0,
+        )
+    else:
+        sea_ice_fraction_name = ocean_fraction_prediction.sea_ice_fraction_name
+        raise ValueError(
+            "test__get_atmosphere_forcings has CoupledOceanFractionConfig with "
+            f"incompatible value {sea_ice_fraction_name=}"
+        )
+
     expected_forcings_from_ocean["ocean_frac"][:, :, 0, 0] = 0.0
     expected_atmos_forcings = {
-        "land_frac": atmos_forcing_data["land_frac"].clone(),
+        "land_fraction": atmos_forcing_data["land_fraction"].clone(),
         "ocean_frac": expected_forcings_from_ocean["ocean_frac"].clone(),
         "sfc_temp": forcings_from_ocean["sst"].clone().expand(*shape_atmos),
     }
     if sea_ice_frac_is_input_to_atmos:
         if ocean_fraction_prediction is None and not sea_ice_frac_is_ocean_prog:
             # sea ice frac comes from atmosphere
-            atmos_forcing_data["sea_ice_frac"] = torch.rand(
+            atmos_forcing_data[sea_ice_frac_name_in_atmos] = torch.rand(
                 *shape_atmos, device=fme.get_device()
             )
-            expected_atmos_forcings["sea_ice_frac"] = atmos_forcing_data[
-                "sea_ice_frac"
+            expected_atmos_forcings[sea_ice_frac_name_in_atmos] = atmos_forcing_data[
+                sea_ice_frac_name_in_atmos
             ].clone()
         else:
             # sea ice frac comes from the ocean
-            expected_atmos_forcings["sea_ice_frac"] = (
-                forcings_from_ocean["sea_ice_frac"].clone().expand(*shape_atmos)
+            expected_atmos_forcings[sea_ice_frac_name_in_atmos] = (
+                expected_forcings_from_ocean[sea_ice_frac_name_in_atmos]
+                .clone()
+                .expand(*shape_atmos)
             )
     new_atmos_forcings = coupler._get_atmosphere_forcings(
         atmos_forcing_data, forcings_from_ocean
@@ -712,11 +1148,8 @@ def test__get_ocean_forcings():
     vertical_coord = Mock(spec=CoupledVerticalCoordinate)
     vertical_coord.atmosphere = NullVerticalCoordinate()
     vertical_coord.ocean = NullVerticalCoordinate()
-    coupler = config.get_stepper(
-        img_shape=(N_LAT, N_LON),
-        gridded_operations=LatLonOperations(torch.ones(N_LAT, N_LON)),
-        vertical_coordinate=vertical_coord,
-    )
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    coupler = config.get_stepper(dataset_info)
     ocean_shape = (1, 2, N_LAT, N_LON)
     atmos_shape = (1, 2, N_LAT, N_LON)
     ocean_data = {
@@ -975,55 +1408,70 @@ def test_reloaded_stepper_gives_same_prediction():
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
             timedelta="1D",
-            stepper=SingleModuleStepperConfig(
-                builder=ModuleSelector(
-                    type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+            stepper=StepperConfig(
+                step=StepSelector(
+                    type="single_module",
+                    config=dataclasses.asdict(
+                        SingleModuleStepConfig(
+                            builder=ModuleSelector(
+                                type="SphericalFourierNeuralOperatorNet",
+                                config={"scale_factor": 1},
+                            ),
+                            in_names=["a", "a_sfc", "constant_mask"],
+                            out_names=["a", "a_sfc"],
+                            normalization=NetworkAndLossNormalizationConfig(
+                                network=NormalizationConfig(
+                                    means={
+                                        "a": 0.0,
+                                        "a_sfc": 0.0,
+                                        "constant_mask": 0.0,
+                                    },
+                                    stds={"a": 1.0, "a_sfc": 1.0, "constant_mask": 1.0},
+                                ),
+                            ),
+                            ocean=OceanConfig(
+                                surface_temperature_name="a_sfc",
+                                ocean_fraction_name="constant_mask",
+                            ),
+                        ),
+                    ),
                 ),
-                in_names=["a", "a_sfc", "constant_mask"],
-                out_names=["a", "a_sfc"],
-                normalization=NormalizationConfig(
-                    means={"a": 0.0, "a_sfc": 0.0, "constant_mask": 0.0},
-                    stds={"a": 1.0, "a_sfc": 1.0, "constant_mask": 1.0},
-                ),
-                loss=WeightedMappingLossConfig(type="MSE"),
-                ocean=OceanConfig(
-                    surface_temperature_name="a_sfc",
-                    ocean_fraction_name="constant_mask",
-                ),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
             timedelta="2D",
-            stepper=SingleModuleStepperConfig(
-                builder=ModuleSelector(
-                    type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+            stepper=StepperConfig(
+                step=StepSelector(
+                    type="single_module",
+                    config=dataclasses.asdict(
+                        SingleModuleStepConfig(
+                            builder=ModuleSelector(
+                                type="SphericalFourierNeuralOperatorNet",
+                                config={"scale_factor": 1},
+                            ),
+                            in_names=["o", "o_sfc", "o_mask"],
+                            out_names=["o", "o_sfc"],
+                            normalization=NetworkAndLossNormalizationConfig(
+                                network=NormalizationConfig(
+                                    means={"o": 0.0, "o_sfc": 0.0, "o_mask": 0.0},
+                                    stds={"o": 1.0, "o_sfc": 1.0, "o_mask": 1.0},
+                                ),
+                            ),
+                            corrector=CorrectorSelector("ocean_corrector", {}),
+                        ),
+                    ),
                 ),
-                in_names=["o", "o_sfc", "o_mask"],
-                out_names=["o", "o_sfc"],
-                normalization=NormalizationConfig(
-                    means={"o": 0.0, "o_sfc": 0.0, "o_mask": 0.0},
-                    stds={"o": 1.0, "o_sfc": 1.0, "o_mask": 1.0},
-                ),
-                loss=WeightedMappingLossConfig(type="MSE"),
-                corrector=CorrectorSelector("ocean_corrector", {}),
+                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name="o_sfc",
     )
-    area = torch.ones((N_LAT, N_LON), device=fme.get_device())
-    vertical_coordinate = CoupledVerticalCoordinate(
-        ocean=DepthCoordinate(torch.arange(2), torch.ones(N_LAT, N_LON, 1)).to(
-            fme.get_device()
-        ),
-        atmosphere=HybridSigmaPressureCoordinate(
-            ak=torch.arange(7), bk=torch.arange(7)
-        ).to(fme.get_device()),
-    )
-    stepper = config.get_stepper(
-        img_shape=(N_LAT, N_LON),
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-    )
+    vertical_coord = Mock(spec=CoupledVerticalCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    stepper = config.get_stepper(dataset_info)
     new_stepper = CoupledStepper.from_state(stepper.get_state())
     data = get_coupled_data(
         ["o", "o_sfc", "o_mask"],
@@ -1032,7 +1480,6 @@ def test_reloaded_stepper_gives_same_prediction():
         n_forward_times_atmosphere=4,
         n_samples=1,
     )
-
     first_result = stepper.train_on_batch(
         data=data.data,
         optimization=NullOptimization(),

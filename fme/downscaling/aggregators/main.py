@@ -19,8 +19,9 @@ from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
+from fme.downscaling.aggregators.adapters import ComparedDynamicHistogramsAdapter
+from fme.downscaling.data import PairedBatchData
 
-from ..datasets import PairedBatchData
 from ..metrics_and_maths import (
     compute_zonal_power_spectrum,
     filter_tensor_mapping,
@@ -46,6 +47,42 @@ def ensure_trailing_slash(key: str) -> str:
 
 def _tensor_mapping_to_numpy(data: TensorMapping) -> TensorMapping:
     return {k: v.cpu().numpy() for k, v in data.items()}
+
+
+def _get_spectrum_metrics(
+    gen_spectrum: Mapping[str, np.ndarray],
+    target_spectrum: Mapping[str, np.ndarray],
+    prefix: str = "",
+) -> Mapping[str, float]:
+    """
+    Compute metrics for the spectrum.
+
+    Args:
+        gen_spectrum: Dictionary of 1-dimensional generated mean power spectra.
+        target_spectrum: Dictionary of 1-dimensional target mean power spectra.
+        prefix: Prefix to use for the metric names.
+
+    Returns:
+        Dictionary of metrics.
+    """
+    prefix = ensure_trailing_slash(prefix)
+    metrics = {}
+    for name in gen_spectrum:
+        if len(gen_spectrum[name].shape) != 1:
+            raise ValueError(
+                f"Expected 1-dimensional power spectrum for {name}, "
+                f"got {gen_spectrum[name].shape}"
+            )
+        ratio = gen_spectrum[name] / target_spectrum[name] - 1
+        positive_bias = float(ratio[ratio > 0].sum() / target_spectrum[name].shape[0])
+        negative_bias = float(ratio[ratio < 0].sum() / target_spectrum[name].shape[0])
+
+        metrics[f"{prefix}positive_norm_bias/{name}"] = positive_bias
+        metrics[f"{prefix}negative_norm_bias/{name}"] = negative_bias
+        metrics[f"{prefix}mean_abs_norm_bias/{name}"] = abs(positive_bias) + abs(
+            negative_bias
+        )
+    return metrics
 
 
 class Mean:
@@ -233,43 +270,6 @@ class MeanComparison:
         }
 
 
-class ComparedDynamicHistogramsAdapter:
-    """
-    Adapter to use ComparedDynamicHistograms with the naming and prefix
-    scheme used by downscaling aggregators.
-
-    Args:
-        histograms: The ComparedDynamicHistograms object to adapt.
-        name: The name to use for the histograms in the wandb output.
-    """
-
-    def __init__(self, histograms: ComparedDynamicHistograms, name: str = "") -> None:
-        self._histograms = histograms
-        self._name = ensure_trailing_slash(name)
-
-    @torch.no_grad()
-    def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
-        """
-        Record the histograms for the current batch comparison.
-        """
-        self._histograms.record_batch(target, prediction)
-
-    def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
-        """
-        Get the histogram logs for wandb.
-        """
-        prefix = ensure_trailing_slash(prefix)
-        histograms = self._histograms.get_wandb()
-        return {f"{prefix}{self._name}{k}": v for k, v in histograms.items()}
-
-    def get_dataset(self) -> dict[str, Any]:
-        """
-        Get the histogram dataset.
-        """
-        ds = self._histograms.get_dataset()
-        return xr.Dataset({f"{self._name}{k}": v for k, v in ds.items()})
-
-
 def _compute_zonal_mean_power_spectrum(x):
     if not len(x.shape) == 3:
         raise ValueError(
@@ -432,13 +432,17 @@ class ZonalPowerSpectrumComparison:
             ret[f"{prefix}{self._name}{name}"] = self._plot_spectrum_all(
                 values, prediction[name], coarse[name]
             )
+        scalar_metrics = _get_spectrum_metrics(
+            prediction, target, prefix=f"{prefix}{self._name}"
+        )
+        ret.update(scalar_metrics)
         return ret
 
     def get_dataset(self) -> xr.Dataset:
         ds = self._mean_prediction_aggregator.get_dataset()
         target = self._mean_target_aggregator.get()
         target = {k: v.cpu().numpy() for k, v in target.items()}
-        ds = ds.update(
+        ds.update(
             {f"{self._name}target.{k}": (("wavenumber"), target[k]) for k in target}
         )
         return ds
@@ -592,11 +596,17 @@ class MeanMapAggregator:
             error = prediction[var_name] - target[var_name]
             maps[f"maps/{self._name}error/{var_name}"] = error
             metrics[f"metrics/{self._name}bias/{var_name}"] = error.mean()
-            spectra[f"power_spectrum_of_time_mean/{self._name}{var_name}"] = (
-                self._plot_spectrum(
-                    prediction_power_spectrum[var_name], target_power_spectrum[var_name]
-                )
+
+            spectra_prefix = ensure_trailing_slash(f"power_spectrum_of_{self._name}")
+            spectra[f"{spectra_prefix}{var_name}"] = self._plot_spectrum(
+                prediction_power_spectrum[var_name], target_power_spectrum[var_name]
             )
+            spectrum_metrics = _get_spectrum_metrics(
+                gen_spectrum=prediction_power_spectrum,
+                target_spectrum=target_power_spectrum,
+                prefix=spectra_prefix,
+            )
+            spectra.update(spectrum_metrics)
         return metrics, maps, spectra
 
     _captions = {
@@ -641,7 +651,8 @@ class MeanMapAggregator:
             fig = plot_imshow(data, vmin=vmin, vmax=vmax, cmap=cmap)
             ret[f"{prefix}{key}"] = wandb.Image(fig, caption=caption)
             plt.close(fig)
-        ret.update(spectra)
+        for key, value in spectra.items():
+            ret[f"{prefix}{key}"] = value
         return ret
 
     def get_dataset(self) -> xr.Dataset:
@@ -755,7 +766,9 @@ class Aggregator:
             SnapshotAggregator(dims, variable_metadata, name="snapshot"),
             ComparedDynamicHistogramsAdapter(
                 histograms=ComparedDynamicHistograms(
-                    n_bins=n_histogram_bins, percentiles=percentiles
+                    n_bins=n_histogram_bins,
+                    percentiles=percentiles,
+                    compute_percentile_frac=True,
                 ),
                 name="histogram",
             ),
