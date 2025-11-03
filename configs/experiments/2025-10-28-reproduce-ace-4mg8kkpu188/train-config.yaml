@@ -1,86 +1,63 @@
 experiment_dir: /results
 save_checkpoint: true
-checkpoint_every_n_batches: 1000
-validate_using_ema: true
+validate_using_ema: false
 ema:
   decay: 0.999
-max_epochs: 10
+max_epochs: 5
 n_forward_steps: 2
+validation_aggregator:
+  log_snapshots: false
+  log_mean_maps: false
 inference:
-  n_forward_steps: 29200
+  n_forward_steps: 2920
   forward_steps_in_memory: 50
   loader:
     start_indices:
       times:
-        - '0151-01-03T12:00:00' # earlier times nan
+        - '0151-01-03T12:00:00'
         - '0171-01-01T06:00:00'
-        - '0191-01-01T06:00:00'
-        - '0211-01-01T06:00:00'
-        - '0231-01-01T06:00:00'
-        - '0251-01-01T06:00:00'
-        - '0271-01-01T06:00:00'
-        - '0291-01-01T06:00:00'
     dataset:
-      merge:
-      - data_path: /climate-default
-        file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
-        engine: zarr
-      - data_path: /climate-default
-        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-        engine: zarr
+      data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      engine: zarr
     num_data_workers: 16
   aggregator:
     log_histograms: false
+    log_zonal_mean_images: false
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace2-cm4-atmos-noLSM
+  project: ace-perf
   entity: ai2cm
 train_loader:
-  batch_size: 16 # 14129 / 4 ~ 3533 batches per GPU
-  num_data_workers: 32
-  prefetch_factor: 2
-  dataset:
-    merge:
-    - data_path: /climate-default
-      file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
-      engine: zarr
-      subset:
-        start_time: '0151-03-01T12:00:00' # earlier times nan
-        stop_time: '0306-01-01T06:00:00'
-    - data_path: /climate-default
-      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-      engine: zarr
-      subset:
-        start_time: '0151-03-01T12:00:00' # earlier times nan
-        stop_time: '0306-01-01T06:00:00'
-validation_loader:
-  batch_size: 64 # 114 / 4 ~ 29 batches per GPU
-  num_data_workers: 8 # 29 / 8 ~ 4 batches per data worker
+  batch_size: 4
+  num_data_workers: 16
   prefetch_factor: 4
-  time_buffer: 30
   dataset:
-    merge:
-    - data_path: /climate-default
-      file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
-      engine: zarr
-      subset:
-        start_time: '0306-01-01T06:00:00'
-        stop_time: '0311-01-01T06:00:00'
-    - data_path: /climate-default
-      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-      engine: zarr
-      subset:
-        start_time: '0306-01-01T06:00:00'
-        stop_time: '0311-01-01T06:00:00'
+    data_path: /climate-default
+    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+    engine: zarr
+    subset:
+      start_time: '0151-01-03T12:00:00'
+      stop_time: '0156-01-03T12:00:00'
+validation_loader:
+  batch_size: 32
+  num_data_workers: 16
+  prefetch_factor: 4
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+    engine: zarr
+    subset:
+      start_time: '0306-01-01T06:00:00'
+      stop_time: '0308-01-01T06:00:00'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  optimizer_type: AdamW
+  optimizer_type: FusedAdam
   kwargs:
-    fused: true
     weight_decay: 0.01
 stepper:
   loss:
@@ -107,14 +84,16 @@ stepper:
     type: single_module
     config:
       builder:
-        type: NoiseConditionedSFNO
+        type: SphericalFourierNeuralOperatorNet
         config:
           embed_dim: 384
-          noise_embed_dim: 0
           filter_type: linear
+          hard_thresholding_fraction: 1.0
           use_mlp: true
+          normalization_layer: instance_norm
           num_layers: 8
           operator_type: dhconv
+          scale_factor: 1
           separable: false
           spectral_layers: 3
           spectral_transform: sht
@@ -153,13 +132,13 @@ stepper:
       - DSWRFtoa
       in_names:
       - land_fraction
-      - lake_fraction
       - ocean_fraction
       - sea_ice_fraction
       - DSWRFtoa
       - HGTsfc
       - PRESsfc
       - surface_temperature
+      - TMP2m
       - Q2m
       - UGRD10m
       - VGRD10m
@@ -246,6 +225,5 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
-      # ocean coupling variables (diagnostic for now)
       - eastward_surface_wind_stress
       - northward_surface_wind_stress

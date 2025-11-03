@@ -1,8 +1,8 @@
 import dataclasses
+import datetime
 import logging
 import os
 from collections.abc import Mapping, Sequence
-from datetime import datetime
 from typing import TypeAlias, TypeGuard, Union
 
 import numpy as np
@@ -14,8 +14,14 @@ from fme.core.dataset.time import TimeSlice
 from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
+from .monthly import MonthlyDataWriter, months_for_timesteps
 from .raw import NetCDFWriterConfig, RawDataWriter
-from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
+from .time_coarsen import (
+    MonthlyCoarsenConfig,
+    PairedTimeCoarsen,
+    TimeCoarsen,
+    TimeCoarsenConfig,
+)
 from .utils import DIM_INFO_HEALPIX, DIM_INFO_LATLON
 from .zarr import SeparateICZarrWriterAdapter, ZarrWriterAdapter, ZarrWriterConfig
 
@@ -36,13 +42,13 @@ def _is_datetime_dataarray(data: xr.DataArray) -> TypeGuard[DatetimeDataArray]:
 
 def _month_string_to_int(month_str: str) -> int:
     try:
-        month = datetime.strptime(month_str, "%B")
+        month = datetime.datetime.strptime(month_str, "%B")
         return month.month
     except ValueError:
         pass
 
     try:
-        month = datetime.strptime(month_str, "%b")
+        month = datetime.datetime.strptime(month_str, "%b")
         return month.month
     except ValueError:
         pass
@@ -180,7 +186,8 @@ class FileWriterConfig:
             can select an index range of steps in an inference, the MonthSelector can be
             used to target specific seasons or months for outputs, and a TimeSlice
             allows for datetime range selection.
-        time_coarsen: Optional TimeCoarsen config for reducing in the time dimension.
+        save_reference: Whether to save the reference/target data alongside predictions.
+        time_coarsen: Configuration for time averaging of outputs.
         format: Configuration for the output format (i.e. netCDF or zarr).
         separate_ensemble_members: Option to write ensemble members to separate files.
             In this case, time is a datetime coordinate.
@@ -192,7 +199,7 @@ class FileWriterConfig:
     lon_extent: Sequence[float] | None = None
     time_selection: Slice | MonthSelector | TimeSlice | None = None
     save_reference: bool = True
-    time_coarsen: TimeCoarsenConfig | None = None
+    time_coarsen: TimeCoarsenConfig | MonthlyCoarsenConfig | None = None
     format: NetCDFWriterConfig | ZarrWriterConfig = dataclasses.field(
         default_factory=NetCDFWriterConfig
     )
@@ -219,9 +226,22 @@ class FileWriterConfig:
                     "Time coarsening is enabled. "
                     "Time subselection is applied *after* time coarsening."
                 )
-            if isinstance(self.format, ZarrWriterConfig):
+
+        if isinstance(self.format, ZarrWriterConfig):
+            if self.time_selection is not None:
                 raise NotImplementedError(
                     "Time selection is not currently supported when writing to zarr."
+                )
+            if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+                raise NotImplementedError(
+                    "Monthly coarsening is not currently supported for the zarr format."
+                )
+
+        if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+            if self.time_selection is not None:
+                raise NotImplementedError(
+                    "Time selection is not currently supported when using monthly "
+                    "coarsening."
                 )
 
     def build_paired(
@@ -229,6 +249,7 @@ class FileWriterConfig:
         experiment_dir: str,
         n_initial_conditions: int,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
@@ -240,10 +261,11 @@ class FileWriterConfig:
         ).build(
             experiment_dir=experiment_dir,
             n_initial_conditions=n_initial_conditions,
+            n_timesteps=n_timesteps,
+            timestep=timestep,
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
-            n_timesteps=n_timesteps,
         )
         if self.save_reference:
             reference_writer = dataclasses.replace(
@@ -251,10 +273,11 @@ class FileWriterConfig:
             ).build(
                 experiment_dir=experiment_dir,
                 n_initial_conditions=n_initial_conditions,
+                n_timesteps=n_timesteps,
+                timestep=timestep,
                 variable_metadata=variable_metadata,
                 coords=coords,
                 dataset_metadata=dataset_metadata,
-                n_timesteps=n_timesteps,
             )
         else:
             reference_writer = None
@@ -267,6 +290,7 @@ class FileWriterConfig:
         experiment_dir: str,
         n_initial_conditions: int,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
@@ -278,6 +302,7 @@ class FileWriterConfig:
             experiment_dir: The directory where experiment outputs are saved.
             n_initial_conditions: The number of initial conditions or ensemble members.
             n_timesteps: Total number of inference forward steps.
+            timestep: The time delta between each timestep.
             variable_metadata: Metadata for each variable.
             coords: Coordinate arrays for the dataset. These should be the coordinates
                 of the entire global domain, not the subset region coordinates.
@@ -316,9 +341,14 @@ class FileWriterConfig:
             )
         subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
 
-        raw_writer: RawDataWriter | ZarrWriterAdapter | SeparateICZarrWriterAdapter
+        raw_writer: (
+            RawDataWriter
+            | ZarrWriterAdapter
+            | SeparateICZarrWriterAdapter
+            | MonthlyDataWriter
+        )
         if isinstance(self.format, ZarrWriterConfig):
-            if self.time_coarsen:
+            if isinstance(self.time_coarsen, TimeCoarsenConfig):
                 n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
             else:
                 n_timesteps_write = n_timesteps
@@ -349,17 +379,29 @@ class FileWriterConfig:
                     "Writing separate ensemble members is not currently supported for "
                     "netcdf output."
                 )
-            raw_writer = RawDataWriter(
-                path=experiment_dir,
-                label=f"{self.label}.nc",
-                n_initial_conditions=n_initial_conditions,
-                save_names=self.names,
-                variable_metadata=variable_metadata,
-                coords=subselect_coords_,
-                dataset_metadata=dataset_metadata,
-            )
+            if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+                raw_writer = MonthlyDataWriter(
+                    path=experiment_dir,
+                    label=self.label,
+                    n_samples=n_initial_conditions,
+                    n_months=months_for_timesteps(n_timesteps, timestep),
+                    save_names=self.names,
+                    variable_metadata=variable_metadata,
+                    coords=subselect_coords_,
+                    dataset_metadata=dataset_metadata,
+                )
+            else:
+                raw_writer = RawDataWriter(
+                    path=experiment_dir,
+                    label=f"{self.label}.nc",
+                    n_initial_conditions=n_initial_conditions,
+                    save_names=self.names,
+                    variable_metadata=variable_metadata,
+                    coords=subselect_coords_,
+                    dataset_metadata=dataset_metadata,
+                )
         writer = FileWriter(self, raw_writer, full_coords=coords)
-        if self.time_coarsen is not None:
+        if isinstance(self.time_coarsen, TimeCoarsenConfig):
             return self.time_coarsen.build(writer)
         else:
             return writer
@@ -373,7 +415,10 @@ class FileWriter:
     def __init__(
         self,
         config: FileWriterConfig,
-        writer: RawDataWriter | ZarrWriterAdapter | SeparateICZarrWriterAdapter,
+        writer: RawDataWriter
+        | MonthlyDataWriter
+        | ZarrWriterAdapter
+        | SeparateICZarrWriterAdapter,
         full_coords: Mapping[str, np.ndarray],
     ):
         self.config = config
