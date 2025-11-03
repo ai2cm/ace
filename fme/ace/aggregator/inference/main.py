@@ -415,10 +415,11 @@ class InferenceEvaluatorAggregator(
         self._n_timesteps_seen = 0
         self._normalize = normalize
         print("self._summary_aggregators", list(self._summary_aggregators.keys()))
-        print(
-            "list(self._ensemble_aggregators.items())",
-            list(self._ensemble_aggregators.keys()),
-        )
+        if self.n_ensemble_per_ic > 1:
+            print(
+                "list(self._ensemble_aggregators.items())",
+                list(self._ensemble_aggregators.keys()),
+            )
 
     @property
     def log_time_series(self) -> bool:
