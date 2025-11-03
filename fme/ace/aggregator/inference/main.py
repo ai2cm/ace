@@ -414,6 +414,11 @@ class InferenceEvaluatorAggregator(
             }
         self._n_timesteps_seen = 0
         self._normalize = normalize
+        print("self._summary_aggregators", list(self._summary_aggregators.keys()))
+        print(
+            "list(self._ensemble_aggregators.items())",
+            list(self._ensemble_aggregators.keys()),
+        )
 
     @property
     def log_time_series(self) -> bool:
@@ -441,8 +446,6 @@ class InferenceEvaluatorAggregator(
             )
         if self.n_ensemble_per_ic > 1:
             unfolded_target_data, unfolded_prediction_data = data.ensemble_data()
-            print("unfolded_target_data", unfolded_target_data["a"].size())
-            print("unfolded_prediction_data", unfolded_prediction_data["a"].size())
             for ensemble_aggregator in self._ensemble_aggregators.values():
                 ensemble_aggregator.record_batch(
                     target_data=unfolded_target_data,
