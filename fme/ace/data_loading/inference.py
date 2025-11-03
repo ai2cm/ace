@@ -43,14 +43,7 @@ class TimestampList:
             )
             for t in self.times
         ]
-        (indices,) = time_index.isin(datetimes).nonzero()
-        if len(indices) != len(self.times):
-            missing_times = set(datetimes) - set(time_index[indices])
-            raise ValueError(
-                f"Inference initial condition timestamps {missing_times} "
-                "were not found in the dataset."
-            )
-        return indices
+        return np.array([time_index.get_loc(dt) for dt in datetimes])
 
     @property
     def n_initial_conditions(self) -> int:

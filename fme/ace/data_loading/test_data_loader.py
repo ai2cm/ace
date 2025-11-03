@@ -694,24 +694,20 @@ def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
     "timestamps, expected_indices",
     [
         (
-            [
-                "2020-01-01T00:00:00",
-                "2020-01-02T00:00:00",
-            ],
+            ["2020-01-01T00:00:00", "2020-01-02T00:00:00"],
             [0, 2],
         ),
         (
-            [
-                "2020-01-01T00:00:00",
-                "2021-01-02T00:00:00",
-            ],
+            ["2020-01-01T00:00:00", "2021-01-02T00:00:00"],
             None,
         ),
         (
-            [
-                "2021-01-02T00:00:00",
-            ],
+            ["2021-01-02T00:00:00"],
             None,
+        ),
+        (
+            ["2020-01-01T12:00:00", "2020-01-01T12:00:00"],
+            [1, 1],
         ),
     ],
 )
@@ -726,7 +722,7 @@ def test_TimestampList_as_indices(timestamps, expected_indices):
     )
     timestamp_list = TimestampList(timestamps)
     if expected_indices is None:
-        with pytest.raises(ValueError):
+        with pytest.raises(KeyError):
             timestamp_list.as_indices(time_index)
     else:
         np.testing.assert_equal(
