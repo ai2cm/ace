@@ -3,7 +3,7 @@
 set -e
 
 JOB_NAME="generate-xshield-amip-100km-to-3km-zarr-outputs-cascade-test"
-CONFIG_FILENAME="config-generate.yaml"
+CONFIG_FILENAME="config-generate-cascade.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
