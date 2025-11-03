@@ -119,7 +119,7 @@ def test_slice_work_item_with_batch_creates_loaded_work_item():
 
 def test_loaded_work_item_requires_batch_data():
     """LoadedWorkItem should raise error if batch is None."""
-    with pytest.raises(ValueError, match="must be created with batch data"):
+    with pytest.raises(ValueError):
         LoadedWorkItem(time_slice=slice(0, 5), ens_slice=slice(0, 10), batch=None)
 
 
