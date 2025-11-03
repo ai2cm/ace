@@ -521,9 +521,13 @@ def test_train_and_inference(
         log_validation_maps=log_validation_maps,
     )
     # using pdb requires calling main functions directly
+    h_parallel_size=4
+    w_parallel_size=1
     with mock_wandb() as wandb:
         train_main(
             yaml_config=train_config,
+             h_parallel_size=h_parallel_size,
+             w_parallel_size=w_parallel_size
         )
         wandb_logs = wandb.get_logs()
         # for log in wandb_logs:
