@@ -216,9 +216,17 @@ def test_run_target_generation_skips_padding_items(
     # Verify model was still called
     mock_model.generate_on_batch_no_target.assert_called_once()
 
-    # Verify writer did NOT record the output
-    mock_writer.record_batch.assert_not_called()
-
+    # Verify writer called with empty slice and array as arguments
+    mock_writer.record_batch.assert_called_once()
+    call_args = mock_writer.record_batch.call_args_list
+    assert len(call_args) == 1
+    args, kwargs = call_args[0]
+    output_vars = args[0]
+    for k, v in output_vars.items():
+        assert v.size == 0
+    insert_slices = kwargs["position_slices"]
+    for k, v in insert_slices.items():
+        assert not v
 
 def get_generate_model_config():
     return DiffusionModelConfig(

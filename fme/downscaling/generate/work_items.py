@@ -4,6 +4,7 @@ from itertools import product
 import torch
 
 from fme.core.distributed import Distributed
+from fme.core.device import get_device
 
 from ..data import BatchData, Topography
 from ..data.config import BatchItemDatasetAdapter
@@ -110,7 +111,8 @@ class SliceItemDataset:
         data_items = [self.dataset[i] for i in work_spec.time_indices]
         batch = BatchData.from_sequence(data_items).to_device()
         loaded_item = SliceWorkItem.with_batch(work_spec, batch)
-        return loaded_item, self.topography
+        topography = self.topography.to_device(device=get_device())
+        return loaded_item, topography
 
     @property
     def max_output_shape(self):

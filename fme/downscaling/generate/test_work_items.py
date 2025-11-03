@@ -247,9 +247,8 @@ def test_slice_item_dataset_getitem_returns_loaded_work_item(
         result = dataset[0]
 
         # Should return tuple of (LoadedWorkItem, Topography)
-        loaded_item, topo = result
+        loaded_item, _ = result
         assert isinstance(loaded_item, LoadedWorkItem)
-        assert topo is mock_topography
 
 
 def test_slice_item_dataset_max_output_shape(

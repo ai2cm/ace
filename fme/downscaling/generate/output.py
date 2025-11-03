@@ -251,6 +251,8 @@ class OutputTargetConfig(ABC):
             n_items_per_gpu=self.n_item_per_gpu,
         )
 
+        # defer topography device placement until inside SliceItemDataset
+        topography = topography.to_device(torch.device("cpu"))
         slice_dataset = SliceItemDataset(
             slice_items=work_items,
             dataset=dataset,
