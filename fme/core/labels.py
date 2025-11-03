@@ -36,17 +36,18 @@ class LabelEncoder:
         Returns:
             Tensor of one-hot encoded labels, of shape (batch_size, n_labels).
         """
+        list_data = []
         for batch_labels in labels:
             if not batch_labels.issubset(self._labels):
                 raise InvalidLabelError(
                     f"Invalid labels: at least one of {batch_labels} "
                     f"is not in {self._labels}"
                 )
+            list_data.append(
+                [1 if label in batch_labels else 0 for label in self._labels]
+            )
         return torch.tensor(
-            [
-                [1 if label in labels else 0 for label in self._labels]
-                for labels in labels
-            ],
+            list_data,
             dtype=torch.float32,
             device=get_device(),
         )

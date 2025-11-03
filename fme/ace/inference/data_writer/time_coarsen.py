@@ -13,7 +13,6 @@ class _PairedDataWriter(Protocol):
         self,
         target: dict[str, torch.Tensor],
         prediction: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         pass
@@ -29,7 +28,6 @@ class _DataWriter(Protocol):
     def append_batch(
         self,
         data: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         pass
@@ -124,19 +122,17 @@ class PairedTimeCoarsen:
         self,
         target: dict[str, torch.Tensor],
         prediction: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
-        (target_coarsened, start_timestep, batch_times_coarsened) = coarsen_batch(
-            target, start_timestep, batch_time, self._coarsen_factor
+        (target_coarsened, batch_times_coarsened) = coarsen_batch(
+            target, batch_time, self._coarsen_factor
         )
-        (prediction_coarsened, _, _) = coarsen_batch(
-            prediction, start_timestep, batch_time, self._coarsen_factor
+        (prediction_coarsened, _) = coarsen_batch(
+            prediction, batch_time, self._coarsen_factor
         )
         self._data_writer.append_batch(
             target_coarsened,
             prediction_coarsened,
-            start_timestep,
             batch_times_coarsened,
         )
 
@@ -161,15 +157,13 @@ class TimeCoarsen:
     def append_batch(
         self,
         data: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
-        (data_coarsened, start_timestep, batch_times_coarsened) = coarsen_batch(
-            data, start_timestep, batch_time, self._coarsen_factor
+        (data_coarsened, batch_times_coarsened) = coarsen_batch(
+            data, batch_time, self._coarsen_factor
         )
         self._data_writer.append_batch(
             data_coarsened,
-            start_timestep,
             batch_times_coarsened,
         )
 
@@ -182,14 +176,12 @@ class TimeCoarsen:
 
 def coarsen_batch(
     data: dict[str, torch.Tensor],
-    start_timestep: int,
     batch_time: xr.DataArray,
     coarsen_factor: int,
-) -> tuple[dict[str, torch.Tensor], int, xr.DataArray]:
+) -> tuple[dict[str, torch.Tensor], xr.DataArray]:
     data_coarsened = _coarsen_tensor_dict(data, coarsen_factor)
-    start_timestep_coarsened = start_timestep // coarsen_factor
     batch_time_coarsened = batch_time.coarsen({TIME_DIM_NAME: coarsen_factor}).mean()
-    return data_coarsened, start_timestep_coarsened, batch_time_coarsened
+    return data_coarsened, batch_time_coarsened
 
 
 def _coarsen_tensor_dict(

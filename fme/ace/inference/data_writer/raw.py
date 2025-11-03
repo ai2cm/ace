@@ -73,17 +73,14 @@ class PairedRawDataWriter:
         self,
         target: dict[str, torch.Tensor],
         prediction: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         self._target_writer.append_batch(
             data=target,
-            start_timestep=start_timestep,
             batch_time=batch_time,
         )
         self._prediction_writer.append_batch(
             data=prediction,
-            start_timestep=start_timestep,
             batch_time=batch_time,
         )
 
@@ -150,7 +147,6 @@ class RawDataWriter:
     def append_batch(
         self,
         data: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         """
@@ -158,7 +154,6 @@ class RawDataWriter:
 
         Args:
             data: Data to be written to file.
-            start_timestep: Timestep (lead time dim) at which to start writing. Unused.
             batch_time: Time coordinate for each sample in the batch.
         """
         if self.dataset is None:

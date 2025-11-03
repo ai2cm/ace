@@ -374,6 +374,16 @@ class BatchData:
             raise ValueError("Cannot broadcast ensemble if n_ensemble is not 1.")
         return self._repeat_interleave_batch_dim(n_ensemble)
 
+    def pin_memory(self: SelfType) -> SelfType:
+        """Used by torch.utils.data.DataLoader when pin_memory=True to page-lock
+        tensors in CPU memory, resulting in faster transfers from CPU to GPU.
+
+        See https://docs.pytorch.org/docs/stable/data.html#memory-pinning
+
+        """
+        self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
+        return self
+
 
 @dataclasses.dataclass
 class PairedData:

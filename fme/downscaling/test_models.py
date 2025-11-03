@@ -27,22 +27,24 @@ class LinearDownscaling(torch.nn.Module):
         self,
         factor: int,
         fine_img_shape: tuple[int, int],
-        n_channels: int = 1,
+        n_channels_in: int = 1,
+        n_channels_out: int | None = None,
     ):
         super().__init__()
         self.img_shape = fine_img_shape
-        self.n_channels = n_channels
+        self.n_channels_in = n_channels_in
+        self.n_channels_out = n_channels_out or n_channels_in
         height, width = fine_img_shape
         self.linear = torch.nn.Linear(
-            ((height * width) // factor**2) * n_channels,
-            height * width * n_channels,
+            ((height * width) // factor**2) * n_channels_in,
+            height * width * self.n_channels_out,
             bias=False,
         )
         self._coarse_img_shape = (height // factor, width // factor)
 
     def forward(self, x):
         x = self.linear(torch.flatten(x, start_dim=1))
-        x = x.view(x.shape[0], self.n_channels, *self.img_shape)
+        x = x.view(x.shape[0], self.n_channels_out, *self.img_shape)
         return x
 
 

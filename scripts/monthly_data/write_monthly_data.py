@@ -210,7 +210,6 @@ def run(config: Config):
         )
         writer.append_batch(
             data=window_batch_data.data,
-            start_timestep=-1,  # ignored
             batch_time=window_batch_data.time,
         )
         if i % 10 == 0:
