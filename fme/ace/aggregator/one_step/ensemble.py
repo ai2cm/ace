@@ -84,6 +84,7 @@ class SSRBiasMetric(ReducedMetric):
         self._n_batches = 0
 
     def record(self, target: torch.Tensor, gen: torch.Tensor):
+        print("logging ssr_bias metric")
         mse = ((gen - target) ** 2).mean(dim=(0, 1, 2))  # batch, ensemble, time
         variance = gen.var(dim=1, unbiased=True).mean(dim=(0, 1))
         self._add_mse(mse)
@@ -182,6 +183,7 @@ class _EnsembleAggregator:
         if self._variable_metrics is None or self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
         data: dict[str, torch.Tensor] = {}
+        print("self._variable_metrics", self._variable_metrics)
         for metric in sorted(self._variable_metrics):
             for key in sorted(self._variable_metrics[metric]):
                 metric_value = self._dist.reduce_mean(
