@@ -4,7 +4,6 @@ from itertools import product
 import torch
 
 from fme.core.distributed import Distributed
-from fme.core.device import get_device
 
 from ..data import BatchData, Topography
 from ..data.config import BatchItemDatasetAdapter
@@ -85,6 +84,10 @@ class LoadedWorkItem(SliceWorkItem):
                 "LoadedWorkItem must be created with batch data via with_batch()"
             )
 
+    def to_device(self) -> None:
+        if self.batch is not None:
+            self.batch = self.batch.to_device()
+
 
 class SliceItemDataset:
     """
@@ -109,9 +112,9 @@ class SliceItemDataset:
     def __getitem__(self, idx: int) -> tuple[LoadedWorkItem, Topography]:
         work_spec = self.slice_items[idx]
         data_items = [self.dataset[i] for i in work_spec.time_indices]
-        batch = BatchData.from_sequence(data_items).to_device()
+        batch = BatchData.from_sequence(data_items)
         loaded_item = SliceWorkItem.with_batch(work_spec, batch)
-        topography = self.topography.to_device(device=get_device())
+        topography = self.topography
         return loaded_item, topography
 
     @property

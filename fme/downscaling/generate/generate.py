@@ -110,6 +110,8 @@ class Downscaler:
         loaded_item: LoadedWorkItem
         topography: Topography
         for i, (loaded_item, topography) in enumerate(target.data):
+            loaded_item.to_device()
+            topography.to_device()
             if writer is None:
                 writer = target.get_writer(
                     latlon_coords=topography.coords,
