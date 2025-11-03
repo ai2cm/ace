@@ -24,6 +24,8 @@ from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.device import get_device, using_gpu
 from fme.ace.models.makani_mpu.mappings import init_gradient_reduction_hooks
+from fme.ace.models.makani_utils.checkpoint_helpers import  gather_model_state_dict, prepend_prefix_to_state_dict, scatter_model_state_dict
+
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
@@ -348,8 +350,19 @@ class SingleModuleStep(StepABC):
         Returns:
             The state of the stepper.
         """
+        # iterate over parameters and gather them from the ranks
+
+        dist=Distributed.get_instance()
+        if dist.is_spatial_distributed():
+            state_dict = gather_model_state_dict(self.module)
+            # drop module prefix in case if DDP is being used
+            # if isinstance(self.module, nn.parallel.DistributedDataParallel):
+            nn.modules.utils.consume_prefix_in_state_dict_if_present(state_dict, "module.")
+        else:
+            state_dict = self.module.state_dict()
+
         return {
-            "module": self.module.state_dict(),
+            "module": state_dict,
         }
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -360,10 +373,27 @@ class SingleModuleStep(StepABC):
             state: The state to load.
         """
         module = state["module"]
+        #CHECK: Getting an error because this key is missing
+        # if I use strict=true
         if "module.device_buffer" in module:
-            # for backwards compatibility with old checkpoints
-            del module["module.device_buffer"]
-        self.module.load_state_dict(module)
+        #    for backwards compatibility with old checkpoints
+          del module["module.device_buffer"]
+
+        dist=Distributed.get_instance()
+        if dist.is_spatial_distributed():
+          # if isinstance(self.module, nn.parallel.DistributedDataParallel):
+          # prepend module prefix to state dict:
+          prepend_prefix_to_state_dict(module, "module.")
+
+          # CHECK:
+          strict= False
+          module = scatter_model_state_dict(self.module, module, strict)
+          # load state dict
+          self.module.load_state_dict(module, strict=strict)
+
+        else:
+          self.module.load_state_dict(module,strict=False)
+
 
 
 def step_with_adjustments(
