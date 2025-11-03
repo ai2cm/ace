@@ -61,70 +61,53 @@ def _get_time_array(
 @pytest.mark.parametrize(
     [
         "coarsen_factor",
-        "start_timestep",
         "expected_coarsened_data",
         "expected_coarsened_time",
-        "expected_coarsened_start_timestep",
     ],
     [
         pytest.param(
             1,
-            0,
             [0.0, 1.0, 2.0, 3.0],
             get_batch_time(start_time=(2020, 1, 1, 0, 0, 0), n_timesteps=4),
-            0,
             id="coarsen_factor_1",
         ),
         pytest.param(
             2,
-            0,
             [0.5, 2.5],
             get_batch_time(
                 start_time=(2020, 1, 1, 3, 0, 0), n_timesteps=2, freq_hrs=12
             ),
-            0,
             id="coarsen_factor_2",
         ),
         pytest.param(
             2,
-            3,
             [0.5, 2.5],
             get_batch_time(
                 start_time=(2020, 1, 1, 3, 0, 0), n_timesteps=2, freq_hrs=12
             ),
-            1,
             id="coarsen_factor_2_start_timestep_3",
         ),
         pytest.param(
             4,
-            0,
             [1.5],
             get_batch_time(
                 start_time=(2020, 1, 1, 9, 0, 0), n_timesteps=1, freq_hrs=24
             ),
-            0,
             id="coarsen_factor_4",
         ),
     ],
 )
 def test_time_coarsen(
     coarsen_factor: int,
-    start_timestep: int,
     expected_coarsened_data: Sequence[float],
     expected_coarsened_time: Sequence[cftime.DatetimeJulian],
-    expected_coarsened_start_timestep: int,
     dim_sizes: Sequence[int] = DIM_SIZES,
 ):
     target, time = get_windowed_batch(
         dim_sizes=dim_sizes, start_time=(2020, 1, 1, 0, 0, 0)
     )
-    (
-        target_coarsened,
-        coarsened_start_timestep,
-        time_coarsened,
-    ) = coarsen_batch(
+    (target_coarsened, time_coarsened) = coarsen_batch(
         data=target,
-        start_timestep=start_timestep,
         batch_time=time,
         coarsen_factor=coarsen_factor,
     )
@@ -146,8 +129,6 @@ def test_time_coarsen(
         ),
         "target coarsened value",
     )
-    # check the coarsened start timestep
-    assert coarsened_start_timestep == expected_coarsened_start_timestep
     # check the coarsened data time coordinate values
     (
         xr.testing.assert_allclose(time_coarsened, expected_coarsened_time),

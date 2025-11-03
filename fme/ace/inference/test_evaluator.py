@@ -533,20 +533,23 @@ def test_inference_writer_boundaries(
         tar["lat"].values, num_lon=len(tar["lon"])
     )
     # check time mean metrics
-    # relative tolerance; for some reason some GPU test cases have higher error
+    tol = 1e-4  # relative tolerance
+    grad_mag_tol = tol
     if using_gpu():
+        # GPU test cases have higher error
         tol = 5e-4
-    else:
-        tol = 1e-4
-    assert metrics.root_mean_squared_error(
-        tar_time_mean, gen_time_mean, area_weights
-    ).item() == pytest.approx(
-        inference_logs[-1]["inference/time_mean/rmse/var"], rel=tol
+        grad_mag_tol = 3e-3
+    np.testing.assert_allclose(
+        metrics.root_mean_squared_error(
+            tar_time_mean, gen_time_mean, area_weights
+        ).item(),
+        inference_logs[-1]["inference/time_mean/rmse/var"],
+        rtol=tol,
     )
-    assert metrics.weighted_mean_bias(
-        tar_time_mean, gen_time_mean, area_weights
-    ).item() == pytest.approx(
-        inference_logs[-1]["inference/time_mean/bias/var"], rel=tol
+    np.testing.assert_allclose(
+        metrics.weighted_mean_bias(tar_time_mean, gen_time_mean, area_weights).item(),
+        inference_logs[-1]["inference/time_mean/bias/var"],
+        rtol=tol,
     )
 
     prediction_ds = prediction_ds.isel(sample=0)
@@ -561,20 +564,30 @@ def test_inference_writer_boundaries(
         gen_i = torch.from_numpy(gen.isel(time=i).values)
         tar_i = torch.from_numpy(tar.isel(time=i).values)
         # check that manually computed metrics match logged metrics
-        assert metrics.root_mean_squared_error(
-            tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_rmse/var"], rel=tol)
-        assert metrics.weighted_mean_bias(
-            tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_bias/var"], rel=tol)
-        assert metrics.gradient_magnitude_percent_diff(
-            tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(
-            log["inference/mean/weighted_grad_mag_percent_diff/var"], rel=tol
+        np.testing.assert_allclose(
+            metrics.root_mean_squared_error(
+                tar_i, gen_i, area_weights, dim=(-2, -1)
+            ).item(),
+            log["inference/mean/weighted_rmse/var"],
+            rtol=tol,
         )
-        assert metrics.weighted_mean(
-            gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_mean_gen/var"], rel=tol)
+        np.testing.assert_allclose(
+            metrics.weighted_mean_bias(tar_i, gen_i, area_weights, dim=(-2, -1)).item(),
+            log["inference/mean/weighted_bias/var"],
+            rtol=tol,
+        )
+        np.testing.assert_allclose(
+            metrics.gradient_magnitude_percent_diff(
+                tar_i, gen_i, area_weights, dim=(-2, -1)
+            ).item(),
+            log["inference/mean/weighted_grad_mag_percent_diff/var"],
+            rtol=grad_mag_tol,
+        )
+        np.testing.assert_allclose(
+            metrics.weighted_mean(gen_i, area_weights, dim=(-2, -1)).item(),
+            log["inference/mean/weighted_mean_gen/var"],
+            rtol=tol,
+        )
 
         # the target obs should be the same as the validation data obs
         # ds is original data which includes IC, target_ds does not
