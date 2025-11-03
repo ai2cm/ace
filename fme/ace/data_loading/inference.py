@@ -300,7 +300,6 @@ class InferenceDataset(torch.utils.data.Dataset):
         return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
-            n_ensemble=self._n_ensemble,
         )
 
     def __getitem__(self, index) -> BatchData:
