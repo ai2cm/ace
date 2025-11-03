@@ -28,11 +28,10 @@ launch_job () {
         --description 'Run ACE inference for SHiELD model' \
         --task-name $JOB_NAME \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/climate-ceres \
+        --workspace ai2/ace \
         --priority normal \
         --not-preemptible \
-        --cluster ai2/saturn-cirrascale \
-	--cluster ai2/ceres \
+	--cluster ai2/titan \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
         --env WANDB_JOB_TYPE=inference \
@@ -48,13 +47,6 @@ launch_job () {
         --allow-dirty \
         --system-python \
         --install "pip install --no-deps ." \
-        -- /bin/bash -c "\
-            python -I -m fme.ace.evaluator $CONFIG_PATH \
-            --override \
-            n_ensemble_per_ic=25 \
-            forward_steps_in_memory=2 \
-          "
-
 }
 
 # checkpoint datasets
@@ -63,6 +55,6 @@ WEIGHTS=01K8MSK8RDWJB9GD7MEKAW2KEG
 
 JOB_NAME="ace-inference-era5-pt-era5-multi-20-multi-ics-agg"
 
-CONFIG_PATH="${SCRIPT_PATH}evaluate-xshield-amip-stochastic-ace.yaml"
+CONFIG_PATH="${SCRIPT_PATH}evaluator-era5-stochastic-weather-skill.yaml"
 
 launch_job $JOB_NAME $WEIGHTS $CONFIG_PATH

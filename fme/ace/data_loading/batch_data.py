@@ -11,11 +11,7 @@ from torch.utils.data import default_collate
 
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
-from fme.core.tensors import (
-    add_ensemble_dim,
-    fold_sized_ensemble_dim,
-    unfold_ensemble_dim,
-)
+from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
@@ -222,6 +218,16 @@ class BatchData:
             **kwargs,
         )
 
+    def _repeat_interleave_batch_dim(self: SelfType, repeats: int) -> SelfType:
+        new_labels: list[set[str]] = np.repeat(self.labels, repeats).tolist()
+        return self.__class__(
+            data=repeat_interleave_batch_dim(self.data, repeats),
+            time=xr.concat([self.time] * repeats, dim="sample"),
+            labels=new_labels,
+            horizontal_dims=self.horizontal_dims,
+            n_ensemble=repeats,
+        )
+
     def __post_init__(self):
         if len(self.time.shape) != 2:
             raise ValueError(
@@ -366,21 +372,9 @@ class BatchData:
         """
         Broadcast n_ensemble ensembles to a new BatchData obj.
         """
-        data = {**self.data}
-        data = add_ensemble_dim(data, repeats=n_ensemble)
-        data = fold_sized_ensemble_dim(data, n_ensemble=n_ensemble)
-
-        time = self.time
-        time = xr.concat([time] * n_ensemble, dim="sample")
-
-        labels = self.labels * n_ensemble
-        return self.__class__(
-            data={k: v.to(v.device) for k, v in data.items()},
-            time=time,
-            horizontal_dims=self.horizontal_dims,
-            labels=labels,
-            n_ensemble=n_ensemble,
-        )
+        if self.n_ensemble != 1:
+            raise ValueError("Cannot broadcast ensemble if n_ensemble is not 1.")
+        return self._repeat_interleave_batch_dim(n_ensemble)
 
     def pin_memory(self: SelfType) -> SelfType:
         """Used by torch.utils.data.DataLoader when pin_memory=True to page-lock
@@ -389,7 +383,9 @@ class BatchData:
         See https://docs.pytorch.org/docs/stable/data.html#memory-pinning
 
         """
-        self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
+        self.data = {
+            name: tensor.clone().pin_memory() for name, tensor in self.data.items()
+        }
         return self
 
 
