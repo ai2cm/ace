@@ -128,20 +128,20 @@ class Downscaler:
             )
             output_np = {k: output[k].cpu().numpy() for k in target.save_vars}
             insert_slices = loaded_item.insert_slices
-            
+
             if loaded_item.is_padding:
                 logging.info("Creating empty slices for padding work item.")
                 output_np_empty = {
-                    k: np.empty([0, 0] + list(output_np[k].shape[2:]), dtype=output_np[k].dtype) 
+                    k: np.empty(
+                        [0, 0] + list(output_np[k].shape[2:]), dtype=output_np[k].dtype
+                    )
                     for k in output_np.keys()
                 }
                 output_np = output_np_empty
                 insert_slices_empty = {k: slice(0, 0) for k in insert_slices}
                 insert_slices = insert_slices_empty
-            
-            writer.record_batch(
-                output_np, position_slices=insert_slices
-            )
+
+            writer.record_batch(output_np, position_slices=insert_slices)
 
         logging.info(f"Completed generation for target: {target.name}")
 

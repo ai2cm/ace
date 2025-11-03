@@ -1,9 +1,9 @@
+import os
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import os
 import pytest
 import torch
 import xarray as xr
@@ -14,6 +14,7 @@ from fme.core.logging_utils import LoggingConfig
 from fme.downscaling.data import Topography
 from fme.downscaling.generate.generate import Downscaler, GenerationConfig, main
 from fme.downscaling.generate.output import EventConfig, OutputTarget, RegionConfig
+from fme.downscaling.generate.test_output import loader_config  # noqa
 from fme.downscaling.models import (
     CheckpointModelConfig,
     DiffusionModelConfig,
@@ -24,7 +25,6 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.test_evaluator import LinearDownscalingDiffusion
-from fme.downscaling.generate.test_output import loader_config  # noqa
 
 # Fixtures
 
@@ -270,7 +270,7 @@ def checkpointed_model_config(tmp_path):
 
 
 @pytest.fixture
-def generation_config(tmp_path, loader_config, checkpointed_model_config):
+def generation_config(tmp_path, loader_config, checkpointed_model_config):  # noqa
     """Create a GenerationConfig for testing."""
     region_config = RegionConfig(
         name="test_region",
@@ -335,7 +335,8 @@ def test_generation_main(generation_config_path, skip_slow):
     assert "x" in event.data_vars
     assert "y" not in event.data_vars
     assert event["x"].notnull().all()
-    
+
+
 @pytest.mark.skipif(
     (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
     reason="Skipping multi-GPU test: less than 2 GPUs available.",
@@ -344,7 +345,7 @@ def test_generation_entrypoint(generation_config_path, skip_slow):
     """Test the main generation process end-to-end."""
     if skip_slow:
         pytest.skip("Skipping slow test.")
-    
+
     command = [
         "torchrun",
         "--nproc_per_node",
