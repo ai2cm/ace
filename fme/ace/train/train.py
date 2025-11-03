@@ -269,7 +269,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         dist.shutdown()
 
 
-def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
+def main(yaml_config: str, override_dotlist: Sequence[str] | None = None, h_parallel_size=1, w_parallel_size=1):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
         data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
@@ -279,7 +279,6 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         config.experiment_dir, config_data, config.resume_results
     )
     dist = Distributed()
-    h_parallel_size=1
-    w_parallel_size=1
-    dist._init_distributed(h_parallel_size =  h_parallel_size, w_parallel_size=w_parallel_size)
+    if (h_parallel_size>1) or (w_parallel_size >1):
+      dist._init_distributed(h_parallel_size =  h_parallel_size, w_parallel_size=w_parallel_size)
     run_train_from_config(config)
