@@ -96,8 +96,8 @@ class OutputTarget:
                 [
                     self.all_times,
                     np.array(ensemble),
-                    latlon_coords.lat.numpy(),
-                    latlon_coords.lon.numpy(),
+                    latlon_coords.lat.cpu().numpy(),
+                    latlon_coords.lon.cpu().numpy(),
                 ],
             )
         )

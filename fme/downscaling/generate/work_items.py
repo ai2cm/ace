@@ -108,7 +108,7 @@ class SliceItemDataset:
     def __getitem__(self, idx: int) -> tuple[LoadedWorkItem, Topography]:
         work_spec = self.slice_items[idx]
         data_items = [self.dataset[i] for i in work_spec.time_indices]
-        batch = BatchData.from_sequence(data_items)
+        batch = BatchData.from_sequence(data_items).to_device()
         loaded_item = SliceWorkItem.with_batch(work_spec, batch)
         return loaded_item, self.topography
 

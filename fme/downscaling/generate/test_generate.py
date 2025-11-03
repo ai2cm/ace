@@ -3,6 +3,7 @@ from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import os
 import pytest
 import torch
 import xarray as xr
@@ -11,7 +12,7 @@ import yaml
 from fme.core.dataset.time import TimeSlice
 from fme.core.logging_utils import LoggingConfig
 from fme.downscaling.data import Topography
-from fme.downscaling.generate.generate import Downscaler, GenerationConfig
+from fme.downscaling.generate.generate import Downscaler, GenerationConfig, main
 from fme.downscaling.generate.output import EventConfig, OutputTarget, RegionConfig
 from fme.downscaling.models import (
     CheckpointModelConfig,
@@ -23,6 +24,7 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.test_evaluator import LinearDownscalingDiffusion
+from fme.downscaling.generate.test_output import loader_config  # noqa
 
 # Fixtures
 
@@ -311,40 +313,47 @@ def generation_config_path(generation_config):
     return config_path
 
 
-@pytest.mark.parametrize(
-    "multi_gpu",
-    [
-        False,
-        pytest.param(
-            True,
-            marks=pytest.mark.skipif(
-                (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
-                reason="Skipping multi-GPU test: less than 2 GPUs available.",
-            ),
-        ),
-    ],
-)
-def test_generation_main(generation_config_path, multi_gpu, skip_slow):
+def test_generation_main(generation_config_path, skip_slow):
     """Test the main generation process end-to-end."""
     if skip_slow:
         pytest.skip("Skipping slow test.")
 
-    if multi_gpu:
-        command = [
-            "torchrun",
-            "--nproc_per_node",
-            "2",
-            "-m",
-            "fme.downscaling.generate",
-            str(generation_config_path),
-        ]
-    else:
-        command = [
-            "python",
-            "-m",
-            "fme.downscaling.generate",
-            str(generation_config_path),
-        ]
+    main(str(generation_config_path))
+
+    output_dir = generation_config_path.parent
+    test_region_zarr = output_dir / "test_region.zarr"
+    test_event_zarr = output_dir / "test_event.zarr"
+
+    assert (output_dir / "test_region.zarr").exists()
+    assert (output_dir / "test_event.zarr").exists()
+    region = xr.open_zarr(test_region_zarr)
+    assert "x" in region.data_vars
+    assert "y" in region.data_vars
+    assert region["x"].notnull().all()
+
+    event = xr.open_zarr(test_event_zarr)
+    assert "x" in event.data_vars
+    assert "y" not in event.data_vars
+    assert event["x"].notnull().all()
+    
+@pytest.mark.skipif(
+    (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
+    reason="Skipping multi-GPU test: less than 2 GPUs available.",
+)
+def test_generation_entrypoint(generation_config_path, skip_slow):
+    """Test the main generation process end-to-end."""
+    if skip_slow:
+        pytest.skip("Skipping slow test.")
+    
+    command = [
+        "torchrun",
+        "--nproc_per_node",
+        "2",
+        "-m",
+        "fme.downscaling.generate",
+        str(generation_config_path),
+    ]
+    os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
 
     subprocess.run(command, check=True)
     output_dir = generation_config_path.parent
