@@ -375,7 +375,7 @@ class BatchData:
 
         labels = self.labels * n_ensemble
         return self.__class__(
-            data={k: v.to(get_device()) for k, v in data.items()},
+            data={k: v.to(v.device) for k, v in data.items()},
             time=time,
             horizontal_dims=self.horizontal_dims,
             labels=labels,
