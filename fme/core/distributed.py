@@ -10,6 +10,7 @@ from torch.nn.parallel import DistributedDataParallel
 from fme.core.device import get_device, using_gpu, using_srun
 from fme.ace.utils import comm
 from physicsnemo.distributed.utils import compute_split_shapes
+from fme.ace.models.makani_mpu.mappings import init_gradient_reduction_hooks
 logger = logging.getLogger(__name__)
 
 
@@ -163,7 +164,7 @@ class Distributed:
         shuffle: bool,
         drop_last: bool = False,
     ) -> torch.utils.data.Sampler:
-        if self._distributed:
+        if self.is_spatial_distributed():
           num_replicas=comm.get_size("batch")
           rank=comm.get_rank("batch")
         else:
@@ -295,7 +296,25 @@ class Distributed:
         """
         Wrap a model with DistributedDataParallel if running in a distributed context.
         """
-        if self.is_distributed() and any(p.requires_grad for p in module.parameters()):
+        if self.is_spatial_distributed() and any(p.requires_grad for p in module.parameters()):
+          capture_stream = torch.Stream(device="cuda")
+          with torch.cuda.stream(capture_stream):
+                module = init_gradient_reduction_hooks(
+                         module,
+                         device=comm.get_local_rank(),
+        #                #FIXME: I am not sure how to set reduction_buffer_count
+                         reduction_buffer_count=1,
+                         broadcast_buffers=False,
+                         find_unused_parameters=False,
+                         gradient_as_bucket_view=True,
+                         static_graph=False,
+                         verbose=True,
+                         )
+          # capture stream sync
+          if capture_stream is not None:
+            capture_stream.synchronize()
+          return module
+        elif self.is_distributed() and any(p.requires_grad for p in module.parameters()):
             if using_gpu():
                 device_ids = [self._device_id]
                 output_device = [self._device_id]

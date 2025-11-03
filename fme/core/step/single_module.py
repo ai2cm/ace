@@ -23,7 +23,6 @@ from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.device import get_device, using_gpu
-from fme.ace.models.makani_mpu.mappings import init_gradient_reduction_hooks
 from fme.ace.models.makani_utils.checkpoint_helpers import  gather_model_state_dict, prepend_prefix_to_state_dict, scatter_model_state_dict
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -227,27 +226,6 @@ class SingleModuleStep(StepABC):
             n_out_channels=n_out_channels,
             img_shape=img_shape,
         ).to(get_device())
-
-        capture_stream = None
-        dist=Distributed.get_instance()
-        if dist.is_spatial_distributed():
-          if using_gpu():
-            capture_stream = torch.Stream(device="cuda")
-          with torch.cuda.stream(capture_stream):
-            self.module = init_gradient_reduction_hooks(
-                        self.module,
-                        device=get_device(),
-                        #FIXME: I am not sure how to set reduction_buffer_count
-                        reduction_buffer_count=1,
-                        broadcast_buffers=False,
-                        find_unused_parameters=False,
-                        gradient_as_bucket_view=True,
-                        static_graph=False,
-                        verbose=True,
-                    )
-          # capture stream sync
-          if capture_stream is not None:
-            capture_stream.synchronize()
         init_weights([self.module])
         self._img_shape = img_shape
         self._config = config
