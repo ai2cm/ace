@@ -75,18 +75,22 @@ class LoadedWorkItem(SliceWorkItem):
     Created via _SliceWorkItem.with_batch() after loading data from the dataset.
     """
 
-    batch: BatchData | None = None
+    def __init__(self, *args, batch: BatchData | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if batch is None:
+            raise ValueError("Batch data must be provided for LoadedWorkItem")
+        self.batch = batch
 
     def __post_init__(self):
         super().__post_init__()
-        if self.batch is None:
-            raise ValueError(
-                "LoadedWorkItem must be created with batch data via with_batch()"
-            )
 
-    def to_device(self) -> None:
-        if self.batch is not None:
-            self.batch = self.batch.to_device()
+    def to_device(self) -> "LoadedWorkItem":
+        return LoadedWorkItem(
+            time_slice=self.time_slice,
+            ens_slice=self.ens_slice,
+            is_padding=self.is_padding,
+            batch=self.batch.to_device(),
+        )
 
 
 class SliceItemDataset:
