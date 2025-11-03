@@ -1353,16 +1353,14 @@ class Stepper(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
             )
-        input_ensemble_batch = input_batch_data.repeat_interleave_batch_dim(n_ensemble)
-        forcing_ensemble_data: BatchData = data.repeat_interleave_batch_dim(
-            repeats=n_ensemble
-        )
+        input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
+        forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
         output_generator = self._predict_generator(
-            input_ensemble_batch.data,
+            input_ensemble_data.data,
             forcing_ensemble_data.data,
             n_forward_steps,
             optimization,
-            labels=input_ensemble_batch.labels,
+            labels=input_ensemble_data.labels,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

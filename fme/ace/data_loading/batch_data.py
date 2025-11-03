@@ -11,12 +11,7 @@ from torch.utils.data import default_collate
 
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
-from fme.core.tensors import (
-    add_ensemble_dim,
-    fold_sized_ensemble_dim,
-    repeat_interleave_batch_dim,
-    unfold_ensemble_dim,
-)
+from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
@@ -221,7 +216,7 @@ class BatchData:
             **kwargs,
         )
 
-    def repeat_interleave_batch_dim(self: SelfType, repeats: int) -> SelfType:
+    def _repeat_interleave_batch_dim(self: SelfType, repeats: int) -> SelfType:
         new_labels: list[set[str]] = np.repeat(self.labels, repeats).tolist()
         return self.__class__(
             data=repeat_interleave_batch_dim(self.data, repeats),
@@ -375,21 +370,9 @@ class BatchData:
         """
         Broadcast n_ensemble ensembles to a new BatchData obj.
         """
-        data = {**self.data}
-        data = add_ensemble_dim(data, repeats=n_ensemble)
-        data = fold_sized_ensemble_dim(data, n_ensemble=n_ensemble)
-
-        time = self.time
-        time = xr.concat([time] * n_ensemble, dim="sample")
-
-        labels = self.labels * n_ensemble
-        return self.__class__(
-            data={k: v.to(get_device()) for k, v in data.items()},
-            time=time,
-            horizontal_dims=self.horizontal_dims,
-            labels=labels,
-            n_ensemble=n_ensemble,
-        )
+        if self.n_ensemble != 1:
+            raise ValueError("Cannot broadcast ensemble if n_ensemble is not 1.")
+        return self._repeat_interleave_batch_dim(n_ensemble)
 
 
 @dataclasses.dataclass

@@ -40,7 +40,7 @@ def test_repeat_interleave_batch_dim_gives_correct_labels():
     )
     batch.data["value"][0] = 0.0
     batch.data["value"][1] = 1.0
-    repeated = batch.repeat_interleave_batch_dim(2)
+    repeated = batch._repeat_interleave_batch_dim(2)
     assert repeated.labels == [{"0"}, {"0"}, {"1"}, {"1"}]
     torch.testing.assert_close(
         repeated.data["value"],
