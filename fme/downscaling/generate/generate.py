@@ -97,7 +97,7 @@ class Downscaler:
                 "and patch prediction is not configured. Generation for larger domains "
                 "requires patch prediction."
             )
-        
+
     def _on_device_generator(self, loader):
         for loaded_item, topography in loader:
             yield loaded_item.to_device(), topography.to_device()
@@ -113,7 +113,9 @@ class Downscaler:
 
         loaded_item: LoadedWorkItem
         topography: Topography
-        for i, (loaded_item, topography) in enumerate(self._on_device_generator(target.data)):
+        for i, (loaded_item, topography) in enumerate(
+            self._on_device_generator(target.data)
+        ):
             if writer is None:
                 writer = target.get_writer(
                     latlon_coords=topography.coords,

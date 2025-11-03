@@ -181,6 +181,7 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
             target=mock_output_target,
         )
 
+
 @pytest.mark.skip(
     reason=(
         "This test is fragile until we fix the zarr writer init"
