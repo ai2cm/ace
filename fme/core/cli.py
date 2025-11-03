@@ -101,4 +101,7 @@ def get_parser():
         help="A dotlist of key=value pairs to override the config. "
         "For example, --override a.b=1 c=2, where a dot indicates nesting.",
     )
+    parser.add_argument("--h_parallel_size", default=1, type=int, help="Spatial parallelism dimension in h")
+    parser.add_argument("--w_parallel_size", default=1, type=int, help="Spatial parallelism dimension in w")
+
     return parser

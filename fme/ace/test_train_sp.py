@@ -313,7 +313,7 @@ def _get_test_yaml_files(
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
         #FIXME
-        save_checkpoint=False,
+        save_checkpoint=True,
         logging=logging_config,
         experiment_dir=str(results_dir),
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
