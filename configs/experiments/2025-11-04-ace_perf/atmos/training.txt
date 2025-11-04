@@ -1,3 +1,5 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
-time_buffer_10_to_device_v2|rs0|train|high||2|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10
-time_buffer_20_to_device_v2|rs0|train|high||2|300GiB|0||seed=0 train_loader.time_buffer=20 validation_loader.time_buffer=20
+B200x2-condSFNO-time_buffer_10-nw4_pf2|rs0|train|low||2|300GiB|0|titan|seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10
+B200x2-condSFNO-time_buffer_20-nw4_pf2|rs0|train|low||2|300GiB|0|titan|seed=0 train_loader.time_buffer=20 validation_loader.time_buffer=20
+B200x1-condSFNO-time_buffer_10-nw4_pf2|rs0|train|low||1|300GiB|0|titan|seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10
+B200x1-condSFNO-time_buffer_20-nw4_pf2|rs0|train|low||1|300GiB|0|titan|seed=0 train_loader.time_buffer=20 validation_loader.time_buffer=20
