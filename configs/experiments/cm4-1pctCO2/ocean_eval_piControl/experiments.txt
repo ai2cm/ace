@@ -9,3 +9,5 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 1pct_nosmooth-eval_piControl-nfs4-150ep_wulr|rs2|01K8J05GR2MAH4A8JX43909Q24|run_ICx1|best_inference_ckpt|high|--not-preemptible
 1pct_nosmooth-eval_piControl-nfs4-150ep_wulr|rs3|01K8J05WG1Y5E71P6NBXT7DM9P|run_ICx1|best_inference_ckpt|high|--not-preemptible
 1pct_nosmooth-eval_piControl-nfs4-150ep_wulr|rs4|01K8J068RBNX89C046NH4Y8EE8|skip|best_inference_ckpt|normal|--not-preemptible
+
+1pct_nosmooth-eval_piControl-nfs4-150ep_2xLR|rs1|01K9864HPBXEYTXGCZKRRPZGCJ|training|best_inference_ckpt|normal|--not-preemptible
