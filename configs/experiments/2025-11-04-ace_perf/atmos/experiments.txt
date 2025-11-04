@@ -9,3 +9,5 @@ B200x2-condSFNO-time_buffer_10-nw4_pf2|rs0||training|best_inference_ckpt|normal|
 B200x2-condSFNO-time_buffer_10-nw4_pf2|rs0|01K98JSFT233559TJE76MAW6ZH|training|best_inference_ckpt|normal|--not-preemptible
 
 B200x2-condSFNO-time_buffer_20-nw4_pf2|rs0|01K98JSX14VW70XSNJ27N00D5W|training|best_inference_ckpt|normal|--not-preemptible
+
+B200x1-condSFNO-time_buffer_10-nw4_pf2|rs0|01K98JT9650BEXCWM9CARZB613|training|best_inference_ckpt|normal|--not-preemptible
