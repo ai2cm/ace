@@ -77,7 +77,7 @@ class NoiseConditionedSFNO(torch.nn.Module):
             [*x.shape[:-3], 0], device=x.device, dtype=x.dtype
         )
         return self.conditional_model(
-            x, Context(embedding_scalar=embedding_scalar, embedding_2d=noise)
+            x, Context(embedding_scalar=embedding_scalar, noise=noise)
         )
 
 
@@ -174,7 +174,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             img_shape=img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
-                embed_dim_2d=self.noise_embed_dim,
+                embed_dim_noise=self.noise_embed_dim,
             ),
         )
         return NoiseConditionedSFNO(
