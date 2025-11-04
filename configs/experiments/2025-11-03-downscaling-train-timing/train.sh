@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-new-unet-apex-gn-amp-timing"
+JOB_NAME="xshield-downscaling-old-unet-amp-timing"
 CONFIG_FILENAME="train.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
