@@ -509,9 +509,13 @@ def _make_video(
     video_data = np.minimum(video_data, 255)
     video_data = np.maximum(video_data, 0)
     video_data[np.isnan(video_data)] = 0
+    # Convert from single-channel grayscale to three-channel RGB to work
+    # around imageio error
+    video_data = video_data.repeat(3, axis=1)
     caption += f"; vmin={data_min:.4g}, vmax={data_max:.4g}"
     return wandb.Video(
         np.flip(video_data, axis=-2),
         caption=caption,
         fps=4,
+        format="gif",
     )
