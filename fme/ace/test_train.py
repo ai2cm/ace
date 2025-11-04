@@ -746,11 +746,9 @@ def test_restore_checkpoint(
     # reload and check model parameters and optimizer state
     restored_trainer1.restore_checkpoint(
         base_trainer.paths.latest_checkpoint_path,
-        base_trainer.paths.ema_checkpoint_path,
     )
     restored_trainer2.restore_checkpoint(
         base_trainer.paths.latest_checkpoint_path,
-        base_trainer.paths.ema_checkpoint_path,
     )
     compare_restored_parameters(
         base_trainer.stepper.modules.parameters(),
@@ -767,7 +765,12 @@ def test_restore_checkpoint(
                 restored_trainer1.optimization.optimizer,
             )
 
-    assert base_trainer._ema.get_state() == restored_trainer1._ema.get_state()
+    base_ema_state = base_trainer._ema.get_state()
+    base_params = base_ema_state.pop("ema_params")
+    restored_ema_state = restored_trainer1._ema.get_state()
+    restored_params = restored_ema_state.pop("ema_params")
+    assert base_ema_state == restored_ema_state
+    torch.testing.assert_close(base_params, restored_params)
 
     set_seed(0)
     base_trainer.train_one_epoch()
