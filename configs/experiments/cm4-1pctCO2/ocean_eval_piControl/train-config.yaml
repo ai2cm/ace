@@ -72,17 +72,6 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-  scheduler:
-    schedulers:
-      - type: LinearLR
-        step_each_iteration: true
-        kwargs:
-          start_factor: 0.01
-          end_factor: 1
-          total_iters: 3190 # 5 epochs
-      - type: ConstantLR
-        step_each_iteration: true
-    milestones: [3190]
 stepper:
   loss:
     type: MSE
