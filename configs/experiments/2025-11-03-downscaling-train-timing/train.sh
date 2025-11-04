@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-new-unet-test"
-CONFIG_FILENAME="config-train.yaml"
+JOB_NAME="xshield-downscaling-new-unet-apex-gn-amp-timing"
+CONFIG_FILENAME="train.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -23,7 +23,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 #PREVIOUS_RESULTS_DATASET="01JVWF4YGVNV0V2GBG927SC7XJ"
 #--dataset $PREVIOUS_RESULTS_DATASET:/previous_results \
 #IMAGE with B200 pytorch installed
-IMAGE=annak/fme-deps-only-with-apex #01JWJ96JMF89D812JS159VF37N
+IMAGE=annak/updated-unet-test #01JWJ96JMF89D812JS159VF37N
 
 gantry run \
     --name $JOB_NAME \
@@ -33,7 +33,6 @@ gantry run \
     --preemptible \
     --cluster ai2/ceres \
     --cluster ai2/jupiter \
-    --cluster ai2/titan
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
