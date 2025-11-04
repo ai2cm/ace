@@ -678,5 +678,4 @@ class SongUNet(Module):
                             x = checkpoint(block, x, emb, use_reentrant=False)
                         else:
                             x = block(x, emb)
-            print('dtype after op: ', x.dtype)
             return aux
