@@ -41,5 +41,6 @@ def compare_restored_parameters(module1_params, module2_params, optimizer1, opti
             value2 = optimizer_state2[key]
             if key == "step":
                 # step is not put on device, but state restore loads to GPU
+                value1 = value1.cpu()
                 value2 = value2.cpu()
             assert torch.equal(value1, value2)
