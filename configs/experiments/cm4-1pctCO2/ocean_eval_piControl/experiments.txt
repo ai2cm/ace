@@ -15,3 +15,5 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 1pct_nosmooth-eval_piControl-nfs4-150ep_2xLR|rs2|01K9864YA8HBB94JN8FVQ13DWY|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth-eval_piControl-nfs4-150ep_2xLR|rs3|01K9865B2XK6AC9R8JX7NKWBY5|training|best_inference_ckpt|normal|--not-preemptible
+
+1pct_nosmooth-eval_piControl-nfs4-150ep_2xLR|rs4|01K9865PTV4GNFVQB18B2HQTPS|training|best_inference_ckpt|normal|--not-preemptible
