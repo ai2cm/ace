@@ -278,20 +278,18 @@ class SeparateRadiationStep(StepABC):
             )
         else:
             self.ocean = None
-        module, self._module_label_encoder = config.builder.build(
+        module = config.builder.build(
             n_in_channels=len(config.main_in_names),
             n_out_channels=len(config.main_out_names),
             all_labels=all_labels,
             img_shape=img_shape,
         )
         self.module = module.to(get_device())
-        radiation_module, self._radiation_label_encoder = (
-            config.radiation_builder.build(
-                n_in_channels=len(config.radiation_in_names),
-                n_out_channels=len(config.radiation_out_names),
-                all_labels=all_labels,
-                img_shape=img_shape,
-            )
+        radiation_module = config.radiation_builder.build(
+            n_in_channels=len(config.radiation_in_names),
+            n_out_channels=len(config.radiation_out_names),
+            all_labels=all_labels,
+            img_shape=img_shape,
         )
         self.radiation_module = radiation_module.to(get_device())
         self._img_shape = img_shape
@@ -300,8 +298,8 @@ class SeparateRadiationStep(StepABC):
 
         init_weights(self.modules)
         dist = Distributed.get_instance()
-        self.module = dist.wrap_module(self.module)
-        self.radiation_module = dist.wrap_module(self.radiation_module)
+        self.module = self.module.wrap_module(dist.wrap_module)
+        self.radiation_module = self.radiation_module.wrap_module(dist.wrap_module)
         self._timestep = timestep
         self._corrector = corrector
 
@@ -344,7 +342,9 @@ class SeparateRadiationStep(StepABC):
         Returns:
             A list of modules being trained.
         """
-        return nn.ModuleList([self.module, self.radiation_module])
+        return nn.ModuleList(
+            [self.module.torch_module, self.radiation_module.torch_module]
+        )
 
     def step(
         self,
@@ -374,15 +374,9 @@ class SeparateRadiationStep(StepABC):
             radiation_input_tensor = self.radiation_in_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
             )
-            if self._radiation_label_encoder is not None:
-                radiation_labels = self._radiation_label_encoder.encode(labels)
-                radiation_output_tensor = wrapper(self.radiation_module)(
-                    radiation_input_tensor, labels=radiation_labels
-                )
-            else:
-                radiation_output_tensor = wrapper(self.radiation_module)(
-                    radiation_input_tensor
-                )
+            radiation_output_tensor = self.radiation_module.wrap_module(wrapper)(
+                radiation_input_tensor, labels=labels
+            )
 
             radiation_output_norm = self.radiation_out_packer.unpack(
                 radiation_output_tensor, axis=self.CHANNEL_DIM
@@ -396,11 +390,9 @@ class SeparateRadiationStep(StepABC):
             else:
                 main_input_data = {**input_norm, **radiation_output_norm}
             input_tensor = self.in_packer.pack(main_input_data, axis=self.CHANNEL_DIM)
-            if self._module_label_encoder is not None:
-                module_labels = self._module_label_encoder.encode(labels)
-                output_tensor = wrapper(self.module)(input_tensor, labels=module_labels)
-            else:
-                output_tensor = wrapper(self.module)(input_tensor)
+            output_tensor = self.module.wrap_module(wrapper)(
+                input_tensor, labels=labels
+            )
             main_output_norm = self.out_packer.unpack(
                 output_tensor, axis=self.CHANNEL_DIM
             )
@@ -429,8 +421,8 @@ class SeparateRadiationStep(StepABC):
             The state of the ML modules.
         """
         return {
-            "module": self.module.state_dict(),
-            "radiation_module": self.radiation_module.state_dict(),
+            "module": self.module.get_state(),
+            "radiation_module": self.radiation_module.get_state(),
         }
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -440,5 +432,5 @@ class SeparateRadiationStep(StepABC):
         Args:
             state: The state to load.
         """
-        self.module.load_state_dict(state["module"])
-        self.radiation_module.load_state_dict(state["radiation_module"])
+        self.module.load_state(state["module"])
+        self.radiation_module.load_state(state["radiation_module"])

@@ -216,18 +216,6 @@ class BatchData:
             **kwargs,
         )
 
-    def _repeat_interleave_batch_dim(self: SelfType, repeats: int) -> SelfType:
-        new_labels: list[set[str]] = np.repeat(self.labels, repeats).tolist()
-        return self.__class__(
-            data=repeat_interleave_batch_dim(self.data, repeats),
-            time=xr.DataArray(
-                np.repeat(self.time, repeats, axis=0),
-                dims=self.time.dims,
-            ),
-            labels=new_labels,
-            horizontal_dims=self.horizontal_dims,
-        )
-
     def __post_init__(self):
         if len(self.time.shape) != 2:
             raise ValueError(
@@ -368,11 +356,24 @@ class BatchData:
 
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
         """
-        Broadcast n_ensemble ensembles to a new BatchData obj.
+        Broadcast a singleton ensemble to a new BatchData obj with n_ensemble members
+        per ensemble.
         """
         if self.n_ensemble != 1:
-            raise ValueError("Cannot broadcast ensemble if n_ensemble is not 1.")
-        return self._repeat_interleave_batch_dim(n_ensemble)
+            raise ValueError(
+                "Can only broadcast singleton ensembles, but this BatchData has "
+                "n_ensemble={self.n_ensemble} and cannot be broadcast."
+            )
+        data = repeat_interleave_batch_dim(self.data, n_ensemble)
+        time = xr.concat([self.time] * n_ensemble, dim="sample")
+        labels = self.labels * n_ensemble
+        return self.__class__(
+            data={k: v.to(get_device()) for k, v in data.items()},
+            time=time,
+            horizontal_dims=self.horizontal_dims,
+            labels=labels,
+            n_ensemble=n_ensemble,
+        )
 
     def pin_memory(self: SelfType) -> SelfType:
         """Used by torch.utils.data.DataLoader when pin_memory=True to page-lock

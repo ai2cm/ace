@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from fme.core.labels import LabelEncoder
+from fme.core.registry.module import Module
 
 from .module import CONDITIONAL_BUILDERS, ModuleConfig, ModuleSelector
 
@@ -38,11 +39,12 @@ class MockModuleBuilder(ModuleConfig):
 def test_register():
     """Make sure that the registry is working as expected."""
     selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
-    module, encoder = selector.build(
+    module = selector.build(
         n_in_channels=1, n_out_channels=1, all_labels=set(), img_shape=(16, 32)
     )
-    assert isinstance(module, MockModule)
-    assert encoder is None
+    assert isinstance(module, Module)
+    assert isinstance(module.torch_module, MockModule)
+    assert module._label_encoder is None
 
 
 def test_build_conditional():
@@ -52,11 +54,12 @@ def test_build_conditional():
         selector = ModuleSelector(
             type="mock", conditional=True, config={"param_shapes": [(1, 2, 3)]}
         )
-        module, encoder = selector.build(
+        module = selector.build(
             n_in_channels=1, n_out_channels=1, all_labels={"a", "b"}, img_shape=(16, 32)
         )
-        assert isinstance(module, MockModule)
-        assert isinstance(encoder, LabelEncoder)
+        assert isinstance(module, Module)
+        assert isinstance(module.torch_module, MockModule)
+        assert isinstance(module._label_encoder, LabelEncoder)
     finally:
         CONDITIONAL_BUILDERS.remove("mock")
 

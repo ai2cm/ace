@@ -15,7 +15,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
-from fme.core.labels import BatchLabels, LabelEncoder
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
@@ -39,9 +39,6 @@ class SingleModuleStepConfig(StepConfigABC):
         in_names: Names of input variables.
         out_names: Names of output variables.
         normalization: The normalization configuration.
-        conditional: Whether to condition the predictions on batch labels. This is
-            distinct from any internal conditioning which might be present in the
-            module (such as random noise conditioning).
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
@@ -225,20 +222,20 @@ class SingleModuleStep(StepABC):
             )
         else:
             self.ocean = None
-        module, self._label_encoder = config.builder.build(
+        module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             all_labels=all_labels,
             img_shape=img_shape,
         )
         self.module = module.to(get_device())
-        init_weights([self.module])
+        init_weights(self.modules)
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
         dist = Distributed.get_instance()
-        self.module = dist.wrap_module(self.module)
+        self.module = self.module.wrap_module(dist.wrap_module)
 
         self._timestep = timestep
 
@@ -285,7 +282,7 @@ class SingleModuleStep(StepABC):
         Returns:
             A list of modules being trained.
         """
-        return nn.ModuleList([self.module])
+        return nn.ModuleList([self.module.torch_module])
 
     def step(
         self,
@@ -314,13 +311,10 @@ class SingleModuleStep(StepABC):
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            if self._label_encoder is not None:
-                encoded_labels = self._label_encoder.encode(labels)
-                output_tensor = wrapper(self.module)(
-                    input_tensor, labels=encoded_labels
-                )
-            else:
-                output_tensor = wrapper(self.module)(input_tensor)
+            output_tensor = self.module.wrap_module(wrapper)(
+                input_tensor,
+                labels,
+            )
             return self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
 
         return step_with_adjustments(
@@ -343,10 +337,8 @@ class SingleModuleStep(StepABC):
             The state of the stepper.
         """
         state = {
-            "module": self.module.state_dict(),
+            "module": self.module.get_state(),
         }
-        if self._label_encoder is not None:
-            state["label_encoder"] = self._label_encoder.get_state()
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -360,12 +352,7 @@ class SingleModuleStep(StepABC):
         if "module.device_buffer" in module:
             # for backwards compatibility with old checkpoints
             del module["module.device_buffer"]
-        self.module.load_state_dict(module)
-        if "label_encoder" in state:
-            if self._label_encoder is None:
-                self._label_encoder = LabelEncoder.from_state(state["label_encoder"])
-            else:
-                self._label_encoder.conform_to_state(state["label_encoder"])
+        self.module.load_state(module)
 
 
 def step_with_adjustments(

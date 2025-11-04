@@ -6,9 +6,10 @@ from collections.abc import Callable, Mapping
 from typing import Any, ClassVar, Type  # noqa: UP035
 
 import dacite
+import torch
 from torch import nn
 
-from fme.core.labels import LabelEncoder
+from fme.core.labels import BatchLabels, LabelEncoder
 
 from .registry import Registry
 
@@ -63,6 +64,51 @@ CONDITIONAL_BUILDERS = [
 ]
 
 
+class Module:
+    def __init__(self, module: nn.Module, label_encoder: LabelEncoder | None):
+        self._module = module
+        self._label_encoder = label_encoder
+
+    def __call__(self, input: torch.Tensor, labels: BatchLabels) -> torch.Tensor:
+        if self._label_encoder is not None:
+            encoded_labels = self._label_encoder.encode(labels)
+            return self._module(input, labels=encoded_labels)
+        else:
+            return self._module(input)
+
+    @property
+    def torch_module(self) -> nn.Module:
+        return self._module
+
+    def get_state(self) -> dict[str, Any]:
+        if self._label_encoder is not None:
+            label_encoder_state = self._label_encoder.get_state()
+        else:
+            label_encoder_state = None
+        return {
+            **self._module.state_dict(),
+            "label_encoder": label_encoder_state,
+        }
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        state = state.copy()
+        if state.get("label_encoder") is not None:
+            if self._label_encoder is None:
+                self._label_encoder = LabelEncoder.from_state(
+                    state.pop("label_encoder")
+                )
+            else:
+                self._label_encoder.conform_to_state(state.pop("label_encoder"))
+        state.pop("label_encoder", None)
+        self._module.load_state_dict(state)
+
+    def wrap_module(self, callable: Callable[[nn.Module], nn.Module]) -> "Module":
+        return Module(callable(self._module), self._label_encoder)
+
+    def to(self, device: torch.device) -> "Module":
+        return Module(self._module.to(device), self._label_encoder)
+
+
 @dataclasses.dataclass
 class ModuleSelector:
     """
@@ -110,7 +156,7 @@ class ModuleSelector:
         n_out_channels: int,
         all_labels: set[str],
         img_shape: tuple[int, int],
-    ) -> tuple[nn.Module, LabelEncoder | None]:
+    ) -> Module:
         """
         Build a nn.Module given information about the input and output channels
         and the image shape.
@@ -128,7 +174,7 @@ class ModuleSelector:
                 longitude.
 
         Returns:
-            a nn.Module, and a label encoder if conditional is True
+            a Module object
         """
         if self.conditional and len(all_labels) == 0:
             raise ValueError("Conditional predictions require labels")
@@ -144,7 +190,7 @@ class ModuleSelector:
             n_labels=n_labels,
             img_shape=img_shape,
         )
-        return module, label_encoder
+        return Module(module, label_encoder)
 
     @classmethod
     def get_available_types(cls):

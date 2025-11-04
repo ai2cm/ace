@@ -31,26 +31,6 @@ def get_batch_data(
     )
 
 
-def test_repeat_interleave_batch_dim_gives_correct_labels():
-    batch = BatchData.new_for_testing(
-        ["value"],
-        n_samples=2,
-        n_timesteps=3,
-        labels=[{"0"}, {"1"}],
-    )
-    batch.data["value"][0] = 0.0
-    batch.data["value"][1] = 1.0
-    repeated = batch._repeat_interleave_batch_dim(2)
-    assert repeated.labels == [{"0"}, {"0"}, {"1"}, {"1"}]
-    torch.testing.assert_close(
-        repeated.data["value"],
-        torch.tensor([0.0, 0.0, 1.0, 1.0])[:, None, None, None].broadcast_to(
-            4, 3, 9, 18
-        ),
-    )
-    assert repeated.time.shape == (4, 3)
-
-
 @pytest.mark.parametrize(
     "names, prognostic_names",
     [
