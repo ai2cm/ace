@@ -14,6 +14,7 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.dataloader import SlidingWindowDataLoader
 from fme.ace.data_loading.getters import (
     get_forcing_data,
     get_gridded_data,
@@ -971,7 +972,7 @@ def test_time_buffer(
 
 @pytest.mark.parametrize(
     "time_buffer",
-    [0, pytest.param(2, marks=pytest.mark.xfail(reason="already on gpu", strict=True))],
+    [0, 2],
 )
 def test_pinned_memory(tmp_path, time_buffer: int):
     _create_dataset_on_disk(tmp_path, n_times=10)
@@ -983,6 +984,10 @@ def test_pinned_memory(tmp_path, time_buffer: int):
     )
     requirements = DataRequirements(["foo"], 3)
     data = get_gridded_data(config, True, requirements)
-    for batch in data._loader:
+    loader = data._loader  # GriddedData.loader returns tensors already on GPU
+    if time_buffer > 0:
+        assert isinstance(loader, SlidingWindowDataLoader)
+        loader = loader._loader  # SlidingWindowDataLoader also returns tensors on GPU
+    for batch in loader:
         tensor = next(iter(batch.data.values()))
         assert tensor.is_pinned() is using_gpu()
