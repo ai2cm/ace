@@ -34,6 +34,7 @@ train_loader:
   batch_size: 4
   num_data_workers: 4
   prefetch_factor: 2
+  time_buffer: 10
   dataset:
     data_path: /climate-default
     file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
@@ -45,6 +46,7 @@ validation_loader:
   batch_size: 16
   num_data_workers: 4
   prefetch_factor: 2
+  time_buffer: 10
   dataset:
     data_path: /climate-default
     file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
