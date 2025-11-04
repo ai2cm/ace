@@ -1,3 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
 
 time_buffer_10_to_device_v2|rs0|01K97WZKJ1G1944EDE4BW4T78T|training|best_inference_ckpt|normal|--not-preemptible
+
+time_buffer_20_to_device_v2|rs0|01K97X008ZP4X6FBE8F7ZK6B92|training|best_inference_ckpt|normal|--not-preemptible
