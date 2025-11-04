@@ -14,9 +14,10 @@ import dacite
 import torch
 
 from fme.core.device import get_device
-from fme.downscaling.modules._unets import DhariwalUNet #, SongUNet
+from fme.downscaling.modules._unets import DhariwalUNet, SongUNet
 from fme.downscaling.modules.swinir import SwinIR
-from fme.downscaling.modules.unets import SongUNet
+
+# from fme.downscaling.modules.unets import SongUNet
 
 
 class ModuleConfig(Protocol):
