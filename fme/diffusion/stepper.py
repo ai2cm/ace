@@ -409,7 +409,8 @@ def edm_sampler(
     # You should have received a copy of the license along with this
     # work. If not, see http://creativecommons.org/licenses/by-nc-sa/4.0/
 
-    input_dtype = torch.float32  # what is expected by the model
+    input_dtype=torch.bfloat16
+    #input_dtype = torch.float32  # what is expected by the model
     # we will integrate in float64 to avoid numerical issues
 
     step_indices = torch.arange(num_steps, dtype=torch.float64, device=latents.device)

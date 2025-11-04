@@ -278,10 +278,10 @@ class SongUNet(Module):
         resample_filter: list[int] = [1, 1],
         checkpoint_level: int = 0,
         additive_pos_embed: bool = False,
-        use_apex_gn: bool = False,
+        use_apex_gn: bool = True,
         act: str = "silu",
         profile_mode: bool = False,
-        amp_mode: bool = False,
+        amp_mode: bool = True,
     ):
         valid_embedding_types = ["fourier", "positional", "zero"]
         if embedding_type not in valid_embedding_types:
@@ -678,4 +678,5 @@ class SongUNet(Module):
                             x = checkpoint(block, x, emb, use_reentrant=False)
                         else:
                             x = block(x, emb)
+            print('dtype after op: ', x.dtype)
             return aux
