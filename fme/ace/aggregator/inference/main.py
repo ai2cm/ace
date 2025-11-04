@@ -418,7 +418,7 @@ class InferenceEvaluatorAggregator(
         if self.n_ensemble_per_ic > 1:
             print(
                 "list(self._ensemble_aggregators.items())",
-                list(self._ensemble_aggregators.keys()),
+                self._ensemble_aggregators["ensemble_step_20"],
             )
 
     @property
@@ -528,6 +528,10 @@ class InferenceEvaluatorAggregator(
             logs.update(time_dependent_aggregator.get_logs(label=name))
         if self.n_ensemble_per_ic > 1:
             for name, ensemble_aggregator in self._ensemble_aggregators.items():
+                print(
+                    "ensemble_aggregator.get_logs(label=name)",
+                    ensemble_aggregator.get_logs(label=name),
+                )
                 logs.update(ensemble_aggregator.get_logs(label=name))
         return logs
 
