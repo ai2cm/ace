@@ -1,1 +1,3 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
+
+cm4_1pctCO2-train_0211to0350-wulr|rs0|01K9B3BA9D7NQD57E2WG544HQZ|training|best_inference_ckpt|normal|--not-preemptible
