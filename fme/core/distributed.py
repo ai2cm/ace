@@ -389,8 +389,10 @@ class Distributed:
         self.barrier()
         if self._distributed:
             logger.debug(f"Shutting down rank {self.rank}")
-            comm.cleanup()
-        #    torch.distributed.destroy_process_group()
+            if self.spatial_parallelism:
+             comm.cleanup()
+            else:
+             torch.distributed.destroy_process_group()
 
 
 singleton: Distributed | None = None
