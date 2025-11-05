@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest.mock
 from typing import Literal
-
+from pathlib import Path
 import dacite
 import numpy as np
 import pytest
@@ -77,11 +77,17 @@ from fme.core.step.step import StepSelector
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice
-
+from fme.core.distributed import Distributed
 JOB_SUBMISSION_SCRIPT_PATH = (
     pathlib.PurePath(__file__).parent / "run-train-and-inference.sh"
 )
 
+# @pytest.fixture
+# def custom_tmp_path(request):
+#     # Create a temporary directory
+#     temp_dir = tempfile.mkdtemp()
+#     # Yield the path to the temporary directory
+#     yield Path(temp_dir)
 
 def _get_test_yaml_files(
     *,
@@ -187,7 +193,7 @@ def _get_test_yaml_files(
     logging_config = LoggingConfig(
         log_to_screen=True,
         log_to_wandb=log_to_wandb,
-        log_to_file=False,
+        log_to_file=True,
         project="fme",
         entity="ai2cm",
     )
@@ -210,7 +216,7 @@ def _get_test_yaml_files(
                 ),
                 start_indices=InferenceInitialConditionIndices(
                     first=0,
-                    n_initial_conditions=2,
+                    n_initial_conditions=4,
                     interval=1,
                 ),
             ),
@@ -232,7 +238,7 @@ def _get_test_yaml_files(
                 ),
                 start_indices=InferenceInitialConditionIndices(
                     first=0,
-                    n_initial_conditions=2,
+                    n_initial_conditions=4,
                     interval=1,
                 ),
             ),
@@ -246,7 +252,7 @@ def _get_test_yaml_files(
                 data_path=str(train_data_path),
                 spatial_dimensions=spatial_dimensions_str,
             ),
-            batch_size=2,
+            batch_size=4,
             num_data_workers=0,
             time_buffer=time_buffer,
             sample_with_replacement=10,
@@ -256,7 +262,7 @@ def _get_test_yaml_files(
                 data_path=str(valid_data_path),
                 spatial_dimensions=spatial_dimensions_str,
             ),
-            batch_size=2,
+            batch_size=4,
             num_data_workers=0,
         ),
         optimization=OptimizationConfig(
@@ -312,7 +318,6 @@ def _get_test_yaml_files(
         weather_evaluation=weather_evaluation_config,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
-        #FIXME
         save_checkpoint=True,
         logging=logging_config,
         experiment_dir=str(results_dir),
@@ -344,7 +349,7 @@ def _get_test_yaml_files(
             ),
             start_indices=InferenceInitialConditionIndices(
                 first=0,
-                n_initial_conditions=2,
+                n_initial_conditions=4,
                 interval=1,
             ),
         ),
@@ -505,31 +510,27 @@ def test_train_and_inference(
         very_fast_only: parameter indicating whether to skip slow tests.
     """
     if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-    # need multi-year to cover annual aggregator
-    train_config, inference_config = _setup(
+      pytest.skip("Skipping non-fast tests")
+    # Let's generate the configuration file on a single processor.
+    with Distributed.non_distributed():
+      train_config, inference_config = _setup(
         tmp_path,
         nettype,
         log_to_wandb=False,
         timestep_days=20,
         n_time=int(366 * 3 / 20 + 1),
-        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        inference_forward_steps=50,#int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
         use_healpix=use_healpix,
         crps_training=crps_training,
-        #FIXME
-        save_per_epoch_diagnostics=False,
+        save_per_epoch_diagnostics=True,
         log_validation_maps=log_validation_maps,
+      )
+      # return
+    # with mock_wandb() as wandb:
+    train_main(
+            yaml_config=train_config
     )
-    # using pdb requires calling main functions directly
-    h_parallel_size=4
-    w_parallel_size=1
-    with mock_wandb() as wandb:
-        train_main(
-            yaml_config=train_config,
-             h_parallel_size=h_parallel_size,
-             w_parallel_size=w_parallel_size
-        )
-        wandb_logs = wandb.get_logs()
+      # wandb_logs = wandb.get_logs()
         # for log in wandb_logs:
         #     # ensure inference time series is not logged
         #     assert "inference/mean/forecast_step" not in log

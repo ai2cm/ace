@@ -278,7 +278,5 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None, h_para
     config.resume_results = prepare_directory(
         config.experiment_dir, config_data, config.resume_results
     )
-    dist = Distributed()
-    if (h_parallel_size>1) or (w_parallel_size >1):
-      dist._init_distributed(h_parallel_size =  h_parallel_size, w_parallel_size=w_parallel_size)
+
     run_train_from_config(config)

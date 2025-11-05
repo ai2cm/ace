@@ -23,7 +23,6 @@ from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.device import get_device, using_gpu
-from fme.ace.models.makani_utils.checkpoint_helpers import  gather_model_state_dict, prepend_prefix_to_state_dict, scatter_model_state_dict
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -231,14 +230,15 @@ class SingleModuleStep(StepABC):
         self._config = config
         self._no_optimization = NullOptimization()
 
-        dist = Distributed.get_instance()
-        self.module = dist.wrap_module(self.module)
+        self.dist = Distributed.get_instance()
+        self.module = self.dist.wrap_module(self.module)
 
         self._timestep = timestep
 
         self._corrector = corrector
         self.in_names = config.in_names
         self.out_names = config.out_names
+
 
     @property
     def config(self) -> SingleModuleStepConfig:
@@ -329,16 +329,7 @@ class SingleModuleStep(StepABC):
             The state of the stepper.
         """
         # iterate over parameters and gather them from the ranks
-
-        dist=Distributed.get_instance()
-        if dist.is_spatial_distributed():
-            state_dict = gather_model_state_dict(self.module)
-            # drop module prefix in case if DDP is being used
-            # if isinstance(self.module, nn.parallel.DistributedDataParallel):
-            nn.modules.utils.consume_prefix_in_state_dict_if_present(state_dict, "module.")
-        else:
-            state_dict = self.module.state_dict()
-
+        state_dict= self.dist.gather_model_state_dict(self.module)
         return {
             "module": state_dict,
         }
@@ -356,23 +347,8 @@ class SingleModuleStep(StepABC):
         if "module.device_buffer" in module:
         #    for backwards compatibility with old checkpoints
           del module["module.device_buffer"]
-
-        dist=Distributed.get_instance()
-        if dist.is_spatial_distributed():
-          # if isinstance(self.module, nn.parallel.DistributedDataParallel):
-          # prepend module prefix to state dict:
-          prepend_prefix_to_state_dict(module, "module.")
-
-          # CHECK:
-          strict= False
-          module = scatter_model_state_dict(self.module, module, strict)
-          # load state dict
-          self.module.load_state_dict(module, strict=strict)
-
-        else:
-          self.module.load_state_dict(module,strict=False)
-
-
+        module=self.dist.scatter_model_state_dict(self.module, module,strict=False)
+        self.module.load_state_dict(module,strict=False)
 
 def step_with_adjustments(
     input: TensorMapping,

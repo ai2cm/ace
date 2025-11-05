@@ -1,7 +1,7 @@
 import logging
 import os
 from collections.abc import Callable
-
+import contextlib
 import torch.distributed
 from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
@@ -11,6 +11,8 @@ from fme.core.device import get_device, using_gpu, using_srun
 from fme.ace.utils import comm
 from physicsnemo.distributed.utils import compute_split_shapes
 from fme.ace.models.makani_mpu.mappings import init_gradient_reduction_hooks
+from torch import nn
+from fme.ace.models.makani_utils.checkpoint_helpers import  gather_model_state_dict, prepend_prefix_to_state_dict, scatter_model_state_dict
 logger = logging.getLogger(__name__)
 
 
@@ -60,20 +62,40 @@ class Distributed:
             singleton = cls()
         return singleton
 
-    def __init__(self):
-        if torch.distributed.is_available() and not torch.distributed.is_initialized() and not comm.is_distributed("spatial"):
+    @classmethod
+    @contextlib.contextmanager
+    def non_distributed(cls):
+        """
+        Context manager to temporarily set the distributed singleton to a
+        non-distributed instance.
+        """
+        original = cls.get_instance()
+        cls.singleton = cls(force_non_distributed=True)
+        try:
+            yield cls.get_instance()
+        finally:
+            cls.singleton = original
+
+    def __init__(self, force_non_distributed: bool = False):
+        if torch.distributed.is_available() and not torch.distributed.is_initialized() and not force_non_distributed:
             self._distributed = self._init_distributed()
         else:
             self._distributed = False
         self._seed = 0
 
-    def _init_distributed(self, h_parallel_size : int =  1,
-                                w_parallel_size : int =  1):
+    def _init_distributed(self):
         #We can review this block of code once spatial parallelism
         #is functioning correctly in a full test.
+        h_parallel_size = int(os.environ.get("H_PARALLEL_SIZE", 1))
+        w_parallel_size = int(os.environ.get("W_PARALLEL_SIZE", 1))
+        logger.debug(f" Spatial parallelism dimension in h {h_parallel_size}")
+        logger.debug(f" Spatial parallelism dimension in w {w_parallel_size}")
         fin_parallel_size=1#args.fin_parallel_size
         fout_parallel_size=1#args.fout_parallel_size
+        self.spatial_parallelism=False
         if (h_parallel_size>1) or (w_parallel_size >1):
+          self.spatial_parallelism=True
+          logger.debug(" Spatial parallelism dimension in enable")
           params={}
           params["fin_parallel_size"] = fin_parallel_size
           params["fout_parallel_size"] = fout_parallel_size
@@ -88,6 +110,7 @@ class Distributed:
           self.world_size = comm.get_world_size()
           self.rank = comm.get_world_rank()
           self.local_rank = comm.get_local_rank()
+          self._device_id = self.local_rank
           distributed = True
           torch.cuda.set_device(comm.get_local_rank())
           torch.backends.cudnn.benchmark = True
@@ -136,9 +159,22 @@ class Distributed:
         return distributed
 
     def is_spatial_distributed(self):
-      return comm.is_distributed("spatial")
+      return self.spatial_parallelism
     def get_comm(self):
       return comm
+
+    def scatter_model_state_dict(self, model: nn.Module, state_dict, strict: bool=True):
+      if comm.get_size("model") > 1:
+          state_dict = scatter_model_state_dict(model, state_dict, strict)
+      return state_dict
+
+    def gather_model_state_dict(self, model: nn.Module):
+      # iterate over parameters and gather them from the ranks
+      if comm.get_size("model") > 1:
+        state_dict= gather_model_state_dict(model)
+        return state_dict
+      else:
+        return model.state_dict()
 
     def get_local_shape_and_offset(self,crop_shape):
       crop_offset=(0, 0)
@@ -165,8 +201,8 @@ class Distributed:
         drop_last: bool = False,
     ) -> torch.utils.data.Sampler:
         if self.is_spatial_distributed():
-          num_replicas=comm.get_size("batch")
-          rank=comm.get_rank("batch")
+          num_replicas=self.world_size#comm.get_size("batch")
+          rank=self.rank#comm.get_rank("batch")
         else:
           num_replicas=self.world_size
           rank=self.rank
