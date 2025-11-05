@@ -2,7 +2,7 @@
 
 set -x
 
-export COMMIT=7399bab
+export COMMIT=06e96385f
 
 # wandb config
 #export WANDB_NAME=changeme

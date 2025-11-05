@@ -6,7 +6,7 @@ set -x
 export WANDB_NAME=PM-AMIP-EAMv3-train-rs1
 export WANDB_RUN_GROUP=2025-04-01-AMIP-EAMv3
 
-export COMMIT=7399bab
+export COMMIT=06e96385f
 
 # directories for input data (training, validation, inference, stats)
 export FME_TRAIN_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1deg/traindata
@@ -36,5 +36,7 @@ cp make-venv.sh $CONFIG_DIR/make-venv.sh
 cp upload-to-beaker.sh $CONFIG_DIR/upload-to-beaker.sh
 
 export FME_VENV=$($CONFIG_DIR/make-venv.sh $COMMIT | tail -n 1)
+conda activate $FME_VENV
+python -m fme.ace.validate_config --config_type train $CONFIG_DIR/train-config.yaml
 #sbatch -t 00:10:00 -q debug sbatch-scripts/sbatch-train.sh  # use this for debugging config/submission
 sbatch sbatch-scripts/sbatch-train.sh
