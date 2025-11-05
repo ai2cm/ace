@@ -734,7 +734,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.norm_big_skip = ConditionalLayerNorm(
                 in_chans,
                 img_shape=self.img_shape,
-                global_layer_norm=global_layer_norm,
+                global_layer_norm=self.global_layer_norm,
                 context_config=context_config,
                 elementwise_affine=self.affine_norms,
             )
