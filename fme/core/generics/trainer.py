@@ -380,10 +380,8 @@ class Trainer:
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 
-            if dist.is_root():
-                if self.config.save_checkpoint:
-                    logging.info(f"Saving checkpoints for epoch {self._epochs_trained}")
-                    self.save_all_checkpoints(valid_loss, inference_error)
+            if self.config.save_checkpoint:
+              self.save_all_checkpoints(valid_loss, inference_error)
 
     def _log_first_batch_metrics(self):
         wandb = WandB.get_instance()
@@ -411,7 +409,6 @@ class Trainer:
         )
         self.train_data.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
-        dist = Distributed.get_instance()
         names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
         aggregator = self._aggregator_builder.get_train_aggregator()
         n_samples_seen_since_logging = 0
@@ -464,14 +461,13 @@ class Trainer:
                 metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
                 n_samples_seen_since_logging = 0
-            if (
-                dist.is_root()
-                and self.config.checkpoint_every_n_batches > 0
+            if (self.config.checkpoint_every_n_batches > 0
                 and self.num_batches_seen % self.config.checkpoint_every_n_batches == 0
             ):
                 self._save_restart_checkpoints()
                 self._last_saved_num_batches_seen = self.num_batches_seen
-        if dist.is_root() and self.num_batches_seen > self._last_saved_num_batches_seen:
+
+        if self.num_batches_seen > self._last_saved_num_batches_seen:
             self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
         # we will save restart checkpoints again after validation/inference
         # are recorded to wandb
@@ -572,10 +568,17 @@ class Trainer:
         checkpoint_path: str,
         include_optimization: bool = False,
     ):
-        if not Distributed.get_instance().is_root():
-            raise RuntimeError("Only the root process should save checkpoints")
-        # save to a temporary file in case we get pre-empted during save
-        temporary_location = os.path.join(
+
+        # If spatial parallelism is one, this needs to be in all processors.
+        stepper_dic =self.stepper.get_state()
+        #CHEKC if we need to gather data for self._ema
+        ema_dic=self._ema.get_state()
+        # CHECK
+        if include_optimization:
+          optimization_dic=self.optimization.get_state()
+        dist = Distributed.get_instance()
+        if dist.is_root():
+          temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
         )
         try:
@@ -585,16 +588,16 @@ class Trainer:
                 "epoch": self._epochs_trained,
                 "best_validation_loss": self._best_validation_loss,
                 "best_inference_error": self._best_inference_error,
-                "stepper": self.stepper.get_state(),
-                "ema": self._ema.get_state(),
+                "stepper": stepper_dic,
+                "ema": ema_dic,
             }
             if include_optimization:
-                data["optimization"] = self.optimization.get_state()
+                data["optimization"] = optimization_dic
             else:
                 data["ema"].pop("ema_params")  # don't need if not saving optimization
             torch.save(data, temporary_location)
             os.replace(temporary_location, checkpoint_path)
-        finally:
+          finally:
             if os.path.exists(temporary_location):
                 os.remove(temporary_location)
 
