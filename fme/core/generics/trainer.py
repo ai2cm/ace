@@ -580,8 +580,8 @@ class Trainer:
         if dist.is_root():
           temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
-        )
-        try:
+          )
+          try:
             data = {
                 "num_batches_seen": self.num_batches_seen,
                 "current_epoch_num_batches_seen": self._current_epoch_num_batches_seen,
