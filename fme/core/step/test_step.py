@@ -405,22 +405,6 @@ SELECTOR_CONFIG_CASES = [
     for getter in SELECTOR_GETTERS
 ]
 
-EXPORTABLE_SELECTOR_CONFIG_CASES = [
-    # Some configs use th.DiscreteContinuousConvS2 layers
-    # which currently do not support export, see
-    # https://github.com/NVIDIA/torch-harmonics/issues/73
-    pytest.param(
-        getter(),
-        id=getter.__name__,
-    )
-    for getter in [
-        get_single_module_with_atmosphere_corrector_selector,
-        get_separate_radiation_selector,
-        get_single_module_selector,
-        get_multi_call_selector,
-    ]
-]
-
 HAS_NEXT_STEP_FORCING_NAME_CASES = [
     pytest.param(
         StepSelector(
@@ -568,29 +552,6 @@ def test_step_initializes_weights(config: StepSelector):
     for i, module in enumerate(step.modules):
         assert isinstance(module, DummyWrapper)
         assert call_args[0][i] is module.module
-
-
-@pytest.mark.parametrize("config", EXPORTABLE_SELECTOR_CONFIG_CASES)
-def test_export_step(config: StepSelector, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-    torch.manual_seed(0)
-    img_shape = DEFAULT_IMG_SHAPE
-    n_samples = 5
-    step = get_step(config, img_shape)
-    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
-    next_step_input_data = get_tensor_dict(
-        step.next_step_input_names, img_shape, n_samples
-    )
-    labels: BatchLabels = [set() for _ in range(n_samples)]
-    unscripted_output = step.step(input_data, next_step_input_data, labels=labels)
-    for name in step.output_names:
-        # informative check for nan values
-        torch.testing.assert_close(unscripted_output[name], unscripted_output[name])
-    exported = step.export(input_data, next_step_input_data)
-    output = exported.module()(input_data, next_step_input_data)
-    for name in step.output_names:
-        torch.testing.assert_close(output[name], unscripted_output[name])
 
 
 @pytest.mark.parametrize(

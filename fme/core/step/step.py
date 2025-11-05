@@ -1,6 +1,5 @@
 import abc
 import dataclasses
-import warnings
 from collections.abc import Callable
 
 # we use Type to distinguish from type attr of StepSelector
@@ -212,7 +211,7 @@ class StepSelector(StepConfigABC):
         self.config = dataclasses.asdict(self._step_config_instance)
 
 
-class StepABC(abc.ABC, nn.Module):
+class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
     @property
@@ -342,34 +341,6 @@ class StepABC(abc.ABC, nn.Module):
             The denormalized output data at the next time step.
         """
         pass
-
-    @final
-    def forward(
-        self,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
-        labels: BatchLabels,
-    ) -> TensorDict:
-        return self.step(
-            input=input,
-            next_step_input_data=next_step_input_data,
-            labels=labels,
-        )
-
-    @final
-    def export(
-        self: SelfType,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
-    ) -> torch.export.ExportedProgram:
-        """
-        Script the step function.
-        """
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message=".*does not reference an nn.Module.*"
-            )
-            return torch.export.export(self, (input, next_step_input_data))
 
     @abc.abstractmethod
     def get_state(self) -> dict[str, Any]:
