@@ -64,6 +64,54 @@ class Context:
             )
 
 
+class ChannelLayerNorm(nn.Module):
+    """
+    Layer Normalization over third-last channel dimension.
+    """
+
+    def __init__(
+        self, n_channels: int, eps: float = 1e-5, elementwise_affine: bool = False
+    ):
+        super(ChannelLayerNorm, self).__init__()
+        self.n_channels = n_channels
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        if self.elementwise_affine:
+            self.weight = nn.Parameter(torch.ones(n_channels))
+            self.bias = nn.Parameter(torch.zeros(n_channels))
+        else:
+            self.weight = None
+            self.bias = None
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.elementwise_affine:
+            torch.nn.init.constant_(self.weight, 1.0)
+            torch.nn.init.constant_(self.bias, 0.0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() < 2:
+            raise ValueError(
+                f"Expected at least 3D input with channel at dim=-3, got shape {tuple(x.shape)}"
+            )
+        if x.size(-3) != self.n_channels:
+            raise ValueError(
+                f"Channel dimension mismatch: got C={x.size(-3)}, expected {self.n_channels}"
+            )
+
+        # Compute per-pixel mean/var across channels without transposing
+        mean = x.mean(dim=-3, keepdim=True)
+        var = x.var(dim=-3, keepdim=True, unbiased=False)
+        inv_std = torch.rsqrt(var + self.eps)
+        y = (x - mean) * inv_std
+
+        if self.weight is not None and self.bias is not None:
+            # Broadcast [C] over [N, C, *spatial]
+            shape = [1, -1] + [1] * (x.dim() - 2)
+            y = y * self.weight.view(*shape) + self.bias.view(*shape)
+        return y
+
+
 class ConditionalLayerNorm(nn.Module):
     """
     Conditional Layer Normalization as described in "AdaSpeech: Adaptive
@@ -114,8 +162,8 @@ class ConditionalLayerNorm(nn.Module):
                 elementwise_affine=elementwise_affine,
             )
         else:
-            self.norm = nn.LayerNorm(
-                (self.n_channels,),
+            self.norm = ChannelLayerNorm(
+                self.n_channels,
                 eps=epsilon,
                 elementwise_affine=elementwise_affine,
             )
@@ -174,11 +222,7 @@ class ConditionalLayerNorm(nn.Module):
             if context.embedding_2d is None:
                 raise ValueError("embedding_2d must be provided")
             bias = bias + self.W_bias_2d(context.embedding_2d)
-        if not self._global_layer_norm:
-            x = x.transpose(1, -1)
         x_norm: torch.Tensor = self.norm(x)
-        if not self._global_layer_norm:
-            x_norm = x_norm.transpose(1, -1)
         return x_norm * scale + bias
 
 
