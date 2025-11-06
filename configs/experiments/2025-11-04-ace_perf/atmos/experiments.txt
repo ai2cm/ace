@@ -37,3 +37,5 @@ B200x1-condSFNOfast-tb10_nw4_pf2|rs0|01K9DQ88SNEN2W78YX1PM31NWS|training|best_in
 B200x1-condSFNOfast-tb10_nw8_pf2|rs0|01K9DQ8NPRH478HY2PXP32TA4P|training|best_inference_ckpt|normal|--not-preemptible
 
 B200x1-condSFNOfast-tb10_nw4_pf4|rs0|01K9DQ91Q3R1VNJPA1CV3D9QDZ|training|best_inference_ckpt|normal|--not-preemptible
+
+B200x1-condSFNOfast-tb10_nw8_pf4|rs0|01K9DQ9ESVQNYXSBRJ55C1Y5KG|training|best_inference_ckpt|normal|--not-preemptible
