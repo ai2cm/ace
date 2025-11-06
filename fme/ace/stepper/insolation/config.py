@@ -1,9 +1,11 @@
+import copy
 import dataclasses
 import datetime
 
 import torch
 import xarray as xr
 
+from fme.ace.requirements import DataRequirements
 from fme.ace.stepper.insolation import CM4Insolation
 from fme.core.coordinates import HorizontalCoordinates
 from fme.core.typing_ import TensorMapping
@@ -111,6 +113,20 @@ class InsolationConfig:
         return CM4Insolation(
             self.obliquity, self.eccentricity, self.longitude_of_perhelion
         )
+
+    def update_requirements(self, requirements: DataRequirements) -> DataRequirements:
+        """Add or remove names from the requirements associated with the insolation.
+
+        Args:
+            requirements: The requirements to update.
+        """
+        names = copy.deepcopy(requirements.names)
+        if self.insolation_name in names:
+            names.remove(self.insolation_name)
+            if isinstance(self.solar_constant, NameConfig):
+                if self.solar_constant.name not in names:
+                    names.append(self.solar_constant.name)
+        return DataRequirements(names=names, n_timesteps=requirements.n_timesteps)
 
 
 class Insolation:
