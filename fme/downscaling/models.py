@@ -4,7 +4,6 @@ from typing import Any
 
 import dacite
 import torch
-from torch.amp import autocast
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -356,15 +355,14 @@ class DiffusionModel:
         conditioned_target = condition_with_noise_for_training(
             targets_norm, self.config.p_std, self.config.p_mean, self.sigma_data
         )
-        with autocast('cuda', dtype=torch.bfloat16):
-            denoised_norm = self.module(
-                conditioned_target.latents, inputs_norm, conditioned_target.sigma
-            )
-            loss = torch.mean(
-                conditioned_target.weight * self.loss(denoised_norm, targets_norm)
-            )
-            optimizer.accumulate_loss(loss)
-            optimizer.step_weights()
+        denoised_norm = self.module(
+            conditioned_target.latents, inputs_norm, conditioned_target.sigma
+        )
+        loss = torch.mean(
+            conditioned_target.weight * self.loss(denoised_norm, targets_norm)
+        )
+        optimizer.accumulate_loss(loss)
+        optimizer.step_weights()
 
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
