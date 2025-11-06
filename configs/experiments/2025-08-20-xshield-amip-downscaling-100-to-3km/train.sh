@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-multivar-increased-cap"
-CONFIG_FILENAME="config-train-winds.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-new-unet"
+CONFIG_FILENAME="config-train-val-on-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -29,8 +29,9 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km training global' \
     --workspace ai2/ace \
-    --priority high \
+    --priority low \
     --preemptible \
+    --cluster ai2/titan \
     --cluster ai2/ceres \
     --cluster ai2/jupiter \
     --beaker-image $IMAGE \
