@@ -24,8 +24,7 @@ run_eval() {
   done < "$CONFIG_PATH"
 
   gantry run \
-    --name $JOB_NAME \
-    --task-name $JOB_NAME \
+    --name "$job_name" \
     --description 'Run ACE2-ERA5 evaluator' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
@@ -35,9 +34,9 @@ run_eval() {
     --cluster ai2/ceres-cirrascale \
     --cluster ai2/jupiter \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
-    --env WANDB_NAME=$JOB_NAME \
+    --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=inference \
-    --env WANDB_RUN_GROUP=$JOB_GROUP \
+    --env WANDB_RUN_GROUP= \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
