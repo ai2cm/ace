@@ -19,12 +19,13 @@ import tensorly as tl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from fme.ace.utils import comm
+
 
 tl.set_backend("pytorch")
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
 
+from fme.core.distributed import Distributed
 # from tensorly.plugins import use_opt_einsum
 # use_opt_einsum('optimal')
 from tltorch.factorized_tensors.core import FactorizedTensor
@@ -106,16 +107,8 @@ class SpectralConvS2(nn.Module):
         if not self.separable:
             weight_shape += [out_channels]
 
-        if isinstance(self.inverse_transform, thd.DistributedInverseRealSHT):
-            self.modes_lat_local = self.inverse_transform.l_shapes[comm.get_rank("h")]
-            self.modes_lon_local = self.inverse_transform.m_shapes[comm.get_rank("w")]
-            self.nlat_local = self.inverse_transform.lat_shapes[comm.get_rank("h")]
-            self.nlon_local = self.inverse_transform.lon_shapes[comm.get_rank("w")]
-        else:
-            self.modes_lat_local = self.modes_lat
-            self.modes_lon_local = self.modes_lon
-            self.lpad = 0
-            self.mpad = 0
+        dist = Distributed.get_instance()
+        self.modes_lat_local, self.modes_lon_local =  dist.get_local_modes(inverse_transform)
 
         # padded weights
         # if self.operator_type == 'diagonal':
