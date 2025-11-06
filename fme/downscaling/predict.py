@@ -232,8 +232,18 @@ class Downscaler:
                 f"{self.experiment_dir}/generated_maps_and_metrics.nc", mode="w"
             )
 
+    @property
+    def _fine_latlon_coordinates(self) -> LatLonCoordinates | None:
+        if self.data.topography is not None:
+            return self.data.topography.coords
+        else:
+            return None
+
     def run(self):
-        aggregator = NoTargetAggregator(downscale_factor=self.model.downscale_factor)
+        aggregator = NoTargetAggregator(
+            downscale_factor=self.model.downscale_factor,
+            latlon_coordinates=self._fine_latlon_coordinates,
+        )
         for i, (batch, topography) in enumerate(self.batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")

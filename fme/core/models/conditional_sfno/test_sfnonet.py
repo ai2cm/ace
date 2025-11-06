@@ -137,7 +137,10 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
     try:
         nn.LayerNorm = SetToZero
         params = SimpleNamespace(
-            embed_dim=16, num_layers=2, normalize_big_skip=normalize_big_skip
+            embed_dim=16,
+            num_layers=2,
+            normalize_big_skip=normalize_big_skip,
+            global_layer_norm=True,  # so it uses nn.LayerNorm
         )
         model = get_lat_lon_sfnonet(
             params=params,
