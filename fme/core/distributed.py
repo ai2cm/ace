@@ -13,6 +13,8 @@ from physicsnemo.distributed.utils import compute_split_shapes
 from fme.ace.models.makani_mpu.mappings import init_gradient_reduction_hooks
 from torch import nn
 from fme.ace.models.makani_utils.checkpoint_helpers import  gather_model_state_dict, prepend_prefix_to_state_dict, scatter_model_state_dict
+import torch_harmonics.distributed as thd
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +79,7 @@ class Distributed:
             cls.singleton = original
 
     def __init__(self, force_non_distributed: bool = False):
+
         if torch.distributed.is_available() and not torch.distributed.is_initialized() and not force_non_distributed:
             self._distributed = self._init_distributed()
         else:
@@ -365,6 +368,24 @@ class Distributed:
         else:
             return DummyWrapper(module)
 
+    def get_local_modes(self, inverse_transform):
+      if isinstance(inverse_transform, thd.DistributedInverseRealSHT):
+        if self.spatial_parallelism:
+          modes_lat_local = inverse_transform.l_shapes[comm.get_rank("h")]
+          modes_lon_local = inverse_transform.m_shapes[comm.get_rank("w")]
+          # These variables are not used
+          # nlat_local = inverse_transform.lat_shapes[comm.get_rank("h")]
+          # nlon_local = inverse_transform.lon_shapes[comm.get_rank("w")]
+        else:
+          modes_lat_local = inverse_transform.lmax_local
+          modes_lon_local = inverse_transform.mmax_local
+          # These variables are not used
+          # self.lpad = 0
+          # self.mpad = 0
+      else:
+          modes_lat_local = inverse_transform.lmax
+          modes_lon_local  = inverse_transform.mmax
+      return modes_lat_local, modes_lon_local
     def barrier(self):
         """
         Wait for all processes to reach this point.
