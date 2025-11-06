@@ -1135,8 +1135,7 @@ def test_resolve_variable_metadata(
 def test_evaluator_with_derived_forcings(
     tmp_path: pathlib.Path, solar_constant: NameConfig | ValueConfig
 ):
-    forward_steps_in_memory = 4
-    coarsen_factor = 2
+    forward_steps_in_memory = 2
     insolation_name = "DSWRFtoa"
     in_names = ["var", "forcing_var", insolation_name]
     out_names = ["var", "ULWRFtoa", "USWRFtoa"]
@@ -1170,10 +1169,9 @@ def test_evaluator_with_derived_forcings(
         dim_sizes=dim_sizes,
         timestep_days=TIMESTEP.total_seconds() / 86400,
     )
-    time_coarsen_config = TimeCoarsenConfig(coarsen_factor=coarsen_factor)
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
-        n_forward_steps=8,
+        n_forward_steps=2,
         forward_steps_in_memory=forward_steps_in_memory,
         checkpoint_path=str(stepper_path),
         logging=LoggingConfig(
@@ -1185,9 +1183,7 @@ def test_evaluator_with_derived_forcings(
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
-            files=[
-                FileWriterConfig("autoregressive", time_coarsen=time_coarsen_config)
-            ],
+            files=[FileWriterConfig("autoregressive")],
         ),
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )

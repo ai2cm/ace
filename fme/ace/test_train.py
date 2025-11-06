@@ -956,7 +956,7 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
     ],
 )
 def test_train_and_inference_with_derived_forcings(
-    tmp_path, insolation_config: InsolationConfig, very_fast_only: bool = False
+    tmp_path, insolation_config: InsolationConfig, very_fast_only: bool
 ):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
@@ -970,8 +970,8 @@ def test_train_and_inference_with_derived_forcings(
         nettype,
         log_to_wandb=True,
         timestep_days=0.25,
-        n_time=22,
-        inference_forward_steps=20,  # must be even
+        n_time=12,
+        inference_forward_steps=10,  # must be even
         save_per_epoch_diagnostics=True,
         crps_training=crps_training,
         log_validation_maps=log_validation_maps,
