@@ -4,7 +4,7 @@ checkpoint_every_n_batches: 0
 validate_using_ema: false
 ema:
   decay: 0.999
-max_epochs: 2
+max_epochs: 3
 n_forward_steps: 2
 validation_aggregator:
   log_snapshots: false
