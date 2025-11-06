@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_
 sfno-v1020_sea_ice-5D_ts|rs0|01K96SARRYA0RA9696E20PK912|training|best_inference_ckpt|normal|--not-preemptible
 
 sfno-v1020_sea_ice-5D_ts|rs1|01K96SB51PS70K7XCEWYHP3GQ7|training|best_inference_ckpt|normal|--not-preemptible
+
+sfno-v1020_sea_ice-5D_ts|rs1|01K9DA7J3DZJ1NEVV6RSAD4G0W|training|best_inference_ckpt|normal|--not-preemptible
