@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 import pathlib
 from collections.abc import Iterable, Mapping
 from copy import copy
@@ -243,6 +244,7 @@ def load_dict_from_netcdf(
         defaults: Dictionary of default values for each variable, if not found
             in the netCDF file.
     """
+    logging.info(f"[NORMALIZER] Loading dataset from {path}")
     with fsspec.open(path, "rb") as f:
         ds = xr.load_dataset(f, mask_and_scale=False)
 
