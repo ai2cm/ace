@@ -381,7 +381,9 @@ class Trainer:
             wandb.log(all_logs, step=self.num_batches_seen)
 
             if self.config.save_checkpoint:
-              self.save_all_checkpoints(valid_loss, inference_error)
+                if dist.is_root():
+                    logging.info(f"Saving checkpoints for epoch {self._epochs_trained}")
+                self.save_all_checkpoints(valid_loss, inference_error)
 
     def _log_first_batch_metrics(self):
         wandb = WandB.get_instance()
