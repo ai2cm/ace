@@ -7,6 +7,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.requirements import DataRequirements
 from fme.ace.stepper.insolation.cm4 import (
     AUTUMNAL_EQUINOX,
     _convert_lat_lon_from_degrees_to_radians,
@@ -61,6 +62,47 @@ def validate_insolation(
     mean = gridded_operations.area_weighted_mean(insolation)
     expected_mean = torch.full(mean.shape, expected_mean, device=get_device())
     torch.testing.assert_close(mean, expected_mean, rtol=0.1, atol=0.0)
+
+
+@pytest.mark.parametrize(
+    ("insolation", "input_names", "expected_names"),
+    [
+        pytest.param(
+            InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_NAME),
+            [INSOLATION_NAME],
+            [SOLAR_CONSTANT_NAME],
+            id="insolation-required-solar-constant-as-name",
+        ),
+        pytest.param(
+            InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_VALUE),
+            [INSOLATION_NAME],
+            [],
+            id="insolation-required-solar-constant-as-value",
+        ),
+        pytest.param(
+            InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_NAME),
+            [],
+            [],
+            id="insolation-not-required-solar-constant-as-name",
+        ),
+        pytest.param(
+            InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_VALUE),
+            [],
+            [],
+            id="insolation-not-required-solar-constant-as-value",
+        ),
+    ],
+)
+def test_update_requirements(
+    insolation: InsolationConfig,
+    input_names: list[str],
+    expected_names: list[str],
+):
+    n_timesteps = 2
+    requirements = DataRequirements(names=input_names, n_timesteps=n_timesteps)
+    result = insolation.update_requirements(requirements)
+    assert result.names == expected_names
+    assert result.n_timesteps == n_timesteps
 
 
 @pytest.mark.parametrize(
