@@ -1,0 +1,36 @@
+experiment_dir: /results
+n_samples: 4
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  #checkpoint_path: /Users/annak/Code/scratch/100-to-3km-mps.ckpt
+  checkpoint_path: /checkpoints/ckpt.tar
+  rename:
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+data:
+  topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  coarse:
+  - data_path: /climate-default
+    engine: zarr
+    file_pattern: 2025-08-29-ace-crps-onestep-outputs.zarr
+    #infer_timestep: false
+    subset:
+      start: 0
+      stop: 12
+      #step: None
+  lat_extent:
+    #start: -66.0
+    start: 0
+    stop: 70.0
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: False
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: annak-downscaling
+  entity: ai2cm
