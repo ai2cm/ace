@@ -1,3 +1,3 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
-sfno-v1020_sea_ice-5D_ts|rs0|train|high||8|600GiB|1||seed=0
-sfno-v1020_sea_ice-5D_ts|rs1|train|high||8|600GiB|1||seed=1
+sfno-v1020_sea_ice-5D_ts|rs0|training|high||8|600GiB|1||seed=0
+sfno-v1020_sea_ice-5D_ts|rs1|train|high|titan|2|600GiB|1||seed=1
