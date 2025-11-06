@@ -584,37 +584,30 @@ class Trainer:
         checkpoint_path: str,
         include_optimization: bool = False,
     ):
-
-        # If spatial parallelism is one, this needs to be in all processors.
-        stepper_dic =self.stepper.get_state()
-        #CHEKC if we need to gather data for self._ema
-        ema_dic=self._ema.get_state()
-        # CHECK
-        if include_optimization:
-          optimization_dic=self.optimization.get_state()
         dist = Distributed.get_instance()
-        if dist.is_root():
-          temporary_location = os.path.join(
+        # save to a temporary file in case we get pre-empted during save
+        temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
-          )
-          try:
+        )
+        try:
             data = {
                 "num_batches_seen": self.num_batches_seen,
                 "current_epoch_num_batches_seen": self._current_epoch_num_batches_seen,
                 "epoch": self._epochs_trained,
                 "best_validation_loss": self._best_validation_loss,
                 "best_inference_error": self._best_inference_error,
-                "stepper": stepper_dic,
-                "ema": ema_dic,
+                "stepper": self.stepper.get_state(),
+                "ema": self._ema.get_state(),
             }
             if include_optimization:
-                data["optimization"] = optimization_dic
+                data["optimization"] = self.optimization.get_state()
             else:
                 data["ema"].pop("ema_params")  # don't need if not saving optimization
-            torch.save(data, temporary_location)
-            os.replace(temporary_location, checkpoint_path)
-          finally:
-            if os.path.exists(temporary_location):
+            if dist.is_root():
+              torch.save(data, temporary_location)
+              os.replace(temporary_location, checkpoint_path)
+        finally:
+            if dist.is_root() and os.path.exists(temporary_location):
                 os.remove(temporary_location)
 
     def restore_checkpoint(self, checkpoint_path):
