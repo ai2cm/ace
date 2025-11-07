@@ -100,7 +100,7 @@ stepper:
           global_means_path: FME_STATS_DIR/centering.nc
           global_stds_path: FME_STATS_DIR/scaling-residual.nc      
       ocean:
-        surface_temperature_name: surface_temperature
+        surface_temperature_name: TS
         ocean_fraction_name: ocean_fraction
       corrector:
         conserve_dry_air: true
