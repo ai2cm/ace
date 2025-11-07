@@ -402,9 +402,14 @@ class PairedDataLoaderConfig:
 
         if requirements.use_fine_topography:
             if self.topography is None:
-                fine_topography = get_normalized_topography(
-                    get_raw_paths(self.fine[0].data_path, self.fine[0].file_pattern)[0]
-                )
+                data_path = self.fine[0].data_path
+                file_pattern = self.fine[0].file_pattern
+                raw_paths = get_raw_paths(data_path, file_pattern)
+                if len(raw_paths) == 0:
+                    raise ValueError(
+                        f"No files found matching '{data_path}/{file_pattern}'."
+                    )
+                fine_topography = get_normalized_topography(raw_paths[0])
             else:
                 fine_topography = get_normalized_topography(self.topography)
             fine_topography = fine_topography.to_device()
