@@ -26,6 +26,8 @@ from fme.ace.inference.test_evaluator import (
     validate_stepper_ocean,
 )
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
+from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriver
+from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
     Stepper,
@@ -75,40 +77,81 @@ OCEAN_CONFIG = OceanConfig(surface_temperature_name="a", ocean_fraction_name="b"
 MULTI_CALL_CONFIG = MultiCallConfig(
     forcing_name="co2", forcing_multipliers={"_b": 0.5}, output_names=["ULWRFtoa"]
 )
+INSOLATION_NAME = "DSWRFtoa"
+SOLAR_CONSTANT_NAME = "solar_constant"
+S0 = 1360.0
+SOLAR_CONSTANT_AS_NAME = NameConfig(SOLAR_CONSTANT_NAME)
+SOLAR_CONSTANT_AS_VALUE = ValueConfig(S0)
+INSOLATION_CONFIG = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_VALUE)
+DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig(insolation=INSOLATION_CONFIG)
+EMPTY_DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig()
+
 LOAD_STEPPER_TESTS = {
-    "override-ocean": (None, None, OCEAN_CONFIG, "keep", OCEAN_CONFIG, None),
-    "persist-ocean": (OCEAN_CONFIG, None, "keep", "keep", OCEAN_CONFIG, None),
+    "override-ocean": (
+        None,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        OCEAN_CONFIG,
+        "keep",
+        "keep",
+        OCEAN_CONFIG,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
+    "persist-ocean": (
+        OCEAN_CONFIG,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        "keep",
+        "keep",
+        "keep",
+        OCEAN_CONFIG,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
     "override-multi-call": (
         None,
         None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
         "keep",
         MULTI_CALL_CONFIG,
+        "keep",
         None,
         MULTI_CALL_CONFIG,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
     ),
     "persist-multi-call": (
         None,
         MULTI_CALL_CONFIG,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        "keep",
         "keep",
         "keep",
         None,
         MULTI_CALL_CONFIG,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
     ),
     "override-all": (
         None,
         None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
         OCEAN_CONFIG,
         MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
         OCEAN_CONFIG,
         MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
     ),
     "persist-all": (
         OCEAN_CONFIG,
         MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+        "keep",
         "keep",
         "keep",
         OCEAN_CONFIG,
         MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
     ),
 }
 
@@ -882,6 +925,7 @@ def _get_stepper(
     ocean_config: OceanConfig | None = None,
     module_name: Literal["AddOne", "ChannelSum", "RepeatChannel", "Linear"] = "AddOne",
     norm_mean: float = 0.0,
+    derived_forcings: DerivedForcingsConfig | None = None,
     **kwargs,
 ):
     if module_name == "AddOne":
@@ -922,6 +966,9 @@ def _get_stepper(
 
         module_config = {"module": Linear()}
 
+    if derived_forcings is None:
+        derived_forcings = DerivedForcingsConfig()
+
     config = StepperConfig(
         step=StepSelector(
             type="single_module",
@@ -942,6 +989,7 @@ def _get_stepper(
             ),
         ),
         loss=StepLossConfig(type="MSE"),
+        derived_forcings=derived_forcings,
     )
     dataset_info = get_dataset_info()
     return config.get_stepper(dataset_info)
@@ -1037,13 +1085,14 @@ def get_data_for_predict(
     n_ensemble: int = 1,
 ) -> tuple[PrognosticState, BatchData]:
     n_samples = 3
+    index = xr.date_range("2000", freq="6h", periods=n_steps + 1, use_cftime=True)
+    forcing_time = xr.DataArray(np.stack(n_samples * [index]), dims=["sample", "time"])
+    input_time = forcing_time.isel(time=[0])
+
     input_data = (
         BatchData.new_on_device(
             data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
-            time=xr.DataArray(
-                np.zeros((n_samples, 1)),
-                dims=["sample", "time"],
-            ),
+            time=input_time,
             labels=[set() for _ in range(n_samples)],
         )
         .broadcast_ensemble(n_ensemble)
@@ -1057,10 +1106,7 @@ def get_data_for_predict(
         data={
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
         },
-        time=xr.DataArray(
-            np.zeros((n_samples, n_steps + 1)),
-            dims=["sample", "time"],
-        ),
+        time=forcing_time,
         labels=[set() for _ in range(n_samples)],
     ).broadcast_ensemble(n_ensemble)
     return input_data, forcing_data
@@ -1256,10 +1302,13 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     (
         "serialized_ocean_config",
         "serialized_multi_call_config",
+        "serialized_derived_forcings_config",
         "overriding_ocean_config",
         "overriding_multi_call_config",
+        "overriding_derived_forcings_config",
         "expected_ocean_config",
         "expected_multi_call_config",
+        "expected_derived_forcings_config",
     ),
     list(LOAD_STEPPER_TESTS.values()),
     ids=list(LOAD_STEPPER_TESTS.keys()),
@@ -1268,10 +1317,13 @@ def test_load_stepper_and_load_stepper_config(
     tmp_path: pathlib.Path,
     serialized_ocean_config: OceanConfig | None,
     serialized_multi_call_config: MultiCallConfig | None,
+    serialized_derived_forcings_config: DerivedForcingsConfig,
     overriding_ocean_config: Literal["keep"] | OceanConfig | None,
     overriding_multi_call_config: Literal["keep"] | MultiCallConfig | None,
+    overriding_derived_forcings_config: Literal["keep"] | DerivedForcingsConfig,
     expected_ocean_config: OceanConfig | None,
     expected_multi_call_config: MultiCallConfig | None,
+    expected_derived_forcings_config: DerivedForcingsConfig,
 ):
     in_names = ["co2", "var", "a", "b"]
     fluxes = ["ULWRFtoa"]
@@ -1304,6 +1356,7 @@ def test_load_stepper_and_load_stepper_config(
         data_shape=dim_sizes.shape_nd,
         ocean=serialized_ocean_config,
         multi_call=serialized_multi_call_config,
+        derived_forcings=serialized_derived_forcings_config,
     )
 
     # First check that load_stepper_config and load_stepper functions load
@@ -1316,11 +1369,14 @@ def test_load_stepper_and_load_stepper_config(
     stepper = load_stepper(stepper_path)
     validate_stepper_ocean(stepper, serialized_ocean_config)
     validate_stepper_multi_call(stepper, serialized_multi_call_config)
+    assert stepper.config.derived_forcings == serialized_derived_forcings_config
 
     # Then check that they load the appropriately modified config and
     # stepper when provided with a StepperOverrideConfig.
     stepper_override = StepperOverrideConfig(
-        ocean=overriding_ocean_config, multi_call=overriding_multi_call_config
+        ocean=overriding_ocean_config,
+        multi_call=overriding_multi_call_config,
+        derived_forcings=overriding_derived_forcings_config,
     )
 
     stepper_config = load_stepper_config(stepper_path, stepper_override)
@@ -1331,6 +1387,8 @@ def test_load_stepper_and_load_stepper_config(
     stepper = load_stepper(stepper_path, stepper_override)
     validate_stepper_ocean(stepper, expected_ocean_config)
     validate_stepper_multi_call(stepper, expected_multi_call_config)
+    assert stepper.config.derived_forcings == expected_derived_forcings_config
+    assert isinstance(stepper._forcing_deriver, ForcingDeriver)
 
 
 def get_regression_stepper_and_data(
@@ -1567,3 +1625,74 @@ def test_get_stepper_with_input_masking_raises():
     # input_masking provided in config
     with pytest.raises(MissingDatasetInfo, match="mask_provider"):
         _ = _get_stepper_with_input_masking(dataset_info_has_mask_provider=False)
+
+
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_predict_with_derived_forcing(n_ensemble):
+    insolation = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_NAME)
+    derived_forcings = DerivedForcingsConfig(insolation=insolation)
+    in_names = [SOLAR_CONSTANT_NAME, INSOLATION_NAME]
+    out_names = ["a"]
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        derived_forcings=derived_forcings,
+    )
+    n_steps = 3
+    forcing_names = [SOLAR_CONSTANT_NAME]
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=forcing_names, n_ensemble=n_ensemble
+    )
+    # Given that insolation is an input, but is not in the provided forcing data
+    # this test would fail if it was not derived. Since insolation does not end
+    # up in the output of predict, there is nothing else we can really test
+    # here.
+    _, _ = stepper.predict(input_data, forcing_data)
+
+
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_predict_paired_with_derived_forcing(n_ensemble):
+    insolation = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_NAME)
+    derived_forcings = DerivedForcingsConfig(insolation=insolation)
+    in_names = [SOLAR_CONSTANT_NAME, INSOLATION_NAME]
+    out_names = ["a"]
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        derived_forcings=derived_forcings,
+    )
+    n_steps = 3
+    forcing_names = [SOLAR_CONSTANT_NAME]
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=forcing_names, n_ensemble=n_ensemble
+    )
+    output, _ = stepper.predict_paired(input_data, forcing_data)
+    assert INSOLATION_NAME in output.forcing
+
+
+def test_reloaded_stepper_has_derived_forcings():
+    in_names = [INSOLATION_NAME]
+    out_names = ["a"]
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        derived_forcings=DERIVED_FORCINGS_CONFIG,
+    )
+    stepper_state = stepper.get_state()
+    new_stepper = Stepper.from_state(stepper_state)
+    assert new_stepper.config.derived_forcings == stepper.config.derived_forcings
+
+
+def test_replace_derived_forcings_error():
+    in_names = [INSOLATION_NAME]
+    out_names = ["a"]
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        derived_forcings=DERIVED_FORCINGS_CONFIG,
+    )
+    replacement_insolation = InsolationConfig("foo", SOLAR_CONSTANT_AS_VALUE)
+    replacement = DerivedForcingsConfig(insolation=replacement_insolation)
+
+    with pytest.raises(ValueError, match="insolation_name"):
+        stepper.config.replace_derived_forcings(replacement)

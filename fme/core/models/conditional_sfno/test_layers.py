@@ -8,9 +8,9 @@ from .layers import ConditionalLayerNorm, Context, ContextConfig
 
 @pytest.mark.parametrize("global_layer_norm", [True, False])
 @pytest.mark.parametrize("n_channels", [32])
-@pytest.mark.parametrize("embed_dim_scalar", [10, 0])
+@pytest.mark.parametrize("embed_dim_scalar", [9, 0])
 @pytest.mark.parametrize("embed_dim_noise", [10, 0])
-@pytest.mark.parametrize("embed_dim_labels", [10, 0])
+@pytest.mark.parametrize("embed_dim_labels", [11, 0])
 @pytest.mark.parametrize("img_shape", [(8, 16)])
 def test_conditional_layer_norm(
     n_channels: int,
