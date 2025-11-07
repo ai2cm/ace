@@ -102,7 +102,7 @@ stepper:
           global_stds_path: FME_STATS_DIR/scaling-residual.nc      
       ocean:
         surface_temperature_name: TS
-        ocean_fraction_name: ocean_fraction
+        ocean_fraction_name: OCNFRAC
       corrector:
         conserve_dry_air: true
         moisture_budget_correction: advection_and_precipitation
