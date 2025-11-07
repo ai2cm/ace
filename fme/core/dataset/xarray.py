@@ -836,11 +836,10 @@ class XarrayDataset(torch.utils.data.Dataset):
                 has_lat="lat" in self.dims
                 has_lon="lon" in self.dims
                 if self._dist.is_spatial_distributed() and has_lat and has_lon :
-                   crop_shape = self._shape_excluding_time_after_selection
-                   local_shape_h, local_offset_h, local_shape_w, local_offset_w = self._dist.get_local_shape_and_offset(crop_shape)
-                   ds = ds.isel(lat=slice(local_offset_h, local_offset_h + local_shape_h), lon=slice(local_offset_w, local_offset_w + local_shape_w))
-                   shape[1]=local_shape_h
-                   shape[2]=local_shape_w
+                   slice_h, slice_w = self._dist.get_local_slices(self._shape_excluding_time_after_selection)
+                   ds = ds.isel(lat=slice_h, lon=slice_w)
+                   shape[1]=slice_h.stop - slice_h.start
+                   shape[2]=slice_w.stop - slice_w.start
                 tensor_dict = load_series_data(
                     idx=start,
                     n_steps=n_steps,
@@ -866,11 +865,10 @@ class XarrayDataset(torch.utils.data.Dataset):
             ds = ds.isel(**self.isel)
             shape = [total_steps] + self._shape_excluding_time_after_selection
             if self._dist.is_spatial_distributed() and has_lat and has_lon :
-              crop_shape = self._shape_excluding_time_after_selection
-              local_shape_h, local_offset_h, local_shape_w, local_offset_w = self._dist.get_local_shape_and_offset(crop_shape)
-              ds = ds.isel(lat=slice(local_offset_h, local_offset_h + local_shape_h), lon=slice(local_offset_w, local_offset_w + local_shape_w))
-              shape[1]=local_shape_h
-              shape[2]=local_shape_w
+              slice_h, slice_w = self._dist.get_local_slices(self._shape_excluding_time_after_selection)
+              ds = ds.isel(lat=slice_h, lon=slice_w)
+              shape[1]=slice_h.stop - slice_h.start
+              shape[2]=slice_w.stop - slice_w.start
 
             for name in self._time_invariant_names:
                 variable = ds[name].variable
