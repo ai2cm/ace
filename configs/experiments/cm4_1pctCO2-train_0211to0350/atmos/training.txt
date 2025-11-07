@@ -1,4 +1,4 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 cm4_1pctCO2-train_0211to0350|rs0|training|low|titan|4|600GiB|1||seed=0
 cm4_1pctCO2-train_0211to0350|rs1|training|low|titan|4|600GiB|1||seed=1
-cm4_1pctCO2-atmos_test_run|rs1|train|high|titan|2|600GiB|1||seed=0 save_checkpoint=false checkpoint_every_n_batches=0 max_epochs=1
+cm4_1pctCO2-atmos_test_run|rs1|training|high|titan|2|600GiB|1||seed=0 save_checkpoint=false checkpoint_every_n_batches=0 max_epochs=1
