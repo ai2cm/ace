@@ -363,39 +363,28 @@ def test_concat_of_XarrayConcat_w_spatial_parallel(mock_monthly_netcdfs):
     # We must use the same random seed because this code will be executed several times.
     init_seed(333)
     mock_data: MockData = mock_monthly_netcdfs
+
     n_timesteps = 5
     names = mock_data.var_names.all_names
     ## without domain decomposition
-    dist = Distributed()
-    config_ref = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(None, 4))
-    ref, _ = get_dataset([config_ref], names, n_timesteps)
-    niters= len(ref)
-    tensor_refs=[]
-    for i in range(niters):
-      ref_t, _, _=ref[i]
-      for var in ref_t:
-        reft = ref_t[var]
-        # NOTE: We need to make a hard copy because the reference gets overwritten.
-        tensor_refs.append(reft.clone())
+    with Distributed.non_distributed():
+      config_ref = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(None, 4))
+      ref, _ = get_dataset([config_ref], names, n_timesteps)
+      niters= len(ref)
+      tensor_refs=[]
+      for i in range(niters):
+        ref_t, _, _=ref[i]
+        for var in ref_t:
+          reft = ref_t[var]
+          # NOTE: We need to make a hard copy because the reference gets overwritten.
+          tensor_refs.append(reft.clone())
 
-    dist.shutdown()
-    # from mpi4py import MPI
-    # mpi_comm = MPI.COMM_WORLD.Dup()
-    # mpi_comm.Barrier()
-    # mpi_comm_rank = mpi_comm.Get_rank()
-    ## with domain decomposition
-    dist = Distributed()
-    h_parallel_size=2
-    w_parallel_size=2
-    dist._init_distributed(h_parallel_size =  h_parallel_size, w_parallel_size=w_parallel_size)
-    thd.init(h_parallel_size, w_parallel_size)
-    comm = dist.get_comm()
-    w_group = comm.get_group("w")
-    h_group = comm.get_group("h")
+    dist = Distributed.get_instance()
+    w_group = dist.comm_get_group("w")
+    h_group = dist.comm_get_group("h")
     config_c1 = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(None, 4))
     c1, _ = get_dataset([config_c1], names, n_timesteps)
 
-    # mpi_comm.Barrier()
     with torch.no_grad():
       niters= len(ref)
       j=0
