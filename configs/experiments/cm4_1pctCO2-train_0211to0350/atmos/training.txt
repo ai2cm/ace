@@ -1,0 +1,3 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+cm4_1pctCO2-train_0211to0350|rs0|train|low|titan|4|600GiB|1||seed=0
+cm4_1pctCO2-train_0211to0350|rs1|train|low|titan|4|600GiB|1||seed=1
