@@ -354,7 +354,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     }
     print("Logging final summary logs to wandb:", summary_logs)
 
-    temp_logs = {k: v for k, v in summary_logs.items() if k in ["ssr_bias", "crps"]}
+    temp_logs = {
+        k: v for k, v in summary_logs.items() if "ssr_bias" in k or "crps" in k
+    }
     print("final summary logs ssr_bias and crps:", temp_logs)
     # record_logs([summary_logs])
     record_logs([temp_logs])
