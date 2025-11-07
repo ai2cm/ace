@@ -1,15 +1,19 @@
-group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+group|tag|skip_or_skip|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-B200x1-condSFNOfast-tb10_nw4_pf2|rs0|train|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10
+B200x1-condSFNOfast-tb10_nw4_pf2|rs0|skip|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10
 
-B200x1-condSFNOfast-tb20_nw4_pf2|rs0|training|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=20 validation_loader.time_buffer=20
+B200x1-condSFNOfast-tb20_nw4_pf2|rs0|skip|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=20 validation_loader.time_buffer=20
 
-B200x1-condSFNOfast-tb10_nw8_pf2|rs0|train|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 inference.loader.num_data_workers=8 train_loader.num_data_workers=8 validation_loader.num_data_workers=8
+B200x1-condSFNOfast-tb10_nw8_pf2|rs0|skip|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 inference.loader.num_data_workers=8 train_loader.num_data_workers=8 validation_loader.num_data_workers=8
 
-B200x1-condSFNOfast-tb10_nw4_pf4|rs0|train|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 train_loader.prefetch_factor=4 validation_loader.prefetch_factor=4
+B200x1-condSFNOfast-tb10_nw4_pf4|rs0|skip|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 train_loader.prefetch_factor=4 validation_loader.prefetch_factor=4
 
-B200x1-condSFNOfast-tb10_nw8_pf4|rs0|train|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 inference.loader.num_data_workers=8 train_loader.num_data_workers=8 validation_loader.num_data_workers=8 train_loader.prefetch_factor=4 validation_loader.prefetch_factor=4
+B200x1-condSFNOfast-tb10_nw8_pf4|rs0|skip|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 inference.loader.num_data_workers=8 train_loader.num_data_workers=8 validation_loader.num_data_workers=8 train_loader.prefetch_factor=4 validation_loader.prefetch_factor=4
 
-B200x1-condSFNOfast-tb10_nw16_pf2|rs0|train|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 inference.loader.num_data_workers=16 train_loader.num_data_workers=16 validation_loader.num_data_workers=16
+B200x1-condSFNOfast-tb10_nw16_pf2|rs0|skip|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 inference.loader.num_data_workers=16 train_loader.num_data_workers=16 validation_loader.num_data_workers=16
 
-B200x1-condSFNOfast-tb10_nw16_pf4|rs0|train|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 inference.loader.num_data_workers=16 train_loader.num_data_workers=16 validation_loader.num_data_workers=16 train_loader.prefetch_factor=4 validation_loader.prefetch_factor=4
+B200x1-condSFNOfast-tb10_nw16_pf4|rs0|skip|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 inference.loader.num_data_workers=16 train_loader.num_data_workers=16 validation_loader.num_data_workers=16 train_loader.prefetch_factor=4 validation_loader.prefetch_factor=4
+
+B200x1-condSFNOfast-tb10_nw4_pf8|rs0|train|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 train_loader.prefetch_factor=4 validation_loader.prefetch_factor=4
+
+B200x1-condSFNOfast-tb10_nw2_pf8|rs0|train|high|titan|1|300GiB|0||seed=0 train_loader.time_buffer=10 validation_loader.time_buffer=10 inference.loader.num_data_workers=2 train_loader.num_data_workers=2 validation_loader.num_data_workers=2 train_loader.prefetch_factor=8 validation_loader.prefetch_factor=8
