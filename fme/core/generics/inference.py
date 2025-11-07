@@ -76,6 +76,8 @@ def get_record_to_wandb(label: str = "") -> Callable[[InferenceLogs], None]:
     def record_logs(logs: InferenceLogs):
         nonlocal step
         for j, log in enumerate(logs):
+            sub_label = [f"{label}/{k}" for k, _ in log.items()]
+            print(f"Logging to wandb at step {step + j}: {sub_label}")
             if len(log) > 0:
                 if label != "":
                     log = {f"{label}/{k}": v for k, v in log.items()}
