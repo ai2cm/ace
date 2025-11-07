@@ -49,11 +49,7 @@ class LatLonRegion(Region):
         )
 
         dist = Distributed.get_instance()
-        if dist.is_spatial_distributed():
-          # CHECK:
-          crop_shape = self._regional_weights.shape
-          local_shape_h, local_offset_h, local_shape_w, local_offset_w = dist.get_local_shape_and_offset(crop_shape)
-          self._regional_weights = self._regional_weights[local_offset_h : local_offset_h + local_shape_h, local_offset_w : local_offset_w + local_shape_w]
+        self._regional_weights = self._regional_weights[*dist.get_local_slices(self._regional_weights.shape)]
 
     @property
     def regional_weights(self) -> torch.Tensor:
