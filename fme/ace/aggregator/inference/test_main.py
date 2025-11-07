@@ -157,7 +157,6 @@ def test_inference_evaluator_aggregator_ensemble():
     agg.record_batch(paired_data)
 
     summary_logs = agg.get_summary_logs()
-    print("summary_logs", summary_logs)
     for varname in ["a", "b", "c"]:
         assert f"ensemble_step_20/crps/{varname}" in summary_logs
     for varname in ["a", "b", "c"]:
