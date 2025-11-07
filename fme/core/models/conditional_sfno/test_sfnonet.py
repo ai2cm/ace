@@ -44,7 +44,7 @@ def test_can_call_sfnonet(
         out_chans=output_channels,
         context_config=ContextConfig(
             embed_dim_scalar=conditional_embed_dim_scalar,
-            embed_dim_2d=conditional_embed_dim_2d,
+            embed_dim_noise=conditional_embed_dim_2d,
         ),
     ).to(device)
     x = torch.randn(n_samples, input_channels, *img_shape, device=device)
@@ -75,7 +75,7 @@ def test_scale_factor_not_implemented():
             out_chans=output_channels,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
-                embed_dim_2d=0,
+                embed_dim_noise=0,
             ),
         ).to(device)
 
@@ -87,7 +87,7 @@ def test_sfnonet_output_is_unchanged():
     img_shape = (9, 18)
     n_samples = 4
     conditional_embed_dim_scalar = 8
-    conditional_embed_dim_2d = 16
+    conditional_embed_dim_noise = 16
     device = get_device()
     params = SimpleNamespace(embed_dim=16, num_layers=2)
     model = get_lat_lon_sfnonet(
@@ -97,16 +97,16 @@ def test_sfnonet_output_is_unchanged():
         out_chans=output_channels,
         context_config=ContextConfig(
             embed_dim_scalar=conditional_embed_dim_scalar,
-            embed_dim_2d=conditional_embed_dim_2d,
+            embed_dim_noise=conditional_embed_dim_noise,
         ),
     ).to(device)
     # must initialize on CPU to get the same results on GPU
     x = torch.randn(n_samples, input_channels, *img_shape).to(device)
     context_embedding = torch.randn(n_samples, conditional_embed_dim_scalar).to(device)
-    context_embedding_2d = torch.randn(
-        n_samples, conditional_embed_dim_2d, *img_shape
+    context_embedding_noise = torch.randn(
+        n_samples, conditional_embed_dim_noise, *img_shape
     ).to(device)
-    context = Context(context_embedding, context_embedding_2d)
+    context = Context(context_embedding, context_embedding_noise)
     with torch.no_grad():
         output = model(x, context)
     validate_tensor(
@@ -123,7 +123,7 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
     img_shape = (9, 18)
     n_samples = 4
     conditional_embed_dim_scalar = 8
-    conditional_embed_dim_2d = 16
+    conditional_embed_dim_noise = 16
     device = get_device()
 
     class SetToZero(nn.Module):
@@ -137,7 +137,10 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
     try:
         nn.LayerNorm = SetToZero
         params = SimpleNamespace(
-            embed_dim=16, num_layers=2, normalize_big_skip=normalize_big_skip
+            embed_dim=16,
+            num_layers=2,
+            normalize_big_skip=normalize_big_skip,
+            global_layer_norm=True,  # so it uses nn.LayerNorm
         )
         model = get_lat_lon_sfnonet(
             params=params,
@@ -146,17 +149,17 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
             out_chans=output_channels,
             context_config=ContextConfig(
                 embed_dim_scalar=conditional_embed_dim_scalar,
-                embed_dim_2d=conditional_embed_dim_2d,
+                embed_dim_noise=conditional_embed_dim_noise,
             ),
         ).to(device)
     finally:
         nn.LayerNorm = original_layer_norm
     x = torch.full((n_samples, input_channels, *img_shape), torch.nan).to(device)
     context_embedding = torch.randn(n_samples, conditional_embed_dim_scalar).to(device)
-    context_embedding_2d = torch.randn(
-        n_samples, conditional_embed_dim_2d, *img_shape
+    context_embedding_noise = torch.randn(
+        n_samples, conditional_embed_dim_noise, *img_shape
     ).to(device)
-    context = Context(context_embedding, context_embedding_2d)
+    context = Context(context_embedding, context_embedding_noise)
     with torch.no_grad():
         output = model(x, context)
     if normalize_big_skip:

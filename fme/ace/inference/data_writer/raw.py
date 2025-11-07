@@ -32,6 +32,7 @@ VALID_TIME = "valid_time"
 @dataclasses.dataclass
 class NetCDFWriterConfig:
     name: Literal["netcdf"] = "netcdf"  # defined for yaml+dacite ease of use
+    suffix: str = "nc"
 
 
 class PairedRawDataWriter:
@@ -52,7 +53,7 @@ class PairedRawDataWriter:
     ):
         self._target_writer = RawDataWriter(
             path=path,
-            label="autoregressive_target.nc",
+            label="autoregressive_target",
             n_initial_conditions=n_initial_conditions,
             save_names=save_names,
             variable_metadata=variable_metadata,
@@ -61,7 +62,7 @@ class PairedRawDataWriter:
         )
         self._prediction_writer = RawDataWriter(
             path=path,
-            label="autoregressive_predictions.nc",
+            label="autoregressive_predictions",
             n_initial_conditions=n_initial_conditions,
             save_names=save_names,
             variable_metadata=variable_metadata,
@@ -73,17 +74,14 @@ class PairedRawDataWriter:
         self,
         target: dict[str, torch.Tensor],
         prediction: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         self._target_writer.append_batch(
             data=target,
-            start_timestep=start_timestep,
             batch_time=batch_time,
         )
         self._prediction_writer.append_batch(
             data=prediction,
-            start_timestep=start_timestep,
             batch_time=batch_time,
         )
 
@@ -125,7 +123,7 @@ class RawDataWriter:
         """
         if not is_local(path):
             raise ValueError("RawDataWriter only supports local file systems.")
-        filename = str(Path(path) / label)
+        filename = str(Path(path) / f"{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata
         self.coords = coords
@@ -140,9 +138,7 @@ class RawDataWriter:
         self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
         self._dataset_dims_created = False
         dataset_metadata = copy.copy(dataset_metadata)
-        dataset_metadata.title = (
-            f"ACE {label.removesuffix('.nc').replace('_', ' ')} data file"
-        )
+        dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         for key, value in dataset_metadata.as_flat_str_dict().items():
             self.dataset.setncattr(key, value)
 
@@ -154,7 +150,6 @@ class RawDataWriter:
     def append_batch(
         self,
         data: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         """
@@ -162,7 +157,6 @@ class RawDataWriter:
 
         Args:
             data: Data to be written to file.
-            start_timestep: Timestep (lead time dim) at which to start writing. Unused.
             batch_time: Time coordinate for each sample in the batch.
         """
         if self.dataset is None:

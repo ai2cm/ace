@@ -149,7 +149,7 @@ class Config:
         }
         return MonthlyDataWriter(
             path=self.experiment_dir,
-            label="data",
+            label="monthly_mean_data",
             save_names=None,  # save all data given
             n_samples=self.data_loader.batch_size * len(data.loaders),
             n_months=n_months,
@@ -210,7 +210,6 @@ def run(config: Config):
         )
         writer.append_batch(
             data=window_batch_data.data,
-            start_timestep=-1,  # ignored
             batch_time=window_batch_data.time,
         )
         if i % 10 == 0:

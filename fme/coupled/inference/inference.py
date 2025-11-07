@@ -15,7 +15,6 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
-from fme.ace.inference.evaluator import validate_time_coarsen_config
 from fme.ace.inference.inference import InitialConditionConfig, get_initial_condition
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import is_local
@@ -171,8 +170,7 @@ class InferenceConfig:
     ) -> CoupledPairedDataWriter:
         if self.data_writer.ocean.time_coarsen is not None:
             try:
-                validate_time_coarsen_config(
-                    self.data_writer.ocean.time_coarsen,
+                self.data_writer.ocean.time_coarsen.validate(
                     self.coupled_steps_in_memory,
                     self.n_coupled_steps,
                 )
@@ -182,8 +180,7 @@ class InferenceConfig:
                 )
         if self.data_writer.atmosphere.time_coarsen is not None:
             try:
-                validate_time_coarsen_config(
-                    self.data_writer.atmosphere.time_coarsen,
+                self.data_writer.atmosphere.time_coarsen.validate(
                     self.coupled_steps_in_memory * data.n_inner_steps,
                     self.n_coupled_steps * data.n_inner_steps,
                 )

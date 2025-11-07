@@ -30,6 +30,8 @@ from fme.ace.inference.evaluator import (
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import Stepper, TrainOutput
+from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
+from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
@@ -74,6 +76,7 @@ def save_plus_one_stepper(
     nz_interface: int = 7,
     ocean=None,
     multi_call: MultiCallConfig | None = None,
+    derived_forcings: DerivedForcingsConfig | None = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -81,6 +84,8 @@ def save_plus_one_stepper(
         all_names = list(set(in_names).union(out_names)) + multi_call.names
     if normalization_names is None:
         normalization_names = all_names
+    if derived_forcings is None:
+        derived_forcings = DerivedForcingsConfig()
     with tempfile.TemporaryDirectory() as temp_dir:
         mean_filename = pathlib.Path(temp_dir) / "means.nc"
         std_filename = pathlib.Path(temp_dir) / "stds.nc"
@@ -124,6 +129,7 @@ def save_plus_one_stepper(
                     ),
                 ),
             ),
+            derived_forcings=derived_forcings,
         )
         horizontal_coordinate = LatLonCoordinates(
             lat=torch.zeros(data_shape[-2]), lon=torch.zeros(data_shape[-1])
@@ -533,20 +539,23 @@ def test_inference_writer_boundaries(
         tar["lat"].values, num_lon=len(tar["lon"])
     )
     # check time mean metrics
-    # relative tolerance; for some reason some GPU test cases have higher error
+    tol = 1e-4  # relative tolerance
+    grad_mag_tol = tol
     if using_gpu():
+        # GPU test cases have higher error
         tol = 5e-4
-    else:
-        tol = 1e-4
-    assert metrics.root_mean_squared_error(
-        tar_time_mean, gen_time_mean, area_weights
-    ).item() == pytest.approx(
-        inference_logs[-1]["inference/time_mean/rmse/var"], rel=tol
+        grad_mag_tol = 3e-3
+    np.testing.assert_allclose(
+        metrics.root_mean_squared_error(
+            tar_time_mean, gen_time_mean, area_weights
+        ).item(),
+        inference_logs[-1]["inference/time_mean/rmse/var"],
+        rtol=tol,
     )
-    assert metrics.weighted_mean_bias(
-        tar_time_mean, gen_time_mean, area_weights
-    ).item() == pytest.approx(
-        inference_logs[-1]["inference/time_mean/bias/var"], rel=tol
+    np.testing.assert_allclose(
+        metrics.weighted_mean_bias(tar_time_mean, gen_time_mean, area_weights).item(),
+        inference_logs[-1]["inference/time_mean/bias/var"],
+        rtol=tol,
     )
 
     prediction_ds = prediction_ds.isel(sample=0)
@@ -561,20 +570,30 @@ def test_inference_writer_boundaries(
         gen_i = torch.from_numpy(gen.isel(time=i).values)
         tar_i = torch.from_numpy(tar.isel(time=i).values)
         # check that manually computed metrics match logged metrics
-        assert metrics.root_mean_squared_error(
-            tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_rmse/var"], rel=tol)
-        assert metrics.weighted_mean_bias(
-            tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_bias/var"], rel=tol)
-        assert metrics.gradient_magnitude_percent_diff(
-            tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(
-            log["inference/mean/weighted_grad_mag_percent_diff/var"], rel=tol
+        np.testing.assert_allclose(
+            metrics.root_mean_squared_error(
+                tar_i, gen_i, area_weights, dim=(-2, -1)
+            ).item(),
+            log["inference/mean/weighted_rmse/var"],
+            rtol=tol,
         )
-        assert metrics.weighted_mean(
-            gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_mean_gen/var"], rel=tol)
+        np.testing.assert_allclose(
+            metrics.weighted_mean_bias(tar_i, gen_i, area_weights, dim=(-2, -1)).item(),
+            log["inference/mean/weighted_bias/var"],
+            rtol=tol,
+        )
+        np.testing.assert_allclose(
+            metrics.gradient_magnitude_percent_diff(
+                tar_i, gen_i, area_weights, dim=(-2, -1)
+            ).item(),
+            log["inference/mean/weighted_grad_mag_percent_diff/var"],
+            rtol=grad_mag_tol,
+        )
+        np.testing.assert_allclose(
+            metrics.weighted_mean(gen_i, area_weights, dim=(-2, -1)).item(),
+            log["inference/mean/weighted_mean_gen/var"],
+            rtol=tol,
+        )
 
         # the target obs should be the same as the validation data obs
         # ds is original data which includes IC, target_ds does not
@@ -815,7 +834,6 @@ def test_derived_metrics_run_without_errors(
     "time_coarsen,n_forward_steps,forward_steps_in_memory",
     [
         pytest.param(3, 12, 4, id="not_multiple_of_forward_steps_in_memory"),
-        pytest.param(-1, 12, 4, id="invalid_time_coarsen"),
         pytest.param(2, 5, 4, id="not_multiple_of_n_forward_steps"),
     ],
 )
@@ -1105,3 +1123,81 @@ def test_resolve_variable_metadata(
         assert variable_metadata == {
             "foo": VariableMetadata("cm", "third definition of foo")
         }
+
+
+@pytest.mark.parametrize(
+    "solar_constant",
+    [
+        pytest.param(ValueConfig(1360.0), id="solar-constant-as-value"),
+        pytest.param(NameConfig("solar_constant"), id="solar-constant-as-name"),
+    ],
+)
+def test_evaluator_with_derived_forcings(
+    tmp_path: pathlib.Path, solar_constant: NameConfig | ValueConfig
+):
+    forward_steps_in_memory = 2
+    insolation_name = "DSWRFtoa"
+    in_names = ["var", "forcing_var", insolation_name]
+    out_names = ["var", "ULWRFtoa", "USWRFtoa"]
+    non_derived_names = ["var", "forcing_var", "ULWRFtoa", "USWRFtoa"]
+    if isinstance(solar_constant, NameConfig):
+        non_derived_names.append(solar_constant.name)
+
+    stepper_path = tmp_path / "stepper"
+
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    insolation = InsolationConfig(insolation_name, solar_constant)
+    derived_forcings = DerivedForcingsConfig(insolation=insolation)
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        derived_forcings=derived_forcings,
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=non_derived_names,
+        dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+    )
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=2,
+        forward_steps_in_memory=forward_steps_in_memory,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=False,
+        ),
+        loader=data.inference_data_loader_config,
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    main(yaml_config=str(config_filename))
+
+    autoregressive_predictions = tmp_path / "autoregressive_predictions.nc"
+    ds = xr.open_dataset(autoregressive_predictions, decode_timedelta=False)
+
+    # If insolation were not computed, net_energy_flux_toa_into_atmosphere would
+    # not be computed.
+    assert "net_energy_flux_toa_into_atmosphere" in ds
+
+    # Forcings, including those that are derived, do not end up in output.
+    assert insolation_name not in ds

@@ -388,11 +388,28 @@ class PairedDataLoaderConfig:
         dataset_fine = self._repeat_if_requested(dataset_fine)
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
 
+        # Ensure fine data subselection lines up exactly with coarse data
+        fine_lat_extent = adjust_fine_coord_range(
+            self.lat_extent,
+            full_coarse_coord=properties_coarse.horizontal_coordinates.lat,
+            full_fine_coord=properties_fine.horizontal_coordinates.lat,
+        )
+        fine_lon_extent = adjust_fine_coord_range(
+            self.lon_extent,
+            full_coarse_coord=properties_coarse.horizontal_coordinates.lon,
+            full_fine_coord=properties_fine.horizontal_coordinates.lon,
+        )
+
         if requirements.use_fine_topography:
             if self.topography is None:
-                fine_topography = get_normalized_topography(
-                    get_raw_paths(self.fine[0].data_path, self.fine[0].file_pattern)[0]
-                )
+                data_path = self.fine[0].data_path
+                file_pattern = self.fine[0].file_pattern
+                raw_paths = get_raw_paths(data_path, file_pattern)
+                if len(raw_paths) == 0:
+                    raise ValueError(
+                        f"No files found matching '{data_path}/{file_pattern}'."
+                    )
+                fine_topography = get_normalized_topography(raw_paths[0])
             else:
                 fine_topography = get_normalized_topography(self.topography)
             fine_topography = fine_topography.to_device()
@@ -407,20 +424,11 @@ class PairedDataLoaderConfig:
                     f"Fine topography shape {fine_topography.shape} does not match "
                     f"fine data shape {properties_fine.horizontal_coordinates.shape}."
                 )
+            fine_topography = fine_topography.subset_latlon(
+                lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
+            )
         else:
             fine_topography = None
-
-        # Ensure fine data subselection lines up exactly with coarse data
-        fine_lat_extent = adjust_fine_coord_range(
-            self.lat_extent,
-            full_coarse_coord=properties_coarse.horizontal_coordinates.lat,
-            full_fine_coord=properties_fine.horizontal_coordinates.lat,
-        )
-        fine_lon_extent = adjust_fine_coord_range(
-            self.lon_extent,
-            full_coarse_coord=properties_coarse.horizontal_coordinates.lon,
-            full_fine_coord=properties_fine.horizontal_coordinates.lon,
-        )
 
         # TODO: horizontal subsetting should probably live in the XarrayDatast level
         # Subset to overall horizontal domain

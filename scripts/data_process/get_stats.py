@@ -30,9 +30,15 @@ DROP_VARIABLES = (
         "pressure_thickness_of_atmospheric_layer_5",
         "pressure_thickness_of_atmospheric_layer_6",
         "pressure_thickness_of_atmospheric_layer_7",
+        "mask_HI",
+        "mask_sea_ice_volume",
+        "mask_sea_ice_fraction",
+        "mask_ocean_sea_ice_fraction",
     ]
     + [f"ak_{i}" for i in range(9)]
     + [f"bk_{i}" for i in range(9)]
+    + [f"idepth_{i}" for i in range(19)]
+    + [f"mask_{i}" for i in range(19)]
 )
 
 DIMS = {
@@ -111,7 +117,7 @@ def get_stats(
     scaling_full_field = ds.std(dim=dims).compute()
     logging.info("Computed scaling_full_field")
     scaling_residual = ds.diff("time").std(dim=dims).compute()
-    logging.info("Computed scaling_resiudal")
+    logging.info("Computed scaling_residual")
     time_means = ds.mean(dim="time").compute()
     logging.info("Computed time_means")
 
