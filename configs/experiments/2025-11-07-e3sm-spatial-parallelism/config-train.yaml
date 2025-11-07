@@ -36,7 +36,7 @@ inference:
     log_histograms: true
 logging:
   log_to_screen: true
-  log_to_wandb: false
+  log_to_wandb: true
   log_to_file: true
   project: ace-eamv3
   entity: ai2cm
