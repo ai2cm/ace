@@ -63,6 +63,8 @@ class Context:
             and self.noise.ndim != self.embedding_scalar.ndim + 2
         ):
             raise ValueError("noise must have 2 more dimensions than embedding_scalar")
+        if self.labels is not None and self.labels.ndim != 2:
+            raise ValueError("labels must have 2 dimensions")
 
 
 class ChannelLayerNorm(nn.Module):
@@ -99,8 +101,6 @@ class ChannelLayerNorm(nn.Module):
             raise ValueError(
                 f"Channel dimension mismatch: got C={x.size(-3)}, expected {self.n_channels}"
             )
-        if self.labels is not None and self.labels.ndim != 2:
-            raise ValueError("labels must have 2 dimensions")
 
         # Compute per-pixel mean/var across channels without transposing
         mean = x.mean(dim=-3, keepdim=True)
