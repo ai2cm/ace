@@ -15,6 +15,7 @@ from torch import nn
 from fme.ace.models.makani_utils.checkpoint_helpers import  gather_model_state_dict, prepend_prefix_to_state_dict, scatter_model_state_dict
 import torch_harmonics.distributed as thd
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -158,22 +159,37 @@ class Distributed:
            self.rank = 0
            self.local_rank = 0
            distributed = False
-        self._distributed= distributed
         return distributed
 
     def is_spatial_distributed(self):
       return self.spatial_parallelism
-    def get_comm(self):
-      return comm
+
+    def comm_get_size(self, key : str):
+      if self.spatial_parallelism:
+       return comm.get_size(key)
+      else:
+       return 1
+
+    def comm_get_group(self, key : str):
+      if self.spatial_parallelism:
+       return comm.get_group(key)
+      else:
+       return 1
+
+    def comm_get_rank(self, key :str ):
+      if self.spatial_parallelism:
+        return comm.get_rank(key)
+      else:
+        return 0
 
     def scatter_model_state_dict(self, model: nn.Module, state_dict, strict: bool=True):
-      if comm.get_size("model") > 1:
+      if (self.spatial_parallelism) and (comm.get_size("model") > 1):
           state_dict = scatter_model_state_dict(model, state_dict, strict)
       return state_dict
 
     def gather_model_state_dict(self, model: nn.Module):
       # iterate over parameters and gather them from the ranks
-      if comm.get_size("model") > 1:
+      if (self.spatial_parallelism) and (comm.get_size("model") > 1):
         state_dict= gather_model_state_dict(model)
         return state_dict
       else:
@@ -186,7 +202,7 @@ class Distributed:
       local_shape_w = crop_shape[1]
       local_offset_w = crop_offset[1]
       #NOTE: self.is_distributed() is always false in xarray
-      if comm.is_distributed("spatial"):
+      if self.spatial_parallelism:
         if (comm.get_size("h") > 1):
             shapes_h = compute_split_shapes(crop_shape[0], comm.get_size("h"))
             local_shape_h = shapes_h[comm.get_rank("h")]
@@ -203,7 +219,7 @@ class Distributed:
         shuffle: bool,
         drop_last: bool = False,
     ) -> torch.utils.data.Sampler:
-        if self.is_spatial_distributed():
+        if self.spatial_parallelism:
           num_replicas=self.world_size#comm.get_size("batch")
           rank=self.rank#comm.get_rank("batch")
         else:
@@ -335,7 +351,7 @@ class Distributed:
         """
         Wrap a model with DistributedDataParallel if running in a distributed context.
         """
-        if self.is_spatial_distributed() and any(p.requires_grad for p in module.parameters()):
+        if self.spatial_parallelism and any(p.requires_grad for p in module.parameters()):
           capture_stream = torch.Stream(device="cuda")
           with torch.cuda.stream(capture_stream):
                 module = init_gradient_reduction_hooks(
@@ -386,6 +402,16 @@ class Distributed:
           modes_lat_local = inverse_transform.lmax
           modes_lon_local  = inverse_transform.mmax
       return modes_lat_local, modes_lon_local
+
+    def get_input_out_shapes(self,forward_transform,inverse_transform):
+      if (self.comm_get_size("spatial") > 1):
+        input_shape_loc = (forward_transform.lat_shapes[comm.get_rank("h")], forward_transform.lon_shapes[comm.get_rank("w")])
+        output_shape_loc = (inverse_transform.lat_shapes[comm.get_rank("h")], inverse_transform.lon_shapes[comm.get_rank("w")])
+      else:
+        input_shape_loc = (forward_transform.nlat, forward_transform.nlon)
+        output_shape_loc = (inverse_transform.nlat, inverse_transform.nlon)
+      return input_shape_loc, output_shape_loc
+
     def barrier(self):
         """
         Wait for all processes to reach this point.

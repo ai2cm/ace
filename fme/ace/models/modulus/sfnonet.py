@@ -37,15 +37,15 @@ from .s2convolutions import SpectralAttentionS2, SpectralConvS2
 from dataclasses import dataclass
 import physicsnemo
 from physicsnemo.models.meta import ModelMetaData
-# layer normalization
-from physicsnemo.distributed.mappings import scatter_to_parallel_region, gather_from_parallel_region
 
 from fme.ace.models.makani_mpu.fft import DistributedRealFFT2, DistributedInverseRealFFT2
-from fme.ace.utils import comm
 
-from fme.ace.models.makani_mpu.layers import DistributedMLP, DistributedEncoderDecoder
+from fme.ace.models.makani_mpu.layers import DistributedMLP
 
 from fme.ace.models.makani_mpu.layer_norm import DistributedInstanceNorm2d, DistributedLayerNorm
+
+from fme.core.distributed import Distributed
+
 # layer normalization
 try:
     from apex.normalization import FusedLayerNorm
@@ -165,12 +165,8 @@ class FourierNeuralOperatorBlock(nn.Module):
         super(FourierNeuralOperatorBlock, self).__init__()
 
         # determine some shapes
-        if comm.get_size("spatial") > 1:
-            self.input_shape_loc = (forward_transform.lat_shapes[comm.get_rank("h")], forward_transform.lon_shapes[comm.get_rank("w")])
-            self.output_shape_loc = (inverse_transform.lat_shapes[comm.get_rank("h")], inverse_transform.lon_shapes[comm.get_rank("w")])
-        else:
-            self.input_shape_loc = (forward_transform.nlat, forward_transform.nlon)
-            self.output_shape_loc = (inverse_transform.nlat, inverse_transform.nlon)
+        dist = Distributed.get_instance()
+        self.input_shape_loc, self.output_shape_loc = dist.get_input_out_shapes(forward_transform,inverse_transform)
 
         # norm layer
         self.norm0 = norm_layer[0]()
@@ -213,8 +209,10 @@ class FourierNeuralOperatorBlock(nn.Module):
         # norm layer
         self.norm1 = norm_layer[1]()
 
+
+
         if use_mlp == True:
-            MLPH = DistributedMLP if (comm.get_size("matmul") > 1) else MLP
+            MLPH = DistributedMLP if (dist.comm_get_size("matmul") > 1) else MLP
             mlp_hidden_dim = int(embed_dim * mlp_ratio)
             self.mlp = MLPH(
                 in_features=embed_dim,
@@ -391,7 +389,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         checkpointing: int = 0,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
-
+        dist = Distributed.get_instance()
         self.params = params
         self.spectral_transform = (
             params.spectral_transform
@@ -494,10 +492,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         )
 
         # check for distributed
-        if (comm.get_size("spatial") > 1) and (not thd.is_initialized()):
-          # print("comm.get_size(h)",comm.get_size("h")
-          polar_group = None if (comm.get_size("h") == 1) else comm.get_group("h")
-          azimuth_group = None if (comm.get_size("w") == 1) else comm.get_group("w")
+        if (dist.comm_get_size("spatial") > 1 ) and (not thd.is_initialized()):
+          polar_group = None if (dist.comm_get_size("h") == 1) else dist.comm_get_group("h")
+          azimuth_group = None if (dist.comm_get_size("w") == 1) else dist.comm_get_group("w")
           thd.init(polar_group, azimuth_group)
         # no global padding because we removed the horizontal distributed code
         self.padding = (0, 0)
@@ -525,7 +522,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             isht_handle = th.InverseRealSHT
 
             # parallelism
-            if comm.get_size("spatial") > 1:
+            if dist.comm_get_size("spatial") > 1:
                 sht_handle = thd.DistributedRealSHT
                 isht_handle = thd.DistributedInverseRealSHT
             # set up
@@ -549,7 +546,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 )
             fft_handle = th.RealFFT2
             ifft_handle = th.InverseRealFFT2
-            if comm.get_size("spatial") > 1:
+            if dist.comm_get_size("spatial") > 1:
                 fft_handle = DistributedRealFFT2
                 ifft_handle = DistributedInverseRealFFT2
 
@@ -579,11 +576,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             raise (ValueError("Unknown spectral transform"))
 
         # use the SHT/FFT to compute the local, downscaled grid dimensions
-        if comm.get_size("spatial") > 1:
-            self.img_shape_loc = (self.trans_down.lat_shapes[comm.get_rank("h")], self.trans_down.lon_shapes[comm.get_rank("w")])
-            self.img_shape_eff = (self.itrans_up.lat_shapes[comm.get_rank("h")], self.itrans_up.lon_shapes[comm.get_rank("w")])
-            self.h_loc = self.itrans.lat_shapes[comm.get_rank("h")]
-            self.w_loc = self.itrans.lon_shapes[comm.get_rank("w")]
+        if dist.comm_get_size("spatial") > 1:
+            self.img_shape_loc = (self.trans_down.lat_shapes[dist.comm_get_rank("h")], self.trans_down.lon_shapes[dist.comm_get_rank("w")])
+            self.img_shape_eff = (self.itrans_up.lat_shapes[dist.comm_get_rank("h")], self.itrans_up.lon_shapes[dist.comm_get_rank("w")])
+            self.h_loc = self.itrans.lat_shapes[dist.comm_get_rank("h")]
+            self.w_loc = self.itrans.lon_shapes[dist.comm_get_rank("w")]
         else:
             self.img_shape_loc = (self.trans_down.nlat, self.trans_down.nlon)
             #CHECK: should be itrans_up?
@@ -609,16 +606,18 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             encoder_modules.append(
                 nn.Conv2d(current_dim, encoder_hidden_dim, 1, bias=True)
             )
-            # weight sharing
-            encoder_modules[-1].weight.is_shared_mp = ["spatial"]
-            if encoder_modules[-1].bias is not None:
+            if dist.spatial_parallelism:
+              # weight sharing
+              encoder_modules[-1].weight.is_shared_mp = ["spatial"]
+              if encoder_modules[-1].bias is not None:
                 encoder_modules[-1].bias.is_shared_mp = ["spatial"]
             encoder_modules.append(self.activation_function())
             current_dim = encoder_hidden_dim
         #final layer
         encoder_modules.append(nn.Conv2d(current_dim, self.embed_dim, 1, bias=False))
-        # weight sharing
-        encoder_modules[-1].weight.is_shared_mp = ["spatial"]
+        if dist.spatial_parallelism:
+          # weight sharing
+          encoder_modules[-1].weight.is_shared_mp = ["spatial"]
         self.encoder = nn.Sequential(*encoder_modules)
 
         # dropout
@@ -627,22 +626,22 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         # pick norm layer
         if self.normalization_layer == "layer_norm":
-          # if comm.get_size("spatial") > 1:
-          ## CHECK ME: norm_layer0 and norm_layer1, as coded in makani
+          if dist.comm_get_size("spatial") > 1:
+            ## CHECK ME: norm_layer0 and norm_layer1, as coded in makani
             norm_layer0 = partial(DistributedLayerNorm, normalized_shape=(self.embed_dim), elementwise_affine=True, eps=1e-6)
             norm_layer1 = norm_layer0
           ## CHECK ME: norm_layer0 and norm_layer1, as coded in ace
-          # else:
-            # norm_layer0 = partial(
-            #     nn.LayerNorm,
-            #     normalized_shape=(self.img_shape_loc[0], self.img_shape_loc[1]),
-            #     eps=1e-6,
-            # )
-            # norm_layer1 = partial(
-            #     nn.LayerNorm, normalized_shape=(self.h_loc, self.w_loc), eps=1e-6
-            # )
+          else:
+            norm_layer0 = partial(
+                nn.LayerNorm,
+                normalized_shape=(self.img_shape_loc[0], self.img_shape_loc[1]),
+                eps=1e-6,
+            )
+            norm_layer1 = partial(
+                nn.LayerNorm, normalized_shape=(self.h_loc, self.w_loc), eps=1e-6
+            )
         elif self.normalization_layer == "instance_norm":
-            if comm.get_size("spatial") > 1:
+            if dist.comm_get_size("spatial") > 1:
                 norm_layer0 = partial(DistributedInstanceNorm2d,
                                          num_features=self.embed_dim,
                                          eps=1e-6, affine=True)
@@ -721,16 +720,18 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             decoder_modules.append(
                 nn.Conv2d(current_dim, decoder_hidden_dim, 1, bias=True)
             )
-            # weight sharing
-            decoder_modules[-1].weight.is_shared_mp = ["spatial"]
-            # decoder_modules[-1].weight.sharded_dims_mp = [None, None, None, None]
-            if decoder_modules[-1].bias is not None:
+            if dist.spatial_parallelism:
+              # weight sharing
+              decoder_modules[-1].weight.is_shared_mp = ["spatial"]
+              # decoder_modules[-1].weight.sharded_dims_mp = [None, None, None, None]
+              if decoder_modules[-1].bias is not None:
                 decoder_modules[-1].bias.is_shared_mp = ["spatial"]
             decoder_modules.append(self.activation_function())
             current_dim = decoder_hidden_dim
         decoder_modules.append(nn.Conv2d(current_dim, self.out_chans, 1, bias=False))
         # weight sharing
-        decoder_modules[-1].weight.is_shared_mp = ["spatial"]
+        if dist.spatial_parallelism:
+          decoder_modules[-1].weight.is_shared_mp = ["spatial"]
         self.decoder = nn.Sequential(*decoder_modules)
 
         # learned position embedding
@@ -742,11 +743,13 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 )
             )
             # self.pos_embed = nn.Parameter( torch.zeros(1, self.embed_dim, self.img_shape_eff[0], self.img_shape_eff[1]) )
-            #former ace..
-            #self.pos_embed.is_shared_mp = ["matmul"]
-            self.pos_embed.is_shared_mp = []
-            self.pos_embed.sharded_dims_mp = [None, None, "h", "w"]
-            self.pos_embed.type = "direct"
+            if dist.spatial_parallelism:
+              self.pos_embed.is_shared_mp = []
+              self.pos_embed.sharded_dims_mp = [None, None, "h", "w"]
+              self.pos_embed.type = "direct"
+            else:
+              self.pos_embed.is_shared_mp = ["matmul"]
+
             trunc_normal_(self.pos_embed, std=0.02)
 
         self.apply(self._init_weights)
