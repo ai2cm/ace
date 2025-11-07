@@ -31,6 +31,7 @@ conda activate $FME_VENV
 
 # env variables
 export WANDB_JOB_TYPE=training
+export WANDB_NOTES="PM: $FME_IMAGE, results: $FME_OUTPUT_DIR"
 set +x  # don't print API key to logs
 export WANDB_API_KEY=$(cat ~/.config/wandb/api)
 set -x
@@ -47,6 +48,9 @@ cp -r $CONFIG_DIR $FME_OUTPUT_DIR/job_config
 
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29507
+
+export H_PARALLEL_SIZE=2
+export W_PARALLEL_SIZE=2
 
 echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT"
 # run the requeueable job
