@@ -269,7 +269,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         dist.shutdown()
 
 
-def main(yaml_config: str, override_dotlist: Sequence[str] | None = None, h_parallel_size=1, w_parallel_size=1):
+def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
         data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
