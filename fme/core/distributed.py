@@ -213,6 +213,26 @@ class Distributed:
             local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
       return local_shape_h, local_offset_h, local_shape_w, local_offset_w
 
+    def get_local_slices(self, crop_shape ):
+      if self.spatial_parallelism:
+        crop_offset=(0, 0)
+        local_shape_h = crop_shape[0]
+        local_offset_h = crop_offset[0]
+        local_shape_w = crop_shape[1]
+        local_offset_w = crop_offset[1]
+        if (comm.get_size("h") > 1):
+            shapes_h = compute_split_shapes(crop_shape[0], comm.get_size("h"))
+            local_shape_h = shapes_h[comm.get_rank("h")]
+            local_offset_h = crop_offset[0] + sum(shapes_h[: comm.get_rank("h")])
+        if (comm.get_size("w") > 1):
+            shapes_w = compute_split_shapes(crop_shape[1], comm.get_size("w"))
+            local_shape_w = shapes_w[comm.get_rank("w")]
+            local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
+
+        return slice(local_offset_h,local_offset_h + local_shape_h), slice(local_offset_w , local_offset_w + local_shape_w)
+      else :
+        return slice(None, None),slice(None, None)
+
     def get_sampler(
         self,
         dataset: torch.utils.data.Dataset,
