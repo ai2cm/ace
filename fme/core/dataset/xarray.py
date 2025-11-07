@@ -90,7 +90,7 @@ def _get_vertical_coordinate(
     idepth_mapping = {
         int(v[7:]): torch.as_tensor(ds[v].values)
         for v in ds.variables
-        if v.startswith("idepth_")
+        if v.startswith("idepth_") and v != "idepth_19"
     }
     idepth_list = [idepth_mapping[k] for k in sorted(idepth_mapping.keys())]
 
