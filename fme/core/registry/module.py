@@ -161,11 +161,6 @@ class ModuleSelector:
         Build a nn.Module given information about the input and output channels
         and the image shape.
 
-        If a label encoder is returned, the caller is meant to use it to encode
-        the labels for each batch member, and then pass those as a `labels` argument
-        when calling the module. If no label encoder is returned, the caller should
-        not provide this argument (even as None).
-
         Args:
             n_in_channels: number of input channels
             n_out_channels: number of output channels
