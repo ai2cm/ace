@@ -12,6 +12,9 @@ else
 	CONDA_PACKAGES=pip
 endif
 
+help:	## Show this help.
+	@sed -ne '/@sed/!s/## //p' $(MAKEFILE_LIST)
+
 build_docker_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE):$(VERSION) --target production .
 
@@ -75,3 +78,9 @@ deploy_pypi: build_pypi
 
 deploy_test_pypi: DEPLOY_TARGET = testpypi
 deploy_test_pypi: deploy_pypi
+
+# job_runner
+
+jr_changelog:	## Interactively update job_runner/CHANGELOG.md
+	@job_runner/bin/changelog.sh
+
