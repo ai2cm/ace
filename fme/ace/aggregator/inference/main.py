@@ -165,8 +165,8 @@ class InferenceEvaluatorAggregatorConfig:
               lat_length = len(monthly_reference_data.coords['lat'])
               lon_length = len(monthly_reference_data.coords['lon'])
               crop_shape = (lat_length, lon_length)
-              local_shape_h, local_offset_h, local_shape_w, local_offset_w = dist.get_local_shape_and_offset(crop_shape)
-              monthly_reference_data = monthly_reference_data.isel(lat=slice(local_offset_h, local_offset_h + local_shape_h), lon=slice(local_offset_w, local_offset_w + local_shape_w))
+              slice_h, slice_w = dist.get_local_slices(crop_shape)
+              monthly_reference_data = monthly_reference_data.isel(lat=slice_h, lon=slice_w)
 
         if self.time_mean_reference_data is None:
             time_mean = None

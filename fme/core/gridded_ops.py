@@ -296,9 +296,7 @@ class LatLonOperations(GriddedOperations):
             )
 
         dist = Distributed.get_instance()
-        if dist.is_spatial_distributed():
-          local_shape_h, local_offset_h, local_shape_w, local_offset_w = dist.get_local_shape_and_offset(area_weights.shape)
-          area_weights=area_weights[local_offset_h : local_offset_h + local_shape_h, local_offset_w : local_offset_w + local_shape_w]
+        area_weights = area_weights[*dist.get_local_slices(area_weights.shape)]
 
         self._device_area = area_weights.to(get_device())
         #NOTE: we do not need the *.to("cpu") lines.
