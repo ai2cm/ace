@@ -1,51 +1,49 @@
-import logging
-import warnings
-from collections import defaultdict
-
-import matplotlib.pyplot as plt
 import torch
-import xarray as xr
-
-from fme.core.distributed import Distributed
-from fme.core.gridded_ops import GriddedOperations
-from fme.core.metrics import spherical_power_spectrum
-from fme.core.typing_ import TensorMapping
 
 
-def _detrend_linear_torch(data):
+def _detrend_linear(data):
     """
     Removes a linear plane of best fit from 4D (B, C, H, W) data.
     """
     B, C, H, W = data.shape
     device = data.device
     dtype = data.dtype
-    
+
     y_coords = torch.linspace(-1, 1, H, device=device, dtype=dtype)
     x_coords = torch.linspace(-1, 1, W, device=device, dtype=dtype)
-    Y, X = torch.meshgrid(y_coords, x_coords, indexing='ij')
-    
+    Y, X = torch.meshgrid(y_coords, x_coords, indexing="ij")
+
     A = torch.stack([X.flatten(), Y.flatten(), torch.ones_like(X).flatten()], dim=1)
-    
+
     B_prime = B * C
     data_flat = data.reshape(B_prime, H * W)
-    
+
     # Solve A * coeffs = data_flat.T
     # A is (H*W, 3), data_flat.T is (H*W, N*B)
     # coeffs will be shape (3, B_prime)
     coeffs, _, _, _ = torch.linalg.lstsq(A, data_flat.T)
-    
+
     # Reconstruct the plane
     # (H*W, 3) @ (N*B, 3, 1) -> (N*B, H*W, 1) -> (N*B, H, W)
     plane = (A @ coeffs.permute(1, 0).unsqueeze(-1)).reshape(B_prime, H, W)
-    
+
     detrended_data = data.reshape(B_prime, H, W) - plane
-    
+
     return detrended_data.reshape(B, C, H, W)
 
 
-def compute_isotropic_spectrum_torch(data, dx=1.0, dy=1.0, num_bins=None, n_factor = 4,
-                                     remove_mean=True, detrend=None, window='Hann',
-                                     truncate=True, cutoff_before_bins: bool = True):
+def compute_isotropic_spectrum(
+    data,
+    dx=1.0,
+    dy=1.0,
+    num_bins=None,
+    n_factor=4,
+    remove_mean=True,
+    detrend=None,
+    window="Hann",
+    truncate=True,
+    cutoff_before_bins: bool = True,
+):
     """
     Computes the isotropic 1D power spectrum from 2D (H,W), 3D (B,H,W),
     or 4D (B,C,H,W) data. Matches `xrft.isotropic_power_spectrum(scaling="density")`.
@@ -82,109 +80,105 @@ def compute_isotropic_spectrum_torch(data, dx=1.0, dy=1.0, num_bins=None, n_fact
         1D tensor of the (k * P(k)) spectrum.
         Shape: (B, C, num_bins), (B, num_bins), or (num_bins,)
     """
-    
+
     # --- 1. Input Validation and Setup ---
     device = data.device
     dtype = data.dtype
     orig_dim = data.dim()
-    
+
     # Unify input shape to 4D (B, C, H, W)
     if orig_dim == 2:
         data = data.reshape(1, 1, *data.shape)  # (H, W) -> (1, 1, H, W)
     elif orig_dim == 3:
-        data = data.unsqueeze(1)                # (B, H, W) -> (B, 1, H, W)
+        data = data.unsqueeze(1)  # (B, H, W) -> (B, 1, H, W)
     elif orig_dim != 4:
         raise ValueError("Input data must be 2D, 3D, or 4D (B, C, H, W)")
-        
+
     B, C, H, W = data.shape
-    B_prime = B * C 
+    B_prime = B * C
     Lx = W * dx
     Ly = H * dy
-    
-    if num_bins is None:
-        num_bins = min(H, W) // n_factor 
 
-    if detrend == 'linear':
-        data = _detrend_linear_torch(data)
-    elif detrend == 'constant' or remove_mean:
+    if num_bins is None:
+        num_bins = min(H, W) // n_factor
+
+    if detrend == "linear":
+        data = _detrend_linear(data)
+    elif detrend == "constant" or remove_mean:
         data = data - torch.mean(data, dim=(-2, -1), keepdim=True)
 
-    if window and window.lower() == 'hann':
+    if window and window.lower() == "hann":
         win_y = torch.hann_window(H, device=device, dtype=dtype).unsqueeze(1)
         win_x = torch.hann_window(W, device=device, dtype=dtype).unsqueeze(0)
         win_2d = (win_y * win_x).reshape(1, 1, H, W)
-        
+
         window_correction = torch.mean(win_2d**2).item()
         data = data * win_2d
     else:
         window_correction = 1.0
 
-    fft_2d = torch.fft.rfft2(data, norm='forward')
-    
-    power_2d = torch.abs(fft_2d)**2
+    fft_2d = torch.fft.rfft2(data, norm="forward")
+
+    power_2d = torch.abs(fft_2d) ** 2
     power_2d = power_2d / window_correction
-    
+
     psd_2d = power_2d * (Lx * Ly)
-    
+
     k_x = torch.fft.rfftfreq(W, d=dx, device=device, dtype=dtype)
     k_y = torch.fft.fftfreq(H, d=dy, device=device, dtype=dtype)
-    
+
     k_x_nyq = 1.0 / (2.0 * dx)
     k_y_nyq = 1.0 / (2.0 * dy)
 
-    k_Y, k_X = torch.meshgrid(k_y, k_x, indexing='ij')
+    k_Y, k_X = torch.meshgrid(k_y, k_x, indexing="ij")
     k_mag = torch.sqrt(k_X**2 + k_Y**2)
-    
+
     k_max_domain = k_mag.max()
-    
+
     if truncate and cutoff_before_bins:
         k_max_cutoff = min(k_x_nyq, k_y_nyq)
         k_max = min(k_max_domain, k_max_cutoff)
     else:
         k_max = k_max_domain
-        
+
     k_bins = torch.linspace(0, k_max, num_bins + 1, device=device, dtype=dtype)
     if truncate and not cutoff_before_bins:
-        k_max_cutoff = min(k_x_nyq, k_y_nyq) 
-        k_max = min(k_max_domain, k_max_cutoff)        
-        k_bins = k_bins[k_bins<k_max_cutoff]
-        num_bins = k_bins.numel()-1
+        k_max_cutoff = min(k_x_nyq, k_y_nyq)
+        k_max = min(k_max_domain, k_max_cutoff)
+        k_bins = k_bins[k_bins < k_max_cutoff]
+        num_bins = k_bins.numel() - 1
     k_bins_centers = (k_bins[:-1] + k_bins[1:]) / 2
 
     k_mag_flat = k_mag.flatten()
-    bin_edges = k_bins[1:-1] 
-    
+    bin_edges = k_bins[1:-1]
+
     bin_indices = torch.bucketize(k_mag_flat, bin_edges, right=True)
-    
+
     N_flat = k_mag_flat.shape[0]
     psd_flat_batched = psd_2d.reshape(B_prime, N_flat)
 
     bin_indices_batched = bin_indices.expand(B_prime, -1)
-    
+
     binned_psd_sum = torch.zeros(B_prime, num_bins, device=device, dtype=dtype)
 
     binned_psd_sum.scatter_add_(dim=1, index=bin_indices_batched, src=psd_flat_batched)
-    
-    binned_counts = torch.bincount(
-        bin_indices, 
-        minlength=num_bins
-    )
-    
+
+    binned_counts = torch.bincount(bin_indices, minlength=num_bins)
+
     binned_counts_safe = binned_counts.float()
     binned_counts_safe[binned_counts_safe == 0] = torch.nan
 
     iso_psd_binned = binned_psd_sum / binned_counts_safe.unsqueeze(0)
-    
-    iso_spectrum = iso_psd_binned * k_bins_centers.unsqueeze(0)
-    
-    iso_spectrum = iso_spectrum.reshape(B, C, num_bins)
-    
-    iso_spectrum[..., 0] = torch.nan
-    
-    if orig_dim == 2:
-        iso_spectrum = iso_spectrum.squeeze(0).squeeze(0) 
-    elif orig_dim == 3:
-        iso_spectrum = iso_spectrum.squeeze(1)            
-    
-    return k_bins_centers, iso_spectrum
 
+    iso_spectrum = iso_psd_binned * k_bins_centers.unsqueeze(0)
+
+    iso_spectrum = iso_spectrum.reshape(B, C, num_bins)
+
+    iso_spectrum[..., 0] = torch.nan
+
+    if orig_dim == 2:
+        iso_spectrum = iso_spectrum.squeeze(0).squeeze(0)
+    elif orig_dim == 3:
+        iso_spectrum = iso_spectrum.squeeze(1)
+
+    return k_bins_centers, iso_spectrum
