@@ -10,7 +10,6 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
-from fme.core.wandb import Image, WandB
 
 
 class SphericalPowerSpectrumAggregator:
@@ -77,8 +76,8 @@ class PairedSphericalPowerSpectrumAggregator:
         self._target_aggregator.record_batch(target_data)
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, Image | float]:
-        logs: dict[str, Image | float] = {}
+    def get_logs(self, label: str) -> dict[str, plt.Figure | float]:
+        logs: dict[str, plt.Figure | float] = {}
         gen_spectrum = self._gen_aggregator.get_mean()
         target_spectrum = self._target_aggregator.get_mean()
         if self._report_plot:
@@ -89,8 +88,9 @@ class PairedSphericalPowerSpectrumAggregator:
                     target_spectrum_cpu = None
                 else:
                     target_spectrum_cpu = target_spectrum[name].cpu()
-                img = _plot_spectrum_pair(gen_spectrum_cpu, target_spectrum_cpu)
-                logs[f"{label}/{name}"] = img
+                fig = _plot_spectrum_pair(gen_spectrum_cpu, target_spectrum_cpu)
+                logs[f"{label}/{name}"] = fig
+                plt.close(fig)
         metrics = _get_spectrum_metrics(gen_spectrum, target_spectrum)
         for name, value in metrics.items():
             logs[f"{label}/{name}"] = value
@@ -159,7 +159,9 @@ def get_positive_and_negative_power_bias(
     return float(positive_bias.cpu()), float(negative_bias.cpu())
 
 
-def _plot_spectrum_pair(prediction: torch.Tensor, target: torch.Tensor | None) -> Image:
+def _plot_spectrum_pair(
+    prediction: torch.Tensor, target: torch.Tensor | None
+) -> plt.Figure:
     fig, ax = plt.subplots()
     ax.plot(prediction, "--", label="prediction", color="C1")
     if target is not None:
@@ -168,7 +170,4 @@ def _plot_spectrum_pair(prediction: torch.Tensor, target: torch.Tensor | None) -
     ax.set(xlabel="wavenumber")
     ax.legend()
     plt.tight_layout()
-    wandb = WandB.get_instance()
-    img = wandb.Image(fig)
-    plt.close(fig)
-    return img
+    return fig

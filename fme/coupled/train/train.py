@@ -35,14 +35,12 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     logging.info("Initializing validation data loader")
     validation_data = builder.get_validation_data()
     logging.info("Initializing inline inference data loader")
+    dataset_info = train_data.dataset_info
     inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
-    dataset_info = train_data.dataset_info
     logging.info("Starting model initialization")
-    stepper = builder.get_stepper(
-        train_data.dataset_info,
-    )
+    stepper = builder.get_stepper(dataset_info)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
     batch = next(iter(inference_data.loader))
@@ -93,6 +91,8 @@ class CoupledAggregatorBuilder(
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         ocean_loss_scaling: TensorMapping | None = None,
         atmosphere_loss_scaling: TensorMapping | None = None,
+        ocean_channel_mean_names: Sequence[str] | None = None,
+        atmosphere_channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
@@ -105,6 +105,8 @@ class CoupledAggregatorBuilder(
         self.atmosphere_normalize = atmosphere_normalize
         self.ocean_loss_scaling = ocean_loss_scaling
         self.atmosphere_loss_scaling = atmosphere_loss_scaling
+        self.ocean_channel_mean_names = ocean_channel_mean_names
+        self.atmosphere_channel_mean_names = atmosphere_channel_mean_names
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
@@ -113,10 +115,12 @@ class CoupledAggregatorBuilder(
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
             dataset_info=self.dataset_info,
-            ocean_loss_scaling=self.ocean_loss_scaling,
-            atmosphere_loss_scaling=self.atmosphere_loss_scaling,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
+            ocean_loss_scaling=self.ocean_loss_scaling,
+            atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+            ocean_channel_mean_names=self.ocean_channel_mean_names,
+            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )
 
     def get_inference_aggregator(self):
@@ -129,6 +133,8 @@ class CoupledAggregatorBuilder(
             atmosphere_normalize=self.atmosphere_normalize,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "inference"),
+            ocean_channel_mean_names=self.ocean_channel_mean_names,
+            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )
 
 
@@ -150,9 +156,13 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         logging.info(
             f"Resuming training from results in {config.resume_results.existing_dir}"
         )
+        config.resume_results.verify_wandb_resumption(config.experiment_dir)
     trainer = build_trainer(builders, config)
-    trainer.train()
-    logging.info(f"DONE ---- rank {dist.rank}")
+    try:
+        trainer.train()
+        logging.info(f"DONE ---- rank {dist.rank}")
+    finally:
+        dist.shutdown()
 
 
 def run_train_from_config(config: TrainConfig):

@@ -57,7 +57,7 @@ class LossContributionsConfig:
 
     def build(
         self,
-        loss_obj: Callable[[TensorMapping, TensorMapping], torch.Tensor],
+        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
         time_dim: int,
     ) -> StepLossABC:
         if self.n_steps == 0 or self.weight == 0.0:
@@ -90,7 +90,7 @@ class LossContributions(StepLossABC):
         self,
         n_steps: float,
         weight: float,
-        loss_obj: Callable[[TensorMapping, TensorMapping], torch.Tensor],
+        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
         time_dim: int,
     ):
         self._loss = loss_obj
@@ -109,5 +109,7 @@ class LossContributions(StepLossABC):
         self, prediction: StepPredictionABC, target_data: TensorMapping
     ) -> torch.Tensor:
         if self.step_is_optimized(prediction.step):
-            return self._weight * self._loss(prediction.data, target_data)
+            return self._weight * self._loss(
+                prediction.data, target_data, prediction.step
+            )
         return torch.tensor(0.0, device=get_device())

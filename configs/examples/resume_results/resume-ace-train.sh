@@ -13,14 +13,14 @@ JOB_GROUP="resume_results"  # Update this to match your experiment group
 JOB_NAME="${JOB_GROUP}-train"
 EXISTING_RESULTS_DATASET="01K3SEWJ5S6VFPN54DH4PF36RB"  # Update this with your results dataset ID
 STATS_DATA=jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean
-N_GPUS=8
-SHARED_MEM="600GiB"
+N_GPUS=2
+SHARED_MEM="150GiB"
 PRIORITY="normal"
 WORKSPACE="ai2/ace"
 RETRIES=0
 
 # Override arguments (add any config overrides here)
-OVERRIDE_ARGS="max_epochs=200"
+OVERRIDE_ARGS="resume_results.resume_wandb=true max_epochs=10"
 
 # Change to the repo root so paths are valid no matter where we run the script from
 cd "$REPO_ROOT"

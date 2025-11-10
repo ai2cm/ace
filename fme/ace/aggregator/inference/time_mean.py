@@ -157,10 +157,10 @@ class TimeMeanAggregator:
         gen_map_key = "gen_map"
         for name, pred in data.items():
             if target_maps is not None and name in target_maps:
-                gen_map_caption_key = gen_map_key
+                gen_map_caption_key = "gen_target_map"
                 data_panels = [[pred.cpu().numpy()], [target_maps[name].cpu().numpy()]]
             else:
-                gen_map_caption_key = "gen_target_map"
+                gen_map_caption_key = gen_map_key
                 data_panels = [[pred.cpu().numpy()]]
             prediction_image = plot_paneled_data(
                 data_panels,

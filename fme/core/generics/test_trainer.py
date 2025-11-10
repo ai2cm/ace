@@ -29,7 +29,7 @@ from fme.core.generics.trainer import (
     TrainStepperABC,
 )
 from fme.core.logging_utils import LoggingConfig
-from fme.core.optimization import Optimization
+from fme.core.optimization import NullOptimization, Optimization
 from fme.core.scheduler import SchedulerConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
@@ -148,6 +148,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
             self._state = {}
         self.loaded_state: dict[str, Any] | None = None
         self.train_batches_seen: list[int] = []
+        self.validation_batches_seen: list[int] = []
 
     def get_state(self) -> dict[str, Any]:
         return {**self._state, "modules": self._modules.state_dict()}
@@ -190,7 +191,10 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
     ) -> TrainOutput:
         optimization.accumulate_loss(torch.tensor(float("inf")))
         optimization.step_weights()
-        self.train_batches_seen.append(batch.i)
+        if isinstance(optimization, NullOptimization):
+            self.validation_batches_seen.append(batch.i)
+        else:
+            self.train_batches_seen.append(batch.i)
         return TrainOutput()
 
     def set_train(self) -> None:
@@ -323,6 +327,7 @@ def get_trainer(
     n_train_batches: int = 100,
     save_best_inference_epoch_checkpoints: bool = False,
     scheduler_config: SchedulerConfig | None = None,
+    n_validation_batches: int = 5,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -337,7 +342,7 @@ def get_trainer(
     if stepper_module_values is None:
         stepper_module_values = np.zeros(max_epochs)
     train_data = TrainData(n_batches=n_train_batches, shuffle=True)
-    validation_data = TrainData(n_batches=5, shuffle=False)
+    validation_data = TrainData(n_batches=n_validation_batches, shuffle=False)
     inference_data = InferenceData()
     stepper = TrainStepper(state=stepper_state)
 
@@ -431,7 +436,6 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
     assert os.path.exists(paths.latest_checkpoint_path)
     assert os.path.exists(paths.best_checkpoint_path)
     assert os.path.exists(paths.best_inference_checkpoint_path)
-    assert os.path.exists(paths.ema_checkpoint_path)
     save_epochs = list(range(config.max_epochs))
     if checkpoint_save_epochs is not None:
         save_epochs = save_epochs[checkpoint_save_epochs.slice]
@@ -660,10 +664,14 @@ def test_resume_after_interrupted_training_during_epoch(
     )
 
 
-def test_resume_after_preemption_during_validation(tmp_path: str):
+@pytest.mark.parametrize("evaluate_before_training", [True, False])
+def test_resume_after_preemption_during_validation(
+    tmp_path: str, evaluate_before_training: bool
+):
     checkpoint_every_n_batches = 20
     n_train_batches = checkpoint_every_n_batches * 2
     stepper_state = {"foo": "bar"}
+    n_validation_batches = 4
     config, trainer = get_trainer(
         tmp_path,
         stepper_state=stepper_state,
@@ -671,20 +679,32 @@ def test_resume_after_preemption_during_validation(tmp_path: str):
         max_epochs=1,
         n_train_batches=n_train_batches,
         checkpoint_every_n_batches=checkpoint_every_n_batches,
+        evaluate_before_training=evaluate_before_training,
+        n_validation_batches=n_validation_batches,
     )
     with (
         unittest.mock.patch.object(
             trainer, "_log_first_batch_metrics", return_value=None
         ),
     ):  # would throw off count for actual training batches seen
-        with preempt_after_calls_patch(trainer, "validate_one_epoch", 0):
+        with preempt_after_calls_patch(
+            trainer,
+            "validate_one_epoch",
+            1 + int(evaluate_before_training),
+        ):
             trainer.train()
     assert isinstance(trainer.stepper, TrainStepper)
     stepper = cast(TrainStepper, trainer.stepper)
     assert len(stepper.train_batches_seen) == n_train_batches
+    assert (
+        len(stepper.validation_batches_seen)
+        == int(evaluate_before_training) * n_validation_batches
+    )
     paths = CheckpointPaths(config.checkpoint_dir)
     assert os.path.exists(paths.latest_checkpoint_path)
-    assert not os.path.exists(paths.best_checkpoint_path)  # requires validation loss
+    assert not os.path.exists(
+        paths.best_checkpoint_path
+    )  # requires end-of-epoch validation loss
     _, trainer = get_trainer(
         tmp_path,
         checkpoint_save_epochs=Slice(start=0, stop=0),
@@ -703,6 +723,9 @@ def test_resume_after_preemption_during_validation(tmp_path: str):
         assert trainer._epochs_trained == 1
     stepper = cast(TrainStepper, trainer.stepper)
     assert len(stepper.train_batches_seen) == 0  # empty epoch after preemption
+    assert (
+        len(stepper.validation_batches_seen) == 0
+    )  # already did evaluate_before_training before pre-emption
     assert os.path.exists(paths.best_checkpoint_path)
 
 
@@ -723,21 +746,18 @@ def test_saves_correct_ema_checkpoints(
     trainer._ema(model=trainer.stepper.modules)
     trainer.save_all_checkpoints(valid_loss=valid_loss, inference_error=inference_error)
     paths = CheckpointPaths(config.checkpoint_dir)
-    assert os.path.exists(paths.ema_checkpoint_path)
-    ema_checkpoint = torch.load(paths.ema_checkpoint_path)
-    ema_weight = 1.0 - min(ema_decay, 2.0 / 11.0)
-    np.testing.assert_allclose(
-        ema_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
-        ema_weight,
-        atol=1e-7,
-    )
-    assert ema_checkpoint["best_validation_loss"] == valid_loss
-    assert ema_checkpoint["best_inference_error"] == inference_error
     assert os.path.exists(paths.latest_checkpoint_path)
     latest_checkpoint = torch.load(paths.latest_checkpoint_path)
     np.testing.assert_allclose(
         latest_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
         1.0,
+        atol=1e-7,
+    )
+    ema_checkpoint = torch.load(paths.latest_checkpoint_path)["ema"]["ema_params"]
+    ema_weight = 1.0 - min(ema_decay, 2.0 / 11.0)
+    np.testing.assert_allclose(
+        ema_checkpoint["0weight"].cpu().numpy(),
+        ema_weight,
         atol=1e-7,
     )
     assert latest_checkpoint["best_validation_loss"] == valid_loss
@@ -842,7 +862,6 @@ def test_saves_correct_non_ema_epoch_checkpoints(
     assert os.path.exists(paths.latest_checkpoint_path)
     assert os.path.exists(paths.best_checkpoint_path)
     assert os.path.exists(paths.best_inference_checkpoint_path)
-    assert os.path.exists(paths.ema_checkpoint_path)
     best_checkpoint = torch.load(paths.best_checkpoint_path, weights_only=False)
     assert best_checkpoint["epoch"] == best_val_epoch
     assert best_checkpoint["best_validation_loss"] == 0.0

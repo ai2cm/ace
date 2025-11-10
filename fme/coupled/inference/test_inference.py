@@ -25,29 +25,17 @@ from fme.coupled.inference.test_evaluator import save_coupled_stepper
 from fme.coupled.test_stepper import CoupledDatasetInfoBuilder
 
 
-@pytest.mark.parametrize(
-    ("n_coupled_steps,coupled_steps_in_memory,n_initial_conditions,"),
-    [
-        (2, 2, 3),
-        (4, 1, 1),
-        (3, 1, 2),
-    ],
-)
-def test_inference(
+def _setup(
+    ocean_in_names: list[str],
+    ocean_out_names: list[str],
+    atmos_in_names: list[str],
+    atmos_out_names: list[str],
     tmp_path: pathlib.Path,
     n_coupled_steps: int,
     coupled_steps_in_memory: int,
     n_initial_conditions: int,
-    very_fast_only: bool,
+    empty_ocean_forcing: bool = False,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
-    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
-    ocean_out_names = ["o_prog", "sst", "o_diag"]
-    atmos_in_names = ["a_prog", "surface_temperature", "forcing_var", "ocean_fraction"]
-    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
-
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmos_in_names + atmos_out_names)
 
@@ -92,14 +80,23 @@ def test_inference(
         ocean_timedelta=mock_data.ocean.timedelta,
         atmosphere_timedelta=mock_data.atmosphere.timedelta,
     )
-    forcing_loader = CoupledForcingDataLoaderConfig(
-        ocean=ForcingDataLoaderConfig(
-            dataset=mock_data.dataset_config.ocean, num_data_workers=0
-        ),
-        atmosphere=ForcingDataLoaderConfig(
-            dataset=mock_data.dataset_config.atmosphere, num_data_workers=0
-        ),
-    )
+    if empty_ocean_forcing:
+        forcing_loader = CoupledForcingDataLoaderConfig(
+            ocean=None,
+            atmosphere=ForcingDataLoaderConfig(
+                dataset=mock_data.dataset_config.atmosphere, num_data_workers=0
+            ),
+        )
+    else:
+        ocean_config = mock_data.dataset_config.ocean
+        assert ocean_config is not None
+        forcing_loader = CoupledForcingDataLoaderConfig(
+            ocean=ForcingDataLoaderConfig(dataset=ocean_config, num_data_workers=0),
+            atmosphere=ForcingDataLoaderConfig(
+                dataset=mock_data.dataset_config.atmosphere, num_data_workers=0
+            ),
+        )
+
     config = InferenceConfig(
         experiment_dir=str(tmp_path),
         n_coupled_steps=n_coupled_steps,
@@ -128,6 +125,42 @@ def test_inference(
             ),
         ),
         coupled_steps_in_memory=coupled_steps_in_memory,
+    )
+    return config, mock_data, atmos_steps_per_ocean_step
+
+
+@pytest.mark.parametrize(
+    ("n_coupled_steps,coupled_steps_in_memory,n_initial_conditions"),
+    [
+        (2, 2, 3),
+        (4, 1, 1),
+        (3, 1, 2),
+    ],
+)
+def test_inference(
+    tmp_path: pathlib.Path,
+    n_coupled_steps: int,
+    coupled_steps_in_memory: int,
+    n_initial_conditions: int,
+    very_fast_only: bool,
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
+    ocean_out_names = ["o_prog", "sst", "o_diag"]
+    atmos_in_names = ["a_prog", "surface_temperature", "forcing_var", "ocean_fraction"]
+    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+
+    config, mock_data, atmos_steps_per_ocean_step = _setup(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        tmp_path=tmp_path,
+        n_coupled_steps=n_coupled_steps,
+        coupled_steps_in_memory=coupled_steps_in_memory,
+        n_initial_conditions=n_initial_conditions,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -176,3 +209,37 @@ def test_inference(
             "lat": mock_data.img_shape[0],
             "lon": mock_data.img_shape[1],
         }
+
+
+def test_inference_with_empty_ocean_forcing(
+    tmp_path: pathlib.Path,
+    very_fast_only: bool,
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    n_coupled_steps = 2
+    coupled_steps_in_memory = 2
+    n_initial_conditions = 3
+    ocean_in_names = ["o_prog", "sst", "a_diag"]
+    ocean_out_names = ["o_prog", "sst", "o_diag"]
+    atmos_in_names = ["a_prog", "surface_temperature", "forcing_var", "ocean_fraction"]
+    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+
+    config, mock_data, atmos_steps_per_ocean_step = _setup(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        tmp_path=tmp_path,
+        n_coupled_steps=n_coupled_steps,
+        coupled_steps_in_memory=coupled_steps_in_memory,
+        n_initial_conditions=n_initial_conditions,
+        empty_ocean_forcing=True,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))

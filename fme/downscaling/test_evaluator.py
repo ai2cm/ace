@@ -14,13 +14,8 @@ from fme.core.optimization import OptimizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import evaluator
 from fme.downscaling.data import PairedDataLoaderConfig
-from fme.downscaling.models import (
-    DiffusionModelConfig,
-    DownscalingModelConfig,
-    PairedNormalizationConfig,
-)
+from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
-from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
 from fme.downscaling.test_train import data_paths_helper
 from fme.downscaling.train import TrainerConfig
@@ -63,80 +58,46 @@ class LinearDownscalingDiffusion(LinearDownscaling):
         return super().forward(coarse)
 
 
-def get_trainer_model_config(model_type: str):
-    if model_type == "deterministic":
-        return DownscalingModelConfig(
-            ModuleRegistrySelector(
-                "prebuilt",
-                {"module": LinearDownscaling(2, fine_img_shape=(16, 16), n_channels=2)},
-                expects_interpolated_input=False,
-            ),
-            loss=LossConfig("NaN"),
-            in_names=["x", "y"],
-            out_names=["x", "y"],
-            normalization=PairedNormalizationConfig(
-                NormalizationConfig(
-                    means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
-                ),
-                NormalizationConfig(
-                    means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
-                ),
-            ),
-        )
-    elif model_type == "diffusion":
-        return DiffusionModelConfig(
-            DiffusionModuleRegistrySelector(
-                "prebuilt",
-                {
-                    "module": LinearDownscalingDiffusion(
-                        factor=2,
-                        fine_img_shape=(16, 16),
-                        n_channels=2,
-                    )
-                },
-                expects_interpolated_input=False,
-            ),
-            loss=LossConfig("NaN"),
-            in_names=["x", "y"],
-            out_names=["x", "y"],
-            normalization=PairedNormalizationConfig(
-                NormalizationConfig(
-                    means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
-                ),
-                NormalizationConfig(
-                    means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
-                ),
-            ),
-            p_mean=0,
-            p_std=1,
-            sigma_min=1,
-            sigma_max=2,
-            churn=1,
-            num_diffusion_generation_steps=2,
-            predict_residual=True,
-        )
-    else:
-        raise ValueError(f"Invalid model type: {model_type}")
+def get_trainer_model_config():
+    return DiffusionModelConfig(
+        DiffusionModuleRegistrySelector(
+            "prebuilt",
+            {
+                "module": LinearDownscalingDiffusion(
+                    factor=2,
+                    fine_img_shape=(16, 16),
+                    n_channels_in=2,
+                )
+            },
+            expects_interpolated_input=False,
+        ),
+        loss=LossConfig("NaN"),
+        in_names=["x", "y"],
+        out_names=["x", "y"],
+        normalization=PairedNormalizationConfig(
+            NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
+            NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
+        ),
+        p_mean=0,
+        p_std=1,
+        sigma_min=1,
+        sigma_max=2,
+        churn=1,
+        num_diffusion_generation_steps=2,
+        predict_residual=True,
+    )
 
 
 @pytest.mark.parametrize(
-    "evaluator_model_config, model_type, num_samples",
+    "evaluator_model_config, num_samples",
     [
         pytest.param(
             {"checkpoint_path": "unused value"},
-            "deterministic",
-            1,
-            id="checkpoint_deterministic_model",
-        ),
-        pytest.param(
-            {"checkpoint_path": "unused value"},
-            "diffusion",
             1,
             id="checkpoint_diffusion_model_single_sample",
         ),
         pytest.param(
             {"checkpoint_path": "unused value"},
-            "diffusion",
             2,
             id="checkpoint_diffusion_model_multiple_samples",
         ),
@@ -145,7 +106,6 @@ def get_trainer_model_config(model_type: str):
 def test_evaluator_runs(
     tmp_path,
     evaluator_model_config,
-    model_type,
     num_samples,
     very_fast_only: bool,
 ):
@@ -158,7 +118,7 @@ def test_evaluator_runs(
 
     paths = data_paths_helper(tmp_path)
 
-    trainer_model_config = get_trainer_model_config(model_type)
+    trainer_model_config = get_trainer_model_config()
 
     if "checkpoint_path" in evaluator_model_config:
         with open(evaluator_config_path) as file:

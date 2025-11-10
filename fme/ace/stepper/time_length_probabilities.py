@@ -22,11 +22,18 @@ class TimeLengthProbabilities:
         )
         self._probabilities /= self._probabilities.sum()
         self._max_n_timesteps = int(max(self._n_times))
-        self._rng = np.random.RandomState(
-            Distributed.get_instance().get_seed()
-            + 684  # don't use this number anywhere else
-        )  # must be the same across all processes
-        self.sample()  # check for errors
+        self._rng = None
+
+    def initialize_rng(self):
+        """Set the rng at runtime. This helps guarantee that the distributed
+        seed has already been set.
+
+        """
+        if self._rng is None:
+            self._rng = np.random.RandomState(
+                Distributed.get_instance().get_seed()
+                + 684  # don't use this number anywhere else
+            )  # must be the same across all processes
 
     @classmethod
     def from_constant(cls, n_steps: int) -> "TimeLengthProbabilities":
@@ -41,4 +48,6 @@ class TimeLengthProbabilities:
         Update the current number of timesteps to sample based on
         the probabilities of sampling each number of timesteps.
         """
+        self.initialize_rng()  # jit, if not called externally
+        assert self._rng is not None
         return self._rng.choice(self._n_times, p=self._probabilities)

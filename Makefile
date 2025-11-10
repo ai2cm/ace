@@ -38,6 +38,9 @@ build_deps_only_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE)-deps-only:$(VERSION) --target deps-only .
 	beaker image create $(IMAGE)-deps-only:$(VERSION) --name $(IMAGE)-deps-only-$(VERSION) --workspace ai2/ace-ci-tests
 
+build_nsight_image:
+	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE)-nsight:$(VERSION) --target nsight .
+	beaker image create $(IMAGE)-nsight:$(VERSION) --name $(IMAGE)-nsight-$(VERSION) --workspace ai2/ace
 
 # recommended to deactivate current conda environment before running this
 create_environment:

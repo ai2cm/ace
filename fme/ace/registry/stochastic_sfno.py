@@ -77,7 +77,7 @@ class NoiseConditionedSFNO(torch.nn.Module):
             [*x.shape[:-3], 0], device=x.device, dtype=x.dtype
         )
         return self.conditional_model(
-            x, Context(embedding_scalar=embedding_scalar, embedding_2d=noise)
+            x, Context(embedding_scalar=embedding_scalar, noise=noise)
         )
 
 
@@ -126,6 +126,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             convolution (DISCO) blocks, which apply local filters. See
             Ocampo et al. (2022)
             https://arxiv.org/abs/2209.13603 for more details.
+        normalize_big_skip: Whether to normalize the big_skip connection.
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
     """
@@ -157,6 +158,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     filter_residual: bool = False
     filter_output: bool = False
     local_blocks: list[int] | None = None
+    normalize_big_skip: bool = False
     affine_norms: bool = False
 
     def build(
@@ -172,7 +174,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             img_shape=img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
-                embed_dim_2d=self.noise_embed_dim,
+                embed_dim_noise=self.noise_embed_dim,
             ),
         )
         return NoiseConditionedSFNO(

@@ -1,5 +1,0 @@
-input_directories:
-  # in priority order to handle name conflicts
-  - /climate-default/2025-07-11-cm4-piControl-200yr-coupled-threshold-sst_from_ts-atmosphere-stats
-  - /climate-default/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats
-output_directory: /climate-default/2025-07-11-cm4-piControl-200yr-coupled-stats/atmosphere

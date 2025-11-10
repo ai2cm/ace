@@ -15,7 +15,7 @@ from fme.ace.stepper import Stepper, StepperConfig, parameter_init
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.single_module import SingleModuleStepConfig
@@ -62,7 +62,7 @@ def test_builder_with_weights_loads_same_state(tmpdir):
                 ),
             ),
         ),
-        loss=WeightedMappingLossConfig(),
+        loss=StepLossConfig(),
     )
     stepper = stepper_config.get_stepper(dataset_info=get_dataset_info())
     torch.save(
@@ -215,7 +215,7 @@ def get_config(
                 ),
             ),
         ),
-        loss=WeightedMappingLossConfig(),
+        loss=StepLossConfig(),
     )
     dataset_info = get_dataset_info(img_shape=loaded_shape)
     stepper = stepper_config.get_stepper(dataset_info=dataset_info)
@@ -254,7 +254,7 @@ def get_config(
                     ),
                 ),
             ),
-            loss=WeightedMappingLossConfig(),
+            loss=StepLossConfig(),
             parameter_init=parameter_init_config,
         )
     )

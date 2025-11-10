@@ -11,7 +11,7 @@ The second step, which produces monthly netCDF files locally (e.g. `make fv3gfs_
 To create an interactive session, run the following command from the `scripts/data_process` directory:
 
 ```
-beaker session create --budget ai2/climate --image beaker://jeremym/fme-2bc0033e --gpus 0 --mount hostPath:///net/nfs/climate=/net/nfs/climate --mount hostpath://$(pwd)=/full-model --workdir /full-model/scripts/data_process
+beaker session create --budget ai2/climate --image beaker://jeremym/fme-2bc0033e --gpus 0 --mount hostPath:///net/nfs/climate=/net/nfs/climate --mount hostpath://$(pwd)=/full-model --workdir /full-model/scripts/data_process --shared-memory 120GiB
 ```
 
 Doing so will require that your current working directory is a mountable path (e.g. something in /data).
@@ -26,3 +26,18 @@ make fv3gfs_AMIP_monthly_netcdfs RESOLUTION=4deg OUTPUT_DIR_AMIP=/data/shared/20
 ```
 
 The stats dataset creation step (e.g. `make fv3gfs_AMIP_stats_beaker_dataset`) must be run in the fme conda environment (created by `make create_environment` at the top level of this repo), and additionally requires the beaker client is installed ([install instructions](https://beaker-docs.apps.allenai.org/start/install.html)).
+
+
+For healpix data (both `healpix_ace` and `healpix_dlwp`), you will need to use the annad/dlwp-datapipe image.
+
+You can either run the target with gantry or use the --bare flag, passing your own beaker secrets to the usual session command.
+
+Update `configs/healpix-1deg-8layer-1940-2022.yaml` to point at the latest era5 data on gcs and the current date, i.e., variable_sources `2024-06-20-era5-1deg-8layer-1940-2022.zarr`; data_output_directory: `/climate-default/[DATE]-healpix-era5-dataset`.
+
+If using gantry, be sure to run `make healpix_ace_dataset_gantry` before running `make healpix_dlwp_dataset_gantry`, or update the config to point at an existing hpx-ace dataset.
+
+The output will be written to the `/climate-default` file directory on weka.
+
+Example bare usage: `cd full-model/scripts/data_process && make healpix_ace_dataset`. You may also want to run in the background using nohup: `nohup make healpix_ace_dataset > compute_hpx.log 2>&1 &`.
+
+Example bare session creation (use your own ssh secrets): `beaker session create --name annad/dlwp-ace-datapipe --image beaker://annad/dlwp-datapipe --remote --cluster ai2/phobos-cirrascale --bare --mount src=weka,ref=climate-default,dst=/climate-default  --mount src=weka,ref=climate-default,subpath=annad,dst=/root --workdir=/root --mount src=secret,ref=ssh-key,dst=/secret-files/.ssh/id_ed25519     --mount src=secret,ref=git-config,dst=/secret-files/.gitconfig --budget ai2/climate --shared-memory 120GiB`

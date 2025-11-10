@@ -214,6 +214,7 @@ class AggregatorBuilder(
             loss_scaling=self.loss_scaling,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
+            channel_mean_names=self.channel_mean_names,
         )
 
     def get_inference_aggregator(
@@ -261,8 +262,11 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
             f"Resuming training from results in {config.resume_results.existing_dir}"
         )
     trainer = build_trainer(builders, config)
-    trainer.train()
-    logging.info(f"DONE ---- rank {dist.rank}")
+    try:
+        trainer.train()
+        logging.info(f"DONE ---- rank {dist.rank}")
+    finally:
+        dist.shutdown()
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):

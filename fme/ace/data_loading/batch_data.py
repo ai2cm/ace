@@ -4,12 +4,19 @@ from typing import Any, TypeVar
 
 import cftime
 import numpy as np
+import pandas as pd
 import torch
 import xarray as xr
 from torch.utils.data import default_collate
 
 from fme.core.device import get_device
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.labels import BatchLabels
+from fme.core.tensors import (
+    add_ensemble_dim,
+    fold_sized_ensemble_dim,
+    unfold_ensemble_dim,
+)
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
 
@@ -60,10 +67,11 @@ class BatchData:
 
     data: TensorMapping
     time: xr.DataArray
-    labels: list[set[str]]
+    labels: BatchLabels
     horizontal_dims: list[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
+    n_ensemble: int = 1
 
     @classmethod
     def new_for_testing(
@@ -73,10 +81,11 @@ class BatchData:
         n_timesteps: int = 10,
         t_initial: cftime.datetime = cftime.datetime(2020, 1, 1),
         freq="6h",
+        increment_times: bool = False,
         calendar="julian",
         img_shape: tuple[int, ...] = (9, 18),
         horizontal_dims: list[str] = ["lat", "lon"],
-        labels: list[set[str]] | None = None,
+        labels: BatchLabels | None = None,
         device: torch.device | None = None,
     ) -> "BatchData":
         """
@@ -88,6 +97,8 @@ class BatchData:
             n_timesteps: The number of timesteps to create.
             t_initial: The initial time.
             freq: The frequency of the time steps.
+            increment_times: Whether to increment the initial time for each sample
+                when creating the time coordinate.
             calendar: The calendar of the time steps.
             img_shape: The shape of the horizontal dimensions of the data.
             horizontal_dims: The horizontal dimensions of the data.
@@ -107,7 +118,13 @@ class BatchData:
             ),
             dims=["time"],
         ).drop_vars(["time"])
-        sample_times = xr.concat([time] * n_samples, dim="sample")
+        if increment_times:
+            sample_times = xr.concat(
+                [time + pd.to_timedelta(freq) * i for i in range(n_samples)],
+                dim="sample",
+            )
+        else:
+            sample_times = xr.concat([time] * n_samples, dim="sample")
         if labels is None:
             labels = [set() for _ in range(n_samples)]
         return BatchData(
@@ -127,6 +144,16 @@ class BatchData:
     @property
     def n_timesteps(self) -> int:
         return self.time["time"].values.size
+
+    @property
+    def ensemble_data(self) -> EnsembleTensorDict:
+        """
+        Add an explicit ensemble dimension to a data tensor dict.
+
+        Returns:
+            The tensor dict with an explicit ensemble dimension.
+        """
+        return unfold_ensemble_dim(TensorDict(self.data), n_ensemble=self.n_ensemble)
 
     def to_device(self) -> "BatchData":
         return self.__class__(
@@ -157,8 +184,9 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        labels: list[set[str]],
+        labels: BatchLabels,
         horizontal_dims: list[str] | None = None,
+        n_ensemble: int = 1,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         kwargs = cls._get_kwargs(horizontal_dims)
@@ -166,6 +194,7 @@ class BatchData:
             data=data,
             time=time,
             labels=labels,
+            n_ensemble=n_ensemble,
             **kwargs,
         )
 
@@ -174,8 +203,9 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        labels: list[set[str]],
+        labels: BatchLabels,
         horizontal_dims: list[str] | None = None,
+        n_ensemble: int = 1,
     ) -> "BatchData":
         """
         Move the data to the current global device specified by get_device().
@@ -186,6 +216,7 @@ class BatchData:
             data=data,
             time=time,
             labels=labels,
+            n_ensemble=n_ensemble,
             **kwargs,
         )
 
@@ -327,6 +358,36 @@ class BatchData:
             labels=self.labels,
         )
 
+    def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
+        """
+        Broadcast n_ensemble ensembles to a new BatchData obj.
+        """
+        data = {**self.data}
+        data = add_ensemble_dim(data, repeats=n_ensemble)
+        data = fold_sized_ensemble_dim(data, n_ensemble=n_ensemble)
+
+        time = self.time
+        time = xr.concat([time] * n_ensemble, dim="sample")
+
+        labels = self.labels * n_ensemble
+        return self.__class__(
+            data={k: v.to(get_device()) for k, v in data.items()},
+            time=time,
+            horizontal_dims=self.horizontal_dims,
+            labels=labels,
+            n_ensemble=n_ensemble,
+        )
+
+    def pin_memory(self: SelfType) -> SelfType:
+        """Used by torch.utils.data.DataLoader when pin_memory=True to page-lock
+        tensors in CPU memory, resulting in faster transfers from CPU to GPU.
+
+        See https://docs.pytorch.org/docs/stable/data.html#memory-pinning
+
+        """
+        self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
+        return self
+
 
 @dataclasses.dataclass
 class PairedData:
@@ -336,7 +397,7 @@ class PairedData:
 
     prediction: TensorMapping
     reference: TensorMapping
-    labels: list[set[str]]
+    labels: BatchLabels
     time: xr.DataArray
 
     @property
@@ -367,7 +428,7 @@ class PairedData:
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
-        labels: list[set[str]],
+        labels: BatchLabels,
         time: xr.DataArray,
     ) -> "PairedData":
         device = get_device()
@@ -385,7 +446,7 @@ class PairedData:
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
-        labels: list[set[str]],
+        labels: BatchLabels,
         time: xr.DataArray,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))

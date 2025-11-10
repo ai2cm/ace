@@ -10,7 +10,7 @@ from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.module import ModuleSelector
@@ -117,7 +117,7 @@ def _get_stepper_config(
                 ),
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE", weights={"temperature": 1.0}),
+        loss=StepLossConfig(type="MSE", weights={"temperature": 1.0}),
     )
 
     return config

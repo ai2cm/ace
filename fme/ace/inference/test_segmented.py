@@ -17,6 +17,7 @@ import yaml
 import fme
 from fme.ace.data_loading.inference import ForcingDataLoaderConfig, TimestampList
 from fme.ace.inference.data_writer import DataWriterConfig
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
     InitialConditionConfig,
     main,
@@ -156,7 +157,11 @@ def test_inference_segmented_entrypoint():
                 start_indices=TimestampList(["2000-01-01T06:00:00"]),
             ),
             forcing_loader=forcing_loader,
-            data_writer=DataWriterConfig(save_prediction_files=True),
+            data_writer=DataWriterConfig(
+                save_prediction_files=False,
+                save_monthly_files=False,
+                files=[FileWriterConfig("autoregressive")],
+            ),
             allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info  # noqa: E501
         )
 
@@ -228,6 +233,9 @@ def _get_mock_config(experiment_dir: str) -> fme.ace.InferenceConfig:
         initial_condition=InitialConditionConfig(path="mock_ic"),
         forcing_loader=ForcingDataLoaderConfig(
             dataset=XarrayDataConfig(data_path="mock_forcing")
+        ),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False, save_monthly_files=False
         ),
     )
 

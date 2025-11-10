@@ -1,5 +1,9 @@
-"""Registry for downscaling modules. Note that all modules should accept and
-return tensors of shape (batch, channel, height, width).
+"""Registry for deterministic downscaling modules. Note that all
+modules should accept and return tensors of shape
+(batch, channel, height, width).
+
+Deterministic models are deprecated, and currently only the diffusion
+registry is supported.
 """
 
 import dataclasses

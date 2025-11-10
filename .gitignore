@@ -142,3 +142,4 @@ scratch/
 
 # Some in progress data pipelines get added here
 scripts/data_process/.nfs*
+scripts/data_process/joblogs/

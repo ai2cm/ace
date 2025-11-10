@@ -35,7 +35,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
     n_lat, n_lon = 8, 16
     writer = MonthlyDataWriter(
         path=str(tmpdir),
-        label="predictions",
+        label="monthly_mean_predictions",
         n_samples=n_samples,
         n_months=24,
         save_names=None,
@@ -64,7 +64,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
                     dims=["sample", "time"],
                 )
                 assert time.shape == (n_samples, window_size)
-                writer.append_batch(data=month_data, start_timestep=0, batch_time=time)
+                writer.append_batch(data=month_data, batch_time=time)
     writer.finalize()
     written = xr.open_dataset(
         str(tmpdir / "monthly_mean_predictions.nc"), decode_timedelta=False
@@ -82,7 +82,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
     assert "counts" in written.coords
     assert "counts" in written.x.coords
     assert "counts" in written.valid_time.coords
-    assert written.attrs["title"] == "ACE monthly predictions data file"
+    assert written.attrs["title"] == "ACE monthly mean predictions data file"
     assert written.attrs["source.inference_version"] == "1.0"
 
 

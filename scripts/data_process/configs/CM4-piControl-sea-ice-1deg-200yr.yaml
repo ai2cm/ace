@@ -1,5 +1,6 @@
 runs:
   2025-08-14-cm4-piControl-200yr-sea-ice: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
+data_output_directory: gs://leap-scratch/jpdunc23
 dataset_computation:
   ice_zarr: ice_6hourly.zarr
   nc_mosaic_path: s3://emulators/ai2_colab/2024-11-11-static-data/ocean_hgrid.nc
@@ -23,6 +24,10 @@ dask:
   cluster_options:
     worker_resource_allocation: "8CPU, 57.9Gi"
     idle_timeout_minutes: 10
+stats:
+  output_directory: gs://leap-scratch/jpdunc23
+  data_type: CM4
+  beaker_dataset: not_used
 filesystem:
   protocol: s3
   storage_options:

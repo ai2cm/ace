@@ -205,3 +205,125 @@ def test_paired_data_forcing_target_data():
     paired_data = PairedData.from_batch_data(prediction=gen_data, reference=target_data)
     assert paired_data.forcing == {"foo": target_data.data["foo"]}
     assert paired_data.target == {"bar": target_data.data["bar"]}
+
+
+@pytest.mark.parametrize("n_ensemble", [1, 2, 3])
+def test_broadcast_ensemble(n_ensemble):
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+
+    target_data = get_batch_data(
+        names=["foo", "bar"],
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+
+    gen_data = get_batch_data(
+        names=["bar"],
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+
+    ensemble_target_data = target_data.broadcast_ensemble(n_ensemble=1)
+    ensemble_gen_data = gen_data.broadcast_ensemble(n_ensemble=n_ensemble)
+
+    # make sure original data is unchanged and that broadcasting with an_ensemble=1 just
+    # copies the BatchData object
+    assert target_data.data["bar"].shape == (n_samples, n_times, n_lat, n_lon)
+    assert ensemble_target_data.data["bar"].shape == (n_samples, n_times, n_lat, n_lon)
+
+    torch.testing.assert_close(
+        target_data.data["bar"],
+        ensemble_target_data.data["bar"],
+    )
+
+    # assert data is shapes are correct after ensembling
+    assert ensemble_gen_data.data["bar"].shape == (
+        n_ensemble * n_samples,
+        n_times,
+        n_lat,
+        n_lon,
+    )
+
+    # assert metadata is shapes are correct after ensembling
+    assert len(ensemble_gen_data.labels) == n_ensemble * n_samples
+    assert len(ensemble_gen_data.time.sample) == n_ensemble * n_samples
+    assert len(ensemble_gen_data.time.time) == n_times
+
+    for i in range(n_ensemble):
+        assert (
+            ensemble_gen_data.labels[i * n_samples : (i * n_samples) + n_samples]
+            == gen_data.labels
+        )
+        assert ensemble_gen_data.time[
+            i * n_samples : (i * n_samples) + n_samples
+        ].equals(gen_data.time)
+
+    for i in range(n_samples):
+        torch.testing.assert_close(
+            ensemble_gen_data.data["bar"][i * n_ensemble],
+            gen_data.data["bar"][i],
+        )
+
+    assert_metadata_equal(ensemble_gen_data, gen_data)
+
+
+@pytest.mark.parametrize("n_ensemble", [1, 2, 3])
+def test_ensemble_data_size(n_ensemble):
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+
+    target_data = get_batch_data(
+        names=["foo", "bar"],
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+
+    gen_data = get_batch_data(
+        names=["bar"],
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+
+    ensemble_target_data = target_data.broadcast_ensemble(n_ensemble=1)
+    ensemble_gen_data = gen_data.broadcast_ensemble(n_ensemble=n_ensemble)
+
+    assert ensemble_gen_data.ensemble_data["bar"].shape == (
+        n_samples,
+        n_ensemble,
+        n_times,
+        n_lat,
+        n_lon,
+    )
+
+    assert ensemble_target_data.ensemble_data["bar"].shape == (
+        n_samples,
+        1,
+        n_times,
+        n_lat,
+        n_lon,
+    )
+
+    for ensemble_idx in range(n_ensemble - 1):
+        torch.testing.assert_close(
+            ensemble_gen_data.ensemble_data["bar"][:, ensemble_idx, ...],
+            ensemble_gen_data.ensemble_data["bar"][:, ensemble_idx + 1, ...],
+        )

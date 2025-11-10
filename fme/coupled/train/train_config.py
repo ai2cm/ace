@@ -210,7 +210,9 @@ class TrainBuilders:
             train=False,
         )
 
-    def get_evaluation_inference_data(self) -> InferenceGriddedData:
+    def get_evaluation_inference_data(
+        self,
+    ) -> InferenceGriddedData:
         return get_inference_data(
             config=self.config.inference.loader,
             total_coupled_steps=self.config.inference.n_coupled_steps,

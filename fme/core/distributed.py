@@ -274,6 +274,12 @@ class Distributed:
         """
         return self._seed
 
+    def shutdown(self):
+        self.barrier()
+        if self._distributed:
+            logger.debug(f"Shutting down rank {self.rank}")
+            torch.distributed.destroy_process_group()
+
 
 singleton: Distributed | None = None
 

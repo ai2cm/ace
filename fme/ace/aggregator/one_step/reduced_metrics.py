@@ -6,6 +6,7 @@ so that they can be iterated over and called in the same way in a loop.
 """
 
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Protocol
 
 import torch
@@ -43,6 +44,12 @@ class ReducedMetric(Protocol):
         """
         ...
 
+    def get_channel_mean(self) -> torch.Tensor:
+        """
+        Get the channel-mean metric value, not divided by number of record batches.
+        """
+        ...
+
 
 class AreaWeightedReducedMetric:
     """
@@ -53,10 +60,18 @@ class AreaWeightedReducedMetric:
         self,
         device: torch.device,
         compute_metric: AreaWeightedFunction,
+        channel_mean_names: Sequence[str] | None = None,
     ):
         self._compute_metric = compute_metric
         self._total: TensorDict | None = None
+        self._channel_mean: torch.Tensor | None = None
         self._device = device
+        self._channel_mean_names = channel_mean_names
+
+    def _get_channel_mean_names(self, tensors: TensorDict) -> Sequence[str]:
+        if self._channel_mean_names is None:
+            return list(tensors.keys())
+        return self._channel_mean_names
 
     def _update_total(self, tensors: TensorDict):
         if self._total is None:
@@ -64,15 +79,19 @@ class AreaWeightedReducedMetric:
                 name: torch.zeros_like(tensor, device=self._device)
                 for name, tensor in tensors.items()
             }
+            self._channel_mean = torch.tensor(0.0, device=self._device)
         missing_names = set(self._total) - set(tensors)
         if len(missing_names) > 0:
             raise ValueError(
                 f"Missing metrics for {missing_names} which were "
                 "present the first time metrics were recorded."
             )
+        channel_mean_names = self._get_channel_mean_names(tensors)
         for name, tensor in tensors.items():
             try:
                 self._total[name] += tensor
+                if name in channel_mean_names:
+                    self._channel_mean += tensor / len(channel_mean_names)
             except KeyError:
                 raise ValueError(
                     "Attempted to record the area weighted reduced metric for "
@@ -99,3 +118,9 @@ class AreaWeightedReducedMetric:
         if self._total is None:
             return defaultdict(lambda: torch.tensor(torch.nan))
         return self._total
+
+    def get_channel_mean(self) -> torch.Tensor:
+        """Returns the channel-mean metric."""
+        if self._channel_mean is None:
+            return torch.tensor(torch.nan)
+        return self._channel_mean

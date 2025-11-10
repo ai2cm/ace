@@ -18,7 +18,27 @@ class CoupledDatasetConfig:
     atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
 
     @property
-    def data_configs(self) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+    def data_configs(
+        self,
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+        return [self.ocean, self.atmosphere]
+
+
+@dataclasses.dataclass
+class CoupledDatasetWithOptionalOceanConfig:
+    """
+    Parameters:
+        ocean: Optional configuration for the ocean dataset.
+        atmosphere: Configuration for the atmosphere dataset.
+    """
+
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
+    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
+
+    @property
+    def data_configs(
+        self,
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig | None]:
         return [self.ocean, self.atmosphere]
 
 
@@ -54,6 +74,7 @@ class CoupledDataLoaderConfig:
             ds.zarr_engine_used
             for ds_coupled in self.dataset
             for ds in ds_coupled.data_configs
+            if ds is not None
         )
 
     @property

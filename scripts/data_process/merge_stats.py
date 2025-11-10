@@ -1,5 +1,6 @@
 import argparse
 import dataclasses
+import logging
 import os
 
 import dacite
@@ -36,10 +37,13 @@ class RenameStatConfig:
 
 
 @dataclasses.dataclass
-class StatsConfig:
+class MergeStatsConfig:
     input_directories: list[str]
     output_directory: str
     rename: list[RenameStatConfig] = dataclasses.field(default_factory=list)
+    latitude_dim: str = "lat"
+    longitude_dim: str = "lon"
+    exclude_names: list[str] = dataclasses.field(default_factory=list)
 
     def open_input_datasets(self, fname: str):
         return [
@@ -48,8 +52,55 @@ class StatsConfig:
         ]
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+def merge_stats(config: MergeStatsConfig):
+    """Merge statistics from multiple input directories into a single output directory.
+
+    Args:
+        config: MergeStatsConfig object containing input directories, output directory,
+                and optional rename configurations.
+    """
+    stats_dir = config.output_directory
+
+    if not os.path.exists(stats_dir):
+        os.makedirs(stats_dir)
+
+    for fname in STATS_NC_FILE_NAMES:
+        logging.info(f"Combining {fname} stats datasets")
+        datasets = config.open_input_datasets(fname)
+        combined_stats = {}
+        overlapping_names = set()
+        for i, ds in enumerate(datasets):
+            latdim = config.latitude_dim
+            londim = config.longitude_dim
+            if config.latitude_dim in ds.dims and i > 0:
+                ds = ds.assign_coords({latdim: datasets[0][latdim]})
+            if config.longitude_dim in ds.dims and i > 0:
+                ds = ds.assign_coords({londim: datasets[0][londim]})
+            for name in ds.data_vars:
+                if name in combined_stats:
+                    overlapping_names.add(name)
+                    continue
+                combined_stats[name] = ds[name]
+                combined_stats[name].attrs["source"] = ds.encoding["source"]
+        if len(overlapping_names) == 0:
+            logging.info("No overlapping names found")
+        else:
+            logging.warning("Overlapping stats found in input directories")
+            for name in overlapping_names:
+                source = combined_stats[name].attrs["source"]
+                logging.warning(f"{name} chosen from {source}")
+        stats = xr.Dataset(combined_stats)
+        for rename_config in config.rename:
+            stats = rename_config.rename_var(stats)
+        print(stats.load())
+        stats.to_netcdf(os.path.join(stats_dir, fname))
+
+
+def main():
+    """Main CLI entry point for merging statistics."""
+    parser = argparse.ArgumentParser(
+        description="Merge statistics from multiple input directories."
+    )
     parser.add_argument("yaml_path", type=str, help="Path to the config file.")
     args = parser.parse_args()
 
@@ -57,37 +108,13 @@ if __name__ == "__main__":
         config_data = yaml.load(f, Loader=yaml.CLoader)
 
     config = dacite.from_dict(
-        data_class=StatsConfig,
+        data_class=MergeStatsConfig,
         data=config_data,
         config=dacite.Config(strict=True),
     )
 
-    stats_dir = config.output_directory
+    merge_stats(config)
 
-    if not os.path.exists(stats_dir):
-        os.makedirs(stats_dir)
 
-    for fname in STATS_NC_FILE_NAMES:
-        print(f"Combining {fname} stats datasets")
-        datasets = config.open_input_datasets(fname)
-        combined_stats = {}
-        overlapping_names = []
-        for ds in datasets:
-            for name in ds.data_vars:
-                if name in combined_stats:
-                    overlapping_names.append(name)
-                    continue
-                combined_stats[name] = ds[name]
-                combined_stats[name].attrs["source"] = ds.encoding["source"]
-        if len(overlapping_names) == 0:
-            print("No overlapping names found")
-        else:
-            print("Overlapping stats and chosen sources: ")
-            for name in set(overlapping_names):
-                source = combined_stats[name].attrs["source"]
-                print(f"{name} from {source}")
-        stats = xr.Dataset(combined_stats)
-        for rename_config in config.rename:
-            stats = rename_config.rename_var(stats)
-        print(stats.load())
-        stats.to_netcdf(os.path.join(stats_dir, fname))
+if __name__ == "__main__":
+    main()

@@ -7,6 +7,7 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.histogram import DynamicHistogramAggregator
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -34,13 +35,22 @@ class _AggregatorInterface(Protocol):
 
 
 class NoTargetAggregator:
+    """
+    Aggregator used when generating downscaled outputs without any corresponding
+    fine-res target data.
+    Mean map outputs assume that all data passed to record_batch has the same
+    lat/lon coordinates.
+    """
+
     def __init__(
         self,
         downscale_factor: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         ensemble_dim: int = 1,
+        latlon_coordinates: LatLonCoordinates | None = None,
     ):
         self.downscale_factor = downscale_factor
+        self.latlon_coordinates = latlon_coordinates
         self.ensemble_dim = ensemble_dim
         self.variable_metadata = variable_metadata
         self.single_sample_aggregators: list[_AggregatorInterface] = [
@@ -97,6 +107,8 @@ class NoTargetAggregator:
             ds = ds.merge(single_sample_agg.get_dataset())
         for agg in self.aggregators:
             ds = ds.merge(agg.get_dataset())
+        if self.latlon_coordinates is not None:
+            ds = ds.assign_coords(self.latlon_coordinates.coords)
         return ds
 
 

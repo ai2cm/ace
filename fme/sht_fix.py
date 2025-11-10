@@ -42,7 +42,6 @@ the torch harmonics sht.py file [*].
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.fft
@@ -100,15 +99,14 @@ class RealSHT(nn.Module):
             raise(ValueError("Unknown quadrature mode"))
 
         # apply cosine transform and flip them
-        tq = np.flip(np.arccos(cost))
+        tq = torch.flip(torch.arccos(cost), dims=(0,))
 
         # determine the dimensions
         self.mmax = mmax or self.nlon // 2 + 1
 
         # combine quadrature weights with the legendre weights
-        weights = torch.from_numpy(w)
         pct = torch.as_tensor(_precompute_legpoly(self.mmax, self.lmax, tq, norm=self.norm, csphase=self.csphase))
-        weights = torch.einsum('mlk,k->mlk', pct, weights)
+        weights = torch.einsum('mlk,k->mlk', pct, w)
 
         # remember quadrature weights
         self.weights = weights.float().to(get_device())
@@ -181,7 +179,7 @@ class InverseRealSHT(nn.Module):
             raise(ValueError("Unknown quadrature mode"))
 
         # apply cosine transform and flip them
-        t = np.flip(np.arccos(cost))
+        t = torch.flip(torch.arccos(cost), dims=(0,))
 
         # determine the dimensions
         self.mmax = mmax or self.nlon // 2 + 1

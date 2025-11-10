@@ -193,9 +193,13 @@ def _infer_available_variables(config: XarrayDataConfig):
     """
     Infer the available variables from a XarrayDataset.
     """
-    paths = get_raw_paths(config.data_path, config.file_pattern)
+    raw_paths = get_raw_paths(config.data_path, config.file_pattern)
+    if len(raw_paths) == 0:
+        raise ValueError(
+            f"No files found matching '{config.data_path}/{config.file_pattern}'."
+        )
     dataset = xr.open_dataset(
-        paths[0],
+        raw_paths[0],
         decode_times=False,
         decode_timedelta=False,
         engine=config.engine,

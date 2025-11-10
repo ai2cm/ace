@@ -1,12 +1,12 @@
 runs:
-  run_directory: /mntdata
+  run_directory: gs://vcm-ml-intermediate/
 stats:
-  output_directory: /mntdata/2024-08-21-healpix-era5-dataset
-  beaker_dataset: 2024-08-21-healpix-era5-dataset-stats
+  output_directory: /climate-default/2025-10-04-healpix-era5-dataset-stats
+  beaker_dataset: 2025-10-04-healpix-era5-dataset-stats
   start_date: "1990-01-01"
   end_date: "2019-12-31"
   data_type: ERA5
-data_output_directory: /mntdata/2024-08-21-healpix-era5-dataset
+data_output_directory: /climate-default/2025-10-04-healpix-era5-dataset
 dataset_computation:
   n_split: 400
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/vertical-coordinate-file/fv_core.res.nc
@@ -16,6 +16,9 @@ dataset_computation:
     face_dim: "face"
   chunking:
     face_dim: -1
+  sharding:
+    face_dim: -1
+    time_dim: 360
   variable_sources:
     2024-06-20-era5-1deg-8layer-1940-2022.zarr:
       - DLWRFsfc

@@ -17,6 +17,9 @@ train_data:
   batch_size: 2
   num_data_workers: 0
   strict_ensemble: False
+  lat_extent:
+    start: 1
+    stop: 6
 validation_data:
   fine:
     - data_path: /will/be/overwritten
@@ -49,3 +52,4 @@ model:
   out_names:
     - "x"
     - "y"
+  use_fine_topography: true

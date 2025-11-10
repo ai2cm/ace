@@ -54,7 +54,7 @@ def steps_thru_atmos_7() -> list[tuple[ComponentStepPrediction, TensorMapping]]:
 class _StepLoss(StepLossABC):
     def __init__(
         self,
-        loss_obj: Callable[[TensorMapping, TensorMapping], torch.Tensor],
+        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
         time_dim: int = 1,
     ):
         self._loss_obj = loss_obj
@@ -66,7 +66,7 @@ class _StepLoss(StepLossABC):
     def __call__(
         self, prediction: StepPredictionABC, target_data: TensorMapping
     ) -> torch.Tensor:
-        return self._loss_obj(prediction.data, target_data)
+        return self._loss_obj(prediction.data, target_data, prediction.step)
 
 
 def assert_tensor_dicts_close(
@@ -80,8 +80,8 @@ def assert_tensor_dicts_close(
 
 
 def test_coupled_stepper_train_loss(steps_thru_atmos_7):
-    ocean_loss_obj = _StepLoss(loss_obj=lambda *_: torch.tensor(2.0))
-    atmos_loss_obj = _StepLoss(loss_obj=lambda *_: torch.tensor(1.0))
+    ocean_loss_obj = _StepLoss(loss_obj=lambda *_, **__: torch.tensor(2.0))
+    atmos_loss_obj = _StepLoss(loss_obj=lambda *_, **__: torch.tensor(1.0))
     loss_obj = CoupledStepperTrainLoss(
         ocean_loss=ocean_loss_obj, atmosphere_loss=atmos_loss_obj
     )
@@ -107,10 +107,10 @@ def test_coupled_stepper_train_loss(steps_thru_atmos_7):
 
 
 def test_loss_contributions(steps_thru_atmos_7):
-    def mae_loss(gen, target):
+    def mae_loss(gen, target, step: int):
         loss = torch.tensor(0.0)
         for key in gen:
-            loss += (gen[key] - target[key]).abs().mean()
+            loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
     atmos_loss_config = LossContributionsConfig(
@@ -135,12 +135,16 @@ def test_loss_contributions(steps_thru_atmos_7):
             if prediction.step >= 6:
                 expected_metrics[label] = None
             else:
-                expected_metrics[label] = mae_loss(prediction.data, target_data) / 3
+                expected_metrics[label] = (
+                    mae_loss(prediction.data, target_data, step=prediction.step) / 3
+                )
         elif prediction.realm == "ocean":
             if prediction.step >= 2:
                 expected_metrics[label] = None
             else:
-                expected_metrics[label] = mae_loss(prediction.data, target_data)
+                expected_metrics[label] = mae_loss(
+                    prediction.data, target_data, step=prediction.step
+                )
     assert_tensor_dicts_close(metrics, expected_metrics)
 
 
@@ -149,7 +153,7 @@ def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
     # test LossContributionsConfig with n_steps = 0
     atmos_loss_config = LossContributionsConfig()
     atmosphere_loss = atmos_loss_config.build(
-        loss_obj=lambda *_: torch.tensor(5.25),
+        loss_obj=lambda *_, **__: torch.tensor(5.25),
         time_dim=1,
     )
     ocean_loss_config = LossContributionsConfig(**ocean_config_kwargs)

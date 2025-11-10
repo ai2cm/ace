@@ -1,7 +1,9 @@
 import dataclasses
+import logging
 from math import ceil
 
 import torch
+import xarray as xr
 
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
@@ -9,13 +11,20 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
+from fme.ace.requirements import DataRequirements
+from fme.core.dataset.dummy import DummyDataset
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData
-from fme.coupled.data_loading.config import CoupledDatasetConfig
+from fme.coupled.data_loading.config import (
+    CoupledDatasetConfig,
+    CoupledDatasetWithOptionalOceanConfig,
+)
 from fme.coupled.data_loading.data_typing import (
     CoupledDataset,
     CoupledDatasetProperties,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
 
 
@@ -38,13 +47,13 @@ class InferenceDataLoaderConfig:
         num_data_workers: Number of parallel workers to use for data loading.
     """
 
-    dataset: CoupledDatasetConfig
+    dataset: CoupledDatasetConfig | CoupledDatasetWithOptionalOceanConfig
     start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList
     num_data_workers: int = 0
 
     def __post_init__(self):
         self._zarr_engine_used = any(
-            ds.zarr_engine_used for ds in self.dataset.data_configs
+            ds.zarr_engine_used for ds in self.dataset.data_configs if ds is not None
         )
 
     @property
@@ -65,19 +74,32 @@ class InferenceDataset(torch.utils.data.Dataset):
         config: InferenceDataLoaderConfig,
         total_coupled_steps: int,
         requirements: CoupledDataRequirements,
+        dataset_info: CoupledDatasetInfo | None = None,
+        initial_time: xr.DataArray | None = None,
     ):
         ocean_reqs = requirements.ocean_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
         ocean: torch.utils.data.Dataset
         atmosphere: torch.utils.data.Dataset
-        ocean, ocean_properties = config.dataset.ocean.build(
-            ocean_reqs.names, ocean_reqs.n_timesteps
-        )
+        if config.dataset.ocean is not None:
+            ocean, ocean_properties = config.dataset.ocean.build(
+                ocean_reqs.names, ocean_reqs.n_timesteps
+            )
+        else:
+            assert dataset_info is not None
+            ocean, ocean_properties = _make_dummy_ocean_forcing(
+                dataset_info=dataset_info,
+                initial_time=initial_time,
+                total_coupled_steps=total_coupled_steps,
+                ocean_reqs=ocean_reqs,
+            )
+        all_ic_times = ocean.sample_start_times
+        ocean_properties = self._update_ocean_mask(ocean_properties, dataset_info)
         atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
             atmosphere_reqs.names, atmosphere_reqs.n_timesteps
         )
         properties = CoupledDatasetProperties(
-            ocean.sample_start_times, ocean_properties, atmosphere_properties
+            all_ic_times, ocean_properties, atmosphere_properties
         )
         dataset = CoupledDataset(
             ocean=ocean,
@@ -95,6 +117,29 @@ class InferenceDataset(torch.utils.data.Dataset):
             self._start_indices = config.start_indices.as_indices(dataset.all_ic_times)
         else:
             self._start_indices = config.start_indices.as_indices()
+
+    def _update_ocean_mask(
+        self,
+        ocean_properties: DatasetProperties,
+        dataset_info: CoupledDatasetInfo | None,
+    ) -> DatasetProperties:
+        if dataset_info is None:
+            return ocean_properties
+        ocean_mask_is_empty = not ocean_properties.mask_provider.masks
+        identical_masks = (
+            len(ocean_properties.mask_provider.masks) > 0
+            and len(dataset_info.ocean.mask_provider.masks) > 0
+            and ocean_properties.mask_provider == dataset_info.ocean.mask_provider
+        )
+        if ocean_mask_is_empty or identical_masks:
+            ocean_properties.update_mask_provider(dataset_info.ocean.mask_provider)
+        else:
+            logging.warning(
+                "Not updating ocean mask provider from dataset info in the checkpoint"
+                "because the existing mask provider is not empty or the masks are not"
+                "identical."
+            )
+        return ocean_properties
 
     def _get_batch_data(self, index) -> CoupledBatchData:
         dist = Distributed.get_instance()
@@ -138,16 +183,53 @@ class InferenceDataset(torch.utils.data.Dataset):
 
 @dataclasses.dataclass
 class CoupledForcingDataLoaderConfig:
-    ocean: ForcingDataLoaderConfig
     atmosphere: ForcingDataLoaderConfig
+    ocean: ForcingDataLoaderConfig | None = None
     num_data_workers: int = 0
 
-    def build_inference_config(self, start_indices: ExplicitIndices):
+    def build_inference_config(
+        self,
+        start_indices: ExplicitIndices,
+    ):
+        if self.ocean is None:
+            return InferenceDataLoaderConfig(
+                dataset=CoupledDatasetWithOptionalOceanConfig(
+                    atmosphere=self.atmosphere.dataset,
+                ),
+                start_indices=start_indices,
+                num_data_workers=self.num_data_workers,
+            )
         return InferenceDataLoaderConfig(
             dataset=CoupledDatasetConfig(
-                ocean=self.ocean.dataset,
                 atmosphere=self.atmosphere.dataset,
+                ocean=self.ocean.dataset,
             ),
             start_indices=start_indices,
             num_data_workers=self.num_data_workers,
         )
+
+
+def _make_dummy_ocean_forcing(
+    dataset_info: CoupledDatasetInfo,
+    initial_time: xr.DataArray,
+    total_coupled_steps: int,
+    ocean_reqs: DataRequirements,
+) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+    ocean_property = DatasetProperties(
+        variable_metadata=dict(dataset_info.ocean.variable_metadata),
+        vertical_coordinate=dataset_info.ocean.vertical_coordinate,
+        horizontal_coordinates=dataset_info.ocean.horizontal_coordinates,
+        mask_provider=dataset_info.ocean.mask_provider,
+        timestep=dataset_info.ocean.timestep,
+        is_remote=False,
+        all_labels=set(),
+    )
+    ts = dataset_info.ocean.timestep
+    ocean = DummyDataset(
+        start_time=initial_time.squeeze().values.flat[0],
+        end_time=initial_time.squeeze().values.flat[-1] + ts * total_coupled_steps,
+        timestep=ts,
+        n_timesteps=ocean_reqs.n_timesteps,
+        horizontal_coordinates=dataset_info.ocean.horizontal_coordinates,
+    )
+    return ocean, ocean_property

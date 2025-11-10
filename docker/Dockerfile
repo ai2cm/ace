@@ -24,6 +24,10 @@ RUN python3 -m pip install -r /tmp/requirements.txt
 COPY requirements-healpix.txt /tmp/requirements-healpix.txt
 RUN python3 -m pip install --no-build-isolation -r /tmp/requirements-healpix.txt
 
+# set default matplotlib cmap
+RUN mkdir -p $HOME/.config/matplotlib && \
+  echo "image.cmap: turbo" >> $HOME/.config/matplotlib/matplotlibrc
+
 FROM base AS production
 
 # copy local code and install
@@ -50,3 +54,22 @@ chmod +x /usr/bin/yq
 COPY scripts/ci_beaker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
+
+FROM deps-only AS nsight
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y -q --no-install-recommends --no-install-suggests \
+  cmake \
+  libglib2.0 \
+  && rm -rf /var/lib/apt/lists/*
+
+# install Nsight Systems
+ARG NSYS_DEB=NsightSystems-linux-cli-public-2025.5.1.121-3638078.deb
+
+RUN wget https://developer.nvidia.com/downloads/assets/tools/secure/nsight-systems/2025_5/${NSYS_DEB} \
+    && dpkg -i ${NSYS_DEB} \
+    && rm ${NSYS_DEB}
+
+ENTRYPOINT ["/bin/bash"]
+CMD ["-l"]

@@ -6,7 +6,6 @@ import os
 import shutil
 import time
 import uuid
-import warnings
 
 import dacite
 import torch
@@ -27,12 +26,7 @@ from fme.downscaling.data import (
     PairedDataLoaderConfig,
     PairedGriddedData,
 )
-from fme.downscaling.models import (
-    DiffusionModel,
-    DiffusionModelConfig,
-    DownscalingModelConfig,
-    Model,
-)
+from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -56,6 +50,7 @@ def _save_checkpoint(trainer: "Trainer", path: str) -> None:
                 "num_batches_seen": trainer.num_batches_seen,
                 "startEpoch": trainer.startEpoch,
                 "best_valid_loss": trainer.best_valid_loss,
+                "best_histogram_tail_metric": trainer.best_histogram_tail_metric,
                 "validate_using_ema": trainer.validate_using_ema,
             },
             temporary_location,
@@ -79,6 +74,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
     trainer.best_valid_loss = checkpoint["best_valid_loss"]
+    trainer.best_histogram_tail_metric = checkpoint.get(
+        "best_histogram_tail_metric", float("inf")
+    )
 
     trainer.validate_using_ema = checkpoint["validate_using_ema"]
     ema_checkpoint = torch.load(
@@ -91,7 +89,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 class Trainer:
     def __init__(
         self,
-        model: Model | DiffusionModel,
+        model: DiffusionModel,
         optimization: Optimization,
         train_data: PairedGriddedData,
         validation_data: PairedGriddedData,
@@ -149,7 +147,7 @@ class Trainer:
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_name = "generation/metrics/crps"
+        self._best_valid_loss_name = "generation/metrics/relative_crps_bicubic"
         self._best_histogram_tail_name = (
             "generation/histogram/abs_norm_tail_bias_above_percentile/99.99/"
         )
@@ -158,7 +156,7 @@ class Trainer:
         self, data: PairedGriddedData, random_offset: bool, shuffle: bool
     ):
         if self.patch_data:
-            batch_generator = data.get_patched_batch_generator(
+            batch_generator = data.get_patched_generator(
                 coarse_yx_patch_extent=self.model.coarse_shape,
                 overlap=0,
                 drop_partial_patches=True,
@@ -166,7 +164,7 @@ class Trainer:
                 shuffle=shuffle,
             )
         else:
-            batch_generator = data.loader
+            batch_generator = data.get_generator()
         return batch_generator
 
     def train_one_epoch(self) -> None:
@@ -184,11 +182,11 @@ class Trainer:
             self.train_data, random_offset=True, shuffle=True
         )
         outputs = None
-        for i, batch in enumerate(train_batch_generator):
+        for i, (batch, topography) in enumerate(train_batch_generator):
             self.num_batches_seen += 1
             if i % 10 == 0:
                 logging.info(f"Training on batch {i+1}")
-            outputs = self.model.train_on_batch(batch, self.optimization)
+            outputs = self.model.train_on_batch(batch, topography, self.optimization)
             self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -260,15 +258,19 @@ class Trainer:
             validation_batch_generator = self._get_batch_generator(
                 self.validation_data, random_offset=False, shuffle=False
             )
-            for batch in validation_batch_generator:
-                outputs = self.model.train_on_batch(batch, self.null_optimization)
+            for batch, topography in validation_batch_generator:
+                outputs = self.model.train_on_batch(
+                    batch, topography, self.null_optimization
+                )
                 validation_aggregator.record_batch(
                     outputs=outputs,
                     coarse=batch.coarse.data,
                     batch=batch,
                 )
                 generated_outputs = self.model.generate_on_batch(
-                    batch, n_samples=self.config.generate_n_samples
+                    batch,
+                    topography=topography,
+                    n_samples=self.config.generate_n_samples,
                 )
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
@@ -394,7 +396,7 @@ class Trainer:
 
 @dataclasses.dataclass
 class TrainerConfig:
-    model: DownscalingModelConfig | DiffusionModelConfig
+    model: DiffusionModelConfig
     optimization: OptimizationConfig
     train_data: PairedDataLoaderConfig
     validation_data: PairedDataLoaderConfig
@@ -471,15 +473,10 @@ class TrainerConfig:
         )
 
 
-def _get_channel_mean_scalar_metric(metrics, prefix="generation/metrics/crps"):
+def _get_channel_mean_scalar_metric(
+    metrics, prefix="generation/metrics/relative_crps_bicubic"
+):
     channel_metric = [v for k, v in metrics.items() if k.startswith(prefix)]
-
-    if len(channel_metric) != 1:
-        warnings.warn(
-            f"Metric {prefix} used for checkpoint selection is computed on "
-            "denormalized outputs. If multiple outputs are present, "
-            "the mean will not be evenly weighted across outputs."
-        )
     if len(channel_metric) == 0:
         return float("inf")
     else:

@@ -1,9 +1,11 @@
+import datetime
 import logging
 import warnings
 from collections.abc import Sequence
 
 import torch
 import torch.utils.data
+import xarray as xr
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
@@ -28,6 +30,7 @@ from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceDataset,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -181,11 +184,19 @@ def get_inference_data(
     total_coupled_steps: int,
     window_requirements: CoupledDataRequirements,
     initial_condition: CoupledPrognosticState | CoupledPrognosticStateDataRequirements,
+    dataset_info: CoupledDatasetInfo | None = None,
 ) -> InferenceGriddedData:
+    initial_time = None
+    if isinstance(initial_condition, CoupledPrognosticState):
+        initial_time = (
+            initial_condition.ocean_data.as_batch_data().time
+        )  # used only if no ocean forcing is specified
     dataset = InferenceDataset(
         config,
         total_coupled_steps,
         window_requirements,
+        dataset_info,
+        initial_time,
     )
     properties = dataset.properties
 
@@ -219,11 +230,29 @@ def get_inference_data(
     return inference_data
 
 
+def _make_available_times_from_initial_time(
+    initial_time: xr.DataArray,
+    total_coupled_steps: int,
+    time_step: datetime.timedelta,
+) -> xr.CFTimeIndex:
+    first_time = sorted(initial_time)[0]
+    last_time = sorted(initial_time)[-1] + total_coupled_steps * time_step
+    available_times = xr.date_range(
+        start=first_time.values[0],
+        end=last_time.values[0],
+        freq=time_step,
+        calendar=first_time.values[0].calendar,
+        use_cftime=True,
+    )
+    return available_times
+
+
 def get_forcing_data(
     config: CoupledForcingDataLoaderConfig,
     total_coupled_steps: int,
     window_requirements: CoupledDataRequirements,
     initial_condition: CoupledPrognosticState,
+    dataset_info: CoupledDatasetInfo | None = None,
 ) -> InferenceGriddedData:
     """Return a GriddedData loader for forcing data based on the initial condition.
     This function determines the start indices for the forcing data based on the initial
@@ -235,6 +264,7 @@ def get_forcing_data(
             inference.
         window_requirements: Data requirements for the forcing data.
         initial_condition: Initial condition for the inference.
+        dataset_info: Dataset info loaded from the stepper.
 
     Returns:
         A data loader for forcing data with coordinates and metadata.
@@ -242,32 +272,38 @@ def get_forcing_data(
     initial_time = initial_condition.ocean_data.as_batch_data().time
     if initial_time.shape[1] != 1:
         raise NotImplementedError("code assumes initial time only has 1 timestep")
-    if isinstance(config.ocean.dataset, XarrayDataConfig):
-        available_times = XarrayDataset(
-            config.ocean.dataset,
-            window_requirements.ocean_requirements.names,
-            window_requirements.ocean_requirements.n_timesteps,
-        ).all_times
-    elif isinstance(config.ocean.dataset, MergeNoConcatDatasetConfig):
-        # Some forcing variables may not be in the first dataset,
-        # use an empty data requirements to get all times
-        if isinstance(config.ocean.dataset.merge[0], XarrayDataConfig):
+    if config.ocean is None:
+        available_times = _make_available_times_from_initial_time(
+            initial_time, total_coupled_steps, window_requirements.ocean_timestep
+        )
+    else:
+        if isinstance(config.ocean.dataset, XarrayDataConfig):
             available_times = XarrayDataset(
-                config.ocean.dataset.merge[0],
-                names=[],
-                n_timesteps=window_requirements.ocean_requirements.n_timesteps,
+                config.ocean.dataset,
+                window_requirements.ocean_requirements.names,
+                window_requirements.ocean_requirements.n_timesteps,
             ).all_times
-        else:
-            raise ValueError("Forcing data cannot be concatenated.")
+        elif isinstance(config.ocean.dataset, MergeNoConcatDatasetConfig):
+            # Some forcing variables may not be in the first dataset,
+            # use an empty data requirements to get all times
+            if isinstance(config.ocean.dataset.merge[0], XarrayDataConfig):
+                available_times = XarrayDataset(
+                    config.ocean.dataset.merge[0],
+                    names=[],
+                    n_timesteps=window_requirements.ocean_requirements.n_timesteps,
+                ).all_times
+            else:
+                raise ValueError("Forcing data cannot be concatenated.")
     start_time_indices = []
     for time in initial_time.values[:, 0]:
         start_time_indices.append(available_times.get_loc(time))
     inference_config = config.build_inference_config(
-        start_indices=ExplicitIndices(start_time_indices)
+        start_indices=ExplicitIndices(start_time_indices),
     )
     return get_inference_data(
         config=inference_config,
         total_coupled_steps=total_coupled_steps,
         window_requirements=window_requirements,
         initial_condition=initial_condition,
+        dataset_info=dataset_info,
     )
