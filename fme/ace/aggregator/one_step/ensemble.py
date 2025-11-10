@@ -84,7 +84,8 @@ class SSRBiasMetric(ReducedMetric):
         self._n_batches = 0
 
     def record(self, target: torch.Tensor, gen: torch.Tensor):
-        mse = ((gen - target) ** 2).mean(dim=(0, 1, 2))  # batch, ensemble, time
+        ensemble_mean = gen.mean(dim=1, keepdim=True)  # batch, 1, time
+        mse = ((ensemble_mean - target) ** 2).mean(dim=(0, 1, 2))  # batch, 1, time
         variance = gen.var(dim=1, unbiased=True).mean(dim=(0, 1))
         self._add_mse(mse)
         self._add_variance(variance)
