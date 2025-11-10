@@ -7,9 +7,9 @@ patch:
 model:
   #checkpoint_path: /Users/annak/Code/scratch/100-to-3km-mps.ckpt
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
-  #rename:
-  #  eastward_wind_at_ten_meters: UGRD10m
-  #  northward_wind_at_ten_meters: VGRD10m
+  #model_updates:
+  #  churn: 5
+  #  sigma_max: 300
 data:
   topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   coarse:
@@ -18,6 +18,8 @@ data:
     file_pattern: 100km.zarr
     #infer_timestep: false
     subset:
+      #start: 0
+      #stop: 4
       start_time: 2023-01-01T00:00
       step: 29
   fine:
@@ -26,15 +28,59 @@ data:
     file_pattern: 3km.zarr
     #infer_timestep: false
     subset:
+      #start: 0
+      #stop: 4
       start_time: 2023-01-01T00:00
       step: 29
   lat_extent:
     #start: -66.0
     start: -66
     stop: 70.0
-  batch_size: 6
+  batch_size: 4
   num_data_workers: 2
   strict_ensemble: False
+events:
+- name: WA_AR_20230206
+  date: 2023-02-06T06:00
+  lat_extent:
+    start: 36
+    stop: 52
+  lon_extent:
+    start: 228
+    stop: 244
+  save_generated_samples: true
+  n_samples: 64
+- name: WPacific_hurricane_20230425
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130.0
+    stop: 146.0
+  save_generated_samples: true
+  n_samples: 64
+- name: WPacific_hurricane_landfall_china_20230510
+  date: 2023-05-10T12:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 104
+    stop: 120
+  save_generated_samples: true
+  n_samples: 64
+- name: extratropical_cyclone_US_20230403
+  date: 2023-04-03T12:00
+  lat_extent:
+    start: 34
+    stop: 50
+  lon_extent:
+    start: 254
+    stop: 270
+  save_generated_samples: true
+  n_samples: 64
+
 logging:
   log_to_screen: true
   log_to_wandb: true
