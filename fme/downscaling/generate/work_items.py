@@ -1,12 +1,17 @@
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from itertools import product
 
 import torch
+import xarray as xr
+from torch.utils.data import DataLoader
 
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 
-from ..data import BatchData
+from ..data import BatchData, Topography
 from ..data.config import BatchItemDatasetAdapter
+from ..data.datasets import SizedMap
 from .constants import ENSEMBLE_NAME, TIME_NAME
 
 
@@ -283,3 +288,29 @@ def get_work_items(
         work_items.extend(_get_work_item_padding(work_items, dist))
 
     return work_items
+
+
+@dataclass
+class SliceWorkItemGriddedData:
+    _loader: DataLoader[LoadedSliceWorkItem]
+    variable_metadata: Mapping[str, VariableMetadata]
+    all_times: xr.CFTimeIndex
+    dtype: torch.dtype
+    max_output_shape: tuple[int, ...]
+    topography: Topography | None
+
+    # TODO: currently no protocol or ABC for gridded data objects
+    #       if we want to unify, we will need one and just raise
+    #       NotImplementedError for unsupported methods.
+
+    @property
+    def loader(self) -> DataLoader[LoadedSliceWorkItem]:
+        def on_device(work_item: LoadedSliceWorkItem) -> LoadedSliceWorkItem:
+            return work_item.to_device()
+
+        return SizedMap(on_device, self._loader)
+
+    def get_generator(self) -> Iterator[tuple[LoadedSliceWorkItem, Topography | None]]:
+        work_item: LoadedSliceWorkItem
+        for work_item in self.loader:
+            yield work_item, self.topography
