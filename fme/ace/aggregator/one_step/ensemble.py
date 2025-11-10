@@ -86,8 +86,14 @@ class SSRBiasMetric(ReducedMetric):
     def record(self, target: torch.Tensor, gen: torch.Tensor):
         num_ensemble = gen.shape[1]
         ensemble_mean = gen.mean(dim=1, keepdim=True)  # batch, 1, time
+        if torch.isnan(ensemble_mean).any():
+            print("NaN detected in ensemble_mean")
         mse = ((ensemble_mean - target) ** 2).mean(dim=(0, 1, 2))  # batch, 1, time
+        if torch.isnan(mse).any():
+            print("NaN detected in mse")
         variance = gen.var(dim=1, unbiased=True).mean(dim=(0, 1))
+        if torch.isnan(variance).any():
+            print("NaN detected in variance")
         self._add_unbiased_mse(mse, variance, num_ensemble)
         self._add_variance(variance)
         self._n_batches += 1
@@ -98,11 +104,15 @@ class SSRBiasMetric(ReducedMetric):
         if self._total_mse is None:
             self._total_mse = torch.zeros_like(mse)
         self._total_mse += mse - variance / num_ensemble
+        if torch.isnan(self._total_mse).any():
+            print("NaN detected in self._total_mse")
 
     def _add_variance(self, variance: torch.Tensor):
         if self._total_variance is None:
             self._total_variance = torch.zeros_like(variance)
         self._total_variance += variance
+        if torch.isnan(self._total_variance).any():
+            print("NaN detected in self._total_variance")
 
     def get(self) -> torch.Tensor:
         if self._total_mse is None or self._total_variance is None:
@@ -110,7 +120,8 @@ class SSRBiasMetric(ReducedMetric):
         spread = self._total_variance.sqrt()
         # must remove the component of the MSE that is due to the
         # variance of the generated values
-        print("self._total_mse", self._total_mse)
+        if torch.isnan(self._total_mse).any():
+            print("NaN detected in self._total_mse get")
         skill = self._total_mse.sqrt()
         return spread / skill - 1
 
