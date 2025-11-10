@@ -110,6 +110,7 @@ class SSRBiasMetric(ReducedMetric):
         spread = self._total_variance.sqrt()
         # must remove the component of the MSE that is due to the
         # variance of the generated values
+        print("self._total_mse", self._total_mse)
         skill = self._total_mse.sqrt()
         return spread / skill - 1
 
