@@ -84,6 +84,8 @@ class SSRBiasMetric(ReducedMetric):
         self._n_batches = 0
 
     def record(self, target: torch.Tensor, gen: torch.Tensor):
+        if torch.isnan(gen).any():
+            print("NaN detected in gen data")
         num_ensemble = gen.shape[1]
         ensemble_mean = gen.mean(dim=1, keepdim=True)  # batch, 1, time
         if torch.isnan(ensemble_mean).any():
@@ -91,6 +93,11 @@ class SSRBiasMetric(ReducedMetric):
         mse = ((ensemble_mean - target) ** 2).mean(dim=(0, 1, 2))  # batch, 1, time
         if torch.isnan(mse).any():
             print("NaN detected in mse")
+        if torch.isnan(gen.var(dim=1, unbiased=True)).any():
+            print("NaN detected in variance computation unbiased=True")
+            print("gen.shape[1]", gen.shape[1])
+        if torch.isnan(gen.var(dim=1, unbiased=False)).any():
+            print("NaN detected in variance computation unbiased=False")
         variance = gen.var(dim=1, unbiased=True).mean(dim=(0, 1))
         if torch.isnan(variance).any():
             print("NaN detected in variance")
