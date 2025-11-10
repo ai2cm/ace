@@ -9,6 +9,7 @@ import xarray as xr
 import yaml
 from coupled_dataset_utils import (
     CoupledFieldNamesConfig,
+    CoupledSeaIceConfig,
     CoupledSeaSurfaceConfig,
     CoupledSurfaceTemperatureConfig,
     ExtraFieldsConfig,
@@ -259,7 +260,8 @@ class CoupledDatasetsConfig:
         family_name: Common name for the family of coupled output datasets.
         output_directory: Directory where outputs will be written.
         coupled_ts: Configuration for surface temperature in coupled atmosphere.
-        coupled_sea_ice: Configuration for sea ice in coupled ocean.
+        coupled_sea_surface: Configuration for sea ice in coupled ocean.
+        coupled_sea_ice: Configuration for for sea ice in the uncoupled atmosphere.
         input_field_names: Names of input fields.
         output_writer: Configuration for writing to output store.
     """
@@ -269,6 +271,9 @@ class CoupledDatasetsConfig:
     output_directory: str
     coupled_ts: CoupledSurfaceTemperatureConfig
     coupled_sea_surface: CoupledSeaSurfaceConfig
+    coupled_sea_ice: CoupledSeaIceConfig = dataclasses.field(
+        default_factory=CoupledSeaIceConfig
+    )
     input_field_names: CoupledFieldNamesConfig = dataclasses.field(
         default_factory=CoupledFieldNamesConfig
     )
@@ -418,12 +423,14 @@ class CoupledDatasetsConfig:
         logging.info("=" * 80)
         logging.info("Computing coupled sea ice fields")
         logging.info("=" * 80)
+        atmos_extras = input_datasets.atmosphere.extra_fields
         coupled_sea_ice = compute_coupled_sea_ice(
             ocean=ocean,
             atmos=atmos,
             sea_ice=sea_ice,
+            config=self.coupled_sea_ice,
             input_field_names=self.input_field_names,
-            atmos_extras=input_datasets.atmosphere.extra_fields,
+            atmos_extras=atmos_extras,
             sea_ice_extras=sea_ice_extras,
         )
 
@@ -433,7 +440,8 @@ class CoupledDatasetsConfig:
         coupled_ocean = compute_coupled_ocean(
             ocean=ocean,
             atmos=atmos,
-            coupled_sea_ice=coupled_sea_ice,
+            # drop extra atmos fields from sea ice dataset
+            coupled_sea_ice=atmos_extras.drop_extra_data_vars(coupled_sea_ice),
             config=self.coupled_sea_surface,
             input_field_names=self.input_field_names,
             extras=input_datasets.ocean.extra_fields,
@@ -448,7 +456,7 @@ class CoupledDatasetsConfig:
             coupled_ocean=coupled_ocean,
             config=self.coupled_ts,
             input_field_names=self.input_field_names,
-            extras=input_datasets.atmosphere.extra_fields,
+            extras=atmos_extras,
         )
 
         atmos_output_store = self.atmosphere_output_store
