@@ -33,7 +33,7 @@ inference:
       data_path: FME_TRAIN_DIR
     num_data_workers: 1
   aggregator:
-    log_histograms: true
+    log_histograms: false
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -44,12 +44,12 @@ train_loader:
   batch_size: 16
   num_data_workers: 4
   dataset:
-    - data_path: FME_TRAIN_DIR
+    data_path: FME_TRAIN_DIR
 validation_loader:
   batch_size: 32
   num_data_workers: 4
   dataset:
-    - data_path: FME_VALID_DIR
+    data_path: FME_VALID_DIR
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
