@@ -4,6 +4,25 @@ import torch
 import torch.distributed as dist
 from physicsnemo.distributed.utils import split_tensor_along_dim
 
+from pathlib import Path
+
+def create_directory(directory_name):
+    """
+    Create a directory if it does not already exist.
+
+    Parameters:
+    directory_name (str): The name of the directory to create.
+
+    Returns:
+    None
+    """
+    try:
+        # Using pathlib to create the directory
+        Path(directory_name).mkdir(parents=True, exist_ok=True)
+        print(f"Directory '{directory_name}' created successfully or already exists.")
+    except Exception as e:
+        print(f"An error occurred while creating the directory: {e}")
+
 # this computes a relative error compatible with torch.allclose or np.allclose
 def relative_error(tensor1, tensor2):
     return torch.sum(torch.abs(tensor1-tensor2)) / torch.sum(torch.abs(tensor2))
