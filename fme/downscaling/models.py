@@ -290,6 +290,10 @@ class DiffusionModel:
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
 
+    @property
+    def fine_shape(self) -> tuple[int, int]:
+        return self._get_fine_shape(self.coarse_shape)
+
     def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
         """
         Calculate the fine shape based on the coarse shape and downscale factor.
@@ -355,6 +359,7 @@ class DiffusionModel:
         conditioned_target = condition_with_noise_for_training(
             targets_norm, self.config.p_std, self.config.p_mean, self.sigma_data
         )
+
         denoised_norm = self.module(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
@@ -500,6 +505,7 @@ class CheckpointModelConfig:
     checkpoint_path: str
     rename: dict[str, str] | None = None
     fine_topography_path: str | None = None
+    model_updates: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # For config validation testing, we don't want to load immediately
@@ -521,6 +527,9 @@ class CheckpointModelConfig:
             ]
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
+            if self.model_updates is not None:
+                for k, v in self.model_updates.items():
+                    checkpoint_data["model"]["config"][k] = v
         return self._checkpoint_data
 
     def build(
