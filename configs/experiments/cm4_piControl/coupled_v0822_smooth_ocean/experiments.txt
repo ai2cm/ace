@@ -11,3 +11,5 @@ test-run-titan-nw2_pf8|484ss1vq_xyx8vraf|01K9RKPXQPEQ8EM5SN015XJQ9Y|training|bes
 test-run-titan-nw4_pf4|484ss1vq_xyx8vraf|01K9RKQP9SHR3WRKH4Y52ACPQT|training|best_inference_ckpt|normal|--not-preemptible
 
 test-run-titan-nw16_pf1|484ss1vq_xyx8vraf|01K9RKRF5M1Y32H44DF8C6F8TP|training|best_inference_ckpt|normal|--not-preemptible
+
+test-run-titan-nw6_pf1|41qhptht_xyx8vraf|01K9RS4FQ46X85DMPQKZNPJCWF|training|best_inference_ckpt|normal|--not-preemptible
