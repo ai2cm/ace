@@ -125,7 +125,6 @@ stepper:
         network:
           global_means_path: FME_STATS_DIR/centering.nc
           global_stds_path: FME_STATS_DIR/scaling-full-field.nc
-          fill_nans_on_normalize: true
         residual:
           global_means_path: FME_STATS_DIR/centering.nc
           global_stds_path: FME_STATS_DIR/scaling-residual.nc
