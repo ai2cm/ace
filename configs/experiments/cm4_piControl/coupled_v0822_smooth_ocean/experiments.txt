@@ -7,3 +7,5 @@ test-run-titan-nw4_pf1|484ss1vq_xyx8vraf|01K9RKNEJCBWAV1K1DNY0KJV1B|training|bes
 test-run-titan-nw8_pf1|484ss1vq_xyx8vraf|01K9RKP744409H1H0358SPJM5X|training|best_inference_ckpt|normal|--not-preemptible
 
 test-run-titan-nw2_pf8|484ss1vq_xyx8vraf|01K9RKPXQPEQ8EM5SN015XJQ9Y|training|best_inference_ckpt|normal|--not-preemptible
+
+test-run-titan-nw4_pf4|484ss1vq_xyx8vraf|01K9RKQP9SHR3WRKH4Y52ACPQT|training|best_inference_ckpt|normal|--not-preemptible
