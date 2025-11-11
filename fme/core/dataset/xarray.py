@@ -90,7 +90,7 @@ def _get_vertical_coordinate(
     idepth_mapping = {
         int(v[7:]): torch.as_tensor(ds[v].values)
         for v in ds.variables
-        if v.startswith("idepth_") and v != "idepth_19"
+        if v.startswith("idepth_")
     }
     idepth_list = [idepth_mapping[k] for k in sorted(idepth_mapping.keys())]
 
@@ -107,7 +107,7 @@ def _get_vertical_coordinate(
             mask_layers = {
                 name: torch.as_tensor(ds[name].values, dtype=dtype)
                 for name in ds.data_vars
-                if re.match(r"mask_(\d+)$", name) and name != "mask_18"
+                if re.match(r"mask_(\d+)$", name)
             }
             for name in mask_layers:
                 if "time" in ds[name].dims:
