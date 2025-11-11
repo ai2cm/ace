@@ -296,7 +296,8 @@ class LatLonOperations(GriddedOperations):
             )
 
         dist = Distributed.get_instance()
-        area_weights = area_weights[*dist.get_local_slices(area_weights.shape)]
+        if dist.spatial_parallelism:
+          area_weights = area_weights[*dist.get_local_slices(area_weights.shape)]
 
         self._device_area = area_weights.to(get_device())
         #NOTE: we do not need the *.to("cpu") lines.
