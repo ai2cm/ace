@@ -1,0 +1,28 @@
+experiment_dir: FME_OUTPUT_DIR
+n_forward_steps: 73
+forward_steps_in_memory: 20
+checkpoint_path: FME_CHECKPOINT_PATH
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ocean-emulator-e3sm
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0421-01-03T12:00:00'
+  dataset:
+    merge:
+      - data_path: FME_VALID_DIR
+        file_pattern: 2025-11-03-E3SMv3-piControl-100yr-coupled-ocean.zarr
+        engine: zarr
+      - data_path: FME_VALID_DIR
+        file_pattern: 2025-11-03-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+        engine: zarr
+  num_data_workers: 1
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: true
+aggregator:
+  log_histograms: true
