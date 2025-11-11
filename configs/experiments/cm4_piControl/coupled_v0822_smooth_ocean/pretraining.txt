@@ -1,5 +1,5 @@
 group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override
 
-fto-sfno-v0822_smooth_ocean|484ss1vq_xyx8vraf|ace-samudra-cm4|484ss1vq|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|skip|high|titan|4|800GiB|1||
+fto-sfno-v0822_smooth_ocean|484ss1vq_xyx8vraf|ace-samudra-cm4|484ss1vq|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|high|titan|4|800GiB|1||
 
-fto-sfno-v0822_smooth_ocean|41qhptht_xyx8vraf|ace-samudra-cm4|41qhptht|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|skip|high|titan|4|800GiB|1||
+fto-sfno-v0822_smooth_ocean|41qhptht_xyx8vraf|ace-samudra-cm4|41qhptht|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|high|titan|4|800GiB|1||
