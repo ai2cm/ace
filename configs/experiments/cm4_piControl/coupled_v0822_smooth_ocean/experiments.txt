@@ -1,1 +1,3 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
+
+test-run-titan|484ss1vq_xyx8vraf|01K9RG78WP4KTJEV8ESK4ED1EY|training|best_inference_ckpt|normal|--not-preemptible
