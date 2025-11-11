@@ -1,4 +1,15 @@
 group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override
-test-run-titan|484ss1vq_xyx8vraf|ace-samudra-cm4|484ss1vq|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|high|titan|4|800GiB|0||max_epochs=1 evaluate_before_training=False
+
+test-run-titan-nw4_pf1|484ss1vq_xyx8vraf|ace-samudra-cm4|484ss1vq|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|high|titan|4|800GiB|0||max_epochs=1 evaluate_before_training=False train_loader.num_data_workers=4 train_loader.prefetch_factor=1
+
+test-run-titan-nw8_pf1|484ss1vq_xyx8vraf|ace-samudra-cm4|484ss1vq|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|high|titan|4|800GiB|0||max_epochs=1 evaluate_before_training=False train_loader.num_data_workers=8 train_loader.prefetch_factor=1
+
+test-run-titan-nw2_pf8|484ss1vq_xyx8vraf|ace-samudra-cm4|484ss1vq|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|high|titan|4|800GiB|0||max_epochs=1 evaluate_before_training=False train_loader.prefetch_factor=8
+
+test-run-titan-nw4_pf4|484ss1vq_xyx8vraf|ace-samudra-cm4|484ss1vq|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|high|titan|4|800GiB|0||max_epochs=1 evaluate_before_training=False train_loader.num_data_workers=4
+
+test-run-titan-nw16_pf1|484ss1vq_xyx8vraf|ace-samudra-cm4|484ss1vq|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|high|titan|4|800GiB|0||max_epochs=1 evaluate_before_training=False train_loader.num_data_workers=16 train_loader.prefetch_factor=1
+
 fto-sfno-v0822_smooth_ocean|484ss1vq_xyx8vraf|ace-samudra-cm4|484ss1vq|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|skip|high|titan|4|800GiB|1||
+
 fto-sfno-v0822_smooth_ocean|41qhptht_xyx8vraf|ace-samudra-cm4|41qhptht|best_inference_ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|skip|high|titan|4|800GiB|1||
