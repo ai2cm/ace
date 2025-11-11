@@ -21,10 +21,12 @@ coupled_datasets:
         - PRATEsfc
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
-    sea_ice_window_avg:
+  coupled_sea_ice:
+    window_avg:
       window_timedelta: 120h
       first_timestamp: "0151-01-06T00:00:00"
       shift_timestamps_to_avg_interval_midpoint: true
+    include_ts: true
   output_writer:
     n_dask_workers: 32
 
