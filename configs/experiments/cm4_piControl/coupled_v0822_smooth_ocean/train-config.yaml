@@ -11,9 +11,9 @@ max_epochs: 20
 n_coupled_steps: 4
 inference:
   n_coupled_steps: 1456
-  coupled_steps_in_memory: 2
+  coupled_steps_in_memory: 8
   loader:
-    num_data_workers: 8
+    num_data_workers: 1
     dataset:
       ocean:
         merge:
@@ -60,8 +60,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 8
-  prefetch_factor: 1
+  num_data_workers: 2
+  prefetch_factor: 2
   dataset:
     - ocean:
         merge:
@@ -92,9 +92,9 @@ train_loader:
               start_time: '0151-01-03T12:00:00' # earlier times nan
               stop_time: '0305-12-29T12:00:00'
 validation_loader:
-  batch_size: 64
-  num_data_workers: 8
-  prefetch_factor: 1
+  batch_size: 16
+  num_data_workers: 2
+  prefetch_factor: 2
   dataset:
     - ocean:
         merge:
