@@ -1,0 +1,26 @@
+experiment_dir: /results
+n_forward_steps: 52960
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '1978-10-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+    - data_path: /climate-default/2025-11-10-era5-1deg-pressure-level-1940-2022
+      file_pattern: 2025-11-10-era5-1deg-pressure-level-1940-2022.zarr
+      engine: "zarr"
+  num_data_workers: 16
+aggregator:
+  log_zonal_mean_images: false
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
