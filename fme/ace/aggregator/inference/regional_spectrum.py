@@ -1,4 +1,18 @@
+import logging
+import warnings
+from collections import defaultdict
+
+import matplotlib.pyplot as plt
 import torch
+import xarray as xr
+
+from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorMapping
+
+from .spectrum import _get_spectrum_metrics, _plot_spectrum_pair
+
+LAT_BOUNDS = (-40, 35)
+LON_BOUNDS = (180, 243)
 
 
 def _detrend_linear(data):
@@ -43,6 +57,7 @@ def compute_isotropic_spectrum(
     window="Hann",
     truncate=True,
     cutoff_before_bins: bool = True,
+    weights=None,
 ):
     """
     Computes the isotropic 1D power spectrum from 2D (H,W), 3D (B,H,W),
@@ -71,7 +86,12 @@ def compute_isotropic_spectrum(
     truncate : bool, optional
         If True, truncates spectrum at the smallest Nyquist frequency.
     cutoff_before_bins: bool, optional
-        If True, truncates the spectrum after already computing the bin locations. Matches xrft
+        If True, truncates the spectrum after already computing the bin locations.
+        Matches xrft implementation.
+    weights : torch.Tensor, optional
+        Regional weights for masking. Should have shape (H, W) and will be broadcast
+        to match data shape. Regions with weight=0 will not contribute to spectrum.
+
     Returns:
     -------
     k_bins_centers : torch.Tensor
@@ -80,7 +100,6 @@ def compute_isotropic_spectrum(
         1D tensor of the (k * P(k)) spectrum.
         Shape: (B, C, num_bins), (B, num_bins), or (num_bins,)
     """
-
     # --- 1. Input Validation and Setup ---
     device = data.device
     dtype = data.dtype
@@ -101,6 +120,19 @@ def compute_isotropic_spectrum(
 
     if num_bins is None:
         num_bins = min(H, W) // n_factor
+
+    # Apply regional weights if provided
+    if weights is not None:
+        # Ensure weights are on the same device and have the right shape
+        if weights.shape != (H, W):
+            raise ValueError(
+                f"Weights shape {weights.shape} "
+                f"does not match data spatial shape ({H}, {W})"
+            )
+        weights = weights.to(device=device, dtype=dtype)
+        # Broadcast weights to match data shape (B, C, H, W)
+        weights_broadcast = weights.unsqueeze(0).unsqueeze(0)
+        data = data * weights_broadcast
 
     if detrend == "linear":
         data = _detrend_linear(data)
@@ -182,3 +214,118 @@ def compute_isotropic_spectrum(
         iso_spectrum = iso_spectrum.squeeze(1)
 
     return k_bins_centers, iso_spectrum
+
+
+class RegionalSpectrumAggregator:
+    """Average the regional power spectrum over batch and time dimensions."""
+
+    def __init__(
+        self,
+        regional_weights: torch.Tensor,
+    ):
+        self._regional_weights = regional_weights
+        self._power_spectrum: dict[str, torch.Tensor] = {}
+        self._wavenumbers: torch.Tensor | None = None
+        self._counts: dict[str, int] = defaultdict(int)
+
+    @torch.no_grad()
+    def record_batch(self, data: TensorMapping):
+        for name in data:
+            # Expecting data of shape (batch, time, lat, lon)
+            batch_size = data[name].shape[0]
+            time_size = data[name].shape[1]
+
+            # Reshape to (batch*time, lat, lon) for spectrum computation
+            data_reshaped = data[name].reshape(
+                batch_size * time_size, data[name].shape[2], data[name].shape[3]
+            )
+
+            # Compute spectrum with regional weights
+            wavenumbers, power_spectrum = compute_isotropic_spectrum(
+                data_reshaped, weights=self._regional_weights
+            )
+
+            # Store wavenumbers (same for all variables)
+            if self._wavenumbers is None:
+                self._wavenumbers = wavenumbers
+
+            # Average over batch*time dimension
+            mean_power_spectrum = torch.mean(power_spectrum, dim=0)
+
+            new_count = batch_size * time_size
+            if name not in self._power_spectrum:
+                self._power_spectrum[name] = mean_power_spectrum
+            else:
+                # Weighted average with previous values
+                weighted_average = (
+                    new_count * mean_power_spectrum
+                    + self._counts[name] * self._power_spectrum[name]
+                ) / (new_count + self._counts[name])
+                self._power_spectrum[name] = weighted_average
+            self._counts[name] += new_count
+
+    def get_mean(self) -> dict[str, torch.Tensor]:
+        dist = Distributed.get_instance()
+        logs = {}
+        sorted_names = sorted(list(self._power_spectrum))
+        for name in sorted_names:
+            _mean_spectrum = self._power_spectrum[name]
+            if dist.world_size > 1:
+                # assuming same count on all workers
+                _mean_spectrum = dist.reduce_mean(_mean_spectrum)
+            logs[name] = _mean_spectrum
+        return logs
+
+
+class PairedRegionalSpectrumAggregator:
+    """Record batches and return plots for paired prediction and target data."""
+
+    def __init__(
+        self,
+        regional_weights: torch.Tensor,
+        report_plot: bool,
+    ):
+        self._gen_aggregator = RegionalSpectrumAggregator(regional_weights)
+        self._target_aggregator = RegionalSpectrumAggregator(regional_weights)
+        self._report_plot = report_plot
+
+    @torch.no_grad()
+    def record_batch(
+        self,
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
+        i_time_start: int = 0,
+    ):
+        self._gen_aggregator.record_batch(gen_data)
+        self._target_aggregator.record_batch(target_data)
+
+    @torch.no_grad()
+    def get_logs(self, label: str) -> dict[str, plt.Figure | float]:
+        logs: dict[str, plt.Figure | float] = {}
+        gen_spectrum = self._gen_aggregator.get_mean()
+        target_spectrum = self._target_aggregator.get_mean()
+        if self._report_plot:
+            for name in gen_spectrum:
+                gen_spectrum_cpu = gen_spectrum[name].cpu()
+                if name not in target_spectrum:
+                    warnings.warn(f"Missing power spectrum target data for {name}")
+                    target_spectrum_cpu = None
+                else:
+                    target_spectrum_cpu = target_spectrum[name].cpu()
+                fig = _plot_spectrum_pair(gen_spectrum_cpu, target_spectrum_cpu)
+                logs[f"{label}/{name}"] = fig
+                plt.close(fig)
+        metrics = _get_spectrum_metrics(gen_spectrum, target_spectrum)
+        for name, value in metrics.items():
+            logs[f"{label}/{name}"] = value
+        return logs
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
+        logging.debug(
+            "get_dataset not implemented for PairedRegionalSpectrumAggregator. "
+            "Returning an empty dataset."
+        )
+        return xr.Dataset()
