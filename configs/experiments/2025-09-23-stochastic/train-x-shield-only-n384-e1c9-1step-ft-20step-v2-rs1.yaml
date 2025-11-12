@@ -105,6 +105,8 @@ stepper:
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
+  parameter_init:
+    weights_path: /weights/training_checkpoints/best_ckpt.tar
   step:
     type: single_module
     config:
