@@ -60,6 +60,6 @@ WEIGHTS=01K8MSK8RDWJB9GD7MEKAW2KEG
 
 JOB_NAME="ace-inference-era5-pt-era5-multi-20-multi-ics-agg"
 
-CONFIG_PATH="${SCRIPT_PATH}evaluator-era5-stochastic-weather-skill.yaml"
+CONFIG_PATH="${SCRIPT_PATH}evaluate-xshield-amip-stochastic-ace.yaml"
 
 launch_job $JOB_NAME $WEIGHTS $CONFIG_PATH

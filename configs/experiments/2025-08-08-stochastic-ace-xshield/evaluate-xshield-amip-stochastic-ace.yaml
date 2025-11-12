@@ -1,8 +1,8 @@
 experiment_dir: /results
 n_forward_steps: 40
-forward_steps_in_memory: 40
+forward_steps_in_memory: 4
 checkpoint_path: /ckpt.tar
-n_ensemble_per_ic: 2
+n_ensemble_per_ic: 10
 logging:
   log_to_screen: true
   log_to_wandb: true
