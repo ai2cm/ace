@@ -13,11 +13,7 @@ from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
-from fme.downscaling.data import (
-    PairedBatchData,
-    PairedDataLoaderConfig,
-    PairedGriddedData,
-)
+from fme.downscaling.data import PairedDataLoaderConfig, PairedGriddedData
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predict import EventConfig
 from fme.downscaling.predictors import (
@@ -112,8 +108,7 @@ class EventEvaluator:
 
     def run(self):
         logging.info(f"Running {self.event_name} event evaluation")
-        batch: PairedBatchData = next(iter(self.data.loader))
-
+        batch, topography = next(iter(self.data.get_generator()))
         sample_agg = PairedSampleAggregator(
             target=batch[0].fine.data,
             coarse=batch[0].coarse.data,
@@ -132,7 +127,7 @@ class EventEvaluator:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch(
-                batch, self.data.topography, n_samples=end_idx - start_idx
+                batch, topography, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs.prediction)
 

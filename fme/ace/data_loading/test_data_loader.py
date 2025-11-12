@@ -14,6 +14,7 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.dataloader import SlidingWindowDataLoader
 from fme.ace.data_loading.getters import (
     get_forcing_data,
     get_gridded_data,
@@ -33,6 +34,7 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.device import using_gpu
 from fme.core.typing_ import Slice
 
 
@@ -690,24 +692,20 @@ def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
     "timestamps, expected_indices",
     [
         (
-            [
-                "2020-01-01T00:00:00",
-                "2020-01-02T00:00:00",
-            ],
+            ["2020-01-01T00:00:00", "2020-01-02T00:00:00"],
             [0, 2],
         ),
         (
-            [
-                "2020-01-01T00:00:00",
-                "2021-01-02T00:00:00",
-            ],
+            ["2020-01-01T00:00:00", "2021-01-02T00:00:00"],
             None,
         ),
         (
-            [
-                "2021-01-02T00:00:00",
-            ],
+            ["2021-01-02T00:00:00"],
             None,
+        ),
+        (
+            ["2020-01-01T12:00:00", "2020-01-01T12:00:00"],
+            [1, 1],
         ),
     ],
 )
@@ -722,7 +720,7 @@ def test_TimestampList_as_indices(timestamps, expected_indices):
     )
     timestamp_list = TimestampList(timestamps)
     if expected_indices is None:
-        with pytest.raises(ValueError):
+        with pytest.raises(KeyError):
             timestamp_list.as_indices(time_index)
     else:
         np.testing.assert_equal(
@@ -966,3 +964,26 @@ def test_time_buffer(
             for window_times in dataset_window_times
         ]
         assert sum(window_matches) == 1
+
+
+@pytest.mark.parametrize(
+    "time_buffer",
+    [0, 2],
+)
+def test_pinned_memory(tmp_path, time_buffer: int):
+    _create_dataset_on_disk(tmp_path, n_times=10)
+    config = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        batch_size=1,
+        num_data_workers=0,
+        time_buffer=time_buffer,
+    )
+    requirements = DataRequirements(["foo"], 3)
+    data = get_gridded_data(config, True, requirements)
+    loader = data._loader  # GriddedData.loader returns tensors already on GPU
+    if time_buffer > 0:
+        assert isinstance(loader, SlidingWindowDataLoader)
+        loader = loader._loader  # SlidingWindowDataLoader also returns tensors on GPU
+    for batch in loader:
+        tensor = next(iter(batch.data.values()))
+        assert tensor.is_pinned() is using_gpu()

@@ -144,6 +144,11 @@ class CoupledBatchData:
             ),
         )
 
+    def pin_memory(self: SelfType) -> SelfType:
+        self.ocean_data = self.ocean_data.pin_memory()
+        self.atmosphere_data = self.atmosphere_data.pin_memory()
+        return self
+
 
 @dataclasses.dataclass
 class CoupledPairedData:
