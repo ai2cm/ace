@@ -7,8 +7,8 @@ patch:
 model:
   #checkpoint_path: /Users/annak/Code/scratch/100-to-3km-mps.ckpt
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
-  model_updates:
-    churn: 5
+  #model_updates:
+  #  churn: 5
   #  sigma_max: 300
 data:
   topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
