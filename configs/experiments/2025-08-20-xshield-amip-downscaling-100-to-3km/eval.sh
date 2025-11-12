@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-new-unet-amp-ckpt"
+JOB_NAME="eval-xshield-amip-100km-to-3km-new-unet-amp-ckpt-sigm300"
 CONFIG_FILENAME="config-generate-on-perfect-pred-global-hist-ckpt.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
