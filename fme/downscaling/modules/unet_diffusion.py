@@ -26,12 +26,12 @@ class UNetDiffusionModule(torch.nn.Module):
         super().__init__()
         self.unet = unet.to(get_device())
         self.amp_mode = amp_mode
-
-        self._amp_context = (
-            autocast(get_device(), dtype=torch.bfloat16)
-            if self.amp_mode
-            else contextlib.nullcontext()
-        )
+        if self.amp_mode:
+            if get_device().type == "mps":
+                raise ValueError("MPS does not support bfloat16 autocast.")
+            self._amp_context = autocast(get_device().type, dtype=torch.bfloat16)
+        else:
+            self._amp_context = contextlib.nullcontext()
 
     def forward(
         self,
