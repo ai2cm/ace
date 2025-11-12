@@ -34,6 +34,12 @@ def test_pad_tensor_at_end(padding, fill_value):
             )
 
 
+def test_force_non_distributed():
+    assert not Distributed.get_instance()._force_non_distributed
+    with Distributed.force_non_distributed():
+        assert Distributed.get_instance()._force_non_distributed
+
+
 @pytest.mark.parametrize(
     ["padding"],
     [

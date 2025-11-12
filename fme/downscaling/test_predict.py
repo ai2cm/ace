@@ -11,7 +11,7 @@ from fme.downscaling import predict
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
-from fme.downscaling.test_train import data_paths_helper
+from fme.downscaling.test_utils import data_paths_helper
 
 
 class LinearDownscalingDiffusion(LinearDownscaling):
@@ -105,7 +105,6 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
     predictor_config_path = create_predictor_config(
         tmp_path,
         n_samples,
-        data_paths_helper_kwargs={"rename": {"x": "var0", "y": "var1"}},
     )
     model_config = get_model_config(coarse_shape, downscale_factor=downscale_factor)
     model = model_config.build(
@@ -144,7 +143,9 @@ def test_predictor_renaming(
         tmp_path,
         n_samples,
         model_renaming=renaming,
-        data_paths_helper_kwargs={"rename": {"x": "var0_renamed", "y": "var1_renamed"}},
+        data_paths_helper_kwargs={
+            "rename": {"var0": "var0_renamed", "var1": "var1_renamed"}
+        },
     )
     model_config = get_model_config(coarse_shape, downscale_factor)
     model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)
