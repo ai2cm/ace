@@ -1,4 +1,7 @@
+import contextlib
+
 import torch
+from torch.amp import autocast
 
 from fme.core.device import get_device
 
@@ -16,14 +19,19 @@ class UNetDiffusionModule(torch.nn.Module):
 
     Args:
         unet: The U-Net model.
+        amp_mode: Whether to use automatic mixed precision if enabled on the device.
     """
 
-    def __init__(
-        self,
-        unet: torch.nn.Module,
-    ):
+    def __init__(self, unet: torch.nn.Module, amp_mode: bool = False):
         super().__init__()
         self.unet = unet.to(get_device())
+        self.amp_mode = amp_mode
+
+        self._amp_context = (
+            autocast(get_device(), dtype=torch.bfloat16)
+            if self.amp_mode
+            else contextlib.nullcontext()
+        )
 
     def forward(
         self,
@@ -39,9 +47,10 @@ class UNetDiffusionModule(torch.nn.Module):
             latent: The latent diffusion variable on the fine grid.
             noise_level: The noise level of each example in the batch.
         """
-        return self.unet(
-            latent.to(get_device()),
-            conditioning.to(get_device()),
-            sigma=noise_level.to(get_device()),
-            class_labels=None,
-        )
+        with self._amp_context:
+            return self.unet(
+                latent.to(get_device()),
+                conditioning.to(get_device()),
+                sigma=noise_level.to(get_device()),
+                class_labels=None,
+            )

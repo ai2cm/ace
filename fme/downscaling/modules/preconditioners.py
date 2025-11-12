@@ -26,12 +26,14 @@ class EDMPrecond(torch.nn.Module):
         label_dim       = 0,                # Number of class labels, 0 = unconditional.
         use_fp16        = False,            # Execute the underlying model at FP16 precision?
         sigma_data      = 0.5,              # Expected standard deviation of the training data.
+        enforce_dtype   = True,            # If enabled, do not enforce dtype checks
     ):
         super().__init__()
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
         self.sigma_data = sigma_data
         self.model = model
+        self.enforce_dtype = enforce_dtype
 
     def forward(self, latent, conditioning, sigma, class_labels=None, force_fp32=False):
         latent = latent.to(torch.float32)
@@ -46,9 +48,11 @@ class EDMPrecond(torch.nn.Module):
 
         channel_dim = 1
         input_ = torch.concat(((c_in.to(latent.device) * latent), conditioning.to(latent.device)), dim=channel_dim)
-
-        F_x = self.model(input_.to(dtype), c_noise.flatten().to(input_.device), class_labels=class_labels)
-        assert F_x.dtype == dtype
+        if self.enforce_dtype:
+            input = input_.to(dtype)
+        F_x = self.model(input_, c_noise.flatten().to(input_.device), class_labels=class_labels)
+        if self.enforce_dtype:
+            assert F_x.dtype == dtype
         # matches how UNetDiffusionModule concatenates (latent, inputs)
         n_latent_channels = F_x.shape[1]
         D_x = c_skip * latent[:, :n_latent_channels, ...] + c_out * F_x.to(torch.float32)

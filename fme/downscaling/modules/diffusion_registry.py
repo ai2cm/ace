@@ -53,6 +53,7 @@ class UNetDiffusionSong:
     encoder_type: str = "standard"
     decoder_type: str = "standard"
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    amp_mode: bool = False
 
     def build(
         self,
@@ -86,7 +87,9 @@ class UNetDiffusionSong:
             EDMPrecond(
                 unet,
                 sigma_data=sigma_data,
+                enforce_dtype=(not self.amp_mode),
             ),
+            amp_mode=self.amp_mode,
         )
 
 
