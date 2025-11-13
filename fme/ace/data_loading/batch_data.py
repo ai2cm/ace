@@ -286,6 +286,7 @@ class BatchData:
             time=self.time,
             horizontal_dims=self.horizontal_dims,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
@@ -299,6 +300,7 @@ class BatchData:
             time=self.time.isel(time=slice(n_ic_timesteps, None)),
             horizontal_dims=self.horizontal_dims,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
@@ -310,6 +312,7 @@ class BatchData:
             time=self.time,
             horizontal_dims=self.horizontal_dims,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def get_start(
@@ -345,6 +348,7 @@ class BatchData:
             time=self.time[:, time_slice],
             horizontal_dims=self.horizontal_dims,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def prepend(self: SelfType, initial_condition: PrognosticState) -> SelfType:
@@ -366,6 +370,7 @@ class BatchData:
             time=xr.concat([initial_batch_data.time, self.time], dim="time"),
             horizontal_dims=self.horizontal_dims,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:

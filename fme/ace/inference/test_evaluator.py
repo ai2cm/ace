@@ -30,8 +30,6 @@ from fme.ace.inference.evaluator import (
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import Stepper, TrainOutput
-from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
-from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
@@ -44,7 +42,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
-from fme.core.device import get_device, using_gpu
+from fme.core.device import get_device
 from fme.core.logging_utils import LoggingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -76,7 +74,6 @@ def save_plus_one_stepper(
     nz_interface: int = 7,
     ocean=None,
     multi_call: MultiCallConfig | None = None,
-    derived_forcings: DerivedForcingsConfig | None = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -84,8 +81,6 @@ def save_plus_one_stepper(
         all_names = list(set(in_names).union(out_names)) + multi_call.names
     if normalization_names is None:
         normalization_names = all_names
-    if derived_forcings is None:
-        derived_forcings = DerivedForcingsConfig()
     with tempfile.TemporaryDirectory() as temp_dir:
         mean_filename = pathlib.Path(temp_dir) / "means.nc"
         std_filename = pathlib.Path(temp_dir) / "stds.nc"
@@ -129,7 +124,6 @@ def save_plus_one_stepper(
                     ),
                 ),
             ),
-            derived_forcings=derived_forcings,
         )
         horizontal_coordinate = LatLonCoordinates(
             lat=torch.zeros(data_shape[-2]), lon=torch.zeros(data_shape[-1])
@@ -540,22 +534,15 @@ def test_inference_writer_boundaries(
     )
     # check time mean metrics
     tol = 1e-4  # relative tolerance
-    grad_mag_tol = tol
-    if using_gpu():
-        # GPU test cases have higher error
-        tol = 5e-4
-        grad_mag_tol = 3e-3
-    np.testing.assert_allclose(
-        metrics.root_mean_squared_error(
-            tar_time_mean, gen_time_mean, area_weights
-        ).item(),
-        inference_logs[-1]["inference/time_mean/rmse/var"],
-        rtol=tol,
+    assert metrics.root_mean_squared_error(
+        tar_time_mean, gen_time_mean, area_weights
+    ).item() == pytest.approx(
+        inference_logs[-1]["inference/time_mean/rmse/var"], rel=tol
     )
-    np.testing.assert_allclose(
-        metrics.weighted_mean_bias(tar_time_mean, gen_time_mean, area_weights).item(),
-        inference_logs[-1]["inference/time_mean/bias/var"],
-        rtol=tol,
+    assert metrics.weighted_mean_bias(
+        tar_time_mean, gen_time_mean, area_weights
+    ).item() == pytest.approx(
+        inference_logs[-1]["inference/time_mean/bias/var"], rel=tol
     )
 
     prediction_ds = prediction_ds.isel(sample=0)
@@ -570,30 +557,20 @@ def test_inference_writer_boundaries(
         gen_i = torch.from_numpy(gen.isel(time=i).values)
         tar_i = torch.from_numpy(tar.isel(time=i).values)
         # check that manually computed metrics match logged metrics
-        np.testing.assert_allclose(
-            metrics.root_mean_squared_error(
-                tar_i, gen_i, area_weights, dim=(-2, -1)
-            ).item(),
-            log["inference/mean/weighted_rmse/var"],
-            rtol=tol,
+        assert metrics.root_mean_squared_error(
+            tar_i, gen_i, area_weights, dim=(-2, -1)
+        ).item() == pytest.approx(log["inference/mean/weighted_rmse/var"], rel=tol)
+        assert metrics.weighted_mean_bias(
+            tar_i, gen_i, area_weights, dim=(-2, -1)
+        ).item() == pytest.approx(log["inference/mean/weighted_bias/var"], rel=tol)
+        assert metrics.gradient_magnitude_percent_diff(
+            tar_i, gen_i, area_weights, dim=(-2, -1)
+        ).item() == pytest.approx(
+            log["inference/mean/weighted_grad_mag_percent_diff/var"], rel=tol
         )
-        np.testing.assert_allclose(
-            metrics.weighted_mean_bias(tar_i, gen_i, area_weights, dim=(-2, -1)).item(),
-            log["inference/mean/weighted_bias/var"],
-            rtol=tol,
-        )
-        np.testing.assert_allclose(
-            metrics.gradient_magnitude_percent_diff(
-                tar_i, gen_i, area_weights, dim=(-2, -1)
-            ).item(),
-            log["inference/mean/weighted_grad_mag_percent_diff/var"],
-            rtol=grad_mag_tol,
-        )
-        np.testing.assert_allclose(
-            metrics.weighted_mean(gen_i, area_weights, dim=(-2, -1)).item(),
-            log["inference/mean/weighted_mean_gen/var"],
-            rtol=tol,
-        )
+        assert metrics.weighted_mean(
+            gen_i, area_weights, dim=(-2, -1)
+        ).item() == pytest.approx(log["inference/mean/weighted_mean_gen/var"], rel=tol)
 
         # the target obs should be the same as the validation data obs
         # ds is original data which includes IC, target_ds does not
@@ -834,6 +811,7 @@ def test_derived_metrics_run_without_errors(
     "time_coarsen,n_forward_steps,forward_steps_in_memory",
     [
         pytest.param(3, 12, 4, id="not_multiple_of_forward_steps_in_memory"),
+        pytest.param(-1, 12, 4, id="invalid_time_coarsen"),
         pytest.param(2, 5, 4, id="not_multiple_of_n_forward_steps"),
     ],
 )
@@ -1125,35 +1103,24 @@ def test_resolve_variable_metadata(
         }
 
 
-@pytest.mark.parametrize(
-    "solar_constant",
-    [
-        pytest.param(ValueConfig(1360.0), id="solar-constant-as-value"),
-        pytest.param(NameConfig("solar_constant"), id="solar-constant-as-name"),
-    ],
-)
-def test_evaluator_with_derived_forcings(
-    tmp_path: pathlib.Path, solar_constant: NameConfig | ValueConfig
-):
-    forward_steps_in_memory = 2
-    insolation_name = "DSWRFtoa"
-    in_names = ["var", "forcing_var", insolation_name]
-    out_names = ["var", "ULWRFtoa", "USWRFtoa"]
-    non_derived_names = ["var", "forcing_var", "ULWRFtoa", "USWRFtoa"]
-    if isinstance(solar_constant, NameConfig):
-        non_derived_names.append(solar_constant.name)
-
+@pytest.mark.parametrize("n_ensemble_per_ic", [1, 2, 3])
+def test_inference_ensembles(n_ensemble_per_ic, tmp_path: pathlib.Path):
+    """Test that data at initial condition boundaires"""
+    in_names = ["var"]
+    out_names = ["var"]
+    all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
 
-    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
+
+    n_forward_steps = 21
+    forward_steps_in_memory = 2
 
     dim_sizes = DimSizes(
-        n_time=9,
+        n_time=n_forward_steps + 1,
         horizontal=horizontal,
         nz_interface=4,
     )
-    insolation = InsolationConfig(insolation_name, solar_constant)
-    derived_forcings = DerivedForcingsConfig(insolation=insolation)
     save_plus_one_stepper(
         stepper_path,
         in_names,
@@ -1161,43 +1128,117 @@ def test_evaluator_with_derived_forcings(
         mean=0.0,
         std=1.0,
         data_shape=dim_sizes.shape_nd,
-        derived_forcings=derived_forcings,
     )
     data = FV3GFSData(
         path=tmp_path,
-        names=non_derived_names,
+        names=all_names,
         dim_sizes=dim_sizes,
         timestep_days=TIMESTEP.total_seconds() / 86400,
     )
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
-        n_forward_steps=2,
-        forward_steps_in_memory=forward_steps_in_memory,
+        n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
-        logging=LoggingConfig(
-            log_to_screen=True,
-            log_to_file=False,
-            log_to_wandb=False,
-        ),
+        logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
+        forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+        n_ensemble_per_ic=n_ensemble_per_ic,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
-    main(yaml_config=str(config_filename))
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(
+            yaml_config=str(config_filename),
+        )
+        inference_logs = wandb.get_logs()
+    n_ic_timesteps = 1
+    summary_log_step = 1
+    assert (
+        len(inference_logs)
+        == n_ic_timesteps + config.n_forward_steps + summary_log_step
+    )
 
-    autoregressive_predictions = tmp_path / "autoregressive_predictions.nc"
-    ds = xr.open_dataset(autoregressive_predictions, decode_timedelta=False)
+    prediction_ds = xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    )
+    target_ds = xr.open_dataset(
+        tmp_path / "autoregressive_target.nc", decode_timedelta=False
+    )
+    # data writers do not include initial condition
+    assert len(prediction_ds["time"]) == n_forward_steps
+    assert not np.any(np.isnan(prediction_ds["var"].values))
 
-    # If insolation were not computed, net_energy_flux_toa_into_atmosphere would
-    # not be computed.
-    assert "net_energy_flux_toa_into_atmosphere" in ds
+    gen = prediction_ds["var"]
+    tar = target_ds["var"]
+    gen_time_mean = torch.from_numpy(gen.mean(dim="time").values)
+    tar_time_mean = torch.from_numpy(tar.mean(dim="time").values)
+    area_weights = metrics.spherical_area_weights(
+        tar["lat"].values, num_lon=len(tar["lon"])
+    )
+    # check time mean metrics
+    tol = 1e-4  # relative tolerance
+    assert metrics.root_mean_squared_error(
+        tar_time_mean, gen_time_mean, area_weights
+    ).item() == pytest.approx(
+        inference_logs[-1]["inference/time_mean/rmse/var"], rel=tol
+    )
+    assert metrics.weighted_mean_bias(
+        tar_time_mean, gen_time_mean, area_weights
+    ).item() == pytest.approx(
+        inference_logs[-1]["inference/time_mean/bias/var"], rel=tol
+    )
 
-    # Forcings, including those that are derived, do not end up in output.
-    assert insolation_name not in ds
+    prediction_ds = prediction_ds.isel(sample=0)
+    target_ds = target_ds.isel(sample=0)
+    ds = xr.open_dataset(data.data_filename, decode_timedelta=False)
+
+    for i in range(0, n_forward_steps):
+        # metrics logs includes IC while saved data does not
+        log = inference_logs[i + n_ic_timesteps]
+        # metric steps should match lead times
+        assert log["inference/mean/forecast_step"] == i + n_ic_timesteps
+        gen_i = torch.from_numpy(gen.isel(time=i).values)
+        tar_i = torch.from_numpy(tar.isel(time=i).values)
+        # check that manually computed metrics match logged metrics
+        assert metrics.root_mean_squared_error(
+            tar_i, gen_i, area_weights, dim=(-2, -1)
+        ).item() == pytest.approx(log["inference/mean/weighted_rmse/var"], rel=tol)
+        assert metrics.weighted_mean_bias(
+            tar_i, gen_i, area_weights, dim=(-2, -1)
+        ).item() == pytest.approx(log["inference/mean/weighted_bias/var"], rel=tol)
+        assert metrics.gradient_magnitude_percent_diff(
+            tar_i, gen_i, area_weights, dim=(-2, -1)
+        ).item() == pytest.approx(
+            log["inference/mean/weighted_grad_mag_percent_diff/var"], rel=tol
+        )
+        assert metrics.weighted_mean(
+            gen_i, area_weights, dim=(-2, -1)
+        ).item() == pytest.approx(log["inference/mean/weighted_mean_gen/var"], rel=tol)
+
+        # the target obs should be the same as the validation data obs
+        # ds is original data which includes IC, target_ds does not
+        np.testing.assert_allclose(
+            target_ds["var"].isel(time=i).values,
+            ds["var"].isel(time=i + 1).values,
+        )
+        if i > 0:
+            lead_da = prediction_ds["var"].isel(time=i)
+            # predictions should be previous condition + 1
+            np.testing.assert_allclose(
+                lead_da.values,
+                prediction_ds["var"].isel(time=i - 1).values + 1,
+            )
+            # prediction and target should not have entirely the same values at
+            # any lead > 0
+            assert not np.allclose(
+                lead_da.values,
+                target_ds["var"].isel(time=i).values,
+            )

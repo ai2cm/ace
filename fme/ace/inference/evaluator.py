@@ -2,7 +2,6 @@ import dataclasses
 import datetime
 import logging
 import os
-import time
 from collections.abc import Callable, Mapping, Sequence
 
 import dacite
@@ -249,6 +248,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     initial_condition_requirements = (
         stepper_config.get_prognostic_state_data_requirements()
     )
+    initial_condition_requirements.n_ensemble = config.n_ensemble_per_ic
     data = get_inference_data(
         config=config.loader,
         total_forward_steps=config.n_forward_steps,
@@ -358,6 +358,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         k: v for k, v in summary_logs.items() if "ssr_bias" in k or "crps" in k
     }
     print("final summary logs ssr_bias and crps:", temp_logs)
-    # record_logs([summary_logs])
-    record_logs([temp_logs])
-    time.sleep(10)  # ensure wandb logs are flushed before ending process
+    record_logs([summary_logs])
+    # record_logs([temp_logs])
+    # time.sleep(10)  # ensure wandb logs are flushed before ending process
