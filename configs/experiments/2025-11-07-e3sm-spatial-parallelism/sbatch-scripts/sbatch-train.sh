@@ -4,7 +4,7 @@
 #SBATCH -q regular
 #SBATCH -C gpu
 #SBATCH -J train-fme
-#SBATCH --nodes=4
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128
@@ -49,8 +49,8 @@ cp -r $CONFIG_DIR $FME_OUTPUT_DIR/job_config
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29507
 
-export H_PARALLEL_SIZE=2
-export W_PARALLEL_SIZE=2
+export H_PARALLEL_SIZE=1
+export W_PARALLEL_SIZE=4
 
 echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT"
 # run the requeueable job
