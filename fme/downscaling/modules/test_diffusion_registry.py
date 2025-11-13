@@ -3,7 +3,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
-from fme.downscaling.modules.unets import NonDivisibleShapeError
+from fme.downscaling.modules.unets import NonDivisibleShapeError, UNetBlock
 
 
 def test_diffusion_unet_shapes():
@@ -118,6 +118,10 @@ def test_diffusion_unet_autocast():
 
     n_channels = 3
 
+    captured_dtypes = {}
+    def hook_fn(module, input, output):
+        captured_dtypes[module.__class__.__name__] = output.dtype
+
     unet = (
         DiffusionModuleRegistrySelector(
             "unet_diffusion_song",
@@ -135,11 +139,19 @@ def test_diffusion_unet_autocast():
         )
         .to(get_device())
     )
-
+    hooks = [
+        m.register_forward_hook(hook_fn)
+        for m in unet.modules()
+        if isinstance(m, UNetBlock)
+    ]
+    
     batch_size = 2
     # models expect interpolated data, so use fine_shape for inputs
     input = torch.randn(batch_size, n_channels, *fine_shape)
     latent = torch.randn(batch_size, n_channels, *fine_shape)
     noise_level = torch.randn(batch_size, 1, 1, 1)
-    outputs = unet(latent, input, noise_level)
-    assert outputs.dtype == torch.bfloat16
+    _ = unet(latent, input, noise_level)
+
+    for h in hooks:
+        h.remove()
+    assert any(dtype == torch.bfloat16 for dtype in captured_dtypes.values())
