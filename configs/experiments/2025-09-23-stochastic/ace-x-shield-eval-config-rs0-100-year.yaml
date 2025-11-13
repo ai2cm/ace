@@ -18,8 +18,8 @@ loader:
     data_path: /climate-default
     file_pattern: 2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
     engine: zarr
+    n_repeats: 10
   num_data_workers: 16
-  n_repeats: 10
 aggregator:
   log_zonal_mean_images: true
   log_histograms: true
