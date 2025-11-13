@@ -52,7 +52,8 @@ run_eval() {
 
 base_name="stochastic"
 
-run_eval "ace-x-shield-eval-config-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-eval-rs0"
-#run_eval "ace-x-shield-eval-config-rs1.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-eval-rs1"
-run_eval "ace-x-shield-eval-config-rs2.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-eval-rs2"
-run_eval "ace-x-shield-eval-config-rs3.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-eval-rs3"
+# run_eval "ace-x-shield-eval-config-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-eval-rs0"
+# run_eval "ace-x-shield-eval-config-rs1.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-eval-rs1"
+# run_eval "ace-x-shield-eval-config-rs2.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-eval-rs2"
+# run_eval "ace-x-shield-eval-config-rs3.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-eval-rs3"
+run_eval "ace-x-shield-eval-config-rs0-1-year.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-year-rs0"
