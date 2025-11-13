@@ -175,6 +175,7 @@ class _EnsembleAggregator:
             for key in gen_data:
                 self._variable_metrics["crps"][key] = CRPSMetric()
                 self._variable_metrics["ssr_bias"][key] = SSRBiasMetric()
+                self._variable_metrics["ensemble_mean_rmse"][key] = EnsembleMeanMetric()
         return self._variable_metrics
 
     @torch.no_grad()
