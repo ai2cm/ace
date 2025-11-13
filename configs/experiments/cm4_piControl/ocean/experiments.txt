@@ -1,1 +1,3 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
+
+cm4_piControl_nosmooth-nfs4-150ep_wu3xLR|rs0|01K9XPZAK68HZ1YRC29VZSQ97W|training|best_inference_ckpt|normal|--not-preemptible
