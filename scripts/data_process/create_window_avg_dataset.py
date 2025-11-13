@@ -50,11 +50,6 @@ class WindowAvgDatasetConfig:
     time_dim: str = "time"
     subset_names: list[str] | None = None
 
-    def __post_init__(self):
-        logging.info(f"  Window timedelta: {self.window_timedelta}")
-        if self.subset_names is not None:
-            logging.info(f"  Subset of variables: {self.subset_names}")
-
     def _compute_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
         if self.subset_names is not None:
             ds = ds[self.subset_names]
