@@ -50,7 +50,7 @@ launch_job () {
 }
 
 # checkpoint datasets
-WEIGHTS=01K8MSK8RDWJB9GD7MEKAW2KEG
+WEIGHTS=01K8XNTHMV8PS2S0XGWASM03AA
 
 
 JOB_NAME="ace-inference-era5-pt-era5-multi-20-multi-ics-agg"

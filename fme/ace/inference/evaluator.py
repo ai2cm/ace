@@ -352,12 +352,4 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         **timer.get_durations(),
         **aggregator.get_summary_logs(),
     }
-    print("Logging final summary logs to wandb:", summary_logs)
-
-    temp_logs = {
-        k: v for k, v in summary_logs.items() if "ssr_bias" in k or "crps" in k
-    }
-    print("final summary logs ssr_bias and crps:", temp_logs)
     record_logs([summary_logs])
-    # record_logs([temp_logs])
-    # time.sleep(10)  # ensure wandb logs are flushed before ending process
