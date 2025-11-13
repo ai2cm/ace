@@ -49,7 +49,7 @@ class EDMPrecond(torch.nn.Module):
         channel_dim = 1
         input_ = torch.concat(((c_in.to(latent.device) * latent), conditioning.to(latent.device)), dim=channel_dim)
         if self.enforce_dtype:
-            input = input_.to(dtype)
+            input_ = input_.to(dtype)
         F_x = self.model(input_, c_noise.flatten().to(input_.device), class_labels=class_labels)
         if self.enforce_dtype:
             assert F_x.dtype == dtype
