@@ -1,7 +1,8 @@
+import contextlib
 import logging
 import os
-from collections.abc import Callable
-import contextlib
+from collections.abc import Callable, Iterator
+
 import torch.distributed
 from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
@@ -67,25 +68,29 @@ class Distributed:
 
     @classmethod
     @contextlib.contextmanager
-    def non_distributed(cls):
+    def force_non_distributed(cls) -> Iterator["Distributed"]:
         """
-        Context manager to temporarily set the distributed singleton to a
-        non-distributed instance.
+        Force the distributed singleton to be in non-distributed mode.
         """
+        global singleton
         original = cls.get_instance()
-        cls.singleton = cls(force_non_distributed=True)
+        singleton = cls(force_non_distributed=True)
         try:
-            yield cls.get_instance()
+            yield singleton
         finally:
-            cls.singleton = original
+            singleton = original
 
     def __init__(self, force_non_distributed: bool = False):
-
-        if torch.distributed.is_available() and not torch.distributed.is_initialized() and not force_non_distributed:
+        if (
+            torch.distributed.is_available()
+            and not torch.distributed.is_initialized()
+            and not force_non_distributed
+        ):
             self._distributed = self._init_distributed()
         else:
             self._distributed = False
         self._seed = 0
+        self._force_non_distributed = force_non_distributed  # for debugging
 
     def _init_distributed(self):
         #We can review this block of code once spatial parallelism

@@ -15,7 +15,8 @@ class ExtraFieldsConfig:
     def copy_extra_data_vars(
         self, input_ds: xr.Dataset, output_ds: xr.Dataset
     ) -> xr.Dataset:
-        """Copy additional data variables from input to output dataset.
+        """Copy additional data variables from input to output dataset. Mutates
+        output_ds.
 
         Matches variables by exact name or prefix (if ending with '_').
 
@@ -25,6 +26,7 @@ class ExtraFieldsConfig:
 
         Returns:
             The output dataset with additional variables copied in.
+
         """
         if self.names_and_prefixes is None:
             return output_ds
@@ -39,6 +41,23 @@ class ExtraFieldsConfig:
                 if match(prefix_or_name, name):
                     output_ds[name] = input_ds[name]
         return output_ds
+
+    def drop_extra_data_vars(self, ds: xr.Dataset) -> xr.Dataset:
+        """Drop the additional data variables from a dataset where they were
+        previously added.
+
+        Returns:
+            A copy of the dataset, with any additional variables dropped.
+        """
+        if self.names_and_prefixes is not None:
+            names = [
+                var
+                for var in ds.data_vars
+                if any(var.startswith(prefix) for prefix in self.names_and_prefixes)
+            ]
+        else:
+            names = []
+        return ds.drop_vars(names, errors="ignore")
 
 
 def _clip_coastal_grid_cells(
@@ -94,6 +113,34 @@ def _minmax_coastal_solid_temp(
     return min_solid_ts, max_solid_ts
 
 
+def _interpolate_sst(
+    ts: xr.DataArray,
+    sst: xr.DataArray,
+    ofrac: xr.DataArray,
+    thresh: float = 1.0,
+) -> xr.DataArray:
+    ofrac = ofrac.where(ofrac < thresh, 1.0)
+    return (1 - ofrac) * ts + ofrac * sst
+
+
+def _make_serializable_time_coord(
+    ds: xr.Dataset,
+    timedelta: str = "6h",
+    tdim: str = "time",
+) -> xr.CFTimeIndex:
+    # this is needed for proper time coord serialization
+    tcoord = xr.date_range(
+        str(ds[tdim].isel({tdim: 0}).values.item()),
+        str(ds[tdim].isel({tdim: -1}).values.item()),
+        freq=timedelta,
+        calendar=ds[tdim].isel({tdim: 0}).values.item().calendar,
+        use_cftime=True,
+    )
+    assert len(tcoord) == len(ds[tdim])
+    tcoord.attrs = ds[tdim].attrs
+    return tcoord
+
+
 @dataclasses.dataclass
 class CoupledSurfaceTemperatureConfig:
     """Determines how to apply the input ocean dataset's SST to the input
@@ -116,7 +163,7 @@ class CoupledSurfaceTemperatureConfig:
         how: How to compute the coupled surface temperature.
         ocean_fraction_threshold: Threshold above which ocean fractions values are
             treated as 1.
-        timedelta: Time resolution of the atmosphere data (e.g., "6h").
+        timedelta: Time resolution of the atmosphere data (default: "6h").
 
     """
 
@@ -156,8 +203,7 @@ class CoupledSurfaceTemperatureConfig:
                 thresh, solid_ts, ofrac, min_series, max_series
             )
         elif self.how == "interpolate_sst":
-            ofrac = ofrac.where(ofrac < thresh, 1.0)
-            ts_mod = (1 - ofrac) * ts + ofrac * sst
+            ts_mod = _interpolate_sst(ts, sst, ofrac, thresh)
         else:
             # simple threshold
             ts_mod = ts.where(ofrac < thresh, sst)
@@ -197,6 +243,7 @@ class CoupledSeaSurfaceConfig:
         sea_ice_window_avg: Optional configuration for windowed time-averaging of the
             coupled sea ice dataset. If None, the coupled sea ice is simply subsampled
             to the ocean dataset temporal frequency.
+        timedelta: Time resolution of the ocean data (default: "120h").
 
     """
 
@@ -257,8 +304,8 @@ class CoupledSeaSurfaceConfig:
         return da.where(self._mask > 0)
 
     def apply_sea_ice_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
-        logging.info("Computing window-averaged sea ice fields")
         if self.sea_ice_window_avg is not None:
+            logging.info("Computing window-averaged sea ice fields")
             return self.sea_ice_window_avg.get_window_avg(ds)
         return ds
 
@@ -338,9 +385,55 @@ class CoupledFieldNamesConfig:
     )
 
 
+@dataclasses.dataclass
+class CoupledSeaIceConfig:
+    """Configuration for computing the coupled sea ice dataset.
+
+    Parameters:
+        window_avg: Optional configuration for windowed time-averaging of the
+            coupled sea ice dataset.
+        include_ts: If true, then the atmosphere surface temperature field is added
+            to the output dataset. If window_avg is also configured, then the window-
+            average is applied to ocean grid cells only based on the forumula
+            (1 - ofrac_window_avg) * ts + ofrac_window_avg * ts_window_avg.
+        timedelta: Time resolution of the sea ice data (default: "6h").
+
+    """
+
+    window_avg: WindowAvgDatasetConfig | None = None
+    include_ts: bool = False
+    timedelta: str = "6h"
+
+    def apply_window_avg_and_reindex(
+        self,
+        ds: xr.Dataset,
+        atmos_names: AtmosphereInputFieldsConfig,
+        time_dim="time",
+    ) -> xr.Dataset:
+        ds_avg = ds
+        ts_name = atmos_names.surface_temperature_name
+        if ts_name in ds_avg and not self.include_ts:
+            ds_avg = ds_avg.drop(ts_name)
+        if self.window_avg is not None:
+            logging.info("Computing window-averaged coupled sea ice")
+            ds_avg = self.window_avg.get_window_avg(ds)
+            ds_avg = ds_avg.reindex(time=ds["time"], method="ffill")
+            logging.info(
+                f"After reindex window-averaged time coord:\n {str(ds_avg[time_dim])}"
+            )
+            if ts_name in ds_avg.data_vars:
+                ds_avg[ts_name] = _interpolate_sst(
+                    ts=ds[ts_name],
+                    sst=ds_avg[ts_name],
+                    ofrac=ds_avg[atmos_names.ocean_fraction_name],
+                )
+        return ds_avg
+
+
 def compute_coupled_sea_ice(
     ocean: xr.Dataset,
     atmos: xr.Dataset,
+    config: CoupledSeaIceConfig,
     sea_ice: xr.Dataset | None = None,
     input_field_names: CoupledFieldNamesConfig | None = None,
     atmos_extras: ExtraFieldsConfig | None = None,
@@ -355,11 +448,11 @@ def compute_coupled_sea_ice(
         ocean: Ocean dataset containing SST and (optionally) sea surface fraction.
         atmos: Atmosphere dataset containing land fraction, sea ice fraction, and
             ocean fraction.
-        config: Configuration for sea ice mask computation.
-        input_field_names: Names of input fields. If None, uses defaults.
         sea_ice: Optional separate sea ice dataset. If provided, sea ice fraction
             is taken from here instead of from atmosphere dataset. Assumed to have
             the same temporal resolution as the atmos dataset.
+        config: Configuration for window averaging and including surface temperature.
+        input_field_names: Names of input fields. If None, uses defaults.
         atmos_extras: Optional configuration for copying extra variables from the
             atmosphere dataset.
         sea_ice_extras: Optional configuration for copying extra variables from the
@@ -390,6 +483,7 @@ def compute_coupled_sea_ice(
     lfrac_name = input_field_names.atmosphere.land_fraction_name
     ifrac_name = input_field_names.atmosphere.sea_ice_fraction_name
     ofrac_name = input_field_names.atmosphere.ocean_fraction_name
+    ts_name = input_field_names.atmosphere.surface_temperature_name
 
     # ocean inputs
     sfrac_name = input_field_names.ocean.sea_surface_fraction_name
@@ -424,7 +518,7 @@ def compute_coupled_sea_ice(
                 logging.warning(
                     f"{sfrac_name} has a time dimension. Using first timepoint."
                 )
-                sfrac = sfrac.isel({tdim: 0}).drop(tdim)
+                sfrac = sfrac.isel({tdim: 0}).drop_vars(tdim)
         except KeyError:
             logging.warning(
                 f"{sfrac_name} not found in ice dataset. "
@@ -462,8 +556,18 @@ def compute_coupled_sea_ice(
             ofrac_name: ofrac_mod,
             sic_name: sic_mod,
             ifrac_name: ifrac_mod,
+            ts_name: atmos[ts_name],
         }
     )
+    ds = config.apply_window_avg_and_reindex(
+        ds,
+        input_field_names.atmosphere,
+        input_field_names.time_dim,
+    )
+    ds[tdim] = _make_serializable_time_coord(
+        ds=atmos, tdim=tdim, timedelta=config.timedelta
+    )
+
     # copy over additional variables from inputs
     for extras, input_ds in zip([atmos_extras, sea_ice_extras], [atmos, sea_ice]):
         if extras is not None:
@@ -512,21 +616,18 @@ def compute_coupled_ocean(
     sst_name = input_field_names.ocean.sea_surface_temperature_name
     ifrac_name = input_field_names.atmosphere.sea_ice_fraction_name
     sic_name = input_field_names.derived.ocean_sea_ice_fraction_name
+    ts_name = input_field_names.atmosphere.surface_temperature_name
+
+    ds = coupled_sea_ice
+    if ts_name in ds.data_vars:
+        ds = ds.drop(ts_name)
 
     ds = config.apply_sea_ice_window_avg(coupled_sea_ice)
     ds = ds.sel({tdim: ocean[tdim]})
     ds = xr.merge([ds, config.apply_surface_flux_window_avg(atmos)])
-
-    tcoord = xr.date_range(
-        str(ocean[tdim].isel({tdim: 0}).values.item()),
-        str(ocean[tdim].isel({tdim: -1}).values.item()),
-        freq=config.timedelta,
-        calendar=ocean[tdim].isel({tdim: 0}).values.item().calendar,
-        use_cftime=True,
-    )  # this is needed for proper time coord serialization
-    assert len(tcoord) == len(ocean[tdim])
-    tcoord.attrs = ocean[tdim].attrs
-    ds[tdim] = tcoord
+    ds[tdim] = _make_serializable_time_coord(
+        ds=ocean, tdim=tdim, timedelta=config.timedelta
+    )
 
     sea_ice_mask = config.compute_sea_ice_mask(ocean[sst_name])
     sea_ice_mask.attrs = {
@@ -620,16 +721,6 @@ def compute_coupled_atmosphere(
     )
     ts_mod.attrs = ts.attrs
 
-    tcoord = xr.date_range(
-        str(atmos[tdim].isel({tdim: 0}).values.item()),
-        str(atmos[tdim].isel({tdim: -1}).values.item()),
-        freq=config.timedelta,
-        calendar=atmos[tdim].isel({tdim: 0}).values.item().calendar,
-        use_cftime=True,
-    )  # this is needed for proper time coord serialization
-    assert len(tcoord) == len(atmos[tdim])
-    tcoord.attrs = atmos[tdim].attrs
-
     ds = xr.Dataset(
         {
             lfrac_name: lfrac,
@@ -639,7 +730,9 @@ def compute_coupled_atmosphere(
             ts_name: ts_mod,
         }
     )
-    ds[tdim] = tcoord
+    ds[tdim] = _make_serializable_time_coord(
+        ds=atmos, tdim=tdim, timedelta=config.timedelta
+    )
     if extras is not None:
         # copy over additional variables from the atmosphere dataset
         return extras.copy_extra_data_vars(atmos, ds)

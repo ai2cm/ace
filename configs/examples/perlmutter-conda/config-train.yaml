@@ -12,22 +12,22 @@ inference:
   loader:
     start_indices:
       times:
-        - '1970-01-01T00:00:00'
-        - '1973-01-01T00:00:00'
-        - '1976-01-01T00:00:00'
-        - '1979-01-01T00:00:00'
-        - '1982-01-01T00:00:00'
-        - '1985-01-01T00:00:00'
-        - '1988-01-01T00:00:00'
-        - '1991-01-01T00:00:00'
-        - '1994-01-01T00:00:00'
-        - '1997-01-01T00:00:00'
-        - '2000-01-01T00:00:00'
-        - '2003-01-01T00:00:00'
-        - '2006-01-01T00:00:00'
-        - '2009-01-01T00:00:00'
-        - '2012-01-01T00:00:00'
-        - '2015-01-01T00:00:00'
+        - '1970-01-01T06:00:00'
+        - '1973-01-01T06:00:00'
+        - '1976-01-01T06:00:00'
+        - '1979-01-01T06:00:00'
+        - '1982-01-01T06:00:00'
+        - '1985-01-01T06:00:00'
+        - '1988-01-01T06:00:00'
+        - '1991-01-01T06:00:00'
+        - '1994-01-01T06:00:00'
+        - '1997-01-01T06:00:00'
+        - '2000-01-01T06:00:00'
+        - '2003-01-01T06:00:00'
+        - '2006-01-01T06:00:00'
+        - '2009-01-01T06:00:00'
+        - '2012-01-01T06:00:00'
+        - '2015-01-01T06:00:00'
     dataset:
       data_path: FME_TRAIN_DIR
     num_data_workers: 1
@@ -43,12 +43,12 @@ train_loader:
   batch_size: 16
   num_data_workers: 4
   dataset:
-    - data_path: FME_TRAIN_DIR
+    data_path: FME_TRAIN_DIR
 validation_loader:
   batch_size: 32
   num_data_workers: 4
   dataset:
-    - data_path: FME_VALID_DIR
+    data_path: FME_VALID_DIR
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
@@ -98,10 +98,10 @@ stepper:
           global_stds_path: FME_STATS_DIR/scaling-full-field.nc
         residual:
           global_means_path: FME_STATS_DIR/centering.nc
-          global_stds_path: FME_STATS_DIR/scaling-residual.nc      
+          global_stds_path: FME_STATS_DIR/scaling-residual.nc
       ocean:
         surface_temperature_name: TS
-        ocean_fraction_name: ocean_fraction
+        ocean_fraction_name: OCNFRAC
       corrector:
         conserve_dry_air: true
         moisture_budget_correction: advection_and_precipitation

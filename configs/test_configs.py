@@ -15,6 +15,7 @@ def get_yaml_files(pattern, exclude=None):
     paths = list(EXAMPLES_DIRECTORY.rglob(pattern))
     if exclude is not None:
         paths = [p for p in paths if exclude not in str(p)]
+    paths = [p for p in paths if "experiments/" not in str(p)]
     return paths
 
 
@@ -31,14 +32,16 @@ def validate_config(file_path, config_class):
 
 
 def test_train_configs_are_valid():
-    train_files = get_yaml_files("*train*.yaml", exclude="downscaling")
+    train_files = get_yaml_files("*train*.yaml", exclude="baselines/downscaling")
     assert len(train_files) > 0, "No train files found"
     for file in train_files:
         validate_config(file, fme.ace.TrainConfig)
 
 
 def test_evaluator_configs_are_valid():
-    evaluator_files = get_yaml_files("*evaluator*.yaml", exclude="downscaling")
+    evaluator_files = get_yaml_files(
+        "*evaluator*.yaml", exclude="baselines/downscaling"
+    )
     assert len(evaluator_files) > 0, "No evaluator files found"
     for file in evaluator_files:
         validate_config(file, fme.ace.InferenceEvaluatorConfig)

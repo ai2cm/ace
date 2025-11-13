@@ -6,7 +6,7 @@ set -x
 export WANDB_NAME=PM-AMIP-EAMv3-train-rs1
 export WANDB_RUN_GROUP=2025-04-01-AMIP-EAMv3
 
-export COMMIT=06e96385f
+export COMMIT=$(git rev-parse --short HEAD)
 
 # directories for input data (training, validation, inference, stats)
 export FME_TRAIN_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1deg/traindata
