@@ -1,0 +1,85 @@
+experiment_dir: /results
+n_samples: 2
+# Uncomment patch config below if using coarse inputs larger than 16x16 deg
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /checkpoints/ckpt.tar
+  rename:
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+data:
+  topography: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  coarse:
+  - data_path: /climate-default/home/troya/explore2/troya/2025-09-02-ACE-1-step-downscaling/data/one_year_free_run/
+    engine: netcdf4
+    file_pattern: one_year_free_run_coarse_xshield_ace_predictions.nc
+    infer_timestep: false
+    subset:
+      start_time: '2014-03-01T00:00:00'
+      stop_time: '2014-03-02T18:00:00'
+      #step: 7
+  # Florida
+  #lat_extent:
+  #  start: 22.0
+  #  stop: 38.0
+  #lon_extent:
+  #  start: 273.0
+  #  stop: 289.0
+  # PNW
+  # lat_extent:
+  #   start: 35
+  #   stop:  51.0
+  # lon_extent:
+  #   start: 232.0
+  #   stop:  248.0
+  # CONUS
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: False
+events:
+ - name: Global_perspective_japan_tc_20140606
+   date: 2014-06-06T18:00
+   lat_extent:
+     start: -45
+     stop: 45
+   lon_extent:
+     start: 0
+     stop: 180
+   save_generated_samples: True
+   n_samples: 2
+#   n_samples: 16
+# - name: WPacific_hurricane_landfall_china_20230510
+#   date: 2023-05-10T12:00
+#   lat_extent:
+#     start: 7
+#     stop: 23
+#   lon_extent:
+#     start: 104
+#     stop: 120
+#   save_generated_samples: True
+#   n_samples: 16
+# - name: extratropical_cyclone_US_20230403
+#   date: 2023-04-03T12:00
+#   lat_extent:
+#     start: 34
+#     stop: 50
+#   lon_extent:
+#     start: 254
+#     stop: 270
+#   save_generated_samples: True
+#   n_samples: 16
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-downscaling
+  entity: ai2cm
