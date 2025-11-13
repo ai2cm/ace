@@ -9,6 +9,7 @@ model:
     type: MSE
   module:
     config:
+      amp_mode: false
       model_channels: 128
       attn_resolutions: []
       num_blocks: 1
@@ -44,50 +45,44 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  #sample_with_replacement: 320   # should be ~20 min per epoch train time for 40 per gpu x 8 gpus
+  sample_with_replacement: 160
   batch_size: 12
-  num_data_workers: 8
+  num_data_workers: 4
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 3km.zarr
     engine: zarr
     subset:
-      start: 0
-      stop: 120
+      start_time: '2014-01-01T00:00:00'
+      stop_time: '2022-12-31T23:59:00'
   coarse:
-  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 100km.zarr
     engine: zarr
     subset:
-      start: 0
-      stop: 120
-  # lat_extent:
-  #   start: -66.0
-  #   stop: 70.0
+      start_time: '2014-01-01T00:00:00'
+      stop_time: '2022-12-31T23:59:00'
   lat_extent:
-    start: 22.0
-    stop: 50.0
-  lon_extent:
-    start: 230.0
-    stop: 295.0
+    start: -66.0
+    stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 20
-  num_data_workers: 8
+  batch_size: 12
+  num_data_workers: 4
   fine:
-  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 3km.zarr
     subset:
-      start_time: "2023-01-01T00:00:00"
-      stop_time: "2023-01-10T00:00:00"
+      start_time: '2023-01-01T00:00:00'
+      stop_time: '2023-01-10T00:00:00'
   coarse:
-  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
     subset:
-      start_time: "2023-01-01T00:00:00"
-      stop_time: "2023-01-10T00:00:00"
+      start_time: '2023-01-01T00:00:00'
+      stop_time: '2023-01-10T00:00:00'
   lat_extent:
     start: 22.0
     stop: 50.0
@@ -97,7 +92,7 @@ validation_data:
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 4 # using 320 samples per epoch, this is roughly 500k steps (200 epochs for the previous 2 yr training dataset)
+max_epochs: 6
 validate_interval: 3
 experiment_dir: /results
 save_checkpoints: true

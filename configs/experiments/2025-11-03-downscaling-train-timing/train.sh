@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-amp-test"
-CONFIG_FILENAME="train-amp.yaml"
+JOB_NAME="xshield-downscaling-control-test"
+CONFIG_FILENAME="train-control.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -29,7 +29,7 @@ gantry run \
     --workspace ai2/climate-titan \
     --priority urgent \
     --preemptible \
-    --cluster ai2/titan
+    --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
@@ -42,7 +42,6 @@ gantry run \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
     --budget ai2/climate \
-    --no-conda \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- torchrun --nproc_per_node $N_GPUS -m fme.downscaling.train $CONFIG_PATH
