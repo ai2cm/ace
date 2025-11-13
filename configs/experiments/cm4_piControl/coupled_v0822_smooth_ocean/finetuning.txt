@@ -1,3 +1,3 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
-ft_fto-sfno-v0822_smooth_ocean|4y48cwy4_ckpt_ep10|ace-samudra-coupled-cm4|4y48cwy4|ckpt|train|urgent|jupiter|8|800GiB|1|ai2/climate-titan|01K9XH05PHHG6WFF0JQ0R9NTNZ
+ft_fto-sfno-v0822_smooth_ocean|4y48cwy4_ckpt_ep10|ace-samudra-coupled-cm4|4y48cwy4|ckpt|train|urgent|jupiter|8|800GiB|1|ai2/climate-titan||01K9XH05PHHG6WFF0JQ0R9NTNZ
