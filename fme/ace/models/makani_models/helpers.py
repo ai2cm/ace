@@ -22,7 +22,6 @@ from fme.ace.utils import comm
 
 def count_parameters(model, device):
     """Counts model parameters"""
-
     with torch.no_grad():
         total_stats = torch.zeros(2, dtype=torch.long, device=device)
         local_bytes = 0
@@ -32,7 +31,9 @@ def count_parameters(model, device):
 
             # make sure complex weight tensors are accounted for correctly
             pview = torch.view_as_real(p) if p.is_complex() else p
-            pstats = torch.tensor([pview.numel(), pview.nbytes], dtype=torch.long, device=device)
+            pstats = torch.tensor(
+                [pview.numel(), pview.nbytes], dtype=torch.long, device=device
+            )
             local_bytes += pview.nbytes
 
             # if the weight is split, then we need to reduce
@@ -54,7 +55,6 @@ def count_parameters(model, device):
 
 def compare_model_parameters(model1, model2):
     """Checks whether both models have the same parameters"""
-
     for p1, p2 in zip(model1.parameters(), model2.parameters()):
         if p1.data.ne(p2.data).any():
             return False

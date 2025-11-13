@@ -13,34 +13,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import types
-from typing import Any
 
 import torch
-from torch.amp import custom_fwd, custom_bwd
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
-# from makani.utils import comm
-from fme.ace.utils import comm
 
 # torch utils
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
-
-# we need those
-from fme.ace.models.makani_mpu.helpers import _transpose
+from torch.amp import custom_bwd, custom_fwd
+from torch.nn.parallel import DistributedDataParallel
 
 # we need the parameter counter
 from fme.ace.models.makani_models.helpers import count_parameters
 
+# we need those
+from fme.ace.models.makani_mpu.helpers import _transpose
+
+# from makani.utils import comm
+from fme.ace.utils import comm
+
 
 class distributed_transpose(torch.autograd.Function):
-
     @staticmethod
     @custom_fwd(device_type="cuda")
     def forward(ctx, x, dims, dim1_split_sizes, comm_id):
         # WAR for a potential contig check torch bug for channels last contig tensors
         x = x.contiguous()
-        xlist, dim0_split_sizes, _ = _transpose(x, dims[0], dims[1], dim1_split_sizes, group=comm.get_group(comm_id))
+        xlist, dim0_split_sizes, _ = _transpose(
+            x, dims[0], dims[1], dim1_split_sizes, group=comm.get_group(comm_id)
+        )
         x = torch.cat(xlist, dim=dims[1]).contiguous()
         ctx.dims = dims
         ctx.dim0_split_sizes = dim0_split_sizes
@@ -54,14 +54,25 @@ class distributed_transpose(torch.autograd.Function):
         dim0_split_sizes = ctx.dim0_split_sizes
         # WAR for a potential contig check torch bug for channels last contig tensors
         go = go.contiguous()
-        gilist, _, _ = _transpose(go, dims[1], dims[0], dim0_split_sizes, group=comm.get_group(ctx.comm_id))
+        gilist, _, _ = _transpose(
+            go, dims[1], dims[0], dim0_split_sizes, group=comm.get_group(ctx.comm_id)
+        )
         gi = torch.cat(gilist, dim=dims[0]).contiguous()
         return gi, None, None, None
 
 
 # handler for additional gradient reductions
 # helper for gradient reduction across channel parallel ranks
-def init_gradient_reduction_hooks(model, device, reduction_buffer_count=1, broadcast_buffers=True, find_unused_parameters=False, gradient_as_bucket_view=True, static_graph=False, verbose=False):
+def init_gradient_reduction_hooks(
+    model,
+    device,
+    reduction_buffer_count=1,
+    broadcast_buffers=True,
+    find_unused_parameters=False,
+    gradient_as_bucket_view=True,
+    static_graph=False,
+    verbose=False,
+):
     # early exit if we are not in a distributed setting:
     if not dist.is_initialized():
         return model
@@ -82,7 +93,9 @@ def init_gradient_reduction_hooks(model, device, reduction_buffer_count=1, broad
             # if it does not have any annotation, we assume it is shared between all model ranks
             if not hasattr(param, "is_shared_mp"):
                 if verbose:
-                    print(f"Parameter {param.name} has no sharing mode specified, settting to globally shared.")
+                    print(
+                        f"Parameter {param.name} has no sharing mode specified, settting to globally shared."
+                    )
                 param.is_shared_mp = ["model"]
 
             # add the sharing type to the dict
@@ -97,7 +110,9 @@ def init_gradient_reduction_hooks(model, device, reduction_buffer_count=1, broad
 
             # register some pre-multiply reduction hooks
             if verbose:
-                print("Setting up gradient hooks to account for shared parameter multiplicity")
+                print(
+                    "Setting up gradient hooks to account for shared parameter multiplicity"
+                )
             for param in model.parameters():
                 param.register_hook(lambda grad: grad * float(comm.get_size("model")))
         else:
@@ -114,7 +129,9 @@ def init_gradient_reduction_hooks(model, device, reduction_buffer_count=1, broad
     _, _, local_parameter_size_bytes = count_parameters(model, device)
 
     # compute reduction buffer size
-    reduction_size_bytes = (local_parameter_size_bytes + reduction_buffer_count - 1) // reduction_buffer_count
+    reduction_size_bytes = (
+        local_parameter_size_bytes + reduction_buffer_count - 1
+    ) // reduction_buffer_count
     reduction_size_mb = (reduction_size_bytes + 1048575) // 1048576
 
     # we should fuse the first bucket with the others
@@ -142,7 +159,9 @@ def init_gradient_reduction_hooks(model, device, reduction_buffer_count=1, broad
         print("Setting up custom communication hooks")
 
     # define comm hook:
-    def reduction_comm_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
+    def reduction_comm_hook(
+        state: object, bucket: dist.GradBucket
+    ) -> torch.futures.Future[torch.Tensor]:
         # allreduce everything first:
         buff = bucket.buffer()
         params = bucket.parameters()
@@ -158,14 +177,28 @@ def init_gradient_reduction_hooks(model, device, reduction_buffer_count=1, broad
 
             # reduce
             if reduction == "sum":
-                dist.all_reduce(coalesced, op=dist.ReduceOp.SUM, group=comm.get_group(group), async_op=False)
+                dist.all_reduce(
+                    coalesced,
+                    op=dist.ReduceOp.SUM,
+                    group=comm.get_group(group),
+                    async_op=False,
+                )
             elif reduction == "mean":
-                dist.all_reduce(coalesced, op=dist.ReduceOp.AVG, group=comm.get_group(group), async_op=False)
+                dist.all_reduce(
+                    coalesced,
+                    op=dist.ReduceOp.AVG,
+                    group=comm.get_group(group),
+                    async_op=False,
+                )
             else:
-                raise NotImplementedError(f"Error, reduction {reduction} not supported.")
+                raise NotImplementedError(
+                    f"Error, reduction {reduction} not supported."
+                )
 
             # copy back
-            for buf, synced_real, is_comp in zip(grads, _unflatten_dense_tensors(coalesced, grads_real), is_complex):
+            for buf, synced_real, is_comp in zip(
+                grads, _unflatten_dense_tensors(coalesced, grads_real), is_complex
+            ):
                 if is_comp:
                     synced = torch.view_as_complex(synced_real)
                 else:
@@ -190,7 +223,9 @@ def init_gradient_reduction_hooks(model, device, reduction_buffer_count=1, broad
                 grads.append(p.grad.data)
 
         if grads:
-            fut = fut.then(lambda x: grad_reduction(x, grads=grads, group="data", reduction="mean"))
+            fut = fut.then(
+                lambda x: grad_reduction(x, grads=grads, group="data", reduction="mean")
+            )
 
         # now go through the groups
         for group in comm.get_comm_names():
@@ -205,7 +240,11 @@ def init_gradient_reduction_hooks(model, device, reduction_buffer_count=1, broad
 
             # append the new reduction functions
             if grads:
-                fut = fut.then(lambda x: grad_reduction(x, grads=grads, group=group, reduction="sum"))
+                fut = fut.then(
+                    lambda x: grad_reduction(
+                        x, grads=grads, group=group, reduction="sum"
+                    )
+                )
 
         return fut
 

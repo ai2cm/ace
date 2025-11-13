@@ -13,37 +13,43 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import glob
+import os
 import re
-
 from collections import OrderedDict
-from typing import Optional, Dict, Any
+from typing import Any
 
 import torch
 import torch.nn as nn
+from physicsnemo.distributed.utils import split_tensor_along_dim
 from torch.optim import Optimizer
+
+from fme.ace.models.makani_mpu.helpers import gather_uneven
 
 # from makani.utils import comm
 from fme.ace.utils import comm
-from fme.ace.models.makani_mpu.helpers import gather_uneven
-
-from physicsnemo.distributed.utils import split_tensor_along_dim
 
 
 def get_latest_checkpoint_version(checkpoint_path):
     try:
-        checkpoint_path = max(glob.glob(checkpoint_path.format(mp_rank=0, checkpoint_version="*")), key=os.path.getmtime)
+        checkpoint_path = max(
+            glob.glob(checkpoint_path.format(mp_rank=0, checkpoint_version="*")),
+            key=os.path.getmtime,
+        )
         pathname, _ = os.path.splitext(checkpoint_path)
         latest_version = int(re.match(r"^.*?_v(\d{1,})$", pathname).groups()[0])
     except:
-        print(f"Could not identify version for checkpoint {checkpoint_path}. Skipping detection.")
+        print(
+            f"Could not identify version for checkpoint {checkpoint_path}. Skipping detection."
+        )
         latest_version = 0
 
     return latest_version
 
 
-def gather_model_state_dict(model: nn.Module, grads: Optional[bool]=False) -> OrderedDict:
+def gather_model_state_dict(
+    model: nn.Module, grads: bool | None = False
+) -> OrderedDict:
     # create empty dict to hold the state
     state_dict = OrderedDict()
 
@@ -74,17 +80,15 @@ def gather_model_state_dict(model: nn.Module, grads: Optional[bool]=False) -> Or
     return state_dict
 
 
-def scatter_model_state_dict(model: nn.Module, state_dict: OrderedDict, strict: Optional[bool] = True) -> OrderedDict():
-
+def scatter_model_state_dict(
+    model: nn.Module, state_dict: OrderedDict, strict: bool | None = True
+) -> OrderedDict():
     # iterate over model parameters and split accordingly
     for name, param in model.named_parameters():
-
         # make sure that the parameter is in the state dict
         if name in state_dict.keys():
-
             # in this case, we need to distribute the weight
             if hasattr(param, "sharded_dims_mp"):
-
                 # make a copy
                 weight = state_dict[name].clone()
 
@@ -94,7 +98,9 @@ def scatter_model_state_dict(model: nn.Module, state_dict: OrderedDict, strict: 
                     if (group is None) or (comm.get_size(group) == 1):
                         continue
 
-                    weight = split_tensor_along_dim(weight, dim=d, num_chunks=comm.get_size(group))[comm.get_rank(group)]
+                    weight = split_tensor_along_dim(
+                        weight, dim=d, num_chunks=comm.get_size(group)
+                    )[comm.get_rank(group)]
 
                 # update state dict
                 state_dict[name] = weight
@@ -107,14 +113,18 @@ def scatter_model_state_dict(model: nn.Module, state_dict: OrderedDict, strict: 
 
 
 def gather_optimizer_state_dict(model: nn.Module, optimizer: Optimizer) -> OrderedDict:
-
     # if optimizer is SGD, we can just return the local dict:
     if isinstance(optimizer, torch.optim.SGD):
         return optimizer.state_dict()
 
     # do sanity checks
-    if not (isinstance(optimizer, torch.optim.Adam) or isinstance(optimizer, torch.optim.AdamW)):
-        raise NotImplementedError("Error, only Adam and AdamW state can be stored in flexible format at the moment.")
+    if not (
+        isinstance(optimizer, torch.optim.Adam)
+        or isinstance(optimizer, torch.optim.AdamW)
+    ):
+        raise NotImplementedError(
+            "Error, only Adam and AdamW state can be stored in flexible format at the moment."
+        )
 
     # state dict:
     state_dict = optimizer.state_dict()
@@ -130,7 +140,9 @@ def gather_optimizer_state_dict(model: nn.Module, optimizer: Optimizer) -> Order
     # if yes, we need to gather it
     optimizer_dict["state"] = {}
     for index, param in enumerate(model.parameters()):
-        optimizer_dict["state"][index] = {"step": state_dict["state"][index]["step"].clone()}
+        optimizer_dict["state"][index] = {
+            "step": state_dict["state"][index]["step"].clone()
+        }
         if hasattr(param, "sharded_dims_mp"):
             exp_avg = state_dict["state"][index]["exp_avg"].clone()
             exp_avg_sq = state_dict["state"][index]["exp_avg_sq"].clone()
@@ -144,28 +156,36 @@ def gather_optimizer_state_dict(model: nn.Module, optimizer: Optimizer) -> Order
             optimizer_dict["state"][index]["exp_avg"] = exp_avg
             optimizer_dict["state"][index]["exp_avg_sq"] = exp_avg_sq
         else:
-            optimizer_dict["state"][index]["exp_avg"] = state_dict["state"][index]["exp_avg"].clone()
-            optimizer_dict["state"][index]["exp_avg_sq"] = state_dict["state"][index]["exp_avg_sq"].clone()
+            optimizer_dict["state"][index]["exp_avg"] = state_dict["state"][index][
+                "exp_avg"
+            ].clone()
+            optimizer_dict["state"][index]["exp_avg_sq"] = state_dict["state"][index][
+                "exp_avg_sq"
+            ].clone()
 
     return optimizer_dict
 
 
-def scatter_optimizer_state_dict(model: nn.Module, optimizer: Optimizer, optimizer_state_dict: OrderedDict) -> OrderedDict():
-
+def scatter_optimizer_state_dict(
+    model: nn.Module, optimizer: Optimizer, optimizer_state_dict: OrderedDict
+) -> OrderedDict():
     # some sanity checks
     # if optimizer is SGD, we can just return the local dict:
     if isinstance(optimizer, torch.optim.SGD):
         return optimizer_state_dict
 
-    if not (isinstance(optimizer, torch.optim.Adam) or isinstance(optimizer, torch.optim.AdamW)):
-        raise NotImplementedError("Error, only Adam and AdamW state can be restored from flexible format at the moment.")
+    if not (
+        isinstance(optimizer, torch.optim.Adam)
+        or isinstance(optimizer, torch.optim.AdamW)
+    ):
+        raise NotImplementedError(
+            "Error, only Adam and AdamW state can be restored from flexible format at the moment."
+        )
 
     # iterate over model parameters and split accordingly
     for idp, param in enumerate(model.parameters()):
-
         # in this case, we need to distribute the weight
         if hasattr(param, "sharded_dims_mp"):
-
             # clone the state
             exp_avg = optimizer_state_dict["state"][idp]["exp_avg"].clone()
             exp_avg_sq = optimizer_state_dict["state"][idp]["exp_avg_sq"].clone()
@@ -175,8 +195,12 @@ def scatter_optimizer_state_dict(model: nn.Module, optimizer: Optimizer, optimiz
                 if (group is None) or (comm.get_size(group) == 1):
                     continue
 
-                exp_avg = split_tensor_along_dim(exp_avg, dim=d, num_chunks=comm.get_size(group))[comm.get_rank(group)]
-                exp_avg_sq = split_tensor_along_dim(exp_avg_sq, dim=d, num_chunks=comm.get_size(group))[comm.get_rank(group)]
+                exp_avg = split_tensor_along_dim(
+                    exp_avg, dim=d, num_chunks=comm.get_size(group)
+                )[comm.get_rank(group)]
+                exp_avg_sq = split_tensor_along_dim(
+                    exp_avg_sq, dim=d, num_chunks=comm.get_size(group)
+                )[comm.get_rank(group)]
 
             # update the state dict
             optimizer_state_dict["state"][idp]["exp_avg"] = exp_avg
@@ -186,7 +210,7 @@ def scatter_optimizer_state_dict(model: nn.Module, optimizer: Optimizer, optimiz
 
 
 def prepend_prefix_to_state_dict(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     prefix: str,
 ) -> None:
     r"""Append the prefix to states in state_dict in place.

@@ -13,27 +13,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 import math
+
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.distributed as dist
-from torch.amp import custom_fwd, custom_bwd
-
-# from makani.utils import comm
-from fme.ace.utils import comm
+from physicsnemo.distributed.mappings import (
+    copy_to_parallel_region,
+    gather_from_parallel_region,
+    reduce_from_parallel_region,
+)
 
 # parallel helpers
 from physicsnemo.distributed.utils import compute_split_shapes
-from physicsnemo.distributed.mappings import reduce_from_parallel_region
-from physicsnemo.distributed.mappings import scatter_to_parallel_region
-from physicsnemo.distributed.mappings import gather_from_parallel_region
-from physicsnemo.distributed.mappings import copy_to_parallel_region
+from torch.amp import custom_bwd, custom_fwd
 
 # use some distributed routines from torch harmonics
-from torch_harmonics.distributed import distributed_transpose_azimuth as distributed_transpose_w
-from torch_harmonics.distributed import distributed_transpose_polar as distributed_transpose_h
+# from makani.utils import comm
+from fme.ace.utils import comm
 
 
 class _DistMatmulHelper(torch.autograd.Function):
@@ -70,10 +68,14 @@ class _DistMatmulHelper(torch.autograd.Function):
 
         # reduce across nodes
         if comm.get_size(gname) > 1:
-            dgrad_handle = dist.all_reduce(grad_input, group=comm.get_group(gname), async_op=True)
+            dgrad_handle = dist.all_reduce(
+                grad_input, group=comm.get_group(gname), async_op=True
+            )
 
         # weight grad
-        grad_weight = F.conv2d(X.transpose(0, 1), grad_out.transpose(0, 1), bias=None).transpose(0, 1)
+        grad_weight = F.conv2d(
+            X.transpose(0, 1), grad_out.transpose(0, 1), bias=None
+        ).transpose(0, 1)
 
         if bias is not None:
             grad_bias = torch.sum(grad_out, dim=(0, 2, 3), keepdim=True)
@@ -87,7 +89,15 @@ class _DistMatmulHelper(torch.autograd.Function):
 
 
 class DistributedMatmul(nn.Module):
-    def __init__(self, inp_dim, out_dim, input_format="nchw", comm_inp_name="fin", comm_out_name="fout", bias=True):
+    def __init__(
+        self,
+        inp_dim,
+        out_dim,
+        input_format="nchw",
+        comm_inp_name="fin",
+        comm_out_name="fout",
+        bias=True,
+    ):
         super(DistributedMatmul, self).__init__()
 
         # get sizes
@@ -97,8 +107,12 @@ class DistributedMatmul(nn.Module):
         comm_out_size = comm.get_size(self.comm_out_name)
 
         # split:
-        assert inp_dim % comm_inp_size == 0, f"Error, the size of input feature dim ({inp_dim}) has to be evenly divisible by the input feature comm dim ({comm_inp_size})"
-        assert out_dim % comm_out_size == 0, f"Error, the size of output feature dim ({out_dim}) has to be evenly divisible by the output feature comm dim ({comm_out_size})"
+        assert (
+            inp_dim % comm_inp_size == 0
+        ), f"Error, the size of input feature dim ({inp_dim}) has to be evenly divisible by the input feature comm dim ({comm_inp_size})"
+        assert (
+            out_dim % comm_out_size == 0
+        ), f"Error, the size of output feature dim ({out_dim}) has to be evenly divisible by the output feature comm dim ({comm_out_size})"
 
         # compute reduced dims
         inp_dim_local = inp_dim // comm_inp_size
@@ -108,14 +122,21 @@ class DistributedMatmul(nn.Module):
         if input_format == "nchw":
             self.weight = nn.Parameter(torch.ones(out_dim_local, inp_dim_local, 1, 1))
             self.weight.is_shared_mp = ["spatial"]
-            self.weight.sharded_dims_mp = [self.comm_out_name, self.comm_inp_name, None, None]
+            self.weight.sharded_dims_mp = [
+                self.comm_out_name,
+                self.comm_inp_name,
+                None,
+                None,
+            ]
             self.matmul_handle = F.conv2d
         elif input_format == "traditional":
             self.weight = nn.Parameter(torch.ones(out_dim_local, inp_dim_local))
             self.weight.sharded_dims_mp = [self.comm_out_name, self.comm_inp_name]
             self.matmul_handle = F.linear
         else:
-            raise NotImplementedError(f"Error, input format {input_format} not supported.")
+            raise NotImplementedError(
+                f"Error, input format {input_format} not supported."
+            )
 
         # bias
         self.bias = None
@@ -140,7 +161,18 @@ class DistributedMatmul(nn.Module):
 
 # distributed encoder/decoder
 class DistributedEncoderDecoder(nn.Module):
-    def __init__(self, num_layers, input_dim, output_dim, hidden_dim, act_layer, gain=1.0, input_format="nchw", comm_inp_name="fin", comm_out_name="fout"):
+    def __init__(
+        self,
+        num_layers,
+        input_dim,
+        output_dim,
+        hidden_dim,
+        act_layer,
+        gain=1.0,
+        input_format="nchw",
+        comm_inp_name="fin",
+        comm_out_name="fout",
+    ):
         super(DistributedEncoderDecoder, self).__init__()
 
         # get comms
@@ -156,7 +188,14 @@ class DistributedEncoderDecoder(nn.Module):
         comm_out_name_tmp = comm_out_name
         for i in range(num_layers - 1):
             encoder_modules.append(
-                DistributedMatmul(current_dim, hidden_dim, input_format=input_format, comm_inp_name=comm_inp_name_tmp, comm_out_name=comm_out_name_tmp, bias=True)
+                DistributedMatmul(
+                    current_dim,
+                    hidden_dim,
+                    input_format=input_format,
+                    comm_inp_name=comm_inp_name_tmp,
+                    comm_out_name=comm_out_name_tmp,
+                    bias=True,
+                )
             )
 
             # proper initialization
@@ -167,10 +206,22 @@ class DistributedEncoderDecoder(nn.Module):
 
             encoder_modules.append(act_layer())
             current_dim = hidden_dim
-            comm_inp_name_tmp, comm_out_name_tmp = (comm_out_name_tmp, comm_inp_name_tmp)
+            comm_inp_name_tmp, comm_out_name_tmp = (
+                comm_out_name_tmp,
+                comm_inp_name_tmp,
+            )
 
         # final layer
-        encoder_modules.append(DistributedMatmul(current_dim, output_dim, input_format=input_format, comm_inp_name=comm_inp_name_tmp, comm_out_name=comm_out_name_tmp, bias=False))
+        encoder_modules.append(
+            DistributedMatmul(
+                current_dim,
+                output_dim,
+                input_format=input_format,
+                comm_inp_name=comm_inp_name_tmp,
+                comm_out_name=comm_out_name_tmp,
+                bias=False,
+            )
+        )
 
         # proper initialization of final layer
         # scale = math.sqrt(gain / current_dim)
@@ -213,20 +264,36 @@ class DistributedMLP(nn.Module):
 
         # sanity checks:
         if (input_format == "traditional") and (drop_type == "features"):
-            raise NotImplementedError(f"Error, traditional input format and feature dropout cannot be selected simultaneously")
+            raise NotImplementedError(
+                f"Error, traditional input format and feature dropout cannot be selected simultaneously"
+            )
 
         # get effective embedding size:
         comm_inp_size = comm.get_size(comm_inp_name)
         comm_hid_size = comm.get_size(comm_hidden_name)
 
-        self.fc1 = DistributedMatmul(in_features, hidden_features, input_format=input_format, comm_inp_name=comm_inp_name, comm_out_name=comm_hidden_name, bias=True)
+        self.fc1 = DistributedMatmul(
+            in_features,
+            hidden_features,
+            input_format=input_format,
+            comm_inp_name=comm_inp_name,
+            comm_out_name=comm_hidden_name,
+            bias=True,
+        )
 
         # initialize the weights correctly
         scale = math.sqrt(2.0 / in_features)
         nn.init.normal_(self.fc1.weight, mean=0.0, std=scale)
         nn.init.constant_(self.fc1.bias, 0.0)
 
-        self.fc2 = DistributedMatmul(hidden_features, out_features, input_format=input_format, comm_inp_name=comm_hidden_name, comm_out_name=comm_inp_name, bias=output_bias)
+        self.fc2 = DistributedMatmul(
+            hidden_features,
+            out_features,
+            input_format=input_format,
+            comm_inp_name=comm_hidden_name,
+            comm_out_name=comm_inp_name,
+            bias=output_bias,
+        )
 
         # gain factor for the output determines the scaling of the output init
         scale = math.sqrt(gain / hidden_features)
@@ -271,7 +338,15 @@ class DistributedMLP(nn.Module):
 
 
 class DistributedPatchEmbed(nn.Module):
-    def __init__(self, img_size=(224, 224), patch_size=(16, 16), in_chans=3, embed_dim=768, input_is_matmul_parallel=False, output_is_matmul_parallel=True):
+    def __init__(
+        self,
+        img_size=(224, 224),
+        patch_size=(16, 16),
+        in_chans=3,
+        embed_dim=768,
+        input_is_matmul_parallel=False,
+        output_is_matmul_parallel=True,
+    ):
         super().__init__()
 
         # store params
@@ -283,21 +358,29 @@ class DistributedPatchEmbed(nn.Module):
         spatial_comm_size = comm.get_size("spatial")
 
         # compute parameters
-        assert (img_size[1] // patch_size[1]) % spatial_comm_size == 0, "Error, make sure that the spatial comm size evenly divides patched W"
-        num_patches = ((img_size[1] // patch_size[1]) // spatial_comm_size) * (img_size[0] // patch_size[0])
+        assert (
+            (img_size[1] // patch_size[1]) % spatial_comm_size == 0
+        ), "Error, make sure that the spatial comm size evenly divides patched W"
+        num_patches = ((img_size[1] // patch_size[1]) // spatial_comm_size) * (
+            img_size[0] // patch_size[0]
+        )
         self.img_size = (img_size[0], img_size[1] // spatial_comm_size)
         self.patch_size = patch_size
         self.num_patches = num_patches
 
         # get effective embedding size:
         if self.output_parallel:
-            assert embed_dim % matmul_comm_size == 0, "Error, the embed_dim needs to be divisible by matmul_parallel_size"
+            assert (
+                embed_dim % matmul_comm_size == 0
+            ), "Error, the embed_dim needs to be divisible by matmul_parallel_size"
             out_chans_local = embed_dim // matmul_comm_size
         else:
             out_chans_local = embed_dim
 
         # the weights  of this layer is shared across spatial parallel ranks
-        self.proj = nn.Conv2d(in_chans, out_chans_local, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv2d(
+            in_chans, out_chans_local, kernel_size=patch_size, stride=patch_size
+        )
 
         # make sure we reduce them across rank
         self.proj.weight.is_shared_mp = ["spatial"]
@@ -314,7 +397,9 @@ class DistributedPatchEmbed(nn.Module):
             x = copy_to_parallel_region(x, "matmul")
 
         B, C, H, W = x.shape
-        assert H == self.img_size[0] and W == self.img_size[1], f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        assert (
+            H == self.img_size[0] and W == self.img_size[1]
+        ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         # new: B, C, H*W
         x = self.proj(x).flatten(2)
         return x
@@ -341,18 +426,34 @@ class DistributedAttention(nn.Module):
         assert dim % num_heads == 0, "dim should be divisible by num_heads"
         self.num_heads = num_heads
 
-        assert num_heads % comm.get_size(comm_hidden_name) == 0, "heads are not evenly split across model ranks"
+        assert (
+            num_heads % comm.get_size(comm_hidden_name) == 0
+        ), "heads are not evenly split across model ranks"
         self.num_heads_local = num_heads // comm.get_size(comm_hidden_name)
         self.head_dim = dim // self.num_heads
 
         self.comm_inp_name = comm_inp_name
         self.comm_hidden_name = comm_hidden_name
 
-        self.qkv = DistributedMatmul(dim, dim * 3, input_format, comm_inp_name=comm_inp_name, comm_out_name=comm_hidden_name, bias=qkv_bias)
+        self.qkv = DistributedMatmul(
+            dim,
+            dim * 3,
+            input_format,
+            comm_inp_name=comm_inp_name,
+            comm_out_name=comm_hidden_name,
+            bias=qkv_bias,
+        )
         self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
         self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
         self.attn_drop_rate = attn_drop_rate
-        self.proj = DistributedMatmul(dim, dim, input_format, comm_inp_name=comm_hidden_name, comm_out_name=comm_inp_name, bias=False)
+        self.proj = DistributedMatmul(
+            dim,
+            dim,
+            input_format,
+            comm_inp_name=comm_hidden_name,
+            comm_out_name=comm_inp_name,
+            bias=False,
+        )
         if proj_drop_rate > 0.0:
             self.proj_drop = nn.Dropout(proj_drop_rate)
         else:
@@ -374,7 +475,11 @@ class DistributedAttention(nn.Module):
     def forward(self, x):
         B, N, C = x.shape
 
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads_local, self.head_dim).permute(2, 0, 3, 1, 4)
+        qkv = (
+            self.qkv(x)
+            .reshape(B, N, 3, self.num_heads_local, self.head_dim)
+            .permute(2, 0, 3, 1, 4)
+        )
         q, k, v = qkv.unbind(0)
         q, k = self.q_norm(q), self.k_norm(k)
 
@@ -394,14 +499,23 @@ class DistributedAttention(nn.Module):
 
 
 @torch.compile
-def compl_mul_add_fwd(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+def compl_mul_add_fwd(
+    a: torch.Tensor, b: torch.Tensor, c: torch.Tensor
+) -> torch.Tensor:
     tmp = torch.einsum("bkixys,kiot->stbkoxy", a, b)
-    res = torch.stack([tmp[0, 0, ...] - tmp[1, 1, ...], tmp[1, 0, ...] + tmp[0, 1, ...]], dim=-1) + c
+    res = (
+        torch.stack(
+            [tmp[0, 0, ...] - tmp[1, 1, ...], tmp[1, 0, ...] + tmp[0, 1, ...]], dim=-1
+        )
+        + c
+    )
     return res
 
 
 @torch.compile
-def compl_mul_add_fwd_c(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+def compl_mul_add_fwd_c(
+    a: torch.Tensor, b: torch.Tensor, c: torch.Tensor
+) -> torch.Tensor:
     ac = torch.view_as_complex(a)
     bc = torch.view_as_complex(b)
     cc = torch.view_as_complex(c)
@@ -423,7 +537,9 @@ class DistributedAFNO2Dv2(nn.Module):
         use_complex_kernels=False,
     ):
         super().__init__()
-        assert hidden_size % num_blocks == 0, f"hidden_size {hidden_size} should be divisble by num_blocks {num_blocks}"
+        assert (
+            hidden_size % num_blocks == 0
+        ), f"hidden_size {hidden_size} should be divisble by num_blocks {num_blocks}"
 
         # get comm sizes:
         matmul_comm_size = comm.get_size("matmul")
@@ -446,7 +562,9 @@ class DistributedAFNO2Dv2(nn.Module):
         self.hard_thresholding_fraction = hard_thresholding_fraction
         self.hidden_size_factor = hidden_size_factor
         self.scale = 0.02
-        self.mult_handle = compl_mul_add_fwd_c if use_complex_kernels else compl_mul_add_fwd
+        self.mult_handle = (
+            compl_mul_add_fwd_c if use_complex_kernels else compl_mul_add_fwd
+        )
 
         # model paralellism
         self.input_is_matmul_parallel = input_is_matmul_parallel
@@ -454,10 +572,37 @@ class DistributedAFNO2Dv2(nn.Module):
 
         # new
         # these weights need to be synced across all spatial ranks!
-        self.w1 = nn.Parameter(self.scale * torch.randn(self.num_blocks_local, self.block_size, self.block_size * self.hidden_size_factor, 2))
-        self.b1 = nn.Parameter(self.scale * torch.randn(self.num_blocks_local, self.block_size * self.hidden_size_factor, 1, 1, 2))
-        self.w2 = nn.Parameter(self.scale * torch.randn(self.num_blocks_local, self.block_size * self.hidden_size_factor, self.block_size, 2))
-        self.b2 = nn.Parameter(self.scale * torch.randn(self.num_blocks_local, self.block_size, 1, 1, 2))
+        self.w1 = nn.Parameter(
+            self.scale
+            * torch.randn(
+                self.num_blocks_local,
+                self.block_size,
+                self.block_size * self.hidden_size_factor,
+                2,
+            )
+        )
+        self.b1 = nn.Parameter(
+            self.scale
+            * torch.randn(
+                self.num_blocks_local,
+                self.block_size * self.hidden_size_factor,
+                1,
+                1,
+                2,
+            )
+        )
+        self.w2 = nn.Parameter(
+            self.scale
+            * torch.randn(
+                self.num_blocks_local,
+                self.block_size * self.hidden_size_factor,
+                self.block_size,
+                2,
+            )
+        )
+        self.b2 = nn.Parameter(
+            self.scale * torch.randn(self.num_blocks_local, self.block_size, 1, 1, 2)
+        )
 
         # setting correct sharding and sharing
         self.w1.is_shared_mp = ["spatial"]
@@ -495,8 +640,23 @@ class DistributedAFNO2Dv2(nn.Module):
         x = torch.view_as_real(x)
         o2 = torch.zeros(x.shape, device=x.device)
 
-        o1 = F.relu(self.mult_handle(x[:, :, :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes, :], self.w1, self.b1))
-        o2[:, :, :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes, :] = self.mult_handle(o1, self.w2, self.b2)
+        o1 = F.relu(
+            self.mult_handle(
+                x[
+                    :,
+                    :,
+                    :,
+                    total_modes - kept_modes : total_modes + kept_modes,
+                    :kept_modes,
+                    :,
+                ],
+                self.w1,
+                self.b1,
+            )
+        )
+        o2[
+            :, :, :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes, :
+        ] = self.mult_handle(o1, self.w2, self.b2)
 
         # finalize
         x = F.softshrink(o2, lambd=self.sparsity_threshold)

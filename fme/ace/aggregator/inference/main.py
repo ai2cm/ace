@@ -11,6 +11,7 @@ from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
+from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
     InferenceLog,
@@ -35,7 +36,6 @@ from .spectrum import PairedSphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanEvaluatorAggregator
 from .video import VideoAggregator
 from .zonal_mean import ZonalMeanAggregator
-from fme.core.distributed import Distributed
 
 wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
@@ -160,13 +160,15 @@ class InferenceEvaluatorAggregatorConfig:
             )
             dist = Distributed.get_instance()
             if dist.is_spatial_distributed():
-              # CHECK: Is there another way to get lat_length and lon_length?
-              # Should we move this splitting operation inside the InferenceEvaluatorAggregator?
-              lat_length = len(monthly_reference_data.coords['lat'])
-              lon_length = len(monthly_reference_data.coords['lon'])
-              crop_shape = (lat_length, lon_length)
-              slice_h, slice_w = dist.get_local_slices(crop_shape)
-              monthly_reference_data = monthly_reference_data.isel(lat=slice_h, lon=slice_w)
+                # CHECK: Is there another way to get lat_length and lon_length?
+                # Should we move this splitting operation inside the InferenceEvaluatorAggregator?
+                lat_length = len(monthly_reference_data.coords["lat"])
+                lon_length = len(monthly_reference_data.coords["lon"])
+                crop_shape = (lat_length, lon_length)
+                slice_h, slice_w = dist.get_local_slices(crop_shape)
+                monthly_reference_data = monthly_reference_data.isel(
+                    lat=slice_h, lon=slice_w
+                )
 
         if self.time_mean_reference_data is None:
             time_mean = None
@@ -174,7 +176,6 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean = xr.open_dataset(
                 self.time_mean_reference_data, decode_timedelta=False
             )
-
 
         return InferenceEvaluatorAggregator(
             dataset_info=dataset_info,

@@ -19,7 +19,6 @@ import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
-from fme.core.distributed import Distributed
 from fme.core.coordinates import (
     DepthCoordinate,
     HorizontalCoordinates,
@@ -31,6 +30,7 @@ from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
+from fme.core.distributed import Distributed
 from fme.core.mask_provider import MaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
@@ -43,7 +43,6 @@ from .utils import (
     load_series_data,
     load_series_data_zarr_async,
 )
-
 
 SLICE_NONE = slice(None)
 GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD = 12
@@ -833,13 +832,15 @@ class XarrayDataset(torch.utils.data.Dataset):
             else:
                 ds = self._open_file(file_idx)
                 ds = ds.isel(**self.isel)
-                has_lat="lat" in self.dims
-                has_lon="lon" in self.dims
-                if self._dist.is_spatial_distributed() and has_lat and has_lon :
-                   slice_h, slice_w = self._dist.get_local_slices(self._shape_excluding_time_after_selection)
-                   ds = ds.isel(lat=slice_h, lon=slice_w)
-                   shape[1]=slice_h.stop - slice_h.start
-                   shape[2]=slice_w.stop - slice_w.start
+                has_lat = "lat" in self.dims
+                has_lon = "lon" in self.dims
+                if self._dist.is_spatial_distributed() and has_lat and has_lon:
+                    slice_h, slice_w = self._dist.get_local_slices(
+                        self._shape_excluding_time_after_selection
+                    )
+                    ds = ds.isel(lat=slice_h, lon=slice_w)
+                    shape[1] = slice_h.stop - slice_h.start
+                    shape[2] = slice_w.stop - slice_w.start
                 tensor_dict = load_series_data(
                     idx=start,
                     n_steps=n_steps,
@@ -864,11 +865,13 @@ class XarrayDataset(torch.utils.data.Dataset):
             ds = self._open_file(idxs[0])
             ds = ds.isel(**self.isel)
             shape = [total_steps] + self._shape_excluding_time_after_selection
-            if self._dist.is_spatial_distributed() and has_lat and has_lon :
-              slice_h, slice_w = self._dist.get_local_slices(self._shape_excluding_time_after_selection)
-              ds = ds.isel(lat=slice_h, lon=slice_w)
-              shape[1]=slice_h.stop - slice_h.start
-              shape[2]=slice_w.stop - slice_w.start
+            if self._dist.is_spatial_distributed() and has_lat and has_lon:
+                slice_h, slice_w = self._dist.get_local_slices(
+                    self._shape_excluding_time_after_selection
+                )
+                ds = ds.isel(lat=slice_h, lon=slice_w)
+                shape[1] = slice_h.stop - slice_h.start
+                shape[2] = slice_w.stop - slice_w.start
 
             for name in self._time_invariant_names:
                 variable = ds[name].variable

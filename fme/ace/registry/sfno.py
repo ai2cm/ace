@@ -4,10 +4,10 @@ from typing import Literal
 from fme.ace.models.makani.sfnonet import (
     SphericalFourierNeuralOperatorNet as MakaniSFNO,
 )
-from fme.ace.models.modulus.sfnonet import SphericalFourierNeuralOperatorNet, SFNO
+from fme.ace.models.modulus.sfnonet import SFNO, SphericalFourierNeuralOperatorNet
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
-from fme.core.distributed import Distributed
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed import Distributed
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
@@ -48,22 +48,23 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ):
-      dist= Distributed.get_instance()
-      if dist.spatial_parallelism:
-        sfno_net = SFNO(
-            params=self,
-            in_chans=n_in_channels,
-            out_chans=n_out_channels,
-            img_shape=dataset_info.img_shape,)
-      else:
-        sfno_net = SphericalFourierNeuralOperatorNet(
-            params=self,
-            in_chans=n_in_channels,
-            out_chans=n_out_channels,
-            img_shape=dataset_info.img_shape,
-        )
+        dist = Distributed.get_instance()
+        if dist.spatial_parallelism:
+            sfno_net = SFNO(
+                params=self,
+                in_chans=n_in_channels,
+                out_chans=n_out_channels,
+                img_shape=dataset_info.img_shape,
+            )
+        else:
+            sfno_net = SphericalFourierNeuralOperatorNet(
+                params=self,
+                in_chans=n_in_channels,
+                out_chans=n_out_channels,
+                img_shape=dataset_info.img_shape,
+            )
 
-      return sfno_net
+        return sfno_net
 
 
 @ModuleSelector.register("SFNO-v0.1.0")
