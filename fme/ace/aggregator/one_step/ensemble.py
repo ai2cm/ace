@@ -171,6 +171,7 @@ class _EnsembleAggregator:
             self._variable_metrics = {
                 "crps": {},
                 "ssr_bias": {},
+                "ensemble_mean_rmse": {},
             }
             for key in gen_data:
                 self._variable_metrics["crps"][key] = CRPSMetric()
