@@ -47,7 +47,7 @@ validate_using_ema: true
 train_data:
   sample_with_replacement: 160
   batch_size: 12
-  num_data_workers: 4
+  num_data_workers: 8
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 3km.zarr
@@ -92,7 +92,7 @@ validation_data:
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 6
+max_epochs: 3
 validate_interval: 3
 experiment_dir: /results
 save_checkpoints: true
