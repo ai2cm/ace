@@ -1,7 +1,7 @@
 # arg: --dataset andrep/2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr-stats:/statsdata
 # arg: --dataset 01K9B2ZY6E1W5N34HQCVMS7BJM:/weights
-experiment_dir: /output
-n_forward_steps: 14600
+experiment_dir: /results
+n_forward_steps: 146000
 forward_steps_in_memory: 40
 checkpoint_path: /weights/training_checkpoints/best_inference_ckpt.tar
 logging:
@@ -21,7 +21,6 @@ loader:
     n_repeats: 10
   num_data_workers: 16
 aggregator:
-  log_zonal_mean_images: true
   log_histograms: true
 data_writer:
   save_monthly_files: true
