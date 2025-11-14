@@ -36,7 +36,6 @@ from physicsnemo.models.diffusion import (
 from physicsnemo.models.diffusion.utils import _recursive_property
 from physicsnemo.models.meta import ModelMetaData
 from physicsnemo.models.module import Module
-from torch.amp import autocast
 from torch.nn.functional import silu
 from torch.utils.checkpoint import checkpoint
 
@@ -523,11 +522,12 @@ class SongUNet(Module):
     )
 
     def forward(self, x, noise_labels, class_labels, augment_labels=None):
-        with (
-            autocast(x.device.type, dtype=torch.bfloat16)
-            if x.device.type == "cuda"
-            else contextlib.nullcontext()
-        ):
+        # with (
+        #     autocast(x.device.type, dtype=torch.bfloat16)
+        #     if x.device.type == "cuda"
+        #     else contextlib.nullcontext()
+        # ):
+        with contextlib.nullcontext():
             # Validate input shapes
             batch_size = x.shape[0]
 
