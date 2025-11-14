@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-new-unet-amp-crps-ckpt"
-CONFIG_FILENAME="config-generate-on-perfect-pred-global-crps-ckpt-conus.yaml"
+JOB_NAME="eval-xshield-amip-100km-to-3km-new-unet-amp-hist-ckpt"
+CONFIG_FILENAME="config-generate-on-perfect-pred-global-hist-ckpt-conus.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

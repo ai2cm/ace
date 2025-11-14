@@ -282,7 +282,7 @@ class SongUNet(Module):
         use_apex_gn: bool = True,
         act: str = "silu",
         profile_mode: bool = False,
-        amp_mode: bool = True,
+        amp_mode: bool = False,
     ):
         valid_embedding_types = ["fourier", "positional", "zero"]
         if embedding_type not in valid_embedding_types:
