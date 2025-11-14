@@ -361,39 +361,39 @@ class InferenceEvaluatorAggregator(
                     monthly_reference_data=monthly_reference_data,
                 )
             )
-            # if (
-            #     isinstance(horizontal_coordinates, LatLonCoordinates)
-            #     and isinstance(ops, LatLonOperations)
-            #     and log_nino34_index
-            # ):
-            #     nino34_region = LatLonRegion(
-            #         lat_bounds=NINO34_LAT,
-            #         lon_bounds=NINO34_LON,
-            #         lat=horizontal_coordinates.lat,
-            #         lon=horizontal_coordinates.lon,
-            #     )
-            #     self._time_dependent_aggregators["enso_index"] = (
-            #         PairedRegionalIndexAggregator(
-            #             target_aggregator=RegionalIndexAggregator(
-            #                 regional_weights=nino34_region.regional_weights,
-            #                 regional_mean=ops.regional_area_weighted_mean,
-            #             ),
-            #             prediction_aggregator=RegionalIndexAggregator(
-            #                 regional_weights=nino34_region.regional_weights,
-            #                 regional_mean=ops.regional_area_weighted_mean,
-            #             ),
-            #         )
-            #     )
-        # if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
-        #     self._time_dependent_aggregators["enso_coefficient"] = (
-        #         EnsoCoefficientEvaluatorAggregator(
-        #             initial_time,
-        #             n_timesteps - 1,
-        #             timestep,
-        #             gridded_operations=ops,
-        #             variable_metadata=dataset_info.variable_metadata,
-        #         )
-        #     )
+            if (
+                isinstance(horizontal_coordinates, LatLonCoordinates)
+                and isinstance(ops, LatLonOperations)
+                and log_nino34_index
+            ):
+                nino34_region = LatLonRegion(
+                    lat_bounds=NINO34_LAT,
+                    lon_bounds=NINO34_LON,
+                    lat=horizontal_coordinates.lat,
+                    lon=horizontal_coordinates.lon,
+                )
+                self._time_dependent_aggregators["enso_index"] = (
+                    PairedRegionalIndexAggregator(
+                        target_aggregator=RegionalIndexAggregator(
+                            regional_weights=nino34_region.regional_weights,
+                            regional_mean=ops.regional_area_weighted_mean,
+                        ),
+                        prediction_aggregator=RegionalIndexAggregator(
+                            regional_weights=nino34_region.regional_weights,
+                            regional_mean=ops.regional_area_weighted_mean,
+                        ),
+                    )
+                )
+        if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+            self._time_dependent_aggregators["enso_coefficient"] = (
+                EnsoCoefficientEvaluatorAggregator(
+                    initial_time,
+                    n_timesteps - 1,
+                    timestep,
+                    gridded_operations=ops,
+                    variable_metadata=dataset_info.variable_metadata,
+                )
+            )
         self._summary_aggregators = {
             name: agg
             for name, agg in list(self._aggregators.items())
