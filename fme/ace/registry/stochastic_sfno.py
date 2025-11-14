@@ -6,6 +6,7 @@ from typing import Literal
 import torch
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 from fme.core.models.conditional_sfno.sfnonet import (
     Context,
     ContextConfig,
@@ -167,17 +168,16 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        n_labels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ):
         sfno_net = get_lat_lon_sfnonet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
-            img_shape=img_shape,
+            img_shape=dataset_info.img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
-                embed_dim_labels=n_labels,
+                embed_dim_labels=len(dataset_info.all_labels),
                 embed_dim_noise=self.noise_embed_dim,
             ),
         )

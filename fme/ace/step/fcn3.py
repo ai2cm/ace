@@ -74,8 +74,9 @@ class FCN3Config:
         n_aux_channels: int,
         n_atmo_diagnostic_channels: int,
         n_surf_diagnostic_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ) -> AtmoSphericNeuralOperatorNet:
+        img_shape = dataset_info.img_shape
         return AtmoSphericNeuralOperatorNet(
             n_atmo_channels=n_atmo_channels,
             n_atmo_groups=n_atmo_groups,
@@ -129,7 +130,7 @@ class FCN3Selector:
         n_aux_channels: int,
         n_atmo_diagnostic_channels: int,
         n_surf_diagnostic_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ) -> AtmoSphericNeuralOperatorNet:
         return self.config.build(
             n_atmo_channels=n_atmo_channels,
@@ -138,7 +139,7 @@ class FCN3Selector:
             n_aux_channels=n_aux_channels,
             n_atmo_diagnostic_channels=n_atmo_diagnostic_channels,
             n_surf_diagnostic_channels=n_surf_diagnostic_channels,
-            img_shape=img_shape,
+            dataset_info=dataset_info,
         )
 
 
@@ -303,7 +304,7 @@ class FCN3StepConfig(StepConfigABC):
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return FCN3Step(
             config=self,
-            img_shape=dataset_info.img_shape,
+            dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
@@ -325,7 +326,7 @@ class FCN3Step(StepABC):
     def __init__(
         self,
         config: FCN3StepConfig,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
@@ -334,7 +335,7 @@ class FCN3Step(StepABC):
         """
         Args:
             config: The configuration.
-            img_shape: Shape of domain as (n_lat, n_lon).
+            dataset_info: Information about the dataset.
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
@@ -362,14 +363,14 @@ class FCN3Step(StepABC):
             + len(config.surface_diagnostic_names),
             n_surf_diagnostic_channels=len(config.surface_diagnostic_names),
             n_aux_channels=len(config.forcing_names),
-            img_shape=img_shape,
+            dataset_info=dataset_info,
         )
         module = module.to(get_device())
         init_weights([module])
 
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
-        self._img_shape = img_shape
+        self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from fme.ace.models.ocean.m2lines.samudra import Samudra
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 
 
 @ModuleSelector.register("Samudra")
@@ -33,10 +34,9 @@ class SamudraBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        n_labels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ):
-        if n_labels > 0:
+        if len(dataset_info.all_labels) > 0:
             raise ValueError("Samudra does not support labels")
         return Samudra(
             input_channels=n_in_channels,

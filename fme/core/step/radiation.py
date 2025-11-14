@@ -113,7 +113,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SeparateRadiationStep(
             config=self,
-            img_shape=dataset_info.img_shape,
+            dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
@@ -247,7 +247,7 @@ class SeparateRadiationStep(StepABC):
     def __init__(
         self,
         config: SeparateRadiationStepConfig,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
@@ -257,7 +257,7 @@ class SeparateRadiationStep(StepABC):
         """
         Args:
             config: The configuration.
-            img_shape: Shape of domain as (n_lat, n_lon).
+            dataset_info: Information about the dataset.
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
@@ -281,18 +281,16 @@ class SeparateRadiationStep(StepABC):
         module = config.builder.build(
             n_in_channels=len(config.main_in_names),
             n_out_channels=len(config.main_out_names),
-            all_labels=all_labels,
-            img_shape=img_shape,
+            dataset_info=dataset_info,
         )
         self.module = module.to(get_device())
         radiation_module = config.radiation_builder.build(
             n_in_channels=len(config.radiation_in_names),
             n_out_channels=len(config.radiation_out_names),
-            all_labels=all_labels,
-            img_shape=img_shape,
+            dataset_info=dataset_info,
         )
         self.radiation_module = radiation_module.to(get_device())
-        self._img_shape = img_shape
+        self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 

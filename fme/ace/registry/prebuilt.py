@@ -3,6 +3,7 @@ import dataclasses
 from torch import nn
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 
 
 @ModuleSelector.register("prebuilt")
@@ -20,7 +21,6 @@ class PreBuiltBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        n_labels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ) -> nn.Module:
         return self.module

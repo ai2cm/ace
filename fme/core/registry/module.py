@@ -9,6 +9,7 @@ import dacite
 import torch
 from torch import nn
 
+from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels, LabelEncoder
 
 from .registry import Registry
@@ -17,8 +18,8 @@ from .registry import Registry
 @dataclasses.dataclass
 class ModuleConfig(abc.ABC):
     """
-    Builds a nn.Module given information about the input
-    and output channels and the image shape.
+    Builds a nn.Module given information about the input and output channels
+    and dataset information.
 
     This is a "Config" as in practice it is a dataclass loaded directly from yaml,
     allowing us to specify details of the network architecture in a config file.
@@ -29,19 +30,17 @@ class ModuleConfig(abc.ABC):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        n_labels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ) -> nn.Module:
         """
         Build a nn.Module given information about the input and output channels
-        and the image shape.
+        and the dataset.
 
         Args:
             n_in_channels: number of input channels
             n_out_channels: number of output channels
-            n_labels: number of labels
-            img_shape: shape of last two dimensions of data, e.g. latitude and
-                longitude.
+            dataset_info: Information about the dataset, including img_shape,
+                horizontal coordinates, vertical coordinate, etc.
 
         Returns:
             a nn.Module
@@ -154,36 +153,32 @@ class ModuleSelector:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        all_labels: set[str],
-        img_shape: tuple[int, int],
-    ) -> Module:
+        dataset_info: DatasetInfo,
+    ) -> nn.Module:
         """
         Build a nn.Module given information about the input and output channels
-        and the image shape.
+        and the dataset.
 
         Args:
             n_in_channels: number of input channels
             n_out_channels: number of output channels
-            all_labels: all labels we might see in the data
-            img_shape: shape of last two dimensions of data, e.g. latitude and
-                longitude.
+            dataset_info: Information about the dataset, including img_shape
+                (shape of last two dimensions of data, e.g. latitude and
+                longitude), horizontal coordinates, vertical coordinate, etc.
 
         Returns:
             a Module object
         """
-        if self.conditional and len(all_labels) == 0:
+        if self.conditional and len(dataset_info.all_labels) == 0:
             raise ValueError("Conditional predictions require labels")
         if self.conditional:
-            label_encoder = LabelEncoder(all_labels)
-            n_labels = len(all_labels)
+            label_encoder = LabelEncoder(dataset_info.all_labels)
         else:
             label_encoder = None
-            n_labels = 0
         module = self._instance.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
-            n_labels=n_labels,
-            img_shape=img_shape,
+            dataset_info=dataset_info,
         )
         return Module(module, label_encoder)
 

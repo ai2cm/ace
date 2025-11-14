@@ -170,12 +170,10 @@ class SingleModuleStepConfig(StepConfigABC):
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SingleModuleStep(
             config=self,
-            img_shape=dataset_info.img_shape,
+            dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
-            timestep=dataset_info.timestep,
             init_weights=init_weights,
-            all_labels=dataset_info.all_labels,
         )
 
     def load(self):
@@ -193,22 +191,19 @@ class SingleModuleStep(StepABC):
     def __init__(
         self,
         config: SingleModuleStepConfig,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
-        timestep: datetime.timedelta,
         init_weights: Callable[[list[nn.Module]], None],
-        all_labels: set[str],
     ):
         """
         Args:
             config: The configuration.
-            img_shape: Shape of domain as (n_lat, n_lon).
+            dataset_info: Information about the dataset.
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
             init_weights: Function to initialize the weights of the module.
-            all_labels: Labels which may be present on batch members.
         """
         super().__init__()
         n_in_channels = len(config.in_names)
@@ -218,26 +213,25 @@ class SingleModuleStep(StepABC):
         self._normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
-                config.in_names, config.out_names, timestep
+                config.in_names, config.out_names, dataset_info.timestep
             )
         else:
             self.ocean = None
         module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
-            all_labels=all_labels,
-            img_shape=img_shape,
+            dataset_info=dataset_info,
         )
         self.module = module.to(get_device())
         init_weights(self.modules)
-        self._img_shape = img_shape
+        self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
         dist = Distributed.get_instance()
         self.module = self.module.wrap_module(dist.wrap_module)
 
-        self._timestep = timestep
+        self._timestep = dataset_info.timestep
 
         self._corrector = corrector
         self.in_names = config.in_names
