@@ -1,6 +1,6 @@
 experiment_dir: /results
 n_forward_steps: 21
-forward_steps_in_memory: 2
+forward_steps_in_memory: 1
 checkpoint_path: /ckpt.tar
 n_ensemble_per_ic: 12
 logging:

@@ -169,7 +169,7 @@ class SingleModuleStepConfig(StepConfigABC):
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SingleModuleStep(
             config=self,
-            img_shape=dataset_info.img_shape,
+            dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
@@ -191,7 +191,7 @@ class SingleModuleStep(StepABC):
     def __init__(
         self,
         config: SingleModuleStepConfig,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
@@ -200,7 +200,7 @@ class SingleModuleStep(StepABC):
         """
         Args:
             config: The configuration.
-            img_shape: Shape of domain as (n_lat, n_lon).
+            dataset_info: Information about the dataset.
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
@@ -221,10 +221,10 @@ class SingleModuleStep(StepABC):
         self.module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
-            img_shape=img_shape,
+            dataset_info=dataset_info,
         ).to(get_device())
         init_weights([self.module])
-        self._img_shape = img_shape
+        self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
