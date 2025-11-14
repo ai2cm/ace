@@ -4,11 +4,11 @@
 #SBATCH -q regular
 #SBATCH -C gpu
 #SBATCH -J train-fme
-#SBATCH --nodes=1
+#SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128
-#SBATCH -t 22:00:00
+#SBATCH -t 10:00:00
 #SBATCH --output=joblogs/%j.out
 #SBATCH --signal=USR1@60
 #SBATCH --requeue
@@ -31,7 +31,7 @@ conda activate $FME_VENV
 
 # env variables
 export WANDB_JOB_TYPE=training
-export WANDB_NOTES="PM: $FME_IMAGE, results: $FME_OUTPUT_DIR"
+export WANDB_NOTES="PM: $COMMIT, results: $FME_OUTPUT_DIR"
 set +x  # don't print API key to logs
 export WANDB_API_KEY=$(cat ~/.config/wandb/api)
 set -x
@@ -49,8 +49,8 @@ cp -r $CONFIG_DIR $FME_OUTPUT_DIR/job_config
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29507
 
-export H_PARALLEL_SIZE=1
-export W_PARALLEL_SIZE=4
+# export H_PARALLEL_SIZE=1
+# export W_PARALLEL_SIZE=4
 
 echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT"
 # run the requeueable job

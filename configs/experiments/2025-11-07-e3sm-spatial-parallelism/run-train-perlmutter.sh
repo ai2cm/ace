@@ -3,7 +3,7 @@
 set -x
 
 # wandb config
-export WANDB_NAME=PM-AMIP-EAMv3-spatial-parallelism-1x4-train-rs1
+export WANDB_NAME=PM-AMIP-EAMv3-no-parallelism-fine-tune-from-spatial-parallelism-train-rs1
 export WANDB_RUN_GROUP=2025-04-01-AMIP-EAMv3
 
 export COMMIT=dc443bccc
@@ -26,7 +26,7 @@ UUID=$(uuidgen)
 export CONFIG_DIR=${PSCRATCH}/fme-config/${UUID}
 mkdir -p $CONFIG_DIR
 if [ -z "${RESUME_JOB_ID}" ]; then
-  cp config-train.yaml $CONFIG_DIR/train-config.yaml
+  cp config-finetune.yaml $CONFIG_DIR/train-config.yaml
 else
   cp ${PSCRATCH}/fme-output/${RESUME_JOB_ID}/job_config/train-config.yaml $CONFIG_DIR/train-config.yaml
 fi
