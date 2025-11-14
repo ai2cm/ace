@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-new-unet-amp-ckpt"
-CONFIG_FILENAME="config-generate-on-perfect-pred-global-hist-ckpt-conus.yaml"
+JOB_NAME="eval-xshield-amip-100km-to-3km-new-unet-amp-crps-ckpt"
+CONFIG_FILENAME="config-generate-on-perfect-pred-global-crps-ckpt-conus.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -32,7 +32,7 @@ gantry run \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
     --priority urgent \
-    --not-preemptible \
+    --preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
