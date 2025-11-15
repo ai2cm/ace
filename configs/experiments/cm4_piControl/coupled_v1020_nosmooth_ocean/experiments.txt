@@ -1,3 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
 
 fto-sfno-v1020_nosmooth_ocean|m0rfyk9z_ckpt_ep43_xyx8vraf||training|best_inference_ckpt|normal|--not-preemptible
+
+fto-sfno-v1020_nosmooth_ocean|m0rfyk9z_ckpt_ep43_xyx8vraf|01KA2Y0EWHTXE75S90Z9CSQ6SM|training|best_inference_ckpt|normal|--not-preemptible
