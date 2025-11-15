@@ -30,9 +30,7 @@ run_eval() {
     --workspace ai2/ace \
     --priority normal \
     --not-preemptible \
-    --cluster ai2/saturn-cirrascale \
-    --cluster ai2/ceres-cirrascale \
-    --cluster ai2/jupiter \
+    --cluster ai2/titan \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=inference \
@@ -41,10 +39,11 @@ run_eval() {
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --gpus 1 \
-    --shared-memory 50GiB \
+    --shared-memory 200GiB \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
     --system-python \
+    --allow-dirty \
     --install "pip install --no-deps ." \
     "${extra_args[@]}" \
     -- python -I -m fme.ace.evaluator "$CONFIG_PATH"
