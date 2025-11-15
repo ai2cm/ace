@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_
 cm4_piControl_nosmooth-nfs4-150ep_wu3xLR|rs0|01K9XPZAK68HZ1YRC29VZSQ97W|training|best_inference_ckpt|normal|--not-preemptible
 
 cm4_piControl_nosmooth-nfs4-150ep_wu3xLR|rs1|01K9XPZSCV14842Y5SC3JJYPE1|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_piControl_nosmooth-nfs4-150ep_wu2p5xLR|rs0|01KA2TV2QMW8B02JEQ9WEJXQZ4|training|best_inference_ckpt|normal|--not-preemptible
