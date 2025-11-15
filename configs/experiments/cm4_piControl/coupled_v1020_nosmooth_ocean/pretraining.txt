@@ -1,4 +1,4 @@
 group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|ocean_results_dataset|atmos_results_dataset
 
-fto-sfno-v1020_nosmooth_ocean|m0rfyk9z_ckpt_ep43_xyx8vraf|||ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|urgent|jupiter|8|800GiB|1|||01KA044QC8GSZEPME6XN7R9DQX
+fto-sfno-v1020_nosmooth_ocean|m0rfyk9z_ckpt_ep43_xyx8vraf|||ckpt|ace2-cm4-atmos-noLSM|xyx8vraf|best_inference_ckpt|train|urgent|jupiter|8|800GiB|1|ai2/climate-titan||01KA044QC8GSZEPME6XN7R9DQX
 
