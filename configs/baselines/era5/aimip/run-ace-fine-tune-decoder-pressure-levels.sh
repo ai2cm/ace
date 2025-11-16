@@ -56,3 +56,14 @@ for SEED in 0 1 2 3; do
     OVERRIDE="seed=${SEED}"
     launch_job $JOB_NAME $OVERRIDE
 done
+
+# same as above but smaller ensemble with downweighted q1/q2/q3/q4 to avoid overfitting
+for SEED in 0 1; do
+    JOB_NAME="${JOB_NAME_BASE}-downweight-q-RS${SEED}"
+    OVERRIDE="seed=${SEED} \
+stepper.loss.weights.specific_total_water_1=0.1 \
+stepper.loss.weights.specific_total_water_2=0.25 \
+stepper.loss.weights.specific_total_water_3=0.5 \
+stepper.loss.weights.specific_total_water_4=0.5"
+    launch_job $JOB_NAME $OVERRIDE
+done
