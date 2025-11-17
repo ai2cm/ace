@@ -48,6 +48,7 @@ train_loader:
   batch_size: 16
   num_data_workers: 4
   time_buffer: 10
+  prefetch_factor: 2
   dataset:
     merge:
     - data_path: FME_TRAIN_DIR
@@ -66,6 +67,7 @@ validation_loader:
   batch_size: 32
   num_data_workers: 1
   time_buffer: 10
+  prefetch_factor: 2
   dataset:
     merge:
     - data_path: FME_TRAIN_DIR
@@ -125,6 +127,7 @@ stepper:
         network:
           global_means_path: FME_STATS_DIR/centering.nc
           global_stds_path: FME_STATS_DIR/scaling-full-field.nc
+          fill_nans_on_normalize: false
         residual:
           global_means_path: FME_STATS_DIR/centering.nc
           global_stds_path: FME_STATS_DIR/scaling-residual.nc
