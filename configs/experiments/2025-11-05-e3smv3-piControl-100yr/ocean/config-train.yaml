@@ -162,8 +162,6 @@ stepper:
       - TAUX
       - TAUY
       - surface_precipitation_rate
-      - surface_upward_longwave_flux
-      - surface_upward_shortwave_flux
       - FLDS
       - FSDS
       - LHFLX
@@ -173,8 +171,6 @@ stepper:
       - TAUX
       - TAUY
       - surface_precipitation_rate
-      - surface_upward_longwave_flux
-      - surface_upward_shortwave_flux
       - FLDS
       - FSDS
       - LHFLX

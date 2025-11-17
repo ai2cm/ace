@@ -3,10 +3,10 @@
 set -x
 
 # wandb config
-export WANDB_NAME=PM-v1110-Samudra-piControl-100yr-lr-1e-4-scdlr-train-rs1
+export WANDB_NAME=PM-v1110-Samudra-piControl-100yr-lr-1e-4-scdlr-no-sfc-up-flux-train-rs2
 export WANDB_RUN_GROUP=v1110-filter-scale-4
 
-export COMMIT=cdc8e5688
+export COMMIT=d97924c5d
 
 export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset
 export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-11-10-E3SMv3-piControl-100yr-coupled-stats/ocean
@@ -14,7 +14,7 @@ export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-11-10-E3SMv3-piCont
 # if resuming a failed job, provide its slurm job ID below and uncomment;
 # note that information entered above should be consistent with that of
 # the failed job
-# export RESUME_JOB_ID=12345678
+# export RESUME_JOB_ID=45211571
 
 # user should not need to modify below
 

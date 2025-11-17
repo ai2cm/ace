@@ -4,11 +4,11 @@
 #SBATCH -q regular
 #SBATCH -C gpu
 #SBATCH -J train-fme
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128
-#SBATCH -t 20:00:00
+#SBATCH -t 12:00:00
 #SBATCH --output=joblogs/%j.out
 #SBATCH --signal=USR1@60
 #SBATCH --requeue
@@ -31,7 +31,7 @@ conda activate $FME_VENV
 
 # env variables
 export WANDB_JOB_TYPE=training
-export WANDB_NOTES="PM: $FME_IMAGE, results: $FME_OUTPUT_DIR"
+export WANDB_NOTES="PM: $COMMIT, results: $FME_OUTPUT_DIR"
 set +x  # don't print API key to logs
 export WANDB_API_KEY=$(cat ~/.config/wandb/api)
 set -x
