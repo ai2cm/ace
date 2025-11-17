@@ -482,7 +482,7 @@ def test__compute_sample_mean_std():
             "time": xr.date_range("2000-03-01", periods=4, freq="MS", use_cftime=True)
         },
     )
-    data = xr.concat([data1, data2], dim="sample")
+    data = xr.concat([data1, data2], dim="sample", join="outer")
     np.testing.assert_almost_equal(
         _compute_sample_mean_std(data),
         (np.std(data1) + np.std(data2)) / 2,
@@ -502,7 +502,7 @@ def test__compute_sample_mean_std():
             "time": xr.date_range("2000-03-01", periods=4, freq="MS", use_cftime=True)
         },
     )
-    target_data = xr.concat([target_data1, target_data2], dim="sample")
+    target_data = xr.concat([target_data1, target_data2], dim="sample", join="outer")
     np.testing.assert_almost_equal(
         _compute_sample_mean_std(data, target_data),
         (np.std(data1) / np.std(target_data1) + np.std(data2) / np.std(target_data2))
