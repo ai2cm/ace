@@ -4,8 +4,8 @@ import pytest
 import torch
 
 from fme.downscaling.data import BatchData
-from fme.downscaling.generate.constants import ENSEMBLE_NAME, TIME_NAME
-from fme.downscaling.generate.work_items import (
+from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
+from fme.downscaling.inference.work_items import (
     LoadedSliceWorkItem,
     SliceItemDataset,
     SliceWorkItem,
@@ -391,7 +391,7 @@ def test_slice_item_dataset_getitem_returns_loaded_work_item(
 
     # Mock BatchData.from_sequence
     with patch(
-        "fme.downscaling.generate.work_items.BatchData.from_sequence"
+        "fme.downscaling.inference.work_items.BatchData.from_sequence"
     ) as mock_from_sequence:
         mock_batch = Mock(spec=BatchData)
         mock_from_sequence.return_value = mock_batch

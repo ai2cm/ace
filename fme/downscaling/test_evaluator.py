@@ -17,7 +17,7 @@ from fme.downscaling.data import PairedDataLoaderConfig
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
-from fme.downscaling.test_train import data_paths_helper
+from fme.downscaling.test_utils import data_paths_helper
 from fme.downscaling.train import TrainerConfig
 
 
@@ -72,11 +72,15 @@ def get_trainer_model_config():
             expects_interpolated_input=False,
         ),
         loss=LossConfig("NaN"),
-        in_names=["x", "y"],
-        out_names=["x", "y"],
+        in_names=["var0", "var1"],
+        out_names=["var0", "var1"],
         normalization=PairedNormalizationConfig(
-            NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
-            NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
+            NormalizationConfig(
+                means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+            ),
+            NormalizationConfig(
+                means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+            ),
         ),
         p_mean=0,
         p_std=1,
