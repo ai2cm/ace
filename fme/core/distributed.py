@@ -1,6 +1,7 @@
+import contextlib
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import torch.distributed
 from torch.nn import SyncBatchNorm
@@ -58,12 +59,31 @@ class Distributed:
             singleton = cls()
         return singleton
 
-    def __init__(self):
-        if torch.distributed.is_available() and not torch.distributed.is_initialized():
+    @classmethod
+    @contextlib.contextmanager
+    def force_non_distributed(cls) -> Iterator["Distributed"]:
+        """
+        Force the distributed singleton to be in non-distributed mode.
+        """
+        global singleton
+        original = cls.get_instance()
+        singleton = cls(force_non_distributed=True)
+        try:
+            yield singleton
+        finally:
+            singleton = original
+
+    def __init__(self, force_non_distributed: bool = False):
+        if (
+            torch.distributed.is_available()
+            and not torch.distributed.is_initialized()
+            and not force_non_distributed
+        ):
             self._distributed = self._init_distributed()
         else:
             self._distributed = False
         self._seed = 0
+        self._force_non_distributed = force_non_distributed  # for debugging
 
     def _init_distributed(self):
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun

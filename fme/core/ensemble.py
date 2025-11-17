@@ -30,7 +30,6 @@ def get_crps(
     # CRPS is `E[|X - y|] - 1/2 E[|X - X'|]`
     # below we compute the first term as the average of two ensemble members
     # meaning the 0.5 factor can be pulled out
-    alpha = 0.95
     epsilon = (1 - alpha) / 2
     target_term = torch.abs(gen - target).mean(axis=1)
     internal_term = -0.5 * torch.abs(gen[:, 0, ...] - gen[:, 1, ...])
