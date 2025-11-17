@@ -1,0 +1,3 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override
+ft_smooth-1pct_nosmooth_0256to0350|rs1_484ss1vq|ace-samudra-cm4|484ss1vq|best_inference_ckpt|train|high|a100+h100|2|200GiB|0||
+ft_smooth-1pct_nosmooth_0256to0350|rs2_41qhptht|ace-samudra-cm4|41qhptht|best_inference_ckpt|train|high|a100+h100|2|200GiB|0||

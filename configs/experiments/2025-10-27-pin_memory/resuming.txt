@@ -1,0 +1,5 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|existing_results_dataset
+no_pin_memory-no_time_buffer|rs0|ace-perf|ax85eyhb|train|high||2|300GiB|0||resume_results.resume_wandb=true inference.n_forward_steps=2920 log_train_every_n_batches=100
+no_pin_memory-time_buffer_10|rs0|ace-perf|vylr0xur|train|high||2|300GiB|0||resume_results.resume_wandb=true inference.n_forward_steps=2920 log_train_every_n_batches=100
+no_pin_memory-no_time_buffer|rs1|ace-perf|mlog0z5g|train|high||2|300GiB|0||resume_results.resume_wandb=true inference.n_forward_steps=2920 log_train_every_n_batches=100
+no_pin_memory-time_buffer_10|rs1|ace-perf|c28e0wdc|train|high||2|300GiB|0||resume_results.resume_wandb=true inference.n_forward_steps=2920 log_train_every_n_batches=100

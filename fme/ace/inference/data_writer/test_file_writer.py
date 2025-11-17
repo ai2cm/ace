@@ -317,7 +317,9 @@ def test__select_time_file_writer_multiple_samples(time_selection, tmpdir):
     )
     file_writer.finalize()
 
-    with xr.open_dataset(tmpdir / "test_writer.nc") as subselected_data:
+    with xr.open_dataset(
+        tmpdir / "test_writer.nc", decode_timedelta=False
+    ) as subselected_data:
         assert len(subselected_data.sample) == n_samples
         if isinstance(time_selection, Slice):
             assert len(subselected_data.time) == 2
@@ -461,7 +463,7 @@ def test_file_writer_with_healpix_data_and_zarr(tmpdir):
     writer.append_batch(data_first_half, batch_time=batch_time_first_half)
     writer.append_batch(data_second_half, batch_time=batch_time_second_half)
     writer.finalize()
-    zarr_data = xr.open_zarr(tmpdir / "filename.zarr")
+    zarr_data = xr.open_zarr(tmpdir / "filename.zarr", decode_timedelta=False)
     assert dict(zarr_data.sizes) == {
         "sample": n_samples,
         "time": n_timesteps,

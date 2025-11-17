@@ -1,0 +1,96 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.999
+max_epochs: 50
+n_forward_steps: 8
+inference:
+  n_forward_steps: 1440
+  forward_steps_in_memory: 40
+  loader:
+    start_indices:
+      times:
+      - '0151-01-03T12:00:00'
+      - '0171-01-03T12:00:00'
+      - '0191-01-03T12:00:00'
+      - '0211-01-03T12:00:00'
+      - '0231-01-03T12:00:00'
+      - '0251-01-03T12:00:00'
+      - '0271-01-03T12:00:00'
+      - '0291-01-03T12:00:00'
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-08-07-cm4-piControl-200yr-5daily-sfc-flux.zarr
+        engine: zarr
+    num_data_workers: 8
+  aggregator:
+    log_histograms: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+train_loader:
+  batch_size: 16 # 707 / 8 ~ 89 batches per GPU
+  num_data_workers: 16 # 89 / 16 ~ 6 batches per data worker
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
+      engine: zarr
+      subset:
+        stop_time: '0306-01-01'
+    - data_path: /climate-default
+      file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
+      engine: zarr
+      subset:
+        stop_time: '0306-01-01'
+    - data_path: /climate-default
+      file_pattern: 2025-08-07-cm4-piControl-200yr-5daily-sfc-flux.zarr
+      engine: zarr
+      subset:
+        stop_time: '0306-01-01'
+validation_loader:
+  batch_size: 16 # 22 / 8 ~ 3 batches per GPU
+  num_data_workers: 8 # 3 / 4 ~ 3 batches per data_worker
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-08-22-cm4-piControl-200yr-coupled-ocean.zarr
+      engine: zarr
+      subset:
+        start_time: '0306-01-01'
+        stop_time: '0311-01-01'
+    - data_path: /climate-default
+      file_pattern: 2025-08-07-cm4-piControl-200yr-ocean.zarr
+      engine: zarr
+      subset:
+        start_time: '0306-01-01'
+        stop_time: '0311-01-01'
+    - data_path: /climate-default
+      file_pattern: 2025-08-07-cm4-piControl-200yr-5daily-sfc-flux.zarr
+      engine: zarr
+      subset:
+        start_time: '0306-01-01'
+        stop_time: '0311-01-01'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper:
+  parameter_init:
+    weights_path: /ckpt.tar

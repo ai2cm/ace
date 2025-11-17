@@ -1,0 +1,3 @@
+group|exper_id|status|ckpt_type|priority|premptible_flag
+v2025-08-07-mnsf-fpHI-nfs8-rs1|01K27VB3JSE5EJP3KFRKR03CGN|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+v2025-08-07-mnsf-fpHI-rs1|01K27WA3ZE31WYT1VEK0E2M6A3|run_ICx1|best_inference_ckpt|normal|--not-preemptible

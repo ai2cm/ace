@@ -1,0 +1,2 @@
+group|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|existing_atmos_ID|existing_ocean_ID
+fto-v1021-ocn-filter-scale-4||ocean-emulator-e3sm|4mifjeyb|best_inference_ckpt|ace-eamv3|s1yh7c4k|best_inference_ckpt|train|high||8|800GiB|0|ai2/ace||01K8KVBD4YTXGY8YS2JBPKVT6M|01K8KJMXZJGK5W1MH80MS933V0

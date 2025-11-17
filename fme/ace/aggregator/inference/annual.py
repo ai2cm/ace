@@ -203,7 +203,7 @@ class GlobalMeanAnnualAggregator:
         if self._datasets is None:
             raise ValueError("No data has been recorded yet.")
         dist = Distributed.get_instance()
-        data = xr.concat(self._datasets, dim="sample")
+        data = xr.concat(self._datasets, dim="sample", join="outer")
         if dist.world_size > 1:
             data = _gather_sample_datasets(dist, data)
         if data is None:

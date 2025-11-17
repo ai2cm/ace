@@ -1,0 +1,31 @@
+experiment_dir: /results
+n_forward_steps: 29200
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-eamv3
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+     - '0401-01-01T06:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-08-13-E3SMv3-piControl-100yr-coupled-interpolate_sst-sst_from_ts-atmosphere.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
+      engine: zarr
+  num_data_workers: 4
+aggregator:
+  log_zonal_mean_images: false
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true

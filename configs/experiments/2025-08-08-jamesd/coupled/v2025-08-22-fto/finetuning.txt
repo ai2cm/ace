@@ -1,0 +1,8 @@
+group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+fto-sad8rguj-cos_lr_20ep|ace-samudra-coupled-cm4|sad8rguj|best_inference_ckpt|trained|urgent|ceres|8|800GiB|3||
+fto-rq97q5t9-const_lr_10ep|ace-samudra-coupled-cm4|rq97q5t9|best_inference_ckpt|training|urgent|ceres|8|800GiB|3||optimization.scheduler.type=null
+fto-rq97q5t9_ep1-const_lr_10ep|ace-samudra-coupled-cm4|rq97q5t9|best_inference_ckpt_0001|training|urgent|ceres|8|800GiB|3||optimization.scheduler.type=null
+fto-vxi6yc4m-cos_lr_10ep|ace-samudra-coupled-cm4|vxi6yc4m|best_ckpt|training|urgent|ceres|8|800GiB|3||max_epochs=10
+fto-vxi6yc4m-cos_lr_20ep|ace-samudra-coupled-cm4|vxi6yc4m|best_ckpt|training|high|ceres|8|800GiB|3||optimization.scheduler.step_each_iteration=true optimization.scheduler.kwargs.T_max=14140
+fto-ojyzoqli-cooldown_lr_2ep|ace-samudra-coupled-cm4|ojyzoqli|best_inference_ckpt|training|high|ceres|8|800GiB|3||optimization.lr=0.0001 optimization.scheduler.type=LinearLR optimization.scheduler.kwargs={'start_factor':1,'end_factor':0,'total_iters':1414} optimization.scheduler.step_each_iteration=true
+fto-ojyzoqli-cooldown_lr_2ep-ncs2|ace-samudra-coupled-cm4|ojyzoqli|best_inference_ckpt|train|urgent|ceres|8|800GiB|3||max_epochs=2 n_coupled_steps=2 optimization.lr=0.0001 optimization.scheduler.type=LinearLR optimization.scheduler.kwargs={'start_factor':1,'end_factor':0,'total_iters':1414} optimization.scheduler.step_each_iteration=true

@@ -1,0 +1,34 @@
+experiment_dir: /results
+n_forward_steps: 1460
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ocean-emulator-e3sm
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0401-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-07-11-E3SMv3-piControl-100yr-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-07-24-E3SMv3-piControl-100yr-mask-zos.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-06-11-E3SM-piControl-ocean-ice-19-levs-fix-mask.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-06-12-E3SMv3-coupled-piControl-atmosphere-sfc-only-5daily.zarr
+      engine: zarr
+  num_data_workers: 1
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+aggregator:
+  log_histograms: true
