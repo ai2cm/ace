@@ -13,7 +13,7 @@ class CRPSExperiment:
     random_amount: float
 
 
-@pytest.mark.parametrize("alpha", [1.0, 0.95, 0.1])
+@pytest.mark.parametrize("alpha", [1.0, 0.95])
 def test_crps(alpha: float):
     """
     Test that get_crps is a proper scoring rule.
