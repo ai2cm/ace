@@ -432,6 +432,28 @@ class Distributed:
         output_shape_loc = (inverse_transform.nlat, inverse_transform.nlon)
       return input_shape_loc, output_shape_loc
 
+    def dataset_reshape(self, ds, dims, shape):
+      shape_excluding_time=(shape[1], shape[2])
+      # Check for the presence of latitude and longitude dimensions
+      has_lat = "lat" in dims
+      has_lon = "lon" in dims
+      has_latitude = "latitude" in dims
+      has_longitude = "longitude" in dims
+
+      # Get local slices for height and width
+      slice_h, slice_w = self.get_local_slices(shape_excluding_time)
+
+      # Determine the appropriate dimension names for latitude and longitude
+      lat_dim = "lat" if has_lat else "latitude" if has_latitude else None
+      lon_dim = "lon" if has_lon else "longitude" if has_longitude else None
+
+      # Check if both dimensions are available
+      if lat_dim is not None and lon_dim is not None:
+        ds = ds.isel(**{lat_dim: slice_h, lon_dim: slice_w})
+        shape[1]=slice_h.stop - slice_h.start
+        shape[2]=slice_w.stop - slice_w.start
+      return ds, shape
+
     def barrier(self):
         """
         Wait for all processes to reach this point.
