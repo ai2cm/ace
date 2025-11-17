@@ -19,19 +19,31 @@ if __name__ == "__main__":
         subset:
           start_time: '1979-01-01'
           stop_time: '2020-12-31'"""  # noqa: E501
+
+    replace_pairs = [
+        (commented_text, uncommented_text),
+        ("max_epochs: 600", "max_epochs: 120"),
+    ]
     for config_filename in [
         "train-era5-extrapolate-1step.yaml",
         "train-era5-infill-1step.yaml",
     ]:
         out_filename = config_filename.replace("-era5-", "-combined-")
         config_text = open(config_filename).read()
-        if commented_text not in config_text:
-            raise ValueError(f"Commented text not found in {config_filename}")
-        if uncommented_text in config_text:
-            raise ValueError(f"Uncommented text found in {config_filename}")
-        combined_text = config_text.replace(
-            commented_text,
-            uncommented_text,
-        )
+        for initial_text, replacement_text in replace_pairs:
+            if initial_text not in config_text:
+                raise ValueError(
+                    f"Initial text not found in {config_filename}, "
+                    f"expected:\n{initial_text}"
+                )
+            if replacement_text in config_text:
+                raise ValueError(
+                    f"Replacement text found in {config_filename}, "
+                    "did not expect:\n{replacement_text}"
+                )
+            config_text = config_text.replace(
+                initial_text,
+                replacement_text,
+            )
         with open(out_filename, "w") as f:
-            f.write(combined_text)
+            f.write(config_text)

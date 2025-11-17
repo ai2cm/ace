@@ -3,7 +3,7 @@ experiment_dir: /results
 seed: 0
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 120
+max_epochs: 600
 ema:
   decay: 0.999
 inference:
