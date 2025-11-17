@@ -5,7 +5,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.downscaling.data import Topography
+from fme.downscaling.data import StaticInputs
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.predictors.cascade import CascadePredictor
@@ -48,7 +48,7 @@ def test_CascadePredictor_generate(downscale_factors):
     n_times, n_samples_generate, nside_coarse = 3, 2, 4
     grid_bounds = (0, 100)
     models = []
-    topographies: list[Topography | None] = []
+    topographies: list[StaticInputs | None] = []
     input_n_cells = nside_coarse
 
     for downscale_factor in downscale_factors:
@@ -59,7 +59,7 @@ def test_CascadePredictor_generate(downscale_factors):
             )
         )
         topographies.append(
-            Topography(
+            StaticInputs(
                 data=torch.randn(
                     input_n_cells * downscale_factor,
                     input_n_cells * downscale_factor,
@@ -97,7 +97,7 @@ def test_CascadePredictor__subset_topographies():
     downscale_factors = [2, 2]
     grid_bounds = (0, 8)
     models = []
-    topographies: list[Topography | None] = []
+    topographies: list[StaticInputs | None] = []
     input_n_cells = nside_coarse
 
     for downscale_factor in downscale_factors:
@@ -108,7 +108,7 @@ def test_CascadePredictor__subset_topographies():
             )
         )
         topographies.append(
-            Topography(
+            StaticInputs(
                 data=torch.randn(
                     input_n_cells * downscale_factor,
                     input_n_cells * downscale_factor,
@@ -129,14 +129,14 @@ def test_CascadePredictor__subset_topographies():
     )
 
     # First topography grid 0.5 grid spacing
-    assert isinstance(subset_intermediate_topographies[0], Topography)
+    assert isinstance(subset_intermediate_topographies[0], StaticInputs)
     assert subset_intermediate_topographies[0].shape == (8, 8)
     assert subset_intermediate_topographies[0].coords.lat[0] == 1.25
     assert subset_intermediate_topographies[0].coords.lat[-1] == 4.75
     assert subset_intermediate_topographies[0].coords.lon[0] == 1.25
     assert subset_intermediate_topographies[0].coords.lon[-1] == 4.75
     # Second topography grid has 0.25 grid spacing
-    assert isinstance(subset_intermediate_topographies[1], Topography)
+    assert isinstance(subset_intermediate_topographies[1], StaticInputs)
     assert subset_intermediate_topographies[1].shape == (16, 16)
     assert subset_intermediate_topographies[1].coords.lat[0] == 1.125
     assert subset_intermediate_topographies[1].coords.lat[-1] == 4.875

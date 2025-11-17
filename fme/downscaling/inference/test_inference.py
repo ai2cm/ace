@@ -11,7 +11,7 @@ import yaml
 
 from fme.core.dataset.time import TimeSlice
 from fme.core.logging_utils import LoggingConfig
-from fme.downscaling.data import LatLonCoordinates, Topography
+from fme.downscaling.data import LatLonCoordinates, StaticInputs
 from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
 from fme.downscaling.inference.inference import Downscaler, InferenceConfig, main
 from fme.downscaling.inference.output import (
@@ -61,7 +61,7 @@ def mock_output_target():
 def get_topography(shape=(16, 16)):
     data = torch.randn(shape)
     coords = LatLonCoordinates(lat=torch.arange(shape[0]), lon=torch.arange(shape[1]))
-    return Topography(data=data, coords=coords)
+    return StaticInputs(data=data, coords=coords)
 
 
 # Tests for Downscaler initialization

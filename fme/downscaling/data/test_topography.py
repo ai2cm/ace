@@ -4,7 +4,7 @@ import torch
 from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
 
-from .topography import Topography, _range_to_slice
+from .topography import StaticInputs, _range_to_slice
 from .utils import ClosedInterval
 
 
@@ -26,7 +26,7 @@ from .utils import ClosedInterval
 )
 def test_Topography_error_cases(init_args):
     with pytest.raises(ValueError):
-        Topography(*init_args)
+        StaticInputs(*init_args)
 
 
 def test__range_to_slice():
@@ -43,7 +43,7 @@ def test_subset_latlon():
     coords = LatLonCoordinates(
         lat=torch.linspace(0, 9, 10), lon=torch.linspace(0, 9, 10)
     )
-    topo = Topography(data=data, coords=coords)
+    topo = StaticInputs(data=data, coords=coords)
     lat_interval = ClosedInterval(2, 5)
     lon_interval = ClosedInterval(3, 7)
     subset_topo = topo.subset_latlon(lat_interval, lon_interval)
@@ -67,7 +67,7 @@ def test_Topography_generate_from_patches():
             output_slice=output_slice,
         ),
     ]
-    topography = Topography(
+    topography = StaticInputs(
         torch.arange(16).reshape(4, 4),
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )

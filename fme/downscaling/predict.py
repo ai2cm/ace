@@ -235,7 +235,7 @@ class Downscaler:
     @property
     def _fine_latlon_coordinates(self) -> LatLonCoordinates | None:
         if self.data.topography is not None:
-            return self.data.topography.coords
+            return self.data.topography.fields[0].coords
         else:
             return None
 

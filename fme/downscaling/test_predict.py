@@ -77,7 +77,7 @@ def create_predictor_config(
     experiment_dir.mkdir()
     with open(file_path) as file:
         config = yaml.safe_load(file)
-    config["data"]["topography"] = f"{paths.fine}/data.nc"
+    config["data"]["static_inputs"] = {"HGTsfc": f"{paths.fine}/data.nc"}
     config["data"]["coarse"] = [{"data_path": str(paths.coarse)}]
     config["data"]["lat_extent"] = {"start": 1, "stop": 6}
     config["experiment_dir"] = str(experiment_dir)

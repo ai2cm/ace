@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Generator
+from collections.abc import Iterator
 
 import torch
 import xarray as xr
@@ -19,7 +19,7 @@ def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
 
 
 @dataclasses.dataclass
-class Topography:
+class StaticInput:
     data: torch.Tensor
     coords: LatLonCoordinates
 
@@ -35,10 +35,6 @@ class Topography:
             )
 
     @property
-    def dim(self) -> int:
-        return len(self.shape)
-
-    @property
     def shape(self) -> tuple[int, int]:
         return self.data.shape
 
@@ -46,14 +42,14 @@ class Topography:
         self,
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
-    ) -> "Topography":
+    ) -> "StaticInput":
         lat_slice = _range_to_slice(self.coords.lat, lat_interval)
         lon_slice = _range_to_slice(self.coords.lon, lon_interval)
         return self._latlon_index_slice(lat_slice=lat_slice, lon_slice=lon_slice)
 
-    def to_device(self) -> "Topography":
+    def to_device(self) -> "StaticInput":
         device = get_device()
-        return Topography(
+        return StaticInput(
             data=self.data.to(device),
             coords=LatLonCoordinates(
                 lat=self.coords.lat.to(device),
@@ -61,7 +57,7 @@ class Topography:
             ),
         )
 
-    def _apply_patch(self, patch: Patch):
+    def apply_patch(self, patch: Patch):
         return self._latlon_index_slice(
             lat_slice=patch.input_slice.y, lon_slice=patch.input_slice.x
         )
@@ -70,13 +66,13 @@ class Topography:
         self,
         lat_slice: slice,
         lon_slice: slice,
-    ) -> "Topography":
+    ) -> "StaticInput":
         sliced_data = self.data[lat_slice, lon_slice]
         sliced_latlon = LatLonCoordinates(
             lat=self.coords.lat[lat_slice],
             lon=self.coords.lon[lon_slice],
         )
-        return Topography(
+        return StaticInput(
             data=sliced_data,
             coords=sliced_latlon,
         )
@@ -84,32 +80,32 @@ class Topography:
     def generate_from_patches(
         self,
         patches: list[Patch],
-    ) -> Generator["Topography", None, None]:
+    ) -> Iterator["StaticInput"]:
         for patch in patches:
             yield self._apply_patch(patch)
 
 
-def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
+def get_normalized_static_input(path: str, input_name: str = "HGTsfc"):
     if path.endswith(".zarr"):
-        topography = xr.open_zarr(path, mask_and_scale=False)[topography_name]
+        field = xr.open_zarr(path, mask_and_scale=False)[input_name]
     else:
-        topography = xr.open_dataset(path, mask_and_scale=False)[topography_name]
-    if "time" in topography.dims:
-        topography = topography.isel(time=0).squeeze()
-    if len(topography.shape) != 2:
+        field = xr.open_dataset(path, mask_and_scale=False)[input_name]
+    if "time" in field.dims:
+        field = field.isel(time=0).squeeze()
+    if len(field.shape) != 2:
         raise ValueError(
-            f"unexpected shape {topography.shape} for topography."
+            f"unexpected shape {field.shape} for topography."
             "Currently, only lat/lon topography is supported."
         )
-    lat_name, lon_name = topography.dims[-2:]
+    lat_name, lon_name = field.dims[-2:]
     coords = LatLonCoordinates(
-        lon=torch.tensor(topography[lon_name].values),
-        lat=torch.tensor(topography[lat_name].values),
+        lon=torch.tensor(field[lon_name].values),
+        lat=torch.tensor(field[lat_name].values),
     )
 
-    topography_normalized = (topography - topography.mean()) / topography.std()
+    field_normalized = (field - field.mean()) / field.std()
 
-    return Topography(data=torch.tensor(topography_normalized.values), coords=coords)
+    return StaticInput(data=torch.tensor(field_normalized.values), coords=coords)
 
 
 def get_topography_downscale_factor(
@@ -137,3 +133,44 @@ def get_topography_downscale_factor(
             f"shape {data_coords_shape}"
         )
     return topography_downscale_factor
+
+
+@dataclasses.dataclass
+class StaticInputs:
+    fields: list[StaticInput]
+
+    def __post_init__(self):
+        for i, field in enumerate(self.fields[1:]):
+            if field.shape != self.fields[0].shape:
+                raise ValueError(
+                    f"All StaticInput fields must have the same shape. "
+                    f"Field {i} has shape {self.fields[i].shape}, "
+                    f"while field 0 has shape {self.fields[0].shape}."
+                )
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.fields[0].shape
+
+    def subset_latlon(
+        self,
+        lat_interval: ClosedInterval,
+        lon_interval: ClosedInterval,
+    ) -> "StaticInputs":
+        return StaticInputs(
+            fields=[
+                field.subset_latlon(lat_interval, lon_interval) for field in self.fields
+            ]
+        )
+
+    def to_device(self) -> "StaticInputs":
+        return StaticInputs(fields=[field.to_device() for field in self.fields.items()])
+
+    def generate_from_patches(
+        self,
+        patches: list[Patch],
+    ) -> Iterator["StaticInputs"]:
+        for patch in patches:
+            yield StaticInputs(
+                fields=[field.apply_patch(patch) for field in self.fields]
+            )

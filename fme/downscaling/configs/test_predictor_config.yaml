@@ -13,7 +13,7 @@ model:
 # model:
 #   checkpoint: /will/be/overwritten
 data:
-  topography: /will/be/overwritten
+  static_inputs: {"HGTsfc": /will/be/overwritten}
   coarse:
     - data_path: /will/be/overwritten
   batch_size: 2

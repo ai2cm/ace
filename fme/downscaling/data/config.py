@@ -21,8 +21,8 @@ from fme.downscaling.data.datasets import (
     PairedGriddedData,
 )
 from fme.downscaling.data.topography import (
-    Topography,
-    get_normalized_topography,
+    StaticInputs,
+    get_normalized_static_input,
     get_topography_downscale_factor,
 )
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
@@ -109,6 +109,7 @@ class DataLoaderConfig:
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
+    static_inputs: dict[str, str] | None = None
     topography: str | None = None
     lat_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(-90.0, 90.0)
@@ -117,6 +118,24 @@ class DataLoaderConfig:
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
     )
     repeat: int = 1
+    topography_variable: str = "HGTsfc"
+
+    def __post_init__(self):
+        if self.topography is not None:
+            if self.static_inputs is not None:
+                if self.topography_variable in self.static_inputs:
+                    if self.topography != self.static_inputs[self.topography_variable]:
+                        raise ValueError(
+                            "'topography' was configured in both the top level DataConfig "
+                            "and within 'static_inputs' with different paths. Please only "
+                            "configure topography in 'static_inputs'."
+                        )
+                self.static_inputs[self.topography_variable] = self.topography
+            raise DeprecationWarning(
+                "The 'topography' field in DataLoaderConfig is deprecated. "
+                f"Instead, provide {self.topography_variable} and data path as key and value "
+                "in the 'static_inputs' config field."
+            )
 
     @property
     def full_config(self) -> Sequence[XarrayDataConfig]:
@@ -155,32 +174,35 @@ class DataLoaderConfig:
             strict=self.strict_ensemble,
         )
 
-    def build_topography(
+    def build_static_inputs(
         self, coarse_coords: LatLonCoordinates, requires_topography: bool
-    ) -> Topography | None:
+    ) -> StaticInputs | None:
         if requires_topography is False:
             return None
-        if self.topography is None:
+        if self.topography is None and self.static_inputs is None:
             raise ValueError(
-                "Topography is required for this model, but no topography "
-                "dataset was specified in the configuration."
+                "Topography is required for this model, but no static inputs "
+                "datasets were specified in the configuration."
             )
-        topography = get_normalized_topography(self.topography)
-        # Fine grid boundaries are adjusted to exactly match the coarse grid
-        fine_lat_interval = adjust_fine_coord_range(
-            self.lat_extent,
-            full_coarse_coord=coarse_coords.lat,
-            full_fine_coord=topography.coords.lat,
-        )
-        fine_lon_interval = adjust_fine_coord_range(
-            self.lon_extent,
-            full_coarse_coord=coarse_coords.lon,
-            full_fine_coord=topography.coords.lon,
-        )
-        subset_topography = topography.subset_latlon(
-            lat_interval=fine_lat_interval, lon_interval=fine_lon_interval
-        )
-        return subset_topography.to_device()
+        static_inputs = []
+        for var_name, path in self.static_inputs.items():
+            static_input = get_normalized_static_input(path, input_name=var_name)
+            # Fine grid boundaries are adjusted to exactly match the coarse grid
+            fine_lat_interval = adjust_fine_coord_range(
+                self.lat_extent,
+                full_coarse_coord=coarse_coords.lat,
+                full_fine_coord=static_input.coords.lat,
+            )
+            fine_lon_interval = adjust_fine_coord_range(
+                self.lon_extent,
+                full_coarse_coord=coarse_coords.lon,
+                full_fine_coord=static_input.coords.lon,
+            )
+            subset_topography = static_input.subset_latlon(
+                lat_interval=fine_lat_interval, lon_interval=fine_lon_interval
+            )
+            static_inputs.append(subset_topography.to_device())
+        return StaticInputs(fields=static_inputs)
 
     def build_batchitem_dataset(
         self,
@@ -246,7 +268,7 @@ class DataLoaderConfig:
             persistent_workers=True if self.num_data_workers > 0 else False,
         )
         example = dataset[0]
-        subset_topography = self.build_topography(
+        subset_topography = self.build_static_inputs(
             coarse_coords=latlon_coords,
             requires_topography=requirements.use_fine_topography,
         )
@@ -409,9 +431,9 @@ class PairedDataLoaderConfig:
                     raise ValueError(
                         f"No files found matching '{data_path}/{file_pattern}'."
                     )
-                fine_topography = get_normalized_topography(raw_paths[0])
+                fine_topography = get_normalized_static_input(raw_paths[0])
             else:
-                fine_topography = get_normalized_topography(self.topography)
+                fine_topography = get_normalized_static_input(self.topography)
             fine_topography = fine_topography.to_device()
             if (
                 get_topography_downscale_factor(

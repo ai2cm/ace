@@ -220,7 +220,7 @@ class DownscalingOutputConfig(ABC):
                 "Downscaling data loader only supports datasets with latlon coords."
             )
         dataset = loader_config.build_batchitem_dataset(xr_dataset, properties)
-        topography = loader_config.build_topography(
+        topography = loader_config.build_static_inputs(
             coords,
             requires_topography=requirements.use_fine_topography,
         )
