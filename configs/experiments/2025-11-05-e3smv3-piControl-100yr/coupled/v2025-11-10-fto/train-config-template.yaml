@@ -1,0 +1,167 @@
+experiment_dir: /results
+save_checkpoint: true
+save_best_inference_epoch_checkpoints: true
+checkpoint_every_n_batches: 120
+log_train_every_n_batches: 20
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 20
+n_coupled_steps: 4
+inference:
+  n_coupled_steps: 730
+  coupled_steps_in_memory: 8
+  loader:
+    num_data_workers: 1
+    dataset:
+      ocean:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0401-01-03T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+          engine: zarr
+          subset:
+            start_time: '0401-01-03T12:00:00'
+      atmosphere:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+          engine: zarr
+          subset:
+            # NOTE: this is required to align the atmosphere and ocean start times
+            start_time: '0401-01-03T12:00:00' # earlier times nan sea ice
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+          engine: zarr
+          subset:
+            # NOTE: this is required to align the atmosphere and ocean start times
+            start_time: '0401-01-03T12:00:00'
+    start_indices:
+      times:
+      - '0421-01-03T12:00:00'
+      - '0431-01-03T12:00:00'
+      - '0441-01-03T12:00:00'
+      - '0451-01-03T12:00:00'
+      - '0461-01-03T12:00:00'
+      - '0471-01-03T12:00:00'
+      - '0481-01-03T12:00:00'
+      - '0488-12-04T12:00:00'
+  aggregator:
+    log_zonal_mean_images: false
+    log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-e3smv3
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 1
+  dataset:
+    - ocean:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0421-01-03T12:00:00'
+            stop_time: '0499-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+          engine: zarr
+          subset:
+            start_time: '0421-01-03T12:00:00'
+            stop_time: '0499-12-29T12:00:00'
+      atmosphere:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+          engine: zarr
+          subset:
+            start_time: '0421-01-03T12:00:00'
+            stop_time: '0499-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+          engine: zarr
+          subset:
+            start_time: '0421-01-03T12:00:00'
+            stop_time: '0499-12-29T12:00:00'
+validation_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 1
+  dataset:
+    - ocean:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0402-01-03T12:00:00'
+            stop_time: '0407-01-03T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+          engine: zarr
+          subset:
+            start_time: '0402-01-03T12:00:00'
+            stop_time: '0407-01-03T12:00:00'
+      atmosphere:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+          engine: zarr
+          subset:
+            start_time: '0402-01-03T12:00:00'
+            stop_time: '0407-01-03T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+          engine: zarr
+          subset:
+            start_time: '0402-01-03T12:00:00'
+            stop_time: '0407-01-03T12:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 1414
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [1414]
+stepper:
+  ocean_fraction_prediction:
+    land_fraction_name: land_fraction
+    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+  sst_name: sst
+  ocean:
+    timedelta: 5D
+    stepper:
+      parameter_init:
+        weights_path: /ocean_ckpt.tar
+  atmosphere:
+    timedelta: 6h
+    loss_contributions:
+      n_steps: 0
+    stepper:
+      parameter_init:
+        weights_path: /atmos_ckpt.tar
+        parameters:
+          - frozen:
+              include:
+                - '*'
