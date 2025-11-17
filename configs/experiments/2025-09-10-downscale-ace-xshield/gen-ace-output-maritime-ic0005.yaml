@@ -1,0 +1,53 @@
+experiment_dir: /results
+n_samples: 1
+# Uncomment patch config below if using coarse inputs larger than 16x16 deg
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /ckpt.tar
+  rename:
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+data:
+  topography: /climate-default/2025-08-20-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  coarse:
+  - data_path: /
+    engine: zarr
+    file_pattern: output_6hourly_predictions_ic0005.zarr
+    infer_timestep: false
+    subset:
+      start_time: '2023-01-01T00:00:00'
+      stop_time: '2023-12-31T18:00:00'
+      #step: 7
+  # Florida
+  #lat_extent:
+  #  start: 22.0
+  #  stop: 38.0
+  #lon_extent:
+  #  start: 273.0
+  #  stop: 289.0
+  # PNW
+  # lat_extent:
+  #   start: 35
+  #   stop:  51.0
+  # lon_extent:
+  #   start: 232.0
+  #   stop:  248.0
+  # CONUS
+  lat_extent:
+    start: -12.0
+    stop: 20.0
+  lon_extent:
+    start: 90.0
+    stop: 150.0
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: False
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-downscaling
+  entity: ai2cm
