@@ -14,19 +14,16 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 
 from .dataset_metadata import DatasetMetadata
+from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
 from .raw import PairedRawDataWriter, RawDataWriter
-from .subselect import PairedSubselectWriter, SubselectWriter, SubselectWriterConfig
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
 PairedSubwriter: TypeAlias = (
-    PairedRawDataWriter
-    | PairedTimeCoarsen
-    | PairedMonthlyDataWriter
-    | PairedSubselectWriter
+    PairedRawDataWriter | PairedTimeCoarsen | PairedMonthlyDataWriter | PairedFileWriter
 )
 
-Subwriter: TypeAlias = MonthlyDataWriter | RawDataWriter | TimeCoarsen | SubselectWriter
+Subwriter: TypeAlias = MonthlyDataWriter | RawDataWriter | TimeCoarsen | FileWriter
 
 
 @dataclasses.dataclass
@@ -43,14 +40,15 @@ class DataWriterConfig:
             netCDF files.
         time_coarsen: Configuration for time coarsening of written outputs to the
             raw data writer.
-        subselection: Configurations for subselection data writers.
+        files: Configuration for a sequence of individual data writers. Each data
+            writer must have a unique label to avoid filename collisions.
     """
 
     save_prediction_files: bool = True
     save_monthly_files: bool = True
     names: Sequence[str] | None = None
     time_coarsen: TimeCoarsenConfig | None = None
-    subselection: list[SubselectWriterConfig] | None = None
+    files: list[FileWriterConfig] | None = None
 
     def __post_init__(self):
         if (
@@ -61,6 +59,18 @@ class DataWriterConfig:
                 "names provided but all options to "
                 "save subsettable output files are False."
             )
+        all_filenames = self._get_all_filenames()
+        if len(set(all_filenames)) != len(all_filenames):
+            raise ValueError(
+                "Duplicate filenames found in file writer configurations. "
+                f"Filenames: {all_filenames}"
+            )
+
+    def _get_all_filenames(self) -> list[str]:
+        filenames = []
+        for file in self.files or []:
+            filenames.extend(file.filenames)
+        return filenames
 
     def build_paired(
         self,
@@ -84,7 +94,7 @@ class DataWriterConfig:
             save_names=self.names,
             time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
-            subselection=self.subselection,
+            files=self.files,
         )
 
     def build(
@@ -109,7 +119,7 @@ class DataWriterConfig:
             save_names=self.names,
             time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
-            subselection=self.subselection,
+            files=self.files,
         )
 
 
@@ -127,7 +137,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         save_names: Sequence[str] | None,
         dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
-        subselection: list[SubselectWriterConfig] | None = None,
+        files: list[FileWriterConfig] | None = None,
     ):
         """
         Args:
@@ -145,7 +155,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 and monthly netCDF files.
             dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of written outputs.
-            subselection: Configurations for subselection data writers.
+            files: Configurations for individual data writers.
 
         """
         self._writers: list[PairedSubwriter] = []
@@ -185,19 +195,19 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                     dataset_metadata=dataset_metadata,
                 )
             )
-        if subselection is not None:
-            for writer_config in subselection:
+        if files is not None:
+            for writer_config in files:
                 self._writers.append(
                     writer_config.build_paired(
                         experiment_dir=path,
                         n_initial_conditions=n_initial_conditions,
                         n_timesteps=n_timesteps,
+                        timestep=timestep,
                         variable_metadata=variable_metadata,
                         coords=coords,
                         dataset_metadata=dataset_metadata,
                     )
                 )
-        self._n_timesteps_seen = 0
 
     def write(self, data: PrognosticState, filename: str):
         """Eagerly write data to a single netCDF file.
@@ -229,10 +239,8 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             writer.append_batch(
                 target=dict(batch.reference),
                 prediction=dict(batch.prediction),
-                start_timestep=self._n_timesteps_seen,
                 batch_time=batch.time,
             )
-        self._n_timesteps_seen += batch.time.shape[1]
 
     def flush(self):
         """
@@ -312,7 +320,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         save_names: Sequence[str] | None,
         dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
-        subselection: list[SubselectWriterConfig] | None = None,
+        files: list[FileWriterConfig] | None = None,
     ):
         """
         Args:
@@ -330,7 +338,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 and monthly netCDF files.
             dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of raw outputs.
-            subselection: Configurations for subselection data writers.
+            files: Configurations for individual data writers.
         """
         self._writers: list[Subwriter] = []
         if "face" in coords:
@@ -348,7 +356,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 _time_coarsen_builder(
                     RawDataWriter(
                         path=path,
-                        label="autoregressive_predictions.nc",
+                        label="autoregressive_predictions",
                         n_initial_conditions=n_initial_conditions,
                         save_names=save_names,
                         variable_metadata=variable_metadata,
@@ -362,7 +370,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             self._writers.append(
                 MonthlyDataWriter(
                     path=path,
-                    label="predictions",
+                    label="monthly_mean_predictions",
                     n_samples=n_initial_conditions,
                     n_months=months_for_timesteps(n_timesteps, timestep),
                     save_names=save_names,
@@ -372,13 +380,14 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 )
             )
 
-        if subselection is not None:
-            for writer_config in subselection:
+        if files is not None:
+            for writer_config in files:
                 self._writers.append(
                     writer_config.build(
                         experiment_dir=path,
                         n_initial_conditions=n_initial_conditions,
                         n_timesteps=n_timesteps,
+                        timestep=timestep,
                         variable_metadata=variable_metadata,
                         coords=coords,
                         dataset_metadata=dataset_metadata,
@@ -389,7 +398,6 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         self.variable_metadata = variable_metadata
         self.dataset_metadata = dataset_metadata
         self.coords = coords
-        self._n_timesteps_seen = 0
 
     def append_batch(self, batch: PairedData):
         """
@@ -411,10 +419,8 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         for writer in self._writers:
             writer.append_batch(
                 data=dict(batch.data),
-                start_timestep=self._n_timesteps_seen,
                 batch_time=batch.time,
             )
-        self._n_timesteps_seen += batch.time.shape[1]
 
     def flush(self):
         """

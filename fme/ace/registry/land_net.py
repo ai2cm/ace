@@ -3,6 +3,7 @@ from typing import Literal
 
 from fme.ace.models.land.land_net import LandNet
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 
 
 @ModuleSelector.register("LandNet")
@@ -20,12 +21,12 @@ class LandNetBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ):
         assert self.network_type in ["MLP"], "network_type must be MLP"
 
         return LandNet(
-            img_shape=img_shape,
+            img_shape=dataset_info.img_shape,
             input_channels=n_in_channels,
             output_channels=n_out_channels,
             hidden_dims=self.hidden_dims,

@@ -9,7 +9,6 @@ import torch
 
 import fme
 import fme.core.logging_utils as logging_utils
-from fme.ace.inference.evaluator import validate_time_coarsen_config
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import load_stepper_config as load_single_stepper_config
 from fme.core.cli import prepare_config, prepare_directory
@@ -212,8 +211,7 @@ class InferenceEvaluatorConfig:
     ) -> CoupledPairedDataWriter:
         if self.data_writer.ocean.time_coarsen is not None:
             try:
-                validate_time_coarsen_config(
-                    self.data_writer.ocean.time_coarsen,
+                self.data_writer.ocean.time_coarsen.validate(
                     self.coupled_steps_in_memory,
                     self.n_coupled_steps,
                 )
@@ -223,8 +221,7 @@ class InferenceEvaluatorConfig:
                 )
         if self.data_writer.atmosphere.time_coarsen is not None:
             try:
-                validate_time_coarsen_config(
-                    self.data_writer.atmosphere.time_coarsen,
+                self.data_writer.atmosphere.time_coarsen.validate(
                     self.coupled_steps_in_memory * data.n_inner_steps,
                     self.n_coupled_steps * data.n_inner_steps,
                 )
@@ -290,14 +287,14 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     initial_condition_requirements = (
         stepper_config.get_prognostic_state_data_requirements()
     )
+    stepper = config.load_stepper()
     data = get_inference_data(
         config=config.loader,
         total_coupled_steps=config.n_coupled_steps,
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
+        dataset_info=stepper.training_dataset_info,
     )
-
-    stepper = config.load_stepper()
     stepper.set_eval()
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator

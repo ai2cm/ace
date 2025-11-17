@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import pathlib
 import re
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import cftime
 import numpy as np
@@ -11,8 +11,8 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.data_loading.inference import ExplicitIndices
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
+from fme.ace.data_loading.inference import ExplicitIndices, ForcingDataLoaderConfig
 from fme.ace.data_loading.test_data_loader import _get_coords
 from fme.ace.requirements import DataRequirements
 from fme.ace.testing import save_scalar_netcdf
@@ -31,6 +31,7 @@ from fme.core.dataset.xarray import (
 )
 from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import Slice
+from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
@@ -38,8 +39,12 @@ from fme.coupled.data_loading.data_typing import (
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
-from .getters import get_gridded_data
-from .inference import InferenceDataLoaderConfig, InferenceDataset
+from .getters import get_forcing_data, get_gridded_data
+from .inference import (
+    CoupledForcingDataLoaderConfig,
+    InferenceDataLoaderConfig,
+    InferenceDataset,
+)
 
 N_LAT = 16
 N_LON = 32
@@ -61,7 +66,9 @@ def _save_netcdf(
         if name == "constant_mask" or name.startswith("mask_"):
             dim_sizes_to_use = dim_sizes_without_time
             rng = np.random.default_rng()
-            data = rng.integers(low=0, high=2, size=list(dim_sizes_to_use.values()))
+            data = rng.integers(
+                low=0, high=2, size=list(dim_sizes_to_use.values())
+            ).astype(np.float32)
         elif name == "land_fraction":
             dim_sizes_to_use = dim_sizes_without_time
             data = np.ones(tuple(dim_sizes_to_use.values()))
@@ -185,6 +192,26 @@ class MockCoupledData:
             atmosphere=XarrayDataConfig(str(self.atmosphere.data_dir)),
         )
 
+    def get_dataset_config_with_kwargs(
+        self,
+        ocean_kwargs: dict[str, Any] | None = None,
+        atmos_kwargs: dict[str, Any] | None = None,
+    ) -> CoupledDatasetConfig:
+        if ocean_kwargs is None:
+            ocean_kwargs = {}
+        if atmos_kwargs is None:
+            atmos_kwargs = {}
+        return CoupledDatasetConfig(
+            ocean=XarrayDataConfig(
+                data_path=str(self.ocean.data_dir),
+                **ocean_kwargs,
+            ),
+            atmosphere=XarrayDataConfig(
+                data_path=str(self.atmosphere.data_dir),
+                **atmos_kwargs,
+            ),
+        )
+
 
 def create_coupled_data_on_disk(
     data_dir: pathlib.Path,
@@ -192,10 +219,45 @@ def create_coupled_data_on_disk(
     n_forward_times_atmosphere: int,
     ocean_names: list[str],
     atmosphere_names: list[str],
-    atmosphere_start_time_offset_from_ocean: bool,
+    atmosphere_start_time_offset_from_ocean: int = 0,
     n_levels_ocean: int = 2,
     n_levels_atmosphere: int = 2,
 ) -> MockCoupledData:
+    """Create synthetic coupled ocean-atmosphere data on disk for testing.
+
+    Creates netCDF files with random data for ocean and atmosphere components,
+    along with statistics files. The ocean and atmosphere can have different
+    timesteps, and the atmosphere can optionally start earlier than the ocean.
+
+    Args:
+        data_dir: Directory where data will be written. Will create subdirectories
+            ocean/, atmos/, and stats/.
+        n_forward_times_ocean: Number of forward timesteps for ocean data.
+            Total ocean timesteps will be n_forward_times_ocean + 1 (including IC).
+        n_forward_times_atmosphere: Number of forward timesteps for atmosphere
+            data. Must be a multiple of n_forward_times_ocean. Total atmosphere
+            timesteps will be n_forward_times_atmosphere + 1 +
+            atmosphere_start_time_offset_from_ocean.
+        ocean_names: List of variable names to create in the ocean dataset.
+        atmosphere_names: List of variable names to create in the atmosphere dataset.
+        atmosphere_start_time_offset_from_ocean: Non-negative integer offset in
+            atmosphere timesteps. When 0, ocean and atmosphere start at the same time
+            (1970-01-01). When positive, atmosphere starts earlier by this many
+            atmosphere timesteps. For example, with offset=1, atmosphere starts at
+            1969-12-31 while ocean starts at 1970-01-01. Default is 0.
+        n_levels_ocean: Number of ocean depth levels. Default is 2.
+        n_levels_atmosphere: Number of atmosphere vertical levels. Default is 2.
+
+    Returns:
+        MockCoupledData containing the created ocean and atmosphere datasets,
+        along with paths to data and statistics files.
+
+    Note:
+        The atmosphere timestep is fixed at 1 day. The ocean timestep is
+        automatically calculated as (n_forward_times_atmosphere / n_forward_times_ocean)
+        days to ensure the datasets span the same total time period.
+
+    """
     np.random.seed(0)
 
     ocean_dir = data_dir / "ocean"
@@ -206,6 +268,8 @@ def create_coupled_data_on_disk(
         raise ValueError(
             "n_forward_times_atmosphere should be a multiple of n_forward_times_ocean."
         )
+    if atmosphere_start_time_offset_from_ocean < 0:
+        raise ValueError("atmosphere_start_time_offset_from_ocean should be >= 0")
     ocean_timestep_size = int(ocean_timestep_size)
     ocean_ds = _save_netcdf(
         filename=ocean_dir / "data.nc",
@@ -217,15 +281,16 @@ def create_coupled_data_on_disk(
         # atmosphere timestep, so the ocean data needs
         timestep_size=ocean_timestep_size,
         nz=n_levels_ocean + 1,
+        timestep_start=0,  # ocean start time fixed
     )
 
     atmos_dir = data_dir / "atmos"
     atmos_dir.mkdir()
-    n_times_atmos = n_forward_times_atmosphere + 1
-    timestep_start_atmosphere = 0
-    if atmosphere_start_time_offset_from_ocean:
-        n_times_atmos += 1
-        timestep_start_atmosphere = -1
+    n_times_atmos = (
+        n_forward_times_atmosphere + 1 + atmosphere_start_time_offset_from_ocean
+    )
+    # atmosphere initial time may be earlier than ocean's
+    timestep_start_atmosphere = -atmosphere_start_time_offset_from_ocean
     atmos_dim_sizes = {
         "time": n_times_atmos,
         "lat": N_LAT,
@@ -268,8 +333,8 @@ def create_coupled_data_on_disk(
     )
 
 
-@pytest.mark.parametrize("atmosphere_times_offset", [False, True])
-def test_coupled_data_loader(tmp_path, atmosphere_times_offset: bool):
+@pytest.mark.parametrize("atmosphere_times_offset", [0, 1])
+def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
     """Tests that the coupled loader returns the correct number of timesteps."""
 
     # Create datasets with fast and slow timesteps.
@@ -293,8 +358,8 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: bool):
         ics.append(ic)
 
     # subset atmosphere data to align with beginning of ocean data
-    if atmosphere_times_offset:
-        atmos_data_subset = Slice(start=1)
+    if atmosphere_times_offset > 0:
+        atmos_data_subset = Slice(start=atmosphere_times_offset)
     else:
         atmos_data_subset = Slice()
 
@@ -355,12 +420,18 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: bool):
 
     # we already checked for matching ocean/atmos sample init times above, now
     # checking that they match times at the right positions in each dataset
-    offset = 1 if atmosphere_times_offset else 0  # for atmosphere data times on disk
     assert ocean_sample_init_time == ocean_ds.isel(time=1)["time"].item()
-    assert atmos_sample_init_time == atmos_ds.isel(time=2 + offset)["time"].item()
+    assert (
+        atmos_sample_init_time
+        == atmos_ds.isel(time=2 + atmosphere_times_offset)["time"].item()
+    )
 
     expected_ocean = ocean_ds["bar"].isel(time=slice(1, 3)).values
-    expected_atmos = atmos_ds["foo"].isel(time=slice(2 + offset, 5 + offset)).values
+    expected_atmos = (
+        atmos_ds["foo"]
+        .isel(time=slice(2 + atmosphere_times_offset, 5 + atmosphere_times_offset))
+        .values
+    )
     # check that
     assert np.allclose(sample.ocean[0]["bar"].cpu().numpy(), expected_ocean)
     assert np.allclose(sample.atmosphere[0]["foo"].cpu().numpy(), expected_atmos)
@@ -518,6 +589,7 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
         config=inference_config,
         total_coupled_steps=1,
         requirements=coupled_requirements,
+        dataset_info=data.dataset_info,
     )
     loader = torch.utils.data.DataLoader(
         dataset,
@@ -528,3 +600,103 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
     inference_batch = next(iter(loader))
     assert set(inference_batch.ocean_data.data.keys()) == set(ocean_names)
     assert set(inference_batch.atmosphere_data.data.keys()) == set(atmos_names)
+
+
+@pytest.mark.parametrize("n_initial_conditions", [1, 2])
+def test_get_forcing_data(tmp_path, n_initial_conditions):
+    calendar = "proleptic_gregorian"
+    ocean_names = ["bar"]
+    atmos_names = ["foo"]
+    n_forward_times_ocean = 4
+    n_forward_times_atmosphere = 8
+    inner_steps = 2
+    total_coupled_steps = 2
+    coupled_steps_in_memory = 2
+    create_coupled_data_on_disk(
+        tmp_path,
+        n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_atmosphere=n_forward_times_atmosphere,
+        ocean_names=ocean_names,
+        atmosphere_names=atmos_names,
+        atmosphere_start_time_offset_from_ocean=0,
+    )
+    config = CoupledForcingDataLoaderConfig(
+        atmosphere=ForcingDataLoaderConfig(
+            XarrayDataConfig(data_path=tmp_path / "atmos")
+        ),
+        ocean=ForcingDataLoaderConfig(XarrayDataConfig(data_path=tmp_path / "ocean")),
+    )
+    ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
+    window_requirements = CoupledDataRequirements(
+        ocean_timestep=datetime.timedelta(days=ocean_timestep_size),
+        ocean_requirements=DataRequirements(
+            ocean_names, n_timesteps=coupled_steps_in_memory + 1
+        ),
+        atmosphere_timestep=datetime.timedelta(days=1),
+        atmosphere_requirements=DataRequirements(
+            atmos_names, n_timesteps=coupled_steps_in_memory * inner_steps + 1
+        ),
+    )
+    atmos_initial_condition = BatchData.new_for_testing(
+        names=atmos_names,
+        n_samples=n_initial_conditions,
+        n_timesteps=1,
+        t_initial=cftime.datetime(1970, 1, 1),
+        calendar=calendar,
+    )
+    ocean_initial_condition = BatchData.new_for_testing(
+        names=ocean_names,
+        n_samples=n_initial_conditions,
+        n_timesteps=1,
+        t_initial=cftime.datetime(1970, 1, 1),
+        calendar=calendar,
+    )
+    data = get_forcing_data(
+        config,
+        total_coupled_steps,
+        window_requirements=window_requirements,
+        initial_condition=CoupledPrognosticState(
+            ocean_data=PrognosticState(ocean_initial_condition),
+            atmosphere_data=PrognosticState(atmos_initial_condition),
+        ),  # type: ignore
+    )
+    batch_data = next(iter(data.loader))
+    assert isinstance(batch_data, CoupledBatchData)
+    assert isinstance(batch_data.ocean_data.data["bar"], torch.Tensor)
+    assert isinstance(batch_data.atmosphere_data.data["foo"], torch.Tensor)
+    assert batch_data.ocean_data.data["bar"].shape[0] == n_initial_conditions
+    assert batch_data.ocean_data.data["bar"].shape[1] == total_coupled_steps + 1
+    assert batch_data.atmosphere_data.data["foo"].shape[0] == n_initial_conditions
+    assert (
+        batch_data.atmosphere_data.data["foo"].shape[1]
+        == total_coupled_steps * inner_steps + 1
+    )
+    assert list(batch_data.ocean_data.time.dims) == ["sample", "time"]
+    assert list(batch_data.atmosphere_data.time.dims) == ["sample", "time"]
+    xr.testing.assert_allclose(
+        batch_data.ocean_data.time[:, 0], ocean_initial_condition.time[:, 0]
+    )
+    xr.testing.assert_allclose(
+        batch_data.atmosphere_data.time[:, 0], atmos_initial_condition.time[:, 0]
+    )
+    assert batch_data.ocean_data.time.dt.calendar == calendar
+    assert batch_data.atmosphere_data.time.dt.calendar == calendar
+    xr.testing.assert_equal(
+        data.initial_condition.ocean_data.as_batch_data().time,
+        ocean_initial_condition.time,
+    )
+    xr.testing.assert_equal(
+        data.initial_condition.atmosphere_data.as_batch_data().time,
+        atmos_initial_condition.time,
+    )
+    np.testing.assert_allclose(
+        data.initial_condition.ocean_data.as_batch_data().data["bar"].cpu().numpy(),
+        ocean_initial_condition.data["bar"].cpu().numpy(),
+    )
+    np.testing.assert_allclose(
+        data.initial_condition.atmosphere_data.as_batch_data()
+        .data["foo"]
+        .cpu()
+        .numpy(),
+        atmos_initial_condition.data["foo"].cpu().numpy(),
+    )

@@ -17,14 +17,14 @@ from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import NoTargetAggregator, SampleAggregator
-from fme.downscaling.data import (
-    BatchData,
-    ClosedInterval,
-    DataLoaderConfig,
-    GriddedData,
+from fme.downscaling.data import ClosedInterval, DataLoaderConfig, GriddedData
+from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
+from fme.downscaling.predictors import (
+    CascadePredictor,
+    CascadePredictorConfig,
+    PatchPredictionConfig,
+    PatchPredictor,
 )
-from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, Model
-from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -107,7 +107,7 @@ class EventDownscaler:
         self,
         event_name: str,
         data: GriddedData,
-        model: DiffusionModel,
+        model: DiffusionModel | CascadePredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -140,7 +140,7 @@ class EventDownscaler:
 
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
-        batch: BatchData = next(iter(self.data.loader))
+        batch, topography = next(iter(self.data.get_generator()))
         coarse_coords = batch[0].latlon_coordinates
         fine_coords = LatLonCoordinates(
             lat=_downscale_coord(coarse_coords.lat, self.model.downscale_factor),
@@ -163,7 +163,7 @@ class EventDownscaler:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch_no_target(
-                batch, n_samples=end_idx - start_idx
+                batch, topography=topography, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs)
         to_log = sample_agg.get_wandb()
@@ -186,7 +186,7 @@ class Downscaler:
     def __init__(
         self,
         data: GriddedData,
-        model: DiffusionModel,
+        model: DiffusionModel | CascadePredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -216,13 +216,13 @@ class Downscaler:
     @property
     def batch_generator(self):
         if self.patch.needs_patch_data_generator:
-            return self.data.get_patched_batch_generator(
+            return self.data.get_patched_generator(
                 yx_patch_extent=self.model.coarse_shape,
                 overlap=self.patch.coarse_horizontal_overlap,
                 drop_partial_patches=False,
             )
         else:
-            return self.data.loader
+            return self.data.get_generator()
 
     def save_netcdf_data(self, ds: xr.Dataset):
         if self.dist.is_root():
@@ -232,13 +232,24 @@ class Downscaler:
                 f"{self.experiment_dir}/generated_maps_and_metrics.nc", mode="w"
             )
 
+    @property
+    def _fine_latlon_coordinates(self) -> LatLonCoordinates | None:
+        if self.data.topography is not None:
+            return self.data.topography.coords
+        else:
+            return None
+
     def run(self):
-        aggregator = NoTargetAggregator(downscale_factor=self.model.downscale_factor)
-        for i, batch in enumerate(self.batch_generator):
+        aggregator = NoTargetAggregator(
+            downscale_factor=self.model.downscale_factor,
+            latlon_coordinates=self._fine_latlon_coordinates,
+        )
+        for i, (batch, topography) in enumerate(self.batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 prediction = self.generation_model.generate_on_batch_no_target(
                     batch=batch,
+                    topography=topography,
                     n_samples=self.n_samples,
                 )
                 logging.info("Recording diagnostics to aggregator")
@@ -254,7 +265,7 @@ class Downscaler:
 
 @dataclasses.dataclass
 class DownscalerConfig:
-    model: CheckpointModelConfig
+    model: CheckpointModelConfig | CascadePredictorConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig
@@ -285,10 +296,6 @@ class DownscalerConfig:
             requirements=self.model.data_requirements,
         )
         model = self.model.build()
-        if isinstance(model, Model):
-            raise NotImplementedError(
-                "No-target generation is only enabled for DiffusionModel, not Model"
-            )
         downscaler = Downscaler(
             data=dataset,
             model=model,

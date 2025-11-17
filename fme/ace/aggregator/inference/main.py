@@ -137,6 +137,7 @@ class InferenceEvaluatorAggregatorConfig:
     log_global_mean_norm_time_series: bool = True
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
+    log_nino34_index: bool = True
 
     def build(
         self,
@@ -179,6 +180,7 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean_reference_data=time_mean,
             record_step_20=record_step_20,
             channel_mean_names=channel_mean_names,
+            log_nino34_index=self.log_nino34_index,
             normalize=normalize,
             save_diagnostics=save_diagnostics,
         )
@@ -274,7 +276,15 @@ class InferenceEvaluatorAggregator(
         self._record_step_20 = record_step_20
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
-                ops, target_time=20
+                ops,
+                target_time=20,
+                target="denorm",
+            )
+            self._aggregators["mean_step_20_norm"] = OneStepMeanAggregator(
+                ops,
+                target_time=20,
+                target="norm",
+                channel_mean_names=self._channel_mean_names,
             )
         try:
             self._aggregators["power_spectrum"] = (
@@ -460,7 +470,9 @@ class InferenceEvaluatorAggregator(
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
         if self._record_step_20:
-            logs.pop("mean_step_20/loss")  # we don't provide it so it's NaN always
+            # we don't provide it so these are NaN always
+            logs.pop("mean_step_20/loss")
+            logs.pop("mean_step_20_norm/loss")
         return logs
 
     @torch.no_grad()

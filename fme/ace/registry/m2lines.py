@@ -4,6 +4,7 @@ from typing import Any
 
 from fme.ace.models.ocean.m2lines.samudra import Samudra
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 
 
 @ModuleSelector.register("Samudra")
@@ -33,7 +34,7 @@ class SamudraBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ):
         return Samudra(
             input_channels=n_in_channels,

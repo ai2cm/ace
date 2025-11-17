@@ -288,7 +288,7 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
         n_forward_times_atmosphere=n_forward_times_atmos,
         ocean_names=ocean_names,
         atmosphere_names=atmos_names,
-        atmosphere_start_time_offset_from_ocean=True,
+        atmosphere_start_time_offset_from_ocean=1,
         n_levels_ocean=2,
         n_levels_atmosphere=2,
     )
@@ -330,6 +330,7 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
     all_out_names = (
         ocean_out_names + ocean_derived_names + atmos_out_names + atmos_derived_names
     )
+    all_out_normed_names = ocean_out_names + atmos_out_names
 
     train_config_fname, inference_config_fname = _write_test_yaml_files(
         tmp_path,
@@ -393,22 +394,54 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
     # atmos loss contributions
     assert "val/mean/loss/atmosphere" in epoch_logs
     if loss_atmos_n_steps == 0:
-        assert np.isclose(epoch_logs["val/mean/loss/atmosphere"], 0.0)
-    assert "inference/time_mean_norm/rmse/channel_mean" in epoch_logs
-    assert "inference/time_mean_norm/rmse/ocean_channel_mean" in epoch_logs
-    assert "inference/time_mean_norm/rmse/atmosphere_channel_mean" in epoch_logs
-    ocean_weight = len(ocean_out_names + ocean_derived_names) / len(all_out_names)
-    assert np.isclose(
-        epoch_logs["inference/time_mean_norm/rmse/channel_mean"],
-        (
-            ocean_weight
-            * epoch_logs["inference/time_mean_norm/rmse/ocean_channel_mean"]
-            + (1 - ocean_weight)
-            * epoch_logs["inference/time_mean_norm/rmse/atmosphere_channel_mean"]
-        ),
-    )
+        np.testing.assert_allclose(epoch_logs["val/mean/loss/atmosphere"], 0.0)
+
     for name in all_out_names:
         assert f"inference/time_mean/rmse/{name}" in epoch_logs
+        if name in all_out_normed_names:
+            assert f"val/mean_norm/weighted_rmse/{name}" in epoch_logs
+            assert f"inference/time_mean_norm/rmse/{name}" in epoch_logs
+        else:
+            assert f"val/mean_norm/weighted_rmse/{name}" not in epoch_logs
+            assert f"inference/time_mean_norm/rmse/{name}" not in epoch_logs
+
+    ocean_weight = len(ocean_out_names + ocean_derived_names) / len(all_out_names)
+    atol, rtol = 1e-6, 1e-6
+    for prefix in ["inference/time_mean_norm/rmse", "val/mean_norm/weighted_rmse"]:
+        assert f"{prefix}/ocean_channel_mean" in epoch_logs
+        ocean_channel_mean = sum(
+            [epoch_logs[f"{prefix}/{name}"] for name in ocean_out_names]
+        ) / len(ocean_out_names)
+        np.testing.assert_allclose(
+            epoch_logs[f"{prefix}/ocean_channel_mean"],
+            ocean_channel_mean,
+            rtol=rtol,
+            atol=atol,
+        )
+
+        assert f"{prefix}/atmosphere_channel_mean" in epoch_logs
+        atmos_channel_mean = sum(
+            [epoch_logs[f"{prefix}/{name}"] for name in atmos_out_names]
+        ) / len(atmos_out_names)
+        np.testing.assert_allclose(
+            epoch_logs[f"{prefix}/atmosphere_channel_mean"],
+            atmos_channel_mean,
+            rtol=rtol,
+            atol=atol,
+        )
+
+        if "time_mean_norm" in prefix:
+            assert f"{prefix}/channel_mean" in epoch_logs
+            np.testing.assert_allclose(
+                epoch_logs[f"{prefix}/channel_mean"],
+                (
+                    ocean_weight * epoch_logs[f"{prefix}/ocean_channel_mean"]
+                    + (1 - ocean_weight)
+                    * epoch_logs[f"{prefix}/atmosphere_channel_mean"]
+                ),
+                rtol=rtol,
+                atol=atol,
+            )
 
     # check that inference map captions includes expected units
     for map_name in ["val/mean_map/image-error", "inference/time_mean/bias_map"]:
@@ -467,7 +500,7 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
     assert len(inference_logs) == n_ic_timesteps + n_forward_steps + n_summary_steps
 
     for name in atmos_out_names + ocean_out_names:
-        assert np.isclose(
+        np.testing.assert_allclose(
             inference_logs[0][f"inference/mean/weighted_mean_target/{name}"],
             inference_logs[0][f"inference/mean/weighted_mean_gen/{name}"],
         )

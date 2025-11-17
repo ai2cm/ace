@@ -1,9 +1,9 @@
 import logging
 from collections.abc import Mapping
+from typing import Literal
 
 import cftime
 import fsspec
-import gcsfs
 import numpy as np
 import xarray as xr
 import zarr
@@ -58,13 +58,13 @@ def _check_data_size_fits_slice(data: np.ndarray, insert_slices: Mapping[int, sl
             )
 
 
-def insert_into_zarr(
+def _insert_into_zarr(
     path: str,
     data: Mapping[str, np.ndarray],
     insert_slices: Mapping[int, slice],
     overwrite_check: bool = True,
 ):
-    root = zarr.open(path, mode="a")
+    root = zarr.open_group(path, mode="r+")
     for var_name, var_data in data.items():
         n_dims = len(var_data.shape)
         # Array data is not loaded until index or slice is referenced
@@ -79,7 +79,7 @@ def insert_into_zarr(
         zarr_array[insert_slices_tuple] = var_data
 
 
-def initialize_zarr(
+def _initialize_zarr(
     path: str,
     vars: list[str],
     dim_sizes: tuple,
@@ -93,11 +93,12 @@ def initialize_zarr(
     nondim_coords: dict[str, xr.DataArray] | None = None,
     array_attributes: dict[str, dict[str, str]] | None = None,
     group_attributes: dict[str, str] | None = None,
+    mode: str = "w-",
 ):
     """
     Initialize a Zarr group with the specified dimensions and chunk sizes.
     """
-    root = zarr.open(path, mode="a")
+    root = zarr.open_group(path, mode=mode)
     root.update_attributes(group_attributes or {})
     chunks_tuple = tuple(
         [chunks.get(dim, dim_sizes[d]) for d, dim in enumerate(dim_names)]
@@ -112,6 +113,7 @@ def initialize_zarr(
     else:
         shards_tuple = None
 
+    coords = coords.copy()
     if "time" in coords:
         times = coords.pop("time")
         time_ds = root.create_array(
@@ -184,6 +186,30 @@ def initialize_zarr(
     zarr.consolidate_metadata(root.store)
 
 
+def _resolve_data_vars(
+    data_vars_from_zarr_writer: list[str] | None,
+    data_vars_from_init_arg: list[str] | None,
+) -> list[str]:
+    if data_vars_from_zarr_writer and data_vars_from_init_arg:
+        if set(data_vars_from_zarr_writer) != set(data_vars_from_init_arg):
+            raise ValueError(
+                "if ZarrWriter.data_vars is set, initialize_store() cannot be "
+                "called with a different set of data_vars. Received "
+                f"{data_vars_from_init_arg} vs {data_vars_from_zarr_writer}."
+            )
+        return data_vars_from_zarr_writer
+    elif not data_vars_from_zarr_writer and not data_vars_from_init_arg:
+        raise ValueError(
+            "data_vars must be provided either to ZarrWriter or to "
+            "initialize_store()."
+        )
+    else:
+        # For mypy showing Exactly one is not None (checked by conditions above)
+        result = data_vars_from_zarr_writer or data_vars_from_init_arg
+        assert result is not None
+        return result
+
+
 class ZarrWriter:
     def __init__(
         self,
@@ -195,7 +221,7 @@ class ZarrWriter:
         shards: dict[str, int] | None = None,
         array_attributes: dict[str, dict[str, str]] | None = None,
         group_attributes: dict[str, str] | None = None,
-        allow_existing: bool = False,
+        mode: Literal["r+", "a", "w", "w-"] = "w-",
         overwrite_check: bool = True,
         time_units: str = DATETIME_ENCODING_UNITS,
         time_calendar: str | None = "julian",
@@ -210,14 +236,18 @@ class ZarrWriter:
             Note that dimensions
             that are often without coordinates (ex. sample) should be provided as an
             array of integer coordinates.
-        data_vars: Variables to write. If None, all variables in data are saved.
+        data_vars: Variables to write. If None, all variables in data are saved unless
+            specified in a manual call to initialize_store().
         chunks: Optional mapping of dimension name to chunk size. If a dimension is not
             in this mapping, the chunk size will be the same as the dimension size.
         shards: Optional mapping to store multiple chunks in a single storage object.
         array_attributes: Optional mapping of variable name to a dictionary of array
             attributes, e.g. units and long_name.
         group_attributes: Optional dictionary of attributes to add to the zarr group.
-        allow_existing: If true, allow writing to a preexisting store.
+        mode: Access mode used for the zarr.open_group call during store initialization.
+            'r+' means read/write (must exist); 'a' means read/write (create if doesn’t
+            exist); 'w' means create (overwrite if exists); 'w-' means create (fail if
+            exists).
         overwrite_check: If true, check when recording each batch that the slice of the
             existing store does not already contain data.
         time_units: Units string for time coordinate. Defaults to
@@ -228,29 +258,31 @@ class ZarrWriter:
             that are not associated with a dimension (ex. init_time, valid_time). Values
             are data arrays to allow for more freedom in these coords (e.g. can be
             multidimensional).
+
+
+        Note: If not using .initialize(), the first call to .record_batch() will
+        automatically initialize the zarr store based on the data provided in that call.
+        However if using distributed writes, and not calling .initialize() first, all
+        processes must call .record_batch() for the barrier synchronization to work.
         """
-        self.path = path
-        self.dims = dims
-        self.coords = coords
-        self.data_vars = data_vars
-        self.chunks = chunks or {}
-        self.shards = shards or None
-        self.array_attributes = array_attributes
-        self.group_attributes = group_attributes
-        self.dist = Distributed.get_instance()
-        self.overwrite_check = overwrite_check
-        self.time_units = time_units
-        self.time_calendar = time_calendar
-        self.nondim_coords = nondim_coords
-        if allow_existing:
+        self._path = path
+        self._dims = dims
+        self._coords = coords
+        self._data_vars = data_vars
+        self._chunks = chunks or {}
+        self._shards = shards or None
+        self._array_attributes = array_attributes
+        self._group_attributes = group_attributes
+        self._dist = Distributed.get_instance()
+        self._overwrite_check = overwrite_check
+        self._time_units = time_units
+        self._time_calendar = time_calendar
+        self._nondim_coords = nondim_coords
+        self._mode = mode
+
+        if mode == "a" or mode == "r+":
             self._store_initialized = True if self._path_exists() else False
         else:
-            if self._path_exists() is True:
-                raise FileExistsError(
-                    f"Zarr store {self.path} already exists. "
-                    "Please delete first before writing to this path, "
-                    "or write to a different path."
-                )
             self._store_initialized = False
 
         for coord, coord_arr in coords.items():
@@ -259,44 +291,18 @@ class ZarrWriter:
                     f"{coord} must be 1D array. Found shape {coord_arr.shape}"
                 )
 
-        for dim in self.dims:
-            if dim not in self.coords:
+        for dim in self._dims:
+            if dim not in self._coords:
                 raise ValueError(
                     f"Missing coordinate for dimension {dim}. "
                     "For dimensionless axes (ex. sample), an integer array "
                     "should be provided."
                 )
 
-    @classmethod
-    def from_existing_store(cls, path: str) -> "ZarrWriter":
-        ds = xr.open_zarr(path)
-        coords = {k: v.values for k, v in ds.coords.items()}
-        dims_list = [ds[var].dims for var in ds.data_vars]
-        array_attributes = {var: dict(ds[var].attrs) for var in ds.data_vars}
-        group_attributes = dict(ds.attrs)
-        if not all(dims == dims_list[0] for dims in dims_list):
-            raise ValueError(
-                "Data arrays must have same dim order when writing "
-                "to existing zarr store with ZarrWriter."
-            )
-        return cls(
-            path=path,
-            dims=dims_list[0],
-            coords=coords,
-            chunks=ds.chunks,
-            data_vars=list(ds.data_vars),
-            array_attributes=array_attributes,
-            group_attributes=group_attributes,
-            allow_existing=True,
-        )
-
     def _path_exists(self) -> bool:
-        if self.path.startswith("gs://"):
-            fs = gcsfs.GCSFileSystem()
-        else:
-            fs = fsspec.filesystem("file")
+        fs = fsspec.url_to_fs(self._path)[0]
 
-        if fs.exists(self.path):
+        if fs.exists(self._path):
             return True
         else:
             return False
@@ -305,50 +311,81 @@ class ZarrWriter:
         self, data: Mapping[str, np.ndarray], position_slices: Mapping[str, slice]
     ):
         """
-        Writes a batch of data into the zarr store.
-        data: Mapping of variable name to data array.
-        position_slices: Mapping of dimension name to the slice
-            along that dimension axis to insert data.
+        Writes a batch of data into the zarr store. If the store is not yet
+        initialized, it will be created based on the data provided in this call.
+
+        Args:
+            data: Mapping of variable name to data array.
+            position_slices: Mapping of dimension name to the slice
+                along that dimension axis to insert data.
         """
         if not self._store_initialized:
-            self.create_zarr_store(example_data=data)
+            save_names = self._data_vars or list(data.keys())
+            dtype = data[save_names[0]].dtype
+            self.initialize_store(data_dtype=dtype, data_vars=save_names)
+
         indexed_position_slices = {
-            self.dims.index(dim): position_slices[dim] for dim in position_slices.keys()
+            self._dims.index(dim): position_slices[dim]
+            for dim in position_slices.keys()
         }
-        write_data = {v: data[v] for v in self.data_vars or data.keys()}
-        insert_into_zarr(
-            self.path, write_data, indexed_position_slices, self.overwrite_check
+        write_data = {v: data[v] for v in self._data_vars or data.keys()}
+        _insert_into_zarr(
+            self._path, write_data, indexed_position_slices, self._overwrite_check
         )
 
-    def create_zarr_store(
-        self,
-        example_data: Mapping[str, np.ndarray],
+    def initialize_store(
+        self, data_dtype: np.dtype | str, data_vars: list[str] | None = None
     ):
-        if self.dist.is_root():
-            save_names = self.data_vars or list(example_data.keys())
-            logger.debug(f"Rank {self.dist.rank}: Initializing zarr store")
-            data_dtype = example_data[save_names[0]].dtype
-            dim_sizes = tuple([len(self.coords[dim]) for dim in self.dims])
-            initialize_zarr(
-                path=self.path,
-                vars=save_names,
-                dim_sizes=dim_sizes,
-                chunks=self.chunks,
-                shards=self.shards,
-                coords=self.coords,
-                dim_names=self.dims,
-                dtype=data_dtype,
-                time_units=self.time_units,
-                time_calendar=self.time_calendar,
-                nondim_coords=self.nondim_coords,
-                array_attributes=self.array_attributes,
-                group_attributes=self.group_attributes,
+        """
+        Initializes the zarr store for writing.
+
+        Args:
+            data_dtype: Data type for the data variables.
+            data_vars: List of variable names to save in the ZarrWriter output.
+                Should only be provided if ZarrWriter.data_vars was not set,
+                but will be okay if both are set and match exactly.
+
+        Raises:
+            ValueError: If data_vars is not provided either here or in the class
+                instance attribute, or if both are provided but do not match.
+        """
+        if self._store_initialized:
+            logger.warning(
+                "Zarr store is already initialized. Skipping initialization."
             )
-            self.dist.barrier()
+            return
+
+        if self._dist.is_root():
+            logger.debug(f"Rank {self._dist.rank}: Initializing zarr store")
+
+            data_vars = _resolve_data_vars(self._data_vars, data_vars)
+            dim_sizes = tuple([len(self._coords[dim]) for dim in self._dims])
+            if data_vars is None:
+                raise ValueError(
+                    "data_vars must be provided either to ZarrWriter or to "
+                    "initialize()"
+                )
+            _initialize_zarr(
+                path=self._path,
+                vars=data_vars,
+                dim_sizes=dim_sizes,
+                chunks=self._chunks,
+                shards=self._shards,
+                coords=self._coords,
+                dim_names=self._dims,
+                dtype=data_dtype,
+                time_units=self._time_units,
+                time_calendar=self._time_calendar,
+                nondim_coords=self._nondim_coords,
+                array_attributes=self._array_attributes,
+                group_attributes=self._group_attributes,
+                mode=self._mode,
+            )
             self._store_initialized = True
+            self._dist.barrier()
         else:
             logger.debug(
-                f"Rank {self.dist.rank}: Waiting for zarr store to be initialized"
+                f"Rank {self._dist.rank}: Waiting for zarr store to be initialized"
             )
-            self.dist.barrier()
+            self._dist.barrier()
             self._store_initialized = True

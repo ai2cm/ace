@@ -1,4 +1,3 @@
-import datetime
 import os
 import pathlib
 import subprocess
@@ -7,17 +6,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import cftime
 import dacite
-import numpy as np
 import pytest
 import torch
-import xarray as xr
 import yaml
 
-from fme.core.optimization import NullOptimization
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
+from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
 from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -49,94 +45,23 @@ def test_trainer(tmp_path):
         trainer.train_one_epoch()
 
 
-def _midpoints_from_count(start, end, n_mid):
-    width = (end - start) / n_mid
-    return np.linspace(start + width / 2, end - width / 2, n_mid, dtype=np.float32)
-
-
-def create_test_data_on_disk(
-    filename: Path, dim_sizes, variable_names, coords_override: dict[str, xr.DataArray]
-) -> Path:
-    data_vars = {}
-
-    for name in variable_names:
-        data = np.random.randn(*list(dim_sizes.values()))
-        if len(dim_sizes) > 0:
-            data = data.astype(np.float32)
-        data_vars[name] = xr.DataArray(
-            data, dims=list(dim_sizes), attrs={"units": "m", "long_name": name}
-        )
-    coords = {
-        dim_name: (
-            xr.DataArray(
-                np.arange(size, dtype=np.float32),
-                dims=(dim_name,),
-            )
-            if dim_name not in coords_override
-            else coords_override[dim_name]
-        )
-        for dim_name, size in dim_sizes.items()
-    }
-    # for lat, lon, overwrite with midpoints that are consistent with a
-    # fine grid that fits inside coarse grid
-    for c in ["lat", "lon"]:
-        if c in coords:
-            coords[c] = _midpoints_from_count(0, 8, dim_sizes[c])
-
-    for i in range(7):
-        data_vars[f"ak_{i}"] = float(i)
-        data_vars[f"bk_{i}"] = float(i + 1)
-
-    ds = xr.Dataset(data_vars=data_vars, coords=coords)
-    unlimited_dims = ["time"] if "time" in ds.dims else None
-
-    ds.to_netcdf(filename, unlimited_dims=unlimited_dims, format="NETCDF4_CLASSIC")
-    return filename
-
-
-def data_paths_helper(tmp_path, rename: dict = {}) -> FineResCoarseResPair[str]:
-    dim_sizes = FineResCoarseResPair[dict[str, int]](
-        fine={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
-        coarse={"time": NUM_TIMESTEPS, "lat": 8, "lon": 8},
-    )
-
-    variable_names = ["x", "y", "HGTsfc"]
-    variable_names = [rename.get(v, v) for v in variable_names]
-    fine_path = tmp_path / "fine"
-    coarse_path = tmp_path / "coarse"
-    fine_path.mkdir()
-    coarse_path.mkdir()
-    time_coord = [
-        cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(days=i)
-        for i in range(NUM_TIMESTEPS)
-    ]
-    coords = {"time": time_coord}
-    create_test_data_on_disk(
-        fine_path / "data.nc", dim_sizes.fine, variable_names, coords
-    )
-    create_test_data_on_disk(
-        coarse_path / "data.nc", dim_sizes.coarse, variable_names, coords
-    )
-    return FineResCoarseResPair[str](fine=fine_path, coarse=coarse_path)
-
-
 @pytest.fixture
 def train_data_paths(tmp_path):
     path = tmp_path / "train"
     path.mkdir()
-    return data_paths_helper(path)
+    return data_paths_helper(path, num_timesteps=NUM_TIMESTEPS)
 
 
 @pytest.fixture
 def validation_data_paths(tmp_path):
     path = tmp_path / "validation"
     path.mkdir()
-    return data_paths_helper(path)
+    return data_paths_helper(path, num_timesteps=NUM_TIMESTEPS)
 
 
 @pytest.fixture
 def stats_data_paths(tmp_path):
-    variable_names = ["x", "y"]
+    variable_names = ["var0", "var1"]
     mean_path = create_test_data_on_disk(
         tmp_path / "stats-mean.nc", {}, variable_names, {}
     )
@@ -180,27 +105,6 @@ def _create_config_dict(
     return config
 
 
-def _update_model_type(trainer_config: dict, module_type: str):
-    """Inplace update of trainer_config model type"""
-
-    if "diffusion" in module_type:
-        model_config_kwargs = {
-            "num_diffusion_generation_steps": 2,
-            "churn": 0.0,
-            "p_mean": -1.2,
-            "p_std": 1.2,
-            "predict_residual": True,
-            "sigma_max": 80.0,
-            "sigma_min": 0.002,
-        }
-        trainer_config["model"].update(model_config_kwargs)
-        trainer_config["generate_n_samples"] = 2
-
-    trainer_config["model"]["module"]["type"] = module_type
-
-    return trainer_config
-
-
 def _update_in_out_names(
     trainer_config: dict, in_names: Sequence[str], out_names: Sequence[str]
 ):
@@ -227,20 +131,27 @@ def default_trainer_config(
     config = _create_config_dict(
         train_data_paths, validation_data_paths, stats_data_paths, tmp_path
     )
+    model_config_kwargs = {
+        "num_diffusion_generation_steps": 2,
+        "churn": 0.0,
+        "p_mean": -1.2,
+        "p_std": 1.2,
+        "predict_residual": True,
+        "sigma_max": 80.0,
+        "sigma_min": 0.002,
+    }
+    config["model"].update(model_config_kwargs)
+    config["generate_n_samples"] = 2
+    config["model"]["module"]["type"] = "unet_diffusion_song"
     return config
 
 
 @pytest.mark.parametrize(
-    "module_type",
-    ["unet_regression_song", "unet_diffusion_song"],
-    ids=["regression", "diffusion"],
-)
-@pytest.mark.parametrize(
     "in_names, out_names",
     [
-        (["x"], ["x", "y"]),
-        (["x", "y"], ["y"]),
-        (["x", "y"], ["x", "y"]),
+        (["var0"], ["var0", "var1"]),
+        (["var0", "var1"], ["var1"]),
+        (["var0", "var1"], ["var0", "var1"]),
     ],
     ids=[
         "single_input_multiple_out",
@@ -249,7 +160,6 @@ def default_trainer_config(
     ],
 )
 def test_train_main_only(
-    module_type,
     in_names,
     out_names,
     default_trainer_config,
@@ -261,8 +171,7 @@ def test_train_main_only(
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 
-    config = _update_model_type(default_trainer_config, module_type)
-    config = _update_in_out_names(config, in_names, out_names)
+    config = _update_in_out_names(default_trainer_config, in_names, out_names)
     config["max_epochs"] = 1
     config_path = _store_config(tmp_path, config)
 
@@ -328,36 +237,6 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
         trainer1.optimization.optimizer,
         trainer2.optimization.optimizer,
     )
-
-
-def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
-    """Checks that at training time the model is stochastic (due to dropout) but
-    that at validation time, it is deterministic."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
-    trainer_config_dict = _update_model_type(
-        default_trainer_config, "unet_regression_song"
-    )
-
-    config = dacite.from_dict(data_class=TrainerConfig, data=trainer_config_dict)
-    trainer = config.build()
-
-    trainer.train_one_epoch()
-    assert trainer.model.module.training
-
-    null_optimization = NullOptimization()
-
-    batch = next(iter(trainer.train_data.loader))
-    outputs1 = trainer.model.train_on_batch(batch, null_optimization)
-    outputs2 = trainer.model.train_on_batch(batch, null_optimization)
-    assert not torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
-
-    trainer.valid_one_epoch()
-    assert not trainer.model.module.training
-    outputs1 = trainer.model.train_on_batch(batch, null_optimization)
-    outputs2 = trainer.model.train_on_batch(batch, null_optimization)
-    assert torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
 
 def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):

@@ -10,7 +10,7 @@ from fme.downscaling.data.config import (
 )
 from fme.downscaling.data.utils import ClosedInterval
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.test_train import data_paths_helper
+from fme.downscaling.test_utils import data_paths_helper
 
 
 @pytest.mark.parametrize(
@@ -52,7 +52,7 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
         pytest.skip("Skipping non-fast tests")
     paths = data_paths_helper(tmp_path)
     requirements = DataRequirements(
-        fine_names=[], coarse_names=["x"], n_timesteps=1, use_fine_topography=True
+        fine_names=[], coarse_names=["var0"], n_timesteps=1, use_fine_topography=True
     )
     data_config = DataLoaderConfig(
         coarse=[XarrayDataConfig(paths.coarse)],
@@ -66,8 +66,7 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
     data = data_config.build(requirements=requirements)
     batch = next(iter(data.loader))
     # lat/lon midpoints are on (0.5, 1.5, ...)
-    assert batch.data["x"].shape == (2, 3, 3)
-    assert batch.topography.data.shape == (2, 6, 6)
+    assert batch.data["var0"].shape == (2, 3, 3)
 
 
 def test_XarrayEnsembleDataConfig():
@@ -91,7 +90,10 @@ def test_XarrayEnsembleDataConfig():
 def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
     paths = data_paths_helper(tmp_path)
     requirements = DataRequirements(
-        fine_names=["x"], coarse_names=["x"], n_timesteps=1, use_fine_topography=True
+        fine_names=["var0"],
+        coarse_names=["var0"],
+        n_timesteps=1,
+        use_fine_topography=True,
     )
     n_sample = 3
     data_config = PairedDataLoaderConfig(
@@ -106,5 +108,4 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
         sample_with_replacement=n_sample,
     )
     data = data_config.build(requirements=requirements, train=True)
-    epoch_samples = list(data.loader)
-    assert len(epoch_samples) == n_sample
+    assert len(data.loader) == n_sample

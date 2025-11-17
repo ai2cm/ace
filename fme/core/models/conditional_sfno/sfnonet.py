@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import math
+from functools import partial
 from typing import Any, Callable, List, Optional, Tuple
 
 import torch
@@ -23,6 +24,7 @@ import torch.nn as nn
 # get spectral transforms from torch_harmonics
 import torch_harmonics as th
 from torch.utils.checkpoint import checkpoint
+from typing_extensions import Literal
 
 from .initialization import trunc_normal_
 
@@ -191,7 +193,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             img_shape=self.input_shape_loc,
             global_layer_norm=global_layer_norm,
             context_config=context_config,
-            affine_norms=affine_norms,
+            elementwise_affine=affine_norms,
         )
 
         # convolution layer
@@ -236,7 +238,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             img_shape=self.output_shape_loc,
             global_layer_norm=global_layer_norm,
             context_config=context_config,
-            affine_norms=affine_norms,
+            elementwise_affine=affine_norms,
         )
 
         if use_mlp == True:
@@ -300,6 +302,11 @@ class FourierNeuralOperatorBlock(nn.Module):
         return x
 
 
+class NoLayerNorm(nn.Module):
+    def forward(self, x, context: Context):
+        return x
+
+
 def get_lat_lon_sfnonet(
     params,
     in_chans: int,
@@ -307,7 +314,7 @@ def get_lat_lon_sfnonet(
     img_shape: Tuple[int, int],
     context_config: ContextConfig = ContextConfig(
         embed_dim_scalar=0,
-        embed_dim_2d=0,
+        embed_dim_noise=0,
     ),
 ) -> "SphericalFourierNeuralOperatorNet":
     h, w = img_shape
@@ -429,6 +436,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         Number of checkpointing segments, by default 0
     local_blocks: List[int], optional
         List of blocks to use local filters, by default []
+    normalize_big_skip: bool, optional
+        Whether to normalize the big_skip connection, by default False
     affine_norms: bool, optional
         Whether to use element-wise affine parameters in the normalization layers,
         by default False.
@@ -469,7 +478,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         embed_dim: int = 256,
         context_config: ContextConfig = ContextConfig(
             embed_dim_scalar=0,
-            embed_dim_2d=0,
+            embed_dim_noise=0,
         ),
         global_layer_norm: bool = False,
         num_layers: int = 12,
@@ -495,6 +504,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         filter_residual: bool = False,
         filter_output: bool = False,
         local_blocks: Optional[List[int]] = None,
+        normalize_big_skip: bool = False,
         affine_norms: bool = False,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
@@ -596,6 +606,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.local_blocks = [i for i in range(self.num_layers) if i in local_blocks]
         else:
             self.local_blocks = []
+        normalize_big_skip = (
+            params.normalize_big_skip
+            if hasattr(params, "normalize_big_skip")
+            else normalize_big_skip
+        )
         self.affine_norms = (
             params.affine_norms if hasattr(params, "affine_norms") else affine_norms
         )
@@ -715,6 +730,16 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.pos_embed = get_pos_embed()
 
         self.apply(self._init_weights)
+        if normalize_big_skip:
+            self.norm_big_skip = ConditionalLayerNorm(
+                in_chans,
+                img_shape=self.img_shape,
+                global_layer_norm=self.global_layer_norm,
+                context_config=context_config,
+                elementwise_affine=self.affine_norms,
+            )
+        else:
+            self.norm_big_skip = NoLayerNorm()
 
     def _init_weights(self, m):
         """Helper routine for weight initialization"""
@@ -743,6 +768,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         # save big skip
         if self.big_skip:
             residual = self.residual_filter_up(self.residual_filter_down(x))
+            residual = self.norm_big_skip(residual, context=context)
 
         if self.checkpointing >= 1:
             x = checkpoint(self.encoder, x)
