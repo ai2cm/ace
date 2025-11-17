@@ -123,13 +123,12 @@ class DataLoaderConfig:
     def __post_init__(self):
         if self.topography is not None:
             if self.static_inputs is not None:
-                if self.topography_variable in self.static_inputs:
-                    if self.topography != self.static_inputs[self.topography_variable]:
-                        raise ValueError(
-                            "'topography' was configured in both the top level DataConfig "
-                            "and within 'static_inputs' with different paths. Please only "
-                            "configure topography in 'static_inputs'."
-                        )
+                if self.topography != self.static_inputs.get(self.topography_variable):
+                    raise ValueError(
+                        "'topography' was configured in both the top level DataConfig "
+                        "and within 'static_inputs' with different paths. Please only "
+                        "configure topography in 'static_inputs'."
+                    )
                 self.static_inputs[self.topography_variable] = self.topography
             raise DeprecationWarning(
                 "The 'topography' field in DataLoaderConfig is deprecated. "
