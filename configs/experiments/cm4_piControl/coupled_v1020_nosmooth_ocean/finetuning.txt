@@ -1,0 +1,3 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+ft_fto-sfno-v1020_nosmooth_ocean|rgo9bb2s_best_inf_ckpt|ace-samudra-coupled-cm4|rgo9bb2s|best_inference_ckpt|train|urgent|jupiter|8|800GiB|1|ai2/climate-titan||
