@@ -87,7 +87,8 @@ class DiffusionModelConfig:
     Parameters:
         module: The module registry selector for the diffusion model.
         loss:  The loss configuration for the diffusion model.
-        in_names: The input variable names for the diffusion model.
+        in_names: The coarse input variable names for the diffusion model.
+            Note this should not include fine res static fields.
         out_names: The output variable names for the diffusion model.
         normalization: The normalization configurations for the diffusion model.
         p_mean: The mean of noise distribution used during training.
@@ -96,7 +97,11 @@ class DiffusionModelConfig:
         sigma_max: Max noise level for generation.
         churn: The amount of stochasticity during generation.
         num_diffusion_generation_steps: Number of diffusion generation steps
-        use_fine_topography: Whether to use fine topography in the model.
+        use_fine_topography: Whether to use a single additional static input channel
+            for fine topography in the model.
+            Deprecated, please use `num_static_inputs` instead.
+        num_static_inputs: Number of fine res static inputs to the model,
+            e.g. topography
     """
 
     module: DiffusionModuleRegistrySelector
@@ -112,13 +117,22 @@ class DiffusionModelConfig:
     num_diffusion_generation_steps: int
     predict_residual: bool
     use_fine_topography: bool = False
+    num_static_inputs: int = 0
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
-        if self.use_fine_topography and not self._interpolate_input:
+        if self.use_fine_topography:
+            if self.num_static_inputs > 0:
+                raise ValueError(
+                    "'use_fine_topography' is deprecated and should not be provided if "
+                    "num_static_inputs>0 is used. "
+                )
+            else:
+                self.num_static_inputs = 1
+        if self.num_static_inputs > 0 and not self._interpolate_input:
             raise ValueError(
-                "Fine topography can only be used when predicting on interpolated"
-                " coarse input"
+                "Fine res static inputs can only be used when predicting on "
+                "interpolated coarse input"
             )
 
     def build(
@@ -138,10 +152,10 @@ class DiffusionModelConfig:
         sigma_data = 1.0
 
         n_in_channels = len(self.in_names)
-        # fine topography is already normalized and at fine scale, so needs
+        # fine static inputs are already normalized and at fine scale, so needs
         # some special handling for now
-        if self.use_fine_topography:
-            n_in_channels += 1
+        if self.use_static_inputs:
+            n_in_channels += self.num_static_inputs
 
         module = self.module.build(
             n_in_channels=n_in_channels,
@@ -176,7 +190,7 @@ class DiffusionModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-            use_fine_topography=self.use_fine_topography,
+            use_fine_topography=self.use_static_inputs,
         )
 
 
@@ -312,7 +326,7 @@ class DiffusionModel:
         )
         interpolated = interpolate(normalized, self.downscale_factor)
 
-        if self.config.use_fine_topography:
+        if self.config.use_static_inputs:
             if topography is None:
                 raise ValueError(
                     "Topography must be provided for each batch when use of fine "
