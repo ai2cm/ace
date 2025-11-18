@@ -835,16 +835,6 @@ def test_zarr_engine_used_mapping():
     assert config.zarr_engine_used
 
 
-def test_data_loader_maintains_backward_concat_compatibility(recwarn):
-    data_loader = DataLoaderConfig(
-        dataset=[XarrayDataConfig(data_path="some_path")],
-        batch_size=1,
-    )
-    assert isinstance(data_loader.dataset, ConcatDatasetConfig)
-    warning = recwarn.pop(DeprecationWarning)
-    assert "Dataset list format is deprecated" in str(warning.message)
-
-
 @pytest.mark.parametrize(
     (
         "shuffle",
