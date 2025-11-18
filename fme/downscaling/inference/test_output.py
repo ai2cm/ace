@@ -101,7 +101,7 @@ def requirements():
         coarse_names=["var0", "var1"],
         fine_names=["var0", "var1"],
         n_timesteps=1,
-        use_fine_topography=True,
+        static_input_names=["HGTsfc"],
     )
 
 

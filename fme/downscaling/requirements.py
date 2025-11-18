@@ -6,4 +6,4 @@ class DataRequirements:
     fine_names: list[str]
     coarse_names: list[str]
     n_timesteps: int
-    use_fine_topography: bool = False
+    static_input_names: list[str] = dataclasses.field(default_factory=list)

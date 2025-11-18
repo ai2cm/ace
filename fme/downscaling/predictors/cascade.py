@@ -79,7 +79,7 @@ class CascadePredictorConfig:
             fine_names=out_names,
             coarse_names=list(set(in_names).union(out_names)),
             n_timesteps=1,
-            use_fine_topography=False,
+            static_input_names=[],
         )
 
 

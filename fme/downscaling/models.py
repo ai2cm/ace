@@ -99,8 +99,8 @@ class DiffusionModelConfig:
         num_diffusion_generation_steps: Number of diffusion generation steps
         use_fine_topography: Whether to use a single additional static input channel
             for fine topography in the model.
-            Deprecated, please use `num_static_inputs` instead.
-        num_static_inputs: Number of fine res static inputs to the model,
+            Deprecated, please use `static_inputs` instead.
+        static_inputs: Number of fine res static inputs to the model,
             e.g. topography
     """
 
@@ -117,19 +117,20 @@ class DiffusionModelConfig:
     num_diffusion_generation_steps: int
     predict_residual: bool
     use_fine_topography: bool = False
-    num_static_inputs: int = 0
+    static_inputs: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
+        # TODO: adjust upstream references to `use_fine_topography`
         if self.use_fine_topography:
-            if self.num_static_inputs > 0:
+            if len(self.static_inputs) > 0:
                 raise ValueError(
                     "'use_fine_topography' is deprecated and should not be provided if "
-                    "num_static_inputs>0 is used. "
+                    ">0 static_inputs are provided. "
                 )
             else:
-                self.num_static_inputs = 1
-        if self.num_static_inputs > 0 and not self._interpolate_input:
+                self.static_inputs = ["HGTsfc"]
+        if len(self.static_inputs) > 0 and not self._interpolate_input:
             raise ValueError(
                 "Fine res static inputs can only be used when predicting on "
                 "interpolated coarse input"
@@ -153,7 +154,7 @@ class DiffusionModelConfig:
 
         # fine static inputs are already normalized and at fine scale, so needs
         # some special handling for now
-        n_in_channels = len(self.in_names) + self.num_static_inputs
+        n_in_channels = len(self.in_names) + len(self.static_inputs)
 
         module = self.module.build(
             n_in_channels=n_in_channels,
@@ -188,7 +189,7 @@ class DiffusionModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-            use_fine_topography=self.use_static_inputs,
+            static_input_names=self.static_inputs,
         )
 
 
@@ -316,7 +317,7 @@ class DiffusionModel:
         )
 
     def _get_input_from_coarse(
-        self, coarse: TensorMapping, topography: StaticInputs | None
+        self, coarse: TensorMapping, static_inputs: StaticInputs | None
     ) -> torch.Tensor:
         inputs = filter_tensor_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
@@ -324,21 +325,26 @@ class DiffusionModel:
         )
         interpolated = interpolate(normalized, self.downscale_factor)
 
-        if self.config.use_static_inputs:
-            if topography is None:
+        if len(self.config.static_inputs) > 0:
+            if static_inputs is None:
                 raise ValueError(
-                    "Topography must be provided for each batch when use of fine "
-                    "topography is enabled."
+                    "static_inputs must be provided for each batch when use of static"
+                    "inputs is enabled."
                 )
-            else:
-                n_batches = normalized.shape[0]
-                # Join the normalized topography to the input (see dataset for details)
-                for field in topography.fields:
-                    static_input = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
-                    static_input = static_input.unsqueeze(self._channel_axis)
-                    interpolated = torch.concat(
-                        [interpolated, static_input], axis=self._channel_axis
-                    )
+            if len(static_inputs.fields) < len(self.config.static_inputs):
+                raise ValueError(
+                    f"Expected {len(self.config.static_inputs)} static input fields, "
+                    f"but got {len(static_inputs.fields)} from data."
+                )
+
+            n_batches = normalized.shape[0]
+            # Join the normalized topography to the input (see dataset for details)
+            for field in static_inputs.fields:
+                static_input = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
+                static_input = static_input.unsqueeze(self._channel_axis)
+                interpolated = torch.concat(
+                    [interpolated, static_input], axis=self._channel_axis
+                )
         if self.config._interpolate_input:
             return interpolated
         return normalized
@@ -516,7 +522,7 @@ class _CheckpointModelConfigSelector:
 class CheckpointModelConfig:
     checkpoint_path: str
     rename: dict[str, str] | None = None
-    fine_topography_path: str | None = None
+    static_input_paths: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         # For config validation testing, we don't want to load immediately
@@ -561,9 +567,7 @@ class CheckpointModelConfig:
             fine_names=out_names,
             coarse_names=list(set(in_names).union(out_names)),
             n_timesteps=1,
-            use_fine_topography=self._checkpoint["model"]["config"][
-                "use_fine_topography"
-            ],
+            static_input_names=self._checkpoint["model"]["config"]["static_inputs"],
         )
 
     @property
@@ -575,12 +579,17 @@ class CheckpointModelConfig:
         return self._checkpoint["model"]["config"]["out_names"]
 
     def get_topography(self) -> StaticInputs | None:
-        if self.data_requirements.use_fine_topography:
-            if self.fine_topography_path is None:
+        if len(self.data_requirements.static_input_names) > 0:
+            if self.static_input_paths is None:
                 raise ValueError(
-                    "Topography path must be provided for model configured "
-                    "to use fine topography."
+                    "static_input_paths must be provided for model configured "
+                    "to use fine static inputs."
                 )
-            return get_normalized_static_input(self.fine_topography_path).to_device()
+            return StaticInputs(
+                [
+                    get_normalized_static_input(self.static_input_paths[var]).to_device() 
+                    for var in self.data_requirements.static_input_names
+                ]
+            )
         else:
             return None

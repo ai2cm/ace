@@ -52,7 +52,10 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
         pytest.skip("Skipping non-fast tests")
     paths = data_paths_helper(tmp_path)
     requirements = DataRequirements(
-        fine_names=[], coarse_names=["var0"], n_timesteps=1, use_fine_topography=True
+        fine_names=[],
+        coarse_names=["var0"],
+        n_timesteps=1,
+        static_input_names=["HGTsfc"],
     )
     data_config = DataLoaderConfig(
         coarse=[XarrayDataConfig(paths.coarse)],
@@ -93,7 +96,7 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
         fine_names=["var0"],
         coarse_names=["var0"],
         n_timesteps=1,
-        use_fine_topography=True,
+        static_input_names=["HGTsfc"],
     )
     n_sample = 3
     data_config = PairedDataLoaderConfig(

@@ -222,7 +222,7 @@ class DownscalingOutputConfig(ABC):
         dataset = loader_config.build_batchitem_dataset(xr_dataset, properties)
         topography = loader_config.build_static_inputs(
             coords,
-            requires_topography=requirements.use_fine_topography,
+            required_static_inputs=requirements.static_input_names,
         )
         if topography is None:
             raise ValueError("Topography is required for downscaling generation.")

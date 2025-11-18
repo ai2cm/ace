@@ -84,7 +84,7 @@ class DeterministicModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-            use_fine_topography=self.use_fine_topography,
+            static_input_names=[],
         )
 
 
@@ -256,4 +256,5 @@ class InterpolateModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
+            static_input_names=[],
         )

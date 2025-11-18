@@ -103,6 +103,8 @@ class DataLoaderConfig:
         repeat: The number of times to repeat the underlying xarray dataset
             time dimension.  Useful to include longer sequences of small
             data for testing.
+        static_inputs: Optional mapping of variable names to dataset paths
+            for static input variables.
     """
 
     coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
@@ -122,14 +124,15 @@ class DataLoaderConfig:
 
     def __post_init__(self):
         if self.topography is not None:
-            if self.static_inputs is not None:
-                if self.topography != self.static_inputs.get(self.topography_variable):
-                    raise ValueError(
-                        "'topography' was configured in both the top level DataConfig "
-                        "and within 'static_inputs' with different paths. Please only "
-                        "configure topography in 'static_inputs'."
-                    )
-                self.static_inputs[self.topography_variable] = self.topography
+            static_inputs = self.static_inputs or {}
+            if self.topography != static_inputs.get(self.topography_variable):
+                raise ValueError(
+                    f"Topography variable {self.topography_variable} was configured "
+                    "in both the top level DataConfig "
+                    "and within 'static_inputs' with different paths. Please only "
+                    "configure in 'static_inputs'."
+                )
+            self.static_inputs[self.topography_variable] = self.topography
             raise DeprecationWarning(
                 "The 'topography' field in DataLoaderConfig is deprecated. "
                 f"Instead, provide {self.topography_variable} and data path as key and value "
@@ -174,18 +177,19 @@ class DataLoaderConfig:
         )
 
     def build_static_inputs(
-        self, coarse_coords: LatLonCoordinates, requires_topography: bool
+        self, coarse_coords: LatLonCoordinates, required_static_inputs: list[str]
     ) -> StaticInputs | None:
-        if requires_topography is False:
+        if len(required_static_inputs) == 0:
             return None
         if self.topography is None and self.static_inputs is None:
             raise ValueError(
                 "Topography is required for this model, but no static inputs "
                 "datasets were specified in the configuration."
             )
-        static_inputs = []
-        for var_name, path in self.static_inputs.items():
-            static_input = get_normalized_static_input(path, input_name=var_name)
+        loaded_static_inputs = []
+        for var in required_static_inputs:
+            path = self.static_inputs[var]
+            static_input = get_normalized_static_input(path, input_name=var)
             # Fine grid boundaries are adjusted to exactly match the coarse grid
             fine_lat_interval = adjust_fine_coord_range(
                 self.lat_extent,
@@ -200,8 +204,8 @@ class DataLoaderConfig:
             subset_topography = static_input.subset_latlon(
                 lat_interval=fine_lat_interval, lon_interval=fine_lon_interval
             )
-            static_inputs.append(subset_topography.to_device())
-        return StaticInputs(fields=static_inputs)
+            loaded_static_inputs.append(subset_topography.to_device())
+        return StaticInputs(fields=loaded_static_inputs)
 
     def build_batchitem_dataset(
         self,
@@ -269,7 +273,7 @@ class DataLoaderConfig:
         example = dataset[0]
         subset_topography = self.build_static_inputs(
             coarse_coords=latlon_coords,
-            requires_topography=requirements.use_fine_topography,
+            required_static_inputs=requirements.static_input_names,
         )
         return GriddedData(
             _loader=dataloader,
@@ -319,6 +323,10 @@ class PairedDataLoaderConfig:
         sample_with_replacement: If provided, the dataset will be
             sampled randomly with replacement to the given size each period,
             instead of retrieving each sample once (either shuffled or not).
+        static_inputs: Optional mapping of variable names to dataset paths
+            for static input variables. If not provided for a variable in the
+            model's data_requirements.required_static_inputs, the data loader
+            will default to trying to load the variable from the fine data.
     """
 
     fine: Sequence[XarrayDataConfig]
@@ -335,7 +343,26 @@ class PairedDataLoaderConfig:
     repeat: int = 1
     topography: str | None = None
     sample_with_replacement: int | None = None
+    static_inputs: dict[str, str] | None = None
 
+
+    def __post_init__(self):
+        if self.topography is not None:
+            static_inputs = self.static_inputs or {}
+            if self.topography != static_inputs.get(self.topography_variable):
+                raise ValueError(
+                    f"Topography variable {self.topography_variable} was configured "
+                    "in both the top level DataConfig "
+                    "and within 'static_inputs' with different paths. Please only "
+                    "configure in 'static_inputs'."
+                )
+            self.static_inputs[self.topography_variable] = self.topography
+            raise DeprecationWarning(
+                "The 'topography' field in DataLoaderConfig is deprecated. "
+                f"Instead, provide {self.topography_variable} and data path as key and value "
+                "in the 'static_inputs' config field."
+            )
+        
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
 
@@ -362,6 +389,36 @@ class PairedDataLoaderConfig:
             else:
                 coarse_configs.append(config)
         return coarse_configs
+
+    def _get_static_inputs(self, required_static_inputs: list[str]) -> StaticInputs | None:
+        if self.topography is not None:
+            raise DeprecationWarning(
+                "The 'topography' field in PairedDataLoaderConfig is deprecated. "
+                f"Instead, provide 'HGTsfc' and data path as key and value "
+                "in the 'static_inputs' config field."
+            )
+        # if path not provided in static_inputs, try to load from fine data
+        fine_data_raw_path = get_raw_paths(
+            path=self.fine[0].data_path, file_pattern=self.fine[0].file_pattern
+        )[0]
+        static_input_data_paths = {
+            var: self.static_inputs.get(var, fine_data_raw_path) for var in required_static_inputs
+        }
+        if len(required_static_inputs)>0:
+            _static_inputs = []
+            for var in required_static_inputs:
+                try:
+                    _static_input = get_normalized_static_input(path=static_input_data_paths[var], input_name=var)
+                except(KeyError):
+                    raise ValueError(
+                        f"Static input variable '{var}' is required but no data path was "
+                        f"provided in the configuration and {var} was not found in the "
+                        "fine dataset."
+                    )
+                _static_inputs.append(_static_input.to_device())
+            return StaticInputs(fields=_static_inputs)
+        else:
+            return None
 
     def build(
         self,
@@ -421,39 +478,43 @@ class PairedDataLoaderConfig:
             full_fine_coord=properties_fine.horizontal_coordinates.lon,
         )
 
-        if requirements.use_fine_topography:
-            if self.topography is None:
-                data_path = self.fine[0].data_path
-                file_pattern = self.fine[0].file_pattern
-                raw_paths = get_raw_paths(data_path, file_pattern)
-                if len(raw_paths) == 0:
-                    raise ValueError(
-                        f"No files found matching '{data_path}/{file_pattern}'."
-                    )
-                fine_topography = get_normalized_static_input(raw_paths[0])
-            else:
-                fine_topography = get_normalized_static_input(self.topography)
-            fine_topography = fine_topography.to_device()
-            if (
-                get_topography_downscale_factor(
-                    fine_topography.data.shape,
-                    properties_fine.horizontal_coordinates.shape,
-                )
-                != 1
-            ):
-                raise ValueError(
-                    f"Fine topography shape {fine_topography.shape} does not match "
-                    f"fine data shape {properties_fine.horizontal_coordinates.shape}."
-                )
+        # if len(requirements.static_input_names)>0:
+        #     if self.topography is None:
+        #         data_path = self.fine[0].data_path
+        #         file_pattern = self.fine[0].file_pattern
+        #         raw_paths = get_raw_paths(data_path, file_pattern)
+        #         if len(raw_paths) == 0:
+        #             raise ValueError(
+        #                 f"No files found matching '{data_path}/{file_pattern}'."
+        #             )
+        #         fine_topography = get_normalized_static_input(raw_paths[0])
+        #     else:
+        #         fine_topography = get_normalized_static_input(self.topography)
+        #     fine_topography = fine_topography.to_device()
+        #     if (
+        #         get_topography_downscale_factor(
+        #             fine_topography.data.shape,
+        #             properties_fine.horizontal_coordinates.shape,
+        #         )
+        #         != 1
+        #     ):
+        #         raise ValueError(
+        #             f"Fine topography shape {fine_topography.shape} does not match "
+        #             f"fine data shape {properties_fine.horizontal_coordinates.shape}."
+        #         )
+        #     fine_topography = fine_topography.subset_latlon(
+        #         lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
+        #     )
+        # else:
+        #     fine_topography = None
+        fine_topography = self._get_static_inputs(requirements.static_input_names)
+        if fine_topography is not None:
             fine_topography = fine_topography.subset_latlon(
                 lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
             )
-        else:
-            fine_topography = None
 
         # TODO: horizontal subsetting should probably live in the XarrayDatast level
         # Subset to overall horizontal domain
-        # TODO: Follow up PR will remove topography from batch items
         dataset_fine_subset = HorizontalSubsetDataset(
             dataset_fine,
             properties=properties_fine,
