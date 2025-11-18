@@ -231,7 +231,10 @@ class InferenceDataset(torch.utils.data.Dataset):
             )
         else:
             self._start_indices = config.start_indices.as_indices()
-        self._validate_n_forward_steps()
+        self._dataset.validate_inference_length(
+            max_start_index=max(self._start_indices),
+            max_window_len=total_forward_steps + 1,
+        )
         if isinstance(self._properties.horizontal_coordinates, LatLonCoordinates):
             self._lats, self._lons = self._properties.horizontal_coordinates.meshgrid
         else:
@@ -321,19 +324,19 @@ class InferenceDataset(torch.utils.data.Dataset):
     def properties(self) -> DatasetProperties:
         return self._properties
 
-    @property
-    def n_forward_steps(self) -> int:
-        return self._total_forward_steps
-
     def _validate_n_forward_steps(self):
-        max_steps = self._dataset.total_timesteps - max(self._start_indices) - 1
-        if self._total_forward_steps > max_steps:
+        try:
+            self._dataset.validate_inference_length(
+                max_start_index=max(self._start_indices),
+                max_window_len=self._total_forward_steps + 1,
+            )
+        except ValueError as e:
             raise ValueError(
                 f"The number of forward inference steps ({self._total_forward_steps}) "
                 "must be less than or equal to the number of possible steps "
-                f"({max_steps}) in dataset after the last initial condition's "
+                f"in dataset after the last initial condition's "
                 "start index."
-            )
+            ) from e
 
     def _resolve_merged_datasets(
         self,

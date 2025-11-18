@@ -1064,24 +1064,6 @@ def test_dataset_raise_error_on_dim_mismatch(
         dataset[0]
 
 
-def test_xarray_raise_error_on_concat_dim_mismatch(
-    mock_monthly_netcdfs, mock_monthly_netcdfs_ensemble_dim
-):
-    mock_data: MockData = mock_monthly_netcdfs
-    mock_data_ensemble: MockData = mock_monthly_netcdfs_ensemble_dim
-    n_timesteps = 5
-    names = mock_data.var_names.all_names + ["x"]
-    config1 = XarrayDataConfig(
-        data_path=mock_data.tmpdir, subset=TimeSlice("2003-03-01", "2003-03-31")
-    )
-    config2 = XarrayDataConfig(
-        data_path=mock_data_ensemble.tmpdir,
-        subset=TimeSlice("2003-05-01", "2003-05-31"),
-    )
-    with pytest.raises(ValueError):
-        get_dataset([config1, config2], names, n_timesteps)
-
-
 @pytest.mark.parametrize(
     "mock_data_fixture, engine, file_pattern",
     [

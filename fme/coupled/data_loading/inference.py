@@ -14,12 +14,11 @@ from fme.ace.data_loading.inference import (
 from fme.ace.requirements import DataRequirements
 from fme.core.dataset.dummy import DummyDataset
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.time import TimeSlice
 from fme.core.distributed import Distributed
+from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData
-from fme.coupled.data_loading.config import (
-    CoupledDatasetConfig,
-    CoupledDatasetWithOptionalOceanConfig,
-)
+from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.data_typing import (
     CoupledDataset,
     CoupledDatasetProperties,
@@ -47,7 +46,7 @@ class InferenceDataLoaderConfig:
         num_data_workers: Number of parallel workers to use for data loading.
     """
 
-    dataset: CoupledDatasetConfig | CoupledDatasetWithOptionalOceanConfig
+    dataset: CoupledDatasetWithOptionalOceanConfig
     start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList
     num_data_workers: int = 0
 
@@ -55,6 +54,17 @@ class InferenceDataLoaderConfig:
         self._zarr_engine_used = any(
             ds.zarr_engine_used for ds in self.dataset.data_configs if ds is not None
         )
+        # issue warning if subset is used in the atmosphere dataset
+        if self.dataset.atmosphere.subset != Slice(None, None, None):
+            raise ValueError(
+                "'subset' cannot be used in the atmosphere dataset during inference."
+            )
+        if self.dataset.ocean is not None and self.dataset.ocean.subset != Slice(
+            None, None, None
+        ):
+            raise ValueError(
+                "'subset' cannot be used in the ocean dataset during inference."
+            )
 
     @property
     def zarr_engine_used(self) -> bool:
@@ -95,6 +105,7 @@ class InferenceDataset(torch.utils.data.Dataset):
             )
         all_ic_times = ocean.sample_start_times
         ocean_properties = self._update_ocean_mask(ocean_properties, dataset_info)
+        config.dataset.atmosphere.update_subset(TimeSlice(start_time=all_ic_times[0]))
         atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
             atmosphere_reqs.names, atmosphere_reqs.n_timesteps
         )
@@ -200,7 +211,7 @@ class CoupledForcingDataLoaderConfig:
                 num_data_workers=self.num_data_workers,
             )
         return InferenceDataLoaderConfig(
-            dataset=CoupledDatasetConfig(
+            dataset=CoupledDatasetWithOptionalOceanConfig(
                 atmosphere=self.atmosphere.dataset,
                 ocean=self.ocean.dataset,
             ),
