@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -9,8 +9,8 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.requirements import DataRequirements
-from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData
+from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceDataset,
@@ -46,7 +46,7 @@ def _setup(
         ),
     )
     config = InferenceDataLoaderConfig(
-        dataset=dataset_config,
+        dataset=cast(CoupledDatasetWithOptionalOceanConfig, dataset_config),
         start_indices=start_indices,
     )
     dataset = InferenceDataset(
@@ -142,6 +142,5 @@ def test_inference_dataset(
         mock_data,
         total_coupled_steps=_N_STEPS,
         start_indices=start_indices,
-        atmos_data_config_kwargs={"subset": Slice(start=atmos_ic_time_offset)},
     )
     _check_batch(dataset[0], mock_data, atmos_ic_time_offset)

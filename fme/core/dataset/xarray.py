@@ -495,6 +495,9 @@ class XarrayDataConfig(DatasetConfigABC):
         if self.engine == "zarr":
             self.zarr_engine_used = True
 
+    def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
+        self.subset = subset
+
     def build(
         self,
         names: Sequence[str],

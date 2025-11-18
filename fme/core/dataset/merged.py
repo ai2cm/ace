@@ -6,13 +6,14 @@ import xarray as xr
 from fme.core.dataset.concat import ConcatDatasetConfig, XarrayConcat
 from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.xarray import (
     XarrayDataConfig,
     XarrayDataset,
     XarraySubset,
     get_raw_paths,
 )
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import Slice, TensorDict
 
 
 class MergedXarrayDataset:
@@ -148,6 +149,14 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
             if ds.engine == "zarr":
                 self.zarr_engine_used = True
                 break
+
+    def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
+        for ds in self.merge:
+            ds.update_subset(subset)
+
+    @property
+    def subset(self) -> Slice | TimeSlice | RepeatedInterval:
+        return self.merge[0].subset
 
     def build(
         self,

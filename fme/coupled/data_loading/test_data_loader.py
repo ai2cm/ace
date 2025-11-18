@@ -32,6 +32,7 @@ from fme.core.dataset.xarray import (
 from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
+from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
@@ -471,7 +472,7 @@ def test_zarr_engine_used_false():
 
 def test_zarr_engine_used_true_inference():
     config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetConfig(
+        dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
             atmosphere=XarrayDataConfig(
                 data_path="atmos", file_pattern="data.zarr", engine="zarr"
@@ -484,7 +485,7 @@ def test_zarr_engine_used_true_inference():
 
 def test_zarr_engine_used_false_inference():
     config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetConfig(
+        dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
             atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
         ),
@@ -579,7 +580,7 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
 
     # test InferenceDataLoaderConfig
     inference_config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetConfig(
+        dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=ocean_config,
             atmosphere=atmos_config,
         ),
