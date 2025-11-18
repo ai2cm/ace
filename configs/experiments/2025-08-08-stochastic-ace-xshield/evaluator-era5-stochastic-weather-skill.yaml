@@ -9,6 +9,7 @@ logging:
   log_to_file: true
   project: ace
   entity: ai2cm
+  wandb_dir_in_experiment_dir: true
 loader:
   start_indices:
     times:

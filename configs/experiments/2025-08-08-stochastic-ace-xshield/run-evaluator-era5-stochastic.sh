@@ -16,16 +16,9 @@ launch_job () {
 
     python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 
-    SPIN_UP_OVERRIDES="experiment_dir=/results/spin-up \
-        initial_condition.start_indices.times=[1989-01-01T00:00:00] \
-        initial_condition.path=/climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002/1989010100.nc \
-        n_forward_steps=1460 \
-        logging.log_to_wandb=false\
-    "
-
     gantry run \
         --name $JOB_NAME \
-        --description 'Run ACE inference for SHiELD model' \
+        --description 'Run ACE inference for ERA% model' \
         --task-name $JOB_NAME \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
@@ -41,12 +34,16 @@ launch_job () {
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --dataset $CHECKPOINT_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
         --gpus 1 \
-        --shared-memory 20GiB \
+        --shared-memory 200GiB \
         --weka climate-default:/climate-default \
         --budget ai2/climate \
         --allow-dirty \
         --system-python \
         --install "pip install --no-deps ." \
+        -- /bin/bash -c "\
+            python -I -m fme.ace.evaluator $CONFIG_PATH \
+          "
+
 }
 
 # checkpoint datasets
