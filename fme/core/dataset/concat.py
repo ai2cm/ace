@@ -1,23 +1,18 @@
 import dataclasses
 from collections.abc import Sequence
-from typing import Self
 
 import torch
 import xarray as xr
 
 from fme.core.dataset.config import DatasetConfigABC
+from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.xarray import (
-    XarrayDataConfig,
-    XarrayDataset,
-    XarraySubset,
-    get_xarray_datasets,
-)
+from fme.core.dataset.xarray import XarrayDataConfig, get_xarray_datasets
 from fme.core.typing_ import TensorDict
 
 
-class XarrayConcat(torch.utils.data.Dataset):
-    def __init__(self, datasets: Sequence[XarrayDataset | XarraySubset | Self]):
+class XarrayConcat(DatasetABC):
+    def __init__(self, datasets: Sequence[DatasetABC]):
         self._dataset = torch.utils.data.ConcatDataset(datasets)
         sample_start_times = datasets[0].sample_start_times
         for dataset in datasets[1:]:
@@ -31,14 +26,9 @@ class XarrayConcat(torch.utils.data.Dataset):
         self._sample_start_times = sample_start_times
         assert len(self._dataset) == len(sample_start_times)
         self._sample_n_times = datasets[0].sample_n_times
-
+        self._properties = datasets[0].properties.copy()
         for dataset in datasets[1:]:
-            if dataset.dims != datasets[0].dims:
-                raise ValueError(
-                    "Datasets being concatenated do not have the same dimensions: "
-                    f"{dataset.dims} != {datasets[0].dims}"
-                )
-        self.dims: list[str] = datasets[0].dims
+            self._properties.update(dataset.properties)
 
     def __len__(self):
         return len(self._dataset)
@@ -54,6 +44,21 @@ class XarrayConcat(torch.utils.data.Dataset):
     def sample_n_times(self) -> int:
         """The length of the time dimension of each sample."""
         return self._sample_n_times
+
+    def get_sample_by_time_slice(
+        self, time_slice: slice
+    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+        raise NotImplementedError(
+            "Concat datasets do not support getting samples by time slice, "
+            "and should not be configurable for inference. Is there a bug?."
+        )
+
+    @property
+    def properties(self) -> DatasetProperties:
+        return self._properties
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        raise ValueError("Concat datasets do not support inference.")
 
 
 def get_dataset(
@@ -90,7 +95,7 @@ class ConcatDatasetConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: int,
-    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+    ) -> tuple[DatasetABC, DatasetProperties]:
         return get_dataset(
             self.concat,
             names,

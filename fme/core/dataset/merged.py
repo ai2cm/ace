@@ -3,21 +3,17 @@ from collections.abc import Sequence
 
 import xarray as xr
 
-from fme.core.dataset.concat import ConcatDatasetConfig, XarrayConcat
+from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.config import DatasetConfigABC
+from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
-from fme.core.dataset.xarray import (
-    XarrayDataConfig,
-    XarrayDataset,
-    XarraySubset,
-    get_raw_paths,
-)
+from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
 from fme.core.typing_ import Slice, TensorDict
 
 
-class MergedXarrayDataset:
-    def __init__(self, datasets: Sequence[XarrayDataset | XarraySubset | XarrayConcat]):
+class MergedXarrayDataset(DatasetABC):
+    def __init__(self, datasets: Sequence[DatasetABC]):
         self.datasets = datasets
 
         combined_names = [
@@ -31,15 +27,15 @@ class MergedXarrayDataset:
                 f"Variable names must be unique across merged datasets. \
                     \nDuplicates found: {duplicates}"
             )
+        self._sample_start_times = self.datasets[0].sample_start_times
+        self._sample_n_times = self.datasets[0].sample_n_times
         for dataset in self.datasets:
-            if not dataset.sample_start_times.equals(
-                self.datasets[0].sample_start_times
-            ):
+            if not dataset.sample_start_times.equals(self._sample_start_times):
                 raise ValueError(
                     "All datasets in a merged dataset must have the same sample "
                     "start times."
                 )
-            if not dataset.sample_n_times == self.datasets[0].sample_n_times:
+            if not dataset.sample_n_times == self._sample_n_times:
                 raise ValueError(
                     "All datasets in the merged datasets \
                          must have the same number of steps per sample item."
@@ -70,7 +66,15 @@ class MergedXarrayDataset:
 
     @property
     def sample_start_times(self):
-        return self.datasets[0].sample_start_times
+        return self._sample_start_times
+
+    @property
+    def sample_n_times(self) -> int:
+        return self._sample_n_times
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        for dataset in self.datasets:
+            dataset.validate_inference_length(max_start_index, max_window_len)
 
     @property
     def properties(self) -> DatasetProperties:
@@ -83,10 +87,6 @@ class MergedXarrayDataset:
         if data_properties is None:
             raise ValueError("No dataset available to determine properties")
         return data_properties
-
-    @property
-    def total_timesteps(self) -> int:
-        return self.datasets[0].total_timesteps
 
 
 @dataclasses.dataclass

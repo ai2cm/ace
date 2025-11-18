@@ -64,3 +64,14 @@ class DatasetProperties:
 
     def update_mask_provider(self, mask_provider: MaskProvider):
         self.mask_provider.update(mask_provider)
+
+    def copy(self) -> "DatasetProperties":
+        return DatasetProperties(
+            self.variable_metadata,
+            self.vertical_coordinate,
+            self.horizontal_coordinates,
+            self.mask_provider,
+            self.timestep,
+            self.is_remote,
+            self.all_labels,
+        )
