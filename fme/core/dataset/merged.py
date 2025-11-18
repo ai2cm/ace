@@ -93,7 +93,8 @@ class MergeDatasetConfig(DatasetConfigABC):
     """
     Configuration for merging multiple datasets. Merging means combining
     variables from multiple datasets, each of which must have the same
-    time coordinate.
+    time coordinate. If multiple datasets contain the same data variable, the version
+    from the first source is loaded and other sources are ignored.
 
     Parameters:
         merge: List of dataset configurations to merge.
@@ -130,8 +131,10 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
     """
     Configuration for merging multiple datasets. Merging means combining
     variables from multiple datasets, each of which must have the same
-    time coordinate. For this case, the datasets being merged may not be
-    concatenated datasets.
+    time coordinate.  If multiple datasets contain the same data variable, the version
+    from the first source is loaded and other sources are ignored. For
+    `MergeNoConcatDatasetConfig`, the datasets being merged may not be concatenated
+    datasets.
 
     Parameters:
         merge: List of dataset configurations to merge.
