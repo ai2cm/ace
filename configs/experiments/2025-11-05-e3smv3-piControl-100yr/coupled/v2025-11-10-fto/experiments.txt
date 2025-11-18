@@ -1,2 +1,4 @@
 
 fto-v1110-ocn-filter-scale-4||01KAA0VH59STHFH05D39V5AE39|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v1110-ocn-filter-scale-4-last-ocn-ckpt||01KACE9FH40FJ0XCE0FCW3YTVD|training|best_inference_ckpt|normal|--not-preemptible
