@@ -151,11 +151,9 @@ class DiffusionModelConfig:
         # https://en.wikipedia.org/wiki/Standard_score
         sigma_data = 1.0
 
-        n_in_channels = len(self.in_names)
         # fine static inputs are already normalized and at fine scale, so needs
         # some special handling for now
-        if self.use_static_inputs:
-            n_in_channels += self.num_static_inputs
+        n_in_channels = len(self.in_names) + self.num_static_inputs
 
         module = self.module.build(
             n_in_channels=n_in_channels,
