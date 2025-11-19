@@ -26,7 +26,7 @@ from .utils import ClosedInterval
 )
 def test_Topography_error_cases(init_args):
     with pytest.raises(ValueError):
-        StaticInputs([StaticInput(*init_args)])
+        StaticInput(*init_args)
 
 
 def test__range_to_slice():
@@ -43,19 +43,29 @@ def test_subset_latlon():
     coords = LatLonCoordinates(
         lat=torch.linspace(0, 9, 10), lon=torch.linspace(0, 9, 10)
     )
-    topo = StaticInputs([StaticInput(data=data, coords=coords)])
+    topography = StaticInput(data=data, coords=coords)
+    land_frac = StaticInput(data=data * -1.0, coords=coords)
+
+    static_inputs = StaticInputs([topography, land_frac])
     lat_interval = ClosedInterval(2, 5)
     lon_interval = ClosedInterval(3, 7)
-    subset_topo = topo[0].subset_latlon(lat_interval, lon_interval)
+
+    subset_static_inputs = static_inputs.subset_latlon(lat_interval, lon_interval)
     expected_lats = torch.tensor([2, 3, 4, 5], dtype=coords.lat.dtype)
     expected_lons = torch.tensor([3, 4, 5, 6, 7], dtype=coords.lon.dtype)
-    expected_data = data[*expected_slices]
-    assert torch.equal(subset_topo.coords.lat, expected_lats)
-    assert torch.equal(subset_topo.coords.lon, expected_lons)
-    assert torch.allclose(subset_topo.data, expected_data)
+
+    expected_topography = data[*expected_slices]
+    expected_land_frac = data[*expected_slices] * -1.0
+
+    for i in [0, 1]:
+        assert torch.equal(subset_static_inputs[i].coords.lat, expected_lats)
+        assert torch.equal(subset_static_inputs[i].coords.lon, expected_lons)
+
+    assert torch.allclose(subset_static_inputs[0].data, expected_topography)
+    assert torch.allclose(subset_static_inputs[1].data, expected_land_frac)
 
 
-def test_Topography_generate_from_patches():
+def test_StaticInputs_generate_from_patches():
     output_slice = _HorizontalSlice(y=slice(None), x=slice(None))
     patches = [
         Patch(
@@ -67,22 +77,31 @@ def test_Topography_generate_from_patches():
             output_slice=output_slice,
         ),
     ]
-    topography = StaticInputs(
-        [
-            StaticInput(
-                torch.arange(16).reshape(4, 4),
-                LatLonCoordinates(torch.arange(4), torch.arange(4)),
-            )
-        ]
+    data = torch.arange(16).reshape(4, 4)
+    topography = StaticInput(
+        data,
+        LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
-    topo_patch_generator = topography.generate_from_patches(patches)
+    land_frac = StaticInput(
+        data * -1.0,
+        LatLonCoordinates(torch.arange(4), torch.arange(4)),
+    )
+    static_inputs = StaticInputs([topography, land_frac])
+    static_inputs_patch_generator = static_inputs.generate_from_patches(patches)
     generated_patches = []
-    for topo_patch in topo_patch_generator:
-        generated_patches.append(topo_patch)
+    for static_inputs_patch in static_inputs_patch_generator:
+        generated_patches.append(static_inputs_patch)
+
     assert len(generated_patches) == 2
+
+    expected_topography_patch_0 = torch.tensor([[4, 5, 6, 7], [8, 9, 10, 11]])
+    expected_topography_patch_1 = torch.tensor([[2], [6]])
+
     # first index is the patch, second is the static input field within
     # the StaticInputs container
-    assert torch.equal(
-        generated_patches[0][0].data, torch.tensor([[4, 5, 6, 7], [8, 9, 10, 11]])
-    )
-    assert torch.equal(generated_patches[1][0].data, torch.tensor([[2], [6]]))
+    assert torch.equal(generated_patches[0][0].data, expected_topography_patch_0)
+    assert torch.equal(generated_patches[1][0].data, expected_topography_patch_1)
+
+    # land_frac field values are -1 * topography
+    assert torch.equal(generated_patches[0][1].data, expected_topography_patch_0 * -1.0)
+    assert torch.equal(generated_patches[1][1].data, expected_topography_patch_1 * -1.0)
