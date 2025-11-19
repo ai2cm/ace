@@ -872,6 +872,8 @@ class XarrayDataset(DatasetABC):
                 )
                 ds_local.close()
                 del ds_local
+                ds.close()
+                del ds
                 #CHECK: DO I also need to del ds
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
@@ -896,6 +898,8 @@ class XarrayDataset(DatasetABC):
             ds_local.close()
             del ds_local
             #CHECK: DO I also need to del ds
+            ds.close()
+            del ds
 
         # load static derived variables
         for name in self._static_derived_names:

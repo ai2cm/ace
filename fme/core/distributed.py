@@ -263,7 +263,7 @@ class Distributed:
         if batch_size % comm.get_size("data") != 0:
             raise ValueError(
                 "batch_size must be divisible by data size "
-                f"workers, got {self.batch_size} and {comm.get_size("data")}"
+                f"workers, got {self.batch_size} and {comm.get_size(data)}"
             )
 
     def local_batch_size(self, batch_size: int) -> int:
