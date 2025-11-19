@@ -388,9 +388,7 @@ class BatchData:
         See https://docs.pytorch.org/docs/stable/data.html#memory-pinning
 
         """
-        self.data = {
-            name: tensor.clone().pin_memory() for name, tensor in self.data.items()
-        }
+        self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
         return self
 
 
