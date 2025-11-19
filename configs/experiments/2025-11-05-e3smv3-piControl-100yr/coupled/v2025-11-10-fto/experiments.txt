@@ -4,3 +4,5 @@ fto-v1110-ocn-filter-scale-4||01KAA0VH59STHFH05D39V5AE39|training|best_inference
 fto-v1110-ocn-filter-scale-4-last-ocn-ckpt||01KACE9FH40FJ0XCE0FCW3YTVD|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt||01KAD90AB5ATF4Y42NG50BFDW1|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt-constant-lr-1e-4||01KAF0SGTYRQ7342GVW1S5BYR9|training|best_inference_ckpt|normal|--not-preemptible
