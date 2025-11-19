@@ -9,7 +9,11 @@ SEED_CHECKPOINT_IDS=("01K9B1MR70QWN90KNY7NM22K5M" \
   "01K9B1MVP3VS3NEABHT0W151AX" \
   "01K9B1MXD6V26S8BQH5CKY514C" \
   )
-FINE_TUNED_SEED_CHECKPOINT_ID="01KACS185XKVBA4YK7EBN57Y6Y"
+FINE_TUNED_SEED_CHECKPOINT_IDS=("01KA2F5J9768HR54369MKEHYB4"\
+  "01KADMD5RAEANTP3M6GWZTXNXA" \
+  "01KAC0B5ZC96GVJV46HNK9QZ9X" \
+  "01KA2F5Q45122PYGW4NZBME01V" \
+  )
 CONFIG_FILENAME="ace-evaluator-seed-selection-single-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -64,6 +68,8 @@ for (( i=0; i<${#SEED_CHECKPOINT_IDS[@]}; i++ )); do
     launch_job "$JOB_NAME" "${SEED_CHECKPOINT_IDS[$i]}"
 done
 
-echo "Launching job for fine-tuned model checkpoint ID: $FINE_TUNED_SEED_CHECKPOINT_ID"
-JOB_NAME="$JOB_NAME_BASE-pressure-level-fine-tuned"
-launch_job "$JOB_NAME" "$FINE_TUNED_SEED_CHECKPOINT_ID"
+for (( i=0; i<${#FINE_TUNED_SEED_CHECKPOINT_IDS[@]}; i++ )); do
+    JOB_NAME="$JOB_NAME_BASE-RS3-pressure-level-fine-tuned-RS$i"
+    echo "Launching job $JOB_NAME checkpoint ID: ${FINE_TUNED_SEED_CHECKPOINT_IDS[$i]}"
+    launch_job "$JOB_NAME" "${FINE_TUNED_SEED_CHECKPOINT_IDS[$i]}"
+done
