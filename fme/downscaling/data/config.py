@@ -181,9 +181,10 @@ class DataLoaderConfig:
     def build_static_inputs(
         self, coarse_coords: LatLonCoordinates, required_static_inputs: list[str]
     ) -> StaticInputs | None:
+        # TODO: return StaticInputs with len 0 instead of None
         if len(required_static_inputs) == 0:
             return None
-        if self.topography is None and self.static_inputs is None:
+        if len(self.static_inputs) == 0:
             raise ValueError(
                 "Topography is required for this model, but no static inputs "
                 "datasets were specified in the configuration."
@@ -353,7 +354,10 @@ class PairedDataLoaderConfig:
 
     def __post_init__(self):
         if self.topography is not None:
-            if self.topography != self.static_inputs.get(self.topography_variable):
+            if (
+                self.topography_variable in self.static_inputs
+                and self.static_inputs[self.topography_variable] != self.topography
+            ):
                 raise ValueError(
                     f"Topography variable {self.topography_variable} was configured "
                     "in both the top level DataConfig "
@@ -363,8 +367,8 @@ class PairedDataLoaderConfig:
             self.static_inputs[self.topography_variable] = self.topography
             raise DeprecationWarning(
                 "The 'topography' field in DataLoaderConfig is deprecated. "
-                f"Instead, provide {self.topography_variable} and data path as key "
-                "and value in the 'static_inputs' config field."
+                f"Instead, provide {self.topography_variable} and data path as key and "
+                "value in the 'static_inputs' config field."
             )
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
@@ -397,12 +401,6 @@ class PairedDataLoaderConfig:
     def _get_static_inputs(
         self, required_static_inputs: list[str]
     ) -> StaticInputs | None:
-        if self.topography is not None:
-            raise DeprecationWarning(
-                "The 'topography' field in PairedDataLoaderConfig is deprecated. "
-                f"Instead, provide 'HGTsfc' and data path as key and value "
-                "in the 'static_inputs' config field."
-            )
         # if path not provided in static_inputs, try to load from fine data
         fine_data_raw_path = get_raw_paths(
             path=self.fine[0].data_path, file_pattern=self.fine[0].file_pattern
@@ -494,36 +492,6 @@ class PairedDataLoaderConfig:
             full_coarse_coord=properties_coarse.horizontal_coordinates.lon,
             full_fine_coord=properties_fine.horizontal_coordinates.lon,
         )
-
-        # if len(requirements.static_input_names)>0:
-        #     if self.topography is None:
-        #         data_path = self.fine[0].data_path
-        #         file_pattern = self.fine[0].file_pattern
-        #         raw_paths = get_raw_paths(data_path, file_pattern)
-        #         if len(raw_paths) == 0:
-        #             raise ValueError(
-        #                 f"No files found matching '{data_path}/{file_pattern}'."
-        #             )
-        #         fine_topography = get_normalized_static_input(raw_paths[0])
-        #     else:
-        #         fine_topography = get_normalized_static_input(self.topography)
-        #     fine_topography = fine_topography.to_device()
-        #     if (
-        #         get_topography_downscale_factor(
-        #             fine_topography.data.shape,
-        #             properties_fine.horizontal_coordinates.shape,
-        #         )
-        #         != 1
-        #     ):
-        #         raise ValueError(
-        #             f"Fine topography shape {fine_topography.shape} does not match "
-        #             f"fine data shape {properties_fine.horizontal_coordinates.shape}."
-        #         )
-        #     fine_topography = fine_topography.subset_latlon(
-        #         lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
-        #     )
-        # else:
-        #     fine_topography = None
         fine_topography = self._get_static_inputs(requirements.static_input_names)
         if fine_topography is not None:
             fine_topography = fine_topography.subset_latlon(
