@@ -125,7 +125,16 @@ optimization:
     fused: true
     weight_decay: 0.01
   scheduler:
-    type: CosineAnnealingLR
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 707
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [707]
 stepper:
   parameter_init:
     checkpoint_path: /ckpt.tar
