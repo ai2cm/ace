@@ -55,20 +55,20 @@ launch_job () {
 # add 120 more epochs
 JOB_NAME="${JOB_NAME_BASE}-RS0"
 PREVIOUS_RESULTS_DATASET="01KA2F5J9768HR54369MKEHYB4"
-OVERRIDE="seed=0 resume_results={existing_dir: /existing_results_dir, resume_wandb: true}"
+OVERRIDE="seed=0 resume_results={'existing_dir':'/existing_results_dir','resume_wandb':true} max_epochs=240"
 launch_job "$JOB_NAME" "$PREVIOUS_RESULTS_DATASET" "$OVERRIDE"
 
 JOB_NAME="${JOB_NAME_BASE}-RS1"
 PREVIOUS_RESULTS_DATASET="01KADMD5RAEANTP3M6GWZTXNXA"
-OVERRIDE="seed=1 resume_results={existing_dir: /existing_results_dir, resume_wandb: true}"
+OVERRIDE="seed=1 resume_results={'existing_dir':'/existing_results_dir','resume_wandb':true} max_epochs=240"
 launch_job "$JOB_NAME" "$PREVIOUS_RESULTS_DATASET" "$OVERRIDE"
 
 JOB_NAME="${JOB_NAME_BASE}-RS2"
 PREVIOUS_RESULTS_DATASET="01KAC0B5ZC96GVJV46HNK9QZ9X"
-OVERRIDE="seed=2 resume_results={existing_dir: /existing_results_dir, resume_wandb: true}"
+OVERRIDE="seed=2 resume_results={'existing_dir':'/existing_results_dir','resume_wandb':true} max_epochs=240"
 launch_job "$JOB_NAME" "$PREVIOUS_RESULTS_DATASET" "$OVERRIDE"
 
 JOB_NAME="${JOB_NAME_BASE}-RS3"
 PREVIOUS_RESULTS_DATASET="01KA2F5Q45122PYGW4NZBME01V"
-OVERRIDE="seed=3 resume_results={existing_dir: /existing_results_dir, resume_wandb: true}"
+OVERRIDE="seed=3 resume_results={'existing_dir':'/existing_results_dir','resume_wandb':true} max_epochs=240"
 launch_job "$JOB_NAME" "$PREVIOUS_RESULTS_DATASET" "$OVERRIDE"
