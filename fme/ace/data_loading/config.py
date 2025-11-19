@@ -82,11 +82,7 @@ class DataLoaderConfig:
 
     def __post_init__(self):
         dist = Distributed.get_instance()
-        if self.batch_size % dist.world_size != 0:
-            raise ValueError(
-                "batch_size must be divisible by the number of parallel "
-                f"workers, got {self.batch_size} and {dist.world_size}"
-            )
+        dist.check_local_batch_size(self.batch_size)
         # TODO: remove following backwards compatibility code in a future release
         if isinstance(self.dataset, Sequence):
             warnings.warn(
