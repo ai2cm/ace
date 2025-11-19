@@ -6,8 +6,8 @@ ema:
 max_epochs: 50
 n_forward_steps: 2
 inference:
-  n_forward_steps: 29200
-  forward_steps_in_memory: 50
+  n_forward_steps: 28810
+  forward_steps_in_memory: 43
   loader:
     start_indices:
       times:
