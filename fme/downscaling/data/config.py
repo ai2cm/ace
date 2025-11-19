@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from collections.abc import Sequence
 
 from torch.utils.data import DataLoader, Dataset, RandomSampler
@@ -406,10 +407,18 @@ class PairedDataLoaderConfig:
         fine_data_raw_path = get_raw_paths(
             path=self.fine[0].data_path, file_pattern=self.fine[0].file_pattern
         )[0]
-        static_input_data_paths = {
-            var: self.static_inputs.get(var, fine_data_raw_path)
-            for var in required_static_inputs
-        }
+        static_input_data_paths = {}
+        for var in required_static_inputs:
+            if var in self.static_inputs:
+                static_input_data_paths[var] = self.static_inputs[var]
+            else:
+                logging.info(
+                    "No path was provided in data config for static input variable "
+                    f"'{var}'. Attempting to load from fine dataset "
+                    f"{fine_data_raw_path}."
+                )
+                static_input_data_paths[var] = fine_data_raw_path
+
         if len(required_static_inputs) > 0:
             _static_inputs = []
             for var in required_static_inputs:
@@ -421,7 +430,7 @@ class PairedDataLoaderConfig:
                     raise ValueError(
                         f"Static input variable '{var}' is required but no data path "
                         f"was provided in the configuration and {var} was not found in "
-                        "the fine dataset."
+                        f"the dataset {static_input_data_paths[var]}."
                     )
                 _static_inputs.append(_static_input.to_device())
             return StaticInputs(fields=_static_inputs)
