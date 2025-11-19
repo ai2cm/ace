@@ -67,7 +67,7 @@ class Downscaler:
         generations.
         """
         model_patch_shape = self.model.fine_shape
-        actual_shape = tuple(topography.data.shape)
+        actual_shape = tuple(topography.shape)
 
         if model_patch_shape == actual_shape:
             # short circuit, no patching necessary
@@ -118,7 +118,7 @@ class Downscaler:
                     latlon_coords=topography.coords,
                     output_dir=self.output_dir,
                 )
-                writer.initialize_store(topography.data.cpu().numpy().dtype)
+                writer.initialize_store(topography.fields[0].data.cpu().numpy().dtype)
             if model is None:
                 model = self._get_generation_model(topography=topography, output=output)
 

@@ -55,7 +55,7 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
         churn=1,
         num_diffusion_generation_steps=2,
         predict_residual=True,
-        use_fine_topography=True,
+        static_inputs=["HGTsfc"],
     )
 
 

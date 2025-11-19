@@ -6,7 +6,7 @@ import xarray as xr
 from fme.core.device import get_device
 from fme.core.packer import Packer
 from fme.downscaling.aggregators.shape_helpers import upsample_tensor
-from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
+from fme.downscaling.data import BatchData, PairedBatchData, StaticInput, StaticInputs
 from fme.downscaling.data.patching import get_patches
 from fme.downscaling.data.utils import BatchedLatLonCoordinates
 from fme.downscaling.models import ModelOutputs
@@ -134,10 +134,15 @@ def test_SpatialCompositePredictor_generate_on_batch(patch_size_coarse):
         *coarse_extent, downscale_factor=downscale_factor, batch_size=batch_size
     )
     topography = StaticInputs(
-        torch.randn(
-            coarse_extent[0] * downscale_factor, coarse_extent[1] * downscale_factor
-        ),
-        paired_batch_data.fine.latlon_coordinates[0],
+        [
+            StaticInput(
+                torch.randn(
+                    coarse_extent[0] * downscale_factor,
+                    coarse_extent[1] * downscale_factor,
+                ),
+                paired_batch_data.fine.latlon_coordinates[0],
+            )
+        ]
     )
 
     predictor = PatchPredictor(
@@ -170,10 +175,15 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
         *coarse_extent, downscale_factor=downscale_factor, batch_size=batch_size
     )
     topography = StaticInputs(
-        torch.randn(
-            coarse_extent[0] * downscale_factor, coarse_extent[1] * downscale_factor
-        ),
-        paired_batch_data.fine.latlon_coordinates[0],
+        [
+            StaticInput(
+                torch.randn(
+                    coarse_extent[0] * downscale_factor,
+                    coarse_extent[1] * downscale_factor,
+                ),
+                paired_batch_data.fine.latlon_coordinates[0],
+            )
+        ]
     )
     predictor = PatchPredictor(
         DummyModel(coarse_shape=patch_size_coarse, downscale_factor=2),  # type: ignore

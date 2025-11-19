@@ -11,7 +11,7 @@ import yaml
 
 from fme.core.dataset.time import TimeSlice
 from fme.core.logging_utils import LoggingConfig
-from fme.downscaling.data import LatLonCoordinates, StaticInputs
+from fme.downscaling.data import LatLonCoordinates, StaticInput, StaticInputs
 from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
 from fme.downscaling.inference.inference import Downscaler, InferenceConfig, main
 from fme.downscaling.inference.output import (
@@ -61,7 +61,7 @@ def mock_output_target():
 def get_topography(shape=(16, 16)):
     data = torch.randn(shape)
     coords = LatLonCoordinates(lat=torch.arange(shape[0]), lon=torch.arange(shape[1]))
-    return StaticInputs(data=data, coords=coords)
+    return StaticInputs(fields=[StaticInput(data=data, coords=coords)])
 
 
 # Tests for Downscaler initialization
@@ -256,6 +256,7 @@ def get_generate_model_config():
         churn=1,
         num_diffusion_generation_steps=2,
         predict_residual=True,
+        static_inputs=["HGTsfc"],
     )
 
 
@@ -265,7 +266,7 @@ def checkpointed_model_config(tmp_path):
     model_config = get_generate_model_config()
     # TODO: ensure this gets connected to centralized data helper
     coarse_shape = (8, 8)
-    model_config.use_fine_topography = True
+    model_config.static_inputs = ["HGTsfc"]
     model = model_config.build(coarse_shape, 2)
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"

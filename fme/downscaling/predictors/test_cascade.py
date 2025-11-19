@@ -5,7 +5,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.downscaling.data import StaticInputs
+from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.predictors.cascade import CascadePredictor
@@ -39,7 +39,7 @@ def _get_diffusion_model(coarse_shape, downscale_factor):
         churn=0.5,
         num_diffusion_generation_steps=3,
         predict_residual=True,
-        use_fine_topography=True,
+        static_inputs=["HGTsfc"],
     ).build(coarse_shape=coarse_shape, downscale_factor=downscale_factor)
 
 
@@ -60,14 +60,18 @@ def test_CascadePredictor_generate(downscale_factors):
         )
         topographies.append(
             StaticInputs(
-                data=torch.randn(
-                    input_n_cells * downscale_factor,
-                    input_n_cells * downscale_factor,
-                    device=get_device(),
-                ),
-                coords=_latlon_coords_on_ngrid(
-                    n=input_n_cells * downscale_factor, edges=grid_bounds
-                ),
+                [
+                    StaticInput(
+                        data=torch.randn(
+                            input_n_cells * downscale_factor,
+                            input_n_cells * downscale_factor,
+                            device=get_device(),
+                        ),
+                        coords=_latlon_coords_on_ngrid(
+                            n=input_n_cells * downscale_factor, edges=grid_bounds
+                        ),
+                    )
+                ]
             )
         )
         input_n_cells *= downscale_factor
@@ -109,14 +113,18 @@ def test_CascadePredictor__subset_topographies():
         )
         topographies.append(
             StaticInputs(
-                data=torch.randn(
-                    input_n_cells * downscale_factor,
-                    input_n_cells * downscale_factor,
-                    device=get_device(),
-                ),
-                coords=_latlon_coords_on_ngrid(
-                    n=input_n_cells * downscale_factor, edges=grid_bounds
-                ),
+                [
+                    StaticInput(
+                        data=torch.randn(
+                            input_n_cells * downscale_factor,
+                            input_n_cells * downscale_factor,
+                            device=get_device(),
+                        ),
+                        coords=_latlon_coords_on_ngrid(
+                            n=input_n_cells * downscale_factor, edges=grid_bounds
+                        ),
+                    )
+                ]
             )
         )
         input_n_cells *= downscale_factor

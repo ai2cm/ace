@@ -10,7 +10,7 @@ from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.downscaling.data import StaticInputs
+from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -76,7 +76,7 @@ def test_module_serialization(tmp_path):
         coarse_shape=coarse_shape,
         downscale_factor=2,
         predict_residual=True,
-        use_fine_topography=False,
+        static_inputs=[],
     )
     model_from_state = DiffusionModel.from_state(
         model.get_state(),
@@ -104,7 +104,7 @@ def _get_diffusion_model(
     coarse_shape,
     downscale_factor,
     predict_residual=True,
-    use_fine_topography=True,
+    static_inputs=["HGTsfc"],
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -126,20 +126,20 @@ def _get_diffusion_model(
         churn=0.5,
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
-        use_fine_topography=use_fine_topography,
+        static_inputs=static_inputs,
     ).build(coarse_shape, downscale_factor)
 
 
 @pytest.mark.parametrize("predict_residual", [True, False])
-@pytest.mark.parametrize("use_fine_topography", [True, False])
-def test_diffusion_model_train_and_generate(predict_residual, use_fine_topography):
+@pytest.mark.parametrize("static_inputs", [["HGTsfc"], []])
+def test_diffusion_model_train_and_generate(predict_residual, static_inputs):
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=2,
         predict_residual=predict_residual,
-        use_fine_topography=use_fine_topography,
+        static_inputs=static_inputs,
     )
 
     assert model._get_fine_shape(coarse_shape) == fine_shape
@@ -149,12 +149,16 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
     batch = get_mock_paired_batch(
         [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
-    if use_fine_topography:
+    if len(static_inputs) > 0:
         topography = StaticInputs(
-            torch.ones(*fine_shape, device=get_device()),
-            LatLonCoordinates(
-                lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
-            ),
+            [
+                StaticInput(
+                    torch.ones(*fine_shape, device=get_device()),
+                    LatLonCoordinates(
+                        lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
+                    ),
+                )
+            ]
         )
     else:
         topography = None
@@ -201,7 +205,7 @@ def test_normalizer_serialization(tmp_path):
         coarse_shape=coarse_shape,
         downscale_factor=2,
         predict_residual=False,
-        use_fine_topography=False,
+        static_inputs=[],
     )
     torch.save(model.get_state(), tmp_path / "test.ckpt")
 
@@ -256,7 +260,7 @@ def test_model_error_cases():
             ["x"],
             ["x"],
             normalization_config,
-            use_fine_topography=True,
+            static_inputs=["HGTsfc"],
             **extra_kwargs,  # type: ignore
         )
 
@@ -272,7 +276,7 @@ def test_model_error_cases():
         ["x"],
         ["x"],
         normalization_config,
-        use_fine_topography=True,
+        static_inputs=["HGTsfc"],
         **extra_kwargs,  # type: ignore
     ).build(
         coarse_shape,
@@ -296,7 +300,7 @@ def test_DiffusionModel_generate_on_batch_no_target():
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         predict_residual=True,
-        use_fine_topography=True,
+        static_inputs=["HGTsfc"],
     )
 
     batch_size = 2
@@ -307,8 +311,14 @@ def test_DiffusionModel_generate_on_batch_no_target():
         [batch_size, *coarse_shape], topography_scale_factor=downscale_factor
     )
     topography = StaticInputs(
-        torch.rand(*fine_shape, device=get_device()),
-        LatLonCoordinates(lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])),
+        [
+            StaticInput(
+                torch.rand(*fine_shape, device=get_device()),
+                LatLonCoordinates(
+                    lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
+                ),
+            )
+        ]
     )
     samples = model.generate_on_batch_no_target(
         coarse_batch,
@@ -333,7 +343,7 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         predict_residual=True,
-        use_fine_topography=True,
+        static_inputs=["HGTsfc"],
     )
     n_ensemble = 2
     batch_size = 2
@@ -345,8 +355,14 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
             topography_scale_factor=downscale_factor,
         )
         topography = StaticInputs(
-            torch.rand(*fine_shape, device=get_device()),
-            LatLonCoordinates(torch.ones(fine_shape[0]), torch.ones(fine_shape[1])),
+            [
+                StaticInput(
+                    torch.rand(*fine_shape, device=get_device()),
+                    LatLonCoordinates(
+                        torch.ones(fine_shape[0]), torch.ones(fine_shape[1])
+                    ),
+                )
+            ]
         )
         samples = model.generate_on_batch_no_target(
             coarse_batch, n_samples=n_ensemble, topography=topography

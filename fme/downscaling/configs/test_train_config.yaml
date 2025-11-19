@@ -52,4 +52,5 @@ model:
   out_names:
     - "x"
     - "y"
-  use_fine_topography: true
+  static_inputs:
+    - "HGTsfc"

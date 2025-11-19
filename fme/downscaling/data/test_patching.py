@@ -3,7 +3,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.downscaling.data import PairedBatchData, StaticInputs
+from fme.downscaling.data import PairedBatchData, StaticInput, StaticInputs
 from fme.downscaling.data.datasets import patched_batch_gen_from_paired_loader
 from fme.downscaling.data.patching import (
     _divide_into_slices,
@@ -120,7 +120,9 @@ def test_paired_patches_with_random_offset_consistent(overlap):
         coarse_shape[1] * downscale_factor,
         device=get_device(),
     )
-    topography = StaticInputs(data=topography_data, coords=full_fine_coords[0])
+    topography = StaticInputs(
+        [StaticInput(data=topography_data, coords=full_fine_coords[0])]
+    )
     y_offsets = []
     x_offsets = []
     batch_generator = patched_batch_gen_from_paired_loader(
@@ -181,7 +183,7 @@ def test_paired_patches_shuffle(shuffle):
         device=get_device(),
     )
     fine_coords = next(iter(loader)).fine.latlon_coordinates[0]
-    topography = StaticInputs(data=topography_data, coords=fine_coords)
+    topography = StaticInputs([StaticInput(data=topography_data, coords=fine_coords)])
 
     generator0 = patched_batch_gen_from_paired_loader(
         loader=loader,
@@ -220,8 +222,8 @@ def test_paired_patches_shuffle(shuffle):
 
     data0 = torch.concat([patch.coarse.data["x"] for patch in patches0], dim=0)
     data1 = torch.concat([patch.coarse.data["x"] for patch in patches1], dim=0)
-    topo_concat_0 = torch.concat([t0.data for t0 in topography0], dim=0)
-    topo_concat_1 = torch.concat([t1.data for t1 in topography1], dim=0)
+    topo_concat_0 = torch.concat([t0[0].data for t0 in topography0], dim=0)
+    topo_concat_1 = torch.concat([t1[0].data for t1 in topography1], dim=0)
 
     if shuffle:
         assert not torch.equal(data0, data1)

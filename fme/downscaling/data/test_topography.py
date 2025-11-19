@@ -4,7 +4,7 @@ import torch
 from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
 
-from .topography import StaticInputs, _range_to_slice
+from .topography import StaticInput, StaticInputs, _range_to_slice
 from .utils import ClosedInterval
 
 
@@ -26,7 +26,7 @@ from .utils import ClosedInterval
 )
 def test_Topography_error_cases(init_args):
     with pytest.raises(ValueError):
-        StaticInputs(*init_args)
+        StaticInputs([StaticInput(*init_args)])
 
 
 def test__range_to_slice():
@@ -43,10 +43,10 @@ def test_subset_latlon():
     coords = LatLonCoordinates(
         lat=torch.linspace(0, 9, 10), lon=torch.linspace(0, 9, 10)
     )
-    topo = StaticInputs(data=data, coords=coords)
+    topo = StaticInputs([StaticInput(data=data, coords=coords)])
     lat_interval = ClosedInterval(2, 5)
     lon_interval = ClosedInterval(3, 7)
-    subset_topo = topo.subset_latlon(lat_interval, lon_interval)
+    subset_topo = topo[0].subset_latlon(lat_interval, lon_interval)
     expected_lats = torch.tensor([2, 3, 4, 5], dtype=coords.lat.dtype)
     expected_lons = torch.tensor([3, 4, 5, 6, 7], dtype=coords.lon.dtype)
     expected_data = data[*expected_slices]
@@ -68,15 +68,21 @@ def test_Topography_generate_from_patches():
         ),
     ]
     topography = StaticInputs(
-        torch.arange(16).reshape(4, 4),
-        LatLonCoordinates(torch.arange(4), torch.arange(4)),
+        [
+            StaticInput(
+                torch.arange(16).reshape(4, 4),
+                LatLonCoordinates(torch.arange(4), torch.arange(4)),
+            )
+        ]
     )
     topo_patch_generator = topography.generate_from_patches(patches)
     generated_patches = []
     for topo_patch in topo_patch_generator:
         generated_patches.append(topo_patch)
     assert len(generated_patches) == 2
+    # first index is the patch, second is the static input field within
+    # the StaticInputs container
     assert torch.equal(
-        generated_patches[0].data, torch.tensor([[4, 5, 6, 7], [8, 9, 10, 11]])
+        generated_patches[0][0].data, torch.tensor([[4, 5, 6, 7], [8, 9, 10, 11]])
     )
-    assert torch.equal(generated_patches[1].data, torch.tensor([[2], [6]]))
+    assert torch.equal(generated_patches[1][0].data, torch.tensor([[2], [6]]))

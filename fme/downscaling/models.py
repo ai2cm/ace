@@ -123,13 +123,14 @@ class DiffusionModelConfig:
         self._interpolate_input = self.module.expects_interpolated_input
         # TODO: adjust upstream references to `use_fine_topography`
         if self.use_fine_topography:
-            if len(self.static_inputs) > 0:
-                raise ValueError(
-                    "'use_fine_topography' is deprecated and should not be provided if "
-                    ">0 static_inputs are provided. "
-                )
-            else:
+            if len(self.static_inputs) == 0:
                 self.static_inputs = ["HGTsfc"]
+            raise DeprecationWarning(
+                "'use_fine_topography' is deprecated, please use static_inputs "
+                "instead to provide variable names for fine res static inputs. "
+                "The names in the static_inputs config arg will be used to load "
+                "these fields."
+            )
         if len(self.static_inputs) > 0 and not self._interpolate_input:
             raise ValueError(
                 "Fine res static inputs can only be used when predicting on "
@@ -317,7 +318,7 @@ class DiffusionModel:
         )
 
     def _get_input_from_coarse(
-        self, coarse: TensorMapping, static_inputs: StaticInputs | None
+        self, coarse: TensorMapping, static_inputs_tensors: list[torch.tensor] | None
     ) -> torch.Tensor:
         inputs = filter_tensor_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
@@ -326,20 +327,20 @@ class DiffusionModel:
         interpolated = interpolate(normalized, self.downscale_factor)
 
         if len(self.config.static_inputs) > 0:
-            if static_inputs is None:
+            if static_inputs_tensors is None:
                 raise ValueError(
                     "static_inputs must be provided for each batch when use of static"
                     "inputs is enabled."
                 )
-            if len(static_inputs.fields) < len(self.config.static_inputs):
+            if len(static_inputs_tensors) < len(self.config.static_inputs):
                 raise ValueError(
                     f"Expected {len(self.config.static_inputs)} static input fields, "
-                    f"but got {len(static_inputs.fields)} from data."
+                    f"but got {len(static_inputs_tensors)} from data."
                 )
 
             n_batches = normalized.shape[0]
             # Join the normalized topography to the input (see dataset for details)
-            for field in static_inputs.fields:
+            for field in static_inputs_tensors:
                 static_input = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
                 static_input = static_input.unsqueeze(self._channel_axis)
                 interpolated = torch.concat(
@@ -357,7 +358,9 @@ class DiffusionModel:
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_norm = self._get_input_from_coarse(coarse, topography)
+        # TODO: Remove None type for topography, StaticInputs can handle empty list
+        static_inputs = topography.input_tensors if topography is not None else None
+        inputs_norm = self._get_input_from_coarse(coarse, static_inputs)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
@@ -402,10 +405,12 @@ class DiffusionModel:
     def generate(
         self,
         coarse_data: TensorMapping,
-        topography: torch.Tensor | None,
+        topography: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        inputs_ = self._get_input_from_coarse(coarse_data, topography)
+        # TODO: Remove None type for topography, StaticInputs can handle empty list
+        static_inputs = topography.input_tensors if topography is not None else None
+        inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
         # expand samples and fold to
         # [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
@@ -587,7 +592,9 @@ class CheckpointModelConfig:
                 )
             return StaticInputs(
                 [
-                    get_normalized_static_input(self.static_input_paths[var]).to_device() 
+                    get_normalized_static_input(
+                        self.static_input_paths[var]
+                    ).to_device()
                     for var in self.data_requirements.static_input_names
                 ]
             )

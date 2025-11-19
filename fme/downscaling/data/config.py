@@ -20,11 +20,7 @@ from fme.downscaling.data.datasets import (
     PairedBatchData,
     PairedGriddedData,
 )
-from fme.downscaling.data.topography import (
-    StaticInputs,
-    get_normalized_static_input,
-    get_topography_downscale_factor,
-)
+from fme.downscaling.data.topography import StaticInputs, get_normalized_static_input
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
 
@@ -105,13 +101,16 @@ class DataLoaderConfig:
             data for testing.
         static_inputs: Optional mapping of variable names to dataset paths
             for static input variables.
+        topography_variable: default name of the topography variable to load,
+            used to autofill the static_inputs if deprecated topography field
+            is provided.
     """
 
     coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
-    static_inputs: dict[str, str] | None = None
+    static_inputs: dict[str, str] = dataclasses.field(default_factory=dict)
     topography: str | None = None
     lat_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(-90.0, 90.0)
@@ -124,8 +123,10 @@ class DataLoaderConfig:
 
     def __post_init__(self):
         if self.topography is not None:
-            static_inputs = self.static_inputs or {}
-            if self.topography != static_inputs.get(self.topography_variable):
+            if (
+                self.topography_variable in self.static_inputs
+                and self.static_inputs[self.topography_variable] != self.topography
+            ):
                 raise ValueError(
                     f"Topography variable {self.topography_variable} was configured "
                     "in both the top level DataConfig "
@@ -135,8 +136,8 @@ class DataLoaderConfig:
             self.static_inputs[self.topography_variable] = self.topography
             raise DeprecationWarning(
                 "The 'topography' field in DataLoaderConfig is deprecated. "
-                f"Instead, provide {self.topography_variable} and data path as key and value "
-                "in the 'static_inputs' config field."
+                f"Instead, provide {self.topography_variable} and data path as key and "
+                "value in the 'static_inputs' config field."
             )
 
     @property
@@ -327,6 +328,9 @@ class PairedDataLoaderConfig:
             for static input variables. If not provided for a variable in the
             model's data_requirements.required_static_inputs, the data loader
             will default to trying to load the variable from the fine data.
+        topography_variable: default name of the topography variable to load,
+            used to autofill the static_inputs if deprecated topography field
+            is provided.
     """
 
     fine: Sequence[XarrayDataConfig]
@@ -343,13 +347,12 @@ class PairedDataLoaderConfig:
     repeat: int = 1
     topography: str | None = None
     sample_with_replacement: int | None = None
-    static_inputs: dict[str, str] | None = None
-
+    static_inputs: dict[str, str] = dataclasses.field(default_factory=dict)
+    topography_variable: str = "HGTsfc"
 
     def __post_init__(self):
         if self.topography is not None:
-            static_inputs = self.static_inputs or {}
-            if self.topography != static_inputs.get(self.topography_variable):
+            if self.topography != self.static_inputs.get(self.topography_variable):
                 raise ValueError(
                     f"Topography variable {self.topography_variable} was configured "
                     "in both the top level DataConfig "
@@ -359,10 +362,10 @@ class PairedDataLoaderConfig:
             self.static_inputs[self.topography_variable] = self.topography
             raise DeprecationWarning(
                 "The 'topography' field in DataLoaderConfig is deprecated. "
-                f"Instead, provide {self.topography_variable} and data path as key and value "
-                "in the 'static_inputs' config field."
+                f"Instead, provide {self.topography_variable} and data path as key "
+                "and value in the 'static_inputs' config field."
             )
-        
+
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
 
@@ -390,7 +393,9 @@ class PairedDataLoaderConfig:
                 coarse_configs.append(config)
         return coarse_configs
 
-    def _get_static_inputs(self, required_static_inputs: list[str]) -> StaticInputs | None:
+    def _get_static_inputs(
+        self, required_static_inputs: list[str]
+    ) -> StaticInputs | None:
         if self.topography is not None:
             raise DeprecationWarning(
                 "The 'topography' field in PairedDataLoaderConfig is deprecated. "
@@ -402,18 +407,21 @@ class PairedDataLoaderConfig:
             path=self.fine[0].data_path, file_pattern=self.fine[0].file_pattern
         )[0]
         static_input_data_paths = {
-            var: self.static_inputs.get(var, fine_data_raw_path) for var in required_static_inputs
+            var: self.static_inputs.get(var, fine_data_raw_path)
+            for var in required_static_inputs
         }
-        if len(required_static_inputs)>0:
+        if len(required_static_inputs) > 0:
             _static_inputs = []
             for var in required_static_inputs:
                 try:
-                    _static_input = get_normalized_static_input(path=static_input_data_paths[var], input_name=var)
-                except(KeyError):
+                    _static_input = get_normalized_static_input(
+                        path=static_input_data_paths[var], input_name=var
+                    )
+                except KeyError:
                     raise ValueError(
-                        f"Static input variable '{var}' is required but no data path was "
-                        f"provided in the configuration and {var} was not found in the "
-                        "fine dataset."
+                        f"Static input variable '{var}' is required but no data path "
+                        f"was provided in the configuration and {var} was not found in "
+                        "the fine dataset."
                     )
                 _static_inputs.append(_static_input.to_device())
             return StaticInputs(fields=_static_inputs)

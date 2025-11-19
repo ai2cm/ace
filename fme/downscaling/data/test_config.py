@@ -62,7 +62,7 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
         batch_size=2,
         num_data_workers=1,
         strict_ensemble=False,
-        topography=f"{paths.fine}/data.nc",
+        static_inputs={"HGTsfc": f"{paths.fine}/data.nc"},
         lat_extent=ClosedInterval(1, 4),
         lon_extent=ClosedInterval(0, 3),
     )
@@ -105,7 +105,7 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
         batch_size=1,
         num_data_workers=1,
         strict_ensemble=False,
-        topography=f"{paths.fine}/data.nc",
+        static_inputs={"HGTsfc": f"{paths.fine}/data.nc"},
         lat_extent=ClosedInterval(1, 4),
         lon_extent=ClosedInterval(0, 3),
         sample_with_replacement=n_sample,

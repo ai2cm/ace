@@ -133,10 +133,9 @@ class CascadePredictor:
             # n_samples are generated for the first step, and subsequent models
             # generate 1 sample
             n_samples_cascade_step = n_samples if i == 0 else 1
-            _fine_topography = fine_topography.data
 
             generated, generated_norm, latent_steps = model.generate(
-                current_coarse, _fine_topography, n_samples_cascade_step
+                current_coarse, fine_topography, n_samples_cascade_step
             )
             generated = {
                 k: v.reshape(batch_size * n_samples_cascade_step, *v.shape[-2:])

@@ -90,7 +90,7 @@ def loader_config(tmp_path):
         batch_size=2,
         num_data_workers=0,
         strict_ensemble=False,
-        topography=f"{test_data_path.fine}/data.nc",
+        static_inputs={"HGTsfc": f"{test_data_path.fine}/data.nc"},
     )
 
 

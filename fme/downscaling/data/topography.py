@@ -82,7 +82,7 @@ class StaticInput:
         patches: list[Patch],
     ) -> Iterator["StaticInput"]:
         for patch in patches:
-            yield self._apply_patch(patch)
+            yield self.apply_patch(patch)
 
 
 def get_normalized_static_input(path: str, input_name: str = "HGTsfc"):
@@ -141,15 +141,32 @@ class StaticInputs:
 
     def __post_init__(self):
         for i, field in enumerate(self.fields[1:]):
-            if field.shape != self.fields[0].shape:
+            if field.coords != self.fields[0].coords:
                 raise ValueError(
-                    f"All StaticInput fields must have the same shape. "
-                    f"Field {i} has shape {self.fields[i].shape}, "
-                    f"while field 0 has shape {self.fields[0].shape}."
+                    f"All StaticInput fields must have the same coordinates. "
+                    f"Fields {i} and 0 do not match coordinates."
                 )
+
+    def __getitem__(self, index: int):
+        return self.fields[index]
+
+    @property
+    def input_tensors(self) -> list[torch.Tensor]:
+        if len(self.fields) > 0:
+            return [field.data for field in self.fields]
+        else:
+            return torch.tensor([])
+
+    @property
+    def coords(self) -> LatLonCoordinates:
+        if len(self.fields) == 0:
+            raise ValueError("No fields in StaticInputs to get coordinates from.")
+        return self.fields[0].coords
 
     @property
     def shape(self) -> tuple[int, int]:
+        if len(self.fields) == 0:
+            raise ValueError("No fields in StaticInputs to get shape from.")
         return self.fields[0].shape
 
     def subset_latlon(
@@ -164,7 +181,7 @@ class StaticInputs:
         )
 
     def to_device(self) -> "StaticInputs":
-        return StaticInputs(fields=[field.to_device() for field in self.fields.items()])
+        return StaticInputs(fields=[field.to_device() for field in self.fields])
 
     def generate_from_patches(
         self,
