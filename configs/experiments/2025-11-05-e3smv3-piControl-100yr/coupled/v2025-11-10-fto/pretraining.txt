@@ -1,4 +1,5 @@
 group|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|existing_atmos_ID|existing_ocean_ID
 fto-v1110-ocn-filter-scale-4||ocean-emulator-e3sm|rttaw1g5|best_inference_ckpt|ace-eamv3|lfudba6z|best_inference_ckpt|skip|high||8|800GiB|0|ai2/ace||01KA614VTFQH461ESGXF977A1R|01K9ZZ3MMXE0S2RXTPSR43VPHA
 fto-v1110-ocn-filter-scale-4-last-ocn-ckpt||ocean-emulator-e3sm|rttaw1g5|ckpt|ace-eamv3|lfudba6z|best_inference_ckpt|skip|high||8|800GiB|0|ai2/ace||01KA614VTFQH461ESGXF977A1R|01K9ZZ3MMXE0S2RXTPSR43VPHA
-fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt||ocean-emulator-e3sm|qp6yfj6k|best_inference_ckpt|ace-eamv3|lfudba6z|best_inference_ckpt|train|high||8|800GiB|2|ai2/ace||01KA614VTFQH461ESGXF977A1R|01KAD790ECA65QSVJMWM10HJMH
+fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt||ocean-emulator-e3sm|qp6yfj6k|best_inference_ckpt|ace-eamv3|lfudba6z|best_inference_ckpt|skip|high||8|800GiB|2|ai2/ace||01KA614VTFQH461ESGXF977A1R|01KAD790ECA65QSVJMWM10HJMH
+fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt-constant-lr-1e-4||ocean-emulator-e3sm|qp6yfj6k|best_inference_ckpt|ace-eamv3|lfudba6z|best_inference_ckpt|train|high||8|800GiB|2|ai2/ace||01KA614VTFQH461ESGXF977A1R|01KAD790ECA65QSVJMWM10HJMH
