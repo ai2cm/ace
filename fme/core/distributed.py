@@ -240,8 +240,8 @@ class Distributed:
         drop_last: bool = False,
     ) -> torch.utils.data.Sampler:
         if self.spatial_parallelism:
-          num_replicas=self.world_size#comm.get_size("batch")
-          rank=self.rank#comm.get_rank("batch")
+          num_replicas=comm.get_size("batch") #data_num_shards
+          rank=comm.get_rank("batch") #data_shard_id
         else:
           num_replicas=self.world_size
           rank=self.rank
