@@ -5,3 +5,5 @@ cm4_1pctCO2-train_0256to0350|rs0|01KAD95M1E0Y60QRKGE047GCZN|training|best_infere
 cm4_1pctCO2-train_0256to0350|rs1|01KAD96407NJ86TRNQCMKMCAEY|training|best_inference_ckpt|normal|--not-preemptible
 
 cm4_1pctCO2-train_0256to0350|rs0|01KAD9TVJ7GZFBZ37VBAJ0WQJH|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_1pctCO2-train_0256to0350|rs1|01KAD9VABJDNS50ZJ3697NSM7D|training|best_inference_ckpt|normal|--not-preemptible
