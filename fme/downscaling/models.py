@@ -341,7 +341,7 @@ class DiffusionModel:
             n_batches = normalized.shape[0]
             # Join the normalized topography to the input (see dataset for details)
             for field in static_inputs_tensors:
-                static_input = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
+                static_input = field.unsqueeze(0).repeat(n_batches, 1, 1)
                 static_input = static_input.unsqueeze(self._channel_axis)
                 interpolated = torch.concat(
                     [interpolated, static_input], axis=self._channel_axis
