@@ -3,10 +3,10 @@
 set -x
 
 # wandb config
-export WANDB_NAME=PM-AMIP-EAMv3-no-parallelism-fine-tune-from-spatial-parallelism-train-rs1
+export WANDB_NAME=PM-AMIP-EAMv3-spatial-parallelism-1x4-batch-fix-train-rs1
 export WANDB_RUN_GROUP=2025-04-01-AMIP-EAMv3
 
-export COMMIT=dc443bccc
+export COMMIT=6799a9284
 
 # directories for input data (training, validation, inference, stats)
 export FME_TRAIN_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1deg/traindata
