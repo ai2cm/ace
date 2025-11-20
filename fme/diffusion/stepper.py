@@ -332,6 +332,7 @@ class PositionalEmbeddingWrapper(torch.nn.Module):
             x,
             Context(
                 embedding_scalar=emb,
+                embedding_pos=None,
                 noise=None,
             ),
         )
