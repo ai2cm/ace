@@ -154,7 +154,7 @@ class DeterministicModel:
     def _run_on_batch(
         self,
         batch: PairedBatchData,
-        topography: StaticInputs | None,
+        static_inputs: StaticInputs | None,
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
@@ -166,17 +166,18 @@ class DeterministicModel:
         interpolated = interpolate(coarse_norm, self.downscale_factor)
 
         if self.config.use_fine_topography:
-            if topography is None:
+            if static_inputs is None:
                 raise ValueError(
                     "Topography must be provided for each batch when use of fine "
                     "topography is enabled."
                 )
             else:
-                # Join the normalized topography to the input (see dataset for details)
-                topo = topography.data.unsqueeze(self._channel_axis)
-                coarse_norm = torch.concat(
-                    [interpolated, topo], axis=self._channel_axis
-                )
+                # Join the normalized static inputs to the input
+                for field in static_inputs.fields:
+                    static_input = field.data.unsqueeze(self._channel_axis)
+                    coarse_norm = torch.concat(
+                        [interpolated, static_input], axis=self._channel_axis
+                    )
         elif self.config._interpolate_input:
             coarse_norm = interpolated
 
