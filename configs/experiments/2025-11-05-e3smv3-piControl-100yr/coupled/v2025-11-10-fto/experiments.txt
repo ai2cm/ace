@@ -8,3 +8,5 @@ fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt||01KAD90AB5ATF4Y42NG50BFDW1|training
 fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt-constant-lr-1e-4||01KAF0SGTYRQ7342GVW1S5BYR9|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt||01KAHB22EAACA7B1178EFZD6YH|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt-no-eval-before||01KAHNPVGEP7YE1RBZ63D1MYJ4|training|best_inference_ckpt|normal|--not-preemptible
