@@ -79,21 +79,27 @@ class SSRBiasMetric(ReducedMetric):
     """
 
     def __init__(self):
-        self._total_mse = None
+        self._total_unbiased_mse = None
         self._total_variance = None
         self._n_batches = 0
 
     def record(self, target: torch.Tensor, gen: torch.Tensor):
-        mse = ((gen - target) ** 2).mean(dim=(0, 1, 2))  # batch, ensemble, time
+        num_ensemble = gen.shape[1]
+        ensemble_mean = gen.mean(dim=1, keepdim=True)  # batch, 1, time
+        mse = ((ensemble_mean - target) ** 2).mean(dim=(0, 1, 2))  # batch, 1, time
         variance = gen.var(dim=1, unbiased=True).mean(dim=(0, 1))
-        self._add_mse(mse)
+        self._add_unbiased_mse(mse, variance, num_ensemble)
         self._add_variance(variance)
         self._n_batches += 1
 
-    def _add_mse(self, mse: torch.Tensor):
-        if self._total_mse is None:
-            self._total_mse = torch.zeros_like(mse)
-        self._total_mse += mse
+    def _add_unbiased_mse(
+        self, mse: torch.Tensor, variance: torch.Tensor, num_ensemble: int
+    ):
+        if self._total_unbiased_mse is None:
+            self._total_unbiased_mse = torch.zeros_like(mse)
+        # must remove the component of the MSE that is due to the
+        # variance of the generated values
+        self._total_unbiased_mse += mse - variance / num_ensemble
 
     def _add_variance(self, variance: torch.Tensor):
         if self._total_variance is None:
@@ -101,12 +107,10 @@ class SSRBiasMetric(ReducedMetric):
         self._total_variance += variance
 
     def get(self) -> torch.Tensor:
-        if self._total_mse is None or self._total_variance is None:
+        if self._total_unbiased_mse is None or self._total_variance is None:
             raise ValueError("No batches have been recorded.")
         spread = self._total_variance.sqrt()
-        # must remove the component of the MSE that is due to the
-        # variance of the generated values
-        skill = (self._total_mse - self._total_variance).sqrt()
+        skill = self._total_unbiased_mse.sqrt()
         return spread / skill - 1
 
 

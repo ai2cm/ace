@@ -40,7 +40,7 @@ from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
 
-from .evaluator import resolve_variable_metadata, validate_time_coarsen_config
+from .evaluator import resolve_variable_metadata
 
 StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
 
@@ -190,16 +190,14 @@ class InferenceConfig:
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
-            validate_time_coarsen_config(
-                self.data_writer.time_coarsen,
+            self.data_writer.time_coarsen.validate(
                 self.forward_steps_in_memory,
                 self.n_forward_steps,
             )
         if self.data_writer.files is not None:
             for file_config in self.data_writer.files:
                 if file_config.time_coarsen is not None:
-                    validate_time_coarsen_config(
-                        file_config.time_coarsen,
+                    file_config.time_coarsen.validate(
                         self.forward_steps_in_memory,
                         self.n_forward_steps,
                     )

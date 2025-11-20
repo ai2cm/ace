@@ -6,6 +6,7 @@ from fme.ace.models.healpix.healpix_decoder import UNetDecoderConfig
 from fme.ace.models.healpix.healpix_encoder import UNetEncoderConfig
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 
 
 @ModuleSelector.register("HEALPixRecUNet")
@@ -45,7 +46,7 @@ class HEALPixRecUNetBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ) -> nn.Module:
         """
         Builds the HEALPixRecUNet model.
@@ -53,7 +54,7 @@ class HEALPixRecUNetBuilder(ModuleConfig):
         Args:
             n_in_channels: Number of input channels.
             n_out_channels: Number of output channels.
-            img_shape: Shape of the input image.
+            dataset_info: Information about the dataset.
 
         Returns:
             HEALPixRecUNet model.

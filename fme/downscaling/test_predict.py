@@ -11,7 +11,7 @@ from fme.downscaling import predict
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
-from fme.downscaling.test_train import data_paths_helper
+from fme.downscaling.test_utils import data_paths_helper
 
 
 class LinearDownscalingDiffusion(LinearDownscaling):
@@ -29,12 +29,13 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
             "prebuilt",
             {
                 "module": LinearDownscalingDiffusion(
-                    factor=downscale_factor,
+                    factor=1,  # will pass coarse input interpolated to fine shape
                     fine_img_shape=fine_shape,
-                    n_channels=2,
+                    n_channels_in=3,
+                    n_channels_out=2,
                 )
             },
-            expects_interpolated_input=False,
+            expects_interpolated_input=True,
         ),
         loss=LossConfig("NaN"),
         in_names=["var0", "var1"],
@@ -54,6 +55,7 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
         churn=1,
         num_diffusion_generation_steps=2,
         predict_residual=True,
+        use_fine_topography=True,
     )
 
 
@@ -77,6 +79,7 @@ def create_predictor_config(
         config = yaml.safe_load(file)
     config["data"]["topography"] = f"{paths.fine}/data.nc"
     config["data"]["coarse"] = [{"data_path": str(paths.coarse)}]
+    config["data"]["lat_extent"] = {"start": 1, "stop": 6}
     config["experiment_dir"] = str(experiment_dir)
     config["model"] = {
         "checkpoint_path": f"{str(experiment_dir)}/checkpoints/latest.ckpt"
@@ -84,6 +87,8 @@ def create_predictor_config(
     config["n_samples"] = n_samples
     config["events"][0]["name"] = "test_event"
     config["events"][0]["save_generated_samples"] = True
+    if model_renaming is not None:
+        config["model"]["rename"] = model_renaming
 
     out_path = tmp_path / "predictor-config.yaml"
     with open(out_path, "w") as file:
@@ -100,10 +105,11 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
     predictor_config_path = create_predictor_config(
         tmp_path,
         n_samples,
-        data_paths_helper_kwargs={"rename": {"x": "var0", "y": "var1"}},
     )
-    model_config = get_model_config(coarse_shape, downscale_factor)
-    model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)
+    model_config = get_model_config(coarse_shape, downscale_factor=downscale_factor)
+    model = model_config.build(
+        coarse_shape=coarse_shape, downscale_factor=downscale_factor
+    )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
     os.makedirs(
@@ -137,7 +143,9 @@ def test_predictor_renaming(
         tmp_path,
         n_samples,
         model_renaming=renaming,
-        data_paths_helper_kwargs={"rename": {"x": "var0", "y": "var1"}},
+        data_paths_helper_kwargs={
+            "rename": {"var0": "var0_renamed", "var1": "var1_renamed"}
+        },
     )
     model_config = get_model_config(coarse_shape, downscale_factor)
     model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)

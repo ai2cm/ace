@@ -302,7 +302,7 @@ class TestDataWriter:
             assert np.all(ds.init_time.dt.year.values > 0)
             assert np.all(ds.init_time.dt.year.values >= 0)
             assert np.all(ds.valid_time.dt.month.values >= 0)
-            assert ds.attrs["title"] == "ACE monthly predictions data file"
+            assert ds.attrs["title"] == "ACE monthly mean predictions data file"
             assert ds.attrs["source.inference_version"] == "1.0"
 
     @pytest.mark.parametrize(
@@ -528,10 +528,12 @@ class TestDataWriter:
                 "lon",
                 "time",
             }
-            assert ds.attrs["title"] == "ACE monthly predictions data file"
+            assert ds.attrs["title"] == "ACE monthly mean predictions data file"
             assert ds.attrs["source.inference_version"] == "1.0"
 
-        with xr.open_dataset(tmp_path / "test_region.zarr") as ds:
+        with xr.open_dataset(
+            tmp_path / "test_region.zarr", decode_timedelta=False
+        ) as ds:
             assert "pressure" in ds
             assert "temp" not in ds
             assert ds.pressure.shape == (n_samples, n_timesteps, 2, 3)
@@ -638,6 +640,21 @@ class TestDataWriter:
                 assert "temp" in ds
                 assert ds.pressure.shape == (n_timesteps, n_lat, n_lon)
                 np.testing.assert_equal(ds.time.values, expected_time)
+
+
+def test_data_writer_validate_filenames_duplicate():
+    config1 = FileWriterConfig(
+        label="region1",
+        names=["var1"],
+    )
+    config2 = FileWriterConfig(
+        label="region1",  # duplicate label
+        names=["var2"],
+    )
+    with pytest.raises(ValueError):
+        DataWriterConfig(
+            files=[config1, config2],
+        )
 
 
 @pytest.mark.parametrize(

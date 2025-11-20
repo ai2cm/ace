@@ -4,11 +4,13 @@ from typing import Any, TypeVar
 
 import cftime
 import numpy as np
+import pandas as pd
 import torch
 import xarray as xr
 from torch.utils.data import default_collate
 
 from fme.core.device import get_device
+from fme.core.labels import BatchLabels
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_sized_ensemble_dim,
@@ -65,7 +67,7 @@ class BatchData:
 
     data: TensorMapping
     time: xr.DataArray
-    labels: list[set[str]]
+    labels: BatchLabels
     horizontal_dims: list[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
@@ -79,10 +81,11 @@ class BatchData:
         n_timesteps: int = 10,
         t_initial: cftime.datetime = cftime.datetime(2020, 1, 1),
         freq="6h",
+        increment_times: bool = False,
         calendar="julian",
         img_shape: tuple[int, ...] = (9, 18),
         horizontal_dims: list[str] = ["lat", "lon"],
-        labels: list[set[str]] | None = None,
+        labels: BatchLabels | None = None,
         device: torch.device | None = None,
     ) -> "BatchData":
         """
@@ -94,6 +97,8 @@ class BatchData:
             n_timesteps: The number of timesteps to create.
             t_initial: The initial time.
             freq: The frequency of the time steps.
+            increment_times: Whether to increment the initial time for each sample
+                when creating the time coordinate.
             calendar: The calendar of the time steps.
             img_shape: The shape of the horizontal dimensions of the data.
             horizontal_dims: The horizontal dimensions of the data.
@@ -113,7 +118,13 @@ class BatchData:
             ),
             dims=["time"],
         ).drop_vars(["time"])
-        sample_times = xr.concat([time] * n_samples, dim="sample")
+        if increment_times:
+            sample_times = xr.concat(
+                [time + pd.to_timedelta(freq) * i for i in range(n_samples)],
+                dim="sample",
+            )
+        else:
+            sample_times = xr.concat([time] * n_samples, dim="sample")
         if labels is None:
             labels = [set() for _ in range(n_samples)]
         return BatchData(
@@ -173,7 +184,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        labels: list[set[str]],
+        labels: BatchLabels,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
     ) -> "BatchData":
@@ -192,7 +203,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        labels: list[set[str]],
+        labels: BatchLabels,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
     ) -> "BatchData":
@@ -367,6 +378,16 @@ class BatchData:
             n_ensemble=n_ensemble,
         )
 
+    def pin_memory(self: SelfType) -> SelfType:
+        """Used by torch.utils.data.DataLoader when pin_memory=True to page-lock
+        tensors in CPU memory, resulting in faster transfers from CPU to GPU.
+
+        See https://docs.pytorch.org/docs/stable/data.html#memory-pinning
+
+        """
+        self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
+        return self
+
 
 @dataclasses.dataclass
 class PairedData:
@@ -376,7 +397,7 @@ class PairedData:
 
     prediction: TensorMapping
     reference: TensorMapping
-    labels: list[set[str]]
+    labels: BatchLabels
     time: xr.DataArray
 
     @property
@@ -407,7 +428,7 @@ class PairedData:
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
-        labels: list[set[str]],
+        labels: BatchLabels,
         time: xr.DataArray,
     ) -> "PairedData":
         device = get_device()
@@ -425,7 +446,7 @@ class PairedData:
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
-        labels: list[set[str]],
+        labels: BatchLabels,
         time: xr.DataArray,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))

@@ -16,7 +16,6 @@ from fme.ace.data_loading.getters import get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
-from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.default_metadata import get_default_variable_metadata
 from fme.ace.inference.loop import DeriverABC, run_dataset_comparison
 from fme.ace.stepper import (
@@ -35,24 +34,6 @@ from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
-
-
-def validate_time_coarsen_config(
-    config: TimeCoarsenConfig, forward_steps_in_memory: int, n_forward_steps: int
-):
-    coarsen_factor = config.coarsen_factor
-    if forward_steps_in_memory % coarsen_factor != 0:
-        raise ValueError(
-            "forward_steps_in_memory must be divisible by "
-            f"time_coarsen.coarsen_factor. Got {forward_steps_in_memory} "
-            f"and {coarsen_factor}."
-        )
-    if n_forward_steps % coarsen_factor != 0:
-        raise ValueError(
-            "n_forward_steps must be divisible by "
-            f"time_coarsen.coarsen_factor. Got {n_forward_steps} "
-            f"and {coarsen_factor}."
-        )
 
 
 def resolve_variable_metadata(
@@ -146,16 +127,14 @@ class InferenceEvaluatorConfig:
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
-            validate_time_coarsen_config(
-                self.data_writer.time_coarsen,
+            self.data_writer.time_coarsen.validate(
                 self.forward_steps_in_memory,
                 self.n_forward_steps,
             )
         if self.data_writer.files is not None:
             for file_config in self.data_writer.files:
                 if file_config.time_coarsen is not None:
-                    validate_time_coarsen_config(
-                        file_config.time_coarsen,
+                    file_config.time_coarsen.validate(
                         self.forward_steps_in_memory,
                         self.n_forward_steps,
                     )

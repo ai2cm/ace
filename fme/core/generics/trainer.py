@@ -171,10 +171,6 @@ class CheckpointPaths:
     def best_inference_checkpoint_path(self) -> str:
         return os.path.join(self.checkpoint_dir, "best_inference_ckpt.tar")
 
-    @property
-    def ema_checkpoint_path(self) -> str:
-        return os.path.join(self.checkpoint_dir, "ema_ckpt.tar")
-
     def epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"ckpt_{epoch:04d}.tar")
 
@@ -248,9 +244,7 @@ class Trainer:
         resuming = os.path.isfile(self.paths.latest_checkpoint_path)
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
-            self.restore_checkpoint(
-                self.paths.latest_checkpoint_path, self.paths.ema_checkpoint_path
-            )
+            self.restore_checkpoint(self.paths.latest_checkpoint_path)
 
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
@@ -304,7 +298,11 @@ class Trainer:
                 self._start_epoch + self.config.segment_epochs, self.config.max_epochs
             )
 
-        if self.config.evaluate_before_training and self._epochs_trained == 0:
+        if (
+            self.config.evaluate_before_training
+            and self._epochs_trained == 0
+            and self._current_epoch_num_batches_seen == 0
+        ):
             logging.info("Starting validation before training")
             valid_logs = self.validate_one_epoch()
             if self._epochs_trained in inference_epochs:
@@ -496,7 +494,6 @@ class Trainer:
         )
         self.save_checkpoint(
             self.paths.latest_checkpoint_path,
-            ema_checkpoint_path=self.paths.ema_checkpoint_path,
             include_optimization=True,
         )
 
@@ -519,13 +516,11 @@ class Trainer:
         """
         A context where the stepper uses the EMA model.
         """
-        self._ema.store(parameters=self.stepper.modules.parameters())
         self._in_ema_context = True
-        self._ema.copy_to(model=self.stepper.modules)
         try:
-            yield
+            with self._ema.applied_params(self.stepper.modules):
+                yield
         finally:
-            self._ema.restore(parameters=self.stepper.modules.parameters())
             self._in_ema_context = False
 
     def validate_one_epoch(self):
@@ -579,7 +574,6 @@ class Trainer:
     def save_checkpoint(
         self,
         checkpoint_path: str,
-        ema_checkpoint_path: str | None = None,
         include_optimization: bool = False,
     ):
         if not Distributed.get_instance().is_root():
@@ -588,12 +582,6 @@ class Trainer:
         temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
         )
-        if ema_checkpoint_path is not None:
-            ema_temporary_location: str | None = os.path.join(
-                os.path.dirname(ema_checkpoint_path), f".{uuid.uuid4()}.tmp"
-            )
-        else:
-            ema_temporary_location = None
         try:
             data = {
                 "num_batches_seen": self.num_batches_seen,
@@ -606,37 +594,22 @@ class Trainer:
             }
             if include_optimization:
                 data["optimization"] = self.optimization.get_state()
-            if ema_temporary_location is not None:
-                with self._ema_context():
-                    ema_data = dict(
-                        data,
-                        stepper=self.stepper.get_state(),
-                        ema=self._ema.get_state(),
-                    )
-                    # never include optimization in EMA checkpoint
-                    if "optimization" in ema_data:
-                        ema_data.pop("optimization")
-                    torch.save(ema_data, ema_temporary_location)
+            else:
+                data["ema"].pop("ema_params")  # don't need if not saving optimization
             torch.save(data, temporary_location)
-            if ema_temporary_location is not None and ema_checkpoint_path is not None:
-                os.replace(ema_temporary_location, ema_checkpoint_path)
             os.replace(temporary_location, checkpoint_path)
         finally:
             if os.path.exists(temporary_location):
                 os.remove(temporary_location)
-            if ema_temporary_location is not None and os.path.exists(
-                ema_temporary_location
-            ):
-                os.remove(ema_temporary_location)
 
-    def restore_checkpoint(self, checkpoint_path, ema_checkpoint_path):
+    def restore_checkpoint(self, checkpoint_path):
         """
         Restore the checkpoint from the given path. This includes the existing state of
         the stepper, optimization, training epoch, and EMA. This is most suitable
         for resuming training from a checkpoint without changing the training schedule,
         i.e., to manage preemption.
         """
-        _restore_checkpoint(self, checkpoint_path, ema_checkpoint_path)
+        _restore_checkpoint(self, checkpoint_path)
 
     def _epoch_checkpoint_enabled(self, epoch: int) -> bool:
         return epoch_checkpoint_enabled(
@@ -730,7 +703,7 @@ def inference_one_epoch(
     return {f"{label}/{k}": v for k, v in logs.items()}
 
 
-def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
+def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     checkpoint = torch.load(
         checkpoint_path, map_location=fme.get_device(), weights_only=False
     )
@@ -744,13 +717,7 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     trainer._epochs_trained = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
-    ema_checkpoint = torch.load(
-        ema_checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
-    ema_stepper: TrainStepperABC = type(trainer.stepper).from_state(
-        ema_checkpoint["stepper"]
-    )
-    trainer._ema = EMATracker.from_state(checkpoint["ema"], ema_stepper.modules)
+    trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:

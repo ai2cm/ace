@@ -6,6 +6,7 @@ from typing import Literal
 import torch
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 from fme.core.models.conditional_sfno.sfnonet import (
     Context,
     ContextConfig,
@@ -68,7 +69,6 @@ class NoiseConditionedSFNO(torch.nn.Module):
             self.pos_embed = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_leading_shape = x.shape[:-3]
         x = x.reshape(-1, *x.shape[-3:])
         if self.noise_type == "isotropic":
             lmax = self.conditional_model.itrans_up.lmax
@@ -90,20 +90,21 @@ class NoiseConditionedSFNO(torch.nn.Module):
             raise ValueError(f"Invalid noise type: {self.noise_type}")
 
         if self.pos_embed is not None:
-            embedding_2d = torch.cat(
-                (noise, self.pos_embed.repeat(noise.shape[0], 1, 1, 1)),
-                dim=1,
-            )
+            embedding_pos = self.pos_embed.repeat(noise.shape[0], 1, 1, 1)
         else:
-            embedding_2d = noise
+            embedding_pos = None
 
         embedding_scalar = torch.zeros(
             [*x.shape[:-3], 0], device=x.device, dtype=x.dtype
         )
-        result: torch.Tensor = self.conditional_model(
-            x, Context(embedding_scalar=embedding_scalar, embedding_2d=embedding_2d)
+        return self.conditional_model(
+            x,
+            Context(
+                embedding_scalar=embedding_scalar,
+                embedding_pos=embedding_pos,
+                noise=noise,
+            ),
         )
-        return result.reshape(*x_leading_shape, *result.shape[-3:])
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
@@ -193,16 +194,17 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ):
         sfno_net = get_lat_lon_sfnonet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
-            img_shape=img_shape,
+            img_shape=dataset_info.img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
-                embed_dim_2d=self.noise_embed_dim + self.context_pos_embed_dim,
+                embed_dim_pos=self.context_pos_embed_dim,
+                embed_dim_noise=self.noise_embed_dim,
             ),
         )
         return NoiseConditionedSFNO(
@@ -210,5 +212,5 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             noise_type=self.noise_type,
             embed_dim=self.noise_embed_dim,
             pos_embed_dim=self.context_pos_embed_dim,
-            img_shape=img_shape,
+            img_shape=dataset_info.img_shape,
         )

@@ -1,0 +1,2 @@
+rtree>=1.4.1 # required for trimesh
+trimesh>=4.8.3
