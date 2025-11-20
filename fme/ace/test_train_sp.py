@@ -1,18 +1,14 @@
 import copy
 import dataclasses
 import pathlib
-import subprocess
 import tempfile
-import unittest.mock
 from typing import Literal
-from pathlib import Path
-import dacite
+
 import numpy as np
 import pytest
 import torch
-import xarray as xr
 import yaml
-import fme
+
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
@@ -23,7 +19,6 @@ from fme.ace.data_loading.inference import (
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig
-from fme.ace.inference.evaluator import main as inference_evaluator_main
 from fme.ace.registry.test_hpx import (
     conv_next_block_config,
     decoder_config,
@@ -44,11 +39,9 @@ from fme.ace.testing import (
     save_nd_netcdf,
     save_scalar_netcdf,
 )
-from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
 from fme.ace.train.train_config import (
     InlineInferenceConfig,
-    TrainBuilders,
     TrainConfig,
     WeatherEvaluationConfig,
 )
@@ -59,11 +52,7 @@ from fme.core.coordinates import (
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.core.generics.trainer import (
-    _restore_checkpoint,
-    count_parameters,
-    epoch_checkpoint_enabled,
-)
+from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -74,10 +63,7 @@ from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
-from fme.core.testing.model import compare_restored_parameters
-from fme.core.testing.wandb import mock_wandb
-from fme.core.typing_ import Slice
-from fme.core.distributed import Distributed
+
 JOB_SUBMISSION_SCRIPT_PATH = (
     pathlib.PurePath(__file__).parent / "run-train-and-inference.sh"
 )
@@ -88,6 +74,7 @@ JOB_SUBMISSION_SCRIPT_PATH = (
 #     temp_dir = tempfile.mkdtemp()
 #     # Yield the path to the temporary directory
 #     yield Path(temp_dir)
+
 
 def _get_test_yaml_files(
     *,
@@ -510,34 +497,32 @@ def test_train_and_inference(
         very_fast_only: parameter indicating whether to skip slow tests.
     """
     if very_fast_only:
-      pytest.skip("Skipping non-fast tests")
+        pytest.skip("Skipping non-fast tests")
     # Let's generate the configuration file on a single processor.
     with Distributed.non_distributed():
-      train_config, inference_config = _setup(
-        tmp_path,
-        nettype,
-        log_to_wandb=False,
-        timestep_days=20,
-        n_time=int(366 * 3 / 20 + 1),
-        inference_forward_steps=50,#int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
-        use_healpix=use_healpix,
-        crps_training=crps_training,
-        save_per_epoch_diagnostics=True,
-        log_validation_maps=log_validation_maps,
-      )
-      # return
+        train_config, inference_config = _setup(
+            tmp_path,
+            nettype,
+            log_to_wandb=False,
+            timestep_days=20,
+            n_time=int(366 * 3 / 20 + 1),
+            inference_forward_steps=50,  # int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+            use_healpix=use_healpix,
+            crps_training=crps_training,
+            save_per_epoch_diagnostics=True,
+            log_validation_maps=log_validation_maps,
+        )
+        # return
     # with mock_wandb() as wandb:
-    train_main(
-            yaml_config=train_config
-    )
-      # wandb_logs = wandb.get_logs()
-        # for log in wandb_logs:
-        #     # ensure inference time series is not logged
-        #     assert "inference/mean/forecast_step" not in log
+    train_main(yaml_config=train_config)
+    # wandb_logs = wandb.get_logs()
+    # for log in wandb_logs:
+    #     # ensure inference time series is not logged
+    #     assert "inference/mean/forecast_step" not in log
 
-        # epoch_logs = wandb_logs[-1]
-        # assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
-        # assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+    # epoch_logs = wandb_logs[-1]
+    # assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
+    # assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
 
     # train_main(
     #         yaml_config=train_config,

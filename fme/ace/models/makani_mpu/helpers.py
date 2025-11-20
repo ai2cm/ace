@@ -14,11 +14,9 @@
 # limitations under the License.
 
 import torch
-import torch.nn.functional as F
 import torch.distributed as dist
-from torch._utils import _flatten_dense_tensors
-
 from physicsnemo.distributed.utils import split_tensor_along_dim
+
 # from makani.utils import comm
 from fme.ace.utils import comm
 
@@ -52,7 +50,9 @@ def gather_uneven(tensor, dim, comm_name):
         return tensor
 
     # gather dims
-    dim_tensor = torch.tensor([tensor.shape[dim]], dtype=torch.int, device=tensor.device)
+    dim_tensor = torch.tensor(
+        [tensor.shape[dim]], dtype=torch.int, device=tensor.device
+    )
     dim_list = [torch.empty_like(dim_tensor) for _ in range(comm.get_size(comm_name))]
     dim_list[comm.get_rank(comm_name)] = dim_tensor
     dist.all_gather(dim_list, dim_tensor, group=comm.get_group(comm_name))
@@ -62,7 +62,9 @@ def gather_uneven(tensor, dim, comm_name):
     tensor_list = []
     for rshape in dim_list:
         gathered_shape[dim] = rshape.item()
-        tensor_list.append(torch.empty(gathered_shape, dtype=tensor.dtype, device=tensor.device))
+        tensor_list.append(
+            torch.empty(gathered_shape, dtype=tensor.dtype, device=tensor.device)
+        )
 
     tensor_list[comm.get_rank(comm_name)] = tensor
     dist.all_gather(tensor_list, tensor, group=comm.get_group(comm_name))
@@ -87,7 +89,12 @@ def sync_params(model, mode="broadcast"):
                 # tlist = [torch.empty_like(param_real) for x in range(comm.get_size(comm_group))]
                 # tlist[comm.get_rank(comm_group)] = param_real
                 # gather all weights in the comm group
-                dist.broadcast(param_real, src=comm.get_root(comm_group), group=comm.get_group(comm_group), async_op=False)
+                dist.broadcast(
+                    param_real,
+                    src=comm.get_root(comm_group),
+                    group=comm.get_group(comm_group),
+                    async_op=False,
+                )
                 # use weight of rank 0
                 # important to use copy here otherwise the handle gets detaches from the optimizer
                 if is_complex:
@@ -97,9 +104,19 @@ def sync_params(model, mode="broadcast"):
             elif mode == "mean":
                 is_complex = param.is_complex()
                 if is_complex:
-                    dist.all_reduce(torch.view_as_real(param), op=dist.ReduceOp.AVG, group=comm.get_group(comm_group), async_op=False)
+                    dist.all_reduce(
+                        torch.view_as_real(param),
+                        op=dist.ReduceOp.AVG,
+                        group=comm.get_group(comm_group),
+                        async_op=False,
+                    )
                 else:
-                    dist.all_reduce(param, op=dist.ReduceOp.AVG, group=comm.get_group(comm_group), async_op=False)
+                    dist.all_reduce(
+                        param,
+                        op=dist.ReduceOp.AVG,
+                        group=comm.get_group(comm_group),
+                        async_op=False,
+                    )
             else:
                 raise ValueError(f"Unknown weight synchronization mode {mode}")
 

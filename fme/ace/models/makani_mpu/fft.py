@@ -13,17 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 import math
+
 import torch
-from torch import nn
 import torch.nn.functional as F
+from physicsnemo.distributed.utils import compute_split_shapes
+from torch import nn
+from torch_harmonics.distributed import (
+    distributed_transpose_azimuth as distributed_transpose_w,
+)
+from torch_harmonics.distributed import (
+    distributed_transpose_polar as distributed_transpose_h,
+)
 
 # from makani.utils import comm
 from fme.ace.utils import comm
-from physicsnemo.distributed.utils import compute_split_shapes
-from torch_harmonics.distributed import distributed_transpose_azimuth as distributed_transpose_w
-from torch_harmonics.distributed import distributed_transpose_polar as distributed_transpose_h
 
 
 class DistributedRealFFT1(nn.Module):
@@ -31,7 +35,7 @@ class DistributedRealFFT1(nn.Module):
     Helper routine to wrap FFT similarly to the SHT
     """
 
-    def __init__(self, nlon: int, lmax: Optional[int] = None, mmax: Optional[int] = None):
+    def __init__(self, nlon: int, lmax: int | None = None, mmax: int | None = None):
         super().__init__()
 
         # get the comms grid:
@@ -51,7 +55,9 @@ class DistributedRealFFT1(nn.Module):
         self.lon_shapes = compute_split_shapes(self.nlon, self.comm_size_w)
         self.m_shapes = compute_split_shapes(self.mmax, self.comm_size_w)
 
-    def forward(self, x: torch.Tensor, norm: Optional[str] = "ortho", channel_dim: Optional[int] = -3) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, norm: str | None = "ortho", channel_dim: int | None = -3
+    ) -> torch.Tensor:
         # store number of chans
         num_chans = x.shape[channel_dim]
 
@@ -78,10 +84,10 @@ class DistributedInverseRealFFT1(nn.Module):
     Helper routine to wrap FFT similarly to the SHT
     """
 
-    def __init__(self, nlon: int, lmax: Optional[int] = None, mmax: Optional[int] = None):
+    def __init__(self, nlon: int, lmax: int | None = None, mmax: int | None = None):
         super().__init__()
 
-         # get the comms grid:
+        # get the comms grid:
         self.comm_size_w = comm.get_size("w")
         self.comm_rank_w = comm.get_rank("w")
 
@@ -98,7 +104,9 @@ class DistributedInverseRealFFT1(nn.Module):
         self.lon_shapes = compute_split_shapes(self.nlon, self.comm_size_w)
         self.m_shapes = compute_split_shapes(self.mmax, self.comm_size_w)
 
-    def forward(self, x: torch.Tensor, norm: Optional[str] = "ortho", channel_dim: Optional[int] = -3) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, norm: str | None = "ortho", channel_dim: int | None = -3
+    ) -> torch.Tensor:
         # store number of channels
         num_chans = x.shape[channel_dim]
 
@@ -122,7 +130,9 @@ class DistributedRealFFT2(nn.Module):
     Helper routine to wrap FFT similarly to the SHT
     """
 
-    def __init__(self, nlat: int, nlon: int, lmax: Optional[int] = None, mmax: Optional[int] = None):
+    def __init__(
+        self, nlat: int, nlon: int, lmax: int | None = None, mmax: int | None = None
+    ):
         super().__init__()
 
         # get the comms grid:
@@ -146,7 +156,9 @@ class DistributedRealFFT2(nn.Module):
         self.l_shapes = compute_split_shapes(self.lmax, self.comm_size_h)
         self.m_shapes = compute_split_shapes(self.mmax, self.comm_size_w)
 
-    def forward(self, x: torch.Tensor, norm: Optional[str] = "ortho", channel_dim: Optional[int] = -3) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, norm: str | None = "ortho", channel_dim: int | None = -3
+    ) -> torch.Tensor:
         # store number of chans
         num_chans = x.shape[channel_dim]
 
@@ -173,7 +185,9 @@ class DistributedRealFFT2(nn.Module):
         x = torch.fft.fft(x, n=self.nlat, dim=-2, norm=norm)
 
         # apply mode truncation:
-        x = torch.cat([x[..., : self.lmax_high, :], x[..., -self.lmax_low :, :]], dim=-2)
+        x = torch.cat(
+            [x[..., : self.lmax_high, :], x[..., -self.lmax_low :, :]], dim=-2
+        )
 
         # transpose: after this, l is split and c is local
         if self.comm_size_h > 1:
@@ -188,7 +202,9 @@ class DistributedInverseRealFFT2(nn.Module):
     Helper routine to wrap FFT similarly to the SHT
     """
 
-    def __init__(self, nlat: int, nlon: int, lmax: Optional[int] = None, mmax: Optional[int] = None):
+    def __init__(
+        self, nlat: int, nlon: int, lmax: int | None = None, mmax: int | None = None
+    ):
         super().__init__()
 
         # get the comms grid:
@@ -212,7 +228,9 @@ class DistributedInverseRealFFT2(nn.Module):
         self.l_shapes = compute_split_shapes(self.lmax, self.comm_size_h)
         self.m_shapes = compute_split_shapes(self.mmax, self.comm_size_w)
 
-    def forward(self, x: torch.Tensor, norm: Optional[str] = "ortho", channel_dim: Optional[int] = -3) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, norm: str | None = "ortho", channel_dim: int | None = -3
+    ) -> torch.Tensor:
         # store number of channels
         num_chans = x.shape[channel_dim]
 
@@ -303,7 +321,9 @@ class DistributedRealFFT3(nn.Module):
         x = x[..., : self.lwmax]
 
         # truncate depth-modes
-        x = torch.cat([x[..., : self.ldmax_high, :, :], x[..., -self.ldmax_low :, :, :]], dim=-3)
+        x = torch.cat(
+            [x[..., : self.ldmax_high, :, :], x[..., -self.ldmax_low :, :, :]], dim=-3
+        )
 
         # transpose: after this, m is split and c is local
         if self.comm_size_w > 1:
@@ -318,7 +338,9 @@ class DistributedRealFFT3(nn.Module):
         x = torch.fft.fft(x, n=self.nh, dim=-2, norm="ortho")
 
         # truncate the modes
-        x = torch.cat([x[..., : self.lhmax_high, :], x[..., -self.lhmax_low :, :]], dim=-2)
+        x = torch.cat(
+            [x[..., : self.lhmax_high, :], x[..., -self.lhmax_low :, :]], dim=-2
+        )
 
         # transpose: after this, l is split and c is local
         if self.comm_size_h > 1:

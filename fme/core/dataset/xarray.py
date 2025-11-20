@@ -19,7 +19,6 @@ import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
-from fme.core.distributed import Distributed
 from fme.core.coordinates import (
     DepthCoordinate,
     HorizontalCoordinates,
@@ -44,7 +43,6 @@ from .utils import (
     load_series_data,
     load_series_data_zarr_async,
 )
-
 
 SLICE_NONE = slice(None)
 GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD = 12
@@ -848,7 +846,7 @@ class XarrayDataset(torch.utils.data.Dataset):
                 del ds_local
                 ds.close()
                 del ds
-                #CHECK: DO I also need to del ds
+                # CHECK: DO I also need to del ds
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
 
@@ -871,7 +869,7 @@ class XarrayDataset(torch.utils.data.Dataset):
                 tensors[name] = as_broadcasted_tensor(variable, self.dims, shape_local)
             ds_local.close()
             del ds_local
-            #CHECK: DO I also need to del ds
+            # CHECK: DO I also need to del ds
             ds.close()
             del ds
 
