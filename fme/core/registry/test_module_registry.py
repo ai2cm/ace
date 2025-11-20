@@ -5,6 +5,8 @@ import dacite
 import pytest
 import torch
 
+from fme.core.dataset_info import DatasetInfo
+
 from .module import ModuleConfig, ModuleSelector
 
 
@@ -20,7 +22,7 @@ class MockModule(torch.nn.Module):
 class MockModuleBuilder(ModuleConfig):
     param_shapes: list[tuple[int, ...]]
 
-    def build(self, n_in_channels, n_out_channels, img_shape):
+    def build(self, n_in_channels, n_out_channels, dataset_info):
         return MockModule(self.param_shapes)
 
     @classmethod
@@ -36,7 +38,8 @@ class MockModuleBuilder(ModuleConfig):
 def test_register():
     """Make sure that the registry is working as expected."""
     selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
-    module = selector.build(1, 1, (16, 32))
+    dataset_info = DatasetInfo(img_shape=(16, 32))
+    module = selector.build(1, 1, dataset_info)
     assert isinstance(module, MockModule)
 
 

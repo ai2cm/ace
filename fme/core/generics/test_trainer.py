@@ -436,7 +436,6 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
     assert os.path.exists(paths.latest_checkpoint_path)
     assert os.path.exists(paths.best_checkpoint_path)
     assert os.path.exists(paths.best_inference_checkpoint_path)
-    assert os.path.exists(paths.ema_checkpoint_path)
     save_epochs = list(range(config.max_epochs))
     if checkpoint_save_epochs is not None:
         save_epochs = save_epochs[checkpoint_save_epochs.slice]
@@ -747,21 +746,18 @@ def test_saves_correct_ema_checkpoints(
     trainer._ema(model=trainer.stepper.modules)
     trainer.save_all_checkpoints(valid_loss=valid_loss, inference_error=inference_error)
     paths = CheckpointPaths(config.checkpoint_dir)
-    assert os.path.exists(paths.ema_checkpoint_path)
-    ema_checkpoint = torch.load(paths.ema_checkpoint_path)
-    ema_weight = 1.0 - min(ema_decay, 2.0 / 11.0)
-    np.testing.assert_allclose(
-        ema_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
-        ema_weight,
-        atol=1e-7,
-    )
-    assert ema_checkpoint["best_validation_loss"] == valid_loss
-    assert ema_checkpoint["best_inference_error"] == inference_error
     assert os.path.exists(paths.latest_checkpoint_path)
     latest_checkpoint = torch.load(paths.latest_checkpoint_path)
     np.testing.assert_allclose(
         latest_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
         1.0,
+        atol=1e-7,
+    )
+    ema_checkpoint = torch.load(paths.latest_checkpoint_path)["ema"]["ema_params"]
+    ema_weight = 1.0 - min(ema_decay, 2.0 / 11.0)
+    np.testing.assert_allclose(
+        ema_checkpoint["0weight"].cpu().numpy(),
+        ema_weight,
         atol=1e-7,
     )
     assert latest_checkpoint["best_validation_loss"] == valid_loss
@@ -866,7 +862,6 @@ def test_saves_correct_non_ema_epoch_checkpoints(
     assert os.path.exists(paths.latest_checkpoint_path)
     assert os.path.exists(paths.best_checkpoint_path)
     assert os.path.exists(paths.best_inference_checkpoint_path)
-    assert os.path.exists(paths.ema_checkpoint_path)
     best_checkpoint = torch.load(paths.best_checkpoint_path, weights_only=False)
     assert best_checkpoint["epoch"] == best_val_epoch
     assert best_checkpoint["best_validation_loss"] == 0.0

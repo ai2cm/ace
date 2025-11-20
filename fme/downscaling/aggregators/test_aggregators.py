@@ -262,14 +262,29 @@ def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
             batch=batch,
         )
         aggregator.get_wandb(prefix="test")
-        aggregator.get_dataset()
+        ds_paired = aggregator.get_dataset()
+        np.testing.assert_array_equal(
+            ds_paired.lat.values, batch.fine.latlon_coordinates[0].lat.cpu().numpy()
+        )
+        np.testing.assert_array_equal(
+            ds_paired.lon.values, batch.fine.latlon_coordinates[0].lon.cpu().numpy()
+        )
 
-        no_target_aggregator = NoTargetAggregator(downscale_factor=downscale_factor)
+        no_target_aggregator = NoTargetAggregator(
+            downscale_factor=downscale_factor,
+            latlon_coordinates=batch.fine.latlon_coordinates[0],
+        )
         no_target_aggregator.record_batch(
             prediction=prediction, coarse=coarse, time=batch.fine.time
         )
         no_target_aggregator.get_wandb(prefix="test_no_target")
-        no_target_aggregator.get_dataset()
+        ds = no_target_aggregator.get_dataset()
+        np.testing.assert_array_equal(
+            ds.lat.values, batch.fine.latlon_coordinates[0].lat.cpu().numpy()
+        )
+        np.testing.assert_array_equal(
+            ds.lon.values, batch.fine.latlon_coordinates[0].lon.cpu().numpy()
+        )
 
 
 @pytest.mark.parametrize("valid_shape", [(2, 4, 8), (2, 3, 4, 8)])

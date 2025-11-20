@@ -11,8 +11,7 @@ from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import mock_wandb
-from fme.core.typing_ import Slice
-from fme.coupled.data_loading.config import CoupledDatasetConfig
+from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
@@ -140,7 +139,7 @@ def test_evaluator_inference(
         n_forward_times_atmosphere=n_forward_times_atmos,
         ocean_names=ocean_names,
         atmosphere_names=atmos_names,
-        atmosphere_start_time_offset_from_ocean=True,
+        atmosphere_start_time_offset_from_ocean=1,
         n_levels_ocean=1,
         n_levels_atmosphere=1,
     )
@@ -170,11 +169,10 @@ def test_evaluator_inference(
         checkpoint_path=checkpoint_path,
         logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
         loader=InferenceDataLoaderConfig(
-            dataset=CoupledDatasetConfig(
+            dataset=CoupledDatasetWithOptionalOceanConfig(
                 ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
                 atmosphere=XarrayDataConfig(
                     data_path=mock_data.atmosphere.data_dir,
-                    subset=Slice(start=1),
                 ),
             ),
             start_indices=InferenceInitialConditionIndices(

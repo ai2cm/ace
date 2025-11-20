@@ -90,6 +90,7 @@ class ZarrWriterAdapter:
 
         self.n_timesteps = n_timesteps
         self.n_initial_conditions = n_initial_conditions
+        self._current_timestep = 0
         self.variable_metadata = _variable_metadata_to_dict(variable_metadata)
 
         dataset_metadata = copy.copy(dataset_metadata)
@@ -172,12 +173,10 @@ class ZarrWriterAdapter:
     def append_batch(
         self,
         data: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ) -> None:
         """
         data: Dict mapping variable name to tensor to
-        start_timestep: Timestep (lead time dim) at which to start writing.
         batch_time: Time coordinate for each sample in the batch.
         """
         # Zarr store initialization needs the full time coordinate information,
@@ -187,9 +186,13 @@ class ZarrWriterAdapter:
         self.writer.record_batch(
             data=self._to_ndarray_mapping(data),
             position_slices={
-                "time": slice(start_timestep, start_timestep + batch_time.sizes["time"])
+                "time": slice(
+                    self._current_timestep,
+                    self._current_timestep + batch_time.sizes["time"],
+                )
             },
         )
+        self._current_timestep += batch_time.sizes["time"]
 
     def flush(self):
         pass
@@ -222,6 +225,7 @@ class SeparateICZarrWriterAdapter:
         self.coords = data_coords
         self.n_timesteps = n_timesteps
         self.n_initial_conditions = n_initial_conditions
+        self._current_timestep = 0
         self.data_vars = data_vars
         self.chunks = chunks
         self.overwrite_check = overwrite_check
@@ -281,7 +285,6 @@ class SeparateICZarrWriterAdapter:
     def append_batch(
         self,
         data: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ) -> None:
         # Zarr store initialization needs the full time coordinate information,
@@ -289,14 +292,18 @@ class SeparateICZarrWriterAdapter:
         if self._writers is None:
             self._initialize_writers(batch_time)
         vars = self.data_vars or list(data.keys())
+        position_slice = {
+            "time": slice(
+                self._current_timestep,
+                self._current_timestep + batch_time.sizes["time"],
+            )
+        }
         for s in range(self.n_initial_conditions):
-            position_slice = {
-                "time": slice(start_timestep, start_timestep + batch_time.sizes["time"])
-            }
             self.writers[s].record_batch(
                 data={k: v.cpu().numpy()[s] for k, v in data.items() if k in vars},
                 position_slices=position_slice,
             )
+        self._current_timestep += batch_time.sizes["time"]
 
     def flush(self):
         pass
