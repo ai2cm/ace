@@ -310,7 +310,7 @@ class DiffusionModel:
         normalized = self.in_packer.pack(
             self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
         )
-        interpolated = interpolate(normalized, self.downscale_factor)
+        interpolated = interpolate(normalized, self.downscale_factor, mode='nearest')
 
         if self.config.use_fine_topography:
             if topography is None:
