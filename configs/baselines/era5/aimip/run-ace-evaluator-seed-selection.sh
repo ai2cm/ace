@@ -14,6 +14,9 @@ FINE_TUNED_SEED_CHECKPOINT_IDS=("01KA2F5J9768HR54369MKEHYB4"\
   "01KAC0B5ZC96GVJV46HNK9QZ9X" \
   "01KA2F5Q45122PYGW4NZBME01V" \
   )
+FINE_TUNED_DOWNWEIGHTED_Q_CHECKPOINT_IDS=("01KA6NPGEQQRSZN9FF128FKJEZ"\
+  "01KAF36CX46JWBZHNZYX2S7C3R" \
+)
 CONFIG_FILENAME="ace-evaluator-seed-selection-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -58,14 +61,23 @@ launch_job () {
 
     }
 
+# pre-trained
 for (( i=0; i<${#SEED_CHECKPOINT_IDS[@]}; i++ )); do
     JOB_NAME="$JOB_NAME_BASE-RS$i"
     echo "Launching job for seed $i checkpoint ID: ${SEED_CHECKPOINT_IDS[$i]}"
     launch_job "$JOB_NAME" "${SEED_CHECKPOINT_IDS[$i]}"
 done
 
+# fine-tuned
 for (( i=0; i<${#FINE_TUNED_SEED_CHECKPOINT_IDS[@]}; i++ )); do
     JOB_NAME="$JOB_NAME_BASE-RS3-pressure-level-fine-tuned-RS$i"
     echo "Launching job for fine-tuned seed $i checkpoint ID: ${FINE_TUNED_SEED_CHECKPOINT_IDS[$i]}"
     launch_job "$JOB_NAME" "${FINE_TUNED_SEED_CHECKPOINT_IDS[$i]}"
+done
+
+# fine-tuned with downweighted q
+for  (( i=0; i<${#FINE_TUNED_DOWNWEIGHTED_Q_CHECKPOINT_IDS[@]}; i++ )); do
+    JOB_NAME="$JOB_NAME_BASE-RS3-pressure-level-fine-tuned-downweighted-q-RS$i"
+    echo "Launching job for fine-tuned with downweighted q seed $i checkpoint ID: ${FINE_TUNED_DOWNWEIGHTED_Q_CHECKPOINT_IDS[$i]}"
+    launch_job "$JOB_NAME" "${FINE_TUNED_DOWNWEIGHTED_Q_CHECKPOINT_IDS[$i]}"
 done
