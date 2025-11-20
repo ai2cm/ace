@@ -5,8 +5,10 @@ set -e
 JOB_NAME_BASE="ace-aimip-fine-tune-decoder-pressure-levels"
 JOB_GROUP="ace-aimip"
 PRESSURE_LEVEL_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-config.yaml"
+PRESSURE_LEVEL_FROZEN_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-frozen-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 PRESSURE_LEVEL_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_CONFIG_FILENAME
+PRESSURE_LEVEL_FROZEN_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_FROZEN_CONFIG_FILENAME
 EXISTING_RESULTS_DATASET="01K9B1MXD6V26S8BQH5CKY514C"  # best checkpoint is ace-aimip-train-rs3
 BEAKER_USERNAME=bhenn1983
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -19,7 +21,8 @@ python -m fme.ace.validate_config --config_type train $PRESSURE_LEVEL_CONFIG_PAT
 launch_job () {
 
     JOB_NAME=$1
-    shift 1
+    CONFIG_FILENAME=$2
+    shift 2
     OVERRIDE="$@"
 
     gantry run \
@@ -46,7 +49,7 @@ launch_job () {
         --budget ai2/climate \
         --system-python \
         --install "pip install --no-deps ." \
-        -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $PRESSURE_LEVEL_CONFIG_PATH --override $OVERRIDE
+        -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_FILENAME --override $OVERRIDE
 
 }
 
@@ -54,7 +57,7 @@ launch_job () {
 for SEED in 0 1 2 3; do
     JOB_NAME="${JOB_NAME_BASE}-RS${SEED}"
     OVERRIDE="seed=${SEED}"
-    launch_job $JOB_NAME $OVERRIDE
+    launch_job $JOB_NAME $PRESSURE_LEVEL_CONFIG_PATH $OVERRIDE
 done
 
 # same as above but smaller ensemble with downweighted q1/q2/q3/q4 to avoid overfitting
@@ -65,5 +68,12 @@ stepper.loss.weights.specific_total_water_1=0.1 \
 stepper.loss.weights.specific_total_water_2=0.25 \
 stepper.loss.weights.specific_total_water_3=0.5 \
 stepper.loss.weights.specific_total_water_4=0.5"
-    launch_job $JOB_NAME $OVERRIDE
+    launch_job $JOB_NAME $PRESSURE_LEVEL_CONFIG_PATH $OVERRIDE
+done
+
+# random seed ensemble of fine-tuning existing decoder to produce pressure level outputs, new weights only
+for SEED in 0 1; do
+    JOB_NAME="${JOB_NAME_BASE}-frozen-RS${SEED}"
+    OVERRIDE="seed=${SEED}"
+    launch_job $JOB_NAME $PRESSURE_LEVEL_FROZEN_CONFIG_PATH $OVERRIDE
 done
