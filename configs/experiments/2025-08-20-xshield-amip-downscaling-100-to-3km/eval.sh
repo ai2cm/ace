@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-new-unet-amp-hist-ckpt-disable-amp"
+JOB_NAME="eval-xshield-amip-100km-to-3km-new-unet-amp-lower-sigmin-decr-steps"
 CONFIG_FILENAME="config-generate-on-perfect-pred-global-hist-ckpt-conus.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=2
+NGPU=1
 
 #IMAGE with B200 pytorch installed
 IMAGE=annak/updated-unet-test #01JWJ96JMF89D812JS159VF37N
@@ -31,7 +31,7 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
-    --priority urgent \
+    --priority low \
     --preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
