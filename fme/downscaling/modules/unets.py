@@ -36,6 +36,7 @@ from physicsnemo.models.diffusion import (
 from physicsnemo.models.diffusion.utils import _recursive_property
 from physicsnemo.models.meta import ModelMetaData
 from physicsnemo.models.module import Module
+from torch.amp import autocast
 from torch.nn.functional import silu
 from torch.utils.checkpoint import checkpoint
 
@@ -281,7 +282,7 @@ class SongUNet(Module):
         use_apex_gn: bool = True,
         act: str = "silu",
         profile_mode: bool = False,
-        amp_mode: bool = False,
+        amp_mode: bool = True,
     ):
         valid_embedding_types = ["fourier", "positional", "zero"]
         if embedding_type not in valid_embedding_types:
@@ -522,12 +523,11 @@ class SongUNet(Module):
     )
 
     def forward(self, x, noise_labels, class_labels, augment_labels=None):
-        # with (
-        #     autocast(x.device.type, dtype=torch.bfloat16)
-        #     if x.device.type == "cuda"
-        #     else contextlib.nullcontext()
-        # ):
-        with contextlib.nullcontext():
+        with (
+            autocast(x.device.type, dtype=torch.bfloat16)
+            if x.device.type == "cuda"
+            else contextlib.nullcontext()
+        ):
             # Validate input shapes
             batch_size = x.shape[0]
 
