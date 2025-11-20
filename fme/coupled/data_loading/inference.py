@@ -13,8 +13,10 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.requirements import DataRequirements
 from fme.core.dataset.dummy import DummyDataset
+from fme.core.dataset.merged import MergedXarrayDataset
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import TimeSlice
+from fme.core.dataset.xarray import XarraySubset
 from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData
@@ -25,6 +27,8 @@ from fme.coupled.data_loading.data_typing import (
 )
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
+
+ComponentDatasetType = XarraySubset | MergedXarrayDataset
 
 
 @dataclasses.dataclass
@@ -89,8 +93,9 @@ class InferenceDataset(torch.utils.data.Dataset):
     ):
         ocean_reqs = requirements.ocean_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
-        ocean: torch.utils.data.Dataset
-        atmosphere: torch.utils.data.Dataset
+        ocean: ComponentDatasetType
+        atmosphere: ComponentDatasetType
+
         if config.dataset.ocean is not None:
             ocean, ocean_properties = config.dataset.ocean.build(
                 ocean_reqs.names, ocean_reqs.n_timesteps
@@ -128,6 +133,11 @@ class InferenceDataset(torch.utils.data.Dataset):
             self._start_indices = config.start_indices.as_indices(dataset.all_ic_times)
         else:
             self._start_indices = config.start_indices.as_indices()
+
+        self._dataset.validate_inference_length(
+            max_start_index=max(self._start_indices),
+            max_window_len=self._total_coupled_steps + 1,
+        )
 
     def _update_ocean_mask(
         self,
