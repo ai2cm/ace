@@ -6,13 +6,15 @@ JOB_NAME_BASE="ace-aimip-fine-tune-decoder-pressure-levels"
 JOB_GROUP="ace-aimip"
 PRESSURE_LEVEL_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-config.yaml"
 PRESSURE_LEVEL_LR_WARMUP_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-lr-warmup-config.yaml"
+PRESSURE_LEVEL_REWEIGHT_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-reweight-config.yaml"
 PRESSURE_LEVEL_FROZEN_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-frozen-config.yaml"
 PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-frozen-lr-warmup-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 PRESSURE_LEVEL_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_CONFIG_FILENAME
+PRESSURE_LEVEL_LR_WARMUP_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_LR_WARMUP_CONFIG_FILENAME
+PRESSURE_LEVEL_REWEIGHT_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_REWEIGHT_CONFIG_FILENAME
 PRESSURE_LEVEL_FROZEN_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_FROZEN_CONFIG_FILENAME
 PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_FILENAME
-PRESSURE_LEVEL_LR_WARMUP_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_LR_WARMUP_CONFIG_FILENAME
 EXISTING_RESULTS_DATASET="01K9B1MXD6V26S8BQH5CKY514C"  # best checkpoint is ace-aimip-train-rs3
 BEAKER_USERNAME=bhenn1983
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -80,6 +82,13 @@ stepper.loss.weights.specific_total_water_2=0.25 \
 stepper.loss.weights.specific_total_water_3=0.5 \
 stepper.loss.weights.specific_total_water_4=0.5"
     launch_job $JOB_NAME $PRESSURE_LEVEL_CONFIG_PATH $OVERRIDE
+done
+
+# fine tune with unfrozen decoder, but reweight (heavily downweight the fine-tuned variables)
+for SEED in 0 1; do
+    JOB_NAME="${JOB_NAME_BASE}-reweight-RS${SEED}"
+    OVERRIDE="seed=${SEED}"
+    launch_job $JOB_NAME $PRESSURE_LEVEL_REWEIGHT_CONFIG_PATH $OVERRIDE
 done
 
 # random seed ensemble of fine-tuning existing decoder to produce pressure level outputs, new weights only
