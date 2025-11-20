@@ -2,8 +2,11 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any
 
+from fme.ace.models.graphcast import GRAPHCAST_AVAIL
+from fme.ace.models.graphcast.main import GraphCast
 from fme.ace.models.ocean.m2lines.samudra import Samudra
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 
 
 @ModuleSelector.register("Samudra")
@@ -33,7 +36,7 @@ class SamudraBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ):
         return Samudra(
             input_channels=n_in_channels,
@@ -45,4 +48,47 @@ class SamudraBuilder(ModuleConfig):
             norm=self.norm,
             norm_kwargs=self.norm_kwargs,
             upscale_factor=self.upscale_factor,
+        )
+
+
+@ModuleSelector.register("FloeNet")
+@dataclasses.dataclass
+class FloeNetBuilder(ModuleConfig):
+    """
+    Configuration for the M2Lines FloeNet architecture.
+    """
+
+    latent_dimension: int = 256
+    activation: str = "SiLU"
+    meshes: int = 6
+    M0: int = 4
+    bias: bool = True
+    radius_fraction: float = 1.0
+    layernorm: bool = True
+    processor_steps: int = 4
+    residual: bool = True
+    is_ocean: bool = True
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+    ):
+        if not GRAPHCAST_AVAIL:
+            raise ImportError("GraphCast dependencies (trimesh, rtree) not available.")
+        return GraphCast(
+            input_channels=n_in_channels,
+            output_channels=n_out_channels,
+            dataset_info=dataset_info,
+            latent_dimension=self.latent_dimension,
+            activation=self.activation,
+            meshes=self.meshes,
+            M0=self.M0,
+            bias=self.bias,
+            radius_fraction=self.radius_fraction,
+            layernorm=self.layernorm,
+            processor_steps=self.processor_steps,
+            residual=self.residual,
+            is_ocean=self.is_ocean,
         )

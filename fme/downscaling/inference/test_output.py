@@ -5,7 +5,7 @@ import pytest
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.downscaling.data import ClosedInterval, DataLoaderConfig
-from fme.downscaling.generate.output import (
+from fme.downscaling.inference.output import (
     DownscalingOutput,
     DownscalingOutputConfig,
     EventConfig,
@@ -13,7 +13,7 @@ from fme.downscaling.generate.output import (
 )
 from fme.downscaling.predictors import PatchPredictionConfig
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.test_train import data_paths_helper
+from fme.downscaling.test_utils import data_paths_helper
 
 # Tests for OutputTargetConfig validation
 
@@ -98,8 +98,8 @@ def loader_config(tmp_path):
 def requirements():
     """Create DataRequirements for generation."""
     return DataRequirements(
-        coarse_names=["x", "y"],
-        fine_names=["x", "y"],
+        coarse_names=["var0", "var1"],
+        fine_names=["var0", "var1"],
         n_timesteps=1,
         use_fine_topography=True,
     )
@@ -122,7 +122,7 @@ def test_event_config_build_creates_output_target_with_single_time(
         name="test_event",
         event_time="2000-01-01T00:00:00",
         n_ens=4,
-        save_vars=["x", "y"],
+        save_vars=["var0", "var1"],
         lat_extent=ClosedInterval(2.0, 6.0),
         lon_extent=ClosedInterval(2.0, 6.0),
     )
@@ -132,7 +132,7 @@ def test_event_config_build_creates_output_target_with_single_time(
     # Verify OutputTarget was created
     assert isinstance(output_target, DownscalingOutput)
     assert output_target.name == "test_event"
-    assert output_target.save_vars == ["x", "y"]
+    assert output_target.save_vars == ["var0", "var1"]
     assert output_target.n_ens == 4
 
     # Verify time dimension - should have exactly 1 timestep
@@ -152,7 +152,7 @@ def test_region_config_build_creates_output_target_with_time_range(
         name="test_region",
         time_range=TimeSlice("2000-01-01T00:00:00", "2000-01-02T00:00:00"),
         n_ens=4,
-        save_vars=["x", "y"],
+        save_vars=["var0", "var1"],
     )
 
     output_target = config.build(loader_config, requirements, patch_config)
