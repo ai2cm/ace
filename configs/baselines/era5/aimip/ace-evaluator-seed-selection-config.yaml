@@ -19,7 +19,11 @@ loader:
       - '2005-01-01T00:00:00'
       - '2010-01-01T00:00:00'
   dataset:
-    data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+    merge:
+    - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+    - data_path: /climate-default/2025-11-10-era5-1deg-pressure-level-1940-2022
+      file_pattern: 2025-11-10-era5-1deg-pressure-level-1940-2022.zarr
+      engine: "zarr"
   num_data_workers: 4
 aggregator:
   log_zonal_mean_images: true
