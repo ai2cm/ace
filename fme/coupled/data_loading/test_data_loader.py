@@ -32,6 +32,7 @@ from fme.core.dataset.xarray import (
 from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
+from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
@@ -222,6 +223,7 @@ def create_coupled_data_on_disk(
     atmosphere_start_time_offset_from_ocean: int = 0,
     n_levels_ocean: int = 2,
     n_levels_atmosphere: int = 2,
+    ocean_timestep_size_in_days: int | None = None,
 ) -> MockCoupledData:
     """Create synthetic coupled ocean-atmosphere data on disk for testing.
 
@@ -247,15 +249,18 @@ def create_coupled_data_on_disk(
             1969-12-31 while ocean starts at 1970-01-01. Default is 0.
         n_levels_ocean: Number of ocean depth levels. Default is 2.
         n_levels_atmosphere: Number of atmosphere vertical levels. Default is 2.
+        ocean_timestep_size_in_days: The ocean timestep size, in days. If None, then
+            n_forward_times_ocean must evenly divide n_forward_times_atmosphere.
 
     Returns:
         MockCoupledData containing the created ocean and atmosphere datasets,
         along with paths to data and statistics files.
 
     Note:
-        The atmosphere timestep is fixed at 1 day. The ocean timestep is
-        automatically calculated as (n_forward_times_atmosphere / n_forward_times_ocean)
-        days to ensure the datasets span the same total time period.
+        The atmosphere timestep is fixed at 1 day. If not provided, the ocean
+        timestep is automatically calculated as
+        (n_forward_times_atmosphere / n_forward_times_ocean) days to ensure the
+        datasets span the same total time period.
 
     """
     np.random.seed(0)
@@ -263,7 +268,10 @@ def create_coupled_data_on_disk(
     ocean_dir = data_dir / "ocean"
     ocean_dir.mkdir()
     ocean_dim_sizes = {"time": n_forward_times_ocean + 1, "lat": N_LAT, "lon": N_LON}
-    ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
+    if ocean_timestep_size_in_days is None:
+        ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
+    else:
+        ocean_timestep_size = ocean_timestep_size_in_days
     if ocean_timestep_size != int(ocean_timestep_size):
         raise ValueError(
             "n_forward_times_atmosphere should be a multiple of n_forward_times_ocean."
@@ -471,7 +479,7 @@ def test_zarr_engine_used_false():
 
 def test_zarr_engine_used_true_inference():
     config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetConfig(
+        dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
             atmosphere=XarrayDataConfig(
                 data_path="atmos", file_pattern="data.zarr", engine="zarr"
@@ -484,7 +492,7 @@ def test_zarr_engine_used_true_inference():
 
 def test_zarr_engine_used_false_inference():
     config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetConfig(
+        dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
             atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
         ),
@@ -579,7 +587,7 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
 
     # test InferenceDataLoaderConfig
     inference_config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetConfig(
+        dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=ocean_config,
             atmosphere=atmos_config,
         ),
