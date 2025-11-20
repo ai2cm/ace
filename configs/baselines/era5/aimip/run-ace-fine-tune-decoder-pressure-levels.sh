@@ -5,10 +5,14 @@ set -e
 JOB_NAME_BASE="ace-aimip-fine-tune-decoder-pressure-levels"
 JOB_GROUP="ace-aimip"
 PRESSURE_LEVEL_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-config.yaml"
+PRESSURE_LEVEL_LR_WARMUP_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-lr-warmup-config.yaml"
 PRESSURE_LEVEL_FROZEN_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-frozen-config.yaml"
+PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-frozen-lr-warmup-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 PRESSURE_LEVEL_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_CONFIG_FILENAME
 PRESSURE_LEVEL_FROZEN_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_FROZEN_CONFIG_FILENAME
+PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_FILENAME
+PRESSURE_LEVEL_LR_WARMUP_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_LR_WARMUP_CONFIG_FILENAME
 EXISTING_RESULTS_DATASET="01K9B1MXD6V26S8BQH5CKY514C"  # best checkpoint is ace-aimip-train-rs3
 BEAKER_USERNAME=bhenn1983
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -60,6 +64,13 @@ for SEED in 0 1 2 3; do
     launch_job $JOB_NAME $PRESSURE_LEVEL_CONFIG_PATH $OVERRIDE
 done
 
+# same as above but with LR warmup
+for SEED in 0 1; do
+    JOB_NAME="${JOB_NAME_BASE}-lr-warmup-RS${SEED}"
+    OVERRIDE="seed=${SEED}"
+    launch_job $JOB_NAME $PRESSURE_LEVEL_LR_WARMUP_CONFIG_PATH $OVERRIDE
+done
+
 # same as above but smaller ensemble with downweighted q1/q2/q3/q4 to avoid overfitting
 for SEED in 0 1; do
     JOB_NAME="${JOB_NAME_BASE}-downweight-q-RS${SEED}"
@@ -76,4 +87,11 @@ for SEED in 0 1; do
     JOB_NAME="${JOB_NAME_BASE}-frozen-RS${SEED}"
     OVERRIDE="seed=${SEED}"
     launch_job $JOB_NAME $PRESSURE_LEVEL_FROZEN_CONFIG_PATH $OVERRIDE
+done
+
+# same as above but with LR warmup
+for SEED in 0 1; do
+    JOB_NAME="${JOB_NAME_BASE}-frozen-lr-warmup-RS${SEED}"
+    OVERRIDE="seed=${SEED}"
+    launch_job $JOB_NAME $PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_PATH $OVERRIDE
 done
