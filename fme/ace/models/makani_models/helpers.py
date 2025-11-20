@@ -31,9 +31,7 @@ def count_parameters(model, device):
 
             # make sure complex weight tensors are accounted for correctly
             pview = torch.view_as_real(p) if p.is_complex() else p
-            pstats = torch.tensor(
-                [pview.numel(), pview.nbytes], dtype=torch.long, device=device
-            )
+            pstats = torch.tensor([pview.numel(), pview.nbytes], dtype=torch.long, device=device)
             local_bytes += pview.nbytes
 
             # if the weight is split, then we need to reduce

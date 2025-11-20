@@ -13,31 +13,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import torch
 import torch.nn as nn
-from physicsnemo.distributed.mappings import (
-    copy_to_parallel_region,
-    gather_from_parallel_region,
-)
+
 from torch import amp
+
+from typing import Tuple, List, Optional
 
 # for spatial model-parallelism
 # from makani.utils import comm
 from fme.ace.utils import comm
-
+from physicsnemo.distributed.mappings import gather_from_parallel_region, copy_to_parallel_region
 
 # quadrature stuff
 # from makani.utils.grids import grid_to_quadrature_rule, GridQuadrature
 @torch.compile
-def _normalize_transform_kernel(
-    x: torch.Tensor,
-    mean: torch.Tensor,
-    var: torch.Tensor,
-    weight: torch.Tensor,
-    bias: torch.Tensor,
-    eps: float,
-) -> torch.Tensor:
+def _normalize_transform_kernel(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, eps: float) -> torch.Tensor:
+
     # normalization
     x = (x - mean) / torch.sqrt(var + eps)
 
@@ -48,19 +40,16 @@ def _normalize_transform_kernel(
 
 
 @torch.compile
-def _normalize_kernel(
-    x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor, eps: float
-) -> torch.Tensor:
+def _normalize_kernel(x: torch.Tensor, mean: torch.Tensor, var: torch.Tensor, eps: float) -> torch.Tensor:
+
     # normalization
     x = (x - mean) / torch.sqrt(var + eps)
 
     return x
 
-
 @torch.compile
-def _welford_kernel(
-    vars: torch.Tensor, means: torch.Tensor, counts: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def _welford_kernel(vars: torch.Tensor, means: torch.Tensor, counts: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
     # for weighted welford, replace counts by
     # omega = sum_i w_i, where w_i are the individual weights
 
@@ -75,15 +64,9 @@ def _welford_kernel(
     # use Welford's algorithm to accumulate them into a single mean and variance
     for i in range(1, means.shape[0]):
         delta = means[i, ...] - mean
-        m2 = (
-            m2
-            + m2s[i, ...]
-            + delta**2 * count * counts[i, ...] / (count + counts[i, ...])
-        )
+        m2 = m2 + m2s[i, ...] + delta**2 * count * counts[i, ...] / (count + counts[i, ...])
         if i == 1:
-            mean = (mean * count + means[i, ...] * counts[i, ...]) / (
-                count + counts[i, ...]
-            )
+            mean = (mean * count + means[i, ...] * counts[i, ...]) / (count + counts[i, ...])
         else:
             mean = mean + delta * counts[i, ...] / (count + counts[i, ...])
 
@@ -94,20 +77,16 @@ def _welford_kernel(
 
     return var, mean, count
 
-
-def distributed_welford_variance(
-    var: torch.Tensor, mean: torch.Tensor, count: torch.Tensor, group: str
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def distributed_welford_variance(var: torch.Tensor, mean: torch.Tensor, count: torch.Tensor, group: str) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Computes the statistics locally, then uses the Welford online algorithm to reduce them"""
+
     # concatenate:
     # this has the shape [3, 1, ...]
     var_mean_count = torch.stack([var, mean, count], dim=0).unsqueeze(1)
 
     # gather
     # this has the shape [3, spatial_size, ...], we split it up directly into individual tensors again
-    vars_means_counts = gather_from_parallel_region(
-        var_mean_count, dim=1, shapes=None, group=group
-    )
+    vars_means_counts = gather_from_parallel_region(var_mean_count, dim=1, shapes=None, group=group)
 
     # split up
     vars = vars_means_counts[0, ...]
@@ -118,7 +97,6 @@ def distributed_welford_variance(
     var, mean, count = _welford_kernel(vars, means, counts)
 
     return var, mean, count
-
 
 class DistributedInstanceNorm2d(nn.Module):
     """
@@ -136,8 +114,9 @@ class DistributedInstanceNorm2d(nn.Module):
             self.weight.is_shared_mp = ["spatial"]
             self.bias.is_shared_mp = ["spatial"]
 
-    def _stats_welford(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _stats_welford(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Computes the statistics locally, then uses the Welford online algorithm to reduce them"""
+
         # extract shapes
         B, C, H, W = x.shape
 
@@ -174,19 +153,11 @@ class DistributedInstanceNorm2d(nn.Module):
 
         # apply the normalization
         if self.affine:
-            x = _normalize_transform_kernel(
-                x,
-                mean,
-                var,
-                self.weight.reshape(-1, 1, 1),
-                self.bias.reshape(-1, 1, 1),
-                self.eps,
-            )
+            x = _normalize_transform_kernel(x, mean, var, self.weight.reshape(-1, 1, 1), self.bias.reshape(-1, 1, 1), self.eps)
         else:
             x = _normalize_kernel(x, mean, var, self.eps)
 
         return x
-
 
 class DistributedLayerNorm(nn.Module):
     """
@@ -195,27 +166,12 @@ class DistributedLayerNorm(nn.Module):
     point.
     """
 
-    def __init__(
-        self,
-        normalized_shape,
-        eps=1e-05,
-        elementwise_affine=True,
-        bias=True,
-        device=None,
-        dtype=None,
-    ):
+    def __init__(self, normalized_shape, eps=1e-05, elementwise_affine=True, bias=True, device=None, dtype=None):
         super().__init__()
 
         assert comm.get_size("matmul") == 1
 
-        self.norm = nn.LayerNorm(
-            normalized_shape,
-            eps=eps,
-            elementwise_affine=elementwise_affine,
-            bias=bias,
-            device=device,
-            dtype=dtype,
-        )
+        self.norm = nn.LayerNorm(normalized_shape, eps=eps, elementwise_affine=elementwise_affine, bias=bias, device=device, dtype=dtype)
 
         if elementwise_affine:
             # set up weight sharing and sharding

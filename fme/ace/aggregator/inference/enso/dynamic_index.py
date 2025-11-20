@@ -49,9 +49,7 @@ class LatLonRegion(Region):
         )
 
         dist = Distributed.get_instance()
-        self._regional_weights = self._regional_weights[
-            *dist.get_local_slices(self._regional_weights.shape)
-        ]
+        self._regional_weights = self._regional_weights[*dist.get_local_slices(self._regional_weights.shape)]
 
     @property
     def regional_weights(self) -> torch.Tensor:

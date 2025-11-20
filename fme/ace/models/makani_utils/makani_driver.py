@@ -1,23 +1,23 @@
+from typing import Optional, Dict
+from collections import OrderedDict
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
+import torch.distributed as dist
 
-from fme.ace.models.makani_utils.checkpoint_helpers import (
-    gather_model_state_dict,
-    prepend_prefix_to_state_dict,
-    scatter_model_state_dict,
-)
 from fme.ace.utils import comm
 
+from fme.ace.models.makani_utils.checkpoint_helpers import  gather_model_state_dict, prepend_prefix_to_state_dict, scatter_model_state_dict
 
 def _save_checkpoint_flexible(
     checkpoint_path: str,
     model: nn.Module,
-    loss: nn.Module | None = None,
-    optimizer: optim.Optimizer | None = None,
-    scheduler: lr_scheduler.LRScheduler | None = None,
-    counters: dict[str, int] | None = None,
+    loss: Optional[nn.Module] = None,
+    optimizer: Optional[optim.Optimizer] = None,
+    scheduler: Optional[lr_scheduler.LRScheduler] = None,
+    counters: Optional[Dict[str, int]] = None,
 ):
     # checkpoint name
     checkpoint_fname = checkpoint_path.format(mp_rank=0)
@@ -39,9 +39,7 @@ def _save_checkpoint_flexible(
 
     if optimizer is not None:
         if comm.get_size("model") > 1:
-            store_dict["optimizer_state_dict"] = gather_optimizer_state_dict(
-                model, optimizer
-            )
+            store_dict["optimizer_state_dict"] = gather_optimizer_state_dict(model, optimizer)
         else:
             store_dict["optimizer_state_dict"] = optimizer.state_dict()
 
@@ -58,14 +56,13 @@ def _save_checkpoint_flexible(
 
     return
 
-
 def _restore_checkpoint_flexible(
     checkpoint_path: str,
     model: nn.Module,
-    loss: nn.Module | None = None,
-    optimizer: optim.Optimizer | None = None,
-    scheduler: lr_scheduler.LRScheduler | None = None,
-    counters: dict[str, int] | None = None,
+    loss: Optional[nn.Module] = None,
+    optimizer: Optional[optim.Optimizer] = None,
+    scheduler: Optional[lr_scheduler.LRScheduler] = None,
+    counters: Optional[Dict[str, int]] = None,
     strict: bool = True,
 ):
     # when loading the weights in flexble mode we exclusively use mp_rank=0 and load them onto the cpu
@@ -92,9 +89,7 @@ def _restore_checkpoint_flexible(
     # If finetuning, restore checkpoint does not load optimizer state, instead uses config specified lr.
     if optimizer is not None:
         if comm.get_size("model") > 1:
-            checkpoint["optimizer_state_dict"] = scatter_optimizer_state_dict(
-                model, optimizer, checkpoint["optimizer_state_dict"]
-            )
+            checkpoint["optimizer_state_dict"] = scatter_optimizer_state_dict(model, optimizer, checkpoint["optimizer_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
     if scheduler is not None:
