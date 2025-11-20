@@ -7,7 +7,7 @@ from fme.ace.models.makani.sfnonet import (
 from fme.ace.models.modulus.sfnonet import SFNO, SphericalFourierNeuralOperatorNet
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.distributed import Distributed
-
+from fme.core.dataset_info import DatasetInfo
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
 # https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py#L292  # noqa: E501
@@ -53,14 +53,14 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
                 params=self,
                 in_chans=n_in_channels,
                 out_chans=n_out_channels,
-                img_shape=img_shape,
+                img_shape=dataset_info.img_shape,
             )
         else:
             sfno_net = SphericalFourierNeuralOperatorNet(
                 params=self,
                 in_chans=n_in_channels,
                 out_chans=n_out_channels,
-                img_shape=img_shape,
+                img_shape=dataset_info.img_shape,
             )
 
         return sfno_net

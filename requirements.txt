@@ -9,7 +9,6 @@ moviepy
 netcdf4
 numpy
 nvidia-physicsnemo
-nvidia-physicsnemo
 omegaconf>=2.1.0
 pandas
 plotly
@@ -21,3 +20,4 @@ torch>=2
 wandb[media]>=0.19.0
 xarray
 zarr>=3
+crc32c
