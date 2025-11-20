@@ -27,7 +27,8 @@ model:
   predict_residual: true
   sigma_max: 150.0
   sigma_min: 0.002
-  use_fine_topography: true
+  static_inputs:
+    - HGTsfc
 optimization:
   lr: 0.0001
   optimizer_type: Adam
