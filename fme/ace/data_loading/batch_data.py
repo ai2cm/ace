@@ -248,7 +248,6 @@ class BatchData:
         samples: Sequence[tuple[TensorMapping, xr.DataArray, set[str]]],
         sample_dim_name: str = "sample",
         horizontal_dims: list[str] | None = None,
-        n_ensemble: int = 1,
     ) -> "BatchData":
         sample_data, sample_times, sample_labels = zip(*samples)
         batch_data = default_collate(sample_data)
@@ -258,7 +257,6 @@ class BatchData:
             time=batch_time,
             labels=list(sample_labels),
             horizontal_dims=horizontal_dims,
-            n_ensemble=n_ensemble,
         )
 
     def compute_derived_variables(
@@ -412,7 +410,7 @@ class PairedData:
     def target(self) -> TensorMapping:
         return {k: v for k, v in self.reference.items() if k in self.prediction}
 
-    def ensemble_data(self) -> tuple[EnsembleTensorDict, EnsembleTensorDict]:
+    def broadcast_ensemble(self) -> tuple[EnsembleTensorDict, EnsembleTensorDict]:
         """
         Add an explicit ensemble dimension to a data tensor dict.
 
@@ -420,7 +418,7 @@ class PairedData:
             The tensor dict with an explicit ensemble dimension.
         """
         return (
-            unfold_ensemble_dim(TensorDict(self.reference), n_ensemble=self.n_ensemble),
+            unfold_ensemble_dim(TensorDict(self.reference), n_ensemble=1),
             unfold_ensemble_dim(
                 TensorDict(self.prediction), n_ensemble=self.n_ensemble
             ),

@@ -139,7 +139,6 @@ class InferenceEvaluatorAggregatorConfig:
     log_global_mean_norm_time_series: bool = True
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
-    log_nino34_index: bool = True
 
     def build(
         self,
@@ -183,7 +182,6 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean_reference_data=time_mean,
             record_step_20=record_step_20,
             channel_mean_names=channel_mean_names,
-            log_nino34_index=self.log_nino34_index,
             normalize=normalize,
             save_diagnostics=save_diagnostics,
             n_ensemble_per_ic=n_ensemble_per_ic,
@@ -400,28 +398,23 @@ class InferenceEvaluatorAggregator(
             )
 
         if self.n_ensemble_per_ic > 1:
-            self._summary_aggregators = {
-                name: agg
-                for name, agg in list(self._aggregators.items())
+            summary_aggregators_list = (
+                list(self._aggregators.items())
                 + list(self._time_dependent_aggregators.items())
                 + list(self._ensemble_aggregators.items())
-                if name not in ["mean", "mean_norm"]
-            }
+            )
         else:
-            self._summary_aggregators = {
-                name: agg
-                for name, agg in list(self._aggregators.items())
-                + list(self._time_dependent_aggregators.items())
-                if name not in ["mean", "mean_norm"]
-            }
+            summary_aggregators_list = list(self._aggregators.items()) + list(
+                self._time_dependent_aggregators.items()
+            )
+
+        self._summary_aggregators = {
+            name: agg
+            for name, agg in summary_aggregators_list
+            if name not in ["mean", "mean_norm"]
+        }
         self._n_timesteps_seen = 0
         self._normalize = normalize
-        print("self._summary_aggregators", list(self._summary_aggregators.keys()))
-        if self.n_ensemble_per_ic > 1:
-            print(
-                "list(self._ensemble_aggregators.items())",
-                self._ensemble_aggregators["ensemble_step_20"],
-            )
 
     @property
     def log_time_series(self) -> bool:
@@ -448,7 +441,7 @@ class InferenceEvaluatorAggregator(
                 i_time_start=self._n_timesteps_seen,
             )
         if self.n_ensemble_per_ic > 1:
-            unfolded_target_data, unfolded_prediction_data = data.ensemble_data()
+            unfolded_target_data, unfolded_prediction_data = data.broadcast_ensemble()
             for ensemble_aggregator in self._ensemble_aggregators.values():
                 ensemble_aggregator.record_batch(
                     target_data=unfolded_target_data,
@@ -530,10 +523,6 @@ class InferenceEvaluatorAggregator(
             logs.update(time_dependent_aggregator.get_logs(label=name))
         if self.n_ensemble_per_ic > 1:
             for name, ensemble_aggregator in self._ensemble_aggregators.items():
-                print(
-                    "ensemble_aggregator.get_logs(label=name)",
-                    ensemble_aggregator.get_logs(label=name),
-                )
                 logs.update(ensemble_aggregator.get_logs(label=name))
         return logs
 

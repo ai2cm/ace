@@ -3,7 +3,7 @@ import torch
 
 from fme.ace.aggregator.one_step.ensemble import (
     CRPSMetric,
-    EnsembleMeanMetric,
+    EnsembleMeanRMSEMetric,
     SSRBiasMetric,
 )
 
@@ -82,7 +82,7 @@ def test_ssr_bias_metric_doubled_spread(n_sample):
 def test_ensemble_mean_metric(n_sample):
     # this simple check only works for even n_sample
     torch.manual_seed(0)
-    metric = EnsembleMeanMetric()
+    metric = EnsembleMeanRMSEMetric()
     n_batch = 5000
     n_time = 3
     n_y = 4

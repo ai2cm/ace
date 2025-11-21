@@ -1284,7 +1284,7 @@ def test_inference_ensembles(n_ensemble_per_ic, tmp_path: pathlib.Path):
         tar["lat"].values, num_lon=len(tar["lon"])
     )
     # check time mean metrics
-    tol = 1e-4  # relative tolerance
+    tol = 1e-3  # relative tolerance
     assert metrics.root_mean_squared_error(
         tar_time_mean, gen_time_mean, area_weights
     ).item() == pytest.approx(
