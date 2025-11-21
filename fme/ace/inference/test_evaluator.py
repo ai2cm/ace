@@ -1308,16 +1308,6 @@ def test_inference_ensembles(n_ensemble_per_ic, tmp_path: pathlib.Path):
         gen_i = torch.from_numpy(gen.isel(time=i).values)
         tar_i = torch.from_numpy(tar.isel(time=i).values)
         # check that manually computed metrics match logged metrics
-        print("log weighted_rmse/var", log["inference/mean/weighted_rmse/var"])
-        print(
-            "tar_i, gen_i, area_weights", tar_i.shape, gen_i.shape, area_weights.shape
-        )
-        print(
-            "metrics truth",
-            metrics.root_mean_squared_error(
-                tar_i, gen_i, area_weights, dim=(0, -2, -1)
-            ),
-        )
         assert metrics.root_mean_squared_error(
             tar_i, gen_i, area_weights, dim=(0, -2, -1)
         ).item() == pytest.approx(log["inference/mean/weighted_rmse/var"], rel=tol)
