@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-full-field"
-CONFIG_FILENAME="train-no-residual.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-residual-interp-nearest"
+CONFIG_FILENAME="train.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
