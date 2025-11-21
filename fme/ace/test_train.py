@@ -224,6 +224,7 @@ def _get_test_yaml_files(
             ),
             n_forward_steps=inference_forward_steps,
             forward_steps_in_memory=2,
+            n_ensemble_per_ic=2,
         )
         weather_evaluation_config = WeatherEvaluationConfig(
             aggregator=InferenceEvaluatorAggregatorConfig(
