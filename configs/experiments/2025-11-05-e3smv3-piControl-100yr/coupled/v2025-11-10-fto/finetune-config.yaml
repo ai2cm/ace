@@ -4,7 +4,7 @@ save_best_inference_epoch_checkpoints: true
 checkpoint_every_n_batches: 100
 log_train_every_n_batches: 10
 validate_using_ema: true
-evaluate_before_training: false
+evaluate_before_training: true
 ema:
   decay: 0.999
 max_epochs: 20
