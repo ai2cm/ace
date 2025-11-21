@@ -252,12 +252,15 @@ def compute_zonal_power_spectrum(tensor: torch.Tensor) -> torch.Tensor:
     return power.mean(dim=-2)
 
 
-def interpolate(tensor: torch.Tensor, scale_factor: int, mode='bicubic') -> torch.Tensor:
+def interpolate(
+    tensor: torch.Tensor, scale_factor: int, mode="bicubic"
+) -> torch.Tensor:
+    align_corners = False if mode == "nearest" else True
     return torch.nn.functional.interpolate(
         tensor,
         scale_factor=[scale_factor, scale_factor],
         mode=mode,
-        align_corners=True,
+        align_corners=align_corners,
     )
 
 
