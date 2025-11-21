@@ -49,8 +49,8 @@ run_training() {
     "${extra_args[@]}" \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
-
-run_training "train-era5-extrapolate-1step.yaml" "train-era5-extrapolate-1step"
-run_training "train-combined-extrapolate-1step.yaml" "train-combined-extrapolate-1step"
-run_training "train-era5-infill-1step.yaml" "train-era5-infill-1step"
-run_training "train-combined-infill-1step.yaml" "train-combined-infill-1step"
+run_training "train-era5-extrapolate-1step_test.yaml" "train-era5-extrapolate-1step-test"
+#run_training "train-era5-extrapolate-1step.yaml" "train-era5-extrapolate-1step"
+#run_training "train-combined-extrapolate-1step.yaml" "train-combined-extrapolate-1step"
+#run_training "train-era5-infill-1step.yaml" "train-era5-infill-1step"
+#run_training "train-combined-infill-1step.yaml" "train-combined-infill-1step"
