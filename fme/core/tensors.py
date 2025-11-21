@@ -127,8 +127,10 @@ def repeat_interleave_batch_dim(data: TensorMapping, repeats: int) -> TensorDict
     if repeats == 1:
         return dict(data)  # no-op
     return {
-        k: v.unsqueeze(1).expand(-1, repeats, *v.shape[1:]).reshape(-1, *v.shape[1:])
-        for k, v in data.items()  # view-only, no copy
+        k: v.unsqueeze(1)
+        .repeat(1, repeats, *(1 for _ in v.shape[1:]))
+        .reshape(-1, *v.shape[1:])
+        for k, v in data.items()
     }
 
 
