@@ -1,3 +1,4 @@
+from .inference import Downscaler, InferenceConfig, main
 from .output import (
     DownscalingOutput,
     DownscalingOutputConfig,
@@ -6,6 +7,9 @@ from .output import (
 )
 
 __all__ = [
+    "Downscaler",
+    "InferenceConfig",
+    "main",
     "DownscalingOutput",
     "DownscalingOutputConfig",
     "EventConfig",

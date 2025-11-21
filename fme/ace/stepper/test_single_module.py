@@ -86,75 +86,6 @@ INSOLATION_CONFIG = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_VALUE)
 DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig(insolation=INSOLATION_CONFIG)
 EMPTY_DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig()
 
-LOAD_STEPPER_TESTS = {
-    "override-ocean": (
-        None,
-        None,
-        EMPTY_DERIVED_FORCINGS_CONFIG,
-        OCEAN_CONFIG,
-        "keep",
-        "keep",
-        OCEAN_CONFIG,
-        None,
-        EMPTY_DERIVED_FORCINGS_CONFIG,
-    ),
-    "persist-ocean": (
-        OCEAN_CONFIG,
-        None,
-        EMPTY_DERIVED_FORCINGS_CONFIG,
-        "keep",
-        "keep",
-        "keep",
-        OCEAN_CONFIG,
-        None,
-        EMPTY_DERIVED_FORCINGS_CONFIG,
-    ),
-    "override-multi-call": (
-        None,
-        None,
-        EMPTY_DERIVED_FORCINGS_CONFIG,
-        "keep",
-        MULTI_CALL_CONFIG,
-        "keep",
-        None,
-        MULTI_CALL_CONFIG,
-        EMPTY_DERIVED_FORCINGS_CONFIG,
-    ),
-    "persist-multi-call": (
-        None,
-        MULTI_CALL_CONFIG,
-        EMPTY_DERIVED_FORCINGS_CONFIG,
-        "keep",
-        "keep",
-        "keep",
-        None,
-        MULTI_CALL_CONFIG,
-        EMPTY_DERIVED_FORCINGS_CONFIG,
-    ),
-    "override-all": (
-        None,
-        None,
-        EMPTY_DERIVED_FORCINGS_CONFIG,
-        OCEAN_CONFIG,
-        MULTI_CALL_CONFIG,
-        DERIVED_FORCINGS_CONFIG,
-        OCEAN_CONFIG,
-        MULTI_CALL_CONFIG,
-        DERIVED_FORCINGS_CONFIG,
-    ),
-    "persist-all": (
-        OCEAN_CONFIG,
-        MULTI_CALL_CONFIG,
-        DERIVED_FORCINGS_CONFIG,
-        "keep",
-        "keep",
-        "keep",
-        OCEAN_CONFIG,
-        MULTI_CALL_CONFIG,
-        DERIVED_FORCINGS_CONFIG,
-    ),
-}
-
 
 def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
     data_dict = {}
@@ -1298,6 +1229,76 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         assert stepper.normalizer.stds == full_field_stds
 
 
+LOAD_STEPPER_TESTS = {
+    "override-ocean": (
+        None,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        OCEAN_CONFIG,
+        "keep",
+        "keep",
+        OCEAN_CONFIG,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
+    "persist-ocean": (
+        OCEAN_CONFIG,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        "keep",
+        "keep",
+        "keep",
+        OCEAN_CONFIG,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
+    "override-multi-call": (
+        None,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        "keep",
+        MULTI_CALL_CONFIG,
+        "keep",
+        None,
+        MULTI_CALL_CONFIG,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
+    "persist-multi-call": (
+        None,
+        MULTI_CALL_CONFIG,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        "keep",
+        "keep",
+        "keep",
+        None,
+        MULTI_CALL_CONFIG,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
+    "override-all": (
+        None,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+    ),
+    "persist-all": (
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+        "keep",
+        "keep",
+        "keep",
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+    ),
+}
+
+
 @pytest.mark.parametrize(
     (
         "serialized_ocean_config",
@@ -1324,7 +1325,10 @@ def test_load_stepper_and_load_stepper_config(
     expected_ocean_config: OceanConfig | None,
     expected_multi_call_config: MultiCallConfig | None,
     expected_derived_forcings_config: DerivedForcingsConfig,
+    very_fast_only: bool,
 ):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     in_names = ["co2", "var", "a", "b"]
     fluxes = ["ULWRFtoa"]
     out_names = ["var", "a"] + fluxes

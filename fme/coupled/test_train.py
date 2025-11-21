@@ -53,12 +53,8 @@ inference:
     dataset:
       ocean:
         data_path: {ocean_data_path}
-        subset:
-            start_time: '1970-01-01'
       atmosphere:
         data_path: {atmosphere_data_path}
-        subset:
-            start_time: '1970-01-01'
     start_indices:
       times:
         - '1970-01-01T00:00:00'
@@ -163,12 +159,8 @@ loader:
   dataset:
     ocean:
       data_path: {ocean_data_path}
-      subset:
-          start_time: '1970-01-01'
     atmosphere:
       data_path: {atmosphere_data_path}
-      subset:
-          start_time: '1970-01-01'
   start_indices:
     times:
       - '1970-01-01T00:00:00'

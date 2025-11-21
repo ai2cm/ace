@@ -297,7 +297,7 @@ class SliceWorkItemGriddedData:
     all_times: xr.CFTimeIndex
     dtype: torch.dtype
     max_output_shape: tuple[int, ...]
-    topography: Topography | None
+    topography: Topography
 
     # TODO: currently no protocol or ABC for gridded data objects
     #       if we want to unify, we will need one and just raise
@@ -310,7 +310,7 @@ class SliceWorkItemGriddedData:
 
         return SizedMap(on_device, self._loader)
 
-    def get_generator(self) -> Iterator[tuple[LoadedSliceWorkItem, Topography | None]]:
+    def get_generator(self) -> Iterator[tuple[LoadedSliceWorkItem, Topography]]:
         work_item: LoadedSliceWorkItem
         for work_item in self.loader:
             yield work_item, self.topography
