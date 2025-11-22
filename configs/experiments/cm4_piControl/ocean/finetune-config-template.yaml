@@ -1,0 +1,98 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 20
+n_forward_steps: 4
+inference:
+  n_forward_steps: 1440
+  forward_steps_in_memory: 40
+  loader:
+    start_indices:
+      times:
+        - '0151-01-03T12:00:00'
+        - '0171-01-03T12:00:00'
+        - '0191-01-03T12:00:00'
+        - '0211-01-03T12:00:00'
+        - '0231-01-03T12:00:00'
+        - '0251-01-03T12:00:00'
+        - '0271-01-03T12:00:00'
+        - '0291-01-03T12:00:00'
+    dataset:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
+          engine: zarr
+    num_data_workers: 4
+  aggregator:
+    log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 2
+  time_buffer: 10
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0151-01-03T12:00:00' # earlier times nan
+          stop_time: '0305-12-29T12:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
+        engine: zarr
+        subset:
+          start_time: '0151-01-03T12:00:00' # earlier times nan
+          stop_time: '0305-12-29T12:00:00'
+validation_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 2
+  time_buffer: 10
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0306-01-03T12:00:00'
+          stop_time: '0311-01-03T12:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
+        engine: zarr
+        subset:
+          start_time: '0306-01-03T12:00:00'
+          stop_time: '0311-01-03T12:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 3000
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [3000]
+stepper:
+  parameter_init:
+    weights_path: /ckpt.tar

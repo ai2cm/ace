@@ -40,6 +40,7 @@ train_loader:
   batch_size: 16
   num_data_workers: 4
   prefetch_factor: 2
+  time_buffer: 10
   dataset:
     merge:
       - data_path: /climate-default
@@ -58,6 +59,7 @@ validation_loader:
   batch_size: 16
   num_data_workers: 4
   prefetch_factor: 2
+  time_buffer: 10
   dataset:
     merge:
       - data_path: /climate-default
