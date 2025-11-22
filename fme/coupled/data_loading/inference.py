@@ -18,7 +18,6 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarraySubset
 from fme.core.distributed import Distributed
-from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.data_typing import (
@@ -58,17 +57,6 @@ class InferenceDataLoaderConfig:
         self._zarr_engine_used = any(
             ds.zarr_engine_used for ds in self.dataset.data_configs if ds is not None
         )
-        # issue warning if subset is used in the atmosphere dataset
-        if self.dataset.atmosphere.subset != Slice(None, None, None):
-            raise ValueError(
-                "'subset' cannot be used in the atmosphere dataset during inference."
-            )
-        if self.dataset.ocean is not None and self.dataset.ocean.subset != Slice(
-            None, None, None
-        ):
-            raise ValueError(
-                "'subset' cannot be used in the ocean dataset during inference."
-            )
 
     @property
     def zarr_engine_used(self) -> bool:
