@@ -127,6 +127,7 @@ optimization:
   scheduler:
     type: CosineAnnealingLR
     step_each_iteration: true
+    T_max: 14140
 stepper:
   parameter_init:
     checkpoint_path: /ckpt.tar
