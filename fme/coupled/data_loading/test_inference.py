@@ -57,7 +57,6 @@ def _setup(
     return dataset
 
 
-_N_STEPS = 2  # number of inference rollout steps
 _N_ICS = 2  # number of initial conditions
 _IC_INDICES = [0, 2]
 # these three are equivalent:
@@ -69,7 +68,7 @@ _IC_RANGE = InferenceInitialConditionIndices(
 
 
 @pytest.mark.parametrize("start_indices", [_EXPLICIT_INDICES, _TIMESTAMPS, _IC_RANGE])
-@pytest.mark.parametrize("atmos_ic_time_offset", [0, 3])
+@pytest.mark.parametrize("atmos_ic_time_offset", [0, 3, 2])
 def test_inference_dataset(
     tmp_path,
     start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList,
@@ -81,6 +80,8 @@ def test_inference_dataset(
     _N_FORWARD_ATMOS = _N_FORWARD_OCEAN * _N_ATMOS_PER_OCEAN
     _OCEAN_NAME = "bar"
     _ATMOS_NAME = "foo"
+
+    _N_STEPS = 2  # number of inference rollout steps
 
     def _check_batch(
         batch: CoupledBatchData,
@@ -144,3 +145,76 @@ def test_inference_dataset(
         start_indices=start_indices,
     )
     _check_batch(dataset[0], mock_data, atmos_ic_time_offset)
+
+
+@pytest.mark.parametrize(
+    "start_indices,err_msg",
+    [
+        (_TIMESTAMPS, "were not found in the time index"),
+        (_EXPLICIT_INDICES, "ocean dataset has an insufficient number of timepoints"),
+        (_IC_RANGE, "ocean dataset has an insufficient number of timepoints"),
+    ],
+)
+def test_validate_inference_length_ocean(
+    tmp_path,
+    start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList,
+    err_msg: str,
+):
+    # ocean has too few steps
+    _N_FORWARD_OCEAN = 5
+    _N_ATMOS_PER_OCEAN = 3
+    _N_FORWARD_ATMOS = _N_FORWARD_OCEAN * _N_ATMOS_PER_OCEAN
+    _OCEAN_NAME = "bar"
+    _ATMOS_NAME = "foo"
+    mock_data = create_coupled_data_on_disk(
+        tmp_path,
+        n_forward_times_ocean=_N_FORWARD_OCEAN,
+        n_forward_times_atmosphere=_N_FORWARD_ATMOS,
+        ocean_names=[_OCEAN_NAME],
+        atmosphere_names=[_ATMOS_NAME],
+        atmosphere_start_time_offset_from_ocean=2,
+    )
+
+    _N_STEPS = 4
+
+    with pytest.raises(ValueError, match=rf".*{err_msg}.*"):
+        _ = _setup(
+            mock_data,
+            total_coupled_steps=_N_STEPS,
+            start_indices=start_indices,
+        )
+
+
+@pytest.mark.parametrize(
+    "start_indices",
+    [_TIMESTAMPS, _EXPLICIT_INDICES, _IC_RANGE],
+)
+def test_validate_inference_length_atmos(
+    tmp_path,
+    start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList,
+):
+    # atmos has too few steps
+    _N_FORWARD_ATMOS = 6
+    _N_FORWARD_OCEAN = 6
+    _OCEAN_TIMESTEP_SIZE = 2  # days
+    _OCEAN_NAME = "bar"
+    _ATMOS_NAME = "foo"
+    mock_data = create_coupled_data_on_disk(
+        tmp_path,
+        n_forward_times_ocean=_N_FORWARD_OCEAN,
+        n_forward_times_atmosphere=_N_FORWARD_ATMOS,
+        ocean_names=[_OCEAN_NAME],
+        atmosphere_names=[_ATMOS_NAME],
+        atmosphere_start_time_offset_from_ocean=0,
+        ocean_timestep_size_in_days=_OCEAN_TIMESTEP_SIZE,
+    )
+
+    _N_STEPS = 2
+    _MSG = "atmosphere dataset has an insufficient number of timepoints"
+
+    with pytest.raises(ValueError, match=rf".*{_MSG}.*"):
+        _ = _setup(
+            mock_data,
+            total_coupled_steps=_N_STEPS,
+            start_indices=start_indices,
+        )
