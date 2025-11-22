@@ -6,7 +6,7 @@ set -x
 export WANDB_NAME=PM-AMIP-EAMv3-spatial-parallelism-1x4-batch-fix-train-rs1
 export WANDB_RUN_GROUP=2025-04-01-AMIP-EAMv3
 
-export COMMIT=6799a9284
+export COMMIT=b7f45d2b0
 
 # directories for input data (training, validation, inference, stats)
 export FME_TRAIN_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1deg/traindata
@@ -16,7 +16,7 @@ export FME_STATS_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1d
 # if resuming a failed job, provide its slurm job ID below and uncomment;
 # note that information entered above should be consistent with that of
 # the failed job
-# export RESUME_JOB_ID=12345678
+export RESUME_JOB_ID=45451769
 
 # user should not need to modify below
 
