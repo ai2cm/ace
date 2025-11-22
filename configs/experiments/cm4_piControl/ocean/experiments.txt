@@ -15,3 +15,5 @@ cm4_piControl_nosmooth-nfs4-150ep_wu2xLR|rs1|01KA5DKPY1DG29JDHH4W9S0TGT|training
 cm4_piControl_nosmooth-nfs4-150ep_2xLR|rs0|01KA9YQQP8Q2HF79V0VQKJ79XT|training|best_inference_ckpt|normal|--not-preemptible
 
 cm4_piControl_nosmooth-nfs4-150ep_2xLR|rs1|01KA9YR6SRTD2GTC50YGWZRPGS|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_piControl_nosmooth-nfs4-150ep_2xLR|rs0|01KAN19EPQWNTXKGCNGGDRMX25|training|best_inference_ckpt|normal|--not-preemptible
