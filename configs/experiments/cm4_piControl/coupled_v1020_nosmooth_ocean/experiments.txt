@@ -21,3 +21,5 @@ fto-sfno-v1020_nosmooth_ocean-resume_rgo9bb2s||01KAMZ0BFHT4ANYBVKH3KDN9X3|traini
 fto-sfno-v1020_nosmooth_ocean-resume_rgo9bb2s|||training|best_inference_ckpt|normal|--not-preemptible
 
 fto-sfno-v1020_nosmooth_ocean-resume_rgo9bb2s||01KANAE9GGF8ZZEJHXRHA7CVFA|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_fto-sfno-v1020_nosmooth_ocean-csdyye6l||01KANAJ970BWS3KAC1NVC26GFV|training|best_inference_ckpt|normal|--not-preemptible
