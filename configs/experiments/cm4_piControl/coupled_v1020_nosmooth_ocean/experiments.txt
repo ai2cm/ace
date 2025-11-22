@@ -13,3 +13,5 @@ ft_fto-sfno-v1020_nosmooth_ocean|rgo9bb2s_best_inf_ckpt|01KAA3251MACRJATSZY9H15W
 fto-sfno-v1020_nosmooth_ocean_o0hceo06_xyx8vraf|best_ocn_inf_ep101|01KAD4FC5Y7HWS8R7ZXR54N0V2|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_fto-sfno-v1020_nosmooth_ocean-csdyye6l_ckpt_ep2-wuLR||01KAEKFEPE0B3NH3YJBAJ06YTQ|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_fto-sfno-v1020_nosmooth_ocean-csdyye6l||01KAMY5QNMEEMDGZBQZQC3SZC4|training|best_inference_ckpt|normal|--not-preemptible
