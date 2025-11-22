@@ -11,6 +11,7 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.typing_ import TensorDict
 
@@ -170,8 +171,8 @@ class CoupledDatasetItem:
 class CoupledDataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        ocean: torch.utils.data.Dataset,
-        atmosphere: torch.utils.data.Dataset,
+        ocean: DatasetABC,
+        atmosphere: DatasetABC,
         properties: CoupledDatasetProperties,
         n_steps_fast: int,
     ):
@@ -239,3 +240,21 @@ class CoupledDataset(torch.utils.data.Dataset):
         ocean = self._ocean[idx]
         atmosphere = self._atmosphere[fast_idx]
         return CoupledDatasetItem(ocean=ocean, atmosphere=atmosphere)
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        try:
+            self._ocean.validate_inference_length(max_start_index, max_window_len)
+        except ValueError as e:
+            raise ValueError(
+                "The ocean dataset has an insufficient number of timepoints."
+            ) from e
+        atmos_max_start_index = max_start_index * self.n_steps_fast
+        atmos_max_window_len = (max_window_len - 1) * self.n_steps_fast + 1
+        try:
+            self._atmosphere.validate_inference_length(
+                atmos_max_start_index, atmos_max_window_len
+            )
+        except ValueError as e:
+            raise ValueError(
+                "The atmosphere dataset has an insufficient number of timepoints."
+            ) from e

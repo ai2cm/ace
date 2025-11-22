@@ -276,11 +276,11 @@ cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
 	--end-date "0351-01-01T00:00:00"
 
 create_ocean_data_proc_env:
-	conda create -y -n ocean_data_proc python=3.10 pip yq
-	conda install -y -n ocean_data_proc -c conda-forge xesmf
-	conda run --no-capture-output -n ocean_data_proc python -m pip install uv
-	conda run --no-capture-output -n ocean_data_proc uv pip install -r requirements-ocean.txt
-	conda run --no-capture-output -n ocean_data_proc bash ./install_ocean_emulators.sh
+	conda create -y -n ocean_preprocess python=3.11 pip yq
+	conda install -y -n ocean_preprocess -c conda-forge xesmf
+	conda run --no-capture-output -n ocean_preprocess python -m pip install uv
+	conda run --no-capture-output -n ocean_preprocess uv pip install -r requirements-ocean.txt
+	conda run --no-capture-output -n ocean_preprocess bash ./install_ocean_emulators.sh
 
 .PHONY: cm4_trial_run_ocean_dataset_and_stats
 cm4_trial_run_ocean_dataset_and_stats:
