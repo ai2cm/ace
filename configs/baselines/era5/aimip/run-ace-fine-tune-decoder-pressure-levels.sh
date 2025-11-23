@@ -117,7 +117,7 @@ for SEED in 0 1; do
 done
 
 # same as above but with LR warmup
-for SEED in 0 1; do
+for SEED in 0 1 2 3; do
     JOB_NAME="${JOB_NAME_BASE}-separate-decoder-lr-warmup-RS${SEED}"
     OVERRIDE="seed=${SEED}"
     launch_job $JOB_NAME $PRESSURE_LEVEL_SEPARATE_DECODER_LR_WARMUP_CONFIG_PATH $OVERRIDE
