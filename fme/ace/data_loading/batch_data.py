@@ -11,7 +11,11 @@ from torch.utils.data import default_collate
 
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
-from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
+from fme.core.tensors import (
+    remove_initial_condition_copies,
+    repeat_interleave_batch_dim,
+    unfold_ensemble_dim,
+)
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
@@ -419,7 +423,9 @@ class PairedData:
             The tensor dict with an explicit ensemble dimension.
         """
         return (
-            unfold_ensemble_dim(TensorDict(self.reference), n_ensemble=1),
+            remove_initial_condition_copies(
+                TensorDict(self.reference), n_ensemble=self.n_ensemble
+            ),
             unfold_ensemble_dim(
                 TensorDict(self.prediction), n_ensemble=self.n_ensemble
             ),
