@@ -1,7 +1,7 @@
 group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|ocean_results_dataset|atmos_results_dataset
 
-fto-1pctCO2_0256to0350-ewbpxamu_qkj0w2hd|rs0|ace-samudra-cm4|ewbpxamu|ace2-cm4-atmos-noLSM|qkj0w2hd|train|high|8||800GiB|3||seed=0|
-fto-1pctCO2_0256to0350-c0fmwhnn_qkj0w2hd|rs0|ace-samudra-cm4|c0fmwhnn|ace2-cm4-atmos-noLSM|qkj0w2hd|train|high|8||800GiB|3||seed=0|
-fto-1pctCO2_0256to0350-ewbpxamu_5px50tqj|rs0|ace-samudra-cm4|ewbpxamu|ace2-cm4-atmos-noLSM|5px50tqj|wait|high|8||800GiB|3||seed=0|
-fto-1pctCO2_0256to0350-c0fmwhnn_5px50tqj|rs0|ace-samudra-cm4|c0fmwhnn|ace2-cm4-atmos-noLSM|5px50tqj|wait|high|8||800GiB|3||seed=0|
+fto-1pctCO2_0256to0350-ewbpxamu_qkj0w2hd|rs0|ace-samudra-cm4|ewbpxamu|best_inference_ckpt|ace2-cm4-atmos-noLSM|qkj0w2hd|best_inference_ckpt|train|high|8||800GiB|3||seed=0|
+fto-1pctCO2_0256to0350-c0fmwhnn_qkj0w2hd|rs0|ace-samudra-cm4|c0fmwhnn|best_inference_ckpt|ace2-cm4-atmos-noLSM|qkj0w2hd|best_inference_ckpt|train|high|8||800GiB|3||seed=0|
+fto-1pctCO2_0256to0350-ewbpxamu_5px50tqj|rs0|ace-samudra-cm4|ewbpxamu|best_inference_ckpt|ace2-cm4-atmos-noLSM|5px50tqj|best_inference_ckpt|wait|high|8||800GiB|3||seed=0|
+fto-1pctCO2_0256to0350-c0fmwhnn_5px50tqj|rs0|ace-samudra-cm4|c0fmwhnn|best_inference_ckpt|ace2-cm4-atmos-noLSM|5px50tqj|best_inference_ckpt|wait|high|8||800GiB|3||seed=0|
 
