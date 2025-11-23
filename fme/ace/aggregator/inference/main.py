@@ -252,8 +252,7 @@ class InferenceEvaluatorAggregator(
         self._channel_mean_names = channel_mean_names
         self._aggregators: dict[str, _EvaluatorAggregator] = {}
         self.n_ensemble_per_ic = n_ensemble_per_ic
-        if n_ensemble_per_ic > 1:
-            self._ensemble_aggregators: dict[str, _EvaluatorEnsembleAggregator] = {}
+        self._ensemble_aggregators: dict[str, _EvaluatorEnsembleAggregator] = {}
         self._time_dependent_aggregators: dict[
             str, _TimeDependentEvaluatorAggregator
         ] = {}
@@ -293,15 +292,14 @@ class InferenceEvaluatorAggregator(
                 target="norm",
                 channel_mean_names=self._channel_mean_names,
             )
-            if n_ensemble_per_ic > 1:
-                self._ensemble_aggregators["ensemble_step_20"] = (
-                    get_one_step_ensemble_aggregator(
-                        gridded_operations=ops,
-                        target_time=20,
-                        log_mean_maps=False,
-                        metadata=dataset_info.variable_metadata,
-                    )
+            self._ensemble_aggregators["ensemble_step_20"] = (
+                get_one_step_ensemble_aggregator(
+                    gridded_operations=ops,
+                    target_time=20,
+                    log_mean_maps=False,
+                    metadata=dataset_info.variable_metadata,
                 )
+            )
         try:
             self._aggregators["power_spectrum"] = (
                 PairedSphericalPowerSpectrumAggregator(
@@ -397,24 +395,9 @@ class InferenceEvaluatorAggregator(
                 )
             )
 
-        if self.n_ensemble_per_ic > 1:
-            summary_aggregators_list = (
-                list(self._aggregators.items())
-                + list(self._time_dependent_aggregators.items())
-                + list(self._ensemble_aggregators.items())
-            )
-        else:
-            summary_aggregators_list = list(self._aggregators.items()) + list(
-                self._time_dependent_aggregators.items()
-            )
-
-        self._summary_aggregators = {
-            name: agg
-            for name, agg in summary_aggregators_list
-            if name not in ["mean", "mean_norm"]
-        }
         self._n_timesteps_seen = 0
         self._normalize = normalize
+        self._seen_ensemble = False
 
     @property
     def log_time_series(self) -> bool:
@@ -440,14 +423,16 @@ class InferenceEvaluatorAggregator(
                 gen_data_norm=gen_data_norm,
                 i_time_start=self._n_timesteps_seen,
             )
-        if self.n_ensemble_per_ic > 1:
+        if data.n_ensemble > 1:
             unfolded_target_data, unfolded_prediction_data = data.broadcast_ensemble()
+            unfolded_target_data = unfolded_target_data
             for ensemble_aggregator in self._ensemble_aggregators.values():
                 ensemble_aggregator.record_batch(
                     target_data=unfolded_target_data,
                     gen_data=unfolded_prediction_data,
                     i_time_start=self._n_timesteps_seen,
                 )
+            self._seen_ensemble = True
 
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
@@ -502,6 +487,23 @@ class InferenceEvaluatorAggregator(
 
     def get_summary_logs(self) -> InferenceLog:
         logs = {}
+
+        if self._seen_ensemble:
+            summary_aggregators_list = (
+                list(self._aggregators.items())
+                + list(self._time_dependent_aggregators.items())
+                + list(self._ensemble_aggregators.items())
+            )
+        else:
+            summary_aggregators_list = list(self._aggregators.items()) + list(
+                self._time_dependent_aggregators.items()
+            )
+        self._summary_aggregators = {
+            name: agg
+            for name, agg in summary_aggregators_list
+            if name not in ["mean", "mean_norm"]
+        }
+
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
