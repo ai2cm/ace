@@ -25,3 +25,5 @@ ft_smooth_piControl-wu2xLR|484ss1vq-rs0|01KAN1CMGA7MQJ65ATXEGCNFDX|training|best
 ft_smooth_piControl-wu2xLR|41qhptht-rs0|01KAN1D6E844TDJ6659Z3CRW9N|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_smooth_piControl-wu2xLR|484ss1vq-rs0|01KAQKQ0QWGWX973N47APPEN5V|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_smooth_piControl-wu2xLR|41qhptht-rs0|01KAQKQA716Y9D4MNE289S94MC|training|best_inference_ckpt|normal|--not-preemptible
