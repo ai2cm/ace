@@ -16,3 +16,5 @@ ft_fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt-inc-timeout||01KAMCR3772Y3W85P2MJ
 ft_fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt-inc-timeout-no-eval-before||01KAT6W3DNXT8QE4N6V42TPG8R|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt-timeout-fix-no-eval-before||01KAVQYD6MZG328W64ARP03PP9|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt-inc-timeout-no-eval-before-train||01KAT6W3DNXT8QE4N6V42TPG8R|run_ICx1|best_inference_ckpt|high|--not-preemptible||01KATR905GS41AJHT0NX04V5NR||
