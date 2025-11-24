@@ -66,7 +66,7 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 128 #128 on 8 gpu
+  batch_size: 36 #128 on 8 gpu
   num_data_workers: 4 #8
   fine:
   - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
