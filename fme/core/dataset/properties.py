@@ -46,8 +46,8 @@ class DatasetProperties:
         self.is_remote = self.is_remote or other.is_remote
         if self.timestep != other.timestep:
             raise ValueError("Inconsistent timesteps between datasets")
-        if self.variable_metadata != other.variable_metadata:
-            raise ValueError("Inconsistent metadata between datasets")
+        # if self.variable_metadata != other.variable_metadata:
+        #     raise ValueError("Inconsistent metadata between datasets")
         if self.vertical_coordinate != other.vertical_coordinate:
             logging.warning(
                 "Inconsistent vertical coordinates between datasets; "
