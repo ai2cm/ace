@@ -530,7 +530,7 @@ def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_err
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
     if raises_error:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"No batches in dataloader.*"):
             get_gridded_data(config, True, requirements)  # type: ignore
     else:
         get_gridded_data(config, True, requirements)  # type: ignore
@@ -720,7 +720,7 @@ def test_TimestampList_as_indices(timestamps, expected_indices):
     )
     timestamp_list = TimestampList(timestamps)
     if expected_indices is None:
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match=r".*were not found in the time index.*"):
             timestamp_list.as_indices(time_index)
     else:
         np.testing.assert_equal(

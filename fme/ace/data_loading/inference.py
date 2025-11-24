@@ -43,7 +43,13 @@ class TimestampList:
             )
             for t in self.times
         ]
-        return np.array([time_index.get_loc(dt) for dt in datetimes])
+        try:
+            return np.array([time_index.get_loc(dt) for dt in datetimes])
+        except KeyError as e:
+            missing = [str(dt) for dt in datetimes if dt not in time_index]
+            raise ValueError(
+                f"Timestamps {missing} were not found in the time index."
+            ) from e
 
     @property
     def n_initial_conditions(self) -> int:

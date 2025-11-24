@@ -951,6 +951,9 @@ class XarraySubset(DatasetABC):
         self._dataset = torch.utils.data.Subset(dataset, indices)
         self._sample_start_times = dataset.sample_start_times[indices]
         self._sample_n_times = dataset.sample_n_times
+        self._max_timestep_index: int | None = None
+        if len(indices) > 0 and np.all(indices[:-1] <= indices[1:]):
+            self._max_timestep_index = indices[-1] + dataset.sample_n_times - 1
         self.dims = dataset.dims
 
     def __len__(self):
@@ -977,7 +980,17 @@ class XarraySubset(DatasetABC):
         )
 
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
-        raise ValueError("XarraySubset does not support inference.")
+        if self._max_timestep_index is None:
+            raise ValueError(
+                "XarraySubset that does not preserve time ordering of the data "
+                "cannot be used for inference."
+            )
+        if max_start_index + max_window_len - 1 > self._max_timestep_index:
+            raise ValueError(
+                f"The maximum start index {max_start_index} plus forward steps "
+                f"{max_window_len - 1} must be less than or equal to the "
+                f"max timestep index in the dataset {self._max_timestep_index}."
+            )
 
     @property
     def properties(self) -> DatasetProperties:

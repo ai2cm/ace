@@ -1,0 +1,7 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+ft_smooth_piControl-wu1p5xLR|484ss1vq-rs0|ace-samudra-cm4|484ss1vq|best_inference_ckpt|train|high|a100+h100|2|200GiB|3||seed=0 optimization.lr=0.00015 max_epochs=150
+ft_smooth_piControl-wu1p5xLR|41qhptht-rs0|ace-samudra-cm4|41qhptht|best_inference_ckpt|train|high|a100+h100|2|200GiB|3||seed=0 optimization.lr=0.00015 max_epochs=150
+
+ft_smooth_piControl-wu1xLR|484ss1vq-rs0|ace-samudra-cm4|484ss1vq|best_inference_ckpt|train|high|a100+h100|2|200GiB|3||seed=0 optimization.lr=0.0001 max_epochs=150
+ft_smooth_piControl-wu1xLR|41qhptht-rs0|ace-samudra-cm4|41qhptht|best_inference_ckpt|train|high|a100+h100|2|200GiB|3||seed=0 optimization.lr=0.0001 max_epochs=150
