@@ -24,7 +24,6 @@ inference:
       data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
       labels: ["era5"]
     num_data_workers: 4
-    prefetch_factor: 2
   aggregator:
     log_histograms: true
     time_mean_reference_data: /statsdata/time-mean.nc
