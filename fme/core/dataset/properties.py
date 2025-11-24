@@ -1,6 +1,11 @@
 import datetime
+import logging
 
-from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
+from fme.core.coordinates import (
+    HorizontalCoordinates,
+    NullVerticalCoordinate,
+    VerticalCoordinate,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.mask_provider import MaskProvider
@@ -44,7 +49,11 @@ class DatasetProperties:
         if self.variable_metadata != other.variable_metadata:
             raise ValueError("Inconsistent metadata between datasets")
         if self.vertical_coordinate != other.vertical_coordinate:
-            raise ValueError("Inconsistent vertical coordinates between datasets")
+            logging.warning(
+                "Inconsistent vertical coordinates between datasets; "
+                "setting to NullVerticalCoordinate"
+            )
+            self.vertical_coordinate = NullVerticalCoordinate()
         if self.horizontal_coordinates != other.horizontal_coordinates:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
         if self.mask_provider != other.mask_provider:
