@@ -2,6 +2,7 @@ import contextlib
 import logging
 import os
 from collections.abc import Callable, Iterator
+from datetime import timedelta
 
 import torch.distributed
 from torch.nn import SyncBatchNorm
@@ -89,7 +90,7 @@ class Distributed:
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
             if using_gpu():
                 torch.distributed.init_process_group(
-                    backend="nccl", init_method="env://"
+                    backend="nccl", init_method="env://", timeout=timedelta(minutes=20)
                 )
             else:
                 torch.distributed.init_process_group(

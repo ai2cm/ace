@@ -3,7 +3,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 150
+max_epochs: 20
 n_forward_steps: 4
 inference:
   n_forward_steps: 1440
@@ -77,12 +77,25 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.0002
+  lr: 0.0001
   optimizer_type: AdamW
   kwargs:
     fused: true
     weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 3000
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [3000]
 stepper:
+  parameter_init:
+    weights_path: /ckpt.tar
   loss:
     type: MSE
   input_masking:
