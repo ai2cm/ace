@@ -33,10 +33,10 @@ model:
   num_diffusion_generation_steps: 18
   churn: 0.0
   p_mean: -1.2
-  p_std: 1.8
+  p_std: 1.1
   predict_residual: true
   sigma_max: 150.0
-  sigma_min: 0.008
+  sigma_min: 0.006
   use_fine_topography: true
 optimization:
   lr: 0.0001
