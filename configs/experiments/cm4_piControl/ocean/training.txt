@@ -1,0 +1,3 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+cm4_piControl_nosmooth-nfs4-150ep_2xLR|rs0|train|high|a100+h100|2|200GiB|0||seed=0 ema_checkpoint_save_epochs.step=10
+cm4_piControl_nosmooth-nfs4-150ep_2xLR|rs1|train|high|a100+h100|2|200GiB|0||seed=1 ema_checkpoint_save_epochs.step=10

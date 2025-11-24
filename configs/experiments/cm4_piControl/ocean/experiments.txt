@@ -1,0 +1,17 @@
+group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
+
+cm4_piControl_nosmooth-nfs4-150ep_wu3xLR|rs0|01K9XPZAK68HZ1YRC29VZSQ97W|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_piControl_nosmooth-nfs4-150ep_wu3xLR|rs1|01K9XPZSCV14842Y5SC3JJYPE1|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_piControl_nosmooth-nfs4-150ep_wu2p5xLR|rs0|01KA2TV2QMW8B02JEQ9WEJXQZ4|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_piControl_nosmooth-nfs4-150ep_wu2p5xLR|rs1|01KA2TVJB939EYX4Y00KE54BJ6|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_piControl_nosmooth-nfs4-150ep_wu2xLR|rs0|01KA5DK8EVH9ZEPPWY26DY6TFS|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_piControl_nosmooth-nfs4-150ep_wu2xLR|rs1|01KA5DKPY1DG29JDHH4W9S0TGT|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_piControl_nosmooth-nfs4-150ep_2xLR|rs0|01KA9YQQP8Q2HF79V0VQKJ79XT|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_piControl_nosmooth-nfs4-150ep_2xLR|rs1|01KA9YR6SRTD2GTC50YGWZRPGS|training|best_inference_ckpt|normal|--not-preemptible
