@@ -127,8 +127,10 @@ def repeat_interleave_batch_dim(data: TensorMapping, repeats: int) -> TensorDict
     if repeats == 1:
         return dict(data)  # no-op
     return {
-        k: v.unsqueeze(1).expand(-1, repeats, *v.shape[1:]).reshape(-1, *v.shape[1:])
-        for k, v in data.items()  # view-only, no copy
+        k: v.unsqueeze(1)
+        .repeat(1, repeats, *(1 for _ in v.shape[1:]))
+        .reshape(-1, *v.shape[1:])
+        for k, v in data.items()
     }
 
 
@@ -153,3 +155,26 @@ def unfold_ensemble_dim(d: TensorDict, n_ensemble: int) -> EnsembleTensorDict:
             for k, v in d.items()
         }
     )
+
+
+def remove_initial_condition_copies(
+    d: TensorDict, n_ensemble: int
+) -> EnsembleTensorDict:
+    """
+    Take a tensor dict with a batch/sample dimension and unfold it into an
+    explicit ensemble dimension but remove the copies of the initial condition.
+
+    Args:
+        d: The tensor dict to unfold.
+        n_ensemble: The number of ensemble members.
+
+    Returns:
+        The unfolded ensemble tensor dict.
+    """
+    data = EnsembleTensorDict(
+        {
+            k: v.reshape(v.shape[0] // n_ensemble, n_ensemble, *v.shape[1:])
+            for k, v in d.items()
+        }
+    )
+    return EnsembleTensorDict({k: v[:, 0:1, :] for k, v in data.items()})

@@ -17,9 +17,10 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
 )
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
+from ..one_step.ensemble import get_one_step_ensemble_aggregator
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
 from .enso import (
@@ -75,12 +76,13 @@ class _EvaluatorAggregator(Protocol):
     def get_dataset(self) -> xr.Dataset: ...
 
 
-class _TimeDependentAggregator(Protocol):
+class _EvaluatorEnsembleAggregator(Protocol):
     @torch.no_grad()
     def record_batch(
         self,
-        time: xr.DataArray,
-        data: TensorMapping,
+        target_data: EnsembleTensorDict,
+        gen_data: EnsembleTensorDict,
+        i_time_start: int = 0,
     ): ...
 
     @torch.no_grad()
@@ -137,7 +139,6 @@ class InferenceEvaluatorAggregatorConfig:
     log_global_mean_norm_time_series: bool = True
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
-    log_nino34_index: bool = True
 
     def build(
         self,
@@ -149,6 +150,7 @@ class InferenceEvaluatorAggregatorConfig:
         record_step_20: bool = False,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
     ) -> "InferenceEvaluatorAggregator":
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
@@ -180,9 +182,9 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean_reference_data=time_mean,
             record_step_20=record_step_20,
             channel_mean_names=channel_mean_names,
-            log_nino34_index=self.log_nino34_index,
             normalize=normalize,
             save_diagnostics=save_diagnostics,
+            n_ensemble_per_ic=n_ensemble_per_ic,
         )
 
 
@@ -216,6 +218,7 @@ class InferenceEvaluatorAggregator(
         channel_mean_names: Sequence[str] | None = None,
         log_nino34_index: bool = True,
         save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
     ):
         """
         Args:
@@ -242,11 +245,14 @@ class InferenceEvaluatorAggregator(
                 provided, all available variables will be used.
             log_nino34_index: Whether to log the Nino34 index.
             save_diagnostics: Whether to save reduced diagnostics to disk.
+            n_ensemble_per_ic: Number of ensemble members per initial condition.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
         self._channel_mean_names = channel_mean_names
         self._aggregators: dict[str, _EvaluatorAggregator] = {}
+        self.n_ensemble_per_ic = n_ensemble_per_ic
+        self._ensemble_aggregators: dict[str, _EvaluatorEnsembleAggregator] = {}
         self._time_dependent_aggregators: dict[
             str, _TimeDependentEvaluatorAggregator
         ] = {}
@@ -285,6 +291,14 @@ class InferenceEvaluatorAggregator(
                 target_time=20,
                 target="norm",
                 channel_mean_names=self._channel_mean_names,
+            )
+            self._ensemble_aggregators["ensemble_step_20"] = (
+                get_one_step_ensemble_aggregator(
+                    gridded_operations=ops,
+                    target_time=20,
+                    log_mean_maps=False,
+                    metadata=dataset_info.variable_metadata,
+                )
             )
         try:
             self._aggregators["power_spectrum"] = (
@@ -380,14 +394,10 @@ class InferenceEvaluatorAggregator(
                     variable_metadata=dataset_info.variable_metadata,
                 )
             )
-        self._summary_aggregators = {
-            name: agg
-            for name, agg in list(self._aggregators.items())
-            + list(self._time_dependent_aggregators.items())
-            if name not in ["mean", "mean_norm"]
-        }
+
         self._n_timesteps_seen = 0
         self._normalize = normalize
+        self._seen_ensemble = False
 
     @property
     def log_time_series(self) -> bool:
@@ -413,6 +423,17 @@ class InferenceEvaluatorAggregator(
                 gen_data_norm=gen_data_norm,
                 i_time_start=self._n_timesteps_seen,
             )
+        if data.n_ensemble > 1:
+            unfolded_target_data, unfolded_prediction_data = data.broadcast_ensemble()
+            unfolded_target_data = unfolded_target_data
+            for ensemble_aggregator in self._ensemble_aggregators.values():
+                ensemble_aggregator.record_batch(
+                    target_data=unfolded_target_data,
+                    gen_data=unfolded_prediction_data,
+                    i_time_start=self._n_timesteps_seen,
+                )
+            self._seen_ensemble = True
+
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
                 time=data.time,
@@ -466,6 +487,23 @@ class InferenceEvaluatorAggregator(
 
     def get_summary_logs(self) -> InferenceLog:
         logs = {}
+
+        if self._seen_ensemble:
+            summary_aggregators_list = (
+                list(self._aggregators.items())
+                + list(self._time_dependent_aggregators.items())
+                + list(self._ensemble_aggregators.items())
+            )
+        else:
+            summary_aggregators_list = list(self._aggregators.items()) + list(
+                self._time_dependent_aggregators.items()
+            )
+        self._summary_aggregators = {
+            name: agg
+            for name, agg in summary_aggregators_list
+            if name not in ["mean", "mean_norm"]
+        }
+
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
@@ -485,6 +523,9 @@ class InferenceEvaluatorAggregator(
             logs.update(aggregator.get_logs(label=name))
         for name, time_dependent_aggregator in self._time_dependent_aggregators.items():
             logs.update(time_dependent_aggregator.get_logs(label=name))
+        if self.n_ensemble_per_ic > 1:
+            for name, ensemble_aggregator in self._ensemble_aggregators.items():
+                logs.update(ensemble_aggregator.get_logs(label=name))
         return logs
 
     @torch.no_grad()

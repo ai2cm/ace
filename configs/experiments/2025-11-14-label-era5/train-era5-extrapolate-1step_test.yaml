@@ -46,33 +46,7 @@ train_loader:
         labels: ["era5"]
         subset:
           start_time: '1979-01-01T00:00:00'
-          stop_time: '1986-03-31T18:00:00'
-      - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-        labels: ["era5"]
-        subset:
-          start_time: '1986-04-01T00:00:00'
-          stop_time: '1993-07-31T18:00:00'
-      - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-        labels: ["era5"]
-        subset:
-          start_time: '1993-08-01T00:00:00'
-          stop_time: '1998-12-31'
-      # - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0001
-      #   labels: ["c96-shield"]
-      #   subset:
-      #     start_time: '1979-01-01'
-      #     stop_time: '2020-12-31'
-      # - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
-      #   labels: ["c96-shield"]
-      #   subset:
-      #     start_time: '1979-01-01'
-      #     stop_time: '2020-12-31'
-      # - data_path: /climate-default
-      #   labels: ["x-shield"]
-      #   file_pattern: 2025-08-08-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
-      #   engine: zarr
-      #   subset:
-      #     stop_time: '2022-12-31'
+          stop_time: '1981-03-31T18:00:00'
 validation_loader:
   batch_size: 32
   num_data_workers: 4
