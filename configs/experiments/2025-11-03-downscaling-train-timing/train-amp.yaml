@@ -36,7 +36,7 @@ model:
   p_std: 1.8
   predict_residual: true
   sigma_max: 150.0
-  sigma_min: 0.002
+  sigma_min: 0.008
   use_fine_topography: true
 optimization:
   lr: 0.0001
@@ -45,8 +45,8 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 160
-  batch_size: 12
+  sample_with_replacement: 320
+  batch_size: 48
   num_data_workers: 8
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -92,8 +92,8 @@ validation_data:
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 3
-validate_interval: 3
+max_epochs: 300
+validate_interval: 30
 experiment_dir: /results
 save_checkpoints: true
 logging:
