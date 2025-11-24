@@ -17,6 +17,11 @@ FINE_TUNED_SEED_CHECKPOINT_IDS=("01KA2F5J9768HR54369MKEHYB4"\
 FINE_TUNED_DOWNWEIGHTED_Q_CHECKPOINT_IDS=("01KA6NPGEQQRSZN9FF128FKJEZ"\
   "01KAF36CX46JWBZHNZYX2S7C3R" \
 )
+FINE_TUNED_SEPARATE_DECODER_CHECKPOINT_IDS=("01KAKXY0EK24K7BZK2N8SPJ5SJ"\
+  "01KAVVAKANNYY096MYCGSZ7RMQ" \
+  "01KAVVGKY28P5N1VA883C63EBY" \
+  "01KAVVN8YPPB3P6ZSD0BGCCVX7"
+)
 CONFIG_FILENAME="ace-evaluator-seed-selection-single-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -84,4 +89,11 @@ for  (( i=0; i<${#FINE_TUNED_DOWNWEIGHTED_Q_CHECKPOINT_IDS[@]}; i++ )); do
     JOB_NAME="$JOB_NAME_BASE-RS3-pressure-level-fine-tuned-downweighted-q-RS$i"
     echo "Launching job for fine-tuned with downweighted q seed $i checkpoint ID: ${FINE_TUNED_DOWNWEIGHTED_Q_CHECKPOINT_IDS[$i]}"
     launch_job "$JOB_NAME" "${FINE_TUNED_DOWNWEIGHTED_Q_CHECKPOINT_IDS[$i]}"
+done
+
+# fine-tuned with separate decoder
+for  (( i=0; i<${#FINE_TUNED_SEPARATE_DECODER_CHECKPOINT_IDS[@]}; i++ )); do
+    JOB_NAME="$JOB_NAME_BASE-RS3-pressure-level-fine-tuned-separate-decoder-RS$i"
+    echo "Launching job for fine-tuned with separate decoder seed $i checkpoint ID: ${FINE_TUNED_SEPARATE_DECODER_CHECKPOINT_IDS[$i]}"
+    launch_job "$JOB_NAME" "${FINE_TUNED_SEPARATE_DECODER_CHECKPOINT_IDS[$i]}"
 done
