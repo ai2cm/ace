@@ -531,7 +531,9 @@ class TestDataWriter:
             assert ds.attrs["title"] == "ACE monthly mean predictions data file"
             assert ds.attrs["source.inference_version"] == "1.0"
 
-        with xr.open_dataset(tmp_path / "test_region.zarr") as ds:
+        with xr.open_dataset(
+            tmp_path / "test_region.zarr", decode_timedelta=False
+        ) as ds:
             assert "pressure" in ds
             assert "temp" not in ds
             assert ds.pressure.shape == (n_samples, n_timesteps, 2, 3)

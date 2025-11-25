@@ -5,7 +5,7 @@ import pytest
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.downscaling.data import ClosedInterval, DataLoaderConfig
-from fme.downscaling.generate.output import (
+from fme.downscaling.inference.output import (
     DownscalingOutput,
     DownscalingOutputConfig,
     EventConfig,

@@ -110,14 +110,14 @@ logging:
   entity: ai2cm
 train_loader:
   dataset:
-    - data_path: '{train_data_path}'
-      spatial_dimensions: latlon
+    data_path: '{train_data_path}'
+    spatial_dimensions: latlon
   batch_size: 2
   num_data_workers: 0
 validation_loader:
   dataset:
-    - data_path: '{valid_data_path}'
-      spatial_dimensions: latlon
+    data_path: '{valid_data_path}'
+    spatial_dimensions: latlon
   batch_size: 2
   num_data_workers: 0
 optimization:

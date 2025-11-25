@@ -62,11 +62,14 @@ class OceanStandardNameMapping(StandardDimMapping):
     sea_ice_volume: str = "sea_ice_volume"
     land_fraction: str = "land_fraction"
     wetmask: str = "wetmask"
-    ocean_layer_thickness: str = "layer_thickness"
     cell_area: str = "areacello"
     surface_mask: str = "mask_2d"
     sea_surface_fraction: str = "sea_surface_fraction"
     sea_floor_depth: str = "deptho"
+    # e3sm-specific names
+    ocean_layer_thickness: str = "layer_thickness"
+    sea_surface_height: str = "ssh"
+    wetmask_reference_variable: str = "sea_water_potential_temperature"
 
     def __post_init__(self):
         self.full_field_dims = [self.longitude_dim, self.latitude_dim, self.time_dim]
@@ -198,6 +201,15 @@ class DaskConfig:
 
 
 @dataclasses.dataclass
+class SpatialFilterConfig:
+    """Configuration for spatial filtering."""
+
+    filter_scale: int = 18
+    exclude_from_filtering: list = dataclasses.field(default_factory=list)
+    enabled: bool = False
+
+
+@dataclasses.dataclass
 class OceanDatasetComputationConfig:
     """Configuration of computation details for an FME reference dataset.
 
@@ -243,12 +255,17 @@ class OceanDatasetComputationConfig:
     )
     ocean_dataset_nc_files: str = ""
     ocean_dataset_monthly_layer_thickness_files: str = ""
+    ocean_dataset_monthly_depth_file: str = ""
     compute_e3sm_surface_downward_heat_flux: bool = False
     ice_dataset_nc_files: str = ""
+    ocean_vertical_target_layer_levels: list = dataclasses.field(default_factory=list)
     ocean_vertical_target_interface_levels: list = dataclasses.field(
         default_factory=list
     )
     shift_timestamps_to_avg_interval_midpoint: bool = False
+    spatial_filter: SpatialFilterConfig = dataclasses.field(
+        default_factory=SpatialFilterConfig
+    )
 
     def rename(self, ds: xr.Dataset):
         return _rename(ds, self.renaming)
@@ -488,15 +505,16 @@ def compute_lazy_dataset(
         ds[varname_x] = x_rotated.astype(np.float32)
         ds[varname_y] = y_rotated.astype(np.float32)
 
-    # spatial filtering, exluding surface fractions
-    unfiltered_vars = [
-        var for var in ocean_names.unfiltered_vars if var in ds.data_vars
-    ]
-    if len(unfiltered_vars) > 0:
+    if config.spatial_filter.enabled:
+        # spatial filtering, exluding surface fractions
+        unfiltered_vars = [
+            var for var in ocean_names.unfiltered_vars if var in ds.data_vars
+        ] + config.spatial_filter.exclude_from_filtering
         ds_unfiltered = ds[unfiltered_vars]
         ds_filtered = spatially_filter(
             ds.drop_vars(unfiltered_vars),
             ds[ocean_names.wetmask],
+            filter_scale=config.spatial_filter.filter_scale,
             depth_dim=vdim,
             y_dim=lat_dim,
             x_dim=lon_dim,

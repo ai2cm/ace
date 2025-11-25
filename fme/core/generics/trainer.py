@@ -298,7 +298,11 @@ class Trainer:
                 self._start_epoch + self.config.segment_epochs, self.config.max_epochs
             )
 
-        if self.config.evaluate_before_training and self._epochs_trained == 0:
+        if (
+            self.config.evaluate_before_training
+            and self._epochs_trained == 0
+            and self._current_epoch_num_batches_seen == 0
+        ):
             logging.info("Starting validation before training")
             valid_logs = self.validate_one_epoch()
             if self._epochs_trained in inference_epochs:

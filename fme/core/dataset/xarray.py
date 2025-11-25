@@ -36,6 +36,7 @@ from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
 from .data_typing import VariableMetadata
+from .dataset import DatasetABC
 from .utils import (
     as_broadcasted_tensor,
     get_horizontal_coordinates,
@@ -496,11 +497,14 @@ class XarrayDataConfig(DatasetConfigABC):
         if self.engine == "zarr":
             self.zarr_engine_used = True
 
+    def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
+        self.subset = subset
+
     def build(
         self,
         names: Sequence[str],
         n_timesteps: int,
-    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+    ) -> tuple["XarraySubset", DatasetProperties]:
         return get_xarray_dataset(
             self,
             list(names),
@@ -508,7 +512,7 @@ class XarrayDataConfig(DatasetConfigABC):
         )
 
 
-class XarrayDataset(torch.utils.data.Dataset):
+class XarrayDataset(DatasetABC):
     """Load data from a directory of files matching a pattern using xarray. The
     number of contiguous timesteps to load for each sample is specified by the
     n_timesteps argument.
@@ -536,7 +540,7 @@ class XarrayDataset(torch.utils.data.Dataset):
                 f"No files found matching '{self.path}/{self.file_pattern}'."
             )
         self.full_paths = self._raw_paths * config.n_repeats
-        self.sample_n_times = n_timesteps
+        self._sample_n_times = n_timesteps
         self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
             self.full_paths[0],
@@ -676,8 +680,8 @@ class XarrayDataset(torch.utils.data.Dataset):
 
         cum_num_timesteps = _get_cumulative_timesteps(time_coord)
         self.start_indices = cum_num_timesteps[:-1]
-        self.total_timesteps = cum_num_timesteps[-1]
-        self._n_initial_conditions = self.total_timesteps - self.sample_n_times + 1
+        self._total_timesteps = cum_num_timesteps[-1]
+        self._n_initial_conditions = self._total_timesteps - self.sample_n_times + 1
         self._sample_start_times = xr.CFTimeIndex(
             np.concatenate(time_coord)[: self._n_initial_conditions]
         )
@@ -778,6 +782,11 @@ class XarrayDataset(torch.utils.data.Dataset):
         """Return cftime index corresponding to start time of each sample."""
         return self._sample_start_times
 
+    @property
+    def sample_n_times(self) -> int:
+        """The length of the time dimension of each sample."""
+        return self._sample_n_times
+
     def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
         """Return a sample of data spanning the timesteps
         [idx, idx + self.sample_n_times).
@@ -791,6 +800,14 @@ class XarrayDataset(torch.utils.data.Dataset):
         """
         time_slice = slice(idx, idx + self.sample_n_times)
         return self.get_sample_by_time_slice(time_slice)
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        if max_window_len + max_start_index > self._total_timesteps:
+            raise ValueError(
+                f"The maximum start index {max_start_index} plus window length "
+                f"{max_window_len} must be less than or "
+                f"equal to the number of steps in the dataset {self._total_timesteps}."
+            )
 
     def get_sample_by_time_slice(
         self, time_slice: slice
@@ -937,13 +954,17 @@ def _as_index_selection(
     return index_selection
 
 
-class XarraySubset(torch.utils.data.Dataset):
+class XarraySubset(DatasetABC):
     def __init__(self, dataset: XarrayDataset, subset: slice | np.ndarray):
         indices = np.arange(len(dataset))[subset]
         logging.info(f"Subsetting dataset samples according to {subset}.")
+        self._wrapped_dataset = dataset
         self._dataset = torch.utils.data.Subset(dataset, indices)
         self._sample_start_times = dataset.sample_start_times[indices]
         self._sample_n_times = dataset.sample_n_times
+        self._max_timestep_index: int | None = None
+        if len(indices) > 0 and np.all(indices[:-1] <= indices[1:]):
+            self._max_timestep_index = indices[-1] + dataset.sample_n_times - 1
         self.dims = dataset.dims
 
     def __len__(self):
@@ -960,6 +981,31 @@ class XarraySubset(torch.utils.data.Dataset):
     def sample_n_times(self) -> int:
         """The length of the time dimension of each sample."""
         return self._sample_n_times
+
+    def get_sample_by_time_slice(
+        self, time_slice: slice
+    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+        raise NotImplementedError(
+            "XarraySubset does not support getting samples by time slice, "
+            "is this a bug?."
+        )
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        if self._max_timestep_index is None:
+            raise ValueError(
+                "XarraySubset that does not preserve time ordering of the data "
+                "cannot be used for inference."
+            )
+        if max_start_index + max_window_len - 1 > self._max_timestep_index:
+            raise ValueError(
+                f"The maximum start index {max_start_index} plus forward steps "
+                f"{max_window_len - 1} must be less than or equal to the "
+                f"max timestep index in the dataset {self._max_timestep_index}."
+            )
+
+    @property
+    def properties(self) -> DatasetProperties:
+        return self._wrapped_dataset.properties
 
 
 def get_xarray_dataset(
