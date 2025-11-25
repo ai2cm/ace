@@ -146,8 +146,6 @@ stepper:
         weights_path: /ocean_ckpt.tar
       loss:
         type: MSE
-        weights:
-          sst: 2
       input_masking:
         mask_value: 0
         fill_value: 0
