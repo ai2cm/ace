@@ -9,6 +9,7 @@ import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.core.distributed import Distributed
+from fme.core.rand import alternate_seed
 from fme.core.typing_ import TensorDict
 
 
@@ -107,14 +108,31 @@ class DataLoaderABC(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def subset(self, start: int) -> "DataLoaderABC":
+    def subset(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> "DataLoaderABC":
         """
-        Return a subset of the data loader starting at the given index.
+        Return a subset of the data loader starting at the given batch index
+        and stopping at the given batch index (exclusive).
+
+        Args:
+            start_batch: Index of the first batch to include.
+            stop_batch: Index of the last batch to include (exclusive).
+
+        Returns:
+            A subset of the data loader.
         """
         pass
 
     @abc.abstractmethod
     def set_epoch(self, epoch: int):
+        pass
+
+    @abc.abstractmethod
+    def alternate_shuffle(self):
+        """
+        Change the random shuffle of the data loader for the current epoch.
+        """
         pass
 
 
@@ -181,14 +199,18 @@ class GenericTorchDataLoader(Generic[T]):
         return self._dataset[-1][1].values[0]
 
     @final
-    def subset(self: SelfType, start: int) -> SelfType:
-        if start == 0:
+    def subset(
+        self: SelfType, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> SelfType:
+        if start_batch is None and stop_batch is None:
             return self
         # how many *examples* to drop, not batches
-        n_skip = start * self._loader.batch_size
-
+        n_skip = start_batch * self._loader.batch_size if start_batch is not None else 0
+        n_stop = (
+            stop_batch * self._loader.batch_size if stop_batch is not None else None
+        )
         # freeze the order produced by the original sampler
-        indices = list(self._loader.sampler)[n_skip:]
+        indices = list(self._loader.sampler)[slice(n_skip, n_stop)]
 
         # dataset view that exposes only the remaining indices
         sub_ds = torch.utils.data.Subset(self._loader.dataset, indices)
@@ -218,6 +240,11 @@ class GenericTorchDataLoader(Generic[T]):
         if isinstance(self._sampler, torch.utils.data.DistributedSampler):
             self._sampler.set_epoch(epoch)
 
+    @final
+    def alternate_shuffle(self):
+        if isinstance(self._sampler, torch.utils.data.DistributedSampler):
+            self._sampler.set_epoch(alternate_seed(self._sampler.epoch))
+
 
 class TorchDataLoader(GenericTorchDataLoader[BatchData], DataLoaderABC):
     pass
@@ -246,6 +273,7 @@ class SlidingWindowDataLoader(DataLoaderABC):
         shuffle: bool,
         n_skipped_input_batches: int = 0,
         skip_first_n_output_batches: int = 0,
+        skip_last_n_output_batches: int = 0,
     ):
         """
         Create a sliding window over the input data loader to generate new batches.
@@ -267,6 +295,10 @@ class SlidingWindowDataLoader(DataLoaderABC):
                 of the loader.
                 Helpful for skipping a number of outputs smaller than the size of the
                 sliding window.
+            skip_last_n_output_batches: Number of output batches to skip at the end
+                of the loader.
+                Helpful for skipping a number of outputs smaller than the size of the
+                sliding window.
         """
         self._input_loader_len = len(loader)
         self._loader = loader
@@ -275,11 +307,12 @@ class SlidingWindowDataLoader(DataLoaderABC):
         self._output_n_timesteps = output_n_timesteps
         self._n_new_batches = input_n_timesteps - output_n_timesteps + 1
         self._shuffle = shuffle
-        self._epoch = 0
         self._n_skipped_input_batches = n_skipped_input_batches
         self._i_batch = self._n_skipped_input_batches
         self._skip_first_n_output_batches = skip_first_n_output_batches
+        self._skip_last_n_output_batches = skip_last_n_output_batches
         self._current_batch: BatchData | None = None
+        self.set_epoch(0)
         self._init_shuffle_indices()
 
     def __iter__(self) -> Iterator[BatchData]:
@@ -295,13 +328,12 @@ class SlidingWindowDataLoader(DataLoaderABC):
         return self
 
     def _init_shuffle_indices(self):
-        dist = Distributed.get_instance()
         if self._shuffle:
             self._shuffle_indices = torch.from_numpy(
                 random_columns_no_replacement(
                     self._n_skipped_input_batches + self._input_loader_len,
                     self._n_new_batches,
-                    seed=self._epoch + dist.get_seed(),
+                    seed=self._seed,
                 )
             )
         else:
@@ -329,6 +361,10 @@ class SlidingWindowDataLoader(DataLoaderABC):
         self._counter += 1
         if self._counter == self._n_new_batches:
             self._current_batch = None
+        # on the last batch, we need to skip the last n output batches
+        if self._i_batch == self._input_loader_len - 1:
+            if self._counter == self._n_new_batches - self._skip_last_n_output_batches:
+                self._current_batch = None
         return small_batch
 
     @property
@@ -360,18 +396,24 @@ class SlidingWindowDataLoader(DataLoaderABC):
         )
         self._loader.log_info(name + " (base loader)")
 
-    def subset(self, start_batch: int) -> "SlidingWindowDataLoader":
+    def subset(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> "SlidingWindowDataLoader":
+        if start_batch is None and stop_batch is None:
+            return self
         sub_batches_per_contained_batch = (
             1 + self._input_n_timesteps - self._output_n_timesteps
         )
-        n_batches_to_skip = (
-            start_batch * self._loader.batch_size // sub_batches_per_contained_batch
+        n_batches_to_skip, n_sub_batches_to_skip = get_skip_batches(
+            sub_batches_per_contained_batch, start_batch
         )
-        subsetted_loader = self._loader.subset(n_batches_to_skip)
+        n_batches_to_stop, n_sub_batches_to_skip_last = get_stop_batches(
+            sub_batches_per_contained_batch, stop_batch
+        )
+        subsetted_loader = self._loader.subset(
+            start_batch=n_batches_to_skip, stop_batch=n_batches_to_stop
+        )
         self._loaditer = iter(subsetted_loader)
-        n_sub_batches_to_skip = (
-            start_batch * self._loader.batch_size % sub_batches_per_contained_batch
-        )
         return SlidingWindowDataLoader(
             subsetted_loader,
             input_n_timesteps=self._input_n_timesteps,
@@ -379,8 +421,65 @@ class SlidingWindowDataLoader(DataLoaderABC):
             shuffle=self._shuffle,
             n_skipped_input_batches=n_batches_to_skip,
             skip_first_n_output_batches=n_sub_batches_to_skip,
+            skip_last_n_output_batches=n_sub_batches_to_skip_last,
         )
 
     def set_epoch(self, epoch: int):
         self._epoch = epoch
+        dist = Distributed.get_instance()
+        self._seed = self._epoch + dist.get_seed()
         self._loader.set_epoch(epoch)
+
+    def alternate_shuffle(self):
+        self._loader.alternate_shuffle()
+        self._seed = alternate_seed(self._seed)
+        self._init_shuffle_indices()
+
+
+def get_skip_batches(
+    sub_batches_per_contained_batch: int, start: int | None = None
+) -> tuple[int, int]:
+    """
+    Get the number of batches and sub-batches to skip.
+
+    Args:
+        sub_batches_per_contained_batch: Number of sub-batches per contained batch.
+        batch_size: Size of the batch.
+        start: Number of samples (not batches) to skip.
+
+    Returns:
+        Number of batches to skip and number of sub-batches to skip.
+    """
+    if start is None:
+        n_batches_to_skip = 0
+        n_sub_batches_to_skip = 0
+    else:
+        n_batches_to_skip = start // sub_batches_per_contained_batch
+        n_sub_batches_to_skip = start % sub_batches_per_contained_batch
+    return n_batches_to_skip, n_sub_batches_to_skip
+
+
+def get_stop_batches(
+    sub_batches_per_contained_batch: int, stop: int | None = None
+) -> tuple[int | None, int]:
+    """
+    Get the number of batches and sub-batches to stop.
+
+    Args:
+        sub_batches_per_contained_batch: Number of sub-batches per contained batch.
+        batch_size: Size of the batch.
+        stop: Number of batches to stop at (exclusive).
+
+    Returns:
+        Number of batches to stop at (exclusive)
+        and which sub-batch to stop at (exclusive).
+    """
+    if stop is None:
+        n_batches_to_stop: int | None = None
+        n_sub_batches_to_skip_last = 0
+    else:
+        n_batches_to_stop = (stop - 1) // sub_batches_per_contained_batch + 1
+        n_sub_batches_to_skip_last = (
+            sub_batches_per_contained_batch - stop % sub_batches_per_contained_batch
+        ) % sub_batches_per_contained_batch
+    return n_batches_to_stop, n_sub_batches_to_skip_last

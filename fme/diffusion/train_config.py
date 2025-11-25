@@ -62,6 +62,9 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        train_evaluation_samples: Number of samples to evaluate on after training
+            on each epoch. The remainder samples after dividing by the batch size
+            are discarded.
         checkpoint_every_n_batches: How often to save checkpoints.
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
@@ -102,6 +105,7 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
+    train_evaluation_samples: int = 1000
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
@@ -116,6 +120,10 @@ class TrainConfig:
     def set_random_seed(self):
         if self.seed is not None:
             set_seed(self.seed)
+
+    @property
+    def train_evaluation_batches(self) -> int:
+        return self.train_evaluation_samples // self.train_loader.batch_size
 
     @property
     def inference_n_forward_steps(self) -> int:
