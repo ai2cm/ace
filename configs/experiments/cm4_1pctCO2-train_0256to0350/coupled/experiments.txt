@@ -9,3 +9,5 @@ fto-1pctCO2_0256to0350-c0fmwhnn_qkj0w2hd|rs0||training|best_inference_ckpt|norma
 fto-1pctCO2_0256to0350-ewbpxamu_qkj0w2hd|rs0|01KAQJ7F4PXD0THKH40TAZ6CD8|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-1pctCO2_0256to0350-c0fmwhnn_qkj0w2hd|rs0|01KAQJ850JAD0AFH5DVMBS0FDM|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-1pctCO2_0256to0350-ewbpxamu_5px50tqj|rs0|01KAY938CXZFQBPZN80W9657E4|training|best_inference_ckpt|normal|--not-preemptible
