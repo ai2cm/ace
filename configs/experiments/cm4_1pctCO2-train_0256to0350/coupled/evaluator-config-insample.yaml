@@ -5,10 +5,10 @@ checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: true
+    save_monthly_files: false
   atmosphere:
     save_prediction_files: false
-    save_monthly_files: true
+    save_monthly_files: false
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -36,4 +36,4 @@ loader:
           engine: zarr
   start_indices:
     times:
-      - '0211-01-03T12:00:00'
+      - '0256-01-03T12:00:00'
