@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_coupled_steps: 5694
+n_coupled_steps: 2920
 coupled_steps_in_memory: 20
 checkpoint_path: /ckpt.tar
 data_writer:
@@ -38,4 +38,4 @@ loader:
         engine: zarr
   start_indices:
     times:
-      - '0421-01-03T12:00:00'
+      - '0401-01-03T12:00:00'
