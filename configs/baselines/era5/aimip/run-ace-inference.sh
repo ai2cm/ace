@@ -76,8 +76,9 @@ launch_job () {
 for IC in {1..5}; do
     JOB_NAME="${JOB_NAME_BASE}-IC${IC}"
     IC_PATH="/climate-default/2025-09-12-aimip-evaluation/aimip-evaluation-ics-v3/1978-09-30_IC$(( IC - 1 )).nc" # files are 0-indexed
+    OUTPUT_PATH="/climate-default/2025-11-25-ace-aimip-inference-results/${JOB_NAME}"
     IC_CONFIG_PATH="${SCRIPT_PATH}/$(basename $AIMIP_INFERENCE_BASE_CONFIG_PATH -config.yaml)-IC${IC}-config.yaml"
-    OVERRIDE="initial_condition.path=${IC_PATH}"
+    OVERRIDE="initial_condition.path=${IC_PATH} experiment_dir=${OUTPUT_PATH}"
     echo "Launching job $JOB_NAME with override: $OVERRIDE"
     launch_job "$JOB_NAME" "$IC_CONFIG_PATH" "$OVERRIDE"
 done
@@ -87,8 +88,9 @@ for PERTURBATION in p2k p4k; do
     for IC in {1..5}; do
         JOB_NAME="${JOB_NAME_BASE}-${PERTURBATION}-IC${IC}"
         IC_PATH="/climate-default/2025-09-12-aimip-evaluation/aimip-evaluation-ics-v3/1978-09-30_IC$(( IC - 1 )).nc" # files are 0-indexed
+        OUTPUT_PATH="/climate-default/2025-11-25-ace-aimip-inference-results/${JOB_NAME}"
         IC_PERTURBATION_CONFIG_PATH="${SCRIPT_PATH}/$(basename $AIMIP_INFERENCE_BASE_CONFIG_PATH -config.yaml)-${PERTURBATION}-IC${IC}-config.yaml"
-        OVERRIDE="initial_condition.path=${IC_PATH}"
+        OVERRIDE="initial_condition.path=${IC_PATH} experiment_dir=${OUTPUT_PATH}"
         echo "Launching job: $JOB_NAME with perturbation: $PERTURBATION and IC: $IC"
         launch_job "$JOB_NAME" "$IC_PERTURBATION_CONFIG_PATH" "$OVERRIDE"
     done
