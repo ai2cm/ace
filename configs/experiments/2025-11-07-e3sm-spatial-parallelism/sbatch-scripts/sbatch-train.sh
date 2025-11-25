@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128
-#SBATCH -t 10:00:00
+#SBATCH -t 04:00:00
 #SBATCH --output=joblogs/%j.out
 #SBATCH --signal=USR1@60
 #SBATCH --requeue
@@ -51,6 +51,10 @@ export MASTER_PORT=29507
 
 export H_PARALLEL_SIZE=1
 export W_PARALLEL_SIZE=4
+
+export NCCL_BLOCKING_WAIT=1
+export NCCL_TIMEOUT=10800
+export NCCL_IB_TIMEOUT=7200
 
 echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT"
 # run the requeueable job
