@@ -1,0 +1,494 @@
+checkpoint_path: /ckpt.tar
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+  files:
+    - label: ta_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - TMP50
+        - TMP100
+        - TMP150
+        - TMP200
+        - TMP250
+        - TMP300
+        - TMP400
+        - TMP500
+        - TMP600
+        - TMP700
+        - TMP850
+        - TMP925
+        - TMP1000
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ta_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - TMP50
+        - TMP100
+        - TMP150
+        - TMP200
+        - TMP250
+        - TMP300
+        - TMP400
+        - TMP500
+        - TMP600
+        - TMP700
+        - TMP850
+        - TMP925
+        - TMP1000
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: hus_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - Q50
+        - Q100
+        - Q150
+        - Q200
+        - Q250
+        - Q300
+        - Q400
+        - Q500
+        - Q600
+        - Q700
+        - Q850
+        - Q925
+        - Q1000
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: hus_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - Q50
+        - Q100
+        - Q150
+        - Q200
+        - Q250
+        - Q300
+        - Q400
+        - Q500
+        - Q600
+        - Q700
+        - Q850
+        - Q925
+        - Q1000
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ua_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - UGRD50
+        - UGRD100
+        - UGRD150
+        - UGRD200
+        - UGRD250
+        - UGRD300
+        - UGRD400
+        - UGRD500
+        - UGRD600
+        - UGRD700
+        - UGRD850
+        - UGRD925
+        - UGRD1000
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ua_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - UGRD50
+        - UGRD100
+        - UGRD150
+        - UGRD200
+        - UGRD250
+        - UGRD300
+        - UGRD400
+        - UGRD500
+        - UGRD600
+        - UGRD700
+        - UGRD850
+        - UGRD925
+        - UGRD1000
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: va_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - VGRD50
+        - VGRD100
+        - VGRD150
+        - VGRD200
+        - VGRD250
+        - VGRD300
+        - VGRD400
+        - VGRD500
+        - VGRD600
+        - VGRD700
+        - VGRD850
+        - VGRD925
+        - VGRD1000
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: va_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - VGRD50
+        - VGRD100
+        - VGRD150
+        - VGRD200
+        - VGRD250
+        - VGRD300
+        - VGRD400
+        - VGRD500
+        - VGRD600
+        - VGRD700
+        - VGRD850
+        - VGRD925
+        - VGRD1000
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: zg_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - h50
+        - h100
+        - h150
+        - h200
+        - h250
+        - h300
+        - h400
+        - h500
+        - h600
+        - h700
+        - h850
+        - h925
+        - h1000
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: zg_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - h50
+        - h100
+        - h150
+        - h200
+        - h250
+        - h300
+        - h400
+        - h500
+        - h600
+        - h700
+        - h850
+        - h925
+        - h1000
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ps_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - PRESsfc
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ps_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - PRESsfc
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ts_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - surface_temperature
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ts_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - surface_temperature
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: tas_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - TMP2m
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: tas_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - TMP2m
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: tdas_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - Q2m
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: tdas_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - Q2m
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: uas_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - UGRD10m
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: uas_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - UGRD10m
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: vas_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - VGRD10m
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: vas_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - VGRD10m
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: pr_day_ACE_aimip_r5i1p1f1_gn_19781001-19791231
+      names:
+        - PRATEsfc
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: pr_day_ACE_aimip_r5i1p1f1_gn_20240101-20241231
+      names:
+        - PRATEsfc
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ta_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - TMP50
+        - TMP100
+        - TMP150
+        - TMP200
+        - TMP250
+        - TMP300
+        - TMP400
+        - TMP500
+        - TMP600
+        - TMP700
+        - TMP850
+        - TMP925
+        - TMP1000
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: hus_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - Q50
+        - Q100
+        - Q150
+        - Q200
+        - Q250
+        - Q300
+        - Q400
+        - Q500
+        - Q600
+        - Q700
+        - Q850
+        - Q925
+        - Q1000
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: ua_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - UGRD50
+        - UGRD100
+        - UGRD150
+        - UGRD200
+        - UGRD250
+        - UGRD300
+        - UGRD400
+        - UGRD500
+        - UGRD600
+        - UGRD700
+        - UGRD850
+        - UGRD925
+        - UGRD1000
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: va_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - VGRD50
+        - VGRD100
+        - VGRD150
+        - VGRD200
+        - VGRD250
+        - VGRD300
+        - VGRD400
+        - VGRD500
+        - VGRD600
+        - VGRD700
+        - VGRD850
+        - VGRD925
+        - VGRD1000
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: zg_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - h50
+        - h100
+        - h150
+        - h200
+        - h250
+        - h300
+        - h400
+        - h500
+        - h600
+        - h700
+        - h850
+        - h925
+        - h1000
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: ps_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - PRESsfc
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: ts_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - surface_temperature
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: tas_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - TMP2m
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: tdas_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - Q2m
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: uas_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - UGRD10m
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: vas_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - VGRD10m
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: pr_Amon_ACE_aimip_r5i1p1f1_gn_197810-202412
+      names:
+        - PRATEsfc
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+experiment_dir: /results
+forward_steps_in_memory: 40
+n_forward_steps: 67576
+initial_condition:
+  path: /climate-default/2025-09-12-aimip-evaluation/aimip-evaluation-ics-v3/1978-09-30_IC0.nc
+  start_indices:
+    times:
+      - '1978-09-30T18:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2025-09-12-aimip-evaluation
+    file_pattern: aimip-era5-1deg-forcing-1978-2024-repeat-first.zarr
+    engine: zarr
+  num_data_workers: 8
+  perturbations:
+    sst:
+      - type: constant
+        config:
+          amplitude: 4.0
+logging:
+  project: ace
