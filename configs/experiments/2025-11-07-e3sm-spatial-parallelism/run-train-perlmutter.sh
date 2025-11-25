@@ -6,7 +6,7 @@ set -x
 export WANDB_NAME=PM-AMIP-EAMv3-spatial-parallelism-1x4-batch-fix-train-rs2
 export WANDB_RUN_GROUP=2025-04-01-AMIP-EAMv3
 
-export COMMIT=b7f45d2b0
+export COMMIT=23552337c
 
 # directories for input data (training, validation, inference, stats)
 export FME_TRAIN_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1deg/traindata
