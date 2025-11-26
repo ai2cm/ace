@@ -13,11 +13,11 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-v1110-ACE-E3SMv3-piControl-100yr"
+JOB_GROUP="BK-v1124-ACE-E3SMv3-piControl-100yr-no-smooth-ocean"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
-STATS_DATA=elynn/2025-11-10-E3SMv3-piControl-100yr-coupled-stats
+STATS_DATA=elynn/2025-11-24-E3SMv3-piControl-100yr-coupled-stats
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
