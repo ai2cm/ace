@@ -57,9 +57,6 @@ class DummyDataset(DatasetABC):
         """Time index of all available times in the data."""
         return self._all_times
 
-    def __len__(self):
-        return self._n_initial_conditions
-
     @property
     def sample_start_times(self) -> xr.CFTimeIndex:
         """Return cftime index corresponding to start time of each sample."""
@@ -106,3 +103,6 @@ class DummyDataset(DatasetABC):
         time_slice = slice(idx, idx + self.sample_n_times)
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
         return (self._dummy_dict, time, self._labels)
+
+    def set_epoch(self, epoch: int):
+        pass

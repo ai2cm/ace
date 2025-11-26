@@ -10,6 +10,8 @@ from fme.ace.data_loading.dataloader import (
     get_stop_batches,
 )
 from fme.ace.data_loading.getters import CollateFn
+from fme.core.dataset.subset import SubsetDataset
+from fme.core.dataset.testing import TestDataset
 from fme.core.distributed import Distributed
 
 
@@ -28,18 +30,7 @@ def get_sample_tuples(start: int, end: int, times_per_batch: int):
 
 
 def get_batch_time(batch: BatchData):
-    return int(batch.time.values[0, 0])
-
-
-class ListDataset(torch.utils.data.Dataset[BatchData]):
-    def __init__(self, data: list[BatchData]):
-        self.data = data
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx: int) -> BatchData:
-        return self.data[idx]
+    return TestDataset.time_to_int(batch.time.values[0, 0])
 
 
 def get_data_loader(
@@ -51,9 +42,12 @@ def get_data_loader(
 ):
     inner_times_per_batch = times_per_batch + time_buffer
     n_skip = time_buffer + 1
-    dataset = ListDataset(
-        get_sample_tuples(start, end, inner_times_per_batch)[::n_skip]
+    dataset: TestDataset | SubsetDataset = TestDataset.new(
+        n_times=end - start,
+        varnames=["var1"],
+        sample_n_times=inner_times_per_batch,
     )
+    dataset = SubsetDataset(dataset, indices=list(range(start, end, n_skip)))
     dist = Distributed.get_instance()
     sampler = dist.get_sampler(dataset, shuffle=shuffle)
     return TorchDataLoader(

@@ -644,11 +644,6 @@ class XarrayDataset(DatasetABC):
             return False
         return True
 
-    @property
-    def all_times(self) -> xr.CFTimeIndex:
-        """Time index of all available times in the data."""
-        return self._all_times
-
     def _get_variable_metadata(self, ds):
         result = {}
         for name in self._names:
@@ -768,9 +763,6 @@ class XarrayDataset(DatasetABC):
         else:
             return self._timestep
 
-    def __len__(self):
-        return self._n_initial_conditions
-
     def _open_file(self, idx):
         logger.debug(f"Opening file {self.full_paths[idx]}")
         return _open_file_fh_cached(self.full_paths[idx], engine=self.engine)
@@ -779,6 +771,20 @@ class XarrayDataset(DatasetABC):
     def sample_start_times(self) -> xr.CFTimeIndex:
         """Return cftime index corresponding to start time of each sample."""
         return self._sample_start_times
+
+    @property
+    def all_times(self) -> xr.CFTimeIndex:
+        """
+        Like sample_start_times, but includes all times in the dataset, including
+        final times which are not valid as a start index.
+
+        This is relevant for inference, where we may use get_sample_by_time_slice to
+        retrieve time windows directly.
+
+        If this dataset does not support inference,
+        this will raise a NotImplementedError.
+        """
+        return self._all_times
 
     @property
     def sample_n_times(self) -> int:
@@ -897,6 +903,13 @@ class XarrayDataset(DatasetABC):
 
         return tensors, time, self._labels
 
+    def set_epoch(self, epoch: int):
+        """
+        Set the epoch for the dataset. This will update the number of initial
+        conditions and the sample start times if the number of timesteps is a schedule.
+        """
+        pass
+
 
 def _get_timestep(time: np.ndarray) -> datetime.timedelta:
     """Computes the timestep of an array of a time coordinate array.
@@ -956,15 +969,26 @@ class XarraySubset(DatasetABC):
             self._max_timestep_index = indices[-1] + dataset.sample_n_times - 1
         self.dims = dataset.dims
 
-    def __len__(self):
-        return len(self._dataset)
-
     def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
         return self._dataset[idx]
 
     @property
     def sample_start_times(self):
         return self._sample_start_times
+
+    @property
+    def all_times(self) -> xr.CFTimeIndex:
+        """
+        Like sample_start_times, but includes all times in the dataset, including
+        final times which are not valid as a start index.
+
+        This is relevant for inference, where we may use get_sample_by_time_slice to
+        retrieve time windows directly.
+
+        If this dataset does not support inference,
+        this will raise a NotImplementedError.
+        """
+        raise NotImplementedError("XarraySubset does not support inference.")
 
     @property
     def sample_n_times(self) -> int:
@@ -996,6 +1020,9 @@ class XarraySubset(DatasetABC):
     def properties(self) -> DatasetProperties:
         return self._wrapped_dataset.properties
 
+    def set_epoch(self, epoch: int):
+        self._wrapped_dataset.set_epoch(epoch)
+
 
 def get_xarray_dataset(
     config: XarrayDataConfig, names: Sequence[str], n_timesteps: int
@@ -1003,8 +1030,8 @@ def get_xarray_dataset(
     dataset = XarrayDataset(config, names, n_timesteps)
     properties = dataset.properties
     index_slice = _as_index_selection(config.subset, dataset)
-    dataset = XarraySubset(dataset, index_slice)
-    return dataset, properties
+    subset_dataset = XarraySubset(dataset, index_slice)
+    return subset_dataset, properties
 
 
 def get_xarray_datasets(

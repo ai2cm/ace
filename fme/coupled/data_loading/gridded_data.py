@@ -135,6 +135,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
             self._sampler, torch.utils.data.DistributedSampler
         ):
             self._sampler.set_epoch(epoch)
+        self._loader.set_epoch(epoch)
 
     def alternate_shuffle(self):
         """

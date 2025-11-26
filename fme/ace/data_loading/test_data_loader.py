@@ -213,6 +213,7 @@ def test_xarray_loader_sample_with_replacement(tmp_path):
     assert data._vertical_coordinate.ak.device == fme.get_device()
     epoch_samples = list(data.loader)
     assert len(epoch_samples) == 10
+    data.set_epoch(1)  # should not raise an error
 
 
 def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):

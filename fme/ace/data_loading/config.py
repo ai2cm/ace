@@ -1,10 +1,9 @@
 import dataclasses
 from collections.abc import Sequence
 
-import torch
-
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.merged import MergeDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import XarrayDataConfig
@@ -62,7 +61,7 @@ class DataLoaderConfig:
         self,
         names: Sequence[str],
         n_timesteps: int,
-    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+    ) -> tuple[DatasetABC, DatasetProperties]:
         return self.dataset.build(names, n_timesteps)
 
     def __post_init__(self):

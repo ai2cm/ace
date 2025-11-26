@@ -6,6 +6,7 @@ from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.subset import SubsetDataset
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -73,8 +74,8 @@ def get_gridded_data(
         # include requirements.n_timesteps - 1 steps of overlap so that no samples are
         # skipped at the boundaries of the preloaded timesteps
         start_every_n = config.time_buffer + 1
-        indices = range(len(dataset))[::start_every_n]
-        dataset = torch.utils.data.Subset(dataset, indices)
+        indices = list(range(len(dataset))[::start_every_n])
+        dataset = SubsetDataset(dataset, indices)
 
     dist = Distributed.get_instance()
 

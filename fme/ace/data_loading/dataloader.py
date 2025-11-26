@@ -8,6 +8,8 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
+from fme.core.dataset.dataset import SupportsDataLoaderABC
+from fme.core.dataset.subset import SubsetDataset
 from fme.core.distributed import Distributed
 from fme.core.rand import alternate_seed
 from fme.core.typing_ import TensorDict
@@ -147,7 +149,7 @@ class GenericTorchDataLoader(Generic[T]):
         self,
         loader: torch.utils.data.DataLoader[T],
         sampler: torch.utils.data.Sampler,
-        dataset: torch.utils.data.Dataset[tuple[TensorDict, xr.DataArray]],
+        dataset: SupportsDataLoaderABC,
     ):
         """
         Args:
@@ -191,12 +193,12 @@ class GenericTorchDataLoader(Generic[T]):
     @property
     @final
     def _first_time(self) -> Any:
-        return self._dataset[0][1].values[0]
+        return self._dataset.first_time
 
     @property
     @final
     def _last_time(self) -> Any:
-        return self._dataset[-1][1].values[0]
+        return self._dataset.last_time
 
     @final
     def subset(
@@ -213,7 +215,7 @@ class GenericTorchDataLoader(Generic[T]):
         indices = list(self._loader.sampler)[slice(n_skip, n_stop)]
 
         # dataset view that exposes only the remaining indices
-        sub_ds = torch.utils.data.Subset(self._loader.dataset, indices)
+        sub_ds = SubsetDataset(self._dataset, indices)  # type: ignore
 
         # iterate through the subset exactly as-is (no extra shuffling)
         sub_sampler = torch.utils.data.SequentialSampler(sub_ds)
@@ -239,6 +241,7 @@ class GenericTorchDataLoader(Generic[T]):
     def set_epoch(self, epoch: int):
         if isinstance(self._sampler, torch.utils.data.DistributedSampler):
             self._sampler.set_epoch(epoch)
+        self._dataset.set_epoch(epoch)
 
     @final
     def alternate_shuffle(self):
