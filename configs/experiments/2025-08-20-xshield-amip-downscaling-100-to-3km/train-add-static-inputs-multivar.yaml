@@ -76,7 +76,7 @@ validation_data:
   static_inputs:
     HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
     land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
-  batch_size: 24
+  batch_size: 12
   num_data_workers: 4
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -85,7 +85,7 @@ validation_data:
     subset:
       start_time: '2023-01-01T12:00:00'
       stop_time: '2024-01-01T12:00:00'
-      step: 43
+      step: 59
   coarse:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
@@ -93,7 +93,7 @@ validation_data:
     subset:
       start_time: '2023-01-01T12:00:00'
       stop_time: '2024-01-01T12:00:00'
-      step: 43
+      step: 59
   lat_extent:
     start: -66.0
     stop: 70.0
