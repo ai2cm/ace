@@ -22,10 +22,10 @@ inference:
     dataset:
       merge:
       - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-        file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-ocean.zarr
+        file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
         engine: zarr
       - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-        file_pattern: 2025-11-10-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+        file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
         engine: zarr
     num_data_workers: 4
   aggregator:
@@ -43,13 +43,13 @@ train_loader:
   dataset:
     merge:
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-ocean.zarr
+      file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
       engine: zarr
       subset:
         start_time: '0421-01-03'
         stop_time: '0499-12-29'
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2025-11-10-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+      file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
       engine: zarr
       subset:
         start_time: '0421-01-03'
@@ -61,13 +61,13 @@ validation_loader:
   dataset:
     merge:
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-ocean.zarr
+      file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
       engine: zarr
       subset:
         start_time: '0402-01-01'
         stop_time: '0407-01-01'
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2025-11-10-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+      file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
       engine: zarr
       subset:
         start_time: '0402-01-01'
