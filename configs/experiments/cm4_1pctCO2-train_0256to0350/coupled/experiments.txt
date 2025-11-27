@@ -7,3 +7,5 @@ fto-1pctCO2_0256to0350-c0fmwhnn_qkj0w2hd|rs0|01KAQJ850JAD0AFH5DVMBS0FDM|run_insa
 fto-1pctCO2_0256to0350-ewbpxamu_5px50tqj|rs0|01KAY938CXZFQBPZN80W9657E4|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-1pctCO2_0256to0350-c0fmwhnn_5px50tqj|rs0|01KAY93YBJJB8W51WDYVKW332F|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_fto-1pctCO2_0256to0350-eoipjris|rs0|01KB1V1CXY65FZ0JQP2HAW4852|training|best_inference_ckpt|normal|--not-preemptible
