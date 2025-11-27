@@ -47,3 +47,5 @@ ft_smooth_piControl-wu1xLR|41qhptht-rs0|01KAVFPQGCANKYX4ZT2KW19RHF|training|best
 cooldown_m0rfyk9z_15ep|rs0|01KB1WZ2FBH4WMJ749TA2KK3KJ|training|best_inference_ckpt|normal|--not-preemptible
 
 cooldown_m0rfyk9z_30ep|rs0|01KB3N96EGVPAA9AAVD3PE11X6|training|best_inference_ckpt|normal|--not-preemptible
+
+cooldown_m0rfyk9z_60ep|rs0|01KB3ND5ZV2DK0N0HXZB6X6QZK|training|best_inference_ckpt|normal|--not-preemptible
