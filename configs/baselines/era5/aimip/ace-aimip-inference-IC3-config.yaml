@@ -24,6 +24,22 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
+    - label: ta_day_ACE_aimip_r3i1p1f1_gr_19781001-19791231
+      names:
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
     - label: ta_day_ACE_aimip_r3i1p1f1_gn_20240101-20241231
       names:
         - TMP50
@@ -39,6 +55,22 @@ data_writer:
         - TMP850
         - TMP925
         - TMP1000
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ta_day_ACE_aimip_r3i1p1f1_gr_20240101-20241231
+      names:
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
       time_selection:
         start_time: '2024-01-01T00:00:00'
         stop_time: '2024-12-31T18:00:00'
@@ -66,6 +98,22 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
+    - label: hus_day_ACE_aimip_r3i1p1f1_gr_19781001-19791231
+      names:
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
     - label: hus_day_ACE_aimip_r3i1p1f1_gn_20240101-20241231
       names:
         - Q50
@@ -81,6 +129,22 @@ data_writer:
         - Q850
         - Q925
         - Q1000
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: hus_day_ACE_aimip_r3i1p1f1_gr_20240101-20241231
+      names:
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
       time_selection:
         start_time: '2024-01-01T00:00:00'
         stop_time: '2024-12-31T18:00:00'
@@ -108,6 +172,22 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
+    - label: ua_day_ACE_aimip_r3i1p1f1_gr_19781001-19791231
+      names:
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
     - label: ua_day_ACE_aimip_r3i1p1f1_gn_20240101-20241231
       names:
         - UGRD50
@@ -123,6 +203,23 @@ data_writer:
         - UGRD850
         - UGRD925
         - UGRD1000
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: ua_day_ACE_aimip_r3i1p1f1_gr_20240101-20241231
+      names:
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+        - eastward_wind_8
       time_selection:
         start_time: '2024-01-01T00:00:00'
         stop_time: '2024-12-31T18:00:00'
@@ -150,6 +247,22 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
+    - label: va_day_ACE_aimip_r3i1p1f1_gr_19781001-19791231
+      names:
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
+      time_selection:
+        start_time: '1978-10-02T00:00:00'
+        stop_time: '1979-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
     - label: va_day_ACE_aimip_r3i1p1f1_gn_20240101-20241231
       names:
         - VGRD50
@@ -165,6 +278,23 @@ data_writer:
         - VGRD850
         - VGRD925
         - VGRD1000
+      time_selection:
+        start_time: '2024-01-01T00:00:00'
+        stop_time: '2024-12-31T18:00:00'
+      time_coarsen:
+        coarsen_factor: 4
+      save_reference: false
+    - label: va_day_ACE_aimip_r3i1p1f1_gr_20240101-20241231
+      names:
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
+        - northward_wind_8
       time_selection:
         start_time: '2024-01-01T00:00:00'
         stop_time: '2024-12-31T18:00:00'
@@ -357,6 +487,19 @@ data_writer:
       time_coarsen:
         method: monthly_mean
       save_reference: false
+    - label: ta_Amon_ACE_aimip_r3i1p1f1_gr_197810-202412
+      names:
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
     - label: hus_Amon_ACE_aimip_r3i1p1f1_gn_197810-202412
       names:
         - Q50
@@ -372,6 +515,19 @@ data_writer:
         - Q850
         - Q925
         - Q1000
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: hus_Amon_ACE_aimip_r3i1p1f1_gr_197810-202412
+      names:
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
       time_coarsen:
         method: monthly_mean
       save_reference: false
@@ -393,6 +549,19 @@ data_writer:
       time_coarsen:
         method: monthly_mean
       save_reference: false
+    - label: ua_Amon_ACE_aimip_r3i1p1f1_gr_197810-202412
+      names:
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
     - label: va_Amon_ACE_aimip_r3i1p1f1_gn_197810-202412
       names:
         - VGRD50
@@ -408,6 +577,19 @@ data_writer:
         - VGRD850
         - VGRD925
         - VGRD1000
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+    - label: va_Amon_ACE_aimip_r3i1p1f1_gr_197810-202412
+      names:
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
       time_coarsen:
         method: monthly_mean
       save_reference: false
