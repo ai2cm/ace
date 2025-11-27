@@ -1,1 +1,9 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+ft_fto-1pctCO2_0256to0350-eoipjris|rs0|ace-samudra-coupled-cm4|eoipjris|best_inference_ckpt|train|high||8|800GiB|3||seed=0|
+
+ft_fto-1pctCO2_0256to0350-3eqp62bx|rs0|ace-samudra-coupled-cm4|3eqp62bx|best_inference_ckpt|train|high||8|800GiB|3||seed=0|
+
+ft_fto-1pctCO2_0256to0350-czhrv51v|rs0|ace-samudra-coupled-cm4|czhrv51v|best_inference_ckpt|train|high||8|800GiB|3||seed=0|
+
+ft_fto-1pctCO2_0256to0350-ubyk6ome|rs0|ace-samudra-coupled-cm4|ubyk6ome|best_inference_ckpt|wait|high||8|800GiB|3||seed=0|
