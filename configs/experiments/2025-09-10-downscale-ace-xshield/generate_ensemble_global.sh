@@ -44,7 +44,7 @@ gantry run \
     --gpus $NGPU \
     --shared-memory 400GiB \
     --budget ai2/climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
