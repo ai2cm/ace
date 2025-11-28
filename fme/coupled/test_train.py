@@ -53,12 +53,8 @@ inference:
     dataset:
       ocean:
         data_path: {ocean_data_path}
-        subset:
-            start_time: '1970-01-01'
       atmosphere:
         data_path: {atmosphere_data_path}
-        subset:
-            start_time: '1970-01-01'
     start_indices:
       times:
         - '1970-01-01T00:00:00'
@@ -163,12 +159,8 @@ loader:
   dataset:
     ocean:
       data_path: {ocean_data_path}
-      subset:
-          start_time: '1970-01-01'
     atmosphere:
       data_path: {atmosphere_data_path}
-      subset:
-          start_time: '1970-01-01'
   start_indices:
     times:
       - '1970-01-01T00:00:00'
@@ -288,7 +280,7 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
         n_forward_times_atmosphere=n_forward_times_atmos,
         ocean_names=ocean_names,
         atmosphere_names=atmos_names,
-        atmosphere_start_time_offset_from_ocean=True,
+        atmosphere_start_time_offset_from_ocean=1,
         n_levels_ocean=2,
         n_levels_atmosphere=2,
     )

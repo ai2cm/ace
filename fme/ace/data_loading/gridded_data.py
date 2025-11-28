@@ -78,8 +78,12 @@ class GriddedData(GriddedDataABC[BatchData]):
     def loader(self) -> DataLoader[BatchData]:
         return self._get_gpu_loader(self._loader)
 
-    def subset_loader(self, start_batch: int) -> DataLoader[BatchData]:
-        return self._get_gpu_loader(self._loader.subset(start_batch))
+    def subset_loader(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> DataLoader[BatchData]:
+        return self._get_gpu_loader(
+            self._loader.subset(start_batch=start_batch, stop_batch=stop_batch)
+        )
 
     def _get_gpu_loader(
         self, base_loader: DataLoader[BatchData]
@@ -138,6 +142,12 @@ class GriddedData(GriddedDataABC[BatchData]):
         Set the epoch for the data loader sampler, if it is a distributed sampler.
         """
         self._loader.set_epoch(epoch)
+
+    def alternate_shuffle(self):
+        """
+        Change the random shuffle of the data loader for the current epoch.
+        """
+        self._loader.alternate_shuffle()
 
 
 def get_initial_condition(

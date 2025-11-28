@@ -3,20 +3,17 @@ from collections.abc import Sequence
 
 import xarray as xr
 
-from fme.core.dataset.concat import ConcatDatasetConfig, XarrayConcat
+from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.config import DatasetConfigABC
+from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.xarray import (
-    XarrayDataConfig,
-    XarrayDataset,
-    XarraySubset,
-    get_raw_paths,
-)
-from fme.core.typing_ import TensorDict
+from fme.core.dataset.time import RepeatedInterval, TimeSlice
+from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
+from fme.core.typing_ import Slice, TensorDict
 
 
-class MergedXarrayDataset:
-    def __init__(self, datasets: Sequence[XarrayDataset | XarraySubset | XarrayConcat]):
+class MergedXarrayDataset(DatasetABC):
+    def __init__(self, datasets: Sequence[DatasetABC]):
         self.datasets = datasets
 
         combined_names = [
@@ -30,33 +27,28 @@ class MergedXarrayDataset:
                 f"Variable names must be unique across merged datasets. \
                     \nDuplicates found: {duplicates}"
             )
+        self._sample_start_times = self.datasets[0].sample_start_times
+        self._sample_n_times = self.datasets[0].sample_n_times
         for dataset in self.datasets:
-            if not dataset.sample_start_times.equals(
-                self.datasets[0].sample_start_times
-            ):
+            if not dataset.sample_start_times.equals(self._sample_start_times):
                 raise ValueError(
                     "All datasets in a merged dataset must have the same sample "
                     "start times."
                 )
-            if not dataset.sample_n_times == self.datasets[0].sample_n_times:
+            if not dataset.sample_n_times == self._sample_n_times:
                 raise ValueError(
                     "All datasets in the merged datasets \
                          must have the same number of steps per sample item."
                 )
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def __getitem__(self, idx: int) -> DatasetItem:
         tensors: TensorDict = {}
         for dataset in self.datasets:
             ds_tensors, time, labels = dataset[idx]
             tensors.update(ds_tensors)
         return tensors, time, labels
 
-    def __len__(self) -> int:
-        return len(self.datasets[0])
-
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         tensors: TensorDict = {}
         for dataset in self.datasets:
             ds_tensors, time, labels = dataset.get_sample_by_time_slice(time_slice)
@@ -65,11 +57,29 @@ class MergedXarrayDataset:
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
+        """
+        Like sample_start_times, but includes all times in the dataset, including
+        final times which are not valid as a start index.
+
+        This is relevant for inference, where we may use get_sample_by_time_slice to
+        retrieve time windows directly.
+
+        If this dataset does not support inference,
+        this will raise a NotImplementedError.
+        """
         return self.datasets[0].all_times
 
     @property
     def sample_start_times(self):
-        return self.datasets[0].sample_start_times
+        return self._sample_start_times
+
+    @property
+    def sample_n_times(self) -> int:
+        return self._sample_n_times
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        for dataset in self.datasets:
+            dataset.validate_inference_length(max_start_index, max_window_len)
 
     @property
     def properties(self) -> DatasetProperties:
@@ -83,9 +93,9 @@ class MergedXarrayDataset:
             raise ValueError("No dataset available to determine properties")
         return data_properties
 
-    @property
-    def total_timesteps(self) -> int:
-        return self.datasets[0].total_timesteps
+    def set_epoch(self, epoch: int):
+        for dataset in self.datasets:
+            dataset.set_epoch(epoch)
 
 
 @dataclasses.dataclass
@@ -93,7 +103,8 @@ class MergeDatasetConfig(DatasetConfigABC):
     """
     Configuration for merging multiple datasets. Merging means combining
     variables from multiple datasets, each of which must have the same
-    time coordinate.
+    time coordinate. If multiple datasets contain the same data variable, the version
+    from the first source is loaded and other sources are ignored.
 
     Parameters:
         merge: List of dataset configurations to merge.
@@ -130,8 +141,10 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
     """
     Configuration for merging multiple datasets. Merging means combining
     variables from multiple datasets, each of which must have the same
-    time coordinate. For this case, the datasets being merged may not be
-    concatenated datasets.
+    time coordinate.  If multiple datasets contain the same data variable, the version
+    from the first source is loaded and other sources are ignored. For
+    `MergeNoConcatDatasetConfig`, the datasets being merged may not be concatenated
+    datasets.
 
     Parameters:
         merge: List of dataset configurations to merge.
@@ -145,6 +158,14 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
             if ds.engine == "zarr":
                 self.zarr_engine_used = True
                 break
+
+    def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
+        for ds in self.merge:
+            ds.update_subset(subset)
+
+    @property
+    def subset(self) -> Slice | TimeSlice | RepeatedInterval:
+        return self.merge[0].subset
 
     def build(
         self,

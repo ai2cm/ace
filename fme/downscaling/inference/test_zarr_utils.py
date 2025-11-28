@@ -1,6 +1,6 @@
 import pytest
 
-from fme.downscaling.generate.zarr_utils import (
+from fme.downscaling.inference.zarr_utils import (
     NotReducibleError,
     _recursive_latlon_chunksize_search,
     _total_size_mb,

@@ -14,6 +14,7 @@ from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
+from fme.coupled.data_loading.concat import ConcatDataset
 from fme.coupled.data_loading.config import (
     CoupledDataLoaderConfig,
     CoupledDatasetConfig,
@@ -67,9 +68,7 @@ def get_dataset(
     atmosphere, atmosphere_properties = config.atmosphere.build(
         atmosphere_reqs.names, atmosphere_reqs.n_timesteps
     )
-    properties = CoupledDatasetProperties(
-        ocean.sample_start_times, ocean_properties, atmosphere_properties
-    )
+    properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
     dataset = CoupledDataset(
         ocean=ocean,
         atmosphere=atmosphere,
@@ -83,7 +82,7 @@ def get_datasets(
     configs: Sequence[CoupledDatasetConfig],
     requirements: CoupledDataRequirements,
     strict: bool = True,
-) -> tuple[torch.utils.data.ConcatDataset[CoupledDataset], CoupledDatasetProperties]:
+) -> tuple[ConcatDataset, CoupledDatasetProperties]:
     datasets = []
     properties: CoupledDatasetProperties | None = None
     for coupled_data_config in configs:
@@ -102,7 +101,7 @@ def get_datasets(
             properties.update(prop)
     if properties is None:
         raise ValueError("At least one dataset must be provided.")
-    dataset = torch.utils.data.ConcatDataset(datasets)
+    dataset = ConcatDataset(datasets)
     return dataset, properties
 
 

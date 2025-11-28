@@ -11,6 +11,7 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.typing_ import TensorDict
 
@@ -78,11 +79,9 @@ class CoupledHorizontalCoordinates:
 class CoupledDatasetProperties:
     def __init__(
         self,
-        all_ic_times: xr.CFTimeIndex,
         ocean: DatasetProperties,
         atmosphere: DatasetProperties,
     ):
-        self.all_ic_times = all_ic_times
         self.ocean = ocean
         self.atmosphere = atmosphere
         ocean_coord = ocean.vertical_coordinate
@@ -143,14 +142,11 @@ class CoupledDatasetProperties:
 
     def to_device(self) -> "CoupledDatasetProperties":
         return CoupledDatasetProperties(
-            all_ic_times=self.all_ic_times,
             ocean=self.ocean.to_device(),
             atmosphere=self.atmosphere.to_device(),
         )
 
     def update(self, other: "CoupledDatasetProperties"):
-        if (self.all_ic_times.values != other.all_ic_times.values).any():
-            raise ValueError("All times must be the same for both datasets.")
         if self.vertical_coordinate != other.vertical_coordinate:
             raise ValueError("Vertical coordinates must be the same for both datasets.")
         if self.horizontal_coordinates != other.horizontal_coordinates:
@@ -167,11 +163,11 @@ class CoupledDatasetItem:
     atmosphere: tuple[TensorDict, xr.DataArray, set[str]]
 
 
-class CoupledDataset(torch.utils.data.Dataset):
+class CoupledDataset:
     def __init__(
         self,
-        ocean: torch.utils.data.Dataset,
-        atmosphere: torch.utils.data.Dataset,
+        ocean: DatasetABC,
+        atmosphere: DatasetABC,
         properties: CoupledDatasetProperties,
         n_steps_fast: int,
     ):
@@ -204,22 +200,6 @@ class CoupledDataset(torch.utils.data.Dataset):
         self._n_steps_fast = n_steps_fast
 
     @property
-    def variable_metadata(self) -> dict[str, VariableMetadata]:
-        return self._properties.variable_metadata
-
-    @property
-    def vertical_coordinate(self) -> CoupledVerticalCoordinate:
-        return self._properties.vertical_coordinate
-
-    @property
-    def horizontal_coordinates(self) -> CoupledHorizontalCoordinates:
-        return self._properties.horizontal_coordinates
-
-    @property
-    def is_remote(self) -> bool:
-        return self._properties.is_remote
-
-    @property
     def properties(self) -> CoupledDatasetProperties:
         return self._properties
 
@@ -229,7 +209,7 @@ class CoupledDataset(torch.utils.data.Dataset):
 
     @property
     def all_ic_times(self) -> xr.CFTimeIndex:
-        return self.properties.all_ic_times
+        return self._ocean.sample_start_times
 
     def __len__(self):
         return min([len(self._ocean), len(self._atmosphere)])
@@ -239,3 +219,25 @@ class CoupledDataset(torch.utils.data.Dataset):
         ocean = self._ocean[idx]
         atmosphere = self._atmosphere[fast_idx]
         return CoupledDatasetItem(ocean=ocean, atmosphere=atmosphere)
+
+    def set_epoch(self, epoch: int):
+        self._ocean.set_epoch(epoch)
+        self._atmosphere.set_epoch(epoch)
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        try:
+            self._ocean.validate_inference_length(max_start_index, max_window_len)
+        except ValueError as e:
+            raise ValueError(
+                "The ocean dataset has an insufficient number of timepoints."
+            ) from e
+        atmos_max_start_index = max_start_index * self.n_steps_fast
+        atmos_max_window_len = (max_window_len - 1) * self.n_steps_fast + 1
+        try:
+            self._atmosphere.validate_inference_length(
+                atmos_max_start_index, atmos_max_window_len
+            )
+        except ValueError as e:
+            raise ValueError(
+                "The atmosphere dataset has an insufficient number of timepoints."
+            ) from e

@@ -213,6 +213,7 @@ def test_xarray_loader_sample_with_replacement(tmp_path):
     assert data._vertical_coordinate.ak.device == fme.get_device()
     epoch_samples = list(data.loader)
     assert len(epoch_samples) == 10
+    data.set_epoch(1)  # should not raise an error
 
 
 def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
@@ -530,7 +531,7 @@ def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_err
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
     if raises_error:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"No batches in dataloader.*"):
             get_gridded_data(config, True, requirements)  # type: ignore
     else:
         get_gridded_data(config, True, requirements)  # type: ignore
@@ -720,7 +721,7 @@ def test_TimestampList_as_indices(timestamps, expected_indices):
     )
     timestamp_list = TimestampList(timestamps)
     if expected_indices is None:
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match=r".*were not found in the time index.*"):
             timestamp_list.as_indices(time_index)
     else:
         np.testing.assert_equal(
@@ -833,16 +834,6 @@ def test_zarr_engine_used_mapping():
         batch_size=1,
     )
     assert config.zarr_engine_used
-
-
-def test_data_loader_maintains_backward_concat_compatibility(recwarn):
-    data_loader = DataLoaderConfig(
-        dataset=[XarrayDataConfig(data_path="some_path")],
-        batch_size=1,
-    )
-    assert isinstance(data_loader.dataset, ConcatDatasetConfig)
-    warning = recwarn.pop(DeprecationWarning)
-    assert "Dataset list format is deprecated" in str(warning.message)
 
 
 @pytest.mark.parametrize(
