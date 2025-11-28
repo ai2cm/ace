@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="downscale-ace-inference-100km-to-3km-ace-1-years-ensemble"
+JOB_NAME="downscale-ace-inference-100km-to-3km-ace-1-year-global"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 
@@ -29,9 +29,8 @@ wandb_group=""
 run_eval() {
     local ensemble="$1"
     local JOB_NAME_RUN="${JOB_NAME}-ensemble${ensemble}"
-    local CONFIG_FILENAME="gen-ace-output${ensemble}.yaml"
+    local CONFIG_FILENAME="gen-ace-output-global-ic${ensemble}.yaml"
     local CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
-    dataset_arg="output_6hourly_predictions_ic${padded}.zarr:/output_6hourly_predictions_ic${padded}.zarr"
     gantry run \
         --name $JOB_NAME \
         --description 'Run 100km to 3km generation on ACE data' \
@@ -48,7 +47,6 @@ run_eval() {
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --dataset $EXISTING_RESULTS_DATASET:checkpoints/best_histogram_tail.ckpt:/ckpt.tar \
-        --dataset $ACE_DATASET:$dataset_arg \
         --weka climate-default:/climate-default \
         --gpus $NGPU \
         --shared-memory 400GiB \
@@ -59,7 +57,7 @@ run_eval() {
         -- torchrun --nproc_per_node $NGPU -m fme.downscaling.predict $CONFIG_PATH
 }
 
-n_ensembles_minus_one=1
+n_ensembles_minus_one=0
 
 for ((i=0; i<=n_ensembles_minus_one; i++)); do
     padded=$(printf "%04d" "$i")   # produces 0000, 0001, ...
