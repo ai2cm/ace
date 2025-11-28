@@ -54,7 +54,7 @@ run_eval() {
         --system-python \
         --install "pip install --no-deps ." \
         --allow-dirty \
-        -- torchrun --nproc_per_node $NGPU -m fme.downscaling.predict $CONFIG_PATH
+        -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
 }
 
 n_ensembles_minus_one=0
