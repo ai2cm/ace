@@ -3,9 +3,10 @@
 
 set -e
 
-JOB_NAME="downscale-ace-inference-100km-to-3km-ace-1-year-global"
+JOB_NAME="downscale-perfect-100km-to-3km-1-year-global"
 
-CONFIG_FILENAME="gen-ace-output-global-ic0000.yaml"
+#CONFIG_FILENAME="gen-ace-output-global-ic0000.yaml"
+CONFIG_FILENAME="gen-perfect-output-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
