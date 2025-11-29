@@ -1,0 +1,38 @@
+experiment_dir: /climate-default/home/troya/ace2-hiro-global-results
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+  rename:
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+data:
+  topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  coarse:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 100km.zarr
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: False
+outputs:
+- name: "Global_perfect_2023"
+  save_vars: ["PRATEsfc"]
+  n_ens: 1
+  max_samples_per_gpu: 32
+  time_range:
+    start_time: "2023-01-01T00:00:00"
+  lat_extent:
+    start: -65.0
+    stop: 65.0
+  lon_extent:
+    start: 0
+    stop: 360
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-downscaling
+  entity: ai2cm
