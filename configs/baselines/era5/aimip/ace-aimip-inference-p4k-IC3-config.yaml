@@ -397,7 +397,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: tdas_p4day_ACE_aimip_r3i1p1f1_gn_19781001-19791231
+    - label: huss_p4day_ACE_aimip_r3i1p1f1_gn_19781001-19791231
       names:
         - Q2m
       time_selection:
@@ -406,7 +406,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: tdas_p4day_ACE_aimip_r3i1p1f1_gn_20240101-20241231
+    - label: huss_p4day_ACE_aimip_r3i1p1f1_gn_20240101-20241231
       names:
         - Q2m
       time_selection:
@@ -629,7 +629,7 @@ data_writer:
       time_coarsen:
         method: monthly_mean
       save_reference: false
-    - label: tdas_Ap4mon_ACE_aimip_r3i1p1f1_gn_197810-202412
+    - label: huss_Ap4mon_ACE_aimip_r3i1p1f1_gn_197810-202412
       names:
         - Q2m
       time_coarsen:
