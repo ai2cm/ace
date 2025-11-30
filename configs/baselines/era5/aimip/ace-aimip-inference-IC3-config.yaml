@@ -19,7 +19,7 @@ data_writer:
         - TMP925
         - TMP1000
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -35,7 +35,7 @@ data_writer:
         - air_temperature_6
         - air_temperature_7
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -93,7 +93,7 @@ data_writer:
         - Q925
         - Q1000
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -109,7 +109,7 @@ data_writer:
         - specific_total_water_6
         - specific_total_water_7
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -167,7 +167,7 @@ data_writer:
         - UGRD925
         - UGRD1000
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -183,7 +183,7 @@ data_writer:
         - eastward_wind_6
         - eastward_wind_7
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -242,7 +242,7 @@ data_writer:
         - VGRD925
         - VGRD1000
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -258,7 +258,7 @@ data_writer:
         - northward_wind_6
         - northward_wind_7
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -317,7 +317,7 @@ data_writer:
         - h925
         - h1000
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -347,7 +347,7 @@ data_writer:
       names:
         - PRESsfc
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -365,7 +365,7 @@ data_writer:
       names:
         - surface_temperature
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -383,7 +383,7 @@ data_writer:
       names:
         - TMP2m
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -401,7 +401,7 @@ data_writer:
       names:
         - Q2m
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -419,7 +419,7 @@ data_writer:
       names:
         - UGRD10m
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -437,7 +437,7 @@ data_writer:
       names:
         - VGRD10m
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
@@ -455,7 +455,7 @@ data_writer:
       names:
         - PRATEsfc
       time_selection:
-        start_time: '1978-10-02T00:00:00'
+        start_time: '1978-10-01T00:00:00'
         stop_time: '1979-12-31T18:00:00'
       time_coarsen:
         coarsen_factor: 4
