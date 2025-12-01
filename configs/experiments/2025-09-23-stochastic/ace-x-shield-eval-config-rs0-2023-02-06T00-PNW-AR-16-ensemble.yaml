@@ -1,0 +1,53 @@
+# arg: --dataset andrep/2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr-stats:/statsdata
+# arg: --dataset 01K9B2ZY6E1W5N34HQCVMS7BJM:/weights
+experiment_dir: /results
+n_forward_steps: 2
+forward_steps_in_memory: 2
+checkpoint_path: /weights/training_checkpoints/best_inference_ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+    - '2023-02-06T00:00:00'
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+    engine: zarr
+  num_data_workers: 16
+aggregator:
+  log_zonal_mean_images: 0
+  log_histograms: true
+data_writer:
+  files:
+  - format:
+      name: zarr
+    label: output_6hourly
+    names:
+    - PRATEsfc
+    - UGRD10m
+    - VGRD10m
+    separate_ensemble_members: true
+  save_monthly_files: false
+  save_prediction_files: false
+logging:
+  project: ace-hiro
