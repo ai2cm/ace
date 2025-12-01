@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_
 cm4_1pctCO2-train_0256to0350_piControlConcat|rs0|01KBDRXWK2VNY6R1QKZQKMYTBW|training|best_inference_ckpt|normal|--not-preemptible
 
 cm4_1pctCO2-train_0256to0350_piControlConcat|rs1|01KBDRYBABRBNB98MPHE4TKKV3|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_1pctCO2-train_0256to0350_piControlConcat|rs0|01KBDT0E9VXY9G5Y7JP77P5AHK|training|best_inference_ckpt|normal|--not-preemptible
