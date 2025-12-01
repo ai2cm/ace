@@ -24,3 +24,5 @@ fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss||01KAWQ42YXHRSJSVMF57C0SCK2|t
 ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss||01KB0WGBJNX6GBHFCN2V83S34G|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss||01KB1354GKT0RT5NS3JCX7KSBY|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss-constant-lr||01KBDNKJ17MMV36GH61KQ4X9X0|training|best_inference_ckpt|normal|--not-preemptible
