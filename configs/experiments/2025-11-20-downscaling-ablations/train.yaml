@@ -66,9 +66,6 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  static_inputs:
-    HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
-    land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
   batch_size: 24
   num_data_workers: 4
   fine:
