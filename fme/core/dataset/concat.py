@@ -27,8 +27,6 @@ class XarrayConcat(DatasetABC):
         assert len(self._dataset) == len(sample_start_times)
         self._sample_n_times = datasets[0].sample_n_times
         self._properties = datasets[0].properties.copy()
-        for dataset in datasets[1:]:
-            self._properties.update(dataset.properties)
 
     def __len__(self):
         return len(self._dataset)
