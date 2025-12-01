@@ -1,1 +1,3 @@
 group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
+
+cm4_1pctCO2-train_0256to0350_piControlConcat|rs0|01KBE4R6HNJNSEMMW20AJDJZJV|training|best_inference_ckpt|normal|--not-preemptible
