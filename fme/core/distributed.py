@@ -218,6 +218,16 @@ class Distributed:
             local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
       return local_shape_h, local_offset_h, local_shape_w, local_offset_w
 
+    def get_local_tensor_dict(self, tensor_dict, shape_excluding_time):
+      tensor_dict_local={}
+      for n, tensor in tensor_dict.items():
+        if len(tensor.shape) == 3:
+          tensor_dict_local[n]=tensor[:,*self.get_local_slices(shape_excluding_time)]
+        else:
+           tensor_dict_local[n]= tensor
+
+      return tensor_dict_local
+
     def get_local_slices(self, crop_shape ):
       if self.spatial_parallelism:
         crop_offset=(0, 0)

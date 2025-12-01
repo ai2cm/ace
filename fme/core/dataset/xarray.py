@@ -860,23 +860,26 @@ class XarrayDataset(DatasetABC):
             else:
                 ds = self._open_file(file_idx)
                 ds = ds.isel(**self.isel)
-                ds_local, shape_local = self._dist.dataset_reshape(ds, self.dims, shape)
+                # ds_local, shape_local = self._dist.dataset_reshape(ds, self.dims, shape)
                 tensor_dict = load_series_data(
                     idx=start,
                     n_steps=n_steps,
-                    ds=ds_local,
+                    ds=ds, #ds_local,
                     names=self._time_dependent_names,
                     final_dims=self.dims,
-                    final_shape=shape_local,
+                    final_shape=shape, #shape_local,
                     fill_nans=self.fill_nans,
                 )
-                ds_local.close()
-                del ds_local
+                # ds_local.close()
+                # del ds_local
                 ds.close()
                 del ds
                 #CHECK: DO I also need to del ds
+            tensor_dict_local=self._dist.get_local_tensor_dict(tensor_dict, self._shape_excluding_time_after_selection)
+
             for n in self._time_dependent_names:
-                arrays.setdefault(n, []).append(tensor_dict[n])
+                arrays.setdefault(n, []).append(tensor_dict_local[n])
+                # arrays.setdefault(n, []).append(tensor_dict[n])
 
         tensors: TensorDict = {}
         for n, tensor_list in arrays.items():
@@ -888,15 +891,19 @@ class XarrayDataset(DatasetABC):
             ds = self._open_file(idxs[0])
             ds = ds.isel(**self.isel)
             shape = [total_steps] + self._shape_excluding_time_after_selection
-            ds_local, shape_local = self._dist.dataset_reshape(ds, self.dims, shape)
+            # ds_local, shape_local = self._dist.dataset_reshape(ds, self.dims, shape)
 
             for name in self._time_invariant_names:
-                variable = ds_local[name].variable
+                variable = ds[name].variable
                 if self.fill_nans is not None:
                     variable = variable.fillna(self.fill_nans.value)
-                tensors[name] = as_broadcasted_tensor(variable, self.dims, shape_local)
-            ds_local.close()
-            del ds_local
+                tensor_globar = as_broadcasted_tensor(variable, self.dims, shape)
+                if len(shape) == 3:
+                  tensors[name]=tensor_globar[:,*self._dist.get_local_slices(self._shape_excluding_time_after_selection)]
+                else:
+                  tensors[name] = tensor_globar
+            # ds_local.close()
+            # del ds_local
             #CHECK: DO I also need to del ds
             ds.close()
             del ds
