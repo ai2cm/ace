@@ -1,4 +1,5 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 ft_fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt||||best_inference_ckpt|skip|high||8|800GiB|2||optimization.lr=0.0001|01KAFQQ9R71FW008S365G7Y6PR
 ft_fto-v1110-ocn-filter-scale-4-ocn-nfs-8-ckpt-timeout-fix-no-eval-before||||best_inference_ckpt|skip|high||8|800GiB|2||optimization.lr=0.0001|01KAFQQ9R71FW008S365G7Y6PR
-ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss-constant-lr||||best_inference_ckpt|train|high||8|800GiB|3||optimization.lr=0.0001|01KAYW10DTP0N1V05M6Y94AM9H
+ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss-constant-lr||||best_inference_ckpt|skip|high||8|800GiB|3||optimization.lr=0.0001|01KAYW10DTP0N1V05M6Y94AM9H
+ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss-constant-lr-more-mem||||best_inference_ckpt|train|high||8|900GiB|3||optimization.lr=0.0001|01KAYW10DTP0N1V05M6Y94AM9H
