@@ -5,7 +5,7 @@ import xarray as xr
 
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.config import DatasetConfigABC
-from fme.core.dataset.dataset import DatasetABC
+from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
@@ -41,19 +41,14 @@ class MergedXarrayDataset(DatasetABC):
                          must have the same number of steps per sample item."
                 )
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def __getitem__(self, idx: int) -> DatasetItem:
         tensors: TensorDict = {}
         for dataset in self.datasets:
             ds_tensors, time, labels = dataset[idx]
             tensors.update(ds_tensors)
         return tensors, time, labels
 
-    def __len__(self) -> int:
-        return len(self.datasets[0])
-
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         tensors: TensorDict = {}
         for dataset in self.datasets:
             ds_tensors, time, labels = dataset.get_sample_by_time_slice(time_slice)
@@ -62,6 +57,16 @@ class MergedXarrayDataset(DatasetABC):
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
+        """
+        Like sample_start_times, but includes all times in the dataset, including
+        final times which are not valid as a start index.
+
+        This is relevant for inference, where we may use get_sample_by_time_slice to
+        retrieve time windows directly.
+
+        If this dataset does not support inference,
+        this will raise a NotImplementedError.
+        """
         return self.datasets[0].all_times
 
     @property
@@ -87,6 +92,10 @@ class MergedXarrayDataset(DatasetABC):
         if data_properties is None:
             raise ValueError("No dataset available to determine properties")
         return data_properties
+
+    def set_epoch(self, epoch: int):
+        for dataset in self.datasets:
+            dataset.set_epoch(epoch)
 
 
 @dataclasses.dataclass

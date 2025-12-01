@@ -62,9 +62,19 @@ class GriddedDataABC(abc.ABC, Generic[T]):
     def set_epoch(self, epoch: int): ...
 
     @abc.abstractmethod
-    def subset_loader(self, start_batch: int) -> DataLoader[T]:
+    def alternate_shuffle(self):
         """
-        Subset the loader to skip the first `start_batch` batches.
+        Change the random shuffle of the data loader for the current epoch.
+        """
+        ...
+
+    @abc.abstractmethod
+    def subset_loader(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> DataLoader[T]:
+        """
+        Subset the loader to skip the first `start_batch` batches
+        and stop at the `stop_batch` batch (exclusive).
         """
         ...
 

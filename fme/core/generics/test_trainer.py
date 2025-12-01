@@ -69,6 +69,7 @@ class TrainData(GriddedDataABC[BDType]):
             self._shuffle_seed: int | None = 0
         else:
             self._shuffle_seed = None
+        self.alternate_shuffle_active = False
 
     @property
     def batch_size(self) -> int:
@@ -96,6 +97,7 @@ class TrainData(GriddedDataABC[BDType]):
 
     def set_epoch(self, epoch: int) -> None:
         self._set_epoch(epoch)
+        self.alternate_shuffle_active = False
 
     def log_info(self, name: str) -> None:
         self._log_info(name)
@@ -108,12 +110,17 @@ class TrainData(GriddedDataABC[BDType]):
     def log_info_mock(self) -> unittest.mock.Mock:
         return self._log_info
 
-    def subset_loader(self, start_batch: int) -> DataLoader[BDType]:
+    def alternate_shuffle(self):
+        self.alternate_shuffle_active = True
+
+    def subset_loader(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> DataLoader[BDType]:
         batches = [BDType(i) for i in range(self._n_batches)]
         if self._shuffle_seed is not None:
             generator = np.random.default_rng(self._shuffle_seed)
             generator.shuffle(batches)
-        return batches[start_batch:]
+        return batches[slice(start_batch, stop_batch)]
 
 
 class InferenceData(InferenceDataABC[PSType, FDType]):
@@ -217,6 +224,7 @@ class Config:
     validate_using_ema: bool = True
     log_train_every_n_batches: int = 1
     checkpoint_every_n_batches: int = 0
+    train_evaluation_batches: int = 2
     inference_n_forward_steps: int = 1
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
@@ -699,6 +707,7 @@ def test_resume_after_preemption_during_validation(
     assert (
         len(stepper.validation_batches_seen)
         == int(evaluate_before_training) * n_validation_batches
+        + config.train_evaluation_batches
     )
     paths = CheckpointPaths(config.checkpoint_dir)
     assert os.path.exists(paths.latest_checkpoint_path)
@@ -724,7 +733,7 @@ def test_resume_after_preemption_during_validation(
     stepper = cast(TrainStepper, trainer.stepper)
     assert len(stepper.train_batches_seen) == 0  # empty epoch after preemption
     assert (
-        len(stepper.validation_batches_seen) == 0
+        len(stepper.validation_batches_seen) == config.train_evaluation_batches
     )  # already did evaluate_before_training before pre-emption
     assert os.path.exists(paths.best_checkpoint_path)
 
