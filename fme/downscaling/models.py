@@ -505,6 +505,7 @@ class CheckpointModelConfig:
     checkpoint_path: str
     rename: dict[str, str] | None = None
     fine_topography_path: str | None = None
+    model_updates: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # For config validation testing, we don't want to load immediately
@@ -526,6 +527,9 @@ class CheckpointModelConfig:
             ]
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
+            if self.model_updates is not None:
+                for k, v in self.model_updates.items():
+                    checkpoint_data["model"]["config"][k] = v
         return self._checkpoint_data
 
     def build(
