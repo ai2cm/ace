@@ -88,7 +88,7 @@ class ZarrWriterAdapter:
         self,
         path: str,
         dims: tuple,
-        data_coords: dict[str, xr.DataArray],
+        data_coords: dict[str, np.ndarray],
         n_timesteps: int,
         n_initial_conditions: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
@@ -125,7 +125,7 @@ class ZarrWriterAdapter:
         for vertical_nondim_coord in ["ak", "bk"]:
             if vertical_nondim_coord in data_coords:
                 self._nondim_coords[vertical_nondim_coord] = xr.DataArray(
-                    data_coords.pop(vertical_nondim_coord).values,
+                    data_coords.pop(vertical_nondim_coord),
                     dims=("z_interface",),
                 )
         self._horizontal_coords = data_coords
@@ -257,7 +257,7 @@ class SeparateICZarrWriterAdapter:
         for vertical_nondim_coord in ["ak", "bk"]:
             if vertical_nondim_coord in data_coords:
                 self._nondim_coords[vertical_nondim_coord] = xr.DataArray(
-                    data_coords.pop(vertical_nondim_coord).values,
+                    data_coords.pop(vertical_nondim_coord),
                     dims=("z_interface",),
                 )
         self._horizontal_coords = data_coords
