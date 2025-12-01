@@ -1,6 +1,6 @@
 experiment_dir: /results
 save_checkpoint: true
-save_best_inference_epoch_checkpoints: true
+save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
 log_train_every_n_batches: 10
 validate_using_ema: true
@@ -124,17 +124,6 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-  scheduler:
-    schedulers:
-      - type: LinearLR
-        step_each_iteration: true
-        kwargs:
-          start_factor: 0.01
-          end_factor: 1
-          total_iters: 360
-      - type: ConstantLR
-        step_each_iteration: true
-    milestones: [360]
 stepper:
   parameter_init:
     checkpoint_path: /ckpt.tar
