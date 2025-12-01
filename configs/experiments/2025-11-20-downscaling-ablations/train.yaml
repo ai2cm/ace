@@ -66,35 +66,35 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 36 #128 on 8 gpu
-  num_data_workers: 4 #8
+  static_inputs:
+    HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+    land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
+  batch_size: 24
+  num_data_workers: 4
   fine:
-  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 3km.zarr
     subset:
-      start_time: "2023-01-01T00:00:00"
-      stop_time: "2024-01-01T00:00:00"
-      step: 19
+      start_time: '2023-01-01T12:00:00'
+      stop_time: '2023-12-31T18:00:00'
+      step: 59
   coarse:
-  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
     subset:
-      start_time: "2023-01-01T00:00:00"
-      stop_time: "2024-01-01T00:00:00"
-      step: 19
+      start_time: '2023-01-01T12:00:00'
+      stop_time: '2023-12-31T18:00:00'
+      step: 59
   lat_extent:
     start: -66.0
     stop: 70.0
-  # lon_extent:
-  #   start: 230.0
-  #   stop: 295.0
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 1500 # using 320 samples per epoch, this is roughly 500k steps (200 epochs for the previous 2 yr training dataset)
-validate_interval: 15
+max_epochs: 500
+validate_interval: 12
 experiment_dir: /results
 save_checkpoints: true
 logging:
