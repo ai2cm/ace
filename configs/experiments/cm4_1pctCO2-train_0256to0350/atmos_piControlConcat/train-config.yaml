@@ -45,29 +45,31 @@ train_loader:
   dataset:
     merge:
       - concat:
-        - data_path: /climate-default
-          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
-          engine: zarr
-          subset:
-            start_time: '0256-01-03T12:00:00'
-        - data_path: /climate-default
-          file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-sea_ice.zarr
-          engine: zarr
-          subset:
-            start_time: '0151-01-03T12:00:00' # earlier times nan
-            stop_time: '0190-12-29T12:00:00'
+          - data_path: /climate-default
+            file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: '0256-01-03T12:00:00'
+          - data_path: /climate-default
+            file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: '0151-01-03T12:00:00' # earlier times nan
+              stop_time: '0190-12-29T12:00:00'
+        strict: false
       - concat:
-        - data_path: /climate-default
-          file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
-          engine: zarr
-          subset:
-            start_time: '0256-01-03T12:00:00'
-        - data_path: /climate-default
-          file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-          engine: zarr
-          subset:
-            start_time: '0151-01-03T12:00:00' # earlier times nan
-            stop_time: '0190-12-29T12:00:00'
+          - data_path: /climate-default
+            file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+            engine: zarr
+            subset:
+              start_time: '0256-01-03T12:00:00'
+          - data_path: /climate-default
+            file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+            engine: zarr
+            subset:
+              start_time: '0151-01-03T12:00:00' # earlier times nan
+              stop_time: '0190-12-29T12:00:00'
+        strict: false
 validation_loader:
   batch_size: 64
   num_data_workers: 4
