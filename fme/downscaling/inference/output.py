@@ -91,7 +91,7 @@ class DownscalingOutput:
             zip(
                 self.dims,
                 [
-                    self.data.all_times.to_numpy(),
+                    self.data.all_times,
                     np.array(ensemble),
                     latlon_coords.lat.cpu().numpy(),
                     latlon_coords.lon.cpu().numpy(),

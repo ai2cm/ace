@@ -68,18 +68,6 @@ class ZarrWriterConfig:
     suffix: str = "zarr"
 
 
-def ensure_numpy_coords(
-    data_coords: dict[str, xr.DataArray | np.ndarray],
-) -> dict[str, np.ndarray]:
-    numpy_coords = {}
-    for coord_name, coord_value in data_coords.items():
-        if isinstance(coord_value, xr.DataArray):
-            numpy_coords[coord_name] = coord_value.to_numpy()
-        else:
-            numpy_coords[coord_name] = coord_value
-    return numpy_coords
-
-
 class ZarrWriterAdapter:
     _SAMPLE_DIM = 0
     _TIME_DIM = 1
@@ -154,6 +142,7 @@ class ZarrWriterAdapter:
                 "valid_time": valid_times_coord,
             }
         )
+
         self._dim_coords = {
             **self._horizontal_coords,
             "time": lead_times_coord,
@@ -162,7 +151,7 @@ class ZarrWriterAdapter:
         self._writer = ZarrWriter(
             path=self.path,
             dims=self.dims,
-            coords=ensure_numpy_coords(self._dim_coords),
+            coords=self._dim_coords,
             data_vars=self.data_vars,
             chunks=self.chunks,
             shards={"time": batch_time.sizes["time"]},

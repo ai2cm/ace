@@ -23,12 +23,7 @@ from .time_coarsen import (
     TimeCoarsenConfig,
 )
 from .utils import DIM_INFO_HEALPIX, DIM_INFO_LATLON
-from .zarr import (
-    SeparateICZarrWriterAdapter,
-    ZarrWriterAdapter,
-    ZarrWriterConfig,
-    ensure_numpy_coords,
-)
+from .zarr import SeparateICZarrWriterAdapter, ZarrWriterAdapter, ZarrWriterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -386,7 +381,7 @@ class FileWriterConfig:
             raw_writer = zarr_writer_cls(
                 path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                 dims=dims,
-                data_coords=ensure_numpy_coords(subselect_coords_),
+                data_coords=subselect_coords_,
                 n_timesteps=n_timesteps_write,
                 n_initial_conditions=n_initial_conditions,
                 data_vars=self.names,
