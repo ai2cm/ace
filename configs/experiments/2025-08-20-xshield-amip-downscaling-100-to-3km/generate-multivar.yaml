@@ -10,11 +10,11 @@ outputs:
       start_time: "2023-01-01T00:00:00"
       stop_time: "2023-03-31T18:00:00"
     lat_extent:
-      start: 41
-      stop: 57
+      start: 36
+      stop: 52
     lon_extent:
-      start: 270
-      stop: 286
+      start: 283
+      stop: 299
   # - name: "CONUS_2023"
   #   save_vars: ["PRATEsfc"]
   #   n_ens: 8
