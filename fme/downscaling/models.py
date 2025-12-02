@@ -593,7 +593,9 @@ class CheckpointModelConfig:
             fine_names=out_names,
             coarse_names=list(set(in_names).union(out_names)),
             n_timesteps=1,
-            static_input_names=self._checkpoint["model"]["config"]["static_inputs"],
+            static_input_names=self._checkpoint["model"]["config"].get(
+                "static_inputs", []
+            ),
         )
 
     @property
