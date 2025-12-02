@@ -118,7 +118,7 @@ validation_loader:
               stop_time: '0407-01-03T12:00:00'
 optimization:
   use_gradient_accumulation: true
-  enable_automatic_mixed_precision: false
+  enable_automatic_mixed_precision: true
   lr: 0.00001
   optimizer_type: AdamW
   kwargs:
@@ -167,8 +167,8 @@ stepper:
               upscale_factor: 2
           normalization:
             network:
-              global_means_path: /climate-default/2025-10-21-E3SMv3-piControl-100yr-coupled-stats/uncoupled_ocean/centering.nc
-              global_stds_path: /climate-default/2025-10-21-E3SMv3-piControl-100yr-coupled-stats/uncoupled_ocean/scaling-full-field.nc
+              global_means_path: /ocean_stats/centering.nc
+              global_stds_path: /ocean_stats/scaling-full-field.nc
           corrector:
             type: ocean_corrector
             config:
@@ -421,12 +421,12 @@ stepper:
               spectral_transform: sht
           normalization:
             network:
-              global_means_path: /climate-default/2025-10-21-E3SMv3-piControl-100yr-coupled-stats/coupled_atmosphere/centering.nc
-              global_stds_path: /climate-default/2025-10-21-E3SMv3-piControl-100yr-coupled-stats/coupled_atmosphere/scaling-full-field.nc
+              global_means_path: /atmos_stats/centering.nc
+              global_stds_path: /atmos_stats/scaling-full-field.nc
               fill_nans_on_normalize: false
             residual:
-              global_means_path: /climate-default/2025-10-21-E3SMv3-piControl-100yr-coupled-stats/coupled_atmosphere/centering.nc
-              global_stds_path: /climate-default/2025-10-21-E3SMv3-piControl-100yr-coupled-stats/coupled_atmosphere/scaling-residual.nc
+              global_means_path: /atmos_stats/centering.nc
+              global_stds_path: /atmos_stats/scaling-residual.nc
           ocean:
             surface_temperature_name: TS
             ocean_fraction_name: ocean_fraction
