@@ -525,15 +525,33 @@ class _CheckpointModelConfigSelector:
 
 @dataclasses.dataclass
 class CheckpointModelConfig:
+    """
+    This class specifies a diffusion model loaded from a checkpoint file.
+
+    Parameters:
+        checkpoint_path: The path to the checkpoint file.
+        rename: Optional mapping of {old: new} model input/output names to rename.
+        fine_topography_path: Optional path to the fine topography file, if needed.
+            This is useful when no fine res data is used during evaluation but the
+            model still needs fine res static input data.
+        model_updates: Optional mapping of {key: new_value} model config updates to
+            apply when loading the model. This is useful for running evaluation with
+            updated parameters than at training time. Use with caution; not all
+            parameters can or should be updated at evaluation time.
+    """
+
     checkpoint_path: str
     rename: dict[str, str] | None = None
     static_input_paths: dict[str, str] | None = None
+    model_updates: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # For config validation testing, we don't want to load immediately
         # so we defer until build or properties are accessed.
         self._checkpoint_is_loaded = False
         self._rename = self.rename or {}
+        if "module" in (self.model_updates or {}):
+            raise ValueError("'module' cannot be updated in model_updates.")
 
     @property
     def _checkpoint(self) -> Mapping[str, Any]:
@@ -549,6 +567,9 @@ class CheckpointModelConfig:
             ]
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
+            if self.model_updates is not None:
+                for k, v in self.model_updates.items():
+                    checkpoint_data["model"]["config"][k] = v
         return self._checkpoint_data
 
     def build(

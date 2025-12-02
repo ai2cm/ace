@@ -4,12 +4,15 @@ import cftime
 import torch
 import xarray as xr
 
-from fme.core.coordinates import HorizontalCoordinates
+from fme.core.coordinates import HorizontalCoordinates, NullVerticalCoordinate
+from fme.core.dataset.dataset import DatasetABC
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import _get_timestep
+from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import TensorDict
 
 
-class DummyDataset(torch.utils.data.Dataset):
+class DummyDataset(DatasetABC):
     def __init__(
         self,
         start_time: cftime.datetime,
@@ -27,7 +30,7 @@ class DummyDataset(torch.utils.data.Dataset):
             horizontal_coordinates: Horizontal coordinates for the dummy dataset.
         """
         self.timestep = timestep
-        self.sample_n_times = n_timesteps
+        self._sample_n_times = n_timesteps
         calendar = start_time.calendar
         self._all_times = xr.date_range(
             start=start_time,
@@ -40,6 +43,7 @@ class DummyDataset(torch.utils.data.Dataset):
         self._n_initial_conditions = total_timesteps - self.sample_n_times + 1
         self._sample_start_times = self._all_times[: self._n_initial_conditions]
         self._timestep = _get_timestep(self._all_times)
+        self._horizontal_coordinates = horizontal_coordinates
         self._horizontal_size = horizontal_coordinates.loaded_sizes
         self._labels: set[str] = set()
         shape = tuple(s.size for s in self._horizontal_size)
@@ -53,13 +57,38 @@ class DummyDataset(torch.utils.data.Dataset):
         """Time index of all available times in the data."""
         return self._all_times
 
-    def __len__(self):
-        return self._n_initial_conditions
-
     @property
     def sample_start_times(self) -> xr.CFTimeIndex:
         """Return cftime index corresponding to start time of each sample."""
         return self._sample_start_times
+
+    @property
+    def sample_n_times(self) -> int:
+        """The length of the time dimension of each sample."""
+        return self._sample_n_times
+
+    def get_sample_by_time_slice(
+        self, time_slice: slice
+    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+        raise NotImplementedError(
+            "Dummy datasets do not support getting samples by time slice, "
+            "is this a bug?."
+        )
+
+    @property
+    def properties(self) -> DatasetProperties:
+        return DatasetProperties(
+            variable_metadata={},
+            vertical_coordinate=NullVerticalCoordinate(),
+            horizontal_coordinates=self._horizontal_coordinates,
+            mask_provider=MaskProvider(),
+            timestep=self.timestep,
+            is_remote=False,
+            all_labels=self._labels,
+        )
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        pass
 
     def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
         """Return a sample of data spanning the timesteps
@@ -74,3 +103,6 @@ class DummyDataset(torch.utils.data.Dataset):
         time_slice = slice(idx, idx + self.sample_n_times)
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
         return (self._dummy_dict, time, self._labels)
+
+    def set_epoch(self, epoch: int):
+        pass

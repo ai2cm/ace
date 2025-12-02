@@ -1,6 +1,7 @@
 import sys
 
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
@@ -39,7 +40,7 @@ from fme.ace.registry.hpx import (
     UNetEncoderConfig,
 )
 from fme.ace.registry.land_net import LandNetBuilder
-from fme.ace.registry.m2lines import SamudraBuilder
+from fme.ace.registry.m2lines import FloeNetBuilder, SamudraBuilder
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO
 from fme.ace.stepper import DerivedForcingsConfig, StepperOverrideConfig
