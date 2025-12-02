@@ -1,14 +1,14 @@
 experiment_dir: /climate-default/home/annak/2025-12-02-multivar-generation
 model:
-    checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
 outputs:
-  - name: NE_US_Quebec_2023_JFM"
+  - name: "NE_US_Quebec_2023_JFM"
     save_vars: ["PRATEsfc"]
     n_ens: 8
     max_samples_per_gpu: 8
     time_range:
-        start_time: "2023-01-01T00:00:00"
-        end_time: "2023-03-31T18:00:00"
+      start_time: "2023-01-01T00:00:00"
+      end_time: "2023-03-31T18:00:00"
     lat_extent:
       start: 41
       stop: 57

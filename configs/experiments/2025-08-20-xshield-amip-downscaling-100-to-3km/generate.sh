@@ -5,7 +5,7 @@
 set -e
 
 JOB_NAME="generate-xshield-amip-100km-to-3km-multivar-ne-quebec"
-CONFIG_FILENAME="generat-multivar.yaml"
+CONFIG_FILENAME="generate-multivar.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
