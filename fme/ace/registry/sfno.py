@@ -47,6 +47,10 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ):
+        if len(dataset_info.all_labels) > 0:
+            raise ValueError(
+                "SphericalFourierNeuralOperatorNet does not support labels"
+            )
         sfno_net = SphericalFourierNeuralOperatorNet(
             params=self,
             in_chans=n_in_channels,
@@ -93,6 +97,8 @@ class SFNO_V0_1_0(ModuleConfig):
         dataset_info: DatasetInfo,
     ):
         img_shape = dataset_info.img_shape
+        if len(dataset_info.all_labels) > 0:
+            raise ValueError("SFNO-v0.1.0 does not support labels")
         return MakaniSFNO(
             inp_chans=n_in_channels,
             out_chans=n_out_channels,

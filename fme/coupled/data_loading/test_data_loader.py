@@ -34,6 +34,7 @@ from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.data_typing import (
+    CoupledDatasetItem,
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
 )
@@ -422,7 +423,8 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
     sample_idx = 1
     ocean_ds = ics[ic_idx].ocean.ds
     atmos_ds = ics[ic_idx].atmosphere.ds
-    sample = data._loader._dataset[sample_idx]
+    sample = data._loader._dataset[sample_idx]  # type: ignore
+    assert isinstance(sample, CoupledDatasetItem)
     ocean_sample_init_time = sample.ocean[1].isel(time=0).item()
     atmos_sample_init_time = sample.atmosphere[1].isel(time=0).item()
 

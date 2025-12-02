@@ -28,7 +28,7 @@ NAME_CLIMSST_4DEG = fv3gfs-ensemble-4deg
 NAME_AMIP_1DEG = fv3gfs-AMIP-ensemble
 NAME_AMIP_4DEG = fv3gfs-AMIP-ensemble-4deg
 ATMOSPHERE_PROCESSING_IMAGE = us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing
-ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.03.1  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
+ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.12.0  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 HEALPIX_PROCESSING_IMAGE = dlwp-ace-datapipe
 HEALPIX_PROCESSING_IMAGE_VERSION = v2025.09.0  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 
@@ -333,3 +333,7 @@ cm4_1pctCO2_140yr_coupled_no_smoothing:
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
 	python ./create_coupled_datasets.py --yaml configs/E3SMv3-piControl-100yr-coupled.yaml
+
+.PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
+cm4_like_am4_random_co2_ensemble_atmosphere:
+	./compute_dataset.sh --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml

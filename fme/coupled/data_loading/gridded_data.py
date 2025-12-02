@@ -9,6 +9,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
+from fme.core.rand import alternate_seed
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.data_typing import (
     CoupledCoords,
@@ -51,8 +52,12 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     def loader(self) -> DataLoader[CoupledBatchData]:
         return self._get_gpu_loader(self._loader)
 
-    def subset_loader(self, start_batch: int) -> DataLoader[CoupledBatchData]:
-        return self._get_gpu_loader(self._loader.subset(start_batch))
+    def subset_loader(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> DataLoader[CoupledBatchData]:
+        return self._get_gpu_loader(
+            self._loader.subset(start_batch=start_batch, stop_batch=stop_batch)
+        )
 
     def _get_gpu_loader(
         self, base_loader: DataLoader[CoupledBatchData]
@@ -130,6 +135,17 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
             self._sampler, torch.utils.data.DistributedSampler
         ):
             self._sampler.set_epoch(epoch)
+        self._loader.set_epoch(epoch)
+
+    def alternate_shuffle(self):
+        """
+        Set the random shuffle of the data loader for the current epoch
+        to the "alternate" shuffle.
+        """
+        if self._sampler is not None and isinstance(
+            self._sampler, torch.utils.data.DistributedSampler
+        ):
+            self._sampler.set_epoch(alternate_seed(self._sampler.epoch))
 
     def log_info(self, name: str):
         logging.info(

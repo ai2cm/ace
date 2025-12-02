@@ -83,7 +83,6 @@ class CoupledInitialConditionConfig:
         self,
         ocean_prognostic_names: Sequence[str],
         atmosphere_prognostic_names: Sequence[str],
-        labels: list[str],
         n_ensemble_per_ic: int,
     ) -> CoupledPrognosticState:
         ocean = self.ocean.get_dataset(self.start_indices)
@@ -96,13 +95,13 @@ class CoupledInitialConditionConfig:
             ocean_data=get_initial_condition(
                 ds=ocean,
                 prognostic_names=ocean_prognostic_names,
-                labels=labels,
+                labels=None,
                 n_ensemble=n_ensemble_per_ic,
             ),
             atmosphere_data=get_initial_condition(
                 ds=atmos,
                 prognostic_names=atmosphere_prognostic_names,
-                labels=labels,
+                labels=None,
                 n_ensemble=n_ensemble_per_ic,
             ),
         )
@@ -125,7 +124,6 @@ class InferenceConfig:
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
-        labels: Dataset labels to use for inference.
         n_ensemble_per_ic: Number of ensemble members per initial condition
     """
 
@@ -142,7 +140,6 @@ class InferenceConfig:
     aggregator: InferenceAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceAggregatorConfig()
     )
-    labels: list[str] = dataclasses.field(default_factory=list)
     n_ensemble_per_ic: int = 1
 
     def configure_logging(self, log_filename: str):
@@ -249,7 +246,6 @@ def run_inference_from_config(config: InferenceConfig):
     initial_condition = config.initial_condition.get_initial_condition(
         ocean_prognostic_names=stepper_config.ocean.stepper.prognostic_names,
         atmosphere_prognostic_names=stepper_config.atmosphere.stepper.prognostic_names,
-        labels=config.labels,
         n_ensemble_per_ic=config.n_ensemble_per_ic,
     )
     stepper = config.load_stepper()

@@ -39,14 +39,14 @@ class CollateFn:
     def __call__(
         self, samples: Sequence[Tuple[TensorMapping, xr.DataArray, set[str]]]
     ) -> "BatchData":
-        sample_data, sample_time, labels = zip(*samples)
+        sample_data, sample_time, _ = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_time, dim="sample")
         return BatchData(
             data=batch_data,
             time=batch_time,
             horizontal_dims=self.horizontal_dims,
-            labels=list(labels),
+            labels=None,
         )
 
 
@@ -170,7 +170,6 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
     for window_batch_data_list in zip(*loaders):
         tensors = [item.data for item in window_batch_data_list]
         time = [item.time for item in window_batch_data_list]
-        labels = [item.labels for item in window_batch_data_list]
         window_batch_data = {
             k: torch.concat([d[k] for d in tensors]) for k in tensors[0].keys()
         }
@@ -178,7 +177,7 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
         yield BatchData(
             data=window_batch_data,
             time=time,
-            labels=list(labels),
+            labels=None,
         )
 
 

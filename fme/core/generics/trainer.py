@@ -114,6 +114,9 @@ class TrainConfigProtocol(Protocol):
     def log_train_every_n_batches(self) -> int: ...
 
     @property
+    def train_evaluation_batches(self) -> int: ...
+
+    @property
     def checkpoint_every_n_batches(self) -> int: ...
 
     @property
@@ -429,7 +432,9 @@ class Trainer:
                 f"{self._current_epoch_num_batches_seen} batches since these were "
                 "already processed for this epoch in a previous training run."
             )
-        epoch_data = self.train_data.subset_loader(self._current_epoch_num_batches_seen)
+        epoch_data = self.train_data.subset_loader(
+            start_batch=self._current_epoch_num_batches_seen,
+        )
         if self._current_epoch_num_batches_seen > 0:
             logging.info(
                 f"Subsetted train loader created, has {len(epoch_data)} batches"
@@ -475,6 +480,14 @@ class Trainer:
             ):
                 self._save_restart_checkpoints()
                 self._last_saved_num_batches_seen = self.num_batches_seen
+        # evaluate after training on an independent shuffle of the data
+        self.train_data.alternate_shuffle()
+        for batch in self.train_data.subset_loader(
+            stop_batch=self.config.train_evaluation_batches
+        ):
+            with GlobalTimer():
+                stepped = self.stepper.train_on_batch(batch, self._no_optimization)
+            aggregator.record_batch(stepped)
         if dist.is_root() and self.num_batches_seen > self._last_saved_num_batches_seen:
             self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
         # we will save restart checkpoints again after validation/inference

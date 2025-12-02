@@ -59,6 +59,8 @@ class HEALPixRecUNetBuilder(ModuleConfig):
         Returns:
             HEALPixRecUNet model.
         """
+        if len(dataset_info.all_labels) > 0:
+            raise ValueError("HEALPixRecUNet does not support labels")
         # Construct the HEALPixRecUNet module here using the parameters
         return HEALPixRecUNet(
             encoder=self.encoder,

@@ -38,6 +38,8 @@ class SamudraBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ):
+        if len(dataset_info.all_labels) > 0:
+            raise ValueError("Samudra does not support labels")
         return Samudra(
             input_channels=n_in_channels,
             output_channels=n_out_channels,
