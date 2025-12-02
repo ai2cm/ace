@@ -485,7 +485,7 @@ class Trainer:
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self._no_optimization)
             aggregator.record_batch(stepped)
-        if dist.is_root() and self.num_batches_seen > self._last_saved_num_batches_seen:
+        if self.num_batches_seen > self._last_saved_num_batches_seen:
             self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
         # we will save restart checkpoints again after validation/inference
         # are recorded to wandb

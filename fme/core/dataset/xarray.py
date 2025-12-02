@@ -541,11 +541,7 @@ class XarrayDataset(DatasetABC):
                 f"No files found matching '{self.path}/{self.file_pattern}'."
             )
         self.full_paths = self._raw_paths * config.n_repeats
-<<<<<<< HEAD
         self._sample_n_times = n_timesteps
-=======
-        self.sample_n_times = n_timesteps
->>>>>>> 35741f5b5 (Fixing the xarray test with spatial parallelism.)
         self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
             self.full_paths[0],
