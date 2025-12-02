@@ -1,0 +1,58 @@
+experiment_dir: /climate-default/home/annak/2025-12-02-multivar-generation
+model:
+    checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+outputs:
+  - name: NE_US_Quebec_2023_JFM"
+    save_vars: ["PRATEsfc"]
+    n_ens: 8
+    max_samples_per_gpu: 8
+    time_range:
+        start_time: "2023-01-01T00:00:00"
+        end_time: "2023-03-31T18:00:00"
+    lat_extent:
+      start: 41
+      stop: 57
+    lon_extent:
+      start: 270
+      stop: 286
+  # - name: "CONUS_2023"
+  #   save_vars: ["PRATEsfc"]
+  #   n_ens: 8
+  #   max_samples_per_gpu: 8
+  #   time_range:
+  #       start_time: "2023-01-01T00:00:00"
+  #       end_time: "2023-12-31T18:00:00"
+  #   lat_extent:
+  #       start: 22.0
+  #       stop:  50.0
+  #   lon_extent:
+  #       start: 230.0
+  #       stop: 295.0
+data:
+  batch_size: 16
+  num_data_workers: 4
+  static_inputs:
+    HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+    land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
+  coarse:
+  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    file_pattern: 100km.zarr
+    engine: zarr
+    subset:
+      start_time: "2023-01-01T00:00:00"
+      stop_time: "2023-03-03T00:00:00"
+  lat_extent:
+    start: 41
+    stop: 57
+  lon_extent:
+    start: 270
+    stop: 286
+  strict_ensemble: false
+patch:
+    divide_generation: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: annak-downscaling
+  entity: ai2cm
