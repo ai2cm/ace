@@ -35,4 +35,4 @@ ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss-constant-lr-more-mem||01KB
 
 ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss-enable-mp||01KBEWAM0T5G79CHBGGDN86940|training|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss-enable-mp||01KBEWAM0T5G79CHBGGDN86940|skip|best_inference_ckpt|high|--not-preemptible||01KBGA6E8TGMBC8NQ9CQ6P28QA||
+ft_fto-v1110-ocn-filter-scale-4-ocn-baseline-sst-loss-enable-mp||01KBEWAM0T5G79CHBGGDN86940|run_ICx1|best_inference_ckpt|high|--not-preemptible||01KBGA6E8TGMBC8NQ9CQ6P28QA||
