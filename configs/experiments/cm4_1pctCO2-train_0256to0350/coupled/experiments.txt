@@ -20,3 +20,5 @@ ft_fto-1pctCO2_0256to0350-czhrv51v|rs0|01KB1V37C1WH8FSHZRCYKPFS9A|run_ICx1|best_
 ft_fto-1pctCO2_0256to0350-czhrv51v|rs0|01KB1V37C1WH8FSHZRCYKPFS9A|run_insample|best_inference_ckpt|normal|--not-preemptible
 
 ft_fto-1pctCO2_0256to0350-ubyk6ome|rs0|01KBEH4M4SE36B4CSZX53QWVMY|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_fruab0nq|rs0|01KBENDFHDW14WQPDWE418VJFJ|training|best_inference_ckpt|normal|--not-preemptible
