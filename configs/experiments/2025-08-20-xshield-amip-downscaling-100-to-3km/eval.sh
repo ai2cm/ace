@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-100km-to-3km-multivar-ne-quebec-20230206-nostatinp"
-CONFIG_FILENAME="generate-multivar.yaml"
+JOB_NAME="generate-xshield-amip-wind-events-nostatinp"
+CONFIG_FILENAME="eval-wind-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=1
+NGPU=2
 
 IMAGE=spencerc/fme-deps-only-0196723e
 
@@ -49,4 +49,4 @@ gantry run \
     --no-conda \
     --install "pip install --no-deps ." \
     --allow-dirty \
-    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
+    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.evaluator $CONFIG_PATH
