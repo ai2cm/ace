@@ -141,7 +141,7 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
-    train_evaluation_samples: int = 1000
+    train_evaluation_samples: int = 0  # FIXME
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
