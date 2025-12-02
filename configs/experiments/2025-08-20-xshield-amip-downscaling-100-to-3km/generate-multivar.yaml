@@ -3,7 +3,7 @@ model:
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
 outputs:
   - name: "NE_US_Quebec_2023_JFM"
-    save_vars: ["PRATEsfc"]
+    save_vars: ["PRATEsfc", "eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"]
     n_ens: 8
     max_samples_per_gpu: 8
     time_range:
