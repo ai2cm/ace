@@ -1133,8 +1133,12 @@ def test_resolve_variable_metadata(
     ],
 )
 def test_evaluator_with_derived_forcings(
-    tmp_path: pathlib.Path, solar_constant: NameConfig | ValueConfig
+    tmp_path: pathlib.Path,
+    solar_constant: NameConfig | ValueConfig,
+    very_fast_only: bool,
 ):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     forward_steps_in_memory = 2
     insolation_name = "DSWRFtoa"
     in_names = ["var", "forcing_var", insolation_name]

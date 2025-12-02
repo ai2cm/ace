@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from collections.abc import Sequence
 
 import torch
@@ -11,7 +12,7 @@ from fme.core.dataset.xarray import XarrayDataConfig, get_xarray_datasets
 
 
 class XarrayConcat(DatasetABC):
-    def __init__(self, datasets: Sequence[DatasetABC]):
+    def __init__(self, datasets: Sequence[DatasetABC], strict: bool = True):
         self._dataset = torch.utils.data.ConcatDataset(datasets)
         self._wrapped_datasets = datasets
         sample_start_times = datasets[0].sample_start_times
@@ -28,7 +29,15 @@ class XarrayConcat(DatasetABC):
         self._sample_n_times = datasets[0].sample_n_times
         self._properties = datasets[0].properties.copy()
         for dataset in datasets[1:]:
-            self._properties.update(dataset.properties)
+            if strict:
+                self._properties.update(dataset.properties)
+            else:
+                try:
+                    self._properties.update(dataset.properties)
+                except ValueError as e:
+                    warnings.warn(
+                        f"Metadata for each ensemble member are not the same: {e}"
+                    )
 
     def __getitem__(self, idx: int) -> DatasetItem:
         return self._dataset[idx]
@@ -83,7 +92,7 @@ def get_dataset(
     datasets, properties = get_xarray_datasets(
         dataset_configs, names, n_timesteps, strict=strict
     )
-    ensemble = XarrayConcat(datasets)
+    ensemble = XarrayConcat(datasets, strict=strict)
     return ensemble, properties
 
 

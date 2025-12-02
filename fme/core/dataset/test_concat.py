@@ -1,3 +1,7 @@
+import datetime
+
+import pytest
+
 from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.testing import TestDataset
 
@@ -20,3 +24,22 @@ def test_concat_len():
     ]
     concat_dataset = XarrayConcat(datasets)
     assert len(concat_dataset) == sum(len(ds) for ds in datasets)
+
+
+@pytest.mark.parametrize(
+    "strict,context",
+    [
+        (True, pytest.raises(ValueError, match=r"Inconsistent timesteps.*")),
+        (False, pytest.warns(UserWarning, match=r"Inconsistent timesteps.*")),
+    ],
+)
+def test_concat_strict(strict, context):
+    dataset = TestDataset.new(n_times=10, varnames=["var1"], sample_n_times=3)
+    new_properties = dataset.properties.copy()
+    new_properties.timestep = datetime.timedelta(hours=6)
+    new_dataset = TestDataset.new(
+        n_times=10, varnames=["var1"], sample_n_times=3, properties=new_properties
+    )
+    datasets = [dataset, new_dataset]
+    with context:
+        _ = XarrayConcat(datasets, strict=strict)
