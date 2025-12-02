@@ -333,3 +333,7 @@ cm4_1pctCO2_140yr_coupled_no_smoothing:
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
 	python ./create_coupled_datasets.py --yaml configs/E3SMv3-piControl-100yr-coupled.yaml
+
+.PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
+cm4_like_am4_random_co2_ensemble_atmosphere:
+	./compute_dataset.sh --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
