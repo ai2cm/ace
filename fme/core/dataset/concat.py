@@ -8,6 +8,7 @@ import xarray as xr
 from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.utils import accumulate_labels
 from fme.core.dataset.xarray import XarrayDataConfig, get_xarray_datasets
 
 
@@ -38,6 +39,9 @@ class XarrayConcat(DatasetABC):
                     warnings.warn(
                         f"Metadata for each ensemble member are not the same: {e}"
                     )
+
+    def __len__(self):
+        return len(self._dataset)
 
     def __getitem__(self, idx: int) -> DatasetItem:
         return self._dataset[idx]
@@ -124,3 +128,10 @@ class ConcatDatasetConfig(DatasetConfigABC):
             n_timesteps,
             strict=self.strict,
         )
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return accumulate_labels([ds.available_labels for ds in self.concat])

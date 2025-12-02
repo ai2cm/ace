@@ -174,6 +174,8 @@ class InferenceDataset(torch.utils.data.Dataset):
             atmosphere_horizontal_dims=list(
                 self.properties.horizontal_coordinates.atmosphere.dims
             ),
+            ocean_label_encoding=None,
+            atmosphere_label_encoding=None,
         )
 
     def __getitem__(self, index) -> CoupledBatchData:
@@ -246,5 +248,6 @@ def _make_dummy_ocean_forcing(
         timestep=ts,
         n_timesteps=ocean_reqs.n_timesteps,
         horizontal_coordinates=dataset_info.ocean.horizontal_coordinates,
+        labels=None,
     )
     return ocean, ocean_property

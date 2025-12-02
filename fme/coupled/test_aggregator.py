@@ -187,7 +187,7 @@ def test_inference_logs_labels_exist(tmpdir):
     )
 
     coupled_data = CoupledPairedData(
-        ocean_data=PairedData(
+        ocean_data=PairedData.new_on_device(
             prediction={
                 "ocean_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
@@ -195,9 +195,9 @@ def test_inference_logs_labels_exist(tmpdir):
                 "ocean_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
             time=time,
-            labels=[set() for _ in range(n_sample)],
+            labels=None,
         ),
-        atmosphere_data=PairedData(
+        atmosphere_data=PairedData.new_on_device(
             prediction={
                 "atmos_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
@@ -205,7 +205,7 @@ def test_inference_logs_labels_exist(tmpdir):
                 "atmos_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
             time=time,
-            labels=[set() for _ in range(n_sample)],
+            labels=None,
         ),
     )
 

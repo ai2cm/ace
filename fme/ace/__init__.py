@@ -67,7 +67,6 @@ from fme.core.dataset.xarray import OverwriteConfig, XarrayDataConfig
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import StepLossConfig
 from fme.core.masking import StaticMaskingConfig
-from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import CheckpointConfig
@@ -79,6 +78,7 @@ from fme.core.step import (
     SeparateRadiationStepConfig,
     SingleModuleStepConfig,
 )
+from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
 
 from . import step

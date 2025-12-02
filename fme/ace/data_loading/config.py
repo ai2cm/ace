@@ -57,12 +57,23 @@ class DataLoaderConfig:
     sample_with_replacement: int | None = None
     time_buffer: int = 0
 
+    @property
+    def using_labels(self) -> bool:
+        return self.available_labels is not None
+
     def get_dataset(
         self,
         names: Sequence[str],
         n_timesteps: int,
     ) -> tuple[DatasetABC, DatasetProperties]:
         return self.dataset.build(names, n_timesteps)
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return self.dataset.available_labels
 
     def __post_init__(self):
         dist = Distributed.get_instance()

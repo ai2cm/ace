@@ -13,6 +13,7 @@ from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
+from fme.core.labels import LabelEncoding
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.concat import ConcatDataset
 from fme.coupled.data_loading.config import (
@@ -42,16 +43,24 @@ from .inference import ExplicitIndices
 
 class CollateFn:
     def __init__(
-        self, ocean_horizontal_dims: list[str], atmosphere_horizontal_dims: list[str]
+        self,
+        ocean_horizontal_dims: list[str],
+        atmosphere_horizontal_dims: list[str],
+        ocean_label_encoding: LabelEncoding | None = None,
+        atmosphere_label_encoding: LabelEncoding | None = None,
     ):
         self.ocean_horizontal_dims = ocean_horizontal_dims
         self.atmosphere_horizontal_dims = atmosphere_horizontal_dims
+        self.ocean_label_encoding = ocean_label_encoding
+        self.atmosphere_label_encoding = atmosphere_label_encoding
 
     def __call__(self, samples: list[CoupledDatasetItem]) -> CoupledBatchData:
         return CoupledBatchData.collate_fn(
             samples,
             ocean_horizontal_dims=self.ocean_horizontal_dims,
             atmosphere_horizontal_dims=self.atmosphere_horizontal_dims,
+            ocean_label_encoding=self.ocean_label_encoding,
+            atmosphere_label_encoding=self.atmosphere_label_encoding,
         )
 
 
@@ -142,6 +151,19 @@ def get_gridded_data(
     else:
         kwargs = {"prefetch_factor": config.prefetch_factor}
 
+    if config.ocean_available_labels is not None:
+        ocean_label_encoding = LabelEncoding(
+            sorted(list(config.ocean_available_labels))
+        )
+    else:
+        ocean_label_encoding = None
+    if config.atmosphere_available_labels is not None:
+        atmosphere_label_encoding = LabelEncoding(
+            sorted(list(config.atmosphere_available_labels))
+        )
+    else:
+        atmosphere_label_encoding = None
+
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
@@ -151,6 +173,8 @@ def get_gridded_data(
         pin_memory=using_gpu(),
         collate_fn=CollateFn(
             ocean_horizontal_dims=list(properties.ocean.horizontal_coordinates.dims),
+            ocean_label_encoding=ocean_label_encoding,
+            atmosphere_label_encoding=atmosphere_label_encoding,
             atmosphere_horizontal_dims=list(
                 properties.atmosphere.horizontal_coordinates.dims
             ),

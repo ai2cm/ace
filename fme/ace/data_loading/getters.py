@@ -10,6 +10,7 @@ from fme.core.dataset.subset import SubsetDataset
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
+from fme.core.labels import LabelEncoding
 
 from .batch_data import PrognosticState
 from .config import DataLoaderConfig
@@ -25,13 +26,17 @@ logger = logging.getLogger(__name__)
 
 
 class CollateFn:
-    def __init__(self, horizontal_dims: list[str]):
+    def __init__(
+        self, horizontal_dims: list[str], label_encoding: LabelEncoding | None = None
+    ):
         self.horizontal_dims = horizontal_dims
+        self.label_encoding = label_encoding
 
     def __call__(self, samples):
         return BatchData.from_sample_tuples(
             samples,
             horizontal_dims=self.horizontal_dims,
+            label_encoding=self.label_encoding,
         )
 
 
@@ -93,6 +98,11 @@ def get_gridded_data(
     dist = Distributed.get_instance()
     batch_size = dist.local_batch_size(int(config.batch_size))
 
+    if config.available_labels is not None:
+        label_encoding = LabelEncoding(sorted(list(config.available_labels)))
+    else:
+        label_encoding = None
+
     dataloader = get_data_loader(
         dataset=dataset,
         batch_size=batch_size,
@@ -103,7 +113,10 @@ def get_gridded_data(
         shuffled=train,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=CollateFn(list(properties.horizontal_coordinates.dims)),
+        collate_fn=CollateFn(
+            list(properties.horizontal_coordinates.dims),
+            label_encoding,
+        ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
         prefetch_factor=config.prefetch_factor,

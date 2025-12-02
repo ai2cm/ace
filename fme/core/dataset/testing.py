@@ -31,7 +31,7 @@ class TestDataset(DatasetABC):
         labels: set[str] | None = None,
         properties: DatasetProperties | None = None,
     ):
-        self.labels = labels or set()
+        self.labels = labels
         self.time = time
         self.data = data
         self._sample_n_times = sample_n_times

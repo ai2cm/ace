@@ -80,6 +80,10 @@ class WeatherEvaluationConfig:
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
 
+    @property
+    def using_labels(self) -> bool:
+        return self.loader.using_labels
+
     def get_inference_data(
         self,
         window_requirements: DataRequirements,
@@ -132,6 +136,10 @@ class InlineInferenceConfig:
             # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
+
+    @property
+    def using_labels(self) -> bool:
+        return self.loader.using_labels
 
     def get_inference_data(
         self,
@@ -253,6 +261,25 @@ class TrainConfig:
             raise ValueError(
                 "stepper.train_n_forward_steps may not be given at the same time as "
                 "n_forward_steps at the top level"
+            )
+        if self.train_loader.using_labels != self.validation_loader.using_labels:
+            raise ValueError(
+                "train_loader and validation_loader must both use labels or both not "
+                "use labels"
+            )
+        if self.inference is not None and (
+            self.train_loader.using_labels != self.inference.using_labels
+        ):
+            raise ValueError(
+                "train_loader and inference loader must both use labels or both not "
+                "use labels"
+            )
+        if self.weather_evaluation is not None and (
+            self.train_loader.using_labels != self.weather_evaluation.using_labels
+        ):
+            raise ValueError(
+                "train_loader and weather_evaluation loader must both use labels or "
+                "both not use labels"
             )
 
     def set_random_seed(self):

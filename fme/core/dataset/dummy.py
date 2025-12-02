@@ -20,6 +20,7 @@ class DummyDataset(DatasetABC):
         timestep: datetime.timedelta,
         n_timesteps: int,
         horizontal_coordinates: HorizontalCoordinates,
+        labels: set[str] | None = None,
     ):
         """
         Parameters:
@@ -28,6 +29,7 @@ class DummyDataset(DatasetABC):
             timestep: Timestep between each time in the dataset.
             n_timesteps: Number of contiguous timesteps to provide in each item.
             horizontal_coordinates: Horizontal coordinates for the dummy dataset.
+            labels: Set of labels attached to samples in the dataset.
         """
         self.timestep = timestep
         self._sample_n_times = n_timesteps
@@ -45,12 +47,12 @@ class DummyDataset(DatasetABC):
         self._timestep = _get_timestep(self._all_times)
         self._horizontal_coordinates = horizontal_coordinates
         self._horizontal_size = horizontal_coordinates.loaded_sizes
-        self._labels: set[str] = set()
         shape = tuple(s.size for s in self._horizontal_size)
         full_shape = (self.sample_n_times,) + shape
         self._dummy_dict = {
             "__dummy__": torch.zeros(full_shape, device=torch.device("cpu"))
         }
+        self._labels = labels
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
@@ -90,7 +92,7 @@ class DummyDataset(DatasetABC):
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
         pass
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str] | None]:
         """Return a sample of data spanning the timesteps
         [idx, idx + self.sample_n_times).
 

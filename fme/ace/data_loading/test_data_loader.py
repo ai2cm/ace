@@ -249,6 +249,49 @@ def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
     assert "foo2" in data.variable_metadata.keys()
 
 
+def test_xarray_loader_labels(tmp_path, tmp_path_factory):
+    _create_dataset_on_disk(tmp_path)
+    other_path = tmp_path_factory.mktemp("other")
+    _create_dataset_on_disk(
+        other_path,
+        filename="other_source.nc",
+    )
+
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(
+                    data_path=tmp_path, file_pattern="data*.nc", labels=["labelled"]
+                ),
+                XarrayDataConfig(
+                    data_path=other_path,
+                    file_pattern="other_source*.nc",
+                    n_repeats=1,
+                    labels=[],
+                ),
+            ]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], window_timesteps)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+    seen_labelled = False
+    seen_unlabelled = False
+    for batch in data.loader:
+        assert batch.labels is not None
+        assert batch.labels.names == ["labelled"]
+        if torch.sum(batch.labels.tensor) > 0:
+            seen_labelled = True
+        else:
+            seen_unlabelled = True
+    if not seen_labelled:
+        raise AssertionError("Did not see labelled data in batches")
+    if not seen_unlabelled:
+        raise AssertionError("Did not see unlabelled data in batches")
+
+
 def test_xarray_loader_using_merged_dataset_errors_if_different_time(
     tmp_path, tmp_path_factory
 ):
@@ -677,7 +720,7 @@ def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
     initial_condition = BatchData.new_on_cpu(
         data={"foo": torch.randn(1, 1, 1, 1), "foo2": torch.randn(1, 1, 1, 1)},
         time=xr.DataArray(time_values, dims=["sample", "time"]),
-        labels=[set()],
+        labels=None,
     )
     data = get_forcing_data(
         config,

@@ -11,9 +11,8 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.dataset.dataset import DatasetABC
+from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.typing_ import TensorDict
 
 
 @dataclasses.dataclass
@@ -159,8 +158,8 @@ class CoupledDatasetProperties:
 
 @dataclasses.dataclass
 class CoupledDatasetItem:
-    ocean: tuple[TensorDict, xr.DataArray, set[str]]
-    atmosphere: tuple[TensorDict, xr.DataArray, set[str]]
+    ocean: DatasetItem
+    atmosphere: DatasetItem
 
 
 class CoupledDataset:

@@ -10,12 +10,8 @@ import xarray as xr
 from torch.utils.data import default_collate
 
 from fme.core.device import get_device
-from fme.core.labels import BatchLabels
-from fme.core.tensors import (
-    add_ensemble_dim,
-    fold_sized_ensemble_dim,
-    unfold_ensemble_dim,
-)
+from fme.core.labels import BatchLabels, LabelEncoding
+from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
@@ -67,7 +63,7 @@ class BatchData:
 
     data: TensorMapping
     time: xr.DataArray
-    labels: BatchLabels
+    labels: BatchLabels | None = None
     horizontal_dims: list[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
@@ -125,8 +121,6 @@ class BatchData:
             )
         else:
             sample_times = xr.concat([time] * n_samples, dim="sample")
-        if labels is None:
-            labels = [set() for _ in range(n_samples)]
         return BatchData(
             data={
                 k: torch.randn(n_samples, n_timesteps, *img_shape).to(device)
@@ -156,11 +150,12 @@ class BatchData:
         return unfold_ensemble_dim(TensorDict(self.data), n_ensemble=self.n_ensemble)
 
     def to_device(self) -> "BatchData":
+        device = get_device()
         return self.__class__(
-            data={k: v.to(get_device()) for k, v in self.data.items()},
+            data={k: v.to(device) for k, v in self.data.items()},
             time=self.time,
             horizontal_dims=self.horizontal_dims,
-            labels=self.labels,
+            labels=self.labels.to(device) if self.labels is not None else None,
         )
 
     def to_cpu(self) -> "BatchData":
@@ -184,7 +179,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        labels: BatchLabels,
+        labels: BatchLabels | None = None,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
     ) -> "BatchData":
@@ -203,7 +198,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        labels: BatchLabels,
+        labels: BatchLabels | None = None,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
     ) -> "BatchData":
@@ -233,21 +228,37 @@ class BatchData:
                     f"(n_samples, n_times) for time but got shape "
                     f"{self.time.shape}."
                 )
+        if (
+            self.labels is not None
+            and self.labels.tensor.shape[0] != self.time.shape[0]
+        ):
+            raise ValueError(
+                "Labels tensor first dimension must match number of samples in "
+                f"time. Got labels shape {self.labels.tensor.shape} and time shape "
+                f"{self.time.shape}."
+            )
 
     @classmethod
     def from_sample_tuples(
         cls,
-        samples: Sequence[tuple[TensorMapping, xr.DataArray, set[str]]],
+        samples: Sequence[tuple[TensorMapping, xr.DataArray, set[str] | None]],
         sample_dim_name: str = "sample",
         horizontal_dims: list[str] | None = None,
+        label_encoding: LabelEncoding | None = None,
     ) -> "BatchData":
         sample_data, sample_times, sample_labels = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_times, dim=sample_dim_name)
+        if label_encoding is None:
+            if sample_labels[0] is not None:
+                raise ValueError("label_encoding must be provided if labels are used.")
+            labels = None
+        else:
+            labels = label_encoding.encode(list(sample_labels))
         return BatchData.new_on_cpu(
             data=batch_data,
             time=batch_time,
-            labels=list(sample_labels),
+            labels=labels,
             horizontal_dims=horizontal_dims,
         )
 
@@ -360,16 +371,23 @@ class BatchData:
 
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
         """
-        Broadcast n_ensemble ensembles to a new BatchData obj.
+        Broadcast a singleton ensemble to a new BatchData obj with n_ensemble members
+        per ensemble.
         """
-        data = {**self.data}
-        data = add_ensemble_dim(data, repeats=n_ensemble)
-        data = fold_sized_ensemble_dim(data, n_ensemble=n_ensemble)
-
-        time = self.time
-        time = xr.concat([time] * n_ensemble, dim="sample")
-
-        labels = self.labels * n_ensemble
+        if self.n_ensemble != 1:
+            raise ValueError(
+                "Can only broadcast singleton ensembles, but this BatchData has "
+                f"n_ensemble={self.n_ensemble} and cannot be broadcast."
+            )
+        data = repeat_interleave_batch_dim(self.data, n_ensemble)
+        time = xr.concat([self.time] * n_ensemble, dim="sample")
+        if self.labels is None:
+            labels = None
+        else:
+            labels = BatchLabels(
+                torch.repeat_interleave(self.labels.tensor, n_ensemble, dim=0),
+                self.labels.names,
+            )
         return self.__class__(
             data={k: v.to(get_device()) for k, v in data.items()},
             time=time,
@@ -397,8 +415,8 @@ class PairedData:
 
     prediction: TensorMapping
     reference: TensorMapping
-    labels: BatchLabels
     time: xr.DataArray
+    labels: BatchLabels | None = None
 
     @property
     def forcing(self) -> TensorMapping:
@@ -428,8 +446,8 @@ class PairedData:
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
-        labels: BatchLabels,
         time: xr.DataArray,
+        labels: BatchLabels | None = None,
     ) -> "PairedData":
         device = get_device()
         _check_device(prediction, device)
@@ -446,8 +464,8 @@ class PairedData:
         cls,
         prediction: TensorMapping,
         reference: TensorMapping,
-        labels: BatchLabels,
         time: xr.DataArray,
+        labels: BatchLabels | None = None,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))
         _check_device(reference, torch.device("cpu"))

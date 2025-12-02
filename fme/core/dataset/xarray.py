@@ -457,7 +457,7 @@ class XarrayDataConfig(DatasetConfigABC):
     overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
-    labels: list[str] = dataclasses.field(default_factory=list)
+    labels: list[str] | None = None
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -466,6 +466,15 @@ class XarrayDataConfig(DatasetConfigABC):
                 "but the engine is specified as 'zarr'. Please set "
                 "`XarrayDataConfig.file_pattern` to match the zarr filename."
             )
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        if self.labels is None:
+            return None
+        return set(self.labels)
 
     @property
     def torch_dtype(self) -> torch.dtype | None:
@@ -578,7 +587,7 @@ class XarrayDataset(DatasetABC):
             [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
         )
         self._check_isel_dimensions(first_dataset.sizes)
-        self._labels = set(config.labels)
+        self._labels = set(config.labels) if config.labels is not None else None
         self._infer_timestep = config.infer_timestep
 
     def _check_isel_dimensions(self, data_dim_sizes):
@@ -788,10 +797,10 @@ class XarrayDataset(DatasetABC):
 
     @property
     def sample_n_times(self) -> int:
-        """The length of the time dimension of each sample."""
+        """Number of timesteps in each sample."""
         return self._sample_n_times
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str] | None]:
         """Return a sample of data spanning the timesteps
         [idx, idx + self.sample_n_times).
 
@@ -815,7 +824,7 @@ class XarrayDataset(DatasetABC):
 
     def get_sample_by_time_slice(
         self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    ) -> tuple[TensorDict, xr.DataArray, set[str] | None]:
         input_file_idx, input_local_idx = _get_file_local_index(
             time_slice.start, self.start_indices
         )

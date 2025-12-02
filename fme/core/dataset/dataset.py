@@ -6,7 +6,7 @@ import xarray as xr
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.typing_ import TensorDict
 
-DatasetItem = tuple[TensorDict, xr.DataArray, set[str]]
+DatasetItem = tuple[TensorDict, xr.DataArray, set[str] | None]
 
 
 class SupportsDataLoaderABC(abc.ABC):

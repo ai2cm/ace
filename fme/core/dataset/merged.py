@@ -8,6 +8,7 @@ from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
+from fme.core.dataset.utils import accumulate_labels
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
 from fme.core.typing_ import Slice, TensorDict
 
@@ -43,10 +44,19 @@ class MergedXarrayDataset(DatasetABC):
 
     def __getitem__(self, idx: int) -> DatasetItem:
         tensors: TensorDict = {}
+        labels = None
         for dataset in self.datasets:
-            ds_tensors, time, labels = dataset[idx]
+            ds_tensors, time, ds_labels = dataset[idx]
+            if labels is None:
+                labels = ds_labels
+            else:
+                if ds_labels is not None:
+                    labels = labels.union(ds_labels)
             tensors.update(ds_tensors)
         return tensors, time, labels
+
+    def __len__(self) -> int:
+        return len(self.datasets[0])
 
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         tensors: TensorDict = {}
@@ -135,6 +145,13 @@ class MergeDatasetConfig(DatasetConfigABC):
             n_timesteps,
         )
 
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return accumulate_labels([ds.available_labels for ds in self.merge])
+
 
 @dataclasses.dataclass
 class MergeNoConcatDatasetConfig(DatasetConfigABC):
@@ -177,6 +194,13 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
             names,
             n_timesteps,
         )
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return accumulate_labels([ds.available_labels for ds in self.merge])
 
 
 def get_merged_datasets(
