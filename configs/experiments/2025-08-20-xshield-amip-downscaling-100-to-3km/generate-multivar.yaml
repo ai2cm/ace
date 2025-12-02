@@ -1,14 +1,15 @@
-experiment_dir: /climate-default/home/annak/2025-12-02-multivar-generation
+experiment_dir: /results #/climate-default/home/annak/2025-12-02-multivar-generation
 model:
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
 outputs:
   - name: "NE_US_Quebec_2023_JFM"
     save_vars: ["PRATEsfc", "eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"]
-    n_ens: 8
+    n_ens: 16
     max_samples_per_gpu: 8
-    time_range:
-      start_time: "2023-01-01T00:00:00"
-      stop_time: "2023-03-31T18:00:00"
+    event_time:  "2023-02-06T00:00:00"
+    # time_range:
+    #   start_time: "2023-01-01T00:00:00"
+    #   stop_time: "2023-03-31T18:00:00"
     lat_extent:
       start: 36
       stop: 52
@@ -45,8 +46,8 @@ data:
     start: 41
     stop: 57
   lon_extent:
-    start: 270
-    stop: 286
+    start: 284
+    stop: 300
   strict_ensemble: false
 patch:
     divide_generation: false
