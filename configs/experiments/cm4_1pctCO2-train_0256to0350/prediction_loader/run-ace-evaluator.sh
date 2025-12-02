@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="cm4_1pctCO2_reference-ic0211_40yrs"
+JOB_NAME="cm4_1pctCO2_reference-ic0256_40yrs"
 JOB_GROUP="cm4_1pctCO2_reference"
 EXISTING_RESULTS_DATASET="01KAQN1E8AF43JHZVB77EV62TD"  # arbitrary
 CONFIG_FILENAME="ace-evaluator-config.yaml"
