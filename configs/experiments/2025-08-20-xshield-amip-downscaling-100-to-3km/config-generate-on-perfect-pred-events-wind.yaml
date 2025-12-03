@@ -6,7 +6,7 @@ patch:
   coarse_horizontal_overlap: 1
 model:
   #checkpoint_path: /Users/annak/Code/scratch/100-to-3km-mps.ckpt
-  checkpoint_path: /checkpoints/best.ckpt
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
   #  eastward_wind_at_ten_meters: UGRD10m
   #  northward_wind_at_ten_meters: VGRD10m
 data:
@@ -41,6 +41,16 @@ logging:
   project: annak-downscaling
   entity: ai2cm
 events:
+- name: NE_US_Quebec_20230206
+  date: 2023-02-06T00:00
+  lat_extent:
+    start: 36
+    stop: 52
+  lon_extent:
+    start: 283
+    stop: 299
+  save_generated_samples: True
+  n_samples: 16
 - name: WA_AR_20230101
   date: 2023-01-01T06:00
   lat_extent:
@@ -50,7 +60,7 @@ events:
     start: 228
     stop: 244
   save_generated_samples: True
-  n_samples: 32
+  n_samples: 16
 - name: WPacific_hurricane_20230425
   date: 2023-04-25T18:00
   lat_extent:
@@ -60,7 +70,7 @@ events:
     start: 130.
     stop: 146.
   save_generated_samples: True
-  n_samples: 32
+  n_samples: 16
 - name: WPacific_hurricane_landfall_china_20230510
   date: 2023-05-10T12:00
   lat_extent:
@@ -70,7 +80,7 @@ events:
     start: 104
     stop: 120
   save_generated_samples: True
-  n_samples: 32
+  n_samples: 16
 - name: extratropical_cyclone_US_20230403
   date: 2023-04-03T12:00
   lat_extent:
@@ -80,7 +90,7 @@ events:
     start: 254
     stop: 270
   save_generated_samples: True
-  n_samples: 32
+  n_samples: 16
 - name: santa_ana_winds_20231221
   date: 2023-12-21T06:00
   lat_extent:
@@ -90,7 +100,7 @@ events:
     start: 234
     stop: 250
   save_generated_samples: True
-  n_samples: 32
+  n_samples: 16
 - name: alpine_foehn_20230330
   date: 2023-03-30T18:00
   lat_extent:
@@ -100,7 +110,7 @@ events:
     start: 2
     stop: 18
   save_generated_samples: True
-  n_samples: 32
+  n_samples: 16
 - name: hindu_kush_20230122
   date: 2023-01-22T06:00
   lat_extent:
@@ -110,4 +120,4 @@ events:
     start: 60
     stop: 76
   save_generated_samples: True
-  n_samples: 32
+  n_samples: 16

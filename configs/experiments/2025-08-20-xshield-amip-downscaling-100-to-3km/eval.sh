@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-conus"
-CONFIG_FILENAME="config-eval-conus.yaml"
+JOB_NAME="generate-xshield-amip-wind-events-no-statinp" #"eval-xshield-amip-100km-to-3km-conus"
+CONFIG_FILENAME="config-generate-on-perfect-pred-events-wind.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -22,8 +22,8 @@ NGPU=2
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
 
-#EXISTING_RESULTS_DATASET=01K3W6KD8SP2YD2ZF2SGMF3S5F
-EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
+EXISTING_RESULTS_DATASET=01K9PGGJSSKHQV4EKN4HMCERXB
+#EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
 #EXISTING_RESULTS_DATASET=01K7SPXVME1MP459K3C6B3J5GF # best crps checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
 wandb_group=""
 
@@ -35,6 +35,7 @@ gantry run \
     --not-preemptible \
     --cluster ai2/ceres \
     --cluster ai2/jupiter \
+    --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
