@@ -14,6 +14,7 @@ import xarray as xr
 import yaml
 from compute_dataset import ChunkingConfig, StandardDimMapping
 from compute_ocean_dataset import DaskConfig, FileSystemConfig, StaticDataConfig
+from get_stats import StatsConfig
 from ocean_emulators.preprocessing import horizontal_regrid, rotate_vectors
 from ocean_emulators.simulation_preprocessing.gfdl_cm4 import sis2_preprocessing
 from ocean_emulators.simulation_preprocessing.gfdl_om4 import convert_super_grid
@@ -216,6 +217,7 @@ class SeaIceDatasetConfig:
     n_split: int = 10
     dask: DaskConfig | None = None
     filesystem: FileSystemConfig | None = None
+    stats: StatsConfig | None = None
 
     @classmethod
     def from_file(cls, path: str) -> "SeaIceDatasetConfig":
