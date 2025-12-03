@@ -59,6 +59,8 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --env WANDB_JOB_TYPE=training \
           --env WANDB_RUN_GROUP="${JOB_GROUP}" \
           --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+          --env NCCL_DEBUG=WARN \
+          --env NCCL_DEBUG_FILE=/results/nccl_debug.log \
           --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
           --dataset-secret google-credentials:/tmp/google_application_credentials.json \
           --dataset $STATS_DATA:/statsdata \
