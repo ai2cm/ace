@@ -5,7 +5,7 @@ set -e
 
 JOB_NAME="downscale-ace-100km-to-3km-10-year-pnw"
 
-CONFIG_FILENAME="gen-ace-output-pnw-ic0000.yaml"
+CONFIG_FILENAME="gen-ace-output-pnw-ic0001.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
