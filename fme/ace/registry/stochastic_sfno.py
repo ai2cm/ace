@@ -54,7 +54,9 @@ class NoiseConditionedSFNO(torch.nn.Module):
         self.embed_dim = embed_dim
         self.noise_type = noise_type
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, labels: torch.Tensor | None = None
+    ) -> torch.Tensor:
         if self.noise_type == "isotropic":
             lmax = self.conditional_model.itrans_up.lmax
             mmax = self.conditional_model.itrans_up.mmax
@@ -78,7 +80,7 @@ class NoiseConditionedSFNO(torch.nn.Module):
             [*x.shape[:-3], 0], device=x.device, dtype=x.dtype
         )
         return self.conditional_model(
-            x, Context(embedding_scalar=embedding_scalar, noise=noise)
+            x, Context(embedding_scalar=embedding_scalar, labels=labels, noise=noise)
         )
 
 
@@ -175,6 +177,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             img_shape=dataset_info.img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
+                embed_dim_labels=len(dataset_info.all_labels),
                 embed_dim_noise=self.noise_embed_dim,
             ),
         )

@@ -41,7 +41,6 @@ from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
-from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -50,7 +49,12 @@ from fme.core.normalizer import (
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step.multi_call import MultiCallStepConfig, replace_multi_call
+from fme.core.step.args import StepArgs
+from fme.core.step.multi_call import (
+    MultiCallConfig,
+    MultiCallStepConfig,
+    replace_multi_call,
+)
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.tensors import (
@@ -467,7 +471,7 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[TensorDict],
     time: xr.DataArray,
-    labels: BatchLabels,
+    labels: BatchLabels | None = None,
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
     output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim=1)
@@ -1051,28 +1055,21 @@ class Stepper(
 
     def step(
         self,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
+        args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
         Args:
-            input: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from the
-                initial timestep.
-            next_step_input_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from
-                the output timestep.
+            args: The arguments to the step function.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
         """
-        input = self._input_process_func(input)
-        next_step_input_data = self._input_process_func(next_step_input_data)
-        output = self._step_obj.step(input, next_step_input_data, wrapper=wrapper)
+        args = args.apply_input_process_func(self._input_process_func)
+        output = self._step_obj.step(args=args, wrapper=wrapper)
         return self._output_process_func(output)
 
     def get_prediction_generator(
@@ -1100,10 +1097,16 @@ class Stepper(
         Returns:
             Generator yielding the output data at each timestep.
         """
-        ic_dict = initial_condition.as_batch_data().data
+        ic_batch_data = initial_condition.as_batch_data()
+        if ic_batch_data.labels != forcing_data.labels:
+            raise ValueError(
+                "Initial condition and forcing data must have the same labels, "
+                f"got {ic_batch_data.labels} and {forcing_data.labels}."
+            )
+        ic_dict = ic_batch_data.data
         forcing_dict = forcing_data.data
         return self._predict_generator(
-            ic_dict, forcing_dict, n_forward_steps, optimizer
+            ic_dict, forcing_dict, n_forward_steps, optimizer, forcing_data.labels
         )
 
     @property
@@ -1118,6 +1121,7 @@ class Stepper(
         forcing_dict: TensorMapping,
         n_forward_steps: int,
         optimizer: OptimizationABC,
+        labels: BatchLabels | None,
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1139,8 +1143,11 @@ class Stepper(
                 return optimizer.checkpoint(module, step=step)
 
             state = self.step(
-                input_data,
-                next_step_input_dict,
+                StepArgs(
+                    input=input_data,
+                    next_step_input_data=next_step_input_dict,
+                    labels=labels,
+                ),
                 wrapper=checkpoint,
             )
             yield state
@@ -1189,11 +1196,6 @@ class Stepper(
 
         with timer.context("forward_prediction"):
             ic_batch_data = initial_condition.as_batch_data()
-            if ic_batch_data.labels != forcing.labels:
-                raise ValueError(
-                    "Initial condition and forcing data must have the same labels, "
-                    f"got {ic_batch_data.labels} and {forcing.labels}."
-                )
             forcing_data = forcing.subset_names(forcing_names)
             if ic_batch_data.n_timesteps != self.n_ic_timesteps:
                 raise ValueError(
@@ -1375,15 +1377,20 @@ class Stepper(
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
         n_ensemble = self._config.n_ensemble
-
+        input_batch_data = input_data.as_batch_data()
+        if input_batch_data.labels != data.labels:
+            raise ValueError(
+                "Initial condition and forcing data must have the same labels, "
+                f"got {input_batch_data.labels} and {data.labels}."
+            )
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
-
         output_generator = self._predict_generator(
             input_ensemble_data.data,
             forcing_ensemble_data.data,
             n_forward_steps,
             optimization,
+            labels=input_ensemble_data.labels,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

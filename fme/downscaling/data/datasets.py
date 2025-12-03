@@ -184,7 +184,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, key) -> tuple[TensorMapping, xr.DataArray, set[str]]:
+    def __getitem__(self, key) -> tuple[TensorMapping, xr.DataArray, set[str] | None]:
         batch, times, _ = self.dataset[key]
         batch = {
             k: v[

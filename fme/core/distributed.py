@@ -280,8 +280,12 @@ class Distributed:
         Wait for all processes to reach this point.
         """
         if self._distributed:
+            if using_gpu():
+                device_ids = [self._device_id]
+            else:
+                device_ids = None
             logger.debug(f"Barrier on rank {self.rank}")
-            torch.distributed.barrier()
+            torch.distributed.barrier(device_ids=device_ids)
 
     def set_seed(self, seed: int):
         """

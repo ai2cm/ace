@@ -12,11 +12,10 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.requirements import DataRequirements
+from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.dummy import DummyDataset
-from fme.core.dataset.merged import MergedXarrayDataset
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import TimeSlice
-from fme.core.dataset.xarray import XarraySubset
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
@@ -26,8 +25,6 @@ from fme.coupled.data_loading.data_typing import (
 )
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
-
-ComponentDatasetType = XarraySubset | MergedXarrayDataset
 
 
 @dataclasses.dataclass
@@ -81,8 +78,8 @@ class InferenceDataset(torch.utils.data.Dataset):
     ):
         ocean_reqs = requirements.ocean_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
-        ocean: ComponentDatasetType
-        atmosphere: ComponentDatasetType
+        ocean: DatasetABC
+        atmosphere: DatasetABC
 
         if config.dataset.ocean is not None:
             ocean, ocean_properties = config.dataset.ocean.build(
@@ -96,15 +93,12 @@ class InferenceDataset(torch.utils.data.Dataset):
                 total_coupled_steps=total_coupled_steps,
                 ocean_reqs=ocean_reqs,
             )
-        all_ic_times = ocean.sample_start_times
         ocean_properties = self._update_ocean_mask(ocean_properties, dataset_info)
-        config.dataset.atmosphere.update_subset(TimeSlice(start_time=all_ic_times[0]))
+        config.dataset.atmosphere.update_subset(TimeSlice(start_time=ocean.first_time))
         atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
             atmosphere_reqs.names, atmosphere_reqs.n_timesteps
         )
-        properties = CoupledDatasetProperties(
-            all_ic_times, ocean_properties, atmosphere_properties
-        )
+        properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
         dataset = CoupledDataset(
             ocean=ocean,
             atmosphere=atmosphere,
@@ -168,6 +162,8 @@ class InferenceDataset(torch.utils.data.Dataset):
             atmosphere_horizontal_dims=list(
                 self.properties.horizontal_coordinates.atmosphere.dims
             ),
+            ocean_label_encoding=None,
+            atmosphere_label_encoding=None,
         )
 
     def __getitem__(self, index) -> CoupledBatchData:
@@ -223,7 +219,7 @@ def _make_dummy_ocean_forcing(
     initial_time: xr.DataArray,
     total_coupled_steps: int,
     ocean_reqs: DataRequirements,
-) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+) -> tuple[DatasetABC, DatasetProperties]:
     ocean_property = DatasetProperties(
         variable_metadata=dict(dataset_info.ocean.variable_metadata),
         vertical_coordinate=dataset_info.ocean.vertical_coordinate,
@@ -240,5 +236,6 @@ def _make_dummy_ocean_forcing(
         timestep=ts,
         n_timesteps=ocean_reqs.n_timesteps,
         horizontal_coordinates=dataset_info.ocean.horizontal_coordinates,
+        labels=None,
     )
     return ocean, ocean_property

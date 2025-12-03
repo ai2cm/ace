@@ -121,7 +121,7 @@ def get_regression_stepper_and_data(
             np.zeros((n_samples, n_forward_steps + 1)),
             dims=["sample", "time"],
         ),
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
         horizontal_dims=["lat", "lon"],
     )
     return stepper, data
