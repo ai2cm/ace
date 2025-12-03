@@ -115,7 +115,7 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
 
 
 def test_deprecated_topography_fields(tmp_path):
-    with pytest.raises(DeprecationWarning):
+    with pytest.warns(UserWarning):
         data_config = DataLoaderConfig(
             coarse=[XarrayDataConfig("coarse_data_path")],
             batch_size=2,
@@ -124,7 +124,7 @@ def test_deprecated_topography_fields(tmp_path):
             topography="topography_path",
         )
         assert data_config.static_inputs["HGTsfc"] == "topography_path"
-    with pytest.raises(DeprecationWarning):
+    with pytest.warns(UserWarning):
         paired_data_config = PairedDataLoaderConfig(
             fine=[XarrayDataConfig("fine_data_path")],
             coarse=[XarrayDataConfig("coarse_data_path")],

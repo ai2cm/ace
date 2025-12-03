@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-wind-events-nostatinp"
+JOB_NAME="generate-xshield-amip-wind-events-no-statinp"
 CONFIG_FILENAME="eval-wind-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')

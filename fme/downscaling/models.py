@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from collections.abc import Mapping
 from typing import Any
 
@@ -125,7 +126,7 @@ class DiffusionModelConfig:
         if self.use_fine_topography:
             if len(self.static_inputs) == 0:
                 self.static_inputs = ["HGTsfc"]
-            raise DeprecationWarning(
+            warnings.warn(
                 "'use_fine_topography' is deprecated, please use static_inputs "
                 "instead to provide variable names for fine res static inputs. "
                 "The names in the static_inputs config arg will be used to load "

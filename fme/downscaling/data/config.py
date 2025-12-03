@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+import warnings
 from collections.abc import Sequence
 
 from torch.utils.data import DataLoader, Dataset, RandomSampler
@@ -135,7 +136,7 @@ class DataLoaderConfig:
                     "configure in 'static_inputs'."
                 )
             self.static_inputs[self.topography_variable] = self.topography
-            raise DeprecationWarning(
+            warnings.warn(
                 "The 'topography' field in DataLoaderConfig is deprecated. "
                 f"Instead, provide {self.topography_variable} and data path as key and "
                 "value in the 'static_inputs' config field."
@@ -365,7 +366,7 @@ class PairedDataLoaderConfig:
                     "configure in 'static_inputs'."
                 )
             self.static_inputs[self.topography_variable] = self.topography
-            raise DeprecationWarning(
+            warnings.warn(
                 "The 'topography' field in DataLoaderConfig is deprecated. "
                 f"Instead, provide {self.topography_variable} and data path as key and "
                 "value in the 'static_inputs' config field."
