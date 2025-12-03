@@ -31,6 +31,8 @@ run_eval() {
     --priority normal \
     --not-preemptible \
     --cluster ai2/titan \
+    --cluster ai2/saturn \
+    --cluster ai2/ceres \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=inference \
@@ -60,4 +62,10 @@ base_name="stochastic"
 # run_eval "ace-x-shield-eval-config-rs0-2023-10-26T18-TC-16-ensemble.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-TCs"
 # run_eval "ace-x-shield-eval-config-rs0-2023-05-10T12-WPAC-TC-16-ensemble.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-2023-05-10T12-WPAC-TC"
 # run_eval "ace-x-shield-eval-config-rs0-2023-02-06T00-PNW-AR-16-ensemble.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-2023-02-06T00-PNW-AR"
-run_eval "ace-x-shield-eval-config-rs0-10-year-10-ensemble.yaml"  "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-10-year-10-ensemble-rs0"
+# run_eval "ace-x-shield-eval-config-rs0-10-year-10-ensemble.yaml"  "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-10-year-10-ensemble-rs0"
+run_eval "ace-x-shield-eval-config-rs0-1-year-1-steps-only0-256.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-0-256"
+run_eval "ace-x-shield-eval-config-rs0-1-year-1-steps-only256-512.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-256-512"
+run_eval "ace-x-shield-eval-config-rs0-1-year-1-steps-only512-768.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-512-768"
+run_eval "ace-x-shield-eval-config-rs0-1-year-1-steps-only768-1024.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-768-1024"
+run_eval "ace-x-shield-eval-config-rs0-1-year-1-steps-only1024-1280.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-1024-1280"
+run_eval "ace-x-shield-eval-config-rs0-1-year-1-steps-only1280-1460.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-1280-1460"
