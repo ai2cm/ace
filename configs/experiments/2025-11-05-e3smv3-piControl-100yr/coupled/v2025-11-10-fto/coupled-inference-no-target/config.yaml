@@ -1,0 +1,38 @@
+experiment_dir: /results
+n_coupled_steps: 29200
+coupled_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+      - sea_ice_fraction
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+      - TS
+      - surface_precipitation_rate
+forcing_loader:
+  atmosphere:
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+      engine: zarr
+      n_repeats: 5
+  num_data_workers: 1
+initial_condition:
+  ocean:
+    path: /climate-default/2025-11-10-E3SMv3-coupled-IC/ocean-ic.nc
+  atmosphere:
+    path: /climate-default/2025-11-10-E3SMv3-coupled-IC/atmosphere-ic.nc
+  start_indices:
+    times:
+      - '0401-01-03T12:00:00'
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-e3smv3
+  entity: ai2cm
