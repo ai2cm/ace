@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-wind-events-no-statinp"
-CONFIG_FILENAME="eval-wind-events.yaml"
+JOB_NAME="generate-xshield-amip-global-with-statinp"
+CONFIG_FILENAME="eval-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -21,8 +21,8 @@ NGPU=2
 
 IMAGE=spencerc/fme-deps-only-0196723e
 
-EXISTING_RESULTS_DATASET=01K9PGGJSSKHQV4EKN4HMCERXB  # best hist checkpoint from multivar without static inputs
-#EXISTING_RESULTS_DATASET=01KBG9EYTQNR082TWYFW5XWW3J  # best hist checkpoint from multivar with static inputs
+#EXISTING_RESULTS_DATASET=01K9PGGJSSKHQV4EKN4HMCERXB  # best hist checkpoint from multivar without static inputs
+EXISTING_RESULTS_DATASET=01KBG9EYTQNR082TWYFW5XWW3J  # best hist checkpoint from multivar with static inputs
 wandb_group=""
 
 gantry run \
@@ -33,6 +33,7 @@ gantry run \
     --not-preemptible \
     --cluster ai2/ceres \
     --cluster ai2/jupiter \
+    --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \

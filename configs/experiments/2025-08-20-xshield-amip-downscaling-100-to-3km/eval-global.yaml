@@ -1,0 +1,43 @@
+experiment_dir: /results
+n_samples: 2
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+  model_updates:
+    churn: 2.5
+data:
+  static_inputs:
+    HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+    land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
+  coarse:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 100km.zarr
+    #infer_timestep: false
+    subset:
+      start_time: 2023-01-01T00:00
+      step: 29
+  fine:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 3km.zarr
+    #infer_timestep: false
+    subset:
+      start_time: 2023-01-01T00:00
+      step: 29
+  lat_extent:
+    #start: -66.0
+    start: -66
+    stop: 70.0
+  batch_size: 2
+  num_data_workers: 2
+  strict_ensemble: False
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: annak-downscaling
+  entity: ai2cm
