@@ -103,15 +103,18 @@ stepper:
   step:
     type: single_module
     config:
+      residual_prediction: false
       builder:
-        type: NoiseConditionedSFNO
+        type: SphericalFourierNeuralOperatorNet
         config:
           embed_dim: 384
-          noise_embed_dim: 0
           filter_type: linear
+          hard_thresholding_fraction: 1.0
           use_mlp: true
+          normalization_layer: instance_norm
           num_layers: 8
           operator_type: dhconv
+          scale_factor: 1
           separable: false
           spectral_layers: 3
           spectral_transform: sht
