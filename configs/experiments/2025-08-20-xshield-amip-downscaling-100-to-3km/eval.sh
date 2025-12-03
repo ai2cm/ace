@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-wind-events-no-statinp" #"eval-xshield-amip-100km-to-3km-conus"
-CONFIG_FILENAME="config-generate-on-perfect-pred-events-wind.yaml"
+JOB_NAME="generate-xshield-amip-fl-no-statinp" #"eval-xshield-amip-100km-to-3km-conus"
+CONFIG_FILENAME="config-eval-fl.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
