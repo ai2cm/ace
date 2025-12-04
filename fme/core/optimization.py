@@ -214,7 +214,7 @@ class Optimization(OptimizationABC):
         Loads state from a serializable data structure.
         """
         dist=Distributed.get_instance()
-        dist.load_optimizer_state(state["optimizer_state_dict"], self.modules, self.optimizer)
+        dist.load_optimizer_state(state, self.modules, self.optimizer)
         self.scheduler.load_state_dict(state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
