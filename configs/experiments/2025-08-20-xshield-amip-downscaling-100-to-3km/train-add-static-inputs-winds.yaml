@@ -47,7 +47,7 @@ ema:
 validate_using_ema: true
 train_data:
   sample_with_replacement: 320
-  batch_size: 24
+  batch_size: 16
   num_data_workers: 4
   static_inputs:
     HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
