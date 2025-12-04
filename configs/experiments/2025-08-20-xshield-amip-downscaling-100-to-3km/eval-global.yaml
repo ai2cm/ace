@@ -19,6 +19,7 @@ data:
     #infer_timestep: false
     subset:
       start_time: 2023-01-01T00:00
+      stop_time: 2023-12-08T06:00
       step: 29
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -27,6 +28,7 @@ data:
     #infer_timestep: false
     subset:
       start_time: 2023-01-01T00:00
+      stop_time: 2023-12-08T06:00
       step: 29
   lat_extent:
     #start: -66.0
