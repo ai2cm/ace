@@ -33,8 +33,6 @@ run_eval() {
     --priority normal \
     --not-preemptible \
     --cluster ai2/titan \
-    --cluster ai2/saturn \
-    --cluster ai2/ceres \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=inference \
@@ -57,6 +55,7 @@ run_eval() {
 base_name="stochastic"
 for i in {0..1459..146}; do
   start_step=$i
-  end_step=$((i + 146))
+  start_step=$((start_step + 14608)) #offset to match val / test period
+  end_step=$((start_step + 146))
   run_eval "ace-x-shield-eval-config-rs0-1-year-1-steps-only.yaml" "$base_name-x-shield-n384-e1c9-era5-ft-20step-v2-eval-1-step-${start_step}-${end_step}" "$start_step"
 done
