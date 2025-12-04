@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-fl-with-statinp"
-CONFIG_FILENAME="eval-fl.yaml"
+JOB_NAME="generate-xshield-amip-global-with-statinp"
+CONFIG_FILENAME="eval-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
