@@ -13,7 +13,7 @@ from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.typing_ import TensorDict, TensorMapping
-
+from fme.core.distributed import Distributed
 
 class Checkpoint:
     def __init__(self, kwargs: Mapping[str, Any]):
@@ -75,7 +75,9 @@ class CheckpointConfig:
 class Optimization(OptimizationABC):
     def __init__(
         self,
-        parameters: Iterable[torch.nn.Parameter],
+        modules: torch.nn.ModuleList,
+        #FIXME: To gather and scatter optimization parameters, in spatial parallelism, I need to have access to the modules.
+        # parameters: Iterable[torch.nn.Parameter],
         optimizer_type: Literal[
             "Adam",
             "FusedAdam",
@@ -91,6 +93,7 @@ class Optimization(OptimizationABC):
             [int], Checkpoint | NoCheckpoint
         ] = lambda _: NoCheckpoint(),
     ):
+        parameters = itertools.chain(*[module.parameters() for module in modules])
         if optimizer_type == "FusedAdam":
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
         elif optimizer_type == "Adam":
@@ -108,6 +111,7 @@ class Optimization(OptimizationABC):
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
+        self.modules=modules
 
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return self._get_checkpoint(step)(module)
@@ -195,8 +199,9 @@ class Optimization(OptimizationABC):
         """
         Returns state as a serializable data structure.
         """
+        dist=Distributed.get_instance()
         state = {
-            "optimizer_state_dict": self.optimizer.state_dict(),
+            "optimizer_state_dict": dist.get_optimizer_state_dict(self.modules, self.optimizer),
             "scheduler_state_dict": self.scheduler.state_dict(),
             "gscaler_state_dict": (
                 self.gscaler.state_dict() if self.gscaler is not None else None
@@ -208,7 +213,8 @@ class Optimization(OptimizationABC):
         """
         Loads state from a serializable data structure.
         """
-        self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        dist=Distributed.get_instance()
+        dist.load_optimizer_state(state["optimizer_state_dict"], self.modules, self.optimizer)
         self.scheduler.load_state_dict(state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
@@ -260,9 +266,10 @@ class OptimizationConfig:
             )
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
-        parameters = itertools.chain(*[module.parameters() for module in modules])
+        # parameters = itertools.chain(*[module.parameters() for module in modules])
         return Optimization(
-            parameters=parameters,
+            # parameters=parameters,
+            modules=modules,
             optimizer_type=self.optimizer_type,
             lr=self.lr,
             max_epochs=max_epochs,

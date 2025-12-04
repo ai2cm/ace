@@ -13,7 +13,8 @@ from fme.ace.utils import comm
 from physicsnemo.distributed.utils import compute_split_shapes
 from fme.ace.models.makani_mpu.mappings import init_gradient_reduction_hooks
 from torch import nn
-from fme.ace.models.makani_utils.checkpoint_helpers import  gather_model_state_dict, prepend_prefix_to_state_dict, scatter_model_state_dict
+from fme.ace.models.makani_utils.checkpoint_helpers import  gather_model_state_dict, prepend_prefix_to_state_dict, scatter_model_state_dict, gather_optimizer_state_dict, scatter_optimizer_state_dict
+
 import torch_harmonics.distributed as thd
 
 
@@ -196,6 +197,11 @@ class Distributed:
       # iterate over parameters and gather them from the ranks
       if (self.spatial_parallelism) and (comm.get_size("model") > 1):
         state_dict= gather_model_state_dict(model)
+        # drop module prefix in case if DDP is being used
+        # FIXME: I am getting an error because inner_model is present in the state_dict.
+        if isinstance(model, nn.parallel.DistributedDataParallel):
+            nn.modules.utils.consume_prefix_in_state_dict_if_present(state_dict, "module.inner_model.")
+            prepend_prefix_to_state_dict(state_dict, "module.")
         return state_dict
       else:
         return model.state_dict()
@@ -476,6 +482,19 @@ class Distributed:
         shape[1]=slice_h.stop - slice_h.start
         shape[2]=slice_w.stop - slice_w.start
       return ds, shape
+
+    def get_optimizer_state_dict(self, modules, optimizer):
+        if self.spatial_parallelism:
+            return gather_optimizer_state_dict(modules, optimizer)
+        else:
+            return optimizer.state_dict()
+
+    def load_optimizer_state(self, optimizer_state_dict, modules, optimizer):
+        if self.spatial_parallelism:
+            optimizer_state_dict = scatter_optimizer_state_dict(modules, optimizer, optimizer_state_dict)
+            optimizer.load_state_dict(optimizer_state_dict)
+        else:
+            optimizer.load_state_dict(optimizer_state_dict)
 
     def barrier(self):
         """
