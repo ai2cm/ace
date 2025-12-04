@@ -26,14 +26,9 @@ aggregator:
   log_global_mean_time_series: false
   log_global_mean_norm_time_series: false
 data_writer:
-  files:
-  - format:
-      name: zarr
-    label: output_6hourly_1year_1step
-    names:
-    - PRATEsfc
-    separate_ensemble_members: false
   save_monthly_files: false
-  save_prediction_files: false
+  save_prediction_files: true
+  names:
+    - PRATEsfc
 logging:
   project: ace-hiro
