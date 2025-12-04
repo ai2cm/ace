@@ -1,0 +1,111 @@
+model:
+  out_names:
+  - eastward_wind_at_ten_meters
+  - northward_wind_at_ten_meters
+  in_names:
+  - eastward_wind_at_ten_meters
+  - northward_wind_at_ten_meters
+  loss:
+    type: MSE
+  module:
+    config:
+      model_channels: 256
+      attn_resolutions: []
+      num_blocks: 1
+      channel_mult_emb: 6
+      channel_mult:
+      - 1
+      - 2
+      - 2
+      - 2
+      - 2
+      - 2
+      - 2
+    type: unet_diffusion_song
+  normalization:
+    coarse:
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field.nc
+    fine:
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field.nc
+  num_diffusion_generation_steps: 18
+  churn: 2.5
+  p_mean: -1.2
+  p_std: 1.8
+  predict_residual: true
+  sigma_max: 200.0
+  sigma_min: 0.002
+  static_inputs:
+    - HGTsfc
+    - land_fraction
+optimization:
+  lr: 0.0001
+  optimizer_type: Adam
+ema:
+  decay: 0.999
+validate_using_ema: true
+train_data:
+  sample_with_replacement: 320
+  batch_size: 24
+  num_data_workers: 4
+  static_inputs:
+    HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+    land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
+  fine:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    file_pattern: 3km.zarr
+    engine: zarr
+    subset:
+      start_time: "2014-01-01T00:00:00"
+      stop_time: "2022-12-31T23:59:00"
+  coarse:
+  - data_path:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    file_pattern: 100km.zarr
+    engine: zarr
+    subset:
+      start_time: "2014-01-01T00:00:00"
+      stop_time: "2022-12-31T23:59:00"
+  lat_extent:
+    start: -66.0
+    stop: 70.0
+  strict_ensemble: false
+validation_data:
+  static_inputs:
+    HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+    land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
+  batch_size: 12 #24
+  num_data_workers: 4
+  fine:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 3km.zarr
+    subset:
+      start_time: '2023-01-01T12:00:00'
+      stop_time: '2023-12-31T18:00:00'
+      #stop_time: '2024-01-01T12:00:00'
+      step: 59
+  coarse:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 100km.zarr
+    subset:
+      start_time: '2023-01-01T12:00:00'
+      stop_time: '2023-12-31T18:00:00'
+      #stop_time: '2024-01-01T12:00:00'
+      step: 59
+  lat_extent:
+    start: -66.0
+    stop: 70.0
+  strict_ensemble: false
+coarse_patch_extent_lat: 16
+coarse_patch_extent_lon: 16
+max_epochs: 500 # using 320 samples per epoch, this is roughly 500k steps (200 epochs for the previous 2 yr training dataset)
+validate_interval: 12
+experiment_dir: /results
+save_checkpoints: true
+logging:
+  project: annak-downscaling
+  entity: ai2cm
+  log_to_wandb: true
+generate_n_samples: 2
