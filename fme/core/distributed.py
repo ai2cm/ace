@@ -485,13 +485,17 @@ class Distributed:
 
     def get_optimizer_state_dict(self, modules, optimizer):
         if self.spatial_parallelism:
-            return gather_optimizer_state_dict(modules, optimizer)
+            optimizer_state_dict = gather_optimizer_state_dict(modules, optimizer)
+            self.barrier()
         else:
-            return optimizer.state_dict()
+            optimizer_state_dict = optimizer.state_dict()
+
+        return optimizer_state_dict
 
     def load_optimizer_state(self, optimizer_state_dict, modules, optimizer):
         if self.spatial_parallelism:
             optimizer_state_dict = scatter_optimizer_state_dict(modules, optimizer, optimizer_state_dict)
+            self.barrier()
             optimizer.load_state_dict(optimizer_state_dict)
         else:
             optimizer.load_state_dict(optimizer_state_dict)
