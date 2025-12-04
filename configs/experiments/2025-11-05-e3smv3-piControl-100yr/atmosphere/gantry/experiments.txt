@@ -10,3 +10,15 @@ BK-v1124-ACE-E3SMv3-piControl-100yr-no-smooth-ocean|1|01KAZG7H46XY53Y0P9PKVJEATA
 BK-v1124-ACE-E3SMv3-piControl-100yr-no-smooth-ocean|2|01KAZG7MNBS3V8ECYFCCAA2YB1|training|best_inference_ckpt
 BK-v1124-ACE-E3SMv3-piControl-100yr-no-smooth-ocean|2|01KAZG7MNBS3V8ECYFCCAA2YB1|training|best_ckpt
 BK-v1124-ACE-E3SMv3-piControl-100yr-no-smooth-ocean|2|01KAZG7MNBS3V8ECYFCCAA2YB1|training|ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|1|01KBHDSVTGYVE9H1GYG5Y4HVTX|training|best_inference_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|1|01KBHDSVTGYVE9H1GYG5Y4HVTX|training|best_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|1|01KBHDSVTGYVE9H1GYG5Y4HVTX|training|ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|2|01KBHDSZ44H1WZPG5DZR3Z806X|training|best_inference_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|2|01KBHDSZ44H1WZPG5DZR3Z806X|training|best_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|2|01KBHDSZ44H1WZPG5DZR3Z806X|training|ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|3|01KBHDT2S45ZRFRA3CSH218EVN|training|best_inference_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|3|01KBHDT2S45ZRFRA3CSH218EVN|training|best_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|3|01KBHDT2S45ZRFRA3CSH218EVN|training|ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|4|01KBHDT5YRVQWC28KZGG3CFJ01|training|best_inference_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|4|01KBHDT5YRVQWC28KZGG3CFJ01|training|best_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-sfno-no-smooth-ocean|4|01KBHDT5YRVQWC28KZGG3CFJ01|training|ckpt
