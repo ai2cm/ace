@@ -95,6 +95,7 @@ train_loader:
             engine: zarr
             subset:
               start_time: '0152-10-03T12:00:00' # earlier times nan
+        strict: false
       - concat:
           - data_path: /climate-default
             file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
@@ -146,6 +147,7 @@ train_loader:
             engine: zarr
             subset:
               start_time: '0152-10-03T12:00:00'
+        strict: false
 validation_loader:
   batch_size: 64
   num_data_workers: 4
