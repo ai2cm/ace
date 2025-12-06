@@ -343,7 +343,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: ps_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_19781001-19791231
+    - label: ps_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_19781001-19791231
       names:
         - PRESsfc
       time_selection:
@@ -352,7 +352,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: ps_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_20240101-20241231
+    - label: ps_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_20240101-20241231
       names:
         - PRESsfc
       time_selection:
@@ -361,7 +361,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: ts_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_19781001-19791231
+    - label: ts_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_19781001-19791231
       names:
         - surface_temperature
       time_selection:
@@ -370,7 +370,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: ts_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_20240101-20241231
+    - label: ts_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_20240101-20241231
       names:
         - surface_temperature
       time_selection:
@@ -379,7 +379,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: tas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_19781001-19791231
+    - label: tas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_19781001-19791231
       names:
         - TMP2m
       time_selection:
@@ -388,7 +388,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: tas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_20240101-20241231
+    - label: tas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_20240101-20241231
       names:
         - TMP2m
       time_selection:
@@ -397,7 +397,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: huss_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_19781001-19791231
+    - label: huss_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_19781001-19791231
       names:
         - Q2m
       time_selection:
@@ -406,7 +406,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: huss_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_20240101-20241231
+    - label: huss_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_20240101-20241231
       names:
         - Q2m
       time_selection:
@@ -415,7 +415,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: uas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_19781001-19791231
+    - label: uas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_19781001-19791231
       names:
         - UGRD10m
       time_selection:
@@ -424,7 +424,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: uas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_20240101-20241231
+    - label: uas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_20240101-20241231
       names:
         - UGRD10m
       time_selection:
@@ -433,7 +433,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: vas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_19781001-19791231
+    - label: vas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_19781001-19791231
       names:
         - VGRD10m
       time_selection:
@@ -442,7 +442,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: vas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_20240101-20241231
+    - label: vas_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_20240101-20241231
       names:
         - VGRD10m
       time_selection:
@@ -451,7 +451,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: pr_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_19781001-19791231
+    - label: pr_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_19781001-19791231
       names:
         - PRATEsfc
       time_selection:
@@ -460,7 +460,7 @@ data_writer:
       time_coarsen:
         coarsen_factor: 4
       save_reference: false
-    - label: pr_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_20240101-20241231
+    - label: pr_day_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_20240101-20241231
       names:
         - PRATEsfc
       time_selection:
@@ -611,43 +611,43 @@ data_writer:
       time_coarsen:
         method: monthly_mean
       save_reference: false
-    - label: ps_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_197810-202412
+    - label: ps_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_197810-202412
       names:
         - PRESsfc
       time_coarsen:
         method: monthly_mean
       save_reference: false
-    - label: ts_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_197810-202412
+    - label: ts_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_197810-202412
       names:
         - surface_temperature
       time_coarsen:
         method: monthly_mean
       save_reference: false
-    - label: tas_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_197810-202412
+    - label: tas_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_197810-202412
       names:
         - TMP2m
       time_coarsen:
         method: monthly_mean
       save_reference: false
-    - label: huss_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_197810-202412
+    - label: huss_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_197810-202412
       names:
         - Q2m
       time_coarsen:
         method: monthly_mean
       save_reference: false
-    - label: uas_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_197810-202412
+    - label: uas_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_197810-202412
       names:
         - UGRD10m
       time_coarsen:
         method: monthly_mean
       save_reference: false
-    - label: vas_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_197810-202412
+    - label: vas_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_197810-202412
       names:
         - VGRD10m
       time_coarsen:
         method: monthly_mean
       save_reference: false
-    - label: pr_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gr_197810-202412
+    - label: pr_Amon_ACE2-ERA5_aimip-p4k_r1i1p1f1_gn_197810-202412
       names:
         - PRATEsfc
       time_coarsen:
