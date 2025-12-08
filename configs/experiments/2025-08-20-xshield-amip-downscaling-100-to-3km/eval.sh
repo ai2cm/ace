@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-wind-events-multivar-modelv0" #"eval-xshield-amip-100km-to-3km-conus"
+JOB_NAME="generate-xshield-amip-wind-great-lakes-multivar-modelv1" #"eval-xshield-amip-100km-to-3km-conus"
 CONFIG_FILENAME="config-generate-on-perfect-pred-events-wind.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -22,7 +22,8 @@ NGPU=2
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
 
-EXISTING_RESULTS_DATASET=01K7SPXVME1MP459K3C6B3J5GF
+#EXISTING_RESULTS_DATASET=01K7SPXVME1MP459K3C6B3J5GF  # orig multivar model
+EXISTING_RESULTS_DATASET=01K9PGGJSSKHQV4EKN4HMCERXB # multivar model with increased cap
 #EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
 #EXISTING_RESULTS_DATASET=01K7SPXVME1MP459K3C6B3J5GF # best crps checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
 wandb_group=""
