@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-global-with-statinp"
-CONFIG_FILENAME="eval-global.yaml"
+JOB_NAME="generate-xshield-amip-wind-great-lakes-multivar-with-static-inputs"
+CONFIG_FILENAME="eval-wind-events-great-lakes.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=4
+NGPU=1
 
 IMAGE=spencerc/fme-deps-only-0196723e
 
