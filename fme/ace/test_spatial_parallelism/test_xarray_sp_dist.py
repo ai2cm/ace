@@ -7,9 +7,9 @@ from fme.core.distributed import Distributed
 from fme.core.dataset.xarray import (
     XarrayDataConfig,
 )
-from fme.core.dataset.test_helper import gather_helper_conv, relative_error, init_seed
 from fme.core.typing_ import Slice
 from fme.core.dataset.test_xarray import mock_monthly_netcdfs
+from test_helper import gather_helper_conv, relative_error, init_seed
 
 # TODO: Make this run with a Bash script; I am running this test manually.
 # 1. Get an interactive node in PM.
