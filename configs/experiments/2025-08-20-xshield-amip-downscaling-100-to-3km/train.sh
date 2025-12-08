@@ -24,16 +24,15 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 #--dataset $PREVIOUS_RESULTS_DATASET:/previous_results \
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
+PREVIOUS_RESULTS_DATASET="01KBXGGDC6GHMB7QNA33T3KN1P"
 
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km training global' \
-    --workspace ai2/ace \
-    --priority low \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
     --cluster ai2/titan \
-    --cluster ai2/jupiter \
-    --cluster ai2/ceres \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
@@ -42,6 +41,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+    --dataset $PREVIOUS_RESULTS_DATASET:/previous_results \
     --weka climate-default:/climate-default \
     --gpus $N_GPUS \
     --shared-memory 400GiB \

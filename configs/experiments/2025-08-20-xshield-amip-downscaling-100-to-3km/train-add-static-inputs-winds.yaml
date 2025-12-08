@@ -1,3 +1,4 @@
+resume_results_dir: /previous_results
 model:
   out_names:
   - eastward_wind_at_ten_meters
