@@ -90,8 +90,10 @@ class Distributed:
             self._distributed = self._init_distributed()
         else:
             self._distributed = False
+            self.spatial_parallelism=False
         self._seed = 0
         self._force_non_distributed = force_non_distributed  # for debugging
+
 
     def _init_distributed(self):
         #We can review this block of code once spatial parallelism
