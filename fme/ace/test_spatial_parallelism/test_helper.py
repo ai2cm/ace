@@ -77,6 +77,17 @@ def split_helper_conv(tensor, hdim=-2, wdim=-1, w_group=1, h_group=1):
   tensor_local = split_helper(tensor_local, dim=wdim, group=w_group)
   return tensor_local
 
+def _split_helper(tensor, w_group, h_group):
+  tensor_local = split_helper(tensor, dim=-1, group=w_group)
+  tensor_local = split_helper(tensor_local, dim=-2, group=h_group)
+  return tensor_local
+
+def _gather_helper(tensor, w_group, h_group):
+  tensor_gather = gather_helper(tensor, dim=-2, group=h_group)
+  tensor_gather =	gather_helper(tensor_gather, dim=-1, group=w_group)
+
+  return tensor_gather
+
 def init_seed(seed):
   torch.manual_seed(seed)
   if torch.cuda.is_available():
