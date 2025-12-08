@@ -4,7 +4,7 @@ validate_using_ema: true
 ema:
   decay: 0.999
 max_epochs: 20
-n_forward_steps: <N_FORWARD_STEPS>
+n_forward_steps: 2
 inference:
   n_forward_steps: 28810
   forward_steps_in_memory: 43
