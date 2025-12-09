@@ -6,10 +6,9 @@ import cftime
 import numpy as np
 import torch
 import xarray as xr
-from torch.utils.data import default_collate
-
 from fme.core.device import get_device
 from fme.core.typing_ import TensorDict, TensorMapping
+from torch.utils.data import default_collate
 
 SelfType = TypeVar("SelfType", bound="BatchData")
 
@@ -326,6 +325,16 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             labels=self.labels,
         )
+
+    def pin_memory(self: SelfType) -> SelfType:
+        """Used by torch.utils.data.DataLoader when pin_memory=True to page-lock
+        tensors in CPU memory, resulting in faster transfers from CPU to GPU.
+
+        See https://docs.pytorch.org/docs/stable/data.html#memory-pinning
+
+        """
+        self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
+        return self
 
 
 @dataclasses.dataclass
