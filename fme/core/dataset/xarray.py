@@ -1039,8 +1039,7 @@ def get_xarray_dataset(
     dataset = XarrayDataset(config, names, n_timesteps)
     properties = dataset.properties
     index_slice = _as_index_selection(config.subset, dataset)
-    subset_dataset = XarraySubset(dataset, index_slice)
-    return subset_dataset, properties
+    return XarraySubset(dataset, index_slice), properties
 
 
 def get_xarray_datasets(

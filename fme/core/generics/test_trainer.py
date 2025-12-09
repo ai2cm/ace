@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.data_loading.gridded_data import DataLoader
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -18,7 +17,7 @@ from fme.core.generics.aggregator import (
     InferenceLog,
     InferenceLogs,
 )
-from fme.core.generics.data import GriddedDataABC, InferenceDataABC
+from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,

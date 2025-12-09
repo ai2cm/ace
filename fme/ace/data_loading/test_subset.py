@@ -1,5 +1,4 @@
 import pytest
-import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
@@ -51,14 +50,10 @@ def get_data_loader(
     dist = Distributed.get_instance()
     sampler = dist.get_sampler(dataset, shuffle=shuffle)
     return TorchDataLoader(
-        loader=torch.utils.data.DataLoader(
-            dataset,
-            sampler=sampler,
-            collate_fn=CollateFn(horizontal_dims=[]),
-            batch_size=1,
-        ),
-        sampler=sampler,
         dataset=dataset,
+        collate_fn=CollateFn(horizontal_dims=[]),
+        batch_size=1,
+        sampler=sampler,
     )
 
 

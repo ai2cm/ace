@@ -164,14 +164,9 @@ def get_gridded_data(
     else:
         atmosphere_label_encoding = None
 
-    dataloader = torch.utils.data.DataLoader(
+    dataloader = CoupledDataLoader(
         dataset,
-        batch_size=batch_size,
-        num_workers=config.num_data_workers,
-        sampler=sampler,
-        drop_last=True,
-        pin_memory=using_gpu(),
-        collate_fn=CollateFn(
+        CollateFn(
             ocean_horizontal_dims=list(properties.ocean.horizontal_coordinates.dims),
             ocean_label_encoding=ocean_label_encoding,
             atmosphere_label_encoding=atmosphere_label_encoding,
@@ -179,6 +174,11 @@ def get_gridded_data(
                 properties.atmosphere.horizontal_coordinates.dims
             ),
         ),
+        batch_size=batch_size,
+        num_workers=config.num_data_workers,
+        sampler=sampler,
+        drop_last=True,
+        pin_memory=using_gpu(),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
         **kwargs,
@@ -187,18 +187,13 @@ def get_gridded_data(
     if len(dataloader) == 0:
         raise ValueError(
             "No batches in dataloader: "
-            f"{len(dataloader.dataset)} samples, {len(dataloader)} batches. "
-            f"Batch size is {dataloader.batch_size}"
+            f"{dataloader.n_samples} samples, "
+            f"batch size is {dataloader.batch_size}"
         )
 
     return GriddedData(
-        loader=CoupledDataLoader(
-            dataloader,
-            sampler=sampler,
-            dataset=dataset,
-        ),
+        loader=dataloader,
         properties=properties,
-        sampler=sampler,
     )
 
 

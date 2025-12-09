@@ -200,7 +200,7 @@ class ForcingDataLoaderConfig:
         )
 
 
-class InferenceDataset(torch.utils.data.Dataset):
+class InferenceDataset(torch.utils.data.Dataset[BatchData]):
     def __init__(
         self,
         config: InferenceDataLoaderConfig,
