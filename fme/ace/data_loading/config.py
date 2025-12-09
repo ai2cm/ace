@@ -1,11 +1,9 @@
 import dataclasses
-import warnings
 from collections.abc import Sequence
-
-import torch
 
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.merged import MergeDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import XarrayDataConfig
@@ -21,10 +19,6 @@ class DataLoaderConfig:
         dataset: Could be a single dataset configuration,
             or a sequence of datasets to be concatenated using the keyword `concat`,
             or datasets from different sources to be merged using the keyword `merge`.
-            For backwards compatibility, it can also be a sequence of
-            datasets, which will be concatenated.
-            During `merge`, if multiple datasets contain the same data variable,
-            the version from the first source is loaded and other sources are ignored.
         batch_size: Number of samples per batch.
         num_data_workers: Number of parallel workers to use for data loading.
         prefetch_factor: how many batches a single data worker will attempt to
@@ -53,12 +47,7 @@ class DataLoaderConfig:
         pre-loaded window.
     """
 
-    dataset: (
-        ConcatDatasetConfig
-        | MergeDatasetConfig
-        | XarrayDataConfig
-        | Sequence[XarrayDataConfig]
-    )
+    dataset: ConcatDatasetConfig | MergeDatasetConfig | XarrayDataConfig
     batch_size: int
     num_data_workers: int = 0
     prefetch_factor: int | None = None
@@ -68,17 +57,23 @@ class DataLoaderConfig:
     sample_with_replacement: int | None = None
     time_buffer: int = 0
 
+    @property
+    def using_labels(self) -> bool:
+        return self.available_labels is not None
+
     def get_dataset(
         self,
         names: Sequence[str],
         n_timesteps: int,
-    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
-        if isinstance(self.dataset, Sequence):
-            raise RuntimeError(
-                "Dataset list should have been replaced by a ConcatDatasetConfig "
-                "at init time, perhaps the attribute was set post-init?"
-            )
+    ) -> tuple[DatasetABC, DatasetProperties]:
         return self.dataset.build(names, n_timesteps)
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return self.dataset.available_labels
 
     def __post_init__(self):
         dist = Distributed.get_instance()
@@ -87,14 +82,6 @@ class DataLoaderConfig:
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
-        # TODO: remove following backwards compatibility code in a future release
-        if isinstance(self.dataset, Sequence):
-            warnings.warn(
-                "Dataset list format is deprecated. "
-                "Use `concat` to specify concatenating datasets.",
-                DeprecationWarning,
-            )
-            self.dataset = ConcatDatasetConfig(concat=self.dataset)
         self._zarr_engine_used = self.dataset.zarr_engine_used
         if self.time_buffer < 0:
             raise ValueError(

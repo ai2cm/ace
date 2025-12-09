@@ -213,6 +213,7 @@ def test_xarray_loader_sample_with_replacement(tmp_path):
     assert data._vertical_coordinate.ak.device == fme.get_device()
     epoch_samples = list(data.loader)
     assert len(epoch_samples) == 10
+    data.set_epoch(1)  # should not raise an error
 
 
 def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
@@ -246,6 +247,49 @@ def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
     data = get_gridded_data(config, True, requirements)  # type: ignore
     assert "foo" in data.variable_metadata.keys()
     assert "foo2" in data.variable_metadata.keys()
+
+
+def test_xarray_loader_labels(tmp_path, tmp_path_factory):
+    _create_dataset_on_disk(tmp_path)
+    other_path = tmp_path_factory.mktemp("other")
+    _create_dataset_on_disk(
+        other_path,
+        filename="other_source.nc",
+    )
+
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(
+                    data_path=tmp_path, file_pattern="data*.nc", labels=["labelled"]
+                ),
+                XarrayDataConfig(
+                    data_path=other_path,
+                    file_pattern="other_source*.nc",
+                    n_repeats=1,
+                    labels=[],
+                ),
+            ]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], window_timesteps)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+    seen_labelled = False
+    seen_unlabelled = False
+    for batch in data.loader:
+        assert batch.labels is not None
+        assert batch.labels.names == ["labelled"]
+        if torch.sum(batch.labels.tensor) > 0:
+            seen_labelled = True
+        else:
+            seen_unlabelled = True
+    if not seen_labelled:
+        raise AssertionError("Did not see labelled data in batches")
+    if not seen_unlabelled:
+        raise AssertionError("Did not see unlabelled data in batches")
 
 
 def test_xarray_loader_using_merged_dataset_errors_if_different_time(
@@ -530,7 +574,7 @@ def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_err
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
     if raises_error:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"No batches in dataloader.*"):
             get_gridded_data(config, True, requirements)  # type: ignore
     else:
         get_gridded_data(config, True, requirements)  # type: ignore
@@ -676,7 +720,7 @@ def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
     initial_condition = BatchData.new_on_cpu(
         data={"foo": torch.randn(1, 1, 1, 1), "foo2": torch.randn(1, 1, 1, 1)},
         time=xr.DataArray(time_values, dims=["sample", "time"]),
-        labels=[set()],
+        labels=None,
     )
     data = get_forcing_data(
         config,
@@ -720,7 +764,7 @@ def test_TimestampList_as_indices(timestamps, expected_indices):
     )
     timestamp_list = TimestampList(timestamps)
     if expected_indices is None:
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match=r".*were not found in the time index.*"):
             timestamp_list.as_indices(time_index)
     else:
         np.testing.assert_equal(
@@ -833,16 +877,6 @@ def test_zarr_engine_used_mapping():
         batch_size=1,
     )
     assert config.zarr_engine_used
-
-
-def test_data_loader_maintains_backward_concat_compatibility(recwarn):
-    data_loader = DataLoaderConfig(
-        dataset=[XarrayDataConfig(data_path="some_path")],
-        batch_size=1,
-    )
-    assert isinstance(data_loader.dataset, ConcatDatasetConfig)
-    warning = recwarn.pop(DeprecationWarning)
-    assert "Dataset list format is deprecated" in str(warning.message)
 
 
 @pytest.mark.parametrize(

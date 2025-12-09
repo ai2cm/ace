@@ -37,6 +37,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
+from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
 
@@ -91,7 +92,10 @@ class InitialConditionConfig:
 
 
 def get_initial_condition(
-    ds: xr.Dataset, prognostic_names: Sequence[str], labels: list[str], n_ensemble: int
+    ds: xr.Dataset,
+    prognostic_names: Sequence[str],
+    labels: list[str] | None,
+    n_ensemble: int,
 ) -> PrognosticState:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
@@ -130,11 +134,16 @@ def get_initial_condition(
             f"and {n_samples}."
         )
 
+    if labels is not None:
+        batch_labels = BatchLabels(torch.ones(n_samples, len(labels)), names=labels)
+    else:
+        batch_labels = None
+
     batch_data = BatchData.new_on_cpu(
         data=initial_condition,
         time=initial_times,
         horizontal_dims=["lat", "lon"],
-        labels=[set(labels)] * n_samples,
+        labels=batch_labels,
     )
     batch_data = batch_data.broadcast_ensemble(n_ensemble=n_ensemble)
     return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
@@ -185,7 +194,7 @@ class InferenceConfig:
     )
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
-    labels: list[str] = dataclasses.field(default_factory=list)
+    labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
 
     def __post_init__(self):
@@ -286,8 +295,8 @@ def run_inference_from_config(config: InferenceConfig):
         initial_condition = get_initial_condition(
             config.initial_condition.get_dataset(),
             stepper_config.prognostic_names,
-            config.labels,
-            config.n_ensemble_per_ic,
+            labels=config.labels,
+            n_ensemble=config.n_ensemble_per_ic,
         )
         stepper = config.load_stepper()
         stepper.set_eval()

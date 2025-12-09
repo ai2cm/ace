@@ -10,6 +10,7 @@ from fme.ace.aggregator import (
     OneStepAggregatorConfig,
 )
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import (
@@ -79,6 +80,10 @@ class WeatherEvaluationConfig:
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
 
+    @property
+    def using_labels(self) -> bool:
+        return self.loader.using_labels
+
     def get_inference_data(
         self,
         window_requirements: DataRequirements,
@@ -132,6 +137,10 @@ class InlineInferenceConfig:
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
 
+    @property
+    def using_labels(self) -> bool:
+        return self.loader.using_labels
+
     def get_inference_data(
         self,
         window_requirements: DataRequirements,
@@ -167,6 +176,7 @@ class TrainConfig:
             used to select checkpoints, but is used to provide metrics.
         n_forward_steps: Number of forward steps during training. Cannot be given
             at the same time as train_n_forward_steps in StepperConfig.
+        train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
             If unset, weight initialization is not reproducible but data shuffling is.
@@ -184,6 +194,9 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        train_evaluation_samples: Number of samples to evaluate on after training
+            on each epoch. The remainder samples after dividing by the batch size
+            are discarded.
         checkpoint_every_n_batches: How often to save latest checkpoint during training.
             If 0 is given, checkpoints will not be saved based on batch progress,
             only other factors like pre-emption or being at the end of an epoch.
@@ -215,6 +228,9 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig | None
     n_forward_steps: int | None = None
+    train_aggregator: TrainAggregatorConfig = dataclasses.field(
+        default_factory=lambda: TrainAggregatorConfig()
+    )
     seed: int | None = None
     copy_weights_after_batch: list[CopyWeightsConfig] = dataclasses.field(
         default_factory=list
@@ -225,6 +241,7 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
+    train_evaluation_samples: int = 1000
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
@@ -245,10 +262,33 @@ class TrainConfig:
                 "stepper.train_n_forward_steps may not be given at the same time as "
                 "n_forward_steps at the top level"
             )
+        if self.train_loader.using_labels != self.validation_loader.using_labels:
+            raise ValueError(
+                "train_loader and validation_loader must both use labels or both not "
+                "use labels"
+            )
+        if self.inference is not None and (
+            self.train_loader.using_labels != self.inference.using_labels
+        ):
+            raise ValueError(
+                "train_loader and inference loader must both use labels or both not "
+                "use labels"
+            )
+        if self.weather_evaluation is not None and (
+            self.train_loader.using_labels != self.weather_evaluation.using_labels
+        ):
+            raise ValueError(
+                "train_loader and weather_evaluation loader must both use labels or "
+                "both not use labels"
+            )
 
     def set_random_seed(self):
         if self.seed is not None:
             set_seed(self.seed)
+
+    @property
+    def train_evaluation_batches(self) -> int:
+        return self.train_evaluation_samples // self.train_loader.batch_size
 
     @property
     def inference_n_forward_steps(self) -> int:

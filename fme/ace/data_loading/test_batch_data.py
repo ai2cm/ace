@@ -5,6 +5,7 @@ import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.device import get_device
+from fme.core.labels import BatchLabels
 
 
 def assert_metadata_equal(a: BatchData, b: BatchData):
@@ -18,8 +19,16 @@ def get_batch_data(
     horizontal_dims: list[str],
     n_lat: int = 8,
     n_lon: int = 16,
+    n_labels: int = 0,
 ):
     device = get_device()
+    if n_labels == 0:
+        labels = None
+    else:
+        labels = BatchLabels(
+            torch.zeros(n_samples, n_labels, device=device),
+            [f"label_{i}" for i in range(n_labels)],
+        )
     return BatchData(
         data={
             name: torch.randn(n_samples, n_times, n_lat, n_lon, device=device)
@@ -27,7 +36,7 @@ def get_batch_data(
         },
         time=xr.DataArray(np.random.rand(n_samples, n_times), dims=["sample", "time"]),
         horizontal_dims=horizontal_dims,
-        labels=[set() for _ in range(n_samples)],
+        labels=labels,
     )
 
 
@@ -222,6 +231,7 @@ def test_broadcast_ensemble(n_ensemble):
         horizontal_dims=horizontal_dims,
         n_lat=n_lat,
         n_lon=n_lon,
+        n_labels=2,
     )
 
     gen_data = get_batch_data(
@@ -231,10 +241,16 @@ def test_broadcast_ensemble(n_ensemble):
         horizontal_dims=horizontal_dims,
         n_lat=n_lat,
         n_lon=n_lon,
+        n_labels=2,
     )
 
     ensemble_target_data = target_data.broadcast_ensemble(n_ensemble=1)
     ensemble_gen_data = gen_data.broadcast_ensemble(n_ensemble=n_ensemble)
+
+    assert ensemble_target_data.labels.tensor.shape == (n_samples, 2)
+    assert ensemble_gen_data.labels.tensor.shape == (n_ensemble * n_samples, 2)
+    assert ensemble_target_data.labels.names == ["label_0", "label_1"]
+    assert ensemble_gen_data.labels.names == ["label_0", "label_1"]
 
     # make sure original data is unchanged and that broadcasting with an_ensemble=1 just
     # copies the BatchData object
@@ -255,14 +271,16 @@ def test_broadcast_ensemble(n_ensemble):
     )
 
     # assert metadata is shapes are correct after ensembling
-    assert len(ensemble_gen_data.labels) == n_ensemble * n_samples
+    assert ensemble_gen_data.labels.tensor.shape[0] == n_ensemble * n_samples
     assert len(ensemble_gen_data.time.sample) == n_ensemble * n_samples
     assert len(ensemble_gen_data.time.time) == n_times
 
     for i in range(n_ensemble):
-        assert (
-            ensemble_gen_data.labels[i * n_samples : (i * n_samples) + n_samples]
-            == gen_data.labels
+        torch.testing.assert_close(
+            ensemble_gen_data.labels.tensor[
+                i * n_samples : (i * n_samples) + n_samples
+            ],
+            gen_data.labels.tensor,
         )
         assert ensemble_gen_data.time[
             i * n_samples : (i * n_samples) + n_samples

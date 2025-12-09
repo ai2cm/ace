@@ -28,7 +28,7 @@ NAME_CLIMSST_4DEG = fv3gfs-ensemble-4deg
 NAME_AMIP_1DEG = fv3gfs-AMIP-ensemble
 NAME_AMIP_4DEG = fv3gfs-AMIP-ensemble-4deg
 ATMOSPHERE_PROCESSING_IMAGE = us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing
-ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.03.1  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
+ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.12.0  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 HEALPIX_PROCESSING_IMAGE = dlwp-ace-datapipe
 HEALPIX_PROCESSING_IMAGE_VERSION = v2025.09.0  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 
@@ -276,11 +276,11 @@ cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
 	--end-date "0351-01-01T00:00:00"
 
 create_ocean_data_proc_env:
-	conda create -y -n ocean_data_proc python=3.10 pip yq
-	conda install -y -n ocean_data_proc -c conda-forge xesmf
-	conda run --no-capture-output -n ocean_data_proc python -m pip install uv
-	conda run --no-capture-output -n ocean_data_proc uv pip install -r requirements-ocean.txt
-	conda run --no-capture-output -n ocean_data_proc bash ./install_ocean_emulators.sh
+	conda create -y -n ocean_preprocess python=3.11 pip yq
+	conda install -y -n ocean_preprocess -c conda-forge xesmf
+	conda run --no-capture-output -n ocean_preprocess python -m pip install uv
+	conda run --no-capture-output -n ocean_preprocess uv pip install -r requirements-ocean.txt
+	conda run --no-capture-output -n ocean_preprocess bash ./install_ocean_emulators.sh
 
 .PHONY: cm4_trial_run_ocean_dataset_and_stats
 cm4_trial_run_ocean_dataset_and_stats:
@@ -333,3 +333,7 @@ cm4_1pctCO2_140yr_coupled_no_smoothing:
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
 	python ./create_coupled_datasets.py --yaml configs/E3SMv3-piControl-100yr-coupled.yaml
+
+.PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
+cm4_like_am4_random_co2_ensemble_atmosphere:
+	./compute_dataset.sh --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
