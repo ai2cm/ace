@@ -1,5 +1,5 @@
 runs:
-  2025-10-15-cm4-piControl-200yr-ocean-no-smoothing: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
+  2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing: s3://emulators/ai2_colab/2025-04-04-CM4-1pctCO2-simulation
 data_output_directory: gs://leap-scratch/jpdunc23
 dataset_computation:
   shift_timestamps_to_avg_interval_midpoint: true

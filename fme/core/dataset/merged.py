@@ -55,9 +55,6 @@ class MergedXarrayDataset(DatasetABC):
             tensors.update(ds_tensors)
         return tensors, time, labels
 
-    def __len__(self) -> int:
-        return len(self.datasets[0])
-
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         tensors: TensorDict = {}
         for dataset in self.datasets:
