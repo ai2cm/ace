@@ -420,7 +420,6 @@ class Trainer:
         wandb = WandB.get_instance()
         dist = Distributed.get_instance()
         names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
-        aggregator = self._aggregator_builder.get_train_aggregator()
         n_samples_seen_since_logging = 0
         self.stepper.set_train()
         if self.num_batches_seen == 0:
@@ -446,7 +445,6 @@ class Trainer:
         for batch in epoch_data:
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
-            aggregator.record_batch(stepped)
             self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
             # Step scheduler per-iteration if configured to do so
@@ -482,12 +480,15 @@ class Trainer:
                 self._last_saved_num_batches_seen = self.num_batches_seen
         # evaluate after training on an independent shuffle of the data
         self.train_data.alternate_shuffle()
-        for batch in self.train_data.subset_loader(
-            stop_batch=self.config.train_evaluation_batches
-        ):
-            with GlobalTimer():
-                stepped = self.stepper.train_on_batch(batch, self._no_optimization)
-            aggregator.record_batch(stepped)
+        aggregator = self._aggregator_builder.get_train_aggregator()
+        self.stepper.set_eval()
+        with torch.no_grad(), self.validation_context():
+            for batch in self.train_data.subset_loader(
+                stop_batch=self.config.train_evaluation_batches
+            ):
+                with GlobalTimer():
+                    stepped = self.stepper.train_on_batch(batch, self._no_optimization)
+                aggregator.record_batch(stepped)
         if dist.is_root() and self.num_batches_seen > self._last_saved_num_batches_seen:
             self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
         # we will save restart checkpoints again after validation/inference
