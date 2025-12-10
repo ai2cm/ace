@@ -12,7 +12,7 @@ logging:
   entity: ai2cm
 loader:
   start_indices:
-    n_initial_conditions: 256
+    n_initial_conditions: 128
     first: 0
     interval: 1
   dataset:

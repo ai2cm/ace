@@ -3,28 +3,6 @@
 
 set -e
 
-JOB_NAME="downscale-perfect-100km-to-3km-1-year-global"
-
-#CONFIG_FILENAME="gen-ace-output-global-ic0000.yaml"
-CONFIG_FILENAME="gen-perfect-output-global.yaml"
-
-SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
-CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
-
- # since we use a service account API key for wandb, we use the beaker username to set the wandb username
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
-REPO_ROOT=$(git rev-parse --show-toplevel)
-
-cd $REPO_ROOT  # so config path is valid no matter where we are running this script
-
-NGPU=2
-IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
-
-#EXISTING_RESULTS_DATASET=01K8P3P5205396WR50FCMZR6P7 # best crps checkpoint from job using global validation
-EXISTING_RESULTS_DATASET=01K8XGEEAJRHN8JRZE4WXQRDVD
-
-wandb_group=""
-
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km generation on ACE' \
@@ -49,3 +27,26 @@ gantry run \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
+
+JOB_NAME="downscale-perfect-100km-to-3km-1-year-global"
+
+#CONFIG_FILENAME="gen-ace-output-global-ic0000.yaml"
+CONFIG_FILENAME="gen-perfect-output-global.yaml"
+
+SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
+CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
+
+ # since we use a service account API key for wandb, we use the beaker username to set the wandb username
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+cd $REPO_ROOT  # so config path is valid no matter where we are running this script
+
+NGPU=2
+IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
+
+#EXISTING_RESULTS_DATASET=01K8P3P5205396WR50FCMZR6P7 # best crps checkpoint from job using global validation
+EXISTING_RESULTS_DATASET=01K8XGEEAJRHN8JRZE4WXQRDVD
+
+wandb_group=""
+

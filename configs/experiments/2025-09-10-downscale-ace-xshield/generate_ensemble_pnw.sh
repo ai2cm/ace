@@ -28,7 +28,7 @@ gantry run \
     --description 'Run 100km to 3km generation on ACE' \
     --workspace ai2/ace \
     --priority high \
-    --preemptible \
+    --not-preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
