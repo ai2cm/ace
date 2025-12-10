@@ -24,7 +24,6 @@ def plot_imshow(
     vmax: float | None = None,
     cmap: str | Colormap | None = None,
     flip_lat: bool = True,
-    roll_lon: bool = True,
     use_colorbar: bool = True,
     ax: plt.Axes | None = None,
 ) -> Figure:
@@ -36,9 +35,6 @@ def plot_imshow(
     if flip_lat:
         lat_dim = -2
         data = np.flip(data, axis=lat_dim)
-    if roll_lon:
-        lon_dim = -1
-        data = np.roll(data, data.shape[lon_dim] // 2 - 10, axis=lon_dim)
 
     if use_colorbar:
         height, width = data.shape
