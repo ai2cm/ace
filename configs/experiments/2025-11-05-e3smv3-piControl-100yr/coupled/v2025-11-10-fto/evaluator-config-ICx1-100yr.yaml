@@ -15,6 +15,7 @@ data_writer:
     names:
       - TS
       - surface_precipitation_rate
+      - PS
 logging:
   log_to_screen: true
   log_to_wandb: true
