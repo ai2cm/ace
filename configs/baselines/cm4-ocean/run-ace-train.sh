@@ -14,7 +14,7 @@ WORKSPACE="ai2/ace"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="2025-08-28-baseline-padding-fix-pad-only" # update when training a new baseline
+JOB_GROUP="2025-08-28-baseline" # update when training a new baseline
 RS=1
 JOB_NAME="${JOB_GROUP}-rs${RS}-train"
 echo "Job name: ${JOB_NAME}"
