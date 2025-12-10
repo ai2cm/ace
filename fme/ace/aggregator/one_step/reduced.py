@@ -32,6 +32,8 @@ class MeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         target_time: int = 1,
+        include_bias: bool = True,
+        include_grad_mag_percent_diff: bool = True,
         target: Literal["norm", "denorm"] = "denorm",
         channel_mean_names: Sequence[str] | None = None,
     ):
@@ -39,8 +41,8 @@ class MeanAggregator:
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
         self._target_time = target_time
-        self._dist = Distributed.get_instance()
         self._target = target
+        self._dist = Distributed.get_instance()
 
         device = get_device()
         self._variable_metrics: dict[str, ReducedMetric] = {}
@@ -49,11 +51,12 @@ class MeanAggregator:
             compute_metric=self._gridded_operations.area_weighted_rmse_dict,
             channel_mean_names=channel_mean_names,
         )
-        if self._target == "denorm":
+        if include_bias:
             self._variable_metrics["weighted_bias"] = AreaWeightedReducedMetric(
                 device=device,
                 compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
             )
+        if include_grad_mag_percent_diff:
             self._variable_metrics["weighted_grad_mag_percent_diff"] = (
                 AreaWeightedReducedMetric(
                     device=device,
@@ -66,8 +69,8 @@ class MeanAggregator:
         self,
         target_data: TensorMapping,
         gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
+        target_data_norm: TensorMapping | None = None,
+        gen_data_norm: TensorMapping | None = None,
         loss: torch.Tensor = torch.tensor(np.nan),
         i_time_start: int = 0,
     ):
@@ -76,6 +79,11 @@ class MeanAggregator:
         time_len = gen_data[list(gen_data.keys())[0]].shape[time_dim]
         target_time = self._target_time - i_time_start
         if self._target == "norm":
+            if target_data_norm is None or gen_data_norm is None:
+                raise ValueError(
+                    "target_data_norm and gen_data_norm must be provided "
+                    "if target is 'norm'."
+                )
             target_data = target_data_norm
             gen_data = gen_data_norm
         if target_time >= 0 and time_len > target_time:

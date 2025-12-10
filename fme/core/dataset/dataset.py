@@ -1,17 +1,53 @@
 import abc
+from typing import Any, final
 
-import torch
 import xarray as xr
 
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.generics.dataset import GenericDataset
 from fme.core.typing_ import TensorDict
 
+DatasetItem = tuple[TensorDict, xr.DataArray, set[str] | None]
 
-class DatasetABC(abc.ABC, torch.utils.data.Dataset):
+
+class DatasetABC(GenericDataset[DatasetItem], abc.ABC):
     @property
     @abc.abstractmethod
     def sample_start_times(self) -> xr.CFTimeIndex:
         pass
+
+    @property
+    @abc.abstractmethod
+    def all_times(self) -> xr.CFTimeIndex:
+        """
+        Like sample_start_times, but includes all times in the dataset, including
+        final times which are not valid as a start index.
+
+        This is relevant for inference, where we may use get_sample_by_time_slice to
+        retrieve time windows directly.
+
+        If this dataset does not support inference,
+        this will raise a NotImplementedError.
+        """
+        pass
+
+    @abc.abstractmethod
+    def __getitem__(self, index) -> DatasetItem:
+        pass
+
+    @final
+    def __len__(self) -> int:
+        return len(self.sample_start_times)
+
+    @property
+    @final
+    def first_time(self) -> Any:
+        return self.sample_start_times[0]
+
+    @property
+    @final
+    def last_time(self) -> Any:
+        return self.sample_start_times[-1]
 
     @property
     @abc.abstractmethod
@@ -20,9 +56,7 @@ class DatasetABC(abc.ABC, torch.utils.data.Dataset):
         pass
 
     @abc.abstractmethod
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         pass
 
     @property

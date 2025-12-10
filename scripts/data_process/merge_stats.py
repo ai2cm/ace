@@ -2,10 +2,13 @@ import argparse
 import dataclasses
 import logging
 import os
+import tempfile
 
 import dacite
+import fsspec
 import xarray as xr
 import yaml
+from get_stats import copy
 
 STATS_NC_FILE_NAMES = [
     "centering.nc",
@@ -46,10 +49,12 @@ class MergeStatsConfig:
     exclude_names: list[str] = dataclasses.field(default_factory=list)
 
     def open_input_datasets(self, fname: str):
-        return [
-            xr.open_dataset(os.path.join(path, fname))
-            for path in self.input_directories
-        ]
+        datasets = []
+        for path in self.input_directories:
+            with fsspec.open(os.path.join(path, fname)) as file:
+                ds = xr.open_dataset(file, decode_timedelta=False).load()
+            datasets.append(ds)
+        return datasets
 
 
 def merge_stats(config: MergeStatsConfig):
@@ -93,7 +98,11 @@ def merge_stats(config: MergeStatsConfig):
         for rename_config in config.rename:
             stats = rename_config.rename_var(stats)
         print(stats.load())
-        stats.to_netcdf(os.path.join(stats_dir, fname))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = os.path.join(tmpdir, fname)
+            stats.to_netcdf(local_path)
+            destination_path = os.path.join(stats_dir, fname)
+            copy(local_path, destination_path)
 
 
 def main():

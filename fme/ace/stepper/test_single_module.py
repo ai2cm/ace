@@ -52,7 +52,6 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.loss import StepLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
-from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import (
@@ -63,6 +62,8 @@ from fme.core.optimization import (
 )
 from fme.core.registry.module import ModuleSelector
 from fme.core.step import SingleModuleStepConfig, StepSelector
+from fme.core.step.args import StepArgs
+from fme.core.step.multi_call import MultiCallConfig
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict
@@ -102,7 +103,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
             np.zeros((n_samples, n_time)),
             dims=["sample", "time"],
         ),
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
     )
     return SphericalData(data, area_weights, vertical_coord)
 
@@ -793,7 +794,7 @@ def test_stepper_corrector(
     batch_data = BatchData.new_on_cpu(
         data=data,
         time=time,
-        labels=[set() for _ in range(time.shape[0])],
+        labels=None,
     ).to_device()
     # run the stepper on the data
     with torch.no_grad():
@@ -927,9 +928,12 @@ def _get_stepper(
 
 def test_step():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    n_samples = 3
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
-    output = stepper.step(input_data, {})
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
@@ -937,8 +941,11 @@ def test_step():
 
 def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
-    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
-    output = stepper.step(input_data, {})
+    n_samples = 3
+    input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
 
@@ -952,8 +959,11 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
         norm_mean=norm_mean,
         residual_prediction=residual_prediction,
     )
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    output = stepper.step(input_data, {})
+    n_samples = 3
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
     else:
@@ -969,7 +979,9 @@ def test_step_with_prescribed_ocean():
     )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
-    output = stepper.step(input_data, ocean_data)
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
+    )
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
         ocean_data["a"],
@@ -1016,7 +1028,7 @@ def get_data_for_predict(
         BatchData.new_on_device(
             data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
             time=input_time,
-            labels=[set() for _ in range(n_samples)],
+            labels=None,
         )
         .broadcast_ensemble(n_ensemble)
         .get_start(
@@ -1030,7 +1042,7 @@ def get_data_for_predict(
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
         },
         time=forcing_time,
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
     ).broadcast_ensemble(n_ensemble)
     return input_data, forcing_data
 
@@ -1158,7 +1170,7 @@ def test_prepend_initial_condition():
     ic = BatchData.new_on_device(
         data=ic_data,
         time=xr.DataArray(np.zeros((batch_size, 1)), dims=["sample", "time"]),
-        labels=[set() for _ in range(batch_size)],
+        labels=None,
     ).get_start(
         prognostic_names=["a", "b"],
         n_ic_timesteps=1,
@@ -1451,7 +1463,7 @@ def get_regression_stepper_and_data(
             np.zeros((n_samples, n_forward_steps + 1)),
             dims=["sample", "time"],
         ),
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
         horizontal_dims=["lat", "lon"],
     )
     return stepper, data

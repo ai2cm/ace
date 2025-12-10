@@ -6,9 +6,11 @@ from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.subset import SubsetDataset
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
+from fme.core.labels import LabelEncoding
 
 from .batch_data import PrognosticState
 from .config import DataLoaderConfig
@@ -24,13 +26,17 @@ logger = logging.getLogger(__name__)
 
 
 class CollateFn:
-    def __init__(self, horizontal_dims: list[str]):
+    def __init__(
+        self, horizontal_dims: list[str], label_encoding: LabelEncoding | None = None
+    ):
         self.horizontal_dims = horizontal_dims
+        self.label_encoding = label_encoding
 
     def __call__(self, samples):
         return BatchData.from_sample_tuples(
             samples,
             horizontal_dims=self.horizontal_dims,
+            label_encoding=self.label_encoding,
         )
 
 
@@ -73,8 +79,8 @@ def get_gridded_data(
         # include requirements.n_timesteps - 1 steps of overlap so that no samples are
         # skipped at the boundaries of the preloaded timesteps
         start_every_n = config.time_buffer + 1
-        indices = range(len(dataset))[::start_every_n]
-        dataset = torch.utils.data.Subset(dataset, indices)
+        indices = list(range(len(dataset))[::start_every_n])
+        dataset = SubsetDataset(dataset, indices)
 
     dist = Distributed.get_instance()
 
@@ -92,6 +98,11 @@ def get_gridded_data(
     dist = Distributed.get_instance()
     batch_size = dist.local_batch_size(int(config.batch_size))
 
+    if config.available_labels is not None:
+        label_encoding = LabelEncoding(sorted(list(config.available_labels)))
+    else:
+        label_encoding = None
+
     dataloader = get_data_loader(
         dataset=dataset,
         batch_size=batch_size,
@@ -102,7 +113,10 @@ def get_gridded_data(
         shuffled=train,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=CollateFn(list(properties.horizontal_coordinates.dims)),
+        collate_fn=CollateFn(
+            list(properties.horizontal_coordinates.dims),
+            label_encoding,
+        ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
         prefetch_factor=config.prefetch_factor,
@@ -111,7 +125,6 @@ def get_gridded_data(
     return GriddedData(
         loader=dataloader,
         properties=properties,
-        sampler=sampler,
         modifier=config.augmentation.build_modifier(),
     )
 
