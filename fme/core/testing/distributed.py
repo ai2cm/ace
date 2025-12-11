@@ -2,7 +2,7 @@ import contextlib
 
 import torch
 
-from fme.core import distributed
+from fme.core.distributed import distributed
 
 
 class MockDistributed:
@@ -41,9 +41,7 @@ class MockDistributed:
         Note this uses the actual implementation but mocks the underlying
         distributed calls.
         """
-        return distributed.gather_irregular(
-            tensor, self.reduce_max, self.gather, is_distributed=self.is_distributed()
-        )
+        return self.gather(tensor)  # this is single-process, can't be irregular
 
 
 @contextlib.contextmanager
