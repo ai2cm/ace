@@ -3,6 +3,9 @@
 
 set -e
 
+#CONFIG_FILENAME="gen-ace-output-global-ic0000.yaml"
+CONFIG_FILENAME="gen-perfect-output-global.yaml"
+
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 
@@ -12,10 +15,10 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-NGPU=8
+NGPU=4
 IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET=01K8P3P5205396WR50FCMZR6P7
+EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD
 
 wandb_group=""
 
@@ -23,13 +26,10 @@ cd "$REPO_ROOT"
 
 JOB_NAME="downscale-perfect-100km-to-3km-1-year-global-churn-2.5"
 
-#CONFIG_FILENAME="gen-ace-output-global-ic0000.yaml"
-CONFIG_FILENAME="gen-perfect-output-global.yaml"
-
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km generation Perfect' \
-    --workspace ai2/ace \
+    --workspace ai2/climate-titan \
     --priority urgent \
     --preemptible \
     --cluster ai2/titan \
