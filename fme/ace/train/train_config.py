@@ -166,7 +166,10 @@ class TrainConfig:
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
-        save_checkpoint: Whether to save checkpoints.
+        save_checkpoint: Whether to save checkpoints. If false, no checkpoints
+            are saved regardless of other checkpoint configuration settings. If
+            true, checkpoints are saved at the end of the training loop, after
+            evaluation, and on catching a termination signal.
         experiment_dir: Directory where checkpoints and logs are saved.
         inference: Configuration for inline inference.
             If None, no inline inference is run,

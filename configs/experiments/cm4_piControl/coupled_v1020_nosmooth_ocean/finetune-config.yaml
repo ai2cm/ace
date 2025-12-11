@@ -1,6 +1,6 @@
 experiment_dir: /results
 save_checkpoint: true
-save_best_inference_epoch_checkpoints: true
+save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
 log_train_every_n_batches: 10
 validate_using_ema: true

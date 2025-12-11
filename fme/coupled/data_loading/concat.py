@@ -3,11 +3,11 @@ from typing import Any
 
 import torch
 
-from fme.core.dataset.dataset import SupportsDataLoaderABC
+from fme.core.generics.dataset import GenericDataset
 from fme.coupled.data_loading.data_typing import CoupledDataset, CoupledDatasetItem
 
 
-class ConcatDataset(SupportsDataLoaderABC):
+class ConcatDataset(GenericDataset[CoupledDatasetItem]):
     def __init__(self, datasets: Sequence[CoupledDataset]):
         self._dataset = torch.utils.data.ConcatDataset(datasets)
         self._underlying_datasets = datasets

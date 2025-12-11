@@ -1,0 +1,86 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 20
+n_forward_steps: 2
+inference:
+  n_forward_steps: 28810
+  forward_steps_in_memory: 43
+  loader:
+    start_indices:
+      times:
+        # 8 evenly spaced, spanning training and validation sets
+        - '0251-01-03T12:00:00'
+        - '0262-06-22T12:00:00'
+        - '0273-12-09T12:00:00'
+        - '0285-05-28T12:00:00'
+        - '0296-11-14T12:00:00'
+        - '0308-05-03T12:00:00'
+        - '0319-10-20T12:00:00'
+        - '0331-04-08T12:00:00'
+    dataset:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+    num_data_workers: 4
+  aggregator:
+    log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 10
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+        engine: zarr
+        subset:
+          start_time: '0256-01-03T12:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+        subset:
+          start_time: '0256-01-03T12:00:00'
+validation_loader:
+  batch_size: 64
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 10
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+        engine: zarr
+        subset:
+          start_time: '0251-01-03T12:00:00'
+          stop_time: '0255-12-29T12:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+        subset:
+          start_time: '0251-01-03T12:00:00'
+          stop_time: '0255-12-29T12:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper:
+  parameter_init:
+    weights_path: /ckpt.tar

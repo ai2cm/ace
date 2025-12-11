@@ -1,21 +1,19 @@
 experiment_dir: /results
 n_coupled_steps: 2920
-coupled_steps_in_memory: <COUPLED_STEPS_IN_MEMORY>
+coupled_steps_in_memory: 20
 checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false
     save_monthly_files: true
-    names: <OCEAN_WRITER_NAMES>
   atmosphere:
     save_prediction_files: false
     save_monthly_files: true
-    names: <ATMOSPHERE_WRITER_NAMES>
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: <WANDB_PROJECT>
+  project: ace-samudra-coupled-cm4
   entity: ai2cm
 loader:
   num_data_workers: 1

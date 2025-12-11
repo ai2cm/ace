@@ -119,3 +119,35 @@ def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
     adapter.append_batch(data, time)
     adapter = writer_cls(**args)  # type: ignore
     adapter.append_batch(data, time)
+
+
+def test_zarr_adapter_single_timestep_data(
+    tmpdir,
+):
+    data = {"foo": torch.zeros((1, 1, 2, 2))}
+    time = xr.DataArray(
+        [
+            [
+                cftime.datetime(2020, 1, 1),
+            ]
+        ],
+        dims=("sample", "time"),
+    )
+    args = dict(
+        path=str(tmpdir / "test.zarr"),
+        dims=("sample", "time", "lat", "lon"),
+        data_coords=ensure_numpy_coords(
+            {
+                "lat": xr.DataArray([0, 1], dims=["lat"]),
+                "lon": xr.DataArray([0, 1], dims=["lon"]),
+                "ak": xr.DataArray([0, 1], dims=["z_interface"]),
+            }
+        ),
+        n_timesteps=1,
+        n_initial_conditions=1,
+    )
+    adapter = ZarrWriterAdapter(**args)  # type: ignore
+    adapter.append_batch(data, time)
+
+    ds = xr.open_zarr(str(tmpdir / "test.zarr"))
+    assert ds.time.size == 1

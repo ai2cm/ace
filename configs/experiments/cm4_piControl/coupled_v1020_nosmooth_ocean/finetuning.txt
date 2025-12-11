@@ -1,4 +1,3 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
-ft_fto-sfno-v1020_nosmooth_ocean-csdyye6l||ace-samudra-coupled-cm4|csdyye6l|best_inference_ckpt|train|high||8|800GiB|3|||
-
+ft_fto-sfno-v1020_nosmooth_ocean-0o5bi74p|rs1|ace-samudra-coupled-cm4|0o5bi74p|best_inference_ckpt|train|high||8|800GiB|3||seed=1|

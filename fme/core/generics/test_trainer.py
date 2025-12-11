@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.data_loading.gridded_data import DataLoader
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -18,7 +17,7 @@ from fme.core.generics.aggregator import (
     InferenceLog,
     InferenceLogs,
 )
-from fme.core.generics.data import GriddedDataABC, InferenceDataABC
+from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
@@ -336,6 +335,7 @@ def get_trainer(
     save_best_inference_epoch_checkpoints: bool = False,
     scheduler_config: SchedulerConfig | None = None,
     n_validation_batches: int = 5,
+    save_checkpoint: bool = True,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -410,6 +410,7 @@ def get_trainer(
         validate_using_ema=validate_using_ema,
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
+        save_checkpoint=save_checkpoint,
     )
     aggregator_builder = AggregatorBuilder(
         train_losses=train_losses,
@@ -1115,3 +1116,29 @@ def test_lr_logging_by_iter(tmp_path: str):
                 assert "lr" in logs
             else:
                 assert "lr" not in logs
+
+
+def test_no_checkpoints_saved_when_disabled(tmp_path: str):
+    """Test that no checkpoint files are created when save_checkpoint=False."""
+    max_epochs = 2
+    n_train_batches = 5
+
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        n_train_batches=n_train_batches,
+        save_checkpoint=False,
+        checkpoint_every_n_batches=1,  # would normally save frequently
+    )
+
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+
+    # Verify no checkpoint files were created
+    assert not os.path.exists(paths.latest_checkpoint_path)
+    assert not os.path.exists(paths.best_checkpoint_path)
+    assert not os.path.exists(paths.best_inference_checkpoint_path)
+    for epoch in range(1, max_epochs + 1):
+        assert not os.path.exists(paths.epoch_checkpoint_path(epoch))
+        assert not os.path.exists(paths.ema_epoch_checkpoint_path(epoch))

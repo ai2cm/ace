@@ -1,22 +1,21 @@
 import abc
 import logging
 from collections.abc import Callable, Iterator
-from typing import Any, Generic, TypeVar, final
+from typing import cast, final
 
 import numpy as np
 import torch
-import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
-from fme.core.dataset.dataset import SupportsDataLoaderABC
-from fme.core.dataset.subset import SubsetDataset
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.distributed import Distributed
+from fme.core.generics.dataloader import GenericDataLoader
+from fme.core.generics.dataset import GenericDataset
 from fme.core.rand import alternate_seed
-from fme.core.typing_ import TensorDict
 
 
 def get_data_loader(
-    dataset: torch.utils.data.Dataset[tuple[TensorDict, xr.DataArray]],
+    dataset: GenericDataset[DatasetItem],
     batch_size: int,
     n_window_timesteps: int,
     time_buffer: int,
@@ -25,7 +24,7 @@ def get_data_loader(
     shuffled: bool,
     drop_last: bool,
     pin_memory: bool,
-    collate_fn: Callable,
+    collate_fn: Callable[[list[DatasetItem]], BatchData],
     multiprocessing_context: str | None,
     persistent_workers: bool,
     prefetch_factor: int | None,
@@ -35,27 +34,29 @@ def get_data_loader(
         kwargs = {}
     else:
         kwargs = {"prefetch_factor": prefetch_factor}
-    torch_dataloader = torch.utils.data.DataLoader(
+    torch_dataloader = TorchDataLoader(
         dataset,
+        collate_fn,
         batch_size=batch_size,
         num_workers=num_workers,
         sampler=sampler,
         drop_last=drop_last,
         pin_memory=pin_memory,
-        collate_fn=collate_fn,
         multiprocessing_context=multiprocessing_context,
         persistent_workers=persistent_workers,
         **kwargs,
     )
-    dataloader: DataLoaderABC = TorchDataLoader(torch_dataloader, sampler, dataset)
+    dataloader: DataLoaderABC
     if time_buffer > 0:
         n_timesteps_preloaded = time_buffer + n_window_timesteps
         dataloader = SlidingWindowDataLoader(
-            loader=dataloader,
+            loader=torch_dataloader,
             input_n_timesteps=n_timesteps_preloaded,
             output_n_timesteps=n_window_timesteps,
             shuffle=shuffled,
         )
+    else:
+        dataloader = torch_dataloader
 
     if len(dataloader) == 0:
         msg = (
@@ -138,118 +139,7 @@ class DataLoaderABC(abc.ABC):
         pass
 
 
-T = TypeVar("T")
-
-
-class GenericTorchDataLoader(Generic[T]):
-    SelfType = TypeVar("SelfType", bound="GenericTorchDataLoader")
-
-    @final
-    def __init__(
-        self,
-        loader: torch.utils.data.DataLoader[T],
-        sampler: torch.utils.data.Sampler,
-        dataset: SupportsDataLoaderABC,
-    ):
-        """
-        Args:
-            loader: The underlying torch data loader.
-            sampler: The sampler associated with the loader.
-            dataset: The underlying dataset associated with the loader. This is
-                provided to allow direct access to the dataset.
-        """
-        self._loader = loader
-        self._sampler = sampler
-        self._dataset = dataset
-
-    @final
-    def __iter__(self) -> Iterator[T]:
-        return iter(self._loader)
-
-    @final
-    def __len__(self) -> int:
-        return len(self._loader)
-
-    @final
-    def __next__(self) -> T:
-        return next(self._loader)
-
-    @property
-    @final
-    def batch_size(self) -> int:
-        return self._loader.batch_size
-
-    @property
-    @final
-    def n_samples(self) -> int:
-        return len(self) * self.batch_size
-
-    @final
-    def log_info(self, name: str):
-        logging.info(f"{name} data: {self.n_samples} samples, {len(self)} batches")
-        logging.info(f"{name} data: first sample's initial time: {self._first_time}")
-        logging.info(f"{name} data: last sample's initial time: {self._last_time}")
-
-    @property
-    @final
-    def _first_time(self) -> Any:
-        return self._dataset.first_time
-
-    @property
-    @final
-    def _last_time(self) -> Any:
-        return self._dataset.last_time
-
-    @final
-    def subset(
-        self: SelfType, start_batch: int | None = None, stop_batch: int | None = None
-    ) -> SelfType:
-        if start_batch is None and stop_batch is None:
-            return self
-        # how many *examples* to drop, not batches
-        n_skip = start_batch * self._loader.batch_size if start_batch is not None else 0
-        n_stop = (
-            stop_batch * self._loader.batch_size if stop_batch is not None else None
-        )
-        # freeze the order produced by the original sampler
-        indices = list(self._loader.sampler)[slice(n_skip, n_stop)]
-
-        # dataset view that exposes only the remaining indices
-        sub_ds = SubsetDataset(self._dataset, indices)  # type: ignore
-
-        # iterate through the subset exactly as-is (no extra shuffling)
-        sub_sampler = torch.utils.data.SequentialSampler(sub_ds)
-        sub_loader = torch.utils.data.DataLoader(
-            sub_ds,
-            batch_size=self._loader.batch_size,
-            num_workers=self._loader.num_workers,
-            sampler=sub_sampler,
-            drop_last=self._loader.drop_last,
-            pin_memory=self._loader.pin_memory,
-            collate_fn=self._loader.collate_fn,
-            prefetch_factor=self._loader.prefetch_factor,
-            multiprocessing_context=self._loader.multiprocessing_context,
-            persistent_workers=self._loader.persistent_workers,
-        )
-        return self.__class__(
-            sub_loader,
-            sampler=sub_sampler,
-            dataset=sub_ds,
-        )
-
-    @final
-    def set_epoch(self, epoch: int):
-        if isinstance(self._sampler, torch.utils.data.DistributedSampler):
-            self._sampler.set_epoch(epoch)
-        self._dataset.set_epoch(epoch)
-
-    @final
-    def alternate_shuffle(self):
-        if isinstance(self._sampler, torch.utils.data.DistributedSampler):
-            self._sampler.set_epoch(alternate_seed(self._sampler.epoch))
-
-
-class TorchDataLoader(GenericTorchDataLoader[BatchData], DataLoaderABC):
+class TorchDataLoader(GenericDataLoader[BatchData], DataLoaderABC):
     pass
 
 
@@ -270,7 +160,7 @@ class SlidingWindowDataLoader(DataLoaderABC):
 
     def __init__(
         self,
-        loader: DataLoaderABC,
+        loader: TorchDataLoader,
         input_n_timesteps: int,
         output_n_timesteps: int,
         shuffle: bool,
@@ -418,7 +308,7 @@ class SlidingWindowDataLoader(DataLoaderABC):
         )
         self._loaditer = iter(subsetted_loader)
         return SlidingWindowDataLoader(
-            subsetted_loader,
+            cast(TorchDataLoader, subsetted_loader),
             input_n_timesteps=self._input_n_timesteps,
             output_n_timesteps=self._output_n_timesteps,
             shuffle=self._shuffle,

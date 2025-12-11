@@ -40,9 +40,6 @@ class XarrayConcat(DatasetABC):
                         f"Metadata for each ensemble member are not the same: {e}"
                     )
 
-    def __len__(self):
-        return len(self._dataset)
-
     def __getitem__(self, idx: int) -> DatasetItem:
         return self._dataset[idx]
 

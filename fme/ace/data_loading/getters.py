@@ -125,7 +125,6 @@ def get_gridded_data(
     return GriddedData(
         loader=dataloader,
         properties=properties,
-        sampler=sampler,
         modifier=config.augmentation.build_modifier(),
     )
 

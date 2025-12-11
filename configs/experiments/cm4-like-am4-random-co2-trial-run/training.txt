@@ -1,0 +1,3 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+cm4_like_am4_random_co2-trial_run|rs0|train|urgent|titan|4|600GiB|1|ai2/climate-titan|seed=0 max_epochs=2

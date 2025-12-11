@@ -1,0 +1,5 @@
+group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
+
+cm4_1pctCO2-train_0256to0350_piControlConcat-condSFNO|rs0|01KBZDS8SZFCN567FGGPR1P5KA|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_1pctCO2-train_0256to0350_piControlConcat-condSFNO|rs1|01KBZDSSCZBB6GJKMM476ZDJRM|training|best_inference_ckpt|normal|--not-preemptible

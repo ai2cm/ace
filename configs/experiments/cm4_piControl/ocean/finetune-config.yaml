@@ -3,7 +3,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 20
+max_epochs: 60
 n_forward_steps: 4
 inference:
   n_forward_steps: 1440
@@ -87,12 +87,12 @@ optimization:
       - type: LinearLR
         step_each_iteration: true
         kwargs:
-          start_factor: 0.01
-          end_factor: 1
-          total_iters: 3000
+          start_factor: 1
+          end_factor: 0.01
+          total_iters: 42420
       - type: ConstantLR
         step_each_iteration: true
-    milestones: [3000]
+    milestones: [42420]
 stepper:
   parameter_init:
     weights_path: /ckpt.tar
