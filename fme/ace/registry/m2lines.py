@@ -25,6 +25,7 @@ class SamudraBuilder(ModuleConfig):
     norm: str = "instance"
     norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     upscale_factor: int = 4
+    checkpoint_simple: bool = False
 
     def __post_init__(self):
         if "num_features" in self.norm_kwargs:
@@ -50,6 +51,7 @@ class SamudraBuilder(ModuleConfig):
             norm=self.norm,
             norm_kwargs=self.norm_kwargs,
             upscale_factor=self.upscale_factor,
+            checkpoint_simple=self.checkpoint_simple,
         )
 
 
