@@ -62,6 +62,7 @@ class Samudra(torch.nn.Module):
         norm: str | None = "instance",
         norm_kwargs: Mapping[str, Any] | None = None,
         upscale_factor: int = 4,
+        checkpoint_simple: bool = False,
     ):
         super().__init__()
 
@@ -93,6 +94,7 @@ class Samudra(torch.nn.Module):
                     norm=self.norm,
                     norm_kwargs=self.norm_kwargs,
                     upscale_factor=self.upscale_factor,
+                    checkpoint_simple=self.checkpoint_simple,
                 )
             )
             layers.append(AvgPool())
@@ -106,6 +108,7 @@ class Samudra(torch.nn.Module):
                 norm=self.norm,
                 norm_kwargs=self.norm_kwargs,
                 upscale_factor=self.upscale_factor,
+                checkpoint_simple=self.checkpoint_simple,
             )
         )
         layers.append(BilinearUpsample(in_channels=b, out_channels=b))
@@ -123,6 +126,7 @@ class Samudra(torch.nn.Module):
                     norm=self.norm,
                     norm_kwargs=self.norm_kwargs,
                     upscale_factor=self.upscale_factor,
+                    checkpoint_simple=self.checkpoint_simple,
                 )
             )
             layers.append(BilinearUpsample(in_channels=b, out_channels=b))
@@ -136,6 +140,7 @@ class Samudra(torch.nn.Module):
                 norm=self.norm,
                 norm_kwargs=self.norm_kwargs,
                 upscale_factor=self.upscale_factor,
+                checkpoint_simple=self.checkpoint_simple,
             )
         )
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))

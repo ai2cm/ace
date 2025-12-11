@@ -3,6 +3,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+import torch.utils.checkpoint
 
 from .activations import CappedGELU
 
@@ -47,6 +48,7 @@ class ConvNeXtBlock(torch.nn.Module):
         norm: str | None = "instance",
         norm_kwargs: Mapping[str, Any] | None = None,
         upscale_factor: int = 4,
+        checkpoint_simple: bool = False,
     ):
         super().__init__()
         assert kernel_size % 2 != 0, "Cannot use even kernel sizes!"
@@ -167,4 +169,6 @@ class ConvNeXtBlock(torch.nn.Module):
                 x = x.permute(0, 3, 1, 2).contiguous()
             else:
                 x = layer(x)
+            if self.checkpoint_simple and not isinstance(layer, nn.Conv2d):
+                x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
         return skip + x
