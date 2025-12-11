@@ -170,5 +170,5 @@ class ConvNeXtBlock(torch.nn.Module):
             else:
                 x = layer(x)
             if self.checkpoint_simple and not isinstance(layer, nn.Conv2d):
-                x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
+                x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=True)
         return skip + x
