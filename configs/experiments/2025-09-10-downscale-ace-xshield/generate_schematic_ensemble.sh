@@ -47,7 +47,7 @@ run_eval() {
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset $EXISTING_RESULTS_DATASET:checkpoints/best_histogram_tail.ckpt:/ckpt.tar \
+	--dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
         --dataset $ACE_DATASET:$dataset_arg \
         --weka climate-default:/climate-default \
         --gpus $NGPU \
@@ -56,7 +56,7 @@ run_eval() {
         --system-python \
         --install "pip install --no-deps ." \
         --allow-dirty \
-        -- torchrun --nproc_per_node $NGPU -m fme.downscaling.predict $CONFIG_PATH
+        -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
 }
 
 n_ensembles_minus_one=4

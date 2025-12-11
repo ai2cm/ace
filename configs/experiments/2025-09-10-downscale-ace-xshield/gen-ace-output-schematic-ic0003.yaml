@@ -18,26 +18,13 @@ data:
   - data_path: /
     engine: zarr
     file_pattern: output_6hourly_predictions_ic0003.zarr
-    infer_timestep: false
-    subset:
-      start_time: '2023-02-06T00:00:00'
-      stop_time: '2023-02-10T00:00:00'
-      #step: 7
-  # Florida
-  #lat_extent:
-  #  start: 22.0
-  #  stop: 38.0
-  #lon_extent:
-  #  start: 273.0
-  #  stop: 289.0
-  # PNW
-  # lat_extent:
-  #   start: 35
-  #   stop:  51.0
-  # lon_extent:
-  #   start: 232.0
-  #   stop:  248.0
-  # CONUS
+outputs:
+- name: "pnw_ace_schematic_ic0003"
+  save_vars: ["PRATEsfc"]
+  n_ens: 1
+  max_samples_per_gpu: 32
+  time_range:
+    start_time: "2023-02-06T00:00:00"
   lat_extent:
     start: 32.9
     stop: 50.0
