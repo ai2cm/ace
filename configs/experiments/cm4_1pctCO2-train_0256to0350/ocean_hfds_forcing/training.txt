@@ -1,0 +1,3 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+1pct_nosmooth_0256to0350_hfds|rs0|train|high|a100+h100|2|200GiB|3||seed=0
