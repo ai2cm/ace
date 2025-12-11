@@ -60,7 +60,7 @@ class ConvNeXtBlock(torch.nn.Module):
         self.norm_kwargs = norm_kwargs
         if self.norm_kwargs is None:
             self.norm_kwargs = {}
-
+        self.checkpoint_simple = checkpoint_simple
         assert n_layers == 1, "Can only use a single layer here!"  # Needs fixing
 
         # 1x1 conv to increase/decrease channel depth if necessary
