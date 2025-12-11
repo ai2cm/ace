@@ -78,6 +78,7 @@ class Samudra(torch.nn.Module):
         self.last_kernel_size = 3
         self.N_pad = int((self.last_kernel_size - 1) / 2)
         self.upscale_factor = upscale_factor
+        self.checkpoint_simple = checkpoint_simple
 
         ch_width_with_input = (self.input_channels, *self.ch_width)
 
