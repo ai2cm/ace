@@ -51,6 +51,7 @@ run_training() {
 }
 
 # run_training "train-era5-extrapolate-1step.yaml" "train-era5-extrapolate-1step"
-run_training "train-combined-extrapolate-1step.yaml" "train-combined-extrapolate-1step"
+# run_training "train-combined-extrapolate-1step.yaml" "train-combined-extrapolate-1step"
 # run_training "train-era5-infill-1step.yaml" "train-era5-infill-1step"
-run_training "train-combined-infill-1step.yaml" "train-combined-infill-1step"
+# run_training "train-combined-infill-1step.yaml" "train-combined-infill-1step"
+run_training "train-combined-extrapolate-n512-e5c5-1step-ft-20step-v2.yaml" "train-combined-extrapolate-1step-n512-e5c5-1step-ft-20step-v2"
