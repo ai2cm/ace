@@ -1,8 +1,8 @@
 import logging
 import os
 from collections.abc import Callable
+from datetime import timedelta
 
-import timedelta
 import torch.distributed
 from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
