@@ -1,2 +1,4 @@
 
 fto-v1124-sfno-m351zi95-rv0ike6m||01KC2T0JJ4HCFTZ9D954EX4V9J|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v1124-sfno-c5ocb8t1-rv0ike6m||01KCA45QWR2WSN30MY4W7JK1TK|training|best_inference_ckpt|normal|--not-preemptible
