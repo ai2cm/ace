@@ -7,3 +7,5 @@ cm4_1pctCO2-train_0256to0350_piControlConcat-condSFNO|rs1|01KBZDSSCZBB6GJKMM476Z
 cm4_1pctCO2-train_0256to0350-condSFNO-ft_bc_w_piC|fruab0nq_rs0|01KCA9R7TWGG0N6AAAFS2AM1AB|training|best_inference_ckpt|normal|--not-preemptible
 
 cm4_1pctCO2-train_0256to0350-condSFNO-ft_bc_w_piC|kd5obbep_rs0|01KCA9RZ6KSVWFZSJ6X2VQVSQZ|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_1pctCO2-train_0256to0350-condSFNO-ft_bic_w_piC|fruab0nq_rs0|01KCA9SP16MRTNFKGBJ55MZ084|training|best_inference_ckpt|normal|--not-preemptible
