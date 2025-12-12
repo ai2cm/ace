@@ -161,7 +161,10 @@ class Samudra(torch.nn.Module):
                 fts = torch.nn.functional.pad(
                     fts, (0, 0, self.N_pad, self.N_pad), mode="constant"
                 )
-            fts = layer(fts)
+            if self.checkpoint_simple:
+                fts = torch.utils.checkpoint.checkpoint(layer, fts, use_reentrant=False)  # type: ignore
+            else:
+                fts = layer(fts)
             if count < self.num_steps:
                 if isinstance(layer, ConvNeXtBlock):
                     temp.append(fts)
