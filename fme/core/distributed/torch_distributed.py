@@ -2,6 +2,7 @@ import logging
 import os
 from collections.abc import Callable
 
+import timedelta
 import torch.distributed
 from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
@@ -23,7 +24,9 @@ class TorchDistributed(DistributedBackend):
             if not torch.distributed.is_initialized():
                 if using_gpu():
                     torch.distributed.init_process_group(
-                        backend="nccl", init_method="env://"
+                        backend="nccl",
+                        init_method="env://",
+                        timeout=timedelta(minutes=20),
                     )
                 else:
                     torch.distributed.init_process_group(
