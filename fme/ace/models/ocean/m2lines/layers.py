@@ -153,6 +153,13 @@ class ConvNeXtBlock(torch.nn.Module):
         )
         self.convblock = torch.nn.Sequential(*convblock)
 
+    def _apply_simple_checkpoint(self, layer, x):
+        if self.checkpoint_simple and not isinstance(layer, nn.Conv2d):
+            x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
+        else:
+            x = layer(x)
+        return x
+
     def forward(self, x):
         skip = self.skip_module(x)
         for layer in self.convblock:
@@ -165,10 +172,8 @@ class ConvNeXtBlock(torch.nn.Module):
                 )
             if isinstance(layer, torch.nn.LayerNorm):
                 x = x.permute(0, 2, 3, 1).contiguous()
-                x = layer(x)
+                x = self._apply_simple_checkpoint(layer, x)
                 x = x.permute(0, 3, 1, 2).contiguous()
             else:
-                x = layer(x)
-            if self.checkpoint_simple and not isinstance(layer, nn.Conv2d):
-                x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=True)
+                x = self._apply_simple_checkpoint(layer, x)
         return skip + x
