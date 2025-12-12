@@ -3,7 +3,7 @@
 
 set -e
 
-JOB_NAME="downscale-ace-100km-to-3km-10-year-pnw"
+JOB_NAME="downscale-ace-100km-to-3km-10-year-pnw-ic0001-no-churn"
 
 CONFIG_FILENAME="gen-ace-output-pnw-ic0001.yaml"
 
