@@ -1,5 +1,4 @@
 experiment_dir: /results
-n_samples: 1
 # Uncomment patch config below if using coarse inputs larger than 16x16 deg
 patch:
   divide_generation: true
