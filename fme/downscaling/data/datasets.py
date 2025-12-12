@@ -187,7 +187,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
         return len(self.dataset)
 
     def __getitem__(self, key) -> DatasetItem:
-        batch, times, _ = self.dataset[key]
+        batch, times, _, epoch = self.dataset[key]
         batch = {
             k: v[
                 ...,
@@ -196,7 +196,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             ]
             for k, v in batch.items()
         }
-        return batch, times, self._properties.all_labels
+        return batch, times, self._properties.all_labels, epoch
 
 
 class BatchItemDatasetAdapter(torch.utils.data.Dataset):
@@ -218,7 +218,7 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         return len(self._dataset)
 
     def __getitem__(self, idx) -> BatchItem:
-        fields, time, _ = self._dataset[idx]
+        fields, time, _, epoch = self._dataset[idx]
         fields = {k: v.squeeze() for k, v in fields.items()}
         field_example = next(iter(fields.values()))
 

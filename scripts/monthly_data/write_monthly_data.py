@@ -37,14 +37,17 @@ class CollateFn:
     horizontal_dims: List[str]
 
     def __call__(self, samples: Sequence[DatasetItem]) -> "BatchData":
-        sample_data, sample_time, _ = zip(*samples)
+        sample_data, sample_time, _, epoch = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_time, dim="sample")
+        if not all(epoch[0] == e for e in epoch):
+            raise ValueError("All samples in batch must have the same epoch.")
         return BatchData(
             data=batch_data,
             time=batch_time,
             horizontal_dims=self.horizontal_dims,
             labels=None,
+            epoch=epoch[0],
         )
 
 
@@ -60,13 +63,13 @@ def get_data_loaders(
     datasets: torch.utils.data.Dataset
     if isinstance(config.dataset, ConcatDatasetConfig):
         datasets, properties = get_xarray_datasets(
-            config.dataset.concat, requirements.names, requirements.n_timesteps
+            config.dataset.concat, requirements.names, requirements.n_timesteps_schedule
         )
     elif isinstance(config.dataset, MergeDatasetConfig):
         datasets, properties = get_merged_datasets(
             config.dataset,
             requirements.names,
-            requirements.n_timesteps,
+            requirements.n_timesteps_schedule,
         )
 
     data_loaders = []

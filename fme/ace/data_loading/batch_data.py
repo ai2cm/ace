@@ -60,6 +60,11 @@ class BatchData:
         labels: Labels for each sample in the batch.
         horizontal_dims: Horizontal dimensions of the data. Used for writing to
             netCDF files.
+        epoch: The epoch number for the batch data.
+        n_ensemble: The number of ensemble members represented in the batch data.
+            This is a suggestion for the purpose of computing ensemble metrics.
+            For example, an ensemble is something you would want to compute CRPS
+            or ensemble mean RMSE over.
     """
 
     data: TensorMapping
@@ -68,6 +73,7 @@ class BatchData:
     horizontal_dims: list[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
+    epoch: int | None = None
     n_ensemble: int = 1
 
     @classmethod
@@ -82,6 +88,7 @@ class BatchData:
         calendar="julian",
         img_shape: tuple[int, ...] = (9, 18),
         horizontal_dims: list[str] = ["lat", "lon"],
+        epoch: int | None = 0,
         labels: BatchLabels | None = None,
         device: torch.device | None = None,
     ) -> "BatchData":
@@ -99,6 +106,7 @@ class BatchData:
             calendar: The calendar of the time steps.
             img_shape: The shape of the horizontal dimensions of the data.
             horizontal_dims: The horizontal dimensions of the data.
+            epoch: The epoch number for the batch data.
             labels: The labels of the data.
             device: The device to create the data on. By default, the device is
                 determined by the global device specified by get_device().
@@ -130,6 +138,7 @@ class BatchData:
             time=sample_times,
             labels=labels,
             horizontal_dims=horizontal_dims,
+            epoch=epoch,
         )
 
     @property
@@ -156,6 +165,7 @@ class BatchData:
             data={k: v.to(device) for k, v in self.data.items()},
             time=self.time,
             horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
             labels=self.labels.to(device) if self.labels is not None else None,
         )
 
@@ -164,6 +174,7 @@ class BatchData:
             data={k: v.cpu() for k, v in self.data.items()},
             time=self.time,
             horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
             labels=self.labels,
         )
 
@@ -180,6 +191,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
+        epoch: int | None = None,
         labels: BatchLabels | None = None,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
@@ -190,6 +202,7 @@ class BatchData:
             data=data,
             time=time,
             labels=labels,
+            epoch=epoch,
             n_ensemble=n_ensemble,
             **kwargs,
         )
@@ -199,6 +212,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
+        epoch: int | None = None,
         labels: BatchLabels | None = None,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
@@ -211,6 +225,7 @@ class BatchData:
         return BatchData(
             data=data,
             time=time,
+            epoch=epoch,
             labels=labels,
             n_ensemble=n_ensemble,
             **kwargs,
@@ -247,7 +262,9 @@ class BatchData:
         horizontal_dims: list[str] | None = None,
         label_encoding: LabelEncoding | None = None,
     ) -> "BatchData":
-        sample_data, sample_times, sample_labels = zip(*samples)
+        sample_data, sample_times, sample_labels, sample_epochs = zip(*samples)
+        if not all(epoch == sample_epochs[0] for epoch in sample_epochs):
+            raise ValueError("All samples must have the same epoch.")
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_times, dim=sample_dim_name)
         if label_encoding is None:
@@ -261,6 +278,7 @@ class BatchData:
             time=batch_time,
             labels=labels,
             horizontal_dims=horizontal_dims,
+            epoch=sample_epochs[0],
         )
 
     def compute_derived_variables(
@@ -287,6 +305,7 @@ class BatchData:
             data={**self.data, **derived_data},
             time=self.time,
             horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
             labels=self.labels,
         )
 
@@ -300,6 +319,7 @@ class BatchData:
             {k: v[:, n_ic_timesteps:] for k, v in self.data.items()},
             time=self.time.isel(time=slice(n_ic_timesteps, None)),
             horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
             labels=self.labels,
         )
 
@@ -311,6 +331,7 @@ class BatchData:
             {k: v for k, v in self.data.items() if k in names},
             time=self.time,
             horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
             labels=self.labels,
         )
 
@@ -346,6 +367,7 @@ class BatchData:
             {k: v[:, time_slice] for k, v in self.data.items()},
             time=self.time[:, time_slice],
             horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
             labels=self.labels,
         )
 
@@ -367,6 +389,7 @@ class BatchData:
             },
             time=xr.concat([initial_batch_data.time, self.time], dim="time"),
             horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
             labels=self.labels,
         )
 
@@ -394,6 +417,7 @@ class BatchData:
             time=time,
             horizontal_dims=self.horizontal_dims,
             labels=labels,
+            epoch=self.epoch,
             n_ensemble=n_ensemble,
         )
 

@@ -30,6 +30,7 @@ from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriv
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
+    EpochNotProvidedError,
     Stepper,
     StepperConfig,
     StepperOverrideConfig,
@@ -37,6 +38,11 @@ from fme.ace.stepper.single_module import (
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
+)
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLength,
+    TimeLengthMilestone,
+    TimeLengthSchedule,
 )
 from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData
@@ -87,7 +93,7 @@ DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig(insolation=INSOLATION_CONFIG)
 EMPTY_DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig()
 
 
-def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
+def get_data(names: Iterable[str], n_samples, n_time, epoch: int = 0) -> SphericalData:
     data_dict = {}
     n_lat, n_lon, nz = 5, 5, 7
 
@@ -104,6 +110,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
             dims=["sample", "time"],
         ),
         labels=None,
+        epoch=epoch,
     )
     return SphericalData(data, area_weights, vertical_coord)
 
@@ -573,6 +580,58 @@ def _setup_and_train_on_batch(
     return stepper.train_on_batch(data, optimization=optimization)
 
 
+@pytest.mark.parametrize("has_epoch", [True, False])
+@pytest.mark.parametrize("uses_scheduling", [True, False])
+def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
+    in_names, out_names = ["a"], ["a"]
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=3, epoch=0 if has_epoch else None
+    ).to_device()
+    module = ReturnZerosModule(len(in_names), len(out_names))
+
+    optimization_config = OptimizationConfig()
+    optimization = optimization_config.build(modules=[module], max_epochs=2)
+
+    if uses_scheduling:
+        train_n_forward_steps: TimeLengthSchedule | TimeLength = TimeLengthSchedule(
+            start_value=2,
+            milestones=[
+                TimeLengthMilestone(epoch=1, value=3),
+            ],
+        )
+    else:
+        train_n_forward_steps = 2
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), 0.0),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        train_n_forward_steps=train_n_forward_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    if uses_scheduling and not has_epoch:
+        with pytest.raises(EpochNotProvidedError):
+            stepper.train_on_batch(data, optimization=optimization)
+    else:
+        stepper.train_on_batch(data, optimization=optimization)
+
+
 @pytest.mark.parametrize(
     "is_input,is_output,is_prescribed",
     [
@@ -795,6 +854,7 @@ def test_stepper_corrector(
         data=data,
         time=time,
         labels=None,
+        epoch=0,
     ).to_device()
     # run the stepper on the data
     with torch.no_grad():
@@ -1453,7 +1513,7 @@ def get_regression_stepper_and_data(
 
     dataset_info = get_dataset_info(img_shape=img_shape)
     stepper = config.get_stepper(dataset_info)
-    data = BatchData(
+    data = BatchData.new_on_device(
         data={
             "a": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
             "b": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
@@ -1464,6 +1524,7 @@ def get_regression_stepper_and_data(
             dims=["sample", "time"],
         ),
         labels=None,
+        epoch=0,
         horizontal_dims=["lat", "lon"],
     )
     return stepper, data

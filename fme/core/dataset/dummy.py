@@ -7,6 +7,7 @@ import xarray as xr
 from fme.core.coordinates import HorizontalCoordinates, NullVerticalCoordinate
 from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import _get_timestep
 from fme.core.mask_provider import MaskProvider
 
@@ -17,7 +18,7 @@ class DummyDataset(DatasetABC):
         start_time: cftime.datetime,
         end_time: cftime.datetime,
         timestep: datetime.timedelta,
-        n_timesteps: int,
+        n_timesteps: IntSchedule,
         horizontal_coordinates: HorizontalCoordinates,
         labels: set[str] | None = None,
     ):
@@ -31,7 +32,7 @@ class DummyDataset(DatasetABC):
             labels: Set of labels attached to samples in the dataset.
         """
         self.timestep = timestep
-        self._sample_n_times = n_timesteps
+        self._n_timesteps_schedule = n_timesteps
         calendar = start_time.calendar
         self._all_times = xr.date_range(
             start=start_time,
@@ -40,9 +41,7 @@ class DummyDataset(DatasetABC):
             calendar=calendar,
             use_cftime=True,
         )
-        total_timesteps = len(self._all_times)
-        self._n_initial_conditions = total_timesteps - self.sample_n_times + 1
-        self._sample_start_times = self._all_times[: self._n_initial_conditions]
+        self._apply_sample_n_times(self._n_timesteps_schedule.get_value(0))
         self._timestep = _get_timestep(self._all_times)
         self._horizontal_coordinates = horizontal_coordinates
         self._horizontal_size = horizontal_coordinates.loaded_sizes
@@ -52,6 +51,7 @@ class DummyDataset(DatasetABC):
             "__dummy__": torch.zeros(full_shape, device=torch.device("cpu"))
         }
         self._labels = labels
+        self._epoch: int | None = None
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
@@ -62,6 +62,12 @@ class DummyDataset(DatasetABC):
     def sample_start_times(self) -> xr.CFTimeIndex:
         """Return cftime index corresponding to start time of each sample."""
         return self._sample_start_times
+
+    def _apply_sample_n_times(self, sample_n_times: int):
+        total_timesteps = len(self._all_times)
+        self._sample_n_times = sample_n_times
+        self._n_initial_conditions = total_timesteps - self._sample_n_times + 1
+        self._sample_start_times = self._all_times[: self._n_initial_conditions]
 
     @property
     def sample_n_times(self) -> int:
@@ -101,7 +107,8 @@ class DummyDataset(DatasetABC):
         """
         time_slice = slice(idx, idx + self.sample_n_times)
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
-        return (self._dummy_dict, time, self._labels)
+        return (self._dummy_dict, time, self._labels, self._epoch)
 
     def set_epoch(self, epoch: int):
-        pass
+        self._apply_sample_n_times(self._n_timesteps_schedule.get_value(epoch))
+        self._epoch = epoch
