@@ -1,1 +1,9 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+cm4_1pctCO2-train_0256to0350-condSFNO-ft_bc_w_piC|fruab0nq_rs0|ace2-cm4-atmos-noLSM|fruab0nq|best_ckpt|train|high|titan|4|600GiB|1||seed=0
+
+cm4_1pctCO2-train_0256to0350-condSFNO-ft_bc_w_piC|kd5obbep_rs0|ace2-cm4-atmos-noLSM|kd5obbep|best_ckpt|train|high|titan|4|600GiB|1||seed=0
+
+cm4_1pctCO2-train_0256to0350-condSFNO-ft_bic_w_piC|fruab0nq_rs0|ace2-cm4-atmos-noLSM|fruab0nq|best_inference_ckpt|train|high|titan|4|600GiB|1||seed=0
+
+cm4_1pctCO2-train_0256to0350-condSFNO-ft_bic_w_piC|kd5obbep_rs0|ace2-cm4-atmos-noLSM|kd5obbep|best_inference_ckpt|train|high|titan|4|600GiB|1||seed=0
