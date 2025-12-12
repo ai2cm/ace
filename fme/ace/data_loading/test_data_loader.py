@@ -33,6 +33,7 @@ from fme.ace.requirements import DataRequirements, PrognosticStateDataRequiremen
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
+from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.typing_ import Slice
@@ -194,6 +195,50 @@ def test_xarray_loader(tmp_path):
     data = get_gridded_data(config, True, requirements)  # type: ignore
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
+
+
+@pytest.mark.parametrize(
+    "workers, force_zarr_engine_used", [(0, False), (0, True), (1, True)]
+)
+def test_xarray_loader_scheduled_epoch(
+    tmp_path,
+    force_zarr_engine_used: bool,
+    workers: int,
+    very_fast_only: bool,
+):
+    """Checks that vertical coordinates are present."""
+    if very_fast_only and workers > 0:
+        pytest.skip("Skipping non-fast tests")
+    _create_dataset_on_disk(tmp_path, n_times=4)
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)]
+        ),
+        batch_size=1,
+        num_data_workers=workers,
+        prefetch_factor=2 if workers != 0 else None,
+    )
+    if force_zarr_engine_used:
+        assert hasattr(config, "_zarr_engine_used")
+        config._zarr_engine_used = True
+    window_timesteps = IntSchedule(
+        start_value=2, milestones=[IntMilestone(epoch=1, value=3)]
+    )
+    requirements = DataRequirements(["foo"], window_timesteps)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+    assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert data._vertical_coordinate.ak.device == fme.get_device()
+    batch = next(iter(data.loader))
+    assert batch.data["foo"].shape[1] == 2  # window_timesteps at start_value
+    assert batch.epoch is None
+    data.set_epoch(0)
+    batch = next(iter(data.loader))
+    assert batch.data["foo"].shape[1] == 2  # window_timesteps at start_value
+    assert batch.epoch == 0
+    data.set_epoch(1)
+    batch = next(iter(data.loader))
+    assert batch.data["foo"].shape[1] == 3  # window_timesteps at milestone value
+    assert batch.epoch == 1
 
 
 def test_xarray_loader_sample_with_replacement(tmp_path):
@@ -998,6 +1043,45 @@ def test_time_buffer(
             for window_times in dataset_window_times
         ]
         assert sum(window_matches) == 1
+
+
+@pytest.mark.parametrize("time_buffer", [0, 2])
+@pytest.mark.parametrize(
+    "shuffle",
+    [True, False],
+)
+def test_set_epoch(tmp_path, time_buffer, shuffle: bool):
+    start_n_timesteps = 2
+    updated_n_timesteps = 3
+    n_times = (start_n_timesteps + time_buffer) * (
+        updated_n_timesteps + time_buffer
+    )  # must evenly divide for this test's assertions
+    _create_dataset_on_disk(tmp_path, n_times=n_times)
+    dataset_times = xr.open_dataset(
+        os.path.join(tmp_path, "data.nc"),
+        decode_times=xr.coders.CFDatetimeCoder(use_cftime=True),
+    )["time"].values
+    n_times = len(dataset_times)
+
+    config = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        batch_size=1,
+        num_data_workers=0,
+        time_buffer=time_buffer,
+    )
+    requirements = DataRequirements(
+        ["foo"],
+        n_timesteps=IntSchedule(
+            start_value=start_n_timesteps,
+            milestones=[IntMilestone(epoch=1, value=updated_n_timesteps)],
+        ),
+    )
+    data = get_gridded_data(config, shuffle, requirements)
+    for epoch, expected_n_timesteps in [(0, 2), (1, 3)]:
+        data.set_epoch(epoch)
+        assert len(data.loader) == n_times - 3 + 1
+        for batch in data.loader:
+            assert batch.n_timesteps == expected_n_timesteps
 
 
 @pytest.mark.parametrize(

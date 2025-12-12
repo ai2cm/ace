@@ -1,10 +1,12 @@
 import logging
+from collections.abc import Sequence
 
 import torch.utils.data
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.subset import SubsetDataset
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
@@ -32,7 +34,7 @@ class CollateFn:
         self.horizontal_dims = horizontal_dims
         self.label_encoding = label_encoding
 
-    def __call__(self, samples):
+    def __call__(self, samples: Sequence[DatasetItem]) -> BatchData:
         return BatchData.from_sample_tuples(
             samples,
             horizontal_dims=self.horizontal_dims,
@@ -72,7 +74,7 @@ def get_gridded_data(
             then data will be shuffled.
         requirements: Data requirements for the model.
     """
-    n_timesteps_preloaded = config.time_buffer + requirements.n_timesteps
+    n_timesteps_preloaded = requirements.n_timesteps_schedule.add(config.time_buffer)
     dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
 
     if config.time_buffer > 0:
@@ -86,7 +88,7 @@ def get_gridded_data(
 
     sampler = _get_sampler(dataset, config.sample_with_replacement, train)
 
-    if config.zarr_engine_used:
+    if config.zarr_engine_used and config.num_data_workers > 0:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # reading zarr with async from weka also requires forkserver
         mp_context = "forkserver"
@@ -106,7 +108,7 @@ def get_gridded_data(
     dataloader = get_data_loader(
         dataset=dataset,
         batch_size=batch_size,
-        n_window_timesteps=requirements.n_timesteps,
+        n_window_timesteps=requirements.n_timesteps_schedule,
         time_buffer=config.time_buffer,
         num_workers=config.num_data_workers,
         sampler=sampler,
@@ -231,7 +233,9 @@ def get_forcing_data(
         raise NotImplementedError("code assumes initial time only has 1 timestep")
     if isinstance(config.dataset, XarrayDataConfig):
         available_times = XarrayDataset(
-            config.dataset, window_requirements.names, window_requirements.n_timesteps
+            config.dataset,
+            window_requirements.names,
+            window_requirements.n_timesteps_schedule,
         ).all_times
     elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
         # Some forcing variables may not be in the first dataset,
@@ -240,7 +244,7 @@ def get_forcing_data(
             available_times = XarrayDataset(
                 config.dataset.merge[0],
                 names=[],
-                n_timesteps=window_requirements.n_timesteps,
+                n_timesteps=window_requirements.n_timesteps_schedule,
             ).all_times
         else:
             raise ValueError("Forcing data cannot be concatenated.")

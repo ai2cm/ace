@@ -38,8 +38,11 @@ from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.stepper.time_length_probabilities import (
+    TimeLength,
+    TimeLengthMilestone,
     TimeLengthProbabilities,
     TimeLengthProbability,
+    TimeLengthSchedule,
 )
 from fme.ace.testing import (
     DimSizes,
@@ -112,6 +115,7 @@ def _get_test_yaml_files(
     skip_inline_inference=False,
     time_buffer=1,
     use_time_length_probabilities=True,
+    use_schedule=False,
     derived_forcings=None,
 ):
     input_time_size = 1
@@ -257,12 +261,25 @@ def _get_test_yaml_files(
         )
 
     if use_time_length_probabilities:
-        train_n_forward_steps = TimeLengthProbabilities(
-            outcomes=[
-                TimeLengthProbability(steps=1, probability=0.5),
-                TimeLengthProbability(steps=n_forward_steps, probability=0.5),
-            ]
+        train_n_forward_steps: TimeLength | TimeLengthSchedule = (
+            TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+                ]
+            )
         )
+    elif use_schedule:
+        train_n_forward_steps = TimeLengthSchedule(
+            start_value=TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+                ]
+            ),
+            milestones=[TimeLengthMilestone(epoch=1, value=n_forward_steps + 1)],
+        )
+        max_epochs = 2
     else:
         train_n_forward_steps = n_forward_steps
 
@@ -427,6 +444,7 @@ def _setup(
     time_buffer=1,
     use_time_length_probabilities=True,
     derived_forcings=None,
+    use_schedule: bool = False,
 ):
     if not path.exists():
         path.mkdir()
@@ -525,18 +543,19 @@ def _setup(
         time_buffer=time_buffer,
         use_time_length_probabilities=use_time_length_probabilities,
         derived_forcings=derived_forcings,
+        use_schedule=use_schedule,
     )
     return train_config_filename, inference_config_filename
 
 
 @pytest.mark.parametrize(
-    "nettype, crps_training, log_validation_maps, use_healpix",
+    "nettype, crps_training, log_validation_maps, use_healpix, use_schedule",
     [
-        ("SphericalFourierNeuralOperatorNet", False, True, False),
-        ("NoiseConditionedSFNO", True, False, False),
-        ("HEALPixRecUNet", False, False, True),
-        ("Samudra", False, False, False),
-        ("NoiseConditionedSFNO", False, False, False),
+        ("NoiseConditionedSFNO", True, False, False, True),
+        ("SphericalFourierNeuralOperatorNet", False, True, False, False),
+        ("HEALPixRecUNet", False, False, True, False),
+        ("Samudra", False, False, False, False),
+        ("NoiseConditionedSFNO", False, False, False, False),
     ],
 )
 def test_train_and_inference(
@@ -545,6 +564,7 @@ def test_train_and_inference(
     crps_training,
     log_validation_maps: bool,
     use_healpix: bool,
+    use_schedule: bool,
     very_fast_only: bool,
 ):
     """Ensure that ACE training and subsequent standalone inference run without errors.
@@ -552,6 +572,11 @@ def test_train_and_inference(
     Args:
         tmp_path: pytext fixture for temporary workspace.
         nettype: parameter indicating model architecture to use.
+        crps_training: parameter indicating whether to use CRPS training.
+        log_validation_maps: parameter indicating whether to log validation maps.
+        use_healpix: parameter indicating whether to use HEALPix grid.
+        use_schedule: parameter indicating whether to use
+            a schedule for n_forward_steps.
         very_fast_only: parameter indicating whether to skip slow tests.
     """
     if very_fast_only:
@@ -567,6 +592,7 @@ def test_train_and_inference(
         use_healpix=use_healpix,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
+        use_schedule=use_schedule,
         log_validation_maps=log_validation_maps,
     )
     # using pdb requires calling main functions directly

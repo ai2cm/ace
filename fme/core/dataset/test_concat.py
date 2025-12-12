@@ -3,12 +3,12 @@ import datetime
 import pytest
 
 from fme.core.dataset.concat import XarrayConcat
-from fme.core.dataset.testing import TestDataset
+from fme.core.dataset.testing import TestingDataset
 
 
 def test_concat_set_epoch():
     datasets = [
-        TestDataset.new(n_times=10, varnames=["var1"], sample_n_times=3)
+        TestingDataset.new(n_times=10, varnames=["var1"], sample_n_times=3)
         for _ in range(3)
     ]
     concat_dataset = XarrayConcat(datasets)
@@ -19,7 +19,7 @@ def test_concat_set_epoch():
 
 def test_concat_len():
     datasets = [
-        TestDataset.new(n_times=10, varnames=["var1"], sample_n_times=3)
+        TestingDataset.new(n_times=10, varnames=["var1"], sample_n_times=3)
         for _ in range(3)
     ]
     concat_dataset = XarrayConcat(datasets)
@@ -34,10 +34,10 @@ def test_concat_len():
     ],
 )
 def test_concat_strict(strict, context):
-    dataset = TestDataset.new(n_times=10, varnames=["var1"], sample_n_times=3)
+    dataset = TestingDataset.new(n_times=10, varnames=["var1"], sample_n_times=3)
     new_properties = dataset.properties.copy()
     new_properties.timestep = datetime.timedelta(hours=6)
-    new_dataset = TestDataset.new(
+    new_dataset = TestingDataset.new(
         n_times=10, varnames=["var1"], sample_n_times=3, properties=new_properties
     )
     datasets = [dataset, new_dataset]
