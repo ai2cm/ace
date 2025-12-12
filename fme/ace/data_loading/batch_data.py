@@ -9,6 +9,7 @@ import torch
 import xarray as xr
 from torch.utils.data import default_collate
 
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels, LabelEncoding
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
@@ -241,7 +242,7 @@ class BatchData:
     @classmethod
     def from_sample_tuples(
         cls,
-        samples: Sequence[tuple[TensorMapping, xr.DataArray, set[str] | None]],
+        samples: Sequence[DatasetItem],
         sample_dim_name: str = "sample",
         horizontal_dims: list[str] | None = None,
         label_encoding: LabelEncoding | None = None,

@@ -13,6 +13,7 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.generics.data import SizedMap
@@ -185,7 +186,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, key) -> tuple[TensorMapping, xr.DataArray, set[str] | None]:
+    def __getitem__(self, key) -> DatasetItem:
         batch, times, _ = self.dataset[key]
         batch = {
             k: v[

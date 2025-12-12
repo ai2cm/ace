@@ -5,11 +5,10 @@ import torch
 import xarray as xr
 
 from fme.core.coordinates import HorizontalCoordinates, NullVerticalCoordinate
-from fme.core.dataset.dataset import DatasetABC
+from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import _get_timestep
 from fme.core.mask_provider import MaskProvider
-from fme.core.typing_ import TensorDict
 
 
 class DummyDataset(DatasetABC):
@@ -69,9 +68,7 @@ class DummyDataset(DatasetABC):
         """The length of the time dimension of each sample."""
         return self._sample_n_times
 
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         raise NotImplementedError(
             "Dummy datasets do not support getting samples by time slice, "
             "is this a bug?."
@@ -92,7 +89,7 @@ class DummyDataset(DatasetABC):
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
         pass
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str] | None]:
+    def __getitem__(self, idx: int) -> DatasetItem:
         """Return a sample of data spanning the timesteps
         [idx, idx + self.sample_n_times).
 

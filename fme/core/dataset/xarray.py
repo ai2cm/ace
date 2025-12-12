@@ -35,7 +35,7 @@ from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
 from .data_typing import VariableMetadata
-from .dataset import DatasetABC
+from .dataset import DatasetABC, DatasetItem
 from .utils import (
     as_broadcasted_tensor,
     get_horizontal_coordinates,
@@ -800,7 +800,7 @@ class XarrayDataset(DatasetABC):
         """Number of timesteps in each sample."""
         return self._sample_n_times
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str] | None]:
+    def __getitem__(self, idx: int) -> DatasetItem:
         """Return a sample of data spanning the timesteps
         [idx, idx + self.sample_n_times).
 
@@ -822,9 +822,7 @@ class XarrayDataset(DatasetABC):
                 f"equal to the number of steps in the dataset {self._total_timesteps}."
             )
 
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str] | None]:
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         input_file_idx, input_local_idx = _get_file_local_index(
             time_slice.start, self.start_indices
         )
@@ -978,7 +976,7 @@ class XarraySubset(DatasetABC):
             self._max_timestep_index = indices[-1] + dataset.sample_n_times - 1
         self.dims = dataset.dims
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def __getitem__(self, idx: int) -> DatasetItem:
         return self._dataset[idx]
 
     @property
@@ -1004,9 +1002,7 @@ class XarraySubset(DatasetABC):
         """The length of the time dimension of each sample."""
         return self._sample_n_times
 
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         raise NotImplementedError(
             "XarraySubset does not support getting samples by time slice, "
             "is this a bug?."

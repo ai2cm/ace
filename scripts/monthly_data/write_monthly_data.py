@@ -23,22 +23,20 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.merged import MergeDatasetConfig, get_merged_datasets
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import get_xarray_datasets
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
-from fme.core.typing_ import TensorMapping
 
 
 @dataclasses.dataclass
 class CollateFn:
     horizontal_dims: List[str]
 
-    def __call__(
-        self, samples: Sequence[Tuple[TensorMapping, xr.DataArray, set[str]]]
-    ) -> "BatchData":
+    def __call__(self, samples: Sequence[DatasetItem]) -> "BatchData":
         sample_data, sample_time, _ = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_time, dim="sample")

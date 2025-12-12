@@ -1,10 +1,12 @@
 import logging
+from collections.abc import Sequence
 
 import torch.utils.data
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.subset import SubsetDataset
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
@@ -32,7 +34,7 @@ class CollateFn:
         self.horizontal_dims = horizontal_dims
         self.label_encoding = label_encoding
 
-    def __call__(self, samples):
+    def __call__(self, samples: Sequence[DatasetItem]):
         return BatchData.from_sample_tuples(
             samples,
             horizontal_dims=self.horizontal_dims,
