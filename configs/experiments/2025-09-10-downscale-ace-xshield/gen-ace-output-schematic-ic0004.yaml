@@ -17,6 +17,9 @@ data:
   - data_path: /
     engine: zarr
     file_pattern: output_6hourly_predictions_ic0004.zarr
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: False
 outputs:
 - name: "pnw_ace_schematic_ic0004"
   save_vars: ["PRATEsfc"]
@@ -30,9 +33,6 @@ outputs:
   lon_extent:
     start: 233.0
     stop: 250.0
-  batch_size: 4
-  num_data_workers: 2
-  strict_ensemble: False
 logging:
   log_to_screen: true
   log_to_wandb: true
