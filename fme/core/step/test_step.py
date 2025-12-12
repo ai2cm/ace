@@ -9,7 +9,6 @@ from collections.abc import Callable
 import dacite
 import pytest
 import torch
-import torch._dynamo.exc
 from torch import nn
 
 import fme
@@ -19,7 +18,7 @@ from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
-from fme.core.distributed import DummyWrapper
+from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
