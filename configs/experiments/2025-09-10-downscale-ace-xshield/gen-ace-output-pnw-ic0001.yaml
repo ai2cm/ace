@@ -1,4 +1,4 @@
-experiment_dir: /climate-default/home/troya/ace2-hiro-pnw-results/
+experiment_dir: /climate-default/home/troya/ace2-hiro-pnw-results-no-churn/
 patch:
   divide_generation: true
   composite_prediction: true
