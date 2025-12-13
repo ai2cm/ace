@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="downscale-ace-inference-100km-to-3km-ace-paper-schematic-pnw"
+JOB_NAME="downscale-ace-inference-100km-to-3km-ace-paper-schematic-pnw-no-overlap"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 
@@ -35,9 +35,9 @@ run_eval() {
     gantry run \
         --name $JOB_NAME_RUN \
         --description 'Run 100km to 3km generation on ACE data' \
-        --workspace ai2/ace \
-        --priority high \
-        --not-preemptible \
+        --workspace ai2/climate-titan \
+        --priority urgent \
+        --preemptible \
         --cluster ai2/titan \
         --beaker-image $IMAGE \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
