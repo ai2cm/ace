@@ -52,8 +52,10 @@ from fme.ace.stepper.parameter_init import (
 )
 from fme.ace.stepper.single_module import Stepper, StepperConfig, StepSelector
 from fme.ace.stepper.time_length_probabilities import (
+    TimeLengthMilestone,
     TimeLengthProbabilities,
     TimeLengthProbability,
+    TimeLengthSchedule,
 )
 from fme.ace.train.train_config import WeatherEvaluationConfig
 from fme.core.cli import ResumeResultsConfig

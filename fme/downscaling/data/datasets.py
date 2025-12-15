@@ -13,6 +13,7 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.generics.data import SizedMap
@@ -185,8 +186,8 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, key) -> tuple[TensorMapping, xr.DataArray, set[str] | None]:
-        batch, times, _ = self.dataset[key]
+    def __getitem__(self, key) -> DatasetItem:
+        batch, times, _, epoch = self.dataset[key]
         batch = {
             k: v[
                 ...,
@@ -195,7 +196,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             ]
             for k, v in batch.items()
         }
-        return batch, times, self._properties.all_labels
+        return batch, times, self._properties.all_labels, epoch
 
 
 class BatchItemDatasetAdapter(torch.utils.data.Dataset):
@@ -217,7 +218,7 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         return len(self._dataset)
 
     def __getitem__(self, idx) -> BatchItem:
-        fields, time, _ = self._dataset[idx]
+        fields, time, _, epoch = self._dataset[idx]
         fields = {k: v.squeeze() for k, v in fields.items()}
         field_example = next(iter(fields.values()))
 

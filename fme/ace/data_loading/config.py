@@ -6,6 +6,7 @@ from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.merged import MergeDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
@@ -64,7 +65,7 @@ class DataLoaderConfig:
     def get_dataset(
         self,
         names: Sequence[str],
-        n_timesteps: int,
+        n_timesteps: IntSchedule,
     ) -> tuple[DatasetABC, DatasetProperties]:
         return self.dataset.build(names, n_timesteps)
 

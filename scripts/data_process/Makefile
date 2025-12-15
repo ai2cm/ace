@@ -322,18 +322,28 @@ build_healpix_processing_image:
 push_healpix_image_to_beaker:
 	beaker image create --name $(HEALPIX_PROCESSING_IMAGE)-$(HEALPIX_PROCESSING_IMAGE_VERSION) $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION)
 
+.PHONY: create_coupled_datasets_env
+create_coupled_datasets_env:
+	conda create -y -n create_coupled_datasets python=3.11 pip
+	conda run --no-capture-output -n create_coupled_datasets python -m pip install uv
+	conda run --no-capture-output -n create_coupled_datasets uv pip install -r requirements-coupled.txt
+
 .PHONY: cm4_piControl_200yr_coupled_no_smoothing
 cm4_piControl_200yr_coupled_no_smoothing:
-	python ./create_coupled_datasets.py --yaml configs/CM4-piControl-200yr-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-200yr-coupled.yaml
 
 .PHONY: cm4_1pctCO2_140yr_coupled_no_smoothing
 cm4_1pctCO2_140yr_coupled_no_smoothing:
-	python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-140yr-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-140yr-coupled.yaml
 
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
-	python ./create_coupled_datasets.py --yaml configs/E3SMv3-piControl-100yr-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/E3SMv3-piControl-100yr-coupled.yaml
 
 .PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
 cm4_like_am4_random_co2_ensemble_atmosphere:
 	./compute_dataset.sh --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
+
+.PHONY:
+cm4_like_am4_random_co2_ensemble_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-like-AM4-random-CO2-ensemble-coupled.yaml

@@ -7,6 +7,7 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -151,7 +152,7 @@ class DataLoaderConfig:
         return get_dataset(
             self.full_config,
             names,
-            n_timesteps,
+            IntSchedule.from_constant(n_timesteps),
             strict=self.strict_ensemble,
         )
 
@@ -355,14 +356,14 @@ class PairedDataLoaderConfig:
         dataset_fine, properties_fine = get_dataset(
             self.fine,
             requirements.fine_names,
-            requirements.n_timesteps,
+            IntSchedule.from_constant(requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
 
         dataset_coarse, properties_coarse = get_dataset(
             self.coarse_full_config,
             requirements.coarse_names,
-            requirements.n_timesteps,
+            IntSchedule.from_constant(requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
 

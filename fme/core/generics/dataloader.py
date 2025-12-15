@@ -120,6 +120,7 @@ class GenericDataLoader(Generic[_BD]):
 
     @final
     def set_epoch(self, epoch: int):
+        self._dataset.set_epoch(epoch)
         if isinstance(self._sampler, torch.utils.data.DistributedSampler):
             self._sampler.set_epoch(epoch)
 
