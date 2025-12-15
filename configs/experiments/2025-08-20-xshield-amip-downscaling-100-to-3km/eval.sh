@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-wind-fl-with-static-inputs"
-CONFIG_FILENAME="eval-fl.yaml"
+JOB_NAME="generate-xshield-amip-global-with-static-inputs-wind-only"
+CONFIG_FILENAME="eval-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -22,17 +22,16 @@ NGPU=2
 IMAGE=spencerc/fme-deps-only-0196723e
 
 #EXISTING_RESULTS_DATASET=01K9PGGJSSKHQV4EKN4HMCERXB  # best hist checkpoint from multivar without static inputs
-EXISTING_RESULTS_DATASET=01KBG9EYTQNR082TWYFW5XWW3J  # best hist checkpoint from multivar with static inputs
+#EXISTING_RESULTS_DATASET=01KBG9EYTQNR082TWYFW5XWW3J  # best hist checkpoint from multivar with static inputs
+EXISTING_RESULTS_DATASET=01KCG9JWS8QEAAHMCRJY6EGW68  # best hist checkpoint from wind-only model with static inputs
 wandb_group=""
 
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/ace \
-    --priority high \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --not-preemptible \
-    --cluster ai2/ceres \
-    --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
