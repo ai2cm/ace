@@ -1,0 +1,13 @@
+cftime
+click
+dacite
+dask[distributed]
+fsspec
+gcsfs
+h5netcdf
+pandas
+pyyaml
+scipy
+xarray>=2025.1.2
+xpartition>=2025.3.0
+zarr>=3.0.3

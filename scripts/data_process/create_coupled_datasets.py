@@ -7,6 +7,7 @@ import click
 import dacite
 import xarray as xr
 import yaml
+from combine_stats import combine_stats
 from coupled_dataset_utils import (
     CoupledFieldNamesConfig,
     CoupledSeaIceConfig,
@@ -25,8 +26,9 @@ from writer_utils import OutputWriterConfig
 def _get_stats(
     input_zarr_path: str,
     climate_data_type: ClimateDataType,
-    debug: bool,
-    subsample: bool,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    debug: bool = False,
 ) -> str:
     """Thin wrapper around get_stats.
 
@@ -34,15 +36,13 @@ def _get_stats(
     imported get_stats util.
 
     Args:
+        input_zarr_path: Path to the input zarr dataset.
         climate_data_type: Type of climate data for statistics computation.
+        start_date: StatsConfig start date.
+        end_date: StatsConfig end date.
         debug: If True, do nothing because the input_zarr_path doesn't exist.
-        subsample: If True, update path to include subsample suffix.
 
     """
-    # Update path if subsampled
-    if subsample:
-        input_zarr_path = input_zarr_path.replace(".zarr", "-subsample.zarr")
-
     # Check if stats directory already exists
     run_name = os.path.basename(input_zarr_path).replace(".zarr", "-stats")
     stats_dir = os.path.join(os.path.dirname(input_zarr_path), run_name)
@@ -63,6 +63,8 @@ def _get_stats(
             config=StatsConfig(
                 output_directory=os.path.dirname(input_zarr_path),
                 data_type=climate_data_type,
+                start_date=start_date,
+                end_date=end_date,
             ),
             input_zarr=input_zarr_path,
             run_name=run_name,
@@ -73,13 +75,12 @@ def _get_stats(
 
 def _merge_stats(
     sea_ice_dir: str,
-    ocean_dir: str,
-    atmos_dir: str,
-    uncoupled_ocean_dir: str,
+    ocean_dir: str | None,
+    atmos_dir: str | None,
+    uncoupled_ocean_dir: str | None,
     uncoupled_atmos_dir: str,
     output_directory: str,
     debug: bool,
-    subsample: bool,
 ):
     """Merge statistics from coupled and uncoupled datasets for different
     training scenarios.
@@ -97,18 +98,14 @@ def _merge_stats(
         uncoupled_atmos_dir: Directory with uncoupled atmosphere statistics.
         output_directory: Base directory where merged stats will be written.
         debug: If True, skip merging (datasets don't exist in debug mode).
-        subsample: If True, include '-subsample' in output directory name.
 
     """
     if debug:
         logging.info("Skipping stats merging in debug mode")
         return
 
-    if subsample:
-        output_directory = output_directory.replace("-stats", "-subsample-stats")
-
     # uncoupled atmosphere training (coupled_sea_ice + uncoupled_atmos)
-    output_dir = os.path.join(output_directory, f"uncoupled_atmosphere")
+    output_dir = os.path.join(output_directory, "uncoupled_atmosphere")
     if not os.path.exists(output_dir):
         logging.info("Merging stats for uncoupled atmosphere training")
         logging.info(f"  Input: {sea_ice_dir}")
@@ -123,39 +120,97 @@ def _merge_stats(
     else:
         logging.info(f"Merged atmosphere stats already exist at {output_dir}, skipping")
 
-    # uncoupled/coupled ocean training (coupled_ocean + uncoupled_ocean)
-    output_dir = os.path.join(output_directory, "ocean")
-    if not os.path.exists(output_dir):
-        logging.info("Merging stats for uncoupled / coupled ocean training")
-        logging.info(f"  Input: {ocean_dir}")
-        logging.info(f"  Input: {uncoupled_ocean_dir}")
+    def _merge_stats_helper(
+        input_dir: str | None,
+        uncoupled_dir: str | None,
+        output_subdir: str,
+        label: str,
+    ):
+        if input_dir is None:
+            return
+
+        output_dir = os.path.join(output_directory, output_subdir)
+        if os.path.exists(output_dir):
+            logging.info(
+                f"Merged {label} stats already exist at {output_dir}, skipping"
+            )
+            return
+
+        if uncoupled_dir is None:
+            raise ValueError(
+                f"Cannot merge coupled {label} stats because stats directory for "
+                f"{label} input dataset not configured."
+            )
+
+        logging.info(f"Merging stats for {label} training")
+        logging.info(f"  Input: {input_dir}")
+        logging.info(f"  Input: {uncoupled_dir}")
         logging.info(f"  Output: {output_dir}")
         merge_stats(
             config=MergeStatsConfig(
-                input_directories=[ocean_dir, uncoupled_ocean_dir],
+                input_directories=[input_dir, uncoupled_dir],
                 output_directory=output_dir,
             )
         )
-    else:
-        logging.info(f"Merged ocean stats already exist at {output_dir}, skipping")
+
+    # uncoupled/coupled ocean training (coupled_ocean + uncoupled_ocean)
+    _merge_stats_helper(
+        input_dir=ocean_dir,
+        uncoupled_dir=uncoupled_ocean_dir,
+        output_subdir="ocean",
+        label="ocean",
+    )
 
     # coupled atmosphere training (coupled_atmos + uncoupled_atmos)
-    output_dir = os.path.join(output_directory, f"coupled_atmosphere")
-    if not os.path.exists(output_dir):
-        logging.info("Merging stats for coupled atmosphere training")
-        logging.info(f"  Input: {atmos_dir}")
-        logging.info(f"  Input: {uncoupled_atmos_dir}")
-        logging.info(f"  Output: {output_dir}")
-        merge_stats(
-            config=MergeStatsConfig(
-                input_directories=[atmos_dir, uncoupled_atmos_dir],
-                output_directory=output_dir,
+    _merge_stats_helper(
+        input_dir=atmos_dir,
+        uncoupled_dir=uncoupled_atmos_dir,
+        output_subdir="coupled_atmosphere",
+        label="coupled atmosphere",
+    )
+
+
+def _combine_ensemble_stats(
+    ensemble_stats_dir: str,
+    run_names: list[str],
+    debug: bool,
+    history: str | None = None,
+):
+    """Combine statistics across ensemble runs for each stat category.
+
+    Args:
+        ensemble_stats_dir: Base directory containing per-run stats subdirectories.
+        run_names: List of run names corresponding to subdirectories in
+            ensemble_stats_dir.
+        debug: If True, skip combining (datasets don't exist in debug mode).
+        history: Optional history string to add to output datasets.
+    """
+    if debug:
+        logging.info("Skipping ensemble stats combining in debug mode")
+        return
+
+    categories = ["uncoupled_atmosphere", "coupled_atmosphere", "ocean"]
+    output_directory = os.path.join(ensemble_stats_dir, "combined")
+
+    for category in categories:
+        # Build stats_roots for this category, checking which runs have it
+        stats_roots = []
+        for run_name in run_names:
+            category_dir = os.path.join(ensemble_stats_dir, run_name, category)
+            if os.path.exists(category_dir):
+                # combine_stats uses string concatenation (root + filename),
+                # so paths must end with "/"
+                stats_roots.append(category_dir + "/")
+
+        # If we have any runs with this category, combine them
+        if stats_roots:
+            logging.info(f"Combining {len(stats_roots)} ensemble stats for {category}")
+            combine_stats(
+                stats_roots=stats_roots,
+                output_directory=output_directory,
+                subdirectory=category,
+                history=history,
             )
-        )
-    else:
-        logging.info(
-            f"Coupled atmosphere stats already exist at {output_dir}, skipping"
-        )
 
 
 @dataclasses.dataclass
@@ -190,8 +245,9 @@ class CoupledInputDatasetConfig:
         logging.info(f"  Loaded dataset with {len(ds.time)} timesteps")
         return ds
 
-    def log_info(self):
+    def log_info(self, label: Literal["sea ice", "ocean", "atmosphere"]):
         """Log information about the dataset configuration."""
+        logging.info(f"CoupledInputDatsetConfig: {label} dataset")
         logging.info(f"  zarr_path: {self.zarr_path}")
         logging.info(f"  time_chunk_size: {self.time_chunk_size}")
         if self.first_timestamp or self.last_timestamp:
@@ -201,6 +257,20 @@ class CoupledInputDatasetConfig:
             )
         if self.extra_fields.names_and_prefixes:
             logging.info("  extra_fields: " f"{self.extra_fields.names_and_prefixes}")
+
+
+@dataclasses.dataclass
+class NullCoupledInputDatasetConfig:
+    """Null version of CoupledInputDatasetConfig."""
+
+    extra_fields = None
+
+    def get_dataset(self) -> None:
+        return None
+
+    def log_info(self, label: Literal["sea ice", "ocean"]):
+        """Log information about the dataset configuration."""
+        logging.info(f"The {label} dataset was not configured")
 
 
 StatsType = Literal["centering", "scaling-full-field", "scaling-residual", "time-mean"]
@@ -216,7 +286,7 @@ class InputStatsConfig:
     """
 
     atmosphere_dir: str
-    ocean_dir: str
+    ocean_dir: str | None = None
 
 
 @dataclasses.dataclass
@@ -232,23 +302,59 @@ class InputDatasetsConfig:
     """
 
     climate_data_type: ClimateDataType
-    atmosphere: CoupledInputDatasetConfig
-    ocean: CoupledInputDatasetConfig
     stats: InputStatsConfig
-    sea_ice: CoupledInputDatasetConfig | None = None
+    atmosphere: CoupledInputDatasetConfig
+    ocean: CoupledInputDatasetConfig | NullCoupledInputDatasetConfig = (
+        dataclasses.field(default_factory=NullCoupledInputDatasetConfig)
+    )
+    sea_ice: CoupledInputDatasetConfig | NullCoupledInputDatasetConfig = (
+        dataclasses.field(default_factory=NullCoupledInputDatasetConfig)
+    )
 
     def log_info(self):
         """Log information about all input datasets."""
         logging.info(f"Climate data type: {self.climate_data_type}")
-        logging.info("Atmosphere input dataset:")
-        self.atmosphere.log_info()
-        logging.info("Ocean input dataset:")
-        self.ocean.log_info()
-        if self.sea_ice is not None:
-            logging.info("Sea ice input dataset:")
-            self.sea_ice.log_info()
-        else:
-            logging.info("Sea ice input dataset: None")
+        self.atmosphere.log_info("atmosphere")
+        self.ocean.log_info("ocean")
+        self.sea_ice.log_info("sea ice")
+
+
+@dataclasses.dataclass
+class EnsembleRunConfig:
+    """Configuration for a single run in an ensemble (without shared fields)."""
+
+    atmosphere: CoupledInputDatasetConfig
+    ocean: CoupledInputDatasetConfig | NullCoupledInputDatasetConfig = (
+        dataclasses.field(default_factory=NullCoupledInputDatasetConfig)
+    )
+    sea_ice: CoupledInputDatasetConfig | NullCoupledInputDatasetConfig = (
+        dataclasses.field(default_factory=NullCoupledInputDatasetConfig)
+    )
+
+
+@dataclasses.dataclass
+class InputEnsembleConfig:
+    runs: dict[str, EnsembleRunConfig]
+    stats: InputStatsConfig
+    climate_data_type: ClimateDataType
+
+    def log_info(self):
+        """Log information about all input datasets."""
+        logging.info(f"Climate data type: {self.climate_data_type}")
+        logging.info(f"Ensemble with {len(self.runs)} runs:")
+        for run_name, run_config in self.runs.items():
+            logging.info(f"  {run_name}:")
+            logging.info(f"    atmosphere: {run_config.atmosphere.zarr_path}")
+            if not isinstance(run_config.ocean, NullCoupledInputDatasetConfig):
+                logging.info(f"    ocean: {run_config.ocean.zarr_path}")
+            if not isinstance(run_config.sea_ice, NullCoupledInputDatasetConfig):
+                logging.info(f"    sea_ice: {run_config.sea_ice.zarr_path}")
+
+
+@dataclasses.dataclass
+class CoupledStatsConfig:
+    start_date: str | None = None
+    end_date: str | None = None
 
 
 @dataclasses.dataclass
@@ -256,9 +362,6 @@ class CoupledDatasetsConfig:
     """Configuration for coupled dataset processing.
 
     Parameters:
-        version: Version string for the output datasets.
-        family_name: Common name for the family of coupled output datasets.
-        output_directory: Directory where outputs will be written.
         coupled_ts: Configuration for surface temperature in coupled atmosphere.
         coupled_sea_surface: Configuration for sea ice in coupled ocean.
         coupled_sea_ice: Configuration for for sea ice in the uncoupled atmosphere.
@@ -266,20 +369,280 @@ class CoupledDatasetsConfig:
         output_writer: Configuration for writing to output store.
     """
 
-    version: str
-    family_name: str
-    output_directory: str
-    coupled_ts: CoupledSurfaceTemperatureConfig
-    coupled_sea_surface: CoupledSeaSurfaceConfig
     coupled_sea_ice: CoupledSeaIceConfig = dataclasses.field(
         default_factory=CoupledSeaIceConfig
     )
+    coupled_ts: CoupledSurfaceTemperatureConfig | None = None
+    coupled_sea_surface: CoupledSeaSurfaceConfig | None = None
     input_field_names: CoupledFieldNamesConfig = dataclasses.field(
         default_factory=CoupledFieldNamesConfig
     )
     output_writer: OutputWriterConfig = dataclasses.field(
         default_factory=OutputWriterConfig
     )
+
+    def validate(self, input_datasets: InputDatasetsConfig):
+        if self.coupled_sea_surface is None:
+            if self.coupled_ts is not None:
+                raise ValueError(
+                    "coupled_ts configured but coupled_sea_surface config is None. "
+                    "The coupled ocean dataset must be created in order to compute "
+                    "the coupled atmosphere dataset. Please remove coupled_ts or add "
+                    "coupled_sea_surface and configure the ocean input dataset."
+                )
+        elif isinstance(input_datasets.ocean, NullCoupledInputDatasetConfig):
+            raise ValueError(
+                "Ocean input dataset not configured but coupled_sea_surface "
+                "config is not None."
+            )
+
+    def _get_and_merge_stats(
+        self,
+        input_datasets: InputDatasetsConfig,
+        compute_ocean: bool,
+        compute_atmos: bool,
+        sea_ice_output_store: str,
+        ocean_output_store: str,
+        atmosphere_output_store: str,
+        coupled_stats_directory: str,
+        stats_config: CoupledStatsConfig,
+        debug: bool,
+    ):
+        sea_ice_stats_dir = _get_stats(
+            input_zarr_path=sea_ice_output_store,
+            climate_data_type=input_datasets.climate_data_type,
+            start_date=stats_config.start_date,
+            end_date=stats_config.end_date,
+            debug=debug,
+        )
+
+        atmos_stats_dir: str | None = None
+        if compute_atmos:
+            atmos_stats_dir = _get_stats(
+                input_zarr_path=atmosphere_output_store,
+                climate_data_type=input_datasets.climate_data_type,
+                start_date=stats_config.start_date,
+                end_date=stats_config.end_date,
+                debug=debug,
+            )
+
+        ocean_stats_dir: str | None = None
+        if compute_ocean:
+            ocean_stats_dir = _get_stats(
+                input_zarr_path=ocean_output_store,
+                climate_data_type=input_datasets.climate_data_type,
+                start_date=stats_config.start_date,
+                end_date=stats_config.end_date,
+                debug=debug,
+            )
+
+        _merge_stats(
+            sea_ice_dir=sea_ice_stats_dir,
+            ocean_dir=ocean_stats_dir,
+            atmos_dir=atmos_stats_dir,
+            uncoupled_ocean_dir=input_datasets.stats.ocean_dir,
+            uncoupled_atmos_dir=input_datasets.stats.atmosphere_dir,
+            output_directory=coupled_stats_directory,
+            debug=debug,
+        )
+
+    def write_datasets_and_stats(
+        self,
+        input_datasets: InputDatasetsConfig,
+        sea_ice_output_store: str,
+        ocean_output_store: str,
+        atmosphere_output_store: str,
+        coupled_stats_directory: str,
+        stats_config: CoupledStatsConfig,
+        debug: bool,
+        subsample: bool,
+    ):
+        self.validate(input_datasets)
+
+        logging.info("=" * 80)
+        logging.info("Creating coupled atmosphere-ocean datasets")
+        logging.info(f"  Atmosphere output: {atmosphere_output_store}")
+        logging.info(f"  Ocean output: {ocean_output_store}")
+        logging.info(f"  Sea ice output: {sea_ice_output_store}")
+        logging.info(f"  Stats output: {coupled_stats_directory}")
+        logging.info("=" * 80)
+
+        # Check if outputs already exist (unless in debug mode)
+        sea_ice_exists = not debug and os.path.exists(sea_ice_output_store)
+        ocean_exists = not debug and os.path.exists(ocean_output_store)
+        atmos_exists = not debug and os.path.exists(atmosphere_output_store)
+
+        if sea_ice_exists:
+            logging.warning(
+                f"Coupled sea ice output {sea_ice_output_store} already exists. "
+                "It will be recomputed but not overwritten."
+            )
+
+        compute_ocean = self.coupled_sea_surface is not None
+        compute_atmos = self.coupled_ts is not None
+
+        if compute_ocean and ocean_exists:
+            logging.warning(
+                f"Coupled ocean output {ocean_output_store} already exists. "
+                "It will be recomputed but not overwritten."
+            )
+
+        if compute_atmos and atmos_exists:
+            logging.warning(
+                f"Coupled atmosphere output {atmosphere_output_store} already "
+                "exists. It will be recomputed but not overwritten."
+            )
+
+        all_exist = sea_ice_exists
+        if compute_ocean:
+            all_exist = all_exist and ocean_exists
+        if compute_atmos:
+            all_exist = all_exist and atmos_exists
+
+        if all_exist and not debug:
+            logging.info(f"All coupled output datasets already exist. Skipping...")
+            # Still compute stats if they don't exist
+            self._get_and_merge_stats(
+                input_datasets,
+                compute_ocean=compute_ocean,
+                compute_atmos=compute_atmos,
+                sea_ice_output_store=sea_ice_output_store,
+                ocean_output_store=ocean_output_store,
+                atmosphere_output_store=atmosphere_output_store,
+                coupled_stats_directory=coupled_stats_directory,
+                stats_config=stats_config,
+                debug=debug,
+            )
+            return
+
+        self.output_writer.start_dask_client(debug)
+
+        atmos = input_datasets.atmosphere.get_dataset()
+        ocean = input_datasets.ocean.get_dataset()
+        sea_ice = input_datasets.sea_ice.get_dataset()
+
+        logging.info("=" * 80)
+        logging.info("Computing coupled sea ice fields")
+        logging.info("=" * 80)
+        atmos_extras = input_datasets.atmosphere.extra_fields
+        coupled_sea_ice = compute_coupled_sea_ice(
+            ocean=ocean,
+            atmos=atmos,
+            sea_ice=sea_ice,
+            config=self.coupled_sea_ice,
+            input_field_names=self.input_field_names,
+            atmos_extras=atmos_extras,
+            sea_ice_extras=input_datasets.sea_ice.extra_fields,
+        )
+
+        coupled_ocean: xr.Dataset | None = None
+        coupled_atmos: xr.Dataset | None = None
+
+        if compute_ocean:
+            assert self.coupled_sea_surface is not None
+            logging.info("=" * 80)
+            logging.info("Computing coupled ocean fields")
+            logging.info("=" * 80)
+            # Validation ensures ocean is not None if coupled_sea_surface is set
+            assert ocean is not None
+            coupled_ocean = compute_coupled_ocean(
+                ocean=ocean,
+                atmos=atmos,
+                # drop extra atmos fields from sea ice dataset
+                coupled_sea_ice=atmos_extras.drop_extra_data_vars(coupled_sea_ice),
+                config=self.coupled_sea_surface,
+                input_field_names=self.input_field_names,
+                extras=input_datasets.ocean.extra_fields,
+            )
+
+        if compute_atmos:
+            assert self.coupled_ts is not None
+            logging.info("=" * 80)
+            logging.info("Computing coupled atmosphere fields")
+            logging.info("=" * 80)
+            # Validation ensures ocean/coupled_ocean are set if coupled_ts is set
+            assert ocean is not None
+            assert coupled_ocean is not None
+            coupled_atmos = compute_coupled_atmosphere(
+                atmos=atmos,
+                ocean=ocean,
+                coupled_ocean=coupled_ocean,
+                config=self.coupled_ts,
+                input_field_names=self.input_field_names,
+                extras=atmos_extras,
+            )
+
+        if subsample:
+            tdim = self.input_field_names.time_dim
+            if coupled_ocean is not None:
+                logging.info(f"Subsampling coupled ocean to 73 timesteps")
+                coupled_ocean = coupled_ocean.isel({tdim: slice(None, 73)})
+            if coupled_atmos is not None:
+                logging.info(f"Subsampling coupled atmosphere to 1460 timesteps")
+                coupled_atmos = coupled_atmos.isel({tdim: slice(None, 365 * 4)})
+            logging.info(f"Subsampling coupled sea ice to 1460 timesteps")
+            coupled_sea_ice = coupled_sea_ice.isel({tdim: slice(None, 365 * 4)})
+
+        if debug:
+            with xr.set_options(display_max_rows=500):
+                if coupled_ocean is not None:
+                    logging.info("Debug mode: printing coupled ocean dataset")
+                    print(coupled_ocean)
+                if coupled_atmos is not None:
+                    logging.info("Debug mode: printing coupled atmosphere dataset")
+                    print(coupled_atmos)
+                logging.info("Debug mode: printing coupled sea ice dataset")
+                print(coupled_sea_ice)
+        else:
+            if not sea_ice_exists:
+                self.output_writer.write(coupled_sea_ice, sea_ice_output_store)
+
+            if not atmos_exists and coupled_atmos is not None:
+                self.output_writer.write(coupled_atmos, atmosphere_output_store)
+
+            if not ocean_exists and coupled_ocean is not None:
+                self.output_writer.write(coupled_ocean, ocean_output_store)
+
+        self.output_writer.close_dask_client()
+
+        self._get_and_merge_stats(
+            input_datasets,
+            compute_ocean=compute_ocean,
+            compute_atmos=compute_atmos,
+            sea_ice_output_store=sea_ice_output_store,
+            ocean_output_store=ocean_output_store,
+            atmosphere_output_store=atmosphere_output_store,
+            coupled_stats_directory=coupled_stats_directory,
+            stats_config=stats_config,
+            debug=debug,
+        )
+
+
+@dataclasses.dataclass
+class CreateCoupledDatasetsConfig:
+    """Top-level configuration for creating coupled datasets.
+
+    This configuration orchestrates the creation of coupled datasets from
+    separate atmosphere, ocean, and sea ice datasets, including window
+    averaging, coupling logic, and statistics computation.
+
+    Parameters:
+        version: Version string for the output datasets.
+        family_name: Common name for the family of coupled output datasets.
+        output_directory: Directory where outputs will be written.
+        coupled_datasets: Configuration for coupled dataset processing.
+        input_datasets: Configuration of input data stores and corresponding stats
+            directories.
+        stats: Configuration of output dataset stats start and end dates.
+    """
+
+    version: str
+    family_name: str
+    output_directory: str
+    coupled_datasets: CoupledDatasetsConfig
+    input_datasets: InputDatasetsConfig | InputEnsembleConfig
+    stats: CoupledStatsConfig = dataclasses.field(default_factory=CoupledStatsConfig)
+    _history: str | None = None  # added by from_file
 
     @property
     def sea_ice_output_store(self) -> str:
@@ -310,17 +673,13 @@ class CoupledDatasetsConfig:
     def atmosphere_output_store(self) -> str:
         """Get the output path for the coupled atmosphere dataset.
 
-        The filename includes the configured CoupledSurfaceTemperatureConfig.how
-        string.
-
         Returns:
             Absolute path to the coupled atmosphere output zarr store.
 
         """
-        prefix = f"{self.version}-{self.family_name}-{self.coupled_ts.how}"
         return os.path.join(
             self.output_directory,
-            f"{prefix}-atmosphere.zarr",
+            f"{self.version}-{self.family_name}-atmosphere.zarr",
         )
 
     @property
@@ -335,212 +694,6 @@ class CoupledDatasetsConfig:
             self.output_directory,
             f"{self.version}-{self.family_name}-stats",
         )
-
-    def write_datasets_and_stats(
-        self,
-        input_datasets: InputDatasetsConfig,
-        debug: bool,
-        subsample: bool,
-    ):
-        logging.info("=" * 80)
-        logging.info("Creating coupled atmosphere-ocean datasets")
-        logging.info(f"  Atmosphere output: {self.atmosphere_output_store}")
-        logging.info(f"  Ocean output: {self.ocean_output_store}")
-        logging.info(f"  Sea ice output: {self.sea_ice_output_store}")
-        logging.info(f"  Stats output: {self.coupled_stats_directory}")
-        logging.info("=" * 80)
-
-        # Check if outputs already exist (unless in debug mode)
-        sea_ice_exists = not debug and os.path.exists(self.sea_ice_output_store)
-        ocean_exists = not debug and os.path.exists(self.ocean_output_store)
-        atmos_exists = not debug and os.path.exists(self.atmosphere_output_store)
-
-        if sea_ice_exists and atmos_exists and ocean_exists:
-            logging.info(f"All coupled output datasets already exist. Skipping...")
-            # Still compute stats if they don't exist
-            sea_ice_stats_dir = _get_stats(
-                input_zarr_path=self.sea_ice_output_store,
-                climate_data_type=input_datasets.climate_data_type,
-                debug=debug,
-                subsample=subsample,
-            )
-            atmos_stats_dir = _get_stats(
-                input_zarr_path=self.atmosphere_output_store,
-                climate_data_type=input_datasets.climate_data_type,
-                debug=debug,
-                subsample=subsample,
-            )
-            ocean_stats_dir = _get_stats(
-                input_zarr_path=self.ocean_output_store,
-                climate_data_type=input_datasets.climate_data_type,
-                debug=debug,
-                subsample=subsample,
-            )
-            _merge_stats(
-                sea_ice_dir=sea_ice_stats_dir,
-                ocean_dir=ocean_stats_dir,
-                atmos_dir=atmos_stats_dir,
-                uncoupled_ocean_dir=input_datasets.stats.ocean_dir,
-                uncoupled_atmos_dir=input_datasets.stats.atmosphere_dir,
-                output_directory=self.coupled_stats_directory,
-                debug=debug,
-                subsample=subsample,
-            )
-            return
-
-        if sea_ice_exists:
-            logging.warning(
-                f"Coupled sea ice output {self.sea_ice_output_store} already exists. "
-                "It will be recomputed but not overwritten."
-            )
-        if atmos_exists:
-            logging.warning(
-                f"Coupled atmosphere output {self.atmosphere_output_store} already "
-                "exists. It will be recomputed but not overwritten."
-            )
-        if ocean_exists:
-            logging.warning(
-                f"Coupled ocean output {self.ocean_output_store} already exists. "
-                "It will be recomputed but not overwritten."
-            )
-
-        self.output_writer.start_dask_client(debug)
-
-        atmos = input_datasets.atmosphere.get_dataset()
-        ocean = input_datasets.ocean.get_dataset()
-
-        sea_ice: xr.Dataset | None = None
-        sea_ice_extras: ExtraFieldsConfig | None = None
-        if input_datasets.sea_ice is not None:
-            sea_ice = input_datasets.sea_ice.get_dataset()
-            sea_ice_extras = input_datasets.sea_ice.extra_fields
-        else:
-            logging.info(
-                "Sea ice input dataset not configured. Using atmosphere input dataset "
-                "as source for sea ice fields."
-            )
-
-        logging.info("=" * 80)
-        logging.info("Computing coupled sea ice fields")
-        logging.info("=" * 80)
-        atmos_extras = input_datasets.atmosphere.extra_fields
-        coupled_sea_ice = compute_coupled_sea_ice(
-            ocean=ocean,
-            atmos=atmos,
-            sea_ice=sea_ice,
-            config=self.coupled_sea_ice,
-            input_field_names=self.input_field_names,
-            atmos_extras=atmos_extras,
-            sea_ice_extras=sea_ice_extras,
-        )
-
-        logging.info("=" * 80)
-        logging.info("Computing coupled ocean fields")
-        logging.info("=" * 80)
-        coupled_ocean = compute_coupled_ocean(
-            ocean=ocean,
-            atmos=atmos,
-            # drop extra atmos fields from sea ice dataset
-            coupled_sea_ice=atmos_extras.drop_extra_data_vars(coupled_sea_ice),
-            config=self.coupled_sea_surface,
-            input_field_names=self.input_field_names,
-            extras=input_datasets.ocean.extra_fields,
-        )
-
-        logging.info("=" * 80)
-        logging.info("Computing coupled atmosphere fields")
-        logging.info("=" * 80)
-        coupled_atmos = compute_coupled_atmosphere(
-            atmos=atmos,
-            ocean=ocean,
-            coupled_ocean=coupled_ocean,
-            config=self.coupled_ts,
-            input_field_names=self.input_field_names,
-            extras=atmos_extras,
-        )
-
-        atmos_output_store = self.atmosphere_output_store
-        ocean_output_store = self.ocean_output_store
-        sea_ice_output_store = self.sea_ice_output_store
-
-        if subsample:
-            tdim = self.input_field_names.time_dim
-            logging.info(f"Subsampling coupled ocean to 73 timesteps")
-            coupled_ocean = coupled_ocean.isel({tdim: slice(None, 73)})
-            logging.info(f"Subsampling coupled atmosphere to 1460 timesteps")
-            coupled_atmos = coupled_atmos.isel({tdim: slice(None, 365 * 4)})
-            logging.info(f"Subsampling coupled sea ice to 1460 timesteps")
-            coupled_sea_ice = coupled_sea_ice.isel({tdim: slice(None, 365 * 4)})
-            ocean_output_store = ocean_output_store.replace(".zarr", "-subsample.zarr")
-            atmos_output_store = atmos_output_store.replace(".zarr", "-subsample.zarr")
-            sea_ice_output_store = sea_ice_output_store.replace(
-                ".zarr", "-subsample.zarr"
-            )
-
-        if debug:
-            with xr.set_options(display_max_rows=500):
-                logging.info("Debug mode: printing coupled ocean dataset")
-                print(coupled_ocean)
-                logging.info("Debug mode: printing coupled atmosphere dataset")
-                print(coupled_atmos)
-                logging.info("Debug mode: printing coupled sea ice dataset")
-                print(coupled_sea_ice)
-        else:
-            if not atmos_exists:
-                self.output_writer.write(coupled_atmos, atmos_output_store)
-            if not ocean_exists:
-                self.output_writer.write(coupled_ocean, ocean_output_store)
-            if not sea_ice_exists:
-                self.output_writer.write(coupled_sea_ice, sea_ice_output_store)
-
-        self.output_writer.close_dask_client()
-
-        atmos_stats_dir = _get_stats(
-            input_zarr_path=self.atmosphere_output_store,
-            climate_data_type=input_datasets.climate_data_type,
-            debug=debug,
-            subsample=subsample,
-        )
-        ocean_stats_dir = _get_stats(
-            input_zarr_path=self.ocean_output_store,
-            climate_data_type=input_datasets.climate_data_type,
-            debug=debug,
-            subsample=subsample,
-        )
-        sea_ice_stats_dir = _get_stats(
-            input_zarr_path=self.sea_ice_output_store,
-            climate_data_type=input_datasets.climate_data_type,
-            debug=debug,
-            subsample=subsample,
-        )
-        _merge_stats(
-            sea_ice_dir=sea_ice_stats_dir,
-            ocean_dir=ocean_stats_dir,
-            atmos_dir=atmos_stats_dir,
-            uncoupled_ocean_dir=input_datasets.stats.ocean_dir,
-            uncoupled_atmos_dir=input_datasets.stats.atmosphere_dir,
-            output_directory=self.coupled_stats_directory,
-            debug=debug,
-            subsample=subsample,
-        )
-
-
-@dataclasses.dataclass
-class CreateCoupledDatasetsConfig:
-    """Top-level configuration for creating coupled datasets.
-
-    This configuration orchestrates the creation of coupled datasets from
-    separate atmosphere, ocean, and sea ice datasets, including window
-    averaging, coupling logic, and statistics computation.
-
-    Parameters:
-        coupled_datasets: Configuration for coupled dataset processing.
-        input_datasets: Configuration of input data stores and corresponding stats
-            directories.
-    """
-
-    coupled_datasets: CoupledDatasetsConfig
-    input_datasets: InputDatasetsConfig
 
     def __post_init__(self):
         """Initialize and print dataset information after dataclass construction."""
@@ -557,11 +710,88 @@ class CreateCoupledDatasetsConfig:
         logging.info("=" * 80)
         logging.info("Creating coupled datasets")
         logging.info("=" * 80)
-        self.coupled_datasets.write_datasets_and_stats(
-            input_datasets=self.input_datasets,
-            debug=debug,
-            subsample=subsample,
-        )
+
+        def _subsample_path(path: str) -> str:
+            """Add '-subsample' suffix to zarr or stats paths if subsample=True."""
+            if not subsample:
+                return path
+            if path.endswith(".zarr"):
+                return path.replace(".zarr", "-subsample.zarr")
+            elif "-stats" in path:
+                return path.replace("-stats", "-subsample-stats")
+            return path
+
+        if isinstance(self.input_datasets, InputDatasetsConfig):
+            # Single dataset: use property-based output paths
+            self.coupled_datasets.write_datasets_and_stats(
+                input_datasets=self.input_datasets,
+                sea_ice_output_store=_subsample_path(self.sea_ice_output_store),
+                ocean_output_store=_subsample_path(self.ocean_output_store),
+                atmosphere_output_store=_subsample_path(self.atmosphere_output_store),
+                coupled_stats_directory=_subsample_path(self.coupled_stats_directory),
+                stats_config=self.stats,
+                debug=debug,
+                subsample=subsample,
+            )
+        elif isinstance(self.input_datasets, InputEnsembleConfig):
+            # Ensemble: loop over runs with run-specific output paths
+            ensemble_dir = os.path.join(
+                self.output_directory, f"{self.version}-{self.family_name}"
+            )
+            ensemble_stats_dir = os.path.join(
+                self.output_directory, f"{self.version}-{self.family_name}-stats"
+            )
+            if subsample:
+                ensemble_dir = ensemble_dir + "-subsample"
+                ensemble_stats_dir = ensemble_stats_dir.replace(
+                    "-stats", "-subsample-stats"
+                )
+            for run_name, run_config in self.input_datasets.runs.items():
+                logging.info("")
+                logging.info("=" * 80)
+                logging.info(f"Processing ensemble run: {run_name}")
+                logging.info("=" * 80)
+
+                # Construct full InputDatasetsConfig for this run
+                run_input_datasets = InputDatasetsConfig(
+                    climate_data_type=self.input_datasets.climate_data_type,
+                    stats=self.input_datasets.stats,
+                    atmosphere=run_config.atmosphere,
+                    ocean=run_config.ocean,
+                    sea_ice=run_config.sea_ice,
+                )
+
+                # Generate run-specific output paths
+                sea_ice_output_store = os.path.join(
+                    ensemble_dir, f"{run_name}-sea_ice.zarr"
+                )
+                ocean_output_store = os.path.join(
+                    ensemble_dir, f"{run_name}-ocean.zarr"
+                )
+                atmosphere_output_store = os.path.join(
+                    ensemble_dir, f"{run_name}-atmosphere.zarr"
+                )
+                coupled_stats_directory = os.path.join(ensemble_stats_dir, run_name)
+
+                self.coupled_datasets.write_datasets_and_stats(
+                    input_datasets=run_input_datasets,
+                    sea_ice_output_store=sea_ice_output_store,
+                    ocean_output_store=ocean_output_store,
+                    atmosphere_output_store=atmosphere_output_store,
+                    coupled_stats_directory=coupled_stats_directory,
+                    stats_config=self.stats,
+                    debug=debug,
+                    subsample=subsample,
+                )
+
+            logging.info("Combining ensemble stats...")
+            _combine_ensemble_stats(
+                ensemble_stats_dir,
+                run_names=list(self.input_datasets.runs.keys()),
+                debug=debug,
+                history=self._history,
+            )
+
         logging.info("Completed coupled datasets creation")
 
     @classmethod
@@ -577,9 +807,14 @@ class CreateCoupledDatasetsConfig:
         with open(path, "r") as file:
             data = yaml.safe_load(file)
 
-        return dacite.from_dict(
+        config = dacite.from_dict(
             data_class=cls, data=data, config=dacite.Config(cast=[tuple], strict=True)
         )
+        config._history = (
+            "Created by full-model/data_process/create_coupled_dataset.py from "
+            f"configuration file {path}."
+        )
+        return config
 
 
 @click.command()
