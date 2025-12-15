@@ -123,6 +123,53 @@ def ocean_heat_content(
     return data.ocean_heat_content
 
 
+@register(
+    VariableMetadata("W/m**2", "Tendency of column-integrated ocean heat content")
+)
+def ocean_heat_content_tendency(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Compute the column-integrated ocean heat content."""
+    ohc = data.ocean_heat_content
+    ohc_tendency = torch.zeros_like(ohc)
+    ohc_tendency[:, 1:] = torch.diff(ohc, n=1, dim=1) / timestep.total_seconds()
+    return ohc_tendency
+
+
+@register(
+    VariableMetadata(
+        "W/m**2",
+        "Imbalance in tendency of ocean heat content and net incoming energy flux",
+    )
+)
+def ocean_heat_content_tendency_imbalance(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Columnwise imbalance in the ocean heat content tendency.
+
+    This is computed as a residual from the column total energy budget.
+    """
+    column_energy_tendency = ocean_heat_content_tendency(data, timestep)
+    flux_through_vertical_boundaries = data.net_energy_flux_into_ocean
+    imbalance = column_energy_tendency - flux_through_vertical_boundaries
+    return imbalance
+
+
+@register(
+    VariableMetadata(
+        "W/m**2",
+        "Net energy flux through surface and sea floor into ocean",
+    )
+)
+def net_energy_flux_into_ocean_column(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    return data.net_energy_flux_into_ocean
+
+
 @register(VariableMetadata("[0-1]", "sea ice concentration"), exists_ok=True)
 def sea_ice_fraction(
     data: OceanData,

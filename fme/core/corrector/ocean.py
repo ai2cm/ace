@@ -156,9 +156,7 @@ def _force_conserve_ocean_heat_content(
         name="ocean_heat_content",
     )
     expected_change_ocean_heat_content = area_weighted_sum(
-        (input.net_downward_surface_heat_flux + input.geothermal_heat_flux)
-        * input.sea_surface_fraction
-        * timestep_seconds,
+        input.net_energy_flux_into_ocean * timestep_seconds,
         keepdim=True,
         name="ocean_heat_content",
     )
