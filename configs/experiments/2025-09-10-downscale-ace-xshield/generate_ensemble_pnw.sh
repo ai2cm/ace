@@ -21,6 +21,8 @@ IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD
 
+ACE_DATASET=01KCHJQ6MX9MH9CT1TQZ6DVCRJ
+
 wandb_group=""
 
 gantry run \
@@ -39,6 +41,7 @@ gantry run \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
+    --dataset $ACE_DATASET:output_6hourly_predictions_ic0000.zarr:/output_6hourly_predictions_ic0000.zarr \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
