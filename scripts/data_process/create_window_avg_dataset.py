@@ -1,8 +1,7 @@
 import dataclasses
-import os
+import logging
 import pdb
 import sys
-from datetime import datetime
 
 import click
 import dacite
@@ -14,18 +13,12 @@ from writer_utils import OutputWriterConfig
 
 
 @dataclasses.dataclass
-class InputDatasetConfig:
+class WindowAvgInputDatasetConfig:
     zarr_path: str
     time_chunk_size: int
-    names: list[str]
-    merge_zarr: str | None = None
 
     def get_dataset(self) -> xr.Dataset:
-        ds = xr.open_zarr(self.zarr_path, chunks={"time": self.time_chunk_size})
-        if self.merge_zarr is not None:
-            ds2 = xr.open_zarr(self.merge_zarr, chunks={"time": self.time_chunk_size})
-            ds = xr.merge([ds, ds2])
-        return ds[self.names]
+        return xr.open_zarr(self.zarr_path, chunks={"time": self.time_chunk_size})
 
 
 @dataclasses.dataclass
@@ -37,55 +30,66 @@ class WindowAvgDatasetConfig:
     dataset from a higher-frequency input dataset.
 
     Attributes:
-        input_dataset: Configuration for the source atmosphere dataset.
         window_timedelta: The time interval for the resampling operation,
-            e.g., '5D' for 5-day averages.
-        output_name_prefix: Prefix for output dataset naming.
-        output_directory: Directory where the output datasets will be created.
+            e.g., '120h' for 5-day averages. Must be specified in units that
+            are "Tick-like" (h, m, s, ms, us).
         first_timestamp: Optional start timestamp for time slicing,
             e.g. '2016-01-01T06:00:00'. The 'origin' used in resampling is
             one step (of size window_timedelta) earlier than first_timestamp.
         last_timestamp: Optional final timestamp in case of extra unneeded windows.
+            Used after window averaging but before shifting timestamps.
         shift_timestamps_to_avg_interval_midpoint: If True, shift time axis labels
             backwards by half the window size.
-        output_writer: Configuration for dask and xpartition.
-        version: An optional version string, e.g. a date '2025-01-01', which is
-            prepended to output_name_prefix.
+        time_dim: Name of the time dimension.
+        subset_names: Optional list of data variable names to subset the input dataset.
     """
 
-    input_dataset: InputDatasetConfig
     window_timedelta: str
-    output_name: str
-    output_directory: str
     first_timestamp: str | None = None
     last_timestamp: str | None = None
     shift_timestamps_to_avg_interval_midpoint: bool = False
-    output_writer: OutputWriterConfig = dataclasses.field(
-        default_factory=OutputWriterConfig
-    )
-    version: str | None = None
+    time_dim: str = "time"
+    subset_names: list[str] | None = None
 
-    @classmethod
-    def from_file(cls, path: str) -> "WindowAvgDatasetConfig":
-        with open(path, "r") as file:
-            data = yaml.safe_load(file)
+    def _compute_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
+        if self.subset_names is not None:
+            ds = ds[self.subset_names]
 
-        return dacite.from_dict(
-            data_class=cls, data=data, config=dacite.Config(cast=[tuple], strict=True)
-        )
+        # Split dataset into time-varying and time-invariant variables
+        time_varying_vars = [
+            var for var in ds.data_vars if self.time_dim in ds[var].dims
+        ]
+        time_invariant_vars = [
+            var for var in ds.data_vars if self.time_dim not in ds[var].dims
+        ]
 
-    def compute_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
+        if len(time_varying_vars) == 0:
+            raise ValueError("There are no time-varying variables in the dataset.")
+
+        ds_time_varying = ds[time_varying_vars]
         dt = pd.Timedelta(self.window_timedelta).to_pytimedelta()
-        origin = ds.time.sel(time=self.first_timestamp).item() - dt
-        return (
-            ds.resample(
+        origin = ds_time_varying.time.sel(time=self.first_timestamp).item() - dt
+        ds_time_varying_avg = (
+            ds_time_varying.resample(
                 time=self.window_timedelta, closed="right", label="right", origin=origin
             )
             .mean()
             .sel(time=slice(None, self.last_timestamp))
         )
 
-    def shift_timestamps(self, ds: xr.Dataset):
+        # Merge with time-invariant variables
+        if time_invariant_vars:
+            ds_time_invariant = ds[time_invariant_vars]
+            ds = xr.merge([ds_time_varying_avg, ds_time_invariant])
+        else:
+            ds = ds_time_varying_avg
+
+        logging.info(
+            f"After _compute_window_avg time coord:\n {str(ds[self.time_dim])}"
+        )
+        return ds
+
+    def _shift_timestamps(self, ds: xr.Dataset):
         """
         Shifts the time coordinate to the midpoint of the averaging interval.
 
@@ -103,7 +107,48 @@ class WindowAvgDatasetConfig:
         if self.shift_timestamps_to_avg_interval_midpoint:
             ds = shift_timestamps_to_midpoint(ds, time_dim="time")
             ds["time"].attrs["long_name"] = "time, avg interval midpoint"
+            logging.info(
+                f"After _shift_timestamps time coord:\n {str(ds[self.time_dim])}"
+            )
         return ds
+
+    def get_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
+        logging.info(f"Input time coord:\n {str(ds[self.time_dim])}")
+        ds = self._compute_window_avg(ds)
+        ds = self._shift_timestamps(ds)
+        return ds
+
+
+@dataclasses.dataclass
+class CreateWindowAvgDatasetConfig:
+    """
+    Top-level runner config.
+
+    Attributes:
+        input_dataset: Configuration for the source atmosphere dataset.
+        window_avg: Configuration for creating the window-averaged dataset.
+        output_zarr_path: Full path to the output zarr store.
+        output_writer: Configuration for dask and xpartition.
+    """
+
+    input_dataset: WindowAvgInputDatasetConfig
+    window_avg: WindowAvgDatasetConfig
+    output_zarr_path: str
+    output_writer: OutputWriterConfig = dataclasses.field(
+        default_factory=OutputWriterConfig
+    )
+
+    def __post_init__(self):
+        logging.info(f"Input dataset: {self.input_dataset.zarr_path}")
+
+    @classmethod
+    def from_file(cls, path: str) -> "CreateWindowAvgDatasetConfig":
+        with open(path, "r") as file:
+            data = yaml.safe_load(file)
+
+        return dacite.from_dict(
+            data_class=cls, data=data, config=dacite.Config(cast=[tuple], strict=True)
+        )
 
 
 @click.command()
@@ -121,25 +166,15 @@ def main(
     debug: bool,
     subsample: bool,
 ):
-    config = WindowAvgDatasetConfig.from_file(yaml)
-    print(f"Input atmosphere dataset: {config.input_dataset.zarr_path}")
+    logging.basicConfig(level=logging.INFO)
+
+    config = CreateWindowAvgDatasetConfig.from_file(yaml)
 
     config.output_writer.start_dask_client(debug)
-
     ds = config.input_dataset.get_dataset()
-    ds = config.compute_window_avg(ds)
-    ds = config.shift_timestamps(ds)
+    ds = config.window_avg.get_window_avg(ds)
 
-    if config.version is None:
-        version = datetime.today().strftime("%Y-%m-%d")
-    else:
-        version = config.version
-
-    output_store = os.path.join(
-        config.output_directory,
-        f"{version}-{config.output_name}.zarr",
-    )
-
+    output_store = config.output_zarr_path
     if subsample:
         output_store = output_store.replace(".zarr", "-subsample.zarr")
         ds = ds.isel(time=slice(None, 73))

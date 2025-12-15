@@ -1,9 +1,8 @@
 import datetime
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
-from typing import Generic, Literal, TypeVar
+from collections.abc import Mapping
+from typing import Literal
 
 import numpy as np
-import torch
 import xarray as xr
 
 from fme.ace.data_loading.augmentation import BatchModifierABC, NullModifier
@@ -14,24 +13,12 @@ from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
-from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
-
-T = TypeVar("T", covariant=True)
-
-
-U = TypeVar("U")
-
-
-class SizedMap(Generic[T, U], Sized, Iterable[U]):
-    def __init__(self, func: Callable[[T], U], iterable: DataLoader[T]):
-        self._func = func
-        self._iterable = iterable
-
-    def __len__(self) -> int:
-        return len(self._iterable)
-
-    def __iter__(self) -> Iterator[U]:
-        return map(self._func, self._iterable)
+from fme.core.generics.data import (
+    DataLoader,
+    GriddedDataABC,
+    InferenceDataABC,
+    SizedMap,
+)
 
 
 class GriddedData(GriddedDataABC[BatchData]):
@@ -49,7 +36,6 @@ class GriddedData(GriddedDataABC[BatchData]):
         loader: DataLoaderABC,
         properties: DatasetProperties,
         modifier: BatchModifierABC = NullModifier(),
-        sampler: torch.utils.data.Sampler | None = None,
     ):
         """
         Args:
@@ -58,8 +44,6 @@ class GriddedData(GriddedDataABC[BatchData]):
             properties: Batch-constant properties for the dataset, such as variable
                 metadata and coordinate information. Data can be on any device.
             modifier: Modifier for the data loader.
-            sampler: Optional sampler for the data loader. Provided to allow support for
-                distributed training.
 
         Note:
             While input data can be on any device, all data exposed from this class
@@ -70,7 +54,6 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._timestep = self._properties.timestep
         self._vertical_coordinate = self._properties.vertical_coordinate
         self._mask_provider = self._properties.mask_provider
-        self._sampler = sampler
         self._modifier = modifier
         self._batch_size: int | None = None
 
@@ -78,8 +61,12 @@ class GriddedData(GriddedDataABC[BatchData]):
     def loader(self) -> DataLoader[BatchData]:
         return self._get_gpu_loader(self._loader)
 
-    def subset_loader(self, start_batch: int) -> DataLoader[BatchData]:
-        return self._get_gpu_loader(self._loader.subset(start_batch))
+    def subset_loader(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> DataLoader[BatchData]:
+        return self._get_gpu_loader(
+            self._loader.subset(start_batch=start_batch, stop_batch=stop_batch)
+        )
 
     def _get_gpu_loader(
         self, base_loader: DataLoader[BatchData]
@@ -101,6 +88,7 @@ class GriddedData(GriddedDataABC[BatchData]):
             mask_provider=self._mask_provider,
             timestep=self._timestep,
             variable_metadata=self._properties.variable_metadata,
+            all_labels=self._properties.all_labels,
         )
 
     @property
@@ -139,6 +127,12 @@ class GriddedData(GriddedDataABC[BatchData]):
         """
         self._loader.set_epoch(epoch)
 
+    def alternate_shuffle(self):
+        """
+        Change the random shuffle of the data loader for the current epoch.
+        """
+        self._loader.alternate_shuffle()
+
 
 def get_initial_condition(
     loader: DataLoader[BatchData],
@@ -167,7 +161,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     ):
         """
         Args:
-            loader: torch DataLoader, which returns batches of type BatchData.
+            loader: DataLoader, which returns batches of type BatchData.
                 Data can be on any device (but will typically be on CPU).
             initial_condition: Initial condition for the inference, or a requirements
                 object specifying how to extract the initial condition from the first

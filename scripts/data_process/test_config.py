@@ -5,6 +5,7 @@ import pytest
 import yaml
 from append_dataset import DatasetAppendConfig
 from combine_stats import Config as CombineStatsConfig
+from create_coupled_datasets import CreateCoupledDatasetsConfig
 from get_stats import Config as GetStatsConfig
 from upload_stats import Config as UploadStatsConfig
 
@@ -15,19 +16,26 @@ APPEND_CONFIG_YAMLS = [
     for f in os.listdir(DIRNAME + "/configs")
     if f.endswith(".yaml") and "append" in f
 ]
-IGNORE_CONFIG_YAMLS = [
-    "CM4-piControl-sea-ice-1deg-200yr.yaml",
-    "CM4-piControl-200yr-sic-6h-to-5Davg.yaml",
-    "CM4-piControl-200yr-ts-6h-to-5Davg.yaml",
-    "CM4-piControl-200yr-5daily-sfc-flux.yaml",
-    "E3SMv3-piControl-100yr-5daily-sfc-flux.yaml",
-    "E3SMv3-piControl-100yr-sic-6h-to5Davg.yaml",
-    "e3smv3-piControl-100yr-ts-6h-to-5Davg.yaml",
+COUPLED_CONFIG_YAMLS = [
+    os.path.join(DIRNAME + "/configs", f)
+    for f in os.listdir(DIRNAME + "/configs")
+    if f.endswith("-coupled.yaml")
 ]
+IGNORE_CONFIGS_WITH_SUFFIX = [
+    "-append.yaml",
+    "-coupled.yaml",
+    "-vertical-coarsen.yaml",
+]
+
+
+def _ignore_config(fname: str) -> bool:
+    return any([fname.endswith(suffix) for suffix in IGNORE_CONFIGS_WITH_SUFFIX])
+
+
 CONFIG_YAMLS = [
     os.path.join(DIRNAME + "/configs", f)
     for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith(".yaml") and "append" not in f and f not in IGNORE_CONFIG_YAMLS
+    if f.endswith(".yaml") and not _ignore_config(f)
 ]
 
 
@@ -51,3 +59,13 @@ def test_valid_dataset_append_config(filename, cls):
     with open(filename, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
     dacite.from_dict(data_class=cls, data=config_data)
+
+
+@pytest.mark.parametrize(
+    "filename",
+    COUPLED_CONFIG_YAMLS,
+)
+def test_valid_create_coupled_datasets_config(filename):
+    with open(filename, "r") as f:
+        config_data = yaml.load(f, Loader=yaml.CLoader)
+    dacite.from_dict(data_class=CreateCoupledDatasetsConfig, data=config_data)

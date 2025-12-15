@@ -35,7 +35,8 @@ class ContextConfig:
     """
 
     embed_dim_scalar: int
-    embed_dim_2d: int
+    embed_dim_labels: int
+    embed_dim_noise: int
 
 
 @dataclasses.dataclass
@@ -46,22 +47,72 @@ class Context:
     Parameters:
         embedding_scalar: The scalar embedding to condition on. The
             last dimension is the channel dimension.
-        embedding_2d: The 2D embedding to condition on. The last
+        labels: The labels to condition on, of shape (batch_size, n_labels).
+        noise: The 2D noise embedding to condition on. The last
             three dimensions are (channels, height, width).
     """
 
     embedding_scalar: torch.Tensor | None
-    embedding_2d: torch.Tensor | None
+    labels: torch.Tensor | None
+    noise: torch.Tensor | None
 
     def __post_init__(self):
         if (
             self.embedding_scalar is not None
-            and self.embedding_2d is not None
-            and self.embedding_2d.ndim != self.embedding_scalar.ndim + 2
+            and self.noise is not None
+            and self.noise.ndim != self.embedding_scalar.ndim + 2
         ):
+            raise ValueError("noise must have 2 more dimensions than embedding_scalar")
+        if self.labels is not None and self.labels.ndim != 2:
+            raise ValueError("labels must have 2 dimensions")
+
+
+class ChannelLayerNorm(nn.Module):
+    """
+    Layer Normalization over third-last channel dimension.
+    """
+
+    def __init__(
+        self, n_channels: int, eps: float = 1e-5, elementwise_affine: bool = False
+    ):
+        super(ChannelLayerNorm, self).__init__()
+        self.n_channels = n_channels
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        if self.elementwise_affine:
+            self.weight = nn.Parameter(torch.ones(n_channels))
+            self.bias = nn.Parameter(torch.zeros(n_channels))
+        else:
+            self.weight = None
+            self.bias = None
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.elementwise_affine:
+            torch.nn.init.constant_(self.weight, 1.0)
+            torch.nn.init.constant_(self.bias, 0.0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() < 2:
             raise ValueError(
-                "embedding_2d must have 2 more dimensions than embedding_scalar"
+                f"Expected at least 3D input with channel at dim=-3, got shape {tuple(x.shape)}"
             )
+        if x.size(-3) != self.n_channels:
+            raise ValueError(
+                f"Channel dimension mismatch: got C={x.size(-3)}, expected {self.n_channels}"
+            )
+
+        # Compute per-pixel mean/var across channels without transposing
+        mean = x.mean(dim=-3, keepdim=True)
+        var = x.var(dim=-3, keepdim=True, unbiased=False)
+        inv_std = torch.rsqrt(var + self.eps)
+        y = (x - mean) * inv_std
+
+        if self.weight is not None and self.bias is not None:
+            # Broadcast [C] over [N, C, *spatial]
+            shape = [1, -1] + [1] * (x.dim() - 2)
+            y = y * self.weight.view(*shape) + self.bias.view(*shape)
+        return y
 
 
 class ConditionalLayerNorm(nn.Module):
@@ -84,7 +135,8 @@ class ConditionalLayerNorm(nn.Module):
         super(ConditionalLayerNorm, self).__init__()
         self.n_channels = n_channels
         self.embed_dim_scalar = context_config.embed_dim_scalar
-        self.embed_dim_2d = context_config.embed_dim_2d
+        self.embed_dim_labels = context_config.embed_dim_labels
+        self.embed_dim_noise = context_config.embed_dim_noise
         self.epsilon = epsilon
         if self.embed_dim_scalar > 0:
             self.W_scale: nn.Linear | None = nn.Linear(
@@ -96,13 +148,19 @@ class ConditionalLayerNorm(nn.Module):
         else:
             self.W_scale = None
             self.W_bias = None
-        if self.embed_dim_2d > 0:
+        if self.embed_dim_labels > 0:
+            self.W_scale_labels = nn.Linear(self.embed_dim_labels, self.n_channels)
+            self.W_bias_labels = nn.Linear(self.embed_dim_labels, self.n_channels)
+        else:
+            self.W_scale_labels = None
+            self.W_bias_labels = None
+        if self.embed_dim_noise > 0:
             # no bias as it is already handled in the non-2d layers
             self.W_scale_2d = nn.Conv2d(
-                self.embed_dim_2d, self.n_channels, kernel_size=1, bias=False
+                self.embed_dim_noise, self.n_channels, kernel_size=1, bias=False
             )
             self.W_bias_2d = nn.Conv2d(
-                self.embed_dim_2d, self.n_channels, kernel_size=1, bias=False
+                self.embed_dim_noise, self.n_channels, kernel_size=1, bias=False
             )
         else:
             self.W_scale_2d = None
@@ -114,8 +172,8 @@ class ConditionalLayerNorm(nn.Module):
                 elementwise_affine=elementwise_affine,
             )
         else:
-            self.norm = nn.LayerNorm(
-                (self.n_channels,),
+            self.norm = ChannelLayerNorm(
+                self.n_channels,
                 eps=epsilon,
                 elementwise_affine=elementwise_affine,
             )
@@ -129,11 +187,18 @@ class ConditionalLayerNorm(nn.Module):
         if self.W_bias is not None:
             torch.nn.init.constant_(self.W_bias.weight, 0.0)
             torch.nn.init.constant_(self.W_bias.bias, 0.0)
+        if self.W_scale_labels is not None:
+            torch.nn.init.constant_(self.W_scale_labels.weight, 0.0)
+            # bias starts at 1 for the first scale, we don't want to add more.
+            torch.nn.init.constant_(self.W_scale_labels.bias, 0.0)
+        if self.W_bias_labels is not None:
+            torch.nn.init.constant_(self.W_bias_labels.weight, 0.0)
+            torch.nn.init.constant_(self.W_bias_labels.bias, 0.0)
+        # no bias on 2d layers as it is already handled in the non-2d layers
         if self.W_scale_2d is not None:
             torch.nn.init.constant_(self.W_scale_2d.weight, 0.0)
         if self.W_bias_2d is not None:
             torch.nn.init.constant_(self.W_bias_2d.weight, 0.0)
-        # no bias on 2d layers as it is already handled in the non-2d layers
 
     def forward(self, x: torch.Tensor, context: Context) -> torch.Tensor:
         """
@@ -150,6 +215,10 @@ class ConditionalLayerNorm(nn.Module):
         Returns:
             The normalized tensor, of shape (batch_size, channels, height, width).
         """
+        if context.labels is None and (
+            self.W_scale_labels is not None or self.W_bias_labels is not None
+        ):
+            raise ValueError("labels must be provided")
         if self.W_scale is not None:
             if context.embedding_scalar is None:
                 raise ValueError("embedding_scalar must be provided")
@@ -157,11 +226,14 @@ class ConditionalLayerNorm(nn.Module):
                 self.W_scale(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
             )
         else:
-            scale = torch.ones_like(x)
+            scale = torch.ones(
+                list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
+            )
+
         if self.W_scale_2d is not None:
-            if context.embedding_2d is None:
+            if context.noise is None:
                 raise ValueError("embedding_2d must be provided")
-            scale = scale + self.W_scale_2d(context.embedding_2d)
+            scale = scale + self.W_scale_2d(context.noise)
         if self.W_bias is not None:
             if context.embedding_scalar is None:
                 raise ValueError("embedding_scalar must be provided")
@@ -169,16 +241,21 @@ class ConditionalLayerNorm(nn.Module):
                 self.W_bias(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
             )
         else:
-            bias = torch.zeros_like(x)
+            bias = torch.zeros(
+                list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
+            )
+
+        if self.W_scale_labels is not None:
+            scale = scale + self.W_scale_labels(context.labels).unsqueeze(-1).unsqueeze(
+                -1
+            )
+        if self.W_bias_labels is not None:
+            bias = bias + self.W_bias_labels(context.labels).unsqueeze(-1).unsqueeze(-1)
         if self.W_bias_2d is not None:
-            if context.embedding_2d is None:
+            if context.noise is None:
                 raise ValueError("embedding_2d must be provided")
-            bias = bias + self.W_bias_2d(context.embedding_2d)
-        if not self._global_layer_norm:
-            x = x.transpose(1, -1)
+            bias = bias + self.W_bias_2d(context.noise)
         x_norm: torch.Tensor = self.norm(x)
-        if not self._global_layer_norm:
-            x_norm = x_norm.transpose(1, -1)
         return x_norm * scale + bias
 
 

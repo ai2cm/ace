@@ -86,6 +86,8 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
                 dataset_info.gridded_operations,
                 target="norm",
                 channel_mean_names=channel_mean_names,
+                include_bias=False,
+                include_grad_mag_percent_diff=False,
             ),
         }
         try:

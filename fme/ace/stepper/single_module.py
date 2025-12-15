@@ -15,6 +15,7 @@ from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
+from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.parameter_init import (
     ParameterInitializationConfig,
     ParameterInitializer,
@@ -23,7 +24,11 @@ from fme.ace.stepper.parameter_init import (
     WeightsAndHistoryLoader,
     null_weights_and_history,
 )
-from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLength,
+    TimeLengthProbabilities,
+    TimeLengthSchedule,
+)
 from fme.core.coordinates import (
     NullPostProcessFn,
     SerializableVerticalCoordinate,
@@ -31,15 +36,16 @@ from fme.core.coordinates import (
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.labels import BatchLabels
 from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
-from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -48,7 +54,12 @@ from fme.core.normalizer import (
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step.multi_call import MultiCallStepConfig, replace_multi_call
+from fme.core.step.args import StepArgs
+from fme.core.step.multi_call import (
+    MultiCallConfig,
+    MultiCallStepConfig,
+    replace_multi_call,
+)
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.tensors import (
@@ -465,7 +476,7 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[TensorDict],
     time: xr.DataArray,
-    labels: list[set[str]],
+    labels: BatchLabels | None = None,
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
     output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim=1)
@@ -498,6 +509,7 @@ class StepperConfig:
             number of timesteps present in the training dataset samples. Values must
             be less than or equal to the number of timesteps present
             in the training dataset samples.
+        derived_forcings: Configuration for deriving forcing variables.
     """
 
     step: StepSelector
@@ -509,13 +521,18 @@ class StepperConfig:
         default_factory=lambda: ParameterInitializationConfig()
     )
     input_masking: StaticMaskingConfig | None = None
-    train_n_forward_steps: TimeLengthProbabilities | int | None = None
+    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
+    derived_forcings: DerivedForcingsConfig = dataclasses.field(
+        default_factory=lambda: DerivedForcingsConfig()
+    )
 
     @property
-    def train_n_forward_steps_sampler(self) -> TimeLengthProbabilities | None:
-        if isinstance(self.train_n_forward_steps, int):
-            return TimeLengthProbabilities.from_constant(self.train_n_forward_steps)
-        return self.train_n_forward_steps
+    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
+        if self.train_n_forward_steps is None:
+            return None
+        if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
+            return self.train_n_forward_steps
+        return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
 
     def __post_init__(self):
         if self.crps_training:
@@ -549,23 +566,25 @@ class StepperConfig:
                     "default_n_forward_steps is required if "
                     "train_n_forward_steps is not provided"
                 )
-            n_forward_steps = default_n_forward_steps
+            n_forward_steps: int | IntSchedule = default_n_forward_steps
         elif isinstance(self.train_n_forward_steps, int):
             n_forward_steps = self.train_n_forward_steps
         else:
             n_forward_steps = self.train_n_forward_steps.max_n_forward_steps
-        return DataRequirements(
+        requirements = DataRequirements(
             names=self.all_names,
             n_timesteps=self._window_steps_required(n_forward_steps),
         )
+        return self.derived_forcings.update_requirements(requirements)
 
     def get_evaluation_window_data_requirements(
         self, n_forward_steps: int
     ) -> DataRequirements:
-        return DataRequirements(
+        requirements = DataRequirements(
             names=self.all_names,
             n_timesteps=self._window_steps_required(n_forward_steps),
         )
+        return self.derived_forcings.update_requirements(requirements)
 
     def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
         return PrognosticStateDataRequirements(
@@ -580,14 +599,19 @@ class StepperConfig:
     def get_forcing_window_data_requirements(
         self, n_forward_steps: int
     ) -> DataRequirements:
-        return DataRequirements(
+        requirements = DataRequirements(
             names=list(
                 set(self.input_only_names).union(self.step.next_step_input_names)
             ),
             n_timesteps=self._window_steps_required(n_forward_steps),
         )
+        return self.derived_forcings.update_requirements(requirements)
 
-    def _window_steps_required(self, n_forward_steps: int) -> int:
+    def _window_steps_required(
+        self, n_forward_steps: int | IntSchedule
+    ) -> int | IntSchedule:
+        if isinstance(n_forward_steps, IntSchedule):
+            return n_forward_steps.add(self.n_ic_timesteps)
         return n_forward_steps + self.n_ic_timesteps
 
     def as_loaded_dict(self):
@@ -758,6 +782,10 @@ class StepperConfig:
         self.step, new_state = replace_multi_call(self.step, multi_call, state)
         return new_state
 
+    def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
+        self.derived_forcings.validate_replacement(derived_forcings)
+        self.derived_forcings = derived_forcings
+
     def get_parameter_initializer(
         self,
         load_weights_and_history: WeightsAndHistoryLoader,
@@ -774,6 +802,17 @@ class StepperConfig:
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
+
+
+class EpochNotProvidedError(ValueError):
+    pass
+
+
+def probabilities_from_time_length(value: TimeLength) -> TimeLengthProbabilities:
+    if isinstance(value, TimeLengthProbabilities):
+        return value
+    else:
+        return TimeLengthProbabilities.from_constant(value)
 
 
 class Stepper(
@@ -826,7 +865,17 @@ class Stepper(
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
-        self._train_n_forward_steps_sampler = config.train_n_forward_steps_sampler
+        self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
+        self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
+        if config.train_n_forward_steps_schedule is None:
+            pass
+        elif len(config.train_n_forward_steps_schedule.milestones) == 0:
+            self._train_n_forward_steps_sampler = probabilities_from_time_length(
+                config.train_n_forward_steps_schedule.start_value
+            )
+        else:
+            self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
+        self._epoch: int | None = None  # to keep track of cached values
 
         def get_loss_obj() -> StepLoss:
             loss_normalizer = step.get_loss_normalizer()
@@ -874,6 +923,24 @@ class Stepper(
         ] = self.predict_paired
 
         self._dataset_info = dataset_info
+        self._forcing_deriver = config.derived_forcings.build(dataset_info)
+
+    def _init_for_epoch(self, epoch: int | None):
+        if epoch is None and self._train_n_forward_steps_schedule is not None:
+            raise EpochNotProvidedError(
+                "current configuration requires epoch to be provided "
+                "on BatchData during training"
+            )
+        if self._epoch == epoch:
+            return
+        if self._train_n_forward_steps_schedule is not None:
+            assert epoch is not None  # already checked, but needed for mypy
+            self._train_n_forward_steps_sampler = probabilities_from_time_length(
+                self._train_n_forward_steps_schedule.get_value(epoch)
+            )
+        else:
+            self._train_n_forward_steps_sampler = None
+        self._epoch = epoch
 
     @property
     def _loaded_loss_normalizer(self) -> StandardNormalizer:
@@ -988,6 +1055,16 @@ class Stepper(
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
 
+    def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
+        """
+        Replace the derived forcings configuration with a new one.
+
+        Args:
+            derived_forcings: The new derived forcings configuration or None.
+        """
+        self._config.replace_derived_forcings(derived_forcings)
+        self._forcing_deriver = derived_forcings.build(self._dataset_info)
+
     def get_base_weights(self) -> Weights | None:
         """
         Get the base weights of the stepper.
@@ -1027,28 +1104,21 @@ class Stepper(
 
     def step(
         self,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
+        args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
         Args:
-            input: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from the
-                initial timestep.
-            next_step_input_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from
-                the output timestep.
+            args: The arguments to the step function.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
         """
-        input = self._input_process_func(input)
-        next_step_input_data = self._input_process_func(next_step_input_data)
-        output = self._step_obj.step(input, next_step_input_data, wrapper=wrapper)
+        args = args.apply_input_process_func(self._input_process_func)
+        output = self._step_obj.step(args=args, wrapper=wrapper)
         return self._output_process_func(output)
 
     def get_prediction_generator(
@@ -1076,10 +1146,16 @@ class Stepper(
         Returns:
             Generator yielding the output data at each timestep.
         """
-        ic_dict = initial_condition.as_batch_data().data
+        ic_batch_data = initial_condition.as_batch_data()
+        if ic_batch_data.labels != forcing_data.labels:
+            raise ValueError(
+                "Initial condition and forcing data must have the same labels, "
+                f"got {ic_batch_data.labels} and {forcing_data.labels}."
+            )
+        ic_dict = ic_batch_data.data
         forcing_dict = forcing_data.data
         return self._predict_generator(
-            ic_dict, forcing_dict, n_forward_steps, optimizer
+            ic_dict, forcing_dict, n_forward_steps, optimizer, forcing_data.labels
         )
 
     @property
@@ -1094,6 +1170,7 @@ class Stepper(
         forcing_dict: TensorMapping,
         n_forward_steps: int,
         optimizer: OptimizationABC,
+        labels: BatchLabels | None,
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1115,8 +1192,11 @@ class Stepper(
                 return optimizer.checkpoint(module, step=step)
 
             state = self.step(
-                input_data,
-                next_step_input_dict,
+                StepArgs(
+                    input=input_data,
+                    next_step_input_data=next_step_input_dict,
+                    labels=labels,
+                ),
                 wrapper=checkpoint,
             )
             yield state
@@ -1127,6 +1207,7 @@ class Stepper(
         initial_condition: PrognosticState,
         forcing: BatchData,
         compute_derived_variables: bool = False,
+        compute_derived_forcings: bool = True,
     ) -> tuple[BatchData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
@@ -1141,6 +1222,9 @@ class Stepper(
                 subsequent timesteps.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction.
+            compute_derived_forcings: Whether to compute derived forcing variables for
+                the prediction. Only used to disable computing the derived forcings
+                if they have been computed ahead of time.
 
         Returns:
             A batch data containing the prediction and the prediction's final state
@@ -1151,6 +1235,9 @@ class Stepper(
             self._step_obj.next_step_input_names
         )
 
+        if compute_derived_forcings:
+            forcing = self._forcing_deriver(forcing)
+
         if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
             forcing = forcing.broadcast_ensemble(
                 n_ensemble=initial_condition.as_batch_data().n_ensemble
@@ -1158,11 +1245,6 @@ class Stepper(
 
         with timer.context("forward_prediction"):
             ic_batch_data = initial_condition.as_batch_data()
-            if ic_batch_data.labels != forcing.labels:
-                raise ValueError(
-                    "Initial condition and forcing data must have the same labels, "
-                    f"got {ic_batch_data.labels} and {forcing.labels}."
-                )
             forcing_data = forcing.subset_names(forcing_names)
             if ic_batch_data.n_timesteps != self.n_ic_timesteps:
                 raise ValueError(
@@ -1229,8 +1311,12 @@ class Stepper(
             all target/forcing data at the same timesteps, and 2) the prediction's
             final state, which can be used as a new initial condition.
         """
+        forcing = self._forcing_deriver(forcing)
         prediction, new_initial_condition = self.predict(
-            initial_condition, forcing, compute_derived_variables
+            initial_condition,
+            forcing,
+            compute_derived_variables,
+            compute_derived_forcings=False,
         )
         forward_data = self.get_forward_data(
             forcing, compute_derived_variables=compute_derived_variables
@@ -1289,9 +1375,11 @@ class Stepper(
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
+        self._init_for_epoch(data.epoch)
         metrics: dict[str, float] = {}
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         target_data = self.get_forward_data(data, compute_derived_variables=False)
+        data = self._forcing_deriver(data)
 
         optimization.set_mode(self._step_obj.modules)
         output_list = self._accumulate_loss(
@@ -1339,15 +1427,20 @@ class Stepper(
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
         n_ensemble = self._config.n_ensemble
-
+        input_batch_data = input_data.as_batch_data()
+        if input_batch_data.labels != data.labels:
+            raise ValueError(
+                "Initial condition and forcing data must have the same labels, "
+                f"got {input_batch_data.labels} and {data.labels}."
+            )
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
-
         output_generator = self._predict_generator(
             input_ensemble_data.data,
             forcing_ensemble_data.data,
             n_forward_steps,
             optimization,
+            labels=input_ensemble_data.labels,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
@@ -1527,10 +1620,13 @@ class StepperOverrideConfig:
             stepper.
         multi_call: MultiCall configuration to override that used in producing a
             serialized stepper.
+        derived_forcings: Derived forcings configuration to override that used in
+            producing a serialized stepper.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
+    derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
 
 
 def load_stepper_config(
@@ -1585,4 +1681,11 @@ def load_stepper(
             "multi_call configuration."
         )
         stepper.replace_multi_call(override_config.multi_call)
+
+    if override_config.derived_forcings != "keep":
+        logging.info(
+            "Overriding training derived_forcings configuration with a new "
+            "derived_forcings configuration."
+        )
+        stepper.replace_derived_forcings(override_config.derived_forcings)
     return stepper

@@ -26,8 +26,11 @@ from fme.ace.inference.test_evaluator import (
     validate_stepper_ocean,
 )
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
+from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriver
+from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
+    EpochNotProvidedError,
     Stepper,
     StepperConfig,
     StepperOverrideConfig,
@@ -35,6 +38,11 @@ from fme.ace.stepper.single_module import (
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
+)
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLength,
+    TimeLengthMilestone,
+    TimeLengthSchedule,
 )
 from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData
@@ -50,7 +58,6 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.loss import StepLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
-from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import (
@@ -61,6 +68,8 @@ from fme.core.optimization import (
 )
 from fme.core.registry.module import ModuleSelector
 from fme.core.step import SingleModuleStepConfig, StepSelector
+from fme.core.step.args import StepArgs
+from fme.core.step.multi_call import MultiCallConfig
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict
@@ -74,45 +83,17 @@ OCEAN_CONFIG = OceanConfig(surface_temperature_name="a", ocean_fraction_name="b"
 MULTI_CALL_CONFIG = MultiCallConfig(
     forcing_name="co2", forcing_multipliers={"_b": 0.5}, output_names=["ULWRFtoa"]
 )
-LOAD_STEPPER_TESTS = {
-    "override-ocean": (None, None, OCEAN_CONFIG, "keep", OCEAN_CONFIG, None),
-    "persist-ocean": (OCEAN_CONFIG, None, "keep", "keep", OCEAN_CONFIG, None),
-    "override-multi-call": (
-        None,
-        None,
-        "keep",
-        MULTI_CALL_CONFIG,
-        None,
-        MULTI_CALL_CONFIG,
-    ),
-    "persist-multi-call": (
-        None,
-        MULTI_CALL_CONFIG,
-        "keep",
-        "keep",
-        None,
-        MULTI_CALL_CONFIG,
-    ),
-    "override-all": (
-        None,
-        None,
-        OCEAN_CONFIG,
-        MULTI_CALL_CONFIG,
-        OCEAN_CONFIG,
-        MULTI_CALL_CONFIG,
-    ),
-    "persist-all": (
-        OCEAN_CONFIG,
-        MULTI_CALL_CONFIG,
-        "keep",
-        "keep",
-        OCEAN_CONFIG,
-        MULTI_CALL_CONFIG,
-    ),
-}
+INSOLATION_NAME = "DSWRFtoa"
+SOLAR_CONSTANT_NAME = "solar_constant"
+S0 = 1360.0
+SOLAR_CONSTANT_AS_NAME = NameConfig(SOLAR_CONSTANT_NAME)
+SOLAR_CONSTANT_AS_VALUE = ValueConfig(S0)
+INSOLATION_CONFIG = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_VALUE)
+DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig(insolation=INSOLATION_CONFIG)
+EMPTY_DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig()
 
 
-def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
+def get_data(names: Iterable[str], n_samples, n_time, epoch: int = 0) -> SphericalData:
     data_dict = {}
     n_lat, n_lon, nz = 5, 5, 7
 
@@ -128,7 +109,8 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
             np.zeros((n_samples, n_time)),
             dims=["sample", "time"],
         ),
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
+        epoch=epoch,
     )
     return SphericalData(data, area_weights, vertical_coord)
 
@@ -598,6 +580,58 @@ def _setup_and_train_on_batch(
     return stepper.train_on_batch(data, optimization=optimization)
 
 
+@pytest.mark.parametrize("has_epoch", [True, False])
+@pytest.mark.parametrize("uses_scheduling", [True, False])
+def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
+    in_names, out_names = ["a"], ["a"]
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=3, epoch=0 if has_epoch else None
+    ).to_device()
+    module = ReturnZerosModule(len(in_names), len(out_names))
+
+    optimization_config = OptimizationConfig()
+    optimization = optimization_config.build(modules=[module], max_epochs=2)
+
+    if uses_scheduling:
+        train_n_forward_steps: TimeLengthSchedule | TimeLength = TimeLengthSchedule(
+            start_value=2,
+            milestones=[
+                TimeLengthMilestone(epoch=1, value=3),
+            ],
+        )
+    else:
+        train_n_forward_steps = 2
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), 0.0),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        train_n_forward_steps=train_n_forward_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    if uses_scheduling and not has_epoch:
+        with pytest.raises(EpochNotProvidedError):
+            stepper.train_on_batch(data, optimization=optimization)
+    else:
+        stepper.train_on_batch(data, optimization=optimization)
+
+
 @pytest.mark.parametrize(
     "is_input,is_output,is_prescribed",
     [
@@ -819,7 +853,8 @@ def test_stepper_corrector(
     batch_data = BatchData.new_on_cpu(
         data=data,
         time=time,
-        labels=[set() for _ in range(time.shape[0])],
+        labels=None,
+        epoch=0,
     ).to_device()
     # run the stepper on the data
     with torch.no_grad():
@@ -881,6 +916,7 @@ def _get_stepper(
     ocean_config: OceanConfig | None = None,
     module_name: Literal["AddOne", "ChannelSum", "RepeatChannel", "Linear"] = "AddOne",
     norm_mean: float = 0.0,
+    derived_forcings: DerivedForcingsConfig | None = None,
     **kwargs,
 ):
     if module_name == "AddOne":
@@ -921,6 +957,9 @@ def _get_stepper(
 
         module_config = {"module": Linear()}
 
+    if derived_forcings is None:
+        derived_forcings = DerivedForcingsConfig()
+
     config = StepperConfig(
         step=StepSelector(
             type="single_module",
@@ -941,6 +980,7 @@ def _get_stepper(
             ),
         ),
         loss=StepLossConfig(type="MSE"),
+        derived_forcings=derived_forcings,
     )
     dataset_info = get_dataset_info()
     return config.get_stepper(dataset_info)
@@ -948,9 +988,12 @@ def _get_stepper(
 
 def test_step():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    n_samples = 3
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
-    output = stepper.step(input_data, {})
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
@@ -958,8 +1001,11 @@ def test_step():
 
 def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
-    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
-    output = stepper.step(input_data, {})
+    n_samples = 3
+    input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
 
@@ -973,8 +1019,11 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
         norm_mean=norm_mean,
         residual_prediction=residual_prediction,
     )
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    output = stepper.step(input_data, {})
+    n_samples = 3
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
     else:
@@ -990,7 +1039,9 @@ def test_step_with_prescribed_ocean():
     )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
-    output = stepper.step(input_data, ocean_data)
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
+    )
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
         ocean_data["a"],
@@ -1029,14 +1080,15 @@ def get_data_for_predict(
     n_ensemble: int = 1,
 ) -> tuple[PrognosticState, BatchData]:
     n_samples = 3
+    index = xr.date_range("2000", freq="6h", periods=n_steps + 1, use_cftime=True)
+    forcing_time = xr.DataArray(np.stack(n_samples * [index]), dims=["sample", "time"])
+    input_time = forcing_time.isel(time=[0])
+
     input_data = (
         BatchData.new_on_device(
             data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
-            time=xr.DataArray(
-                np.zeros((n_samples, 1)),
-                dims=["sample", "time"],
-            ),
-            labels=[set() for _ in range(n_samples)],
+            time=input_time,
+            labels=None,
         )
         .broadcast_ensemble(n_ensemble)
         .get_start(
@@ -1049,11 +1101,8 @@ def get_data_for_predict(
         data={
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
         },
-        time=xr.DataArray(
-            np.zeros((n_samples, n_steps + 1)),
-            dims=["sample", "time"],
-        ),
-        labels=[set() for _ in range(n_samples)],
+        time=forcing_time,
+        labels=None,
     ).broadcast_ensemble(n_ensemble)
     return input_data, forcing_data
 
@@ -1181,7 +1230,7 @@ def test_prepend_initial_condition():
     ic = BatchData.new_on_device(
         data=ic_data,
         time=xr.DataArray(np.zeros((batch_size, 1)), dims=["sample", "time"]),
-        labels=[set() for _ in range(batch_size)],
+        labels=None,
     ).get_start(
         prognostic_names=["a", "b"],
         n_ic_timesteps=1,
@@ -1244,14 +1293,87 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         assert stepper.normalizer.stds == full_field_stds
 
 
+LOAD_STEPPER_TESTS = {
+    "override-ocean": (
+        None,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        OCEAN_CONFIG,
+        "keep",
+        "keep",
+        OCEAN_CONFIG,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
+    "persist-ocean": (
+        OCEAN_CONFIG,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        "keep",
+        "keep",
+        "keep",
+        OCEAN_CONFIG,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
+    "override-multi-call": (
+        None,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        "keep",
+        MULTI_CALL_CONFIG,
+        "keep",
+        None,
+        MULTI_CALL_CONFIG,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
+    "persist-multi-call": (
+        None,
+        MULTI_CALL_CONFIG,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        "keep",
+        "keep",
+        "keep",
+        None,
+        MULTI_CALL_CONFIG,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+    ),
+    "override-all": (
+        None,
+        None,
+        EMPTY_DERIVED_FORCINGS_CONFIG,
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+    ),
+    "persist-all": (
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+        "keep",
+        "keep",
+        "keep",
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+    ),
+}
+
+
 @pytest.mark.parametrize(
     (
         "serialized_ocean_config",
         "serialized_multi_call_config",
+        "serialized_derived_forcings_config",
         "overriding_ocean_config",
         "overriding_multi_call_config",
+        "overriding_derived_forcings_config",
         "expected_ocean_config",
         "expected_multi_call_config",
+        "expected_derived_forcings_config",
     ),
     list(LOAD_STEPPER_TESTS.values()),
     ids=list(LOAD_STEPPER_TESTS.keys()),
@@ -1260,11 +1382,17 @@ def test_load_stepper_and_load_stepper_config(
     tmp_path: pathlib.Path,
     serialized_ocean_config: OceanConfig | None,
     serialized_multi_call_config: MultiCallConfig | None,
+    serialized_derived_forcings_config: DerivedForcingsConfig,
     overriding_ocean_config: Literal["keep"] | OceanConfig | None,
     overriding_multi_call_config: Literal["keep"] | MultiCallConfig | None,
+    overriding_derived_forcings_config: Literal["keep"] | DerivedForcingsConfig,
     expected_ocean_config: OceanConfig | None,
     expected_multi_call_config: MultiCallConfig | None,
+    expected_derived_forcings_config: DerivedForcingsConfig,
+    very_fast_only: bool,
 ):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     in_names = ["co2", "var", "a", "b"]
     fluxes = ["ULWRFtoa"]
     out_names = ["var", "a"] + fluxes
@@ -1296,6 +1424,7 @@ def test_load_stepper_and_load_stepper_config(
         data_shape=dim_sizes.shape_nd,
         ocean=serialized_ocean_config,
         multi_call=serialized_multi_call_config,
+        derived_forcings=serialized_derived_forcings_config,
     )
 
     # First check that load_stepper_config and load_stepper functions load
@@ -1308,11 +1437,14 @@ def test_load_stepper_and_load_stepper_config(
     stepper = load_stepper(stepper_path)
     validate_stepper_ocean(stepper, serialized_ocean_config)
     validate_stepper_multi_call(stepper, serialized_multi_call_config)
+    assert stepper.config.derived_forcings == serialized_derived_forcings_config
 
     # Then check that they load the appropriately modified config and
     # stepper when provided with a StepperOverrideConfig.
     stepper_override = StepperOverrideConfig(
-        ocean=overriding_ocean_config, multi_call=overriding_multi_call_config
+        ocean=overriding_ocean_config,
+        multi_call=overriding_multi_call_config,
+        derived_forcings=overriding_derived_forcings_config,
     )
 
     stepper_config = load_stepper_config(stepper_path, stepper_override)
@@ -1323,6 +1455,8 @@ def test_load_stepper_and_load_stepper_config(
     stepper = load_stepper(stepper_path, stepper_override)
     validate_stepper_ocean(stepper, expected_ocean_config)
     validate_stepper_multi_call(stepper, expected_multi_call_config)
+    assert stepper.config.derived_forcings == expected_derived_forcings_config
+    assert isinstance(stepper._forcing_deriver, ForcingDeriver)
 
 
 def get_regression_stepper_and_data(
@@ -1379,7 +1513,7 @@ def get_regression_stepper_and_data(
 
     dataset_info = get_dataset_info(img_shape=img_shape)
     stepper = config.get_stepper(dataset_info)
-    data = BatchData(
+    data = BatchData.new_on_device(
         data={
             "a": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
             "b": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
@@ -1389,7 +1523,8 @@ def get_regression_stepper_and_data(
             np.zeros((n_samples, n_forward_steps + 1)),
             dims=["sample", "time"],
         ),
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
+        epoch=0,
         horizontal_dims=["lat", "lon"],
     )
     return stepper, data
@@ -1559,3 +1694,74 @@ def test_get_stepper_with_input_masking_raises():
     # input_masking provided in config
     with pytest.raises(MissingDatasetInfo, match="mask_provider"):
         _ = _get_stepper_with_input_masking(dataset_info_has_mask_provider=False)
+
+
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_predict_with_derived_forcing(n_ensemble):
+    insolation = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_NAME)
+    derived_forcings = DerivedForcingsConfig(insolation=insolation)
+    in_names = [SOLAR_CONSTANT_NAME, INSOLATION_NAME]
+    out_names = ["a"]
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        derived_forcings=derived_forcings,
+    )
+    n_steps = 3
+    forcing_names = [SOLAR_CONSTANT_NAME]
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=forcing_names, n_ensemble=n_ensemble
+    )
+    # Given that insolation is an input, but is not in the provided forcing data
+    # this test would fail if it was not derived. Since insolation does not end
+    # up in the output of predict, there is nothing else we can really test
+    # here.
+    _, _ = stepper.predict(input_data, forcing_data)
+
+
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_predict_paired_with_derived_forcing(n_ensemble):
+    insolation = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_NAME)
+    derived_forcings = DerivedForcingsConfig(insolation=insolation)
+    in_names = [SOLAR_CONSTANT_NAME, INSOLATION_NAME]
+    out_names = ["a"]
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        derived_forcings=derived_forcings,
+    )
+    n_steps = 3
+    forcing_names = [SOLAR_CONSTANT_NAME]
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=forcing_names, n_ensemble=n_ensemble
+    )
+    output, _ = stepper.predict_paired(input_data, forcing_data)
+    assert INSOLATION_NAME in output.forcing
+
+
+def test_reloaded_stepper_has_derived_forcings():
+    in_names = [INSOLATION_NAME]
+    out_names = ["a"]
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        derived_forcings=DERIVED_FORCINGS_CONFIG,
+    )
+    stepper_state = stepper.get_state()
+    new_stepper = Stepper.from_state(stepper_state)
+    assert new_stepper.config.derived_forcings == stepper.config.derived_forcings
+
+
+def test_replace_derived_forcings_error():
+    in_names = [INSOLATION_NAME]
+    out_names = ["a"]
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        derived_forcings=DERIVED_FORCINGS_CONFIG,
+    )
+    replacement_insolation = InsolationConfig("foo", SOLAR_CONSTANT_AS_VALUE)
+    replacement = DerivedForcingsConfig(insolation=replacement_insolation)
+
+    with pytest.raises(ValueError, match="insolation_name"):
+        stepper.config.replace_derived_forcings(replacement)

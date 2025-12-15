@@ -7,6 +7,7 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -151,7 +152,7 @@ class DataLoaderConfig:
         return get_dataset(
             self.full_config,
             names,
-            n_timesteps,
+            IntSchedule.from_constant(n_timesteps),
             strict=self.strict_ensemble,
         )
 
@@ -355,14 +356,14 @@ class PairedDataLoaderConfig:
         dataset_fine, properties_fine = get_dataset(
             self.fine,
             requirements.fine_names,
-            requirements.n_timesteps,
+            IntSchedule.from_constant(requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
 
         dataset_coarse, properties_coarse = get_dataset(
             self.coarse_full_config,
             requirements.coarse_names,
-            requirements.n_timesteps,
+            IntSchedule.from_constant(requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
 
@@ -388,11 +389,28 @@ class PairedDataLoaderConfig:
         dataset_fine = self._repeat_if_requested(dataset_fine)
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
 
+        # Ensure fine data subselection lines up exactly with coarse data
+        fine_lat_extent = adjust_fine_coord_range(
+            self.lat_extent,
+            full_coarse_coord=properties_coarse.horizontal_coordinates.lat,
+            full_fine_coord=properties_fine.horizontal_coordinates.lat,
+        )
+        fine_lon_extent = adjust_fine_coord_range(
+            self.lon_extent,
+            full_coarse_coord=properties_coarse.horizontal_coordinates.lon,
+            full_fine_coord=properties_fine.horizontal_coordinates.lon,
+        )
+
         if requirements.use_fine_topography:
             if self.topography is None:
-                fine_topography = get_normalized_topography(
-                    get_raw_paths(self.fine[0].data_path, self.fine[0].file_pattern)[0]
-                )
+                data_path = self.fine[0].data_path
+                file_pattern = self.fine[0].file_pattern
+                raw_paths = get_raw_paths(data_path, file_pattern)
+                if len(raw_paths) == 0:
+                    raise ValueError(
+                        f"No files found matching '{data_path}/{file_pattern}'."
+                    )
+                fine_topography = get_normalized_topography(raw_paths[0])
             else:
                 fine_topography = get_normalized_topography(self.topography)
             fine_topography = fine_topography.to_device()
@@ -407,20 +425,11 @@ class PairedDataLoaderConfig:
                     f"Fine topography shape {fine_topography.shape} does not match "
                     f"fine data shape {properties_fine.horizontal_coordinates.shape}."
                 )
+            fine_topography = fine_topography.subset_latlon(
+                lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
+            )
         else:
             fine_topography = None
-
-        # Ensure fine data subselection lines up exactly with coarse data
-        fine_lat_extent = adjust_fine_coord_range(
-            self.lat_extent,
-            full_coarse_coord=properties_coarse.horizontal_coordinates.lat,
-            full_fine_coord=properties_fine.horizontal_coordinates.lat,
-        )
-        fine_lon_extent = adjust_fine_coord_range(
-            self.lon_extent,
-            full_coarse_coord=properties_coarse.horizontal_coordinates.lon,
-            full_fine_coord=properties_fine.horizontal_coordinates.lon,
-        )
 
         # TODO: horizontal subsetting should probably live in the XarrayDatast level
         # Subset to overall horizontal domain

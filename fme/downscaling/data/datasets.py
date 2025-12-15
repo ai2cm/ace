@@ -1,8 +1,8 @@
 """Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Sized
-from typing import Generic, Literal, Self, TypeVar, cast
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Literal, Self, cast
 
 import torch
 import torch.utils.data
@@ -13,8 +13,10 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import get_device, move_tensordict_to_device
+from fme.core.generics.data import SizedMap
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.data.patching import Patch, get_patches
 from fme.downscaling.data.topography import Topography
@@ -184,8 +186,8 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, key) -> tuple[TensorMapping, xr.DataArray, set[str]]:
-        batch, times, _ = self.dataset[key]
+    def __getitem__(self, key) -> DatasetItem:
+        batch, times, _, epoch = self.dataset[key]
         batch = {
             k: v[
                 ...,
@@ -194,7 +196,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             ]
             for k, v in batch.items()
         }
-        return batch, times, self._properties.all_labels
+        return batch, times, self._properties.all_labels, epoch
 
 
 class BatchItemDatasetAdapter(torch.utils.data.Dataset):
@@ -216,7 +218,7 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         return len(self._dataset)
 
     def __getitem__(self, idx) -> BatchItem:
-        fields, time, _ = self._dataset[idx]
+        fields, time, _, epoch = self._dataset[idx]
         fields = {k: v.squeeze() for k, v in fields.items()}
         field_example = next(iter(fields.values()))
 
@@ -306,22 +308,6 @@ class FineCoarsePairedDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx) -> PairedBatchItem:
         return PairedBatchItem(self.fine[idx], self.coarse[idx])
-
-
-T = TypeVar("T", covariant=True)
-U = TypeVar("U")
-
-
-class SizedMap(Generic[T, U], Sized, Iterable[U]):
-    def __init__(self, func: Callable[[T], U], iterable: DataLoader[T]):
-        self._func = func
-        self._iterable = iterable
-
-    def __len__(self) -> int:
-        return len(self._iterable)
-
-    def __iter__(self) -> Iterator[U]:
-        return map(self._func, self._iterable)
 
 
 @dataclasses.dataclass

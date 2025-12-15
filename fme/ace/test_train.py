@@ -34,10 +34,15 @@ from fme.ace.registry.test_hpx import (
     recurrent_block_config,
     up_sampling_block_config,
 )
+from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
+from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.stepper.time_length_probabilities import (
+    TimeLength,
+    TimeLengthMilestone,
     TimeLengthProbabilities,
     TimeLengthProbability,
+    TimeLengthSchedule,
 )
 from fme.ace.testing import (
     DimSizes,
@@ -59,6 +64,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.generics.trainer import (
     _restore_checkpoint,
@@ -70,12 +76,13 @@ from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import OptimizationConfig
+from fme.core.rand import set_seed
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
-from fme.core.testing.model import compare_restored_parameters
+from fme.core.testing.model import compare_parameters, compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice
 
@@ -107,9 +114,14 @@ def _get_test_yaml_files(
     log_validation_maps=False,
     skip_inline_inference=False,
     time_buffer=1,
+    use_time_length_probabilities=True,
+    use_schedule=False,
+    derived_forcings=None,
 ):
     input_time_size = 1
     output_time_size = 1
+    if derived_forcings is None:
+        derived_forcings = DerivedForcingsConfig()
     if nettype == "HEALPixRecUNet":
         in_channels = len(in_variable_names)
         out_channels = len(out_variable_names)
@@ -173,6 +185,11 @@ def _get_test_yaml_files(
         else:
             spatial_dimensions_str = "latlon"
 
+    if nettype == "NoiseConditionedSFNO":
+        conditional = True
+    else:
+        conditional = False
+
     if nettype == "SphericalFourierNeuralOperatorNet":
         corrector_config: AtmosphereCorrectorConfig | CorrectorSelector = (
             CorrectorSelector(
@@ -208,6 +225,7 @@ def _get_test_yaml_files(
                 dataset=XarrayDataConfig(
                     data_path=str(valid_data_path),
                     spatial_dimensions=spatial_dimensions_str,
+                    labels=[] if conditional else None,
                 ),
                 start_indices=InferenceInitialConditionIndices(
                     first=0,
@@ -230,6 +248,7 @@ def _get_test_yaml_files(
                 dataset=XarrayDataConfig(
                     data_path=str(valid_data_path),
                     spatial_dimensions=spatial_dimensions_str,
+                    labels=["era5"] if conditional else None,
                 ),
                 start_indices=InferenceInitialConditionIndices(
                     first=0,
@@ -241,11 +260,44 @@ def _get_test_yaml_files(
             forward_steps_in_memory=2,
         )
 
+    if use_time_length_probabilities:
+        train_n_forward_steps: TimeLength | TimeLengthSchedule = (
+            TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+                ]
+            )
+        )
+    elif use_schedule:
+        train_n_forward_steps = TimeLengthSchedule(
+            start_value=TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+                ]
+            ),
+            milestones=[TimeLengthMilestone(epoch=1, value=n_forward_steps + 1)],
+        )
+        max_epochs = 2
+    else:
+        train_n_forward_steps = n_forward_steps
+
     train_config = TrainConfig(
         train_loader=DataLoaderConfig(
-            dataset=XarrayDataConfig(
-                data_path=str(train_data_path),
-                spatial_dimensions=spatial_dimensions_str,
+            dataset=ConcatDatasetConfig(
+                concat=[
+                    XarrayDataConfig(
+                        data_path=str(train_data_path),
+                        labels=["era5"] if conditional else None,
+                        spatial_dimensions=spatial_dimensions_str,
+                    ),
+                    XarrayDataConfig(
+                        data_path=str(train_data_path),
+                        labels=[] if conditional else None,
+                        spatial_dimensions=spatial_dimensions_str,
+                    ),
+                ],
             ),
             batch_size=2,
             num_data_workers=0,
@@ -256,6 +308,7 @@ def _get_test_yaml_files(
             dataset=XarrayDataConfig(
                 data_path=str(valid_data_path),
                 spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
             ),
             batch_size=2,
             num_data_workers=0,
@@ -273,12 +326,8 @@ def _get_test_yaml_files(
         stepper=StepperConfig(
             loss=StepLossConfig(type="MSE"),
             crps_training=crps_training,
-            train_n_forward_steps=TimeLengthProbabilities(
-                outcomes=[
-                    TimeLengthProbability(steps=1, probability=0.5),
-                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
-                ]
-            ),
+            train_n_forward_steps=train_n_forward_steps,
+            derived_forcings=derived_forcings,
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -298,6 +347,7 @@ def _get_test_yaml_files(
                         ),
                         builder=ModuleSelector(
                             type=nettype,
+                            conditional=conditional,
                             config=net_config,
                         ),
                         ocean=OceanConfig(
@@ -341,6 +391,7 @@ def _get_test_yaml_files(
             dataset=XarrayDataConfig(
                 data_path=str(valid_data_path),
                 spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
             ),
             start_indices=InferenceInitialConditionIndices(
                 first=0,
@@ -391,9 +442,14 @@ def _setup(
     log_validation_maps=False,
     skip_inline_inference=False,
     time_buffer=1,
+    use_time_length_probabilities=True,
+    derived_forcings=None,
+    use_schedule: bool = False,
 ):
     if not path.exists():
         path.mkdir()
+    if derived_forcings is None:
+        derived_forcings = DerivedForcingsConfig()
     seed = 0
     np.random.seed(seed)
     in_variable_names = [
@@ -403,6 +459,8 @@ def _setup(
         "surface_temperature",
         "baz",
     ]
+    if derived_forcings.insolation is not None:
+        in_variable_names.append(derived_forcings.insolation.insolation_name)
     out_variable_names = [
         "PRESsfc",
         "specific_total_water_0",
@@ -428,10 +486,14 @@ def _setup(
     data_dir.mkdir()
     stats_dir.mkdir()
     results_dir.mkdir()
+    on_disk_names = all_variable_names + [mask_name]
+    if derived_forcings.insolation is not None:
+        if isinstance(derived_forcings.insolation.solar_constant, NameConfig):
+            on_disk_names.append(derived_forcings.insolation.solar_constant.name)
     save_nd_netcdf(
         data_dir / "data.nc",
         dim_sizes,
-        variable_names=all_variable_names + [mask_name],
+        variable_names=on_disk_names,
         timestep_days=timestep_days,
     )
     save_scalar_netcdf(
@@ -479,18 +541,21 @@ def _setup(
         log_validation_maps=log_validation_maps,
         skip_inline_inference=skip_inline_inference,
         time_buffer=time_buffer,
+        use_time_length_probabilities=use_time_length_probabilities,
+        derived_forcings=derived_forcings,
+        use_schedule=use_schedule,
     )
     return train_config_filename, inference_config_filename
 
 
 @pytest.mark.parametrize(
-    "nettype, crps_training, log_validation_maps, use_healpix",
+    "nettype, crps_training, log_validation_maps, use_healpix, use_schedule",
     [
-        ("SphericalFourierNeuralOperatorNet", False, True, False),
-        ("NoiseConditionedSFNO", True, False, False),
-        ("HEALPixRecUNet", False, False, True),
-        ("Samudra", False, False, False),
-        ("NoiseConditionedSFNO", False, False, False),
+        ("NoiseConditionedSFNO", True, False, False, True),
+        ("SphericalFourierNeuralOperatorNet", False, True, False, False),
+        ("HEALPixRecUNet", False, False, True, False),
+        ("Samudra", False, False, False, False),
+        ("NoiseConditionedSFNO", False, False, False, False),
     ],
 )
 def test_train_and_inference(
@@ -499,6 +564,7 @@ def test_train_and_inference(
     crps_training,
     log_validation_maps: bool,
     use_healpix: bool,
+    use_schedule: bool,
     very_fast_only: bool,
 ):
     """Ensure that ACE training and subsequent standalone inference run without errors.
@@ -506,6 +572,11 @@ def test_train_and_inference(
     Args:
         tmp_path: pytext fixture for temporary workspace.
         nettype: parameter indicating model architecture to use.
+        crps_training: parameter indicating whether to use CRPS training.
+        log_validation_maps: parameter indicating whether to log validation maps.
+        use_healpix: parameter indicating whether to use HEALPix grid.
+        use_schedule: parameter indicating whether to use
+            a schedule for n_forward_steps.
         very_fast_only: parameter indicating whether to skip slow tests.
     """
     if very_fast_only:
@@ -521,6 +592,7 @@ def test_train_and_inference(
         use_healpix=use_healpix,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
+        use_schedule=use_schedule,
         log_validation_maps=log_validation_maps,
     )
     # using pdb requires calling main functions directly
@@ -640,40 +712,158 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
             )
 
 
-def test_restore_checkpoint(tmp_path, very_fast_only: bool):
-    """Test that restoring a checkpoint works."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
-    config_path, _ = _setup(tmp_path, "SphericalFourierNeuralOperatorNet")
-    with open(config_path) as f:
-        config_dict = yaml.safe_load(f)
+def _get_reproducible_trainer(config_dict, seed):
+    set_seed(seed)
+    # TrainConfig objects may create rng (e.g., TimeLengthProbabilities), so it
+    # has to be rebuilt after setting the seed.
     config = dacite.from_dict(
         data_class=TrainConfig, data=config_dict, config=dacite.Config(strict=True)
     )
     prepare_directory(config.experiment_dir, config_dict)
-
     builders = TrainBuilders(config)
-    trainer1 = build_trainer(builders, config)
+    return build_trainer(builders, config)
+
+
+@pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO"])
+def test_set_seed(tmp_path, nettype, very_fast_only: bool):
+    """Test that set_seed leads to identical training outcomes."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    config_path, _ = _setup(tmp_path, nettype)
+    with open(config_path) as f:
+        config_dict = yaml.safe_load(f)
+
+    trainer1 = _get_reproducible_trainer(config_dict, seed=0)
+    trainer2 = _get_reproducible_trainer(config_dict, seed=0)
+
+    compare_parameters(
+        trainer1.stepper.modules.named_parameters(),
+        trainer2.stepper.modules.named_parameters(),
+    )
+
+    set_seed(0)
+    trainer1.train_one_epoch()
+
+    set_seed(0)
+    trainer2.train_one_epoch()
+
+    compare_parameters(
+        trainer1.stepper.modules.named_parameters(),
+        trainer2.stepper.modules.named_parameters(),
+    )
+
+
+@pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO"])
+@pytest.mark.parametrize("save_type", ["restart", "all"])
+def test_restore_checkpoint(
+    tmp_path,
+    nettype: str,
+    save_type: Literal["restart", "all"],
+    very_fast_only: bool,
+):
+    """Test that restoring a checkpoint works."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    # this test will fail if the config has rng
+    config_path, _ = _setup(tmp_path, nettype, use_time_length_probabilities=False)
+    with open(config_path) as f:
+        config_dict = yaml.safe_load(f)
+
+    set_seed(0)
+    config = dacite.from_dict(
+        data_class=TrainConfig, data=config_dict, config=dacite.Config(strict=True)
+    )
+    prepare_directory(config.experiment_dir, config_dict)
+    builders = TrainBuilders(config)
+
+    base_trainer = build_trainer(builders, config)
+    restored_trainer1 = build_trainer(builders, config)
+    restored_trainer2 = build_trainer(builders, config)
 
     # run one epoch
-    trainer1.train_one_epoch()
-    trainer1.save_all_checkpoints(0.1, 0.2)
+    base_trainer.train_one_epoch()
+    if save_type == "all":
+        base_trainer.save_all_checkpoints(0.1, 0.2)
+    elif save_type == "restart":
+        base_trainer._save_restart_checkpoints()
 
     # reload and check model parameters and optimizer state
-    trainer2 = build_trainer(builders, config)
-    _restore_checkpoint(
-        trainer2,
-        trainer1.paths.latest_checkpoint_path,
-        trainer1.paths.ema_checkpoint_path,
+    restored_trainer1.restore_checkpoint(
+        base_trainer.paths.latest_checkpoint_path,
     )
+    restored_trainer2.restore_checkpoint(
+        base_trainer.paths.latest_checkpoint_path,
+    )
+    compare_restored_parameters(
+        base_trainer.stepper.modules.parameters(),
+        restored_trainer1.stepper.modules.parameters(),
+        base_trainer.optimization.optimizer,
+        restored_trainer1.optimization.optimizer,
+    )
+    with base_trainer._ema_context():
+        with restored_trainer1._ema_context():
+            compare_restored_parameters(
+                base_trainer.stepper.modules.parameters(),
+                restored_trainer1.stepper.modules.parameters(),
+                base_trainer.optimization.optimizer,
+                restored_trainer1.optimization.optimizer,
+            )
+
+    base_ema_state = base_trainer._ema.get_state()
+    base_params = base_ema_state.pop("ema_params")
+    restored_ema_state = restored_trainer1._ema.get_state()
+    restored_params = restored_ema_state.pop("ema_params")
+    assert base_ema_state == restored_ema_state
+    torch.testing.assert_close(base_params, restored_params)
+
+    set_seed(0)
+    base_trainer.train_one_epoch()
+    set_seed(0)
+    restored_trainer1.train_one_epoch()
+    set_seed(0)
+    restored_trainer2.train_one_epoch()
 
     compare_restored_parameters(
-        trainer1.stepper.modules.parameters(),
-        trainer2.stepper.modules.parameters(),
-        trainer1.optimization.optimizer,
-        trainer2.optimization.optimizer,
+        restored_trainer2.stepper.modules.parameters(),
+        restored_trainer1.stepper.modules.parameters(),
+        restored_trainer2.optimization.optimizer,
+        restored_trainer1.optimization.optimizer,
     )
+    with restored_trainer2._ema_context():
+        with restored_trainer1._ema_context():
+            compare_restored_parameters(
+                restored_trainer2.stepper.modules.parameters(),
+                restored_trainer1.stepper.modules.parameters(),
+                restored_trainer2.optimization.optimizer,
+                restored_trainer1.optimization.optimizer,
+            )
+
+    compare_restored_parameters(
+        base_trainer.stepper.modules.parameters(),
+        restored_trainer1.stepper.modules.parameters(),
+        base_trainer.optimization.optimizer,
+        restored_trainer1.optimization.optimizer,
+    )
+
+    with base_trainer._ema_context():
+        with restored_trainer1._ema_context():
+            compare_restored_parameters(
+                base_trainer.stepper.modules.parameters(),
+                restored_trainer1.stepper.modules.parameters(),
+                base_trainer.optimization.optimizer,
+                restored_trainer1.optimization.optimizer,
+            )
+
+    with base_trainer._ema_context():
+        with pytest.raises(AssertionError):  # should not be equal
+            compare_restored_parameters(
+                base_trainer.stepper.modules.parameters(),
+                restored_trainer1.stepper.modules.parameters(),
+                base_trainer.optimization.optimizer,
+                restored_trainer1.optimization.optimizer,
+            )
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
@@ -797,3 +987,48 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         wandb_logs = wandb.get_logs()
     assert np.isinf(wandb_logs[-1]["best_inference_error"])
     assert not any("inference/" in key for key in wandb_logs[-1])
+
+
+@pytest.mark.parametrize(
+    "insolation_config",
+    [
+        pytest.param(
+            InsolationConfig("DSWRFtoa", ValueConfig(1360.0)),
+            id="solar-constant-as-value",
+        ),
+        pytest.param(
+            InsolationConfig("DSWRFtoa", NameConfig("solar_constant")),
+            id="solar-constant-as-name",
+        ),
+    ],
+)
+def test_train_and_inference_with_derived_forcings(
+    tmp_path, insolation_config: InsolationConfig, very_fast_only: bool
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    nettype = "SphericalFourierNeuralOperatorNet"
+    crps_training = False
+    log_validation_maps = False
+    derived_forcings = DerivedForcingsConfig(insolation_config)
+    train_config, inference_config = _setup(
+        tmp_path,
+        nettype,
+        log_to_wandb=True,
+        timestep_days=0.25,
+        n_time=12,
+        inference_forward_steps=10,  # must be even
+        save_per_epoch_diagnostics=True,
+        crps_training=crps_training,
+        log_validation_maps=log_validation_maps,
+        derived_forcings=derived_forcings,
+    )
+    # using pdb requires calling main functions directly
+    with mock_wandb() as wandb:
+        train_main(
+            yaml_config=train_config,
+        )
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        inference_evaluator_main(yaml_config=inference_config)

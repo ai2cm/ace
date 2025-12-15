@@ -195,10 +195,11 @@ def test_horizontal_subset(
         lat=torch.linspace(0.0, 1.0, n_lat), lon=torch.linspace(0.0, 1.0, n_lon)
     )
 
-    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str]] = (
+    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str], int] = (
         {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
         xr.DataArray([0.0]),
         set(),
+        0,
     )
     base_dataset = MagicMock(spec=torch.utils.data.Dataset)
     properties = MagicMock(spec=DatasetProperties)
@@ -212,7 +213,7 @@ def test_horizontal_subset(
         lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
     )
 
-    subset, _, labels = dataset[0]
+    subset, _, labels, _ = dataset[0]
     assert labels is properties.all_labels
     assert subset["x"].shape == (
         batch_size,
@@ -269,6 +270,7 @@ def get_mock_dataset(field_leading_dim=1):
             {"x": torch.rand(field_leading_dim, 8, 16)},
             data_array([0]),
             set(),
+            0,
         )
     )
     return dataset

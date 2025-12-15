@@ -17,12 +17,7 @@ from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import NoTargetAggregator, SampleAggregator
-from fme.downscaling.data import (
-    BatchData,
-    ClosedInterval,
-    DataLoaderConfig,
-    GriddedData,
-)
+from fme.downscaling.data import ClosedInterval, DataLoaderConfig, GriddedData
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predictors import (
     CascadePredictor,
@@ -145,7 +140,7 @@ class EventDownscaler:
 
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
-        batch: BatchData = next(iter(self.data.loader))
+        batch, topography = next(iter(self.data.get_generator()))
         coarse_coords = batch[0].latlon_coordinates
         fine_coords = LatLonCoordinates(
             lat=_downscale_coord(coarse_coords.lat, self.model.downscale_factor),
@@ -168,7 +163,7 @@ class EventDownscaler:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch_no_target(
-                batch, topography=self.data.topography, n_samples=end_idx - start_idx
+                batch, topography=topography, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs)
         to_log = sample_agg.get_wandb()
@@ -237,8 +232,18 @@ class Downscaler:
                 f"{self.experiment_dir}/generated_maps_and_metrics.nc", mode="w"
             )
 
+    @property
+    def _fine_latlon_coordinates(self) -> LatLonCoordinates | None:
+        if self.data.topography is not None:
+            return self.data.topography.coords
+        else:
+            return None
+
     def run(self):
-        aggregator = NoTargetAggregator(downscale_factor=self.model.downscale_factor)
+        aggregator = NoTargetAggregator(
+            downscale_factor=self.model.downscale_factor,
+            latlon_coordinates=self._fine_latlon_coordinates,
+        )
         for i, (batch, topography) in enumerate(self.batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")

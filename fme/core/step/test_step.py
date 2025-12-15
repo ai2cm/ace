@@ -9,7 +9,6 @@ from collections.abc import Callable
 import dacite
 import pytest
 import torch
-import torch._dynamo.exc
 from torch import nn
 
 import fme
@@ -19,11 +18,12 @@ from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
-from fme.core.distributed import DummyWrapper
-from fme.core.multi_call import MultiCallConfig
+from fme.core.distributed.non_distributed import DummyWrapper
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
-from fme.core.step.multi_call import MultiCallStepConfig
+from fme.core.step.args import StepArgs
+from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
@@ -161,6 +161,43 @@ def get_single_module_noise_conditioned_selector(
                             num_layers=2,
                             local_blocks=[0],
                             affine_norms=True,
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def get_label_conditioned_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_shared",
+            "forcing_rad",
+            "diagnostic_main",
+            "diagnostic_rad",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    conditional=True,
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="isotropic",
+                            num_layers=2,
+                            local_blocks=[0],
                         )
                     ),
                 ),
@@ -367,22 +404,6 @@ SELECTOR_CONFIG_CASES = [
     for getter in SELECTOR_GETTERS
 ]
 
-EXPORTABLE_SELECTOR_CONFIG_CASES = [
-    # Some configs use th.DiscreteContinuousConvS2 layers
-    # which currently do not support export, see
-    # https://github.com/NVIDIA/torch-harmonics/issues/73
-    pytest.param(
-        getter(),
-        id=getter.__name__,
-    )
-    for getter in [
-        get_single_module_with_atmosphere_corrector_selector,
-        get_separate_radiation_selector,
-        get_single_module_selector,
-        get_multi_call_selector,
-    ]
-]
-
 HAS_NEXT_STEP_FORCING_NAME_CASES = [
     pytest.param(
         StepSelector(
@@ -423,6 +444,7 @@ def get_step(
     selector: StepSelector,
     img_shape: tuple[int, int],
     init_weights: Callable[[list[nn.Module]], None] = lambda _: None,
+    all_labels: set[str] | None = None,
 ) -> StepABC:
     device = fme.get_device()
     horizontal_coordinate = LatLonCoordinates(
@@ -436,8 +458,30 @@ def get_step(
         horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
+        all_labels=all_labels,
     )
     return selector.get_step(dataset_info, init_weights)
+
+
+def test_label_conditioned_step():
+    selector = get_label_conditioned_selector()
+    step = get_step(selector, DEFAULT_IMG_SHAPE, all_labels={"a", "b"})
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=1)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples=1
+    )
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=BatchLabels.new_from_set(
+                {"a", "b"}, n_samples=1, device=fme.get_device()
+            ),
+        ),
+        wrapper=lambda x: x,
+    )
+    assert output["diagnostic_main"].shape == (1, 45, 90)
+    assert output["diagnostic_rad"].shape == (1, 45, 90)
 
 
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
@@ -494,7 +538,12 @@ def test_step_applies_wrapper(config: StepSelector):
             multi_calls += len(config._step_config_instance.config.forcing_multipliers)
 
     wrapper = unittest.mock.MagicMock(side_effect=lambda x: x)
-    step.step(input_data, next_step_input_data, wrapper=wrapper)
+    step.step(
+        args=StepArgs(
+            input=input_data, next_step_input_data=next_step_input_data, labels=None
+        ),
+        wrapper=wrapper,
+    )
     assert wrapper.call_count == multi_calls * len(step.modules)
     for module in step.modules:
         wrapper.assert_any_call(module)
@@ -515,28 +564,6 @@ def test_step_initializes_weights(config: StepSelector):
     for i, module in enumerate(step.modules):
         assert isinstance(module, DummyWrapper)
         assert call_args[0][i] is module.module
-
-
-@pytest.mark.parametrize("config", EXPORTABLE_SELECTOR_CONFIG_CASES)
-def test_export_step(config: StepSelector, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-    torch.manual_seed(0)
-    img_shape = DEFAULT_IMG_SHAPE
-    n_samples = 5
-    step = get_step(config, img_shape)
-    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
-    next_step_input_data = get_tensor_dict(
-        step.next_step_input_names, img_shape, n_samples
-    )
-    unscripted_output = step.step(input_data, next_step_input_data)
-    for name in step.output_names:
-        # informative check for nan values
-        torch.testing.assert_close(unscripted_output[name], unscripted_output[name])
-    exported = step.export(input_data, next_step_input_data)
-    output = exported.module()(input_data, next_step_input_data)
-    for name in step.output_names:
-        torch.testing.assert_close(output[name], unscripted_output[name])
 
 
 @pytest.mark.parametrize(

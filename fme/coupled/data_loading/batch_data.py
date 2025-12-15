@@ -5,6 +5,7 @@ from typing import TypeVar
 import numpy as np
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.core.labels import LabelEncoding
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
 from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
@@ -72,6 +73,8 @@ class CoupledBatchData:
         ocean_horizontal_dims: list[str],
         atmosphere_horizontal_dims: list[str],
         sample_dim_name: str = "sample",
+        ocean_label_encoding: LabelEncoding | None = None,
+        atmosphere_label_encoding: LabelEncoding | None = None,
     ) -> "CoupledBatchData":
         """
         Collate function for use with PyTorch DataLoader. Separates out ocean
@@ -83,11 +86,13 @@ class CoupledBatchData:
             [x.ocean for x in samples],
             horizontal_dims=ocean_horizontal_dims,
             sample_dim_name=sample_dim_name,
+            label_encoding=ocean_label_encoding,
         )
         atmosphere_data = BatchData.from_sample_tuples(
             [x.atmosphere for x in samples],
             horizontal_dims=atmosphere_horizontal_dims,
             sample_dim_name=sample_dim_name,
+            label_encoding=atmosphere_label_encoding,
         )
         return CoupledBatchData.new_on_cpu(ocean_data, atmosphere_data)
 
@@ -143,6 +148,11 @@ class CoupledBatchData:
                 atmosphere_derive_func, forcing_data.atmosphere_data
             ),
         )
+
+    def pin_memory(self: SelfType) -> SelfType:
+        self.ocean_data = self.ocean_data.pin_memory()
+        self.atmosphere_data = self.atmosphere_data.pin_memory()
+        return self
 
 
 @dataclasses.dataclass

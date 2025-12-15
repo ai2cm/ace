@@ -1,5 +1,6 @@
 runs:
   2025-08-14-cm4-piControl-200yr-sea-ice: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
+data_output_directory: gs://leap-scratch/jpdunc23
 dataset_computation:
   ice_zarr: ice_6hourly.zarr
   nc_mosaic_path: s3://emulators/ai2_colab/2024-11-11-static-data/ocean_hgrid.nc
@@ -16,9 +17,9 @@ dataset_computation:
     time_dim: 360
     latitude_dim: 180
     longitude_dim: 360
-n_split: 500
+n_split: 100
 dask:
-  n_workers: 64
+  n_workers: 8
   use_gateway: true
   cluster_options:
     worker_resource_allocation: "8CPU, 57.9Gi"
@@ -29,3 +30,9 @@ filesystem:
     profile: ai2
     client_kwargs:
       endpoint_url: https://nyu1.osn.mghpcc.org
+stats:
+  output_directory: /dev/null
+  start_date: null
+  end_date: null
+  data_type: CM4
+  beaker_dataset: not_used
