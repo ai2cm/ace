@@ -3,9 +3,9 @@
 
 set -e
 
-JOB_NAME="downscale-ace-100km-to-3km-10-year-pnw-ic0001-no-churn"
+JOB_NAME="downscale-deterministic-ace-100km-to-3km-1-year-pnw-ic0000-no-churn"
 
-CONFIG_FILENAME="gen-ace-output-pnw-ic0001.yaml"
+CONFIG_FILENAME="gen-deterministic-ace-output-pnw-1-year-ic0000.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -26,8 +26,8 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km generation on ACE' \
-    --workspace ai2/ace \
-    --priority high \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --not-preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
