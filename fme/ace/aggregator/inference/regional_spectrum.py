@@ -33,12 +33,12 @@ def _detrend_linear(data):
     data_flat = data.reshape(B_prime, H * W)
 
     # Solve A * coeffs = data_flat.T
-    # A is (H*W, 3), data_flat.T is (H*W, N*B)
+    # A is (H*W, 3), data_flat.T is (H*W, B_prime)
     # coeffs will be shape (3, B_prime)
     coeffs, _, _, _ = torch.linalg.lstsq(A, data_flat.T)
 
     # Reconstruct the plane
-    # (H*W, 3) @ (N*B, 3, 1) -> (N*B, H*W, 1) -> (N*B, H, W)
+    # (H*W, 3) @ (B_prime, 3, 1) -> (B_prime, H*W, 1) -> (B_prime, H, W)
     plane = (A @ coeffs.permute(1, 0).unsqueeze(-1)).reshape(B_prime, H, W)
 
     detrended_data = data.reshape(B_prime, H, W) - plane
@@ -60,45 +60,32 @@ def compute_isotropic_spectrum(
     weights=None,
 ):
     """
-    Computes the isotropic 1D power spectrum from 2D (H,W), 3D (B,H,W),
-    or 4D (B,C,H,W) data. Matches `xrft.isotropic_power_spectrum(scaling="density")`.
+    Compute the isotropic 1D power spectrum from 2D, 3D, or 4D data.
 
+    Matches `xrft.isotropic_power_spectrum(scaling="density")`.
     The output spectrum is computed for each batch and channel element.
 
-    Parameters:
-    ----------
-    data : torch.Tensor
-        Input data tensor. Can be 2D, 3D, or 4D.
-    dx : float, optional
-        Grid spacing in the x-dimension.
-    dy : float, optional
-        Grid spacing in the y-dimension.
-    num_bins : int, optional
-        Number of bins. If None, defaults to min(H, W) // n_factor.
-    n_factor : int, optional
-        Factor to determine number of bins.
-    remove_mean : bool, optional
-        If True, removes spatial mean. Overridden by `detrend`.
-    detrend : str, optional
-        'linear' or 'constant'.
-    window : str, optional
-        'hann' or 'Hann'.
-    truncate : bool, optional
-        If True, truncates spectrum at the smallest Nyquist frequency.
-    cutoff_before_bins: bool, optional
-        If True, truncates the spectrum after already computing the bin locations.
-        Matches xrft implementation.
-    weights : torch.Tensor, optional
-        Regional weights for masking. Should have shape (H, W) and will be broadcast
-        to match data shape. Regions with weight=0 will not contribute to spectrum.
+    Args:
+        data: Input data tensor with shape (H, W), (B, H, W), or (B, C, H, W).
+        dx: Grid spacing in the x-dimension.
+        dy: Grid spacing in the y-dimension.
+        num_bins: Number of bins. If None, defaults to min(H, W) // n_factor.
+        n_factor: Factor to determine number of bins when num_bins is None.
+        remove_mean: If True, removes spatial mean. Overridden by `detrend`.
+        detrend: Detrending method, either 'linear' or 'constant'.
+        window: Window function to apply, currently only 'hann' is supported.
+        truncate: If True, truncates spectrum at the smallest Nyquist frequency.
+        cutoff_before_bins: If True, truncates the spectrum after computing
+            the bin locations. Matches xrft implementation.
+        weights: Regional weights for masking with shape (H, W). Will be
+            broadcast to match data shape. Regions with weight=0 will not
+            contribute to spectrum.
 
     Returns:
-    -------
-    k_bins_centers : torch.Tensor
-        1D tensor of bin center wavenumbers. Shape: (num_bins,)
-    iso_spectrum : torch.Tensor
-        1D tensor of the (k * P(k)) spectrum.
-        Shape: (B, C, num_bins), (B, num_bins), or (num_bins,)
+        A tuple of (k_bins_centers, iso_spectrum) where:
+        - k_bins_centers: 1D tensor of bin center wavenumbers with shape (num_bins,).
+        - iso_spectrum: The (k * P(k)) spectrum with shape matching input
+          dimensionality: (num_bins,), (B, num_bins), or (B, C, num_bins).
     """
     # --- 1. Input Validation and Setup ---
     device = data.device
@@ -282,8 +269,8 @@ class PairedRegionalSpectrumAggregator:
         self,
         target_data: TensorMapping,
         gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
+        target_data_norm: TensorMapping | None = None,
+        gen_data_norm: TensorMapping | None = None,
         i_time_start: int = 0,
     ):
         self._gen_aggregator.record_batch(gen_data)
