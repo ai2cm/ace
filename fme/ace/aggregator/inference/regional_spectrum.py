@@ -143,28 +143,22 @@ def compute_isotropic_spectrum(
         win_y = torch.hann_window(H, device=device, dtype=dtype).unsqueeze(1)
         win_x = torch.hann_window(W, device=device, dtype=dtype).unsqueeze(0)
         win_2d = (win_y * win_x).reshape(1, 1, H, W)
-
         window_correction = torch.mean(win_2d**2).item()
         data = data * win_2d
     else:
         window_correction = 1.0
 
     fft_2d = torch.fft.rfft2(data, norm="forward")
-
     power_2d = torch.abs(fft_2d) ** 2
     power_2d = power_2d / window_correction
-
     psd_2d = power_2d * (Lx * Ly)
 
     k_x = torch.fft.rfftfreq(W, d=dx, device=device, dtype=dtype)
     k_y = torch.fft.fftfreq(H, d=dy, device=device, dtype=dtype)
-
     k_x_nyq = 1.0 / (2.0 * dx)
     k_y_nyq = 1.0 / (2.0 * dy)
-
     k_Y, k_X = torch.meshgrid(k_y, k_x, indexing="ij")
     k_mag = torch.sqrt(k_X**2 + k_Y**2)
-
     k_max_domain = k_mag.max()
 
     if truncate and cutoff_before_bins:
@@ -174,38 +168,32 @@ def compute_isotropic_spectrum(
         k_max = k_max_domain
 
     k_bins = torch.linspace(0, k_max, num_bins + 1, device=device, dtype=dtype)
+
     if truncate and not cutoff_before_bins:
         k_max_cutoff = min(k_x_nyq, k_y_nyq)
         k_max = min(k_max_domain, k_max_cutoff)
         k_bins = k_bins[k_bins < k_max_cutoff]
         num_bins = k_bins.numel() - 1
-    k_bins_centers = (k_bins[:-1] + k_bins[1:]) / 2
 
+    k_bins_centers = (k_bins[:-1] + k_bins[1:]) / 2
     k_mag_flat = k_mag.flatten()
     bin_edges = k_bins[1:-1]
-
     bin_indices = torch.bucketize(k_mag_flat, bin_edges, right=True)
 
     N_flat = k_mag_flat.shape[0]
     psd_flat_batched = psd_2d.reshape(B_prime, N_flat)
-
     bin_indices_batched = bin_indices.expand(B_prime, -1)
 
     binned_psd_sum = torch.zeros(B_prime, num_bins, device=device, dtype=dtype)
-
     binned_psd_sum.scatter_add_(dim=1, index=bin_indices_batched, src=psd_flat_batched)
 
     binned_counts = torch.bincount(bin_indices, minlength=num_bins)
-
     binned_counts_safe = binned_counts.float()
     binned_counts_safe[binned_counts_safe == 0] = torch.nan
 
     iso_psd_binned = binned_psd_sum / binned_counts_safe.unsqueeze(0)
-
     iso_spectrum = iso_psd_binned * k_bins_centers.unsqueeze(0)
-
     iso_spectrum = iso_spectrum.reshape(B, C, num_bins)
-
     iso_spectrum[..., 0] = torch.nan
 
     if orig_dim == 2:
