@@ -164,6 +164,12 @@ class OceanData:
         return self._get("geothermal_heat_flux")
 
     @property
+    def net_energy_flux_into_ocean(self) -> torch.Tensor:
+        return (
+            self.net_downward_surface_heat_flux + self.geothermal_heat_flux
+        ) * self.sea_surface_fraction
+
+    @property
     def sea_ice_fraction(self) -> torch.Tensor:
         """Returns the sea ice fraction."""
         try:
