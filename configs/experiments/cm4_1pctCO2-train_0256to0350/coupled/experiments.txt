@@ -4,34 +4,36 @@ fto-1pctCO2_0256to0350-ewbpxamu_qkj0w2hd|rs0|01KAQJ7F4PXD0THKH40TAZ6CD8|trained|
 
 fto-1pctCO2_0256to0350-c0fmwhnn_qkj0w2hd|rs0|01KAQJ850JAD0AFH5DVMBS0FDM|trained|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-ewbpxamu_5px50tqj|rs0|01KAY938CXZFQBPZN80W9657E4|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-fto-1pctCO2_0256to0350-ewbpxamu_5px50tqj|rs0|01KAY938CXZFQBPZN80W9657E4|run_insample|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-ewbpxamu_5px50tqj|rs0|01KAY938CXZFQBPZN80W9657E4|trained|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-c0fmwhnn_5px50tqj|rs0|01KAY93YBJJB8W51WDYVKW332F|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-fto-1pctCO2_0256to0350-c0fmwhnn_5px50tqj|rs0|01KAY93YBJJB8W51WDYVKW332F|run_insample|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-c0fmwhnn_5px50tqj|rs0|01KAY93YBJJB8W51WDYVKW332F|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto-1pctCO2_0256to0350-eoipjris|rs0|01KB1V1CXY65FZ0JQP2HAW4852|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-ft_fto-1pctCO2_0256to0350-eoipjris|rs0|01KB1V1CXY65FZ0JQP2HAW4852|run_insample|best_inference_ckpt|normal|--not-preemptible
+ft_fto-1pctCO2_0256to0350-eoipjris|rs0|01KB1V1CXY65FZ0JQP2HAW4852|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto-1pctCO2_0256to0350-3eqp62bx|rs0|01KB1V2AHJTV46HBZBQSF31YGX|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-ft_fto-1pctCO2_0256to0350-3eqp62bx|rs0|01KB1V2AHJTV46HBZBQSF31YGX|run_insample|best_inference_ckpt|normal|--not-preemptible
+ft_fto-1pctCO2_0256to0350-3eqp62bx|rs0|01KB1V2AHJTV46HBZBQSF31YGX|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto-1pctCO2_0256to0350-czhrv51v|rs0|01KB1V37C1WH8FSHZRCYKPFS9A|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-ft_fto-1pctCO2_0256to0350-czhrv51v|rs0|01KB1V37C1WH8FSHZRCYKPFS9A|run_insample|best_inference_ckpt|normal|--not-preemptible
+ft_fto-1pctCO2_0256to0350-czhrv51v|rs0|01KB1V37C1WH8FSHZRCYKPFS9A|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto-1pctCO2_0256to0350-ubyk6ome|rs0|01KBEH4M4SE36B4CSZX53QWVMY|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO_w_EC-ewbpxamu_mb4prsz7|rs0|01KC2HD92BFVVN2M00A0M3ZQJW|run_ICx1|best_inference_ckpt|high|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO_w_EC-ewbpxamu_mb4prsz7|rs0|01KC2HD92BFVVN2M00A0M3ZQJW|run_insample|best_inference_ckpt|high|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_fruab0nq|rs0|01KBENDFHDW14WQPDWE418VJFJ|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO_w_EC-c0fmwhnn_mb4prsz7|rs0|01KC2HE84WNN2JWANZAHPWJ7AP|run_ICx1|best_inference_ckpt|high|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO_w_EC-c0fmwhnn_mb4prsz7|rs0|01KC2HE84WNN2JWANZAHPWJ7AP|run_insample|best_inference_ckpt|high|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_fruab0nq|rs0|01KBENEAVH5R9DTCMGS4B8QKHA|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_fruab0nq|rs0|01KBENDFHDW14WQPDWE418VJFJ|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_fruab0nq|rs0|01KBENDFHDW14WQPDWE418VJFJ|run_insample|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_kd5obbep|rs0|01KC02TX1NJ2K3PGWJ0F207ZSZ|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_fruab0nq|rs0|01KBENEAVH5R9DTCMGS4B8QKHA|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_fruab0nq|rs0|01KBENEAVH5R9DTCMGS4B8QKHA|run_insample|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_kd5obbep|rs0|01KC02VQT8JF6439QMAG425D62|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_kd5obbep|rs0|01KC02TX1NJ2K3PGWJ0F207ZSZ|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_kd5obbep|rs0|01KC02TX1NJ2K3PGWJ0F207ZSZ|run_insample|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO_w_EC-ewbpxamu_mb4prsz7|rs0|01KC2HD92BFVVN2M00A0M3ZQJW|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_kd5obbep|rs0|01KC02VQT8JF6439QMAG425D62|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_kd5obbep|rs0|01KC02VQT8JF6439QMAG425D62|run_insample|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO_w_EC-c0fmwhnn_mb4prsz7|rs0|01KC2HE84WNN2JWANZAHPWJ7AP|training|best_inference_ckpt|normal|--not-preemptible
+ft_fto-1pctCO2_0256to0350-ubyk6ome|rs0|01KBEH4M4SE36B4CSZX53QWVMY|run_ICx1|best_inference_ckpt|low|--not-preemptible
+ft_fto-1pctCO2_0256to0350-ubyk6ome|rs0|01KBEH4M4SE36B4CSZX53QWVMY|run_insample|best_inference_ckpt|low|--not-preemptible
 
 ft_fto-1pctCO2_0256to0350-condSFNO-8bwb51e8|rs0|01KC512GQTP1PK4ZYTTC9YAV9A|training|best_inference_ckpt|normal|--not-preemptible
 
