@@ -130,7 +130,7 @@ def ocean_heat_content_tendency(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    """Compute the column-integrated ocean heat content."""
+    """Compute the column-integrated ocean heat content tendency."""
     ohc = data.ocean_heat_content
     ohc_tendency = torch.zeros_like(ohc)
     ohc_tendency[:, 1:] = torch.diff(ohc, n=1, dim=1) / timestep.total_seconds()
