@@ -13,10 +13,7 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.batch_data import BatchData, default_collate
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
-from fme.ace.inference.data_writer.monthly import (
-    MonthlyDataWriter,
-    months_for_timesteps,
-)
+from fme.ace.inference.data_writer.monthly import MonthlyDataWriter
 from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import (
     AtmosphericDeriveFn,
@@ -143,7 +140,6 @@ class Config:
 
     def get_data_writer(self, data: "Data") -> MonthlyDataWriter:
         assert data.properties.timestep is not None
-        n_months = months_for_timesteps(data.n_timesteps, data.properties.timestep)
         coords = {
             **data.properties.horizontal_coordinates.coords,
             **data.properties.vertical_coordinate.coords,
@@ -153,7 +149,6 @@ class Config:
             label="monthly_mean_data",
             save_names=None,  # save all data given
             n_samples=self.data_loader.batch_size * len(data.loaders),
-            n_months=n_months,
             variable_metadata=data.properties.variable_metadata,
             coords=coords,
             dataset_metadata=DatasetMetadata.from_env(),
