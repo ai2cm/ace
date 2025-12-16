@@ -115,6 +115,64 @@ def _abs_norm_tail_bias(
     return np.sum(abs(ratio)) / ratio.shape[0]
 
 
+def _absolute_value_histogram(counts: np.ndarray, edges: np.ndarray):
+    # take the bin that contains zero and split it proportionally to insert a bin edge at zero
+    edges = edges.tolist()
+    zero_index = None
+    for i in range(len(edges) - 1):
+        if edges[i] < 0.0 and edges[i + 1] >= 0.0:
+            zero_index = i
+            break
+    if zero_index is not None:  
+        l_edge = edges[zero_index]
+        r_edge = edges[zero_index + 1]
+        frac_neg = abs(l_edge) / (r_edge - l_edge)
+        counts = np.insert(counts, zero_index + 1, counts[zero_index] * (1 - frac_neg))
+        counts[zero_index] = counts[zero_index] * frac_neg
+        edges.insert(zero_index + 1, 0.0)
+
+    # get postive half of histogram using the zero_index
+    
+
+
+# def _absolute_value_histogram(counts: np.ndarray, edges: np.ndarray):
+#     # convert histogram with both negative and positive bins into absolute value histogram
+
+#     # Absolute-value bin edges to guaranteee exact alignment
+#     abs_edges = np.unique(np.abs(edges))
+#     abs_edges.sort()
+#     abs_counts = np.zeros(len(abs_edges) - 1)
+
+#     def _add_interval(lo, hi, weight):
+#         # Accumulate weighted counts into abs_counts
+#         if hi <= lo:
+#             return
+#         idx = np.searchsorted(abs_edges, [lo, hi]) - 1
+#         abs_counts[idx[0]:idx[1]] += weight
+
+#     for l_edge, r_edge, count in zip(edges[:-1], edges[1:], counts):
+#         if count == 0 or r_edge == l_edge:
+#             continue
+#         width = r_edge - l_edge
+#         if r_edge <= 0:
+#             # Entirely negative → folded
+#             _add_interval(abs(r_edge), abs(l_edge), count)
+#         elif l_edge >= 0:
+#             # Entirely positive
+#             _add_interval(l_edge, r_edge, count)
+#         else:
+#             # Bin straddles zero: split proportionally
+#             neg_len = abs(l_edge)
+#             pos_len = r_edge
+
+#             if neg_len > 0:
+#                 _add_interval(0.0, neg_len, count * neg_len / width)
+#             if pos_len > 0:
+#                 _add_interval(0.0, pos_len, count * pos_len / width)
+
+#     return abs_edges, abs_counts
+
+ 
 class DynamicHistogram:
     """
     A histogram that dynamically bins values into a fixed number of bins
