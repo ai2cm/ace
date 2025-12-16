@@ -94,6 +94,58 @@ def _rebin_counts(counts, bin_edges, new_edges):
     return new_counts
 
 
+def _absolute_value_histogram(counts: np.ndarray, edges: np.ndarray):
+    """Convert histogram to absolute value histogram.
+    Splits a histogram into negative and positive halves and
+    rebins so both halves have the same bin edges in absolute value.
+    """
+    # take the bin that contains zero and split it proportionally
+    # to insert a bin edge at zero
+    edges = edges.tolist()
+    zero_index = None
+    for i in range(len(edges) - 1):
+        if edges[i] < 0.0 and edges[i + 1] >= 0.0:
+            zero_index = i
+            break
+    if zero_index is None:
+        return counts, edges
+
+    l_edge = edges[zero_index]
+    r_edge = edges[zero_index + 1]
+    frac_neg = abs(l_edge) / (r_edge - l_edge)
+    counts = np.insert(counts, zero_index + 1, counts[zero_index] * (1 - frac_neg))
+    counts[zero_index] = counts[zero_index] * frac_neg
+    edges.insert(zero_index + 1, 0.0)
+
+    new_zero_index = zero_index + 1
+
+    counts_pos, edges_pos = counts[new_zero_index:], edges[new_zero_index:]
+    # flip negative half of histogram to positive
+    counts_neg, abs_edges_neg = (
+        counts[:new_zero_index][::-1],
+        [0.0] + [-e for e in edges[:new_zero_index][::-1]],
+    )
+
+    # rebin to the edges that have the largest maximum edge
+    if abs_edges_neg[-1] > edges_pos[-1]:
+        # Use the negative edges for rebinning,
+        # rebin the positive counts and add to negative counts
+        rebinned_pos_counts = _rebin_counts(
+            counts_pos, edges_pos, new_edges=abs_edges_neg
+        )
+        final_counts = counts_neg + rebinned_pos_counts
+        final_edges = abs_edges_neg
+    else:
+        # Use the positive edges for rebinning,
+        # rebin the negative counts and add to positive counts
+        rebinned_neg_counts = _rebin_counts(
+            counts_neg, abs_edges_neg, new_edges=edges_pos
+        )
+        final_counts = rebinned_neg_counts + counts_pos
+        final_edges = edges_pos
+    return final_counts, final_edges
+
+
 def _abs_norm_tail_bias(
     percentile: float,
     predict_counts: np.ndarray,
@@ -101,78 +153,30 @@ def _abs_norm_tail_bias(
     predict_bin_edges: np.ndarray,
     target_bin_edges: np.ndarray,
 ):
-    pred_counts_rebinned = _rebin_counts(
-        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
+    abs_predict_counts, abs_predict_bin_edges = _absolute_value_histogram(
+        predict_counts, predict_bin_edges
     )
-    bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
-    threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
+    abs_target_counts, abs_target_bin_edges = _absolute_value_histogram(
+        target_counts, target_bin_edges
+    )
+    abs_pred_counts_rebinned = _rebin_counts(
+        bin_edges=abs_predict_bin_edges,
+        counts=abs_predict_counts,
+        new_edges=abs_target_bin_edges,
+    )
+    bin_centers = 0.5 * (abs_target_bin_edges[:-1] + abs_target_bin_edges[1:])
+    threshold = quantile(abs_target_bin_edges, abs_target_counts, percentile / 100.0)
     tail_mask = bin_centers > threshold
 
-    pred_density = (pred_counts_rebinned / np.sum(pred_counts_rebinned))[tail_mask]
-    target_density = (target_counts / np.sum(target_counts))[tail_mask]
+    pred_density = (abs_pred_counts_rebinned / np.sum(abs_pred_counts_rebinned))[
+        tail_mask
+    ]
+    target_density = (abs_target_counts / np.sum(abs_target_counts))[tail_mask]
     nan_mask = target_density > 0
     ratio = (pred_density / target_density - 1)[nan_mask]
     return np.sum(abs(ratio)) / ratio.shape[0]
 
 
-def _absolute_value_histogram(counts: np.ndarray, edges: np.ndarray):
-    # take the bin that contains zero and split it proportionally to insert a bin edge at zero
-    edges = edges.tolist()
-    zero_index = None
-    for i in range(len(edges) - 1):
-        if edges[i] < 0.0 and edges[i + 1] >= 0.0:
-            zero_index = i
-            break
-    if zero_index is not None:  
-        l_edge = edges[zero_index]
-        r_edge = edges[zero_index + 1]
-        frac_neg = abs(l_edge) / (r_edge - l_edge)
-        counts = np.insert(counts, zero_index + 1, counts[zero_index] * (1 - frac_neg))
-        counts[zero_index] = counts[zero_index] * frac_neg
-        edges.insert(zero_index + 1, 0.0)
-
-    # get postive half of histogram using the zero_index
-    
-
-
-# def _absolute_value_histogram(counts: np.ndarray, edges: np.ndarray):
-#     # convert histogram with both negative and positive bins into absolute value histogram
-
-#     # Absolute-value bin edges to guaranteee exact alignment
-#     abs_edges = np.unique(np.abs(edges))
-#     abs_edges.sort()
-#     abs_counts = np.zeros(len(abs_edges) - 1)
-
-#     def _add_interval(lo, hi, weight):
-#         # Accumulate weighted counts into abs_counts
-#         if hi <= lo:
-#             return
-#         idx = np.searchsorted(abs_edges, [lo, hi]) - 1
-#         abs_counts[idx[0]:idx[1]] += weight
-
-#     for l_edge, r_edge, count in zip(edges[:-1], edges[1:], counts):
-#         if count == 0 or r_edge == l_edge:
-#             continue
-#         width = r_edge - l_edge
-#         if r_edge <= 0:
-#             # Entirely negative → folded
-#             _add_interval(abs(r_edge), abs(l_edge), count)
-#         elif l_edge >= 0:
-#             # Entirely positive
-#             _add_interval(l_edge, r_edge, count)
-#         else:
-#             # Bin straddles zero: split proportionally
-#             neg_len = abs(l_edge)
-#             pos_len = r_edge
-
-#             if neg_len > 0:
-#                 _add_interval(0.0, neg_len, count * neg_len / width)
-#             if pos_len > 0:
-#                 _add_interval(0.0, pos_len, count * pos_len / width)
-
-#     return abs_edges, abs_counts
-
- 
 class DynamicHistogram:
     """
     A histogram that dynamically bins values into a fixed number of bins
