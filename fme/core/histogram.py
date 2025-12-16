@@ -146,6 +146,49 @@ def _absolute_value_histogram(counts: np.ndarray, edges: np.ndarray):
     return final_counts, final_edges
 
 
+def _abs_norm_tail_bias_masked(
+    pred_counts,
+    target_counts,
+    mask,
+):
+    pred_density = (pred_counts / pred_counts.sum())[mask]
+    target_density = (target_counts / target_counts.sum())[mask]
+
+    valid = target_density > 0
+    ratio = (pred_density[valid] / target_density[valid]) - 1
+    return np.mean(np.abs(ratio))
+
+
+def abs_norm_two_sided_tail_bias(
+    percentile: float,
+    predict_counts: np.ndarray,
+    target_counts: np.ndarray,
+    predict_bin_edges: np.ndarray,
+    target_bin_edges: np.ndarray,
+):
+    pred_counts = _rebin_counts(
+        bin_edges=predict_bin_edges,
+        counts=predict_counts,
+        new_edges=target_bin_edges,
+    )
+
+    centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
+
+    q_left = quantile(target_bin_edges, target_counts, percentile / 100)
+    q_left = quantile(target_bin_edges, target_counts, 1 - percentile / 100)
+
+    hi_mask = centers > q_left
+    lo_mask = centers < q_left
+
+    hi_bias = _abs_norm_tail_bias_masked(pred_counts, target_counts, hi_mask)
+    lo_bias = _abs_norm_tail_bias_masked(pred_counts, target_counts, lo_mask)
+
+    return (
+        hi_bias * hi_mask.sum() +
+        lo_bias * lo_mask.sum()
+    ) / (hi_mask.sum() + lo_mask.sum())
+
+
 def _abs_norm_tail_bias(
     percentile: float,
     predict_counts: np.ndarray,
