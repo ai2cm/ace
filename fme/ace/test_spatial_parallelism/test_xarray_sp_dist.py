@@ -34,7 +34,8 @@ def test_concat_of_XarrayConcat_w_spatial_parallel(mock_monthly_netcdfs):
             ref_t, _, _ = ref[i]
             for var in ref_t:
                 reft = ref_t[var]
-                # NOTE: We need to make a hard copy because the reference gets overwritten.
+                # NOTE: We need to make a hard copy
+                # because the reference gets overwritten.
                 tensor_refs.append(reft.clone())
 
     dist = Distributed.get_instance()
@@ -55,7 +56,8 @@ def test_concat_of_XarrayConcat_w_spatial_parallel(mock_monthly_netcdfs):
                 c1t = t1[var]
                 # NOTE: only check variables w time, lat, and lon
                 if len(c1t.shape) > 3:
-                    # gather_helper_conv assumes that the distribution is across the GPUs.
+                    # gather_helper_conv assumes that
+                    # the distribution is across the GPUs
                     c1t = c1t.to(dist.local_rank)
                     c1t_full = gather_helper_conv(
                         c1t, hdim=-2, wdim=-1, w_group=w_group, h_group=h_group
