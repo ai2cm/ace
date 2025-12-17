@@ -347,3 +347,7 @@ cm4_like_am4_random_co2_ensemble_atmosphere:
 .PHONY:
 cm4_like_am4_random_co2_ensemble_coupled:
 	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-like-AM4-random-CO2-ensemble-coupled.yaml
+
+.PHONY: shield_amip_constant_co2_c96_dataset
+shield_amip_constant_co2_c96_dataset:
+	./compute_dataset.sh --config configs/shield-amip-constant-co2-c96-1deg-8layer.yaml
