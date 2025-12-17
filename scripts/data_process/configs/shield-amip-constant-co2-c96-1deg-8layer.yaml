@@ -42,13 +42,17 @@ dataset_computation:
     full_state.zarr:
       - PRESsfc
       - HGTsfc
+      - RH200
       - RH500
       - RH850
+      - TMP200
       - TMP500
       - TMP850
+      - VGRD200
       - UGRD500
       - UGRD850
       - UGRD1000
+      - VGRD200
       - VGRD500
       - VGRD850
       - VGRD1000
@@ -79,11 +83,6 @@ dataset_computation:
       - land_fraction
       - ocean_fraction
       - sea_ice_fraction
-    UGRD200_VGRD200_TMP200_RH200.zarr:
-      - UGRD200
-      - VGRD200
-      - TMP200
-      - RH200
     scalar.zarr:
       - global_mean_co2
   standard_names:
