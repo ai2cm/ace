@@ -4,8 +4,8 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-global-with-static-inputs-wind-only"
-CONFIG_FILENAME="eval-global.yaml"
+JOB_NAME="generate-xshield-amip-events-with-static-inputs-wind-only"
+CONFIG_FILENAME="eval-wind-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
