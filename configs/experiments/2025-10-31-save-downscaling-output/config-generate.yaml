@@ -2,7 +2,7 @@ experiment_dir: /results
 patch:
   divide_generation: true
   composite_prediction: true
-  coarse_horizontal_overlap: 0
+  coarse_horizontal_overlap: 1
 model:
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
 data:
@@ -15,28 +15,18 @@ data:
   num_data_workers: 2
   strict_ensemble: False
 output_targets:
-- name: "WA_AR_20230206"
-  save_vars: ["PRATEsfc"]
-  n_ens: 128
-  n_item_per_gpu: 8
-  event_time: "2023-02-06T06:00:00"
-  lat_extent:
-    start: 36.0
-    stop:  52.0
-  lon_extent:
-    start: 228.0
-    stop: 244.0
-- name: "WPacific_hurricane_landfall_china_20230510"
-  save_vars: ["PRATEsfc"]
-  n_ens: 128
-  n_item_per_gpu: 8
-  event_time: "2023-05-10T12:00:00"
-  lat_extent:
-    start: 7.0
-    stop: 23.0
-  lon_extent:
-    start: 104.0
-    stop: 120.0
+  - name: "US_WestCoast_2023_nens16"
+    max_samples_per_gpu: 64
+    n_ens: 16
+    time_range:
+      start: "2023-01-01T00:00:00"
+    save_vars: "PRATEsfc"
+    lat_extent:
+      start: 22.0
+      stop: 50.0
+    lon_extent:
+      start: 230.0
+      stop: 256.0
 logging:
   log_to_screen: true
   log_to_wandb: true
