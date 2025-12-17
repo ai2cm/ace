@@ -13,16 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import time
-import logging
 import math
-from typing import Union
-import numpy as np
+
+from physicsnemo.distributed.config import ProcessGroupConfig, ProcessGroupNode
 
 # we are using the distributed manager from physicsnemo
 from physicsnemo.distributed.manager import DistributedManager
-from physicsnemo.distributed.config import ProcessGroupNode, ProcessGroupConfig
 
 # we need this
 _DM = None
@@ -90,13 +86,17 @@ def get_local_rank():
 def get_comm_names():
     global _DM
     if _DM is not None:
-        return [name for name in _DM.group_names if (not name.startswith("__orthogonal_to"))]
+        return [
+            name for name in _DM.group_names if (not name.startswith("__orthogonal_to"))
+        ]
     else:
         return []
 
 
 def get_model_comm_names():
-    return [x for x in get_comm_names() if x not in ["world", "data", "ensemble", "batch"]]
+    return [
+        x for x in get_comm_names() if x not in ["world", "data", "ensemble", "batch"]
+    ]
 
 
 def is_distributed(name: str):
@@ -116,15 +116,22 @@ def cleanup():
 
 
 # initialization routine
-def init(model_parallel_sizes=[1, 1, 1, 1], model_parallel_names=["h", "w", "fin", "fout"], data_parallel_sizes=[1, -1], data_parallel_names=["ensemble", "batch"], verbose=False):
-
-    # call basic init first
-    DistributedManager.initialize()
-
-    # extract manager object
+def init(
+    model_parallel_sizes=[1, 1, 1, 1],
+    model_parallel_names=["h", "w", "fin", "fout"],
+    data_parallel_sizes=[1, -1],
+    data_parallel_names=["ensemble", "batch"],
+    verbose=False,
+):
+    try:
+        DistributedManager.initialize()
+    except ValueError as e:
+        if "initialize the default process group twice" in str(e):
+            pass
+        else:
+            raise e
     global _DM
     _DM = DistributedManager()
-
     # create process group config:
     world = ProcessGroupNode("world", size=_DM.world_size)
     pconfig = ProcessGroupConfig(world)
@@ -195,7 +202,9 @@ def init(model_parallel_sizes=[1, 1, 1, 1], model_parallel_names=["h", "w", "fin
             if rank == _DM.rank:
                 print(f"{rank}: groups:")
                 for gname in get_comm_names():
-                    print(f"\t{gname}: {_DM._group_ranks[gname]}, root={_COMM_ROOTS[gname]}")
+                    print(
+                        f"\t{gname}: {_DM._group_ranks[gname]}, root={_COMM_ROOTS[gname]}"
+                    )
             torch.distributed.barrier(device_ids=[_DM.local_rank])
 
     return get_size("model")

@@ -1,10 +1,9 @@
-import os
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
 from physicsnemo.distributed.utils import split_tensor_along_dim
 
-from pathlib import Path
 
 def create_directory(directory_name):
     """
@@ -23,21 +22,44 @@ def create_directory(directory_name):
     except Exception as e:
         print(f"An error occurred while creating the directory: {e}")
 
+
 # this computes a relative error compatible with torch.allclose or np.allclose
 def relative_error(tensor1, tensor2):
-    return torch.sum(torch.abs(tensor1-tensor2)) / torch.sum(torch.abs(tensor2))
+    return torch.sum(torch.abs(tensor1 - tensor2)) / torch.sum(torch.abs(tensor2))
+
 
 # this computes an absolute error compatible with torch.allclose or np.allclose
 def absolute_error(tensor1, tensor2):
-    return torch.max(torch.abs(tensor1-tensor2))
+    return torch.max(torch.abs(tensor1 - tensor2))
+
+
+def split_helper(tensor, dim=None, group=None):
+    with torch.no_grad():
+        if (dim is not None) and dist.get_world_size(group=group):
+            gsize = dist.get_world_size(group=group)
+            grank = dist.get_rank(group=group)
+            # split in dim
+            tensor_list_local = split_tensor_along_dim(
+                tensor, dim=dim, num_chunks=gsize
+            )
+            tensor_local = tensor_list_local[grank]
+        else:
+            tensor_local = tensor.clone()
+
+    return tensor_local
+
 
 def gather_helper(tensor, dim=None, group=None):
     # get shapes
     if (dim is not None) and (dist.get_world_size(group=group) > 1):
         gsize = dist.get_world_size(group=group)
         grank = dist.get_rank(group=group)
-        shape_loc = torch.tensor([tensor.shape[dim]], dtype=torch.long, device=tensor.device)
-        shape_list = [torch.empty_like(shape_loc) for _ in range(dist.get_world_size(group=group))]
+        shape_loc = torch.tensor(
+            [tensor.shape[dim]], dtype=torch.long, device=tensor.device
+        )
+        shape_list = [
+            torch.empty_like(shape_loc) for _ in range(dist.get_world_size(group=group))
+        ]
         shape_list[grank] = shape_loc
         dist.all_gather(shape_list, shape_loc, group=group)
         tshapes = []
@@ -45,7 +67,10 @@ def gather_helper(tensor, dim=None, group=None):
             tshape = list(tensor.shape)
             tshape[dim] = shape_list[ids].item()
             tshapes.append(tuple(tshape))
-        tens_gather = [torch.empty(tshapes[ids], dtype=tensor.dtype, device=tensor.device) for ids in range(gsize)]
+        tens_gather = [
+            torch.empty(tshapes[ids], dtype=tensor.dtype, device=tensor.device)
+            for ids in range(gsize)
+        ]
         tens_gather[grank] = tensor
         dist.all_gather(tens_gather, tensor, group=group)
         tensor_gather = torch.cat(tens_gather, dim=dim)
@@ -54,42 +79,34 @@ def gather_helper(tensor, dim=None, group=None):
 
     return tensor_gather
 
-def split_helper(tensor, dim=None, group=None):
-    with torch.no_grad():
-        if (dim is not None) and dist.get_world_size(group=group):
-            gsize = dist.get_world_size(group=group)
-            grank = dist.get_rank(group=group)
-            # split in dim
-            tensor_list_local = split_tensor_along_dim(tensor, dim=dim, num_chunks=gsize)
-            tensor_local = tensor_list_local[grank]
-        else:
-            tensor_local = tensor.clone()
-
-    return tensor_local
-
-def gather_helper_conv(tensor, hdim=-2, wdim=-1, w_group=1, h_group=1):
-  tensor_gather = gather_helper(tensor, dim=hdim, group=h_group)
-  tensor_gather = gather_helper(tensor_gather, dim=wdim, group=w_group)
-  return tensor_gather
-
-def split_helper_conv(tensor, hdim=-2, wdim=-1, w_group=1, h_group=1):
-  tensor_local = split_helper(tensor, dim=hdim, group=h_group)
-  tensor_local = split_helper(tensor_local, dim=wdim, group=w_group)
-  return tensor_local
 
 def _split_helper(tensor, w_group, h_group):
-  tensor_local = split_helper(tensor, dim=-1, group=w_group)
-  tensor_local = split_helper(tensor_local, dim=-2, group=h_group)
-  return tensor_local
+    tensor_local = split_helper(tensor, dim=-1, group=w_group)
+    tensor_local = split_helper(tensor_local, dim=-2, group=h_group)
+    return tensor_local
+
 
 def _gather_helper(tensor, w_group, h_group):
-  tensor_gather = gather_helper(tensor, dim=-2, group=h_group)
-  tensor_gather =	gather_helper(tensor_gather, dim=-1, group=w_group)
+    tensor_gather = gather_helper(tensor, dim=-2, group=h_group)
+    tensor_gather = gather_helper(tensor_gather, dim=-1, group=w_group)
 
-  return tensor_gather
+    return tensor_gather
+
+
+def split_helper_conv(tensor, hdim=-2, wdim=-1, w_group=1, h_group=1):
+    tensor_local = split_helper(tensor, dim=hdim, group=h_group)
+    tensor_local = split_helper(tensor_local, dim=wdim, group=w_group)
+    return tensor_local
+
+
+def gather_helper_conv(tensor, hdim=-2, wdim=-1, w_group=1, h_group=1):
+    tensor_gather = gather_helper(tensor, dim=hdim, group=h_group)
+    tensor_gather = gather_helper(tensor_gather, dim=wdim, group=w_group)
+    return tensor_gather
+
 
 def init_seed(seed):
-  torch.manual_seed(seed)
-  if torch.cuda.is_available():
-    torch.cuda.manual_seed(seed)
-  return
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    return

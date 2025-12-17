@@ -93,9 +93,9 @@ def _init_comms():
 
 def test_distributed_fft2():
     verbose = True
-    world_rank, world_size, device = setup_test()
+    _, _, device = setup_test()
     w_group, h_group, e_group, world_rank, world_size = _init_comms()
-
+    # Use the default group for the global sync
     # 256, 512, 0, 32,  8, 1e-6
     # nlat, nlon, nalt, batch_size, num_chan, tol,
     tol = 1e-6
