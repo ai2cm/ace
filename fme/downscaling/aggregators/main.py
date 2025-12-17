@@ -534,6 +534,7 @@ class MeanMapAggregator:
         self._name = ensure_trailing_slash(name)
         self._mean_target = Mean(batch_mean)
         self._mean_prediction = Mean(batch_mean)
+        self.max_img_upload_size = 3686400  # corresponds to 45 x 80 deg at 3km resolution, in comparison CONUS is 28x65 deg
 
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
@@ -588,15 +589,19 @@ class MeanMapAggregator:
                 float(target[var_name].min()),
                 device=target[var_name].device,
             )
-            maps[f"maps/{self._name}full-field/{var_name}"] = torch.cat(
-                (prediction[var_name], gap, target[var_name]), dim=1
-            )
-            maps[f"maps/{self._name}log10_relative_mean/{var_name}"] = relative[
-                var_name
-            ]
+
             error = prediction[var_name] - target[var_name]
-            maps[f"maps/{self._name}error/{var_name}"] = error
             metrics[f"metrics/{self._name}bias/{var_name}"] = error.mean()
+
+            print("target map size: ", target[var_name].size)
+            if target[var_name].size < self.max_img_upload_size:
+                maps[f"maps/{self._name}error/{var_name}"] = error
+                maps[f"maps/{self._name}full-field/{var_name}"] = torch.cat(
+                    (prediction[var_name], gap, target[var_name]), dim=1
+                )
+                maps[f"maps/{self._name}log10_relative_mean/{var_name}"] = relative[
+                    var_name
+                ]
 
             spectra_prefix = ensure_trailing_slash(f"power_spectrum_of_{self._name}")
             spectra[f"{spectra_prefix}{var_name}"] = self._plot_spectrum(
