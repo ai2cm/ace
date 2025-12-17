@@ -42,7 +42,6 @@ class SingleModuleStepConfig(StepConfigABC):
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
-        crps_training: Unused, kept for backwards compatibility.
         residual_prediction: Whether to use residual prediction.
     """
 
@@ -55,7 +54,6 @@ class SingleModuleStepConfig(StepConfigABC):
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
-    crps_training: bool | None = None
     residual_prediction: bool = False
 
     def __post_init__(self):
@@ -154,6 +152,8 @@ class SingleModuleStepConfig(StepConfigABC):
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]
         return state_copy
 
     def get_step(

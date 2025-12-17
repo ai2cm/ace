@@ -3,7 +3,6 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-import warnings
 from collections.abc import Callable, Generator, Mapping
 from typing import Any, Literal, cast
 
@@ -107,7 +106,6 @@ class SingleModuleStepperConfig:
         multi_call: The configuration of multi-called diagnostics.
         include_multi_call_in_loss: Whether to include multi-call diagnostics in the
             loss. The same loss configuration as specified in 'loss' is used.
-        crps_training: Whether to use CRPS training for stochastic models.
         residual_prediction: Whether to have ML module predict tendencies for
             prognostic variables.
     """
@@ -129,7 +127,6 @@ class SingleModuleStepperConfig:
     residual_normalization: NormalizationConfig | None = None
     multi_call: MultiCallConfig | None = None
     include_multi_call_in_loss: bool = False
-    crps_training: bool = False
     residual_prediction: bool = False
 
     def __post_init__(self):
@@ -219,6 +216,8 @@ class SingleModuleStepperConfig:
             del state_copy["prescriber"]
         if "activation_checkpointing" in state_copy:
             del state_copy["activation_checkpointing"]
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]  # training value, ok to break
         return state_copy
 
     def to_stepper_config(
@@ -245,7 +244,6 @@ class SingleModuleStepperConfig:
         return StepperConfig(
             step=self._to_step_config(normalizer, loss_normalizer),
             loss=self.loss,
-            crps_training=self.crps_training,
             parameter_init=self.parameter_init,
         )
 
@@ -302,7 +300,6 @@ class SingleModuleStepperConfig:
             ocean=self.ocean,
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
-            crps_training=self.crps_training,
             residual_prediction=self.residual_prediction,
         )
 
@@ -500,8 +497,6 @@ class StepperConfig:
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
-        crps_training: Deprecated, kept for backwards compatibility. Use
-            n_ensemble=2 with a CRPS loss instead.
         parameter_init: The parameter initialization configuration.
         input_masking: Config for masking step inputs.
         train_n_forward_steps: The number of timesteps to train on and associated
@@ -516,7 +511,6 @@ class StepperConfig:
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
-    crps_training: bool = False
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
@@ -535,17 +529,6 @@ class StepperConfig:
         return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
 
     def __post_init__(self):
-        if self.crps_training:
-            warnings.warn(
-                "crps_training is deprecated, use n_ensemble=2 "
-                "with a CRPS loss instead",
-                DeprecationWarning,
-            )
-            self.n_ensemble = 2
-            self.loss = StepLossConfig(
-                type="EnsembleLoss",
-                kwargs={"crps_weight": 1.0},
-            )
         if self.n_ensemble == -1:
             if self.loss.type == "EnsembleLoss":
                 self.n_ensemble = 2
@@ -749,6 +732,8 @@ class StepperConfig:
     @classmethod
     def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]  # training value, ok to break
         return state_copy
 
     def replace_ocean(self, ocean: OceanConfig | None):

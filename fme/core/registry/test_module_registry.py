@@ -29,7 +29,7 @@ class MockModuleBuilder(ModuleConfig):
 
     @classmethod
     def from_state(cls, state):
-        return cls(state["param_shapes"])
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
     def get_state(self):
         return {
