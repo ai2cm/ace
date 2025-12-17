@@ -94,101 +94,6 @@ def _rebin_counts(counts, bin_edges, new_edges):
     return new_counts
 
 
-def _absolute_value_histogram(counts: np.ndarray, edges: np.ndarray):
-    """Convert histogram to absolute value histogram.
-    Splits a histogram into negative and positive halves and
-    rebins so both halves have the same bin edges in absolute value.
-    """
-    # take the bin that contains zero and split it proportionally
-    # to insert a bin edge at zero
-    edges = edges.tolist()
-    zero_index = None
-    for i in range(len(edges) - 1):
-        if edges[i] < 0.0 and edges[i + 1] >= 0.0:
-            zero_index = i
-            break
-    if zero_index is None:
-        return counts, edges
-
-    l_edge = edges[zero_index]
-    r_edge = edges[zero_index + 1]
-    frac_neg = abs(l_edge) / (r_edge - l_edge)
-    counts = np.insert(counts, zero_index + 1, counts[zero_index] * (1 - frac_neg))
-    counts[zero_index] = counts[zero_index] * frac_neg
-    edges.insert(zero_index + 1, 0.0)
-
-    new_zero_index = zero_index + 1
-
-    counts_pos, edges_pos = counts[new_zero_index:], edges[new_zero_index:]
-    # flip negative half of histogram to positive
-    counts_neg, abs_edges_neg = (
-        counts[:new_zero_index][::-1],
-        [0.0] + [-e for e in edges[:new_zero_index][::-1]],
-    )
-
-    # rebin to the edges that have the largest maximum edge
-    if abs_edges_neg[-1] > edges_pos[-1]:
-        # Use the negative edges for rebinning,
-        # rebin the positive counts and add to negative counts
-        rebinned_pos_counts = _rebin_counts(
-            counts_pos, edges_pos, new_edges=abs_edges_neg
-        )
-        final_counts = counts_neg + rebinned_pos_counts
-        final_edges = abs_edges_neg
-    else:
-        # Use the positive edges for rebinning,
-        # rebin the negative counts and add to positive counts
-        rebinned_neg_counts = _rebin_counts(
-            counts_neg, abs_edges_neg, new_edges=edges_pos
-        )
-        final_counts = rebinned_neg_counts + counts_pos
-        final_edges = edges_pos
-    return final_counts, final_edges
-
-
-def _abs_norm_tail_bias_masked(
-    pred_counts,
-    target_counts,
-    mask,
-):
-    pred_density = (pred_counts / pred_counts.sum())[mask]
-    target_density = (target_counts / target_counts.sum())[mask]
-
-    valid = target_density > 0
-    ratio = (pred_density[valid] / target_density[valid]) - 1
-    return np.mean(np.abs(ratio))
-
-
-def abs_norm_two_sided_tail_bias(
-    percentile: float,
-    predict_counts: np.ndarray,
-    target_counts: np.ndarray,
-    predict_bin_edges: np.ndarray,
-    target_bin_edges: np.ndarray,
-):
-    pred_counts = _rebin_counts(
-        bin_edges=predict_bin_edges,
-        counts=predict_counts,
-        new_edges=target_bin_edges,
-    )
-
-    centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
-
-    q_left = quantile(target_bin_edges, target_counts, percentile / 100)
-    q_left = quantile(target_bin_edges, target_counts, 1 - percentile / 100)
-
-    hi_mask = centers > q_left
-    lo_mask = centers < q_left
-
-    hi_bias = _abs_norm_tail_bias_masked(pred_counts, target_counts, hi_mask)
-    lo_bias = _abs_norm_tail_bias_masked(pred_counts, target_counts, lo_mask)
-
-    return (
-        hi_bias * hi_mask.sum() +
-        lo_bias * lo_mask.sum()
-    ) / (hi_mask.sum() + lo_mask.sum())
-
-
 def _abs_norm_tail_bias(
     percentile: float,
     predict_counts: np.ndarray,
@@ -196,25 +101,15 @@ def _abs_norm_tail_bias(
     predict_bin_edges: np.ndarray,
     target_bin_edges: np.ndarray,
 ):
-    abs_predict_counts, abs_predict_bin_edges = _absolute_value_histogram(
-        predict_counts, predict_bin_edges
+    pred_counts_rebinned = _rebin_counts(
+        bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
     )
-    abs_target_counts, abs_target_bin_edges = _absolute_value_histogram(
-        target_counts, target_bin_edges
-    )
-    abs_pred_counts_rebinned = _rebin_counts(
-        bin_edges=abs_predict_bin_edges,
-        counts=abs_predict_counts,
-        new_edges=abs_target_bin_edges,
-    )
-    bin_centers = 0.5 * (abs_target_bin_edges[:-1] + abs_target_bin_edges[1:])
-    threshold = quantile(abs_target_bin_edges, abs_target_counts, percentile / 100.0)
+    bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
+    threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
     tail_mask = bin_centers > threshold
 
-    pred_density = (abs_pred_counts_rebinned / np.sum(abs_pred_counts_rebinned))[
-        tail_mask
-    ]
-    target_density = (abs_target_counts / np.sum(abs_target_counts))[tail_mask]
+    pred_density = (pred_counts_rebinned / np.sum(pred_counts_rebinned))[tail_mask]
+    target_density = (target_counts / np.sum(target_counts))[tail_mask]
     nan_mask = target_density > 0
     ratio = (pred_density / target_density - 1)[nan_mask]
     return np.sum(abs(ratio)) / ratio.shape[0]
