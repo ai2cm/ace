@@ -154,6 +154,7 @@ stepper:
         - top_of_atmos_upward_shortwave_flux
       next_step_forcing_names:
       - SOLIN
+      in_names:
       - land_fraction
       - ocean_fraction
       - sea_ice_fraction
