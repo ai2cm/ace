@@ -4,7 +4,7 @@
 
 set -e
 
-JOB_NAME="generate-xshield-amip-events-with-static-inputs-wind-only"
+JOB_NAME="generate-xshield-amip-events-with-static-inputs-wind-only-churn0"
 CONFIG_FILENAME="eval-wind-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -29,10 +29,11 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/climate-titan \
-    --priority urgent \
+    --workspace ai2/ace \
+    --priority high \
     --not-preemptible \
     --cluster ai2/titan \
+    --cluster ai2/jupiter \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
