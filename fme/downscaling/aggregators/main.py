@@ -534,8 +534,9 @@ class MeanMapAggregator:
         self._name = ensure_trailing_slash(name)
         self._mean_target = Mean(batch_mean)
         self._mean_prediction = Mean(batch_mean)
-        self.max_img_upload_size = 3686400  # corresponds to 45 x 80 deg at 3km resolution, in comparison CONUS is 28x65 deg
-
+        # corresponds to 40 x 80 deg at 3km resolution, in comparison CONUS is 28x65 deg
+        self.max_img_upload_size = 3276800
+        
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
         """
@@ -593,8 +594,7 @@ class MeanMapAggregator:
             error = prediction[var_name] - target[var_name]
             metrics[f"metrics/{self._name}bias/{var_name}"] = error.mean()
 
-            print("target map size: ", target[var_name].size)
-            if target[var_name].size < self.max_img_upload_size:
+            if target[var_name].nelement() < self.max_img_upload_size:
                 maps[f"maps/{self._name}error/{var_name}"] = error
                 maps[f"maps/{self._name}full-field/{var_name}"] = torch.cat(
                     (prediction[var_name], gap, target[var_name]), dim=1
