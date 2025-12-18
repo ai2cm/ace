@@ -20,7 +20,6 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step.args import StepArgs
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -170,9 +169,10 @@ class SingleModuleStepConfig(StepConfigABC):
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SingleModuleStep(
             config=self,
-            dataset_info=dataset_info,
+            img_shape=dataset_info.img_shape,
             corrector=corrector,
             normalizer=normalizer,
+            timestep=dataset_info.timestep,
             init_weights=init_weights,
         )
 
@@ -191,15 +191,16 @@ class SingleModuleStep(StepABC):
     def __init__(
         self,
         config: SingleModuleStepConfig,
-        dataset_info: DatasetInfo,
+        img_shape: tuple[int, int],
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
+        timestep: datetime.timedelta,
         init_weights: Callable[[list[nn.Module]], None],
     ):
         """
         Args:
             config: The configuration.
-            dataset_info: Information about the dataset.
+            img_shape: Shape of domain as (n_lat, n_lon).
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
@@ -213,25 +214,24 @@ class SingleModuleStep(StepABC):
         self._normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
-                config.in_names, config.out_names, dataset_info.timestep
+                config.in_names, config.out_names, timestep
             )
         else:
             self.ocean = None
-        module = config.builder.build(
+        self.module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
-            dataset_info=dataset_info,
-        )
-        self.module = module.to(get_device())
-        init_weights(self.modules)
-        self._img_shape = dataset_info.img_shape
+            img_shape=img_shape,
+        ).to(get_device())
+        init_weights([self.module])
+        self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
         dist = Distributed.get_instance()
-        self.module = self.module.wrap_module(dist.wrap_module)
+        self.module = dist.wrap_module(self.module)
 
-        self._timestep = dataset_info.timestep
+        self._timestep = timestep
 
         self._corrector = corrector
         self.in_names = config.in_names
@@ -276,18 +276,25 @@ class SingleModuleStep(StepABC):
         Returns:
             A list of modules being trained.
         """
-        return nn.ModuleList([self.module.torch_module])
+        return nn.ModuleList([self.module])
 
     def step(
         self,
-        args: StepArgs,
+        input: TensorMapping,
+        next_step_input_data: TensorMapping,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
         Args:
-            args: The arguments to the step function.
+            input: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon] containing denormalized data from the
+                initial timestep. In practice this contains the ML inputs.
+            next_step_input_data: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon] containing denormalized data from
+                the output timestep. In practice this contains the necessary data
+                at the output timestep for the ocean model and corrector.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
@@ -296,15 +303,12 @@ class SingleModuleStep(StepABC):
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            output_tensor = self.module.wrap_module(wrapper)(
-                input_tensor,
-                labels=args.labels,
-            )
+            output_tensor = wrapper(self.module)(input_tensor)
             return self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
 
         return step_with_adjustments(
-            input=args.input,
-            next_step_input_data=args.next_step_input_data,
+            input=input,
+            next_step_input_data=next_step_input_data,
             network_calls=network_call,
             normalizer=self.normalizer,
             corrector=self._corrector,
@@ -321,10 +325,9 @@ class SingleModuleStep(StepABC):
         Returns:
             The state of the stepper.
         """
-        state = {
-            "module": self.module.get_state(),
+        return {
+            "module": self.module.state_dict(),
         }
-        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
         """
@@ -337,7 +340,7 @@ class SingleModuleStep(StepABC):
         if "module.device_buffer" in module:
             # for backwards compatibility with old checkpoints
             del module["module.device_buffer"]
-        self.module.load_state(module)
+        self.module.load_state_dict(module)
 
 
 def step_with_adjustments(

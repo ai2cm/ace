@@ -18,7 +18,6 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -113,12 +112,11 @@ class SeparateRadiationStepConfig(StepConfigABC):
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SeparateRadiationStep(
             config=self,
-            dataset_info=dataset_info,
+            img_shape=dataset_info.img_shape,
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
             init_weights=init_weights,
-            all_labels=dataset_info.all_labels,
         )
 
     def get_loss_normalizer(
@@ -247,22 +245,20 @@ class SeparateRadiationStep(StepABC):
     def __init__(
         self,
         config: SeparateRadiationStepConfig,
-        dataset_info: DatasetInfo,
+        img_shape: tuple[int, int],
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
         init_weights: Callable[[list[nn.Module]], None],
-        all_labels: set[str],
     ):
         """
         Args:
             config: The configuration.
-            dataset_info: Information about the dataset.
+            img_shape: Shape of domain as (n_lat, n_lon).
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
             init_weights: Function to initialize the weights of the step.
-            all_labels: All labels we might see in the data.
         """
         super().__init__()
         self.in_packer = Packer(config.main_in_names)
@@ -278,26 +274,24 @@ class SeparateRadiationStep(StepABC):
             )
         else:
             self.ocean = None
-        module = config.builder.build(
+        self.module: nn.Module = config.builder.build(
             n_in_channels=len(config.main_in_names),
             n_out_channels=len(config.main_out_names),
-            dataset_info=dataset_info,
-        )
-        self.module = module.to(get_device())
-        radiation_module = config.radiation_builder.build(
+            img_shape=img_shape,
+        ).to(get_device())
+        self.radiation_module: nn.Module = config.radiation_builder.build(
             n_in_channels=len(config.radiation_in_names),
             n_out_channels=len(config.radiation_out_names),
-            dataset_info=dataset_info,
-        )
-        self.radiation_module = radiation_module.to(get_device())
-        self._img_shape = dataset_info.img_shape
+            img_shape=img_shape,
+        ).to(get_device())
+        self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
         init_weights(self.modules)
         dist = Distributed.get_instance()
-        self.module = self.module.wrap_module(dist.wrap_module)
-        self.radiation_module = self.radiation_module.wrap_module(dist.wrap_module)
+        self.module = dist.wrap_module(self.module)
+        self.radiation_module = dist.wrap_module(self.radiation_module)
         self._timestep = timestep
         self._corrector = corrector
 
@@ -340,20 +334,24 @@ class SeparateRadiationStep(StepABC):
         Returns:
             A list of modules being trained.
         """
-        return nn.ModuleList(
-            [self.module.torch_module, self.radiation_module.torch_module]
-        )
+        return nn.ModuleList([self.module, self.radiation_module])
 
     def step(
         self,
-        args: StepArgs,
+        input: TensorMapping,
+        next_step_forcing_data: TensorMapping,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
         Args:
-            args: The arguments to the step function.
+            input: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon]. This data is used as input for `self.module`
+                and is assumed to contain all input variables and be denormalized.
+            next_step_forcing_data: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon]. This must contain the necessary forcing
+                data at the output timestep for the ocean model and corrector.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
@@ -364,10 +362,9 @@ class SeparateRadiationStep(StepABC):
             radiation_input_tensor = self.radiation_in_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
             )
-            radiation_output_tensor = self.radiation_module.wrap_module(wrapper)(
-                radiation_input_tensor, labels=args.labels
+            radiation_output_tensor = wrapper(self.radiation_module)(
+                radiation_input_tensor
             )
-
             radiation_output_norm = self.radiation_out_packer.unpack(
                 radiation_output_tensor, axis=self.CHANNEL_DIM
             )
@@ -380,9 +377,7 @@ class SeparateRadiationStep(StepABC):
             else:
                 main_input_data = {**input_norm, **radiation_output_norm}
             input_tensor = self.in_packer.pack(main_input_data, axis=self.CHANNEL_DIM)
-            output_tensor = self.module.wrap_module(wrapper)(
-                input_tensor, labels=args.labels
-            )
+            output_tensor = wrapper(self.module)(input_tensor)
             main_output_norm = self.out_packer.unpack(
                 output_tensor, axis=self.CHANNEL_DIM
             )
@@ -392,8 +387,8 @@ class SeparateRadiationStep(StepABC):
             }
 
         return step_with_adjustments(
-            input=args.input,
-            next_step_input_data=args.next_step_input_data,
+            input=input,
+            next_step_input_data=next_step_forcing_data,
             network_calls=network_calls,
             normalizer=self.normalizer,
             corrector=self._corrector,
@@ -411,8 +406,8 @@ class SeparateRadiationStep(StepABC):
             The state of the ML modules.
         """
         return {
-            "module": self.module.get_state(),
-            "radiation_module": self.radiation_module.get_state(),
+            "module": self.module.state_dict(),
+            "radiation_module": self.radiation_module.state_dict(),
         }
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -422,5 +417,5 @@ class SeparateRadiationStep(StepABC):
         Args:
             state: The state to load.
         """
-        self.module.load_state(state["module"])
-        self.radiation_module.load_state(state["radiation_module"])
+        self.module.load_state_dict(state["module"])
+        self.radiation_module.load_state_dict(state["radiation_module"])

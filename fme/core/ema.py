@@ -27,9 +27,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-import contextlib
 import dataclasses
-import logging
 from collections.abc import Iterable, Iterator
 from typing import Protocol
 
@@ -41,8 +39,6 @@ class HasNamedParameters(Protocol):
     def named_parameters(
         self, recurse: bool = True
     ) -> Iterator[tuple[str, nn.Parameter]]: ...
-
-    def parameters(self) -> Iterator[nn.Parameter]: ...
 
 
 @dataclasses.dataclass
@@ -91,7 +87,7 @@ class EMATracker:
         self._faster_decay_at_start = faster_decay_at_start
         self.num_updates = torch.tensor(0, dtype=torch.int)
 
-        self._ema_params: dict[str, torch.Tensor] = {}
+        self._ema_params = {}
 
         for name, p in model.named_parameters():
             if p.requires_grad:
@@ -101,7 +97,6 @@ class EMATracker:
                 self._ema_params[ema_name] = p.clone().detach().data
 
         self._stored_params: list[nn.Parameter] = []
-        self._in_context = False
 
     def __call__(self, model: HasNamedParameters):
         """
@@ -139,20 +134,7 @@ class EMATracker:
                         "but it does not"
                     )
 
-    @contextlib.contextmanager
-    def applied_params(self, model: HasNamedParameters) -> Iterator[None]:
-        self.store(parameters=model.parameters())
-        if self._in_context:
-            raise RuntimeError("Cannot nest EMA contexts")
-        self._in_context = True
-        self.copy_to(model)
-        try:
-            yield
-        finally:
-            self.restore(parameters=model.parameters())
-            self._in_context = False
-
-    def copy_to(self, model: HasNamedParameters) -> None:
+    def copy_to(self, model: HasNamedParameters):
         """
         Copy the averaged parameters to the model, overwriting its values.
         """
@@ -191,7 +173,7 @@ class EMATracker:
 
     def get_state(self):
         """
-        Get the state of the EMA tracker.
+        Get the state of the EMA tracker, excluding weights.
 
         Returns:
             The state of the EMA tracker.
@@ -201,9 +183,6 @@ class EMATracker:
             "num_updates": self.num_updates,
             "faster_decay_at_start": self._faster_decay_at_start,
             "module_name_to_ema_name": self._module_name_to_ema_name,
-            "ema_params": {
-                name: param.clone().detach() for name, param in self._ema_params.items()
-            },
         }
 
     @classmethod
@@ -214,7 +193,7 @@ class EMATracker:
         Args:
             state: The state of the EMA tracker.
             model: The model whose parameters should be tracked, used to
-                initialize the EMA weights.
+                initialize the EMA weights. Should come from an EMA checkpoint.
 
         Returns:
             The EMA tracker.
@@ -222,8 +201,4 @@ class EMATracker:
         ema = cls(model, float(state["decay"]), state["faster_decay_at_start"])
         ema.num_updates = state["num_updates"]
         ema._module_name_to_ema_name = state["module_name_to_ema_name"]
-        if "ema_params" in state:
-            ema._ema_params = state["ema_params"]
-        else:
-            logging.warning("EMA params not found in state and will not be restored.")
         return ema

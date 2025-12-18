@@ -16,7 +16,6 @@ from fme.core.coordinates import (
 from .utils import (
     _broadcast_array_to_tensor,
     _get_indexers,
-    accumulate_labels,
     as_broadcasted_tensor,
     decode_timestep,
     encode_timestep,
@@ -55,26 +54,6 @@ def create_reference_dataset(
     full = xr.DataArray(data, dims=dims, coords=coords, name=FULL_NAME)
     constant = full.isel({TIME_DIM: 0}).drop_vars(TIME_DIM).rename(CONSTANT_NAME)
     return xr.merge([full, constant])
-
-
-@pytest.mark.parametrize(
-    "labels, expected, raises_error",
-    [
-        ([["a", "b"], ["a", "c"], ["b", "c"]], {"a", "b", "c"}, False),
-        ([None, None, None], None, False),
-        ([["a", "b"], ["a", "c"], None], None, True),
-        ([{"a"}, {}], {"a"}, False),
-    ],
-)
-def test_accumulate_labels(
-    labels: list[set[str] | None], expected: set[str] | None, raises_error: bool
-):
-    if raises_error:
-        with pytest.raises(ValueError):
-            accumulate_labels(labels)
-    else:
-        result = accumulate_labels(labels)
-        assert result == expected
 
 
 @pytest.mark.parametrize(

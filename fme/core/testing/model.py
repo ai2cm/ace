@@ -1,15 +1,6 @@
 import torch
 
 
-def compare_parameters(module1_named_params, module2_named_params):
-    for (name1, param1), (name2, param2) in zip(
-        module1_named_params,
-        module2_named_params,
-    ):
-        assert name1 == name2
-        assert torch.equal(param1, param2)
-
-
 def compare_restored_parameters(module1_params, module2_params, optimizer1, optimizer2):
     """
     This helper function is used to compare the model parameters and optimizer
@@ -41,6 +32,5 @@ def compare_restored_parameters(module1_params, module2_params, optimizer1, opti
             value2 = optimizer_state2[key]
             if key == "step":
                 # step is not put on device, but state restore loads to GPU
-                value1 = value1.cpu()
                 value2 = value2.cpu()
             assert torch.equal(value1, value2)

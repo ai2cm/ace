@@ -89,7 +89,7 @@ class MockLoader(torch.utils.data.DataLoader):
                 data=self._data,
                 time=self._time
                 + (self._current_window - 1) * (self._time.shape[1] - 1),
-                labels=None,
+                labels=[set() for _ in range(self._time.shape[0])],
             )
         else:
             raise StopIteration
@@ -162,7 +162,7 @@ def get_batch_data(
     return BatchData.new_on_device(
         data=data,
         time=time,
-        labels=None,
+        labels=[set() for _ in range(time.shape[0])],
     )
 
 
@@ -364,7 +364,7 @@ class PlusOneStepper:
         data = BatchData.new_on_device(
             data={"var": out_tensor},
             time=forcing.time[:, self.n_ic_timesteps :],
-            labels=None,
+            labels=[set() for _ in range(forcing.time.shape[0])],
         )
         if compute_derived_variables:
             data = data.compute_derived_variables(

@@ -4,7 +4,6 @@ from collections.abc import Sequence
 import torch
 
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.schedule import IntSchedule
 
 
 class DatasetConfigABC(abc.ABC):
@@ -12,6 +11,6 @@ class DatasetConfigABC(abc.ABC):
     def build(
         self,
         names: Sequence[str],
-        n_timesteps: IntSchedule,
+        n_timesteps: int,
     ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
         pass

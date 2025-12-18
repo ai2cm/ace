@@ -165,8 +165,6 @@ class WandB:
             wandb.log(dict(data), step=step)
             if sleep is not None:
                 time.sleep(sleep)
-        dist = Distributed.get_instance()
-        dist.barrier()
 
     def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):

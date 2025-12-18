@@ -1,7 +1,6 @@
 import datetime
 import math
 import os
-from unittest.mock import patch
 
 import cftime
 import numpy as np
@@ -9,12 +8,7 @@ import pytest
 import xarray as xr
 import zarr
 
-from fme.core.writer import (
-    ZarrWriter,
-    _initialize_zarr,
-    _insert_into_zarr,
-    _resolve_data_vars,
-)
+from fme.core.writer import ZarrWriter, initialize_zarr, insert_into_zarr
 
 NLAT, NLON = (8, 8)
 
@@ -23,7 +17,7 @@ def create_zarr_store(path, shape, chunks, times, shards=None, nondim_coords=Non
     dims = ("time", "sample", "lat", "lon")
     vars = ["var1", "var2"]
     array_attributes = {"var1": {"units": "K", "long_name": "Variable 1"}}
-    _initialize_zarr(
+    initialize_zarr(
         path=path,
         vars=vars,
         dim_sizes=shape,
@@ -121,7 +115,7 @@ def test_insert_into_zarr(tmp_path, time_batch_size):
                 "var1": data["var1"][insert_slices[0], insert_slices[1], :, :],
                 "var2": data["var2"][insert_slices[0], insert_slices[1], :, :],
             }
-            _insert_into_zarr(
+            insert_into_zarr(
                 path,
                 batch_data,
                 insert_slices,
@@ -179,7 +173,7 @@ def test_ZarrWriter(
     }
     writer.record_batch(data=batch_data, position_slices=position_slices)
 
-    ds_write = zarr.open(writer._path, mode="r")
+    ds_write = zarr.open(writer.path, mode="r")
     np.testing.assert_array_equal(ds_write["lat"], lat)
     np.testing.assert_array_equal(ds_write["lon"], lon)
     assert ds_write["var"].shape == (n_times, n_samples, NLAT, NLON)
@@ -192,7 +186,7 @@ def test_ZarrWriter(
     assert ds_write["var"].chunks == (chunks["time"], chunks["sample"], NLAT, NLON)
 
     # Time coord check needs open with xarray to decode times
-    ds_write = xr.open_zarr(writer._path)
+    ds_write = xr.open_zarr(writer.path)
     np.testing.assert_array_equal(ds_write["time"], times)
 
     assert "no_write_var" not in ds_write.variables
@@ -380,66 +374,3 @@ def test_ZarrWriter_shards_errors_for_wrong_chunks_size(tmp_path):
             chunks=chunks,
             shards=shards,
         )
-
-
-def test_ZarrWriter_already_initialized(tmp_path):
-    n_times = 4
-    path = os.path.join(tmp_path, "test.zarr")
-    writer = _create_writer(
-        path=path,
-        n_times=n_times,
-        chunks={"time": 2},
-    )
-
-    with patch("fme.core.writer._initialize_zarr") as mock_initialize:
-        # Initialize the store for the first time
-        writer.initialize_store(data_dtype="f4", data_vars=["var"])
-
-        # Verify _initialize_zarr was called once
-        assert mock_initialize.call_count == 1
-
-        # Attempt to initialize again, verify still called once
-        writer.initialize_store(data_dtype="f4", data_vars=["var"])
-        assert mock_initialize.call_count == 1
-
-
-@pytest.mark.parametrize(
-    "data_vars_inputs",
-    [
-        (["var1"], ["var1"]),
-        (["var1"], None),
-        (None, ["var1"]),
-    ],
-)
-def test__resolve_data_vars(data_vars_inputs):
-    result = _resolve_data_vars(*data_vars_inputs)
-    assert result == ["var1"]
-
-
-@pytest.mark.parametrize("data_vars", [None, []])
-def test__resolve_data_vars_empty_errors(data_vars):
-    with pytest.raises(ValueError, match="data_vars must be provided"):
-        _resolve_data_vars(data_vars, data_vars)
-
-
-def test__resolve_data_vars_both_provided_mismatching():
-    with pytest.raises(ValueError, match="if ZarrWriter.data_vars is set"):
-        _resolve_data_vars(["var1"], ["var2"])
-
-
-def test_ZarrWriter_initialize_error_when_no_data_vars(tmp_path):
-    """Test that initialize() raises appropriate warnings and errors."""
-    n_times = 4
-    path = os.path.join(tmp_path, "test.zarr")
-
-    # Test 1: Error when no data_vars provided to either ZarrWriter or initialize()
-    writer_no_vars = _create_writer(
-        path=path,
-        n_times=n_times,
-        chunks={"time": 2},
-    )
-    # Remove data_vars to test the error case
-    writer_no_vars._data_vars = None
-
-    with pytest.raises(ValueError, match="data_vars must be provided"):
-        writer_no_vars.initialize_store(data_dtype="f4")

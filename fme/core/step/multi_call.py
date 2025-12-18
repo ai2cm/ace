@@ -7,10 +7,9 @@ import torch
 from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
+from fme.core.multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
-from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
-from fme.core.step.args import StepArgs
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -287,15 +286,19 @@ class MultiCallStep(StepABC):
 
     def step(
         self,
-        args: StepArgs,
+        input: TensorMapping,
+        next_step_input_data: TensorMapping,
         wrapper: Callable[[torch.nn.Module], torch.nn.Module] = lambda x: x,
     ) -> TensorDict:
         state = self._wrapped_step.step(
-            args=args,
+            input,
+            next_step_input_data,
             wrapper=wrapper,
         )
         if self._multi_call is not None:
-            multi_called_outputs = self._multi_call.step(args=args, wrapper=wrapper)
+            multi_called_outputs = self._multi_call.step(
+                input, next_step_input_data, wrapper=wrapper
+            )
             state = {**multi_called_outputs, **state}
         return state
 

@@ -9,7 +9,6 @@ from torch import nn
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.ocean import OceanConfig
-from fme.core.step.args import StepArgs
 from fme.core.typing_ import TensorDict, TensorMapping
 
 from .step import StepABC, StepConfigABC, StepSelector
@@ -57,11 +56,7 @@ class MockStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
 
-    def step(
-        self,
-        args: StepArgs,
-        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    def step(self, input, next_step_input_data, use_activation_checkpointing=False):
         raise NotImplementedError()
 
     def get_state(self):

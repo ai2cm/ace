@@ -314,8 +314,7 @@ def get_lat_lon_sfnonet(
     img_shape: Tuple[int, int],
     context_config: ContextConfig = ContextConfig(
         embed_dim_scalar=0,
-        embed_dim_noise=0,
-        embed_dim_labels=0,
+        embed_dim_2d=0,
     ),
 ) -> "SphericalFourierNeuralOperatorNet":
     h, w = img_shape
@@ -479,8 +478,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         embed_dim: int = 256,
         context_config: ContextConfig = ContextConfig(
             embed_dim_scalar=0,
-            embed_dim_labels=0,
-            embed_dim_noise=0,
+            embed_dim_2d=0,
         ),
         global_layer_norm: bool = False,
         num_layers: int = 12,
@@ -736,7 +734,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.norm_big_skip = ConditionalLayerNorm(
                 in_chans,
                 img_shape=self.img_shape,
-                global_layer_norm=self.global_layer_norm,
+                global_layer_norm=global_layer_norm,
                 context_config=context_config,
                 elementwise_affine=self.affine_norms,
             )

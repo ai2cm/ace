@@ -10,28 +10,9 @@ from fme.core.histogram import (
     DynamicHistogram,
     DynamicHistogramAggregator,
     _abs_norm_tail_bias,
-    _absolute_value_histogram,
     _normalize_histogram,
     _rebin_counts,
 )
-
-
-def test__absolute_value_histogram():
-    bin_edges = np.array(
-        [
-            -10.0,
-            -8,
-            -4,
-            -2,
-            1,
-            2,
-            3,
-        ]
-    )
-    counts = np.arange(1, 7) * 1.0
-    new_counts, new_edges = _absolute_value_histogram(edges=bin_edges, counts=counts)
-    np.testing.assert_array_equal(new_edges, np.array([0.0, 2, 4, 8, 10]))
-    np.testing.assert_array_equal(new_counts, np.array([4 + 5, 3 + 6, 2, 1.0]))
 
 
 def test__rebin_counts():

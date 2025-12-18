@@ -59,14 +59,3 @@ def use_cpu_randn():
     USE_CPU_RANDN = True
     yield
     USE_CPU_RANDN = old_use_cpu_randn
-
-
-def alternate_seed(seed: int) -> int:
-    """
-    Get the alternate seed given a seed.
-
-    Used when a new deterministic random shuffle is desired.
-    """
-    g = torch.Generator()
-    g.manual_seed(seed)
-    return int(torch.randint(0, 2**31, (1,), generator=g).item())
