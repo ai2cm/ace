@@ -26,6 +26,12 @@ def pytest_addoption(parser):
         help="Disable test timeout",
     )
     parser.addoption(
+        "--distributed",
+        action="store_true",
+        default=False,
+        help="Run distributed tests with torchrun",
+    )
+    parser.addoption(
         "--meta-get-device",
         action="store_true",
         default=False,
@@ -48,6 +54,11 @@ def skip_slow(request, very_fast_only):
 @pytest.fixture
 def very_fast_only(request):
     return request.config.getoption("--very-fast")
+
+
+@pytest.fixture
+def distributed(request):
+    return request.config.getoption("--distributed")
 
 
 @pytest.fixture

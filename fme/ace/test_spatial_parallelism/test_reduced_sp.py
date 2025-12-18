@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import torch
 
 from fme.ace.aggregator.one_step.reduced import MeanAggregator
@@ -8,11 +9,13 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import LatLonOperations
 
 
-def test_loss_wo_sp():
+def test_loss_wo_sp(distributed):
     """
     Basic test the aggregator combines loss correctly
     with multiple batches and no distributed training.
     """
+    if distributed:
+        pytest.skip("Disable serial tests when distributed tests are enabled")
     nx = 8
     ny = 8
     torch.manual_seed(0)
@@ -50,7 +53,9 @@ def test_loss_wo_sp():
     assert logs["metrics/loss"] == 2.0
 
 
-def test_loss_with_sp():
+def test_loss_with_sp(distributed):
+    if not distributed:
+        pytest.skip("Distributed tests are not enabled")
     os.environ["H_PARALLEL_SIZE"] = "2"
     os.environ["W_PARALLEL_SIZE"] = "2"
     nx = 8

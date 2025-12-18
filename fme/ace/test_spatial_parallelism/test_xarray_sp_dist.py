@@ -2,6 +2,7 @@
 
 import os
 
+import pytest
 import torch
 from test_helper import gather_helper_conv, init_seed, relative_error
 
@@ -14,7 +15,25 @@ from fme.core.typing_ import Slice
 # TODO: Make this run with a Bash script; I am running this test manually.
 # 1. Get an interactive node in PM.
 # 2. Then srun -n 4 pytest test_xarray_sp_dist.py.
-def test_concat_of_XarrayConcat_w_spatial_parallel(mock_monthly_netcdfs):
+def test_concat_of_XarrayConcat_w_spatial_parallel(mock_monthly_netcdfs, distributed):
+    if not distributed:
+        pytest.skip("Distributed tests are not enabled")
+    if not torch.cuda.is_available():
+        # physicsnemo DistributedManager assumes that the device_id is a GPU
+        # so we override the init_process_group function to not pass in device_id
+        import torch.distributed as dist
+
+        orig_init = dist.init_process_group
+
+        def cpu_friendly_init(*args, **kwargs):
+            if (
+                "device_id" in kwargs
+                and getattr(kwargs["device_id"], "type", None) == "cpu"
+            ):
+                kwargs.pop("device_id")
+            return orig_init(*args, **kwargs)
+
+        dist.init_process_group = cpu_friendly_init
     # We must use the same random seed because this code will be executed several times.
     init_seed(333)
     mock_data = mock_monthly_netcdfs

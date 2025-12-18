@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import torch
 
 from fme.core.coordinates import LatLonCoordinates
@@ -28,7 +29,9 @@ def int():
     return lat, lon, nlat, nlon, batch_size, input_tensor
 
 
-def test_lat_lon_ops_from_coords_wo_sp():
+def test_lat_lon_ops_from_coords_wo_sp(distributed):
+    if distributed:
+        pytest.skip("Disable serial tests when distributed tests are enabled")
     os.environ["H_PARALLEL_SIZE"] = "1"
     lat, lon, nlat, nlon, batch_size, input_ = int()
     coords = LatLonCoordinates(lat=lat, lon=lon)
@@ -37,7 +40,9 @@ def test_lat_lon_ops_from_coords_wo_sp():
     print(result)
 
 
-def test_lat_lon_ops_from_coords_w_sp():
+def test_lat_lon_ops_from_coords_w_sp(distributed):
+    if not distributed:
+        pytest.skip("Distributed tests are not enabled")
     lat_host, lon_host, nlat, nlon, batch_size, input_ = int()
     os.environ["H_PARALLEL_SIZE"] = "2"
     os.environ["W_PARALLEL_SIZE"] = "2"

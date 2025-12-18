@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import torch
 import torch.distributed as dist
 import torch_harmonics.distributed as thd
@@ -91,10 +92,25 @@ def _init_comms():
     )  # Use PDC world size
 
 
-def test_distributed_fft2():
+@pytest.fixture(scope="session", autouse=True)
+def init_distributed_session():
+    w_group, h_group, e_group, world_rank, world_size = _init_comms()
+
+    yield
+
+    if dist.is_initialized():
+        dist.barrier()
+        comm.cleanup()
+
+
+def test_distributed_fft2(distributed):
+    if not distributed:
+        pytest.skip("Distributed tests are not enabled")
     verbose = True
     _, _, device = setup_test()
-    w_group, h_group, e_group, world_rank, world_size = _init_comms()
+    w_group = comm.get_group("w")
+    h_group = comm.get_group("h")
+    world_rank = dist.get_rank()
     # Use the default group for the global sync
     # 256, 512, 0, 32,  8, 1e-6
     # nlat, nlon, nalt, batch_size, num_chan, tol,
@@ -162,10 +178,14 @@ def test_distributed_fft2():
     assert err.item() <= tol
 
 
-def test_distributed_ifft2():
+def test_distributed_ifft2(distributed):
+    if not distributed:
+        pytest.skip("Distributed tests are not enabled")
     verbose = True
     world_rank, world_size, device = setup_test()
-    w_group, h_group, e_group, world_rank, world_size = _init_comms()
+    w_group = comm.get_group("w")
+    h_group = comm.get_group("h")
+    world_rank = dist.get_rank()
     # 256, 512, 0, 32,  8, 1e-6
     # nlat, nlon, nalt, batch_size, num_chan, tol,
     tol = 1e-6

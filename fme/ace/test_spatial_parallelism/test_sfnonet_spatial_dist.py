@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import torch
 
 from fme.ace.models.modulus.sfnonet import SFNO
@@ -18,7 +19,9 @@ from fme.ace.models.makani_utils.makani_driver import (
 from fme.core.distributed import Distributed
 
 
-def test_sfnonet_without_sp():
+def test_sfnonet_without_sp(distributed):
+    if distributed:
+        pytest.skip("Disable serial tests when distributed tests are enabled")
     init_seed(333)
     ## without domain decomposition
     os.environ["H_PARALLEL_SIZE"] = "1"
@@ -65,7 +68,9 @@ def test_sfnonet_without_sp():
         )
 
 
-def test_sfnonet_with_sp():
+def test_sfnonet_with_sp(distributed):
+    if not distributed:
+        pytest.skip("Distributed tests are not enabled")
     init_seed(333)
     tmp_path = "testdata"
     os.environ["H_PARALLEL_SIZE"] = "2"
@@ -77,7 +82,22 @@ def test_sfnonet_with_sp():
     n_samples = 4
     embed_dim = 16
     num_layers = 2
+    if not torch.cuda.is_available():
+        # physicsnemo DistributedManager assumes that the device_id is a GPU
+        # so we override the init_process_group function to not pass in device_id
+        import torch.distributed as dist
 
+        orig_init = dist.init_process_group
+
+        def cpu_friendly_init(*args, **kwargs):
+            if (
+                "device_id" in kwargs
+                and getattr(kwargs["device_id"], "type", None) == "cpu"
+            ):
+                kwargs.pop("device_id")
+            return orig_init(*args, **kwargs)
+
+        dist.init_process_group = cpu_friendly_init
     dist = Distributed.get_instance()
     mpi_comm_rank = dist.local_rank
 
@@ -180,7 +200,9 @@ def test_sfnonet_with_sp():
     assert err < 1e-3
 
 
-def test_sfnonet_spatial_dist_output_is_unchanged():
+def test_sfnonet_spatial_dist_output_is_unchanged(distributed):
+    if distributed:
+        pytest.skip("Disable serial tests when distributed tests are enabled")
     # torch.manual_seed(0)
     # fix seed
     init_seed(333)
