@@ -133,7 +133,7 @@ events:
   save_generated_samples: True
   n_samples: 16
 - name: Phl_tc_landfall_20230514T06
-  date: 2023-05-14T06
+  date: 2023-05-14T06:00
   lat_extent:
     start: 4
     stop: 20
