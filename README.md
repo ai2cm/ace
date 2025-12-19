@@ -5,6 +5,17 @@
 
 # Ai2 Climate Emulator
 
+> **⚠️ IMPORTANT MIGRATION NOTICE**
+>
+> This repository has recently undergone a **breaking history change** on the `main` branch as part of our transition to open development. If you have an existing clone from before this migration, you will need to take action.
+>
+> **See [MIGRATION.md](MIGRATION.md) for complete instructions.**
+>
+> - If you have no local work to preserve: delete your local clone and re-clone the repository
+> - If you have local branches or commits: follow the detailed migration steps in [MIGRATION.md](MIGRATION.md)
+>
+> This is a hopefully a one-time change. Future updates should maintain normal Git history.
+
 Ai2 Climate Emulator (ACE) is a fast machine learning model that simulates global atmospheric variability in a changing climate over time scales ranging from hours to centuries.
 
 This repo contains code accompanying five papers describing ACE models:

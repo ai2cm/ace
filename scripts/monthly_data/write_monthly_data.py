@@ -13,40 +13,38 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.batch_data import BatchData, default_collate
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
-from fme.ace.inference.data_writer.monthly import (
-    MonthlyDataWriter,
-    months_for_timesteps,
-)
+from fme.ace.inference.data_writer.monthly import MonthlyDataWriter
 from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import (
     AtmosphericDeriveFn,
     OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.merged import MergeDatasetConfig, get_merged_datasets
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import get_xarray_datasets
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
-from fme.core.typing_ import TensorMapping
 
 
 @dataclasses.dataclass
 class CollateFn:
     horizontal_dims: List[str]
 
-    def __call__(
-        self, samples: Sequence[Tuple[TensorMapping, xr.DataArray, set[str]]]
-    ) -> "BatchData":
-        sample_data, sample_time, labels = zip(*samples)
+    def __call__(self, samples: Sequence[DatasetItem]) -> "BatchData":
+        sample_data, sample_time, _, epoch = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_time, dim="sample")
+        if not all(epoch[0] == e for e in epoch):
+            raise ValueError("All samples in batch must have the same epoch.")
         return BatchData(
             data=batch_data,
             time=batch_time,
             horizontal_dims=self.horizontal_dims,
-            labels=list(labels),
+            labels=None,
+            epoch=epoch[0],
         )
 
 
@@ -62,13 +60,13 @@ def get_data_loaders(
     datasets: torch.utils.data.Dataset
     if isinstance(config.dataset, ConcatDatasetConfig):
         datasets, properties = get_xarray_datasets(
-            config.dataset.concat, requirements.names, requirements.n_timesteps
+            config.dataset.concat, requirements.names, requirements.n_timesteps_schedule
         )
     elif isinstance(config.dataset, MergeDatasetConfig):
         datasets, properties = get_merged_datasets(
             config.dataset,
             requirements.names,
-            requirements.n_timesteps,
+            requirements.n_timesteps_schedule,
         )
 
     data_loaders = []
@@ -142,17 +140,15 @@ class Config:
 
     def get_data_writer(self, data: "Data") -> MonthlyDataWriter:
         assert data.properties.timestep is not None
-        n_months = months_for_timesteps(data.n_timesteps, data.properties.timestep)
         coords = {
             **data.properties.horizontal_coordinates.coords,
             **data.properties.vertical_coordinate.coords,
         }
         return MonthlyDataWriter(
             path=self.experiment_dir,
-            label="data",
+            label="monthly_mean_data",
             save_names=None,  # save all data given
             n_samples=self.data_loader.batch_size * len(data.loaders),
-            n_months=n_months,
             variable_metadata=data.properties.variable_metadata,
             coords=coords,
             dataset_metadata=DatasetMetadata.from_env(),
@@ -170,7 +166,6 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
     for window_batch_data_list in zip(*loaders):
         tensors = [item.data for item in window_batch_data_list]
         time = [item.time for item in window_batch_data_list]
-        labels = [item.labels for item in window_batch_data_list]
         window_batch_data = {
             k: torch.concat([d[k] for d in tensors]) for k in tensors[0].keys()
         }
@@ -178,7 +173,7 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
         yield BatchData(
             data=window_batch_data,
             time=time,
-            labels=list(labels),
+            labels=None,
         )
 
 
@@ -210,7 +205,6 @@ def run(config: Config):
         )
         writer.append_batch(
             data=window_batch_data.data,
-            start_timestep=-1,  # ignored
             batch_time=window_batch_data.time,
         )
         if i % 10 == 0:

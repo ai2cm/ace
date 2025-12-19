@@ -40,6 +40,7 @@ from .layers import (
     SpectralAttention2d,
 )
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
+from .makani.spectral_convolution import SpectralConv
 
 
 # heuristic for finding theta_cutoff
@@ -87,6 +88,7 @@ class SpectralFilterLayer(nn.Module):
         complex_activation="real",
         spectral_layers=1,
         drop_rate=0.0,
+        num_groups=1,
         filter_residual=False,
     ):
         super(SpectralFilterLayer, self).__init__()
@@ -119,6 +121,17 @@ class SpectralFilterLayer(nn.Module):
                 bias=True,
                 use_tensorly=False if factorization is None else True,
                 filter_residual=filter_residual,
+            )
+        elif filter_type == "makani-linear":
+            self.filter = SpectralConv(
+                forward_transform,
+                inverse_transform,
+                embed_dim,
+                embed_dim,
+                operator_type="dhconv",
+                num_groups=num_groups,
+                bias=False,
+                gain=1.0,
             )
 
         elif filter_type == "local":
@@ -181,6 +194,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         checkpointing=0,
         filter_residual=False,
         affine_norms=False,
+        filter_num_groups: int = 1,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -214,6 +228,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             spectral_layers=spectral_layers,
             drop_rate=drop_rate,
             filter_residual=filter_residual,
+            num_groups=filter_num_groups,
         )
 
         if inner_skip == "linear":
@@ -314,7 +329,8 @@ def get_lat_lon_sfnonet(
     img_shape: Tuple[int, int],
     context_config: ContextConfig = ContextConfig(
         embed_dim_scalar=0,
-        embed_dim_2d=0,
+        embed_dim_noise=0,
+        embed_dim_labels=0,
     ),
 ) -> "SphericalFourierNeuralOperatorNet":
     h, w = img_shape
@@ -478,7 +494,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         embed_dim: int = 256,
         context_config: ContextConfig = ContextConfig(
             embed_dim_scalar=0,
-            embed_dim_2d=0,
+            embed_dim_labels=0,
+            embed_dim_noise=0,
         ),
         global_layer_norm: bool = False,
         num_layers: int = 12,
@@ -501,6 +518,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         complex_activation: str = "real",
         spectral_layers: int = 3,
         checkpointing: int = 0,
+        filter_num_groups: int = 1,
         filter_residual: bool = False,
         filter_output: bool = False,
         local_blocks: Optional[List[int]] = None,
@@ -614,6 +632,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.affine_norms = (
             params.affine_norms if hasattr(params, "affine_norms") else affine_norms
         )
+        self.filter_num_groups = (
+            params.filter_num_groups
+            if hasattr(params, "filter_num_groups")
+            else filter_num_groups
+        )
 
         # no global padding because we removed the horizontal distributed code
         self.padding = (0, 0)
@@ -708,6 +731,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 checkpointing=self.checkpointing,
                 filter_residual=self.filter_residual,
                 affine_norms=self.affine_norms,
+                filter_num_groups=self.filter_num_groups,
             )
 
             self.blocks.append(block)
@@ -734,7 +758,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.norm_big_skip = ConditionalLayerNorm(
                 in_chans,
                 img_shape=self.img_shape,
-                global_layer_norm=global_layer_norm,
+                global_layer_norm=self.global_layer_norm,
                 context_config=context_config,
                 elementwise_affine=self.affine_norms,
             )

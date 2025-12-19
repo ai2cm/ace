@@ -6,7 +6,6 @@ import os
 import shutil
 import time
 import uuid
-import warnings
 
 import dacite
 import torch
@@ -51,6 +50,7 @@ def _save_checkpoint(trainer: "Trainer", path: str) -> None:
                 "num_batches_seen": trainer.num_batches_seen,
                 "startEpoch": trainer.startEpoch,
                 "best_valid_loss": trainer.best_valid_loss,
+                "best_histogram_tail_metric": trainer.best_histogram_tail_metric,
                 "validate_using_ema": trainer.validate_using_ema,
             },
             temporary_location,
@@ -74,6 +74,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
     trainer.best_valid_loss = checkpoint["best_valid_loss"]
+    trainer.best_histogram_tail_metric = checkpoint.get(
+        "best_histogram_tail_metric", float("inf")
+    )
 
     trainer.validate_using_ema = checkpoint["validate_using_ema"]
     ema_checkpoint = torch.load(
@@ -144,7 +147,7 @@ class Trainer:
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_name = "generation/metrics/crps"
+        self._best_valid_loss_name = "generation/metrics/relative_crps_bicubic"
         self._best_histogram_tail_name = (
             "generation/histogram/abs_norm_tail_bias_above_percentile/99.99/"
         )
@@ -470,15 +473,10 @@ class TrainerConfig:
         )
 
 
-def _get_channel_mean_scalar_metric(metrics, prefix="generation/metrics/crps"):
+def _get_channel_mean_scalar_metric(
+    metrics, prefix="generation/metrics/relative_crps_bicubic"
+):
     channel_metric = [v for k, v in metrics.items() if k.startswith(prefix)]
-
-    if len(channel_metric) != 1:
-        warnings.warn(
-            f"Metric {prefix} used for checkpoint selection is computed on "
-            "denormalized outputs. If multiple outputs are present, "
-            "the mean will not be evenly weighted across outputs."
-        )
     if len(channel_metric) == 0:
         return float("inf")
     else:

@@ -18,6 +18,7 @@ except ImportError:
 from fme.core import metrics
 from fme.core.constants import GRAVITY
 from fme.core.corrector.atmosphere import AtmosphereCorrector, AtmosphereCorrectorConfig
+from fme.core.corrector.ice import IceCorrector, IceCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
@@ -528,6 +529,17 @@ class NullVerticalCoordinate(VerticalCoordinate):
                 config=config_instance,
                 gridded_operations=gridded_operations,
                 vertical_coordinate=None,
+                timestep=timestep,
+            )
+        elif config.type == "ice_corrector":
+            config_instance = dacite.from_dict(
+                data_class=IceCorrectorConfig,
+                data=config.config,
+                config=dacite.Config(strict=True),
+            )
+            return IceCorrector(
+                config=config_instance,
+                gridded_operations=gridded_operations,
                 timestep=timestep,
             )
         else:

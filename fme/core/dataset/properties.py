@@ -15,7 +15,7 @@ class DatasetProperties:
         mask_provider: MaskProvider,
         timestep: datetime.timedelta | None,
         is_remote: bool,
-        all_labels: set[str],
+        all_labels: set[str] | None,
     ):
         self.variable_metadata = variable_metadata
         self.vertical_coordinate = vertical_coordinate
@@ -49,7 +49,19 @@ class DatasetProperties:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
         if self.mask_provider != other.mask_provider:
             raise ValueError("Inconsistent mask providers between datasets")
-        self.all_labels.update(other.all_labels)
+        self._update_labels(other)
+
+    def _update_labels(self, other: "DatasetProperties"):
+        if (self.all_labels is None) != (other.all_labels is None):
+            raise ValueError(
+                "Inconsistent labels between datasets, must all provide labels "
+                "or none provide labels. Provide an explicit empty list "
+                "for datasets with no labels."
+            )
+        if self.all_labels is not None:
+            if other.all_labels is None:
+                raise RuntimeError("Checks above should prevent this case.")
+            self.all_labels.update(other.all_labels)
 
     def update_merged_dataset(self, other: "DatasetProperties"):
         if isinstance(self.variable_metadata, dict):
@@ -60,7 +72,18 @@ class DatasetProperties:
             raise ValueError("Inconsistent timesteps between datasets")
         if self.horizontal_coordinates != other.horizontal_coordinates:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
-        self.all_labels.update(other.all_labels)
+        self._update_labels(other)
 
     def update_mask_provider(self, mask_provider: MaskProvider):
         self.mask_provider.update(mask_provider)
+
+    def copy(self) -> "DatasetProperties":
+        return DatasetProperties(
+            self.variable_metadata,
+            self.vertical_coordinate,
+            self.horizontal_coordinates,
+            self.mask_provider,
+            self.timestep,
+            self.is_remote,
+            self.all_labels,
+        )

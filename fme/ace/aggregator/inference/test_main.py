@@ -63,7 +63,7 @@ def test_inference_evaluator_aggregator_channel_mean_names(
     paired_data = PairedData.new_on_device(
         prediction=gen_data,
         reference=target_data,
-        labels=[set() for _ in range(batch_size)],
+        labels=None,
         time=time,
     )
     agg.record_batch(paired_data)

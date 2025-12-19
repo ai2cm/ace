@@ -24,8 +24,8 @@ from fme.core.typing_ import EnsembleTensorDict
                 "test/power_spectrum/negative_norm_bias/a",
                 "test/power_spectrum/mean_abs_norm_bias/a",
                 "test/power_spectrum/smallest_scale_norm_bias/a",
-                "test/mean/loss",
                 "test/mean/weighted_rmse/a",
+                "test/mean/loss",
             ],
         ),
     ],
@@ -58,6 +58,7 @@ def test_labels_exist(config: TrainAggregatorConfig, expected_keys: list[str]):
     )
     logs = agg.get_logs(label="test")
     assert set(logs.keys()) == set(expected_keys)
+    assert not np.isnan(float(logs["test/mean/loss"]))
 
 
 @pytest.mark.parametrize(
@@ -68,11 +69,12 @@ def test_labels_exist(config: TrainAggregatorConfig, expected_keys: list[str]):
     ],
 )
 def test_aggregator_gets_logs_with_no_batches(config: TrainAggregatorConfig):
-    nx, ny = 2, 2
+    ny, nx = 4, 8
     device = get_device()
     gridded_operations = LatLonOperations(
-        area_weights=torch.ones(nx, ny, device=device)
+        area_weights=torch.ones(ny, nx, device=device)
     )
     agg = TrainAggregator(config=config, operations=gridded_operations)
     logs = agg.get_logs(label="test")
+    assert np.isnan(logs.pop("test/mean/loss"))
     assert logs == {}

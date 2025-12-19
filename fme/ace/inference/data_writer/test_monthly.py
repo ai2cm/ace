@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import torch
 import xarray as xr
+from xarray.coders import CFDatetimeCoder
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import (
@@ -12,7 +13,6 @@ from fme.ace.inference.data_writer.monthly import (
     add_data,
     find_boundary,
     get_days_since_reference,
-    months_for_timesteps,
 )
 from fme.core.dataset.data_typing import VariableMetadata
 
@@ -35,9 +35,8 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
     n_lat, n_lon = 8, 16
     writer = MonthlyDataWriter(
         path=str(tmpdir),
-        label="predictions",
+        label="monthly_mean_predictions",
         n_samples=n_samples,
-        n_months=24,
         save_names=None,
         variable_metadata={"x": VariableMetadata(units="m", long_name="x_name")},
         coords={},
@@ -64,10 +63,12 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
                     dims=["sample", "time"],
                 )
                 assert time.shape == (n_samples, window_size)
-                writer.append_batch(data=month_data, start_timestep=0, batch_time=time)
+                writer.append_batch(data=month_data, batch_time=time)
     writer.finalize()
     written = xr.open_dataset(
-        str(tmpdir / "monthly_mean_predictions.nc"), decode_timedelta=False
+        str(tmpdir / "monthly_mean_predictions.nc"),
+        decode_timedelta=False,
+        decode_times=CFDatetimeCoder(use_cftime=True),
     )
     assert written["x"].shape == (n_samples, 24, n_lat, n_lon)
     assert np.sum(written["x"].values != 0) > 0, "No non-zero values written"
@@ -82,22 +83,49 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
     assert "counts" in written.coords
     assert "counts" in written.x.coords
     assert "counts" in written.valid_time.coords
-    assert written.attrs["title"] == "ACE monthly predictions data file"
+    assert written.attrs["title"] == "ACE monthly mean predictions data file"
     assert written.attrs["source.inference_version"] == "1.0"
 
-
-@pytest.mark.parametrize(
-    "n_timesteps, min_expected",
-    [
-        (1, 1),
-        (2, 2),  # 2 timesteps can cross a month boundary
-        (3, 2),  # 3 timesteps can't cross an additional boundary
-        (4 * 28, 2),  # 28 days can only cross one month boundary
-        (4 * 28 + 1, 3),  # 29 days can cross two month boundaries
-    ],
-)
-def test_months_for_timesteps(n_timesteps: int, min_expected: int):
-    assert months_for_timesteps(n_timesteps, TIMESTEP) >= min_expected
+    # Validate time coordinates.
+    expected_init_time = xr.DataArray(
+        [
+            cftime.DatetimeProlepticGregorian(2020, 1, 1),
+            cftime.DatetimeProlepticGregorian(2020, 1, 1),
+        ],
+        dims=["sample"],
+        name="init_time",
+    )
+    expected_init_time = expected_init_time.assign_coords(init_time=expected_init_time)
+    expected_time = np.arange(24)
+    expected_counts = (["sample", "time"], np.full((2, 24), window_size * n_writes))
+    valid_times = (
+        xr.date_range(
+            "2020",
+            periods=24,
+            freq="MS",
+            calendar="proleptic_gregorian",
+            use_cftime=True,
+        )
+        .shift(14, "D")
+        .tolist()
+    )
+    valid_times = [valid_times, valid_times]
+    expected_valid_time = xr.DataArray(
+        valid_times, dims=["sample", "time"], name="valid_time"
+    )
+    expected_valid_time = expected_valid_time.assign_coords(
+        init_time=expected_init_time, time=expected_time, counts=expected_counts
+    )
+    expected_valid_time = expected_valid_time.assign_coords(
+        valid_time=expected_valid_time
+    )
+    xr.testing.assert_equal(written.init_time, expected_init_time)
+    xr.testing.assert_equal(written.valid_time, expected_valid_time)
+    xr.testing.assert_equal(written.time, expected_valid_time.time)
+    xr.testing.assert_equal(written.counts, expected_valid_time.counts)
+    assert written.init_time.dt.calendar == "proleptic_gregorian"
+    assert written.valid_time.dt.calendar == "proleptic_gregorian"
+    assert written.time.attrs["units"] == "months"
 
 
 @pytest.mark.parametrize("num_years", [2, 500])
@@ -140,6 +168,29 @@ def test_get_days_since_reference(num_years, calendar):
         if num_years == 500:
             assert days[499, 0] == 182135 + 31
             assert days[499, 1] == 182135 + 31 + 28
+
+
+def test_days_since_reference_with_month_offset():
+    calendar = "noleap"
+    month_offset = 2
+    offset_n_months = 3
+    n_months = month_offset + offset_n_months
+
+    years = np.array([2020, 2021])
+    months = np.zeros((2,), dtype=int)
+    reference_date = cftime.DatetimeNoLeap(2020, 1, 1)
+
+    full = get_days_since_reference(years, months, reference_date, n_months, calendar)
+    expected = full[:, month_offset:]
+    result = get_days_since_reference(
+        years,
+        months,
+        reference_date,
+        offset_n_months,
+        calendar,
+        month_offset=month_offset,
+    )
+    np.testing.assert_equal(result, expected)
 
 
 @pytest.mark.parametrize(
@@ -233,3 +284,31 @@ def test_add_data_two_later_months():
         months_elapsed=months_elapsed,
     )
     np.testing.assert_array_equal(target, expected)
+
+
+def test_monthly_data_writer_long_run(tmpdir):
+    # Regression test for GitHub issue #1246. Using a 360-day calendar with
+    # 82 timesteps and a timestep length of 360 days is close to the
+    # fastest possible test we can construct for this issue. It takes less
+    # than 0.2s on a laptop.
+    n_timesteps = 82
+    n_samples = 1
+    n_lat, n_lon = 1, 1
+    timestep = datetime.timedelta(days=360)
+    writer = MonthlyDataWriter(
+        path=str(tmpdir),
+        label="monthly_mean_predictions",
+        n_samples=n_samples,
+        save_names=None,
+        variable_metadata={"x": VariableMetadata(units="m", long_name="x_name")},
+        coords={},
+        dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
+    )
+    time = cftime.Datetime360Day(2020, 1, 1)
+    for _ in range(n_timesteps):
+        x = torch.ones((n_samples, 1, n_lat, n_lon))
+        month_data = {"x": x}
+        batch_time = xr.DataArray([[time]], dims=["sample", "time"])
+        writer.append_batch(data=month_data, batch_time=batch_time)
+        time = time + timestep
+    writer.finalize()

@@ -108,6 +108,10 @@ class CascadePredictor:
         return self.models[0].coarse_shape
 
     @property
+    def fine_shape(self):
+        return self.models[-1].fine_shape
+
+    @property
     def downscale_factor(self):
         return math.prod([model.downscale_factor for model in self.models])
 
@@ -124,7 +128,7 @@ class CascadePredictor:
     ):
         current_coarse = coarse
         for i, (model, fine_topography) in enumerate(zip(self.models, topographies)):
-            sample_data = current_coarse[list(coarse.keys())[0]]
+            sample_data = next(iter(current_coarse.values()))
             batch_size = sample_data.shape[0]
             # n_samples are generated for the first step, and subsequent models
             # generate 1 sample

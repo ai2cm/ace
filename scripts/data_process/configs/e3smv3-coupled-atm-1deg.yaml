@@ -1,0 +1,100 @@
+runs:
+  atm: /pscratch/sd/e/elynnwu/e3smv3-couple-run/v3.LR.piControl_bonus
+data_output_directory: /pscratch/sd/e/elynnwu/e3smv3-couple-run/zarrv3
+stats:
+  output_directory: /pscratch/sd/e/elynnwu/e3smv3-couple-run/2025-04-15-e3smv3-coupled-atm-1deg
+  start_date: "0401-01-01"
+  end_date: "0500-01-01"
+  data_type: E3SMV2
+  beaker_dataset: e3sm-1deg-8layers-stats # this is not used in e3sm data processing
+dataset_computation:
+  reference_vertical_coordinate_file: None
+  time_invariant_dir: /global/cfs/cdirs/m4331/jpduncan/e3smv2/time_invariant
+  vertical_coarsening_indices:
+# computed here: https://github.com/ai2cm/explore/blob/master/jamesd/2023-06-09-e3smv2-vertical-interface-indices.ipynb
+#[np.int64(0), np.int64(25), np.int64(38), np.int64(46), np.int64(52), np.int64(56), np.int64(61), np.int64(69), np.int64(80)]
+    - [0, 25]
+    - [25, 38]
+    - [38, 46]
+    - [46, 52]
+    - [52, 56]
+    - [56, 61]
+    - [61, 69]
+    - [69, 80]
+  roundtrip_fraction_kept: 1.0
+  roundtrip_variables:
+    - PS
+    - TS
+    - T
+    - U
+    - V
+    - Q
+    - CLDLIQ
+    - CLDICE
+    - RAINQM
+    - TMQ
+    - TGCLDLWP
+    - TGCLDIWP
+  n_split: 500
+  variable_sources:
+    time_invariant:
+      - PHIS
+    6hourly_instant:
+      - PS
+      - TS
+      - T
+      - U
+      - V
+      - Q
+      - CLDLIQ
+      - CLDICE
+      - RAINQM
+      - TMQ
+      - TGCLDLWP
+      - TGCLDIWP
+      - OCNFRAC
+      - LANDFRAC
+      - ICEFRAC
+      - TAUX
+      - TAUY
+    6hourly:
+      - PRECT
+      - LHFLX
+      - SHFLX
+      - FLNS
+      - FLDS
+      - FSNS
+      - FSDS
+      - FSNTOA
+      - SOLIN
+      - FLUT
+      - PRECSC
+      - PRECSL
+      - QFLX
+  standard_names:
+    total_frozen_precip_rate: None
+    surface_snow_rate: PRECSL
+    surface_ice_rate: PRECSC
+    surface_graupel_rate: None
+    longitude_dim: lon
+    latitude_dim: lat
+    vertical_dim: lev
+    vertical_interface_dim: ilev
+    time_dim: time
+    surface_pressure: PS
+    latent_heat_flux: LHFLX
+    precip_rate: PRECT
+    precipitable_water_path: precipitable_water_path
+    pressure_thickness: pressure_thickness_of_atmospheric_layer
+    air_temperature: T
+    specific_humidity: Q
+    cloud_water_mixing_ratio: CLDLIQ
+    cloud_ice_mixing_ratio: CLDICE
+    graupel_mixing_ratio: None
+    rain_mixing_ratio: RAINQM
+    snow_mixing_ratio: None
+    northward_wind: V
+    eastward_wind: U
+    hybrid_level_coeffs:
+      - hyai
+      - hybi

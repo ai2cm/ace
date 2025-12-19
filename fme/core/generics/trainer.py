@@ -114,6 +114,9 @@ class TrainConfigProtocol(Protocol):
     def log_train_every_n_batches(self) -> int: ...
 
     @property
+    def train_evaluation_batches(self) -> int: ...
+
+    @property
     def checkpoint_every_n_batches(self) -> int: ...
 
     @property
@@ -171,10 +174,6 @@ class CheckpointPaths:
     def best_inference_checkpoint_path(self) -> str:
         return os.path.join(self.checkpoint_dir, "best_inference_ckpt.tar")
 
-    @property
-    def ema_checkpoint_path(self) -> str:
-        return os.path.join(self.checkpoint_dir, "ema_ckpt.tar")
-
     def epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"ckpt_{epoch:04d}.tar")
 
@@ -222,6 +221,12 @@ class Trainer:
         self.config = config
         self.paths = CheckpointPaths(config.checkpoint_dir)
 
+        if dist.is_root() and not self.config.save_checkpoint:
+            logging.warning(
+                "Configured value of save_checkpoint is false, no "
+                "checkpoints whatsoever will be saved!"
+            )
+
         self.train_data = train_data
         self.valid_data = validation_data
         for gridded_data, name in zip(
@@ -248,9 +253,7 @@ class Trainer:
         resuming = os.path.isfile(self.paths.latest_checkpoint_path)
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
-            self.restore_checkpoint(
-                self.paths.latest_checkpoint_path, self.paths.ema_checkpoint_path
-            )
+            self.restore_checkpoint(self.paths.latest_checkpoint_path)
 
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
@@ -268,7 +271,10 @@ class Trainer:
             dist = Distributed.get_instance()
             # have all ranks check in to logs
             dist.barrier()
-            if self._current_epoch_num_batches_seen > 0 and dist.is_root():
+            if (
+                self._current_epoch_num_batches_seen > 0
+                and self._should_save_checkpoints()
+            ):
                 if self._in_ema_context:
                     logging.info(
                         "In EMA context during interrupt, not saving "
@@ -292,9 +298,12 @@ class Trainer:
         for param in model.parameters():
             param.requires_grad = False
 
+    def _should_save_checkpoints(self) -> bool:
+        dist = Distributed.get_instance()
+        return self.config.save_checkpoint and dist.is_root()
+
     def train(self):
         logging.info("Starting Training Loop...")
-        dist = Distributed.get_instance()
 
         inference_epochs = self.config.get_inference_epochs()
         if self.config.segment_epochs is None:
@@ -304,7 +313,11 @@ class Trainer:
                 self._start_epoch + self.config.segment_epochs, self.config.max_epochs
             )
 
-        if self.config.evaluate_before_training and self._epochs_trained == 0:
+        if (
+            self.config.evaluate_before_training
+            and self._epochs_trained == 0
+            and self._current_epoch_num_batches_seen == 0
+        ):
             logging.info("Starting validation before training")
             valid_logs = self.validate_one_epoch()
             if self._epochs_trained in inference_epochs:
@@ -386,10 +399,9 @@ class Trainer:
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 
-            if dist.is_root():
-                if self.config.save_checkpoint:
-                    logging.info(f"Saving checkpoints for epoch {self._epochs_trained}")
-                    self.save_all_checkpoints(valid_loss, inference_error)
+            if self._should_save_checkpoints():
+                logging.info(f"Saving checkpoints for epoch {self._epochs_trained}")
+                self.save_all_checkpoints(valid_loss, inference_error)
 
     def _log_first_batch_metrics(self):
         wandb = WandB.get_instance()
@@ -417,9 +429,7 @@ class Trainer:
         )
         self.train_data.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
-        dist = Distributed.get_instance()
         names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
-        aggregator = self._aggregator_builder.get_train_aggregator()
         n_samples_seen_since_logging = 0
         self.stepper.set_train()
         if self.num_batches_seen == 0:
@@ -431,7 +441,9 @@ class Trainer:
                 f"{self._current_epoch_num_batches_seen} batches since these were "
                 "already processed for this epoch in a previous training run."
             )
-        epoch_data = self.train_data.subset_loader(self._current_epoch_num_batches_seen)
+        epoch_data = self.train_data.subset_loader(
+            start_batch=self._current_epoch_num_batches_seen,
+        )
         if self._current_epoch_num_batches_seen > 0:
             logging.info(
                 f"Subsetted train loader created, has {len(epoch_data)} batches"
@@ -443,7 +455,6 @@ class Trainer:
         for batch in epoch_data:
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
-            aggregator.record_batch(stepped)
             self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
             # Step scheduler per-iteration if configured to do so
@@ -471,13 +482,27 @@ class Trainer:
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
                 n_samples_seen_since_logging = 0
             if (
-                dist.is_root()
+                self._should_save_checkpoints()
                 and self.config.checkpoint_every_n_batches > 0
                 and self.num_batches_seen % self.config.checkpoint_every_n_batches == 0
             ):
                 self._save_restart_checkpoints()
                 self._last_saved_num_batches_seen = self.num_batches_seen
-        if dist.is_root() and self.num_batches_seen > self._last_saved_num_batches_seen:
+        # evaluate after training on an independent shuffle of the data
+        self.train_data.alternate_shuffle()
+        aggregator = self._aggregator_builder.get_train_aggregator()
+        self.stepper.set_eval()
+        with torch.no_grad(), self.validation_context():
+            for batch in self.train_data.subset_loader(
+                stop_batch=self.config.train_evaluation_batches
+            ):
+                with GlobalTimer():
+                    stepped = self.stepper.train_on_batch(batch, self._no_optimization)
+                aggregator.record_batch(stepped)
+        if (
+            self._should_save_checkpoints()
+            and self.num_batches_seen > self._last_saved_num_batches_seen
+        ):
             self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
         # we will save restart checkpoints again after validation/inference
         # are recorded to wandb
@@ -496,7 +521,6 @@ class Trainer:
         )
         self.save_checkpoint(
             self.paths.latest_checkpoint_path,
-            ema_checkpoint_path=self.paths.ema_checkpoint_path,
             include_optimization=True,
         )
 
@@ -519,13 +543,11 @@ class Trainer:
         """
         A context where the stepper uses the EMA model.
         """
-        self._ema.store(parameters=self.stepper.modules.parameters())
         self._in_ema_context = True
-        self._ema.copy_to(model=self.stepper.modules)
         try:
-            yield
+            with self._ema.applied_params(self.stepper.modules):
+                yield
         finally:
-            self._ema.restore(parameters=self.stepper.modules.parameters())
             self._in_ema_context = False
 
     def validate_one_epoch(self):
@@ -537,6 +559,7 @@ class Trainer:
             f"Starting validation step for model trained for "
             f"{self._epochs_trained} epochs"
         )
+        self.valid_data.set_epoch(self._epochs_trained)
         self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_validation_aggregator()
         logging.info("Starting loop over validation data")
@@ -579,7 +602,6 @@ class Trainer:
     def save_checkpoint(
         self,
         checkpoint_path: str,
-        ema_checkpoint_path: str | None = None,
         include_optimization: bool = False,
     ):
         if not Distributed.get_instance().is_root():
@@ -588,12 +610,6 @@ class Trainer:
         temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
         )
-        if ema_checkpoint_path is not None:
-            ema_temporary_location: str | None = os.path.join(
-                os.path.dirname(ema_checkpoint_path), f".{uuid.uuid4()}.tmp"
-            )
-        else:
-            ema_temporary_location = None
         try:
             data = {
                 "num_batches_seen": self.num_batches_seen,
@@ -606,37 +622,22 @@ class Trainer:
             }
             if include_optimization:
                 data["optimization"] = self.optimization.get_state()
-            if ema_temporary_location is not None:
-                with self._ema_context():
-                    ema_data = dict(
-                        data,
-                        stepper=self.stepper.get_state(),
-                        ema=self._ema.get_state(),
-                    )
-                    # never include optimization in EMA checkpoint
-                    if "optimization" in ema_data:
-                        ema_data.pop("optimization")
-                    torch.save(ema_data, ema_temporary_location)
+            else:
+                data["ema"].pop("ema_params")  # don't need if not saving optimization
             torch.save(data, temporary_location)
-            if ema_temporary_location is not None and ema_checkpoint_path is not None:
-                os.replace(ema_temporary_location, ema_checkpoint_path)
             os.replace(temporary_location, checkpoint_path)
         finally:
             if os.path.exists(temporary_location):
                 os.remove(temporary_location)
-            if ema_temporary_location is not None and os.path.exists(
-                ema_temporary_location
-            ):
-                os.remove(ema_temporary_location)
 
-    def restore_checkpoint(self, checkpoint_path, ema_checkpoint_path):
+    def restore_checkpoint(self, checkpoint_path):
         """
         Restore the checkpoint from the given path. This includes the existing state of
         the stepper, optimization, training epoch, and EMA. This is most suitable
         for resuming training from a checkpoint without changing the training schedule,
         i.e., to manage preemption.
         """
-        _restore_checkpoint(self, checkpoint_path, ema_checkpoint_path)
+        _restore_checkpoint(self, checkpoint_path)
 
     def _epoch_checkpoint_enabled(self, epoch: int) -> bool:
         return epoch_checkpoint_enabled(
@@ -730,7 +731,7 @@ def inference_one_epoch(
     return {f"{label}/{k}": v for k, v in logs.items()}
 
 
-def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
+def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     checkpoint = torch.load(
         checkpoint_path, map_location=fme.get_device(), weights_only=False
     )
@@ -744,13 +745,7 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     trainer._epochs_trained = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
-    ema_checkpoint = torch.load(
-        ema_checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
-    ema_stepper: TrainStepperABC = type(trainer.stepper).from_state(
-        ema_checkpoint["stepper"]
-    )
-    trainer._ema = EMATracker.from_state(checkpoint["ema"], ema_stepper.modules)
+    trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:

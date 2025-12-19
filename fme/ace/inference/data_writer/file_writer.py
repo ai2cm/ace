@@ -1,8 +1,8 @@
 import dataclasses
+import datetime
 import logging
 import os
 from collections.abc import Mapping, Sequence
-from datetime import datetime
 from typing import TypeAlias, TypeGuard, Union
 
 import numpy as np
@@ -14,10 +14,21 @@ from fme.core.dataset.time import TimeSlice
 from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
+from .monthly import MonthlyDataWriter
 from .raw import NetCDFWriterConfig, RawDataWriter
-from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
+from .time_coarsen import (
+    MonthlyCoarsenConfig,
+    PairedTimeCoarsen,
+    TimeCoarsen,
+    TimeCoarsenConfig,
+)
 from .utils import DIM_INFO_HEALPIX, DIM_INFO_LATLON
-from .zarr import SeparateICZarrWriterAdapter, ZarrWriterAdapter, ZarrWriterConfig
+from .zarr import (
+    SeparateICZarrWriterAdapter,
+    ZarrWriterAdapter,
+    ZarrWriterConfig,
+    ensure_numpy_coords,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +47,13 @@ def _is_datetime_dataarray(data: xr.DataArray) -> TypeGuard[DatetimeDataArray]:
 
 def _month_string_to_int(month_str: str) -> int:
     try:
-        month = datetime.strptime(month_str, "%B")
+        month = datetime.datetime.strptime(month_str, "%B")
         return month.month
     except ValueError:
         pass
 
     try:
-        month = datetime.strptime(month_str, "%b")
+        month = datetime.datetime.strptime(month_str, "%b")
         return month.month
     except ValueError:
         pass
@@ -111,6 +122,8 @@ def _select_time(
     data: xr.Dataset,
     time_selection: TimeSlice | MonthSelector | Slice | None,
     start_timestep: int = 0,
+    sample_dim: str = "sample",
+    time_dim: str = "time",
 ) -> xr.Dataset:
     """
     Filter the dataset based on the time selection.
@@ -118,20 +131,46 @@ def _select_time(
     if time_selection is None:
         return data
 
-    if "time" not in data.coords:
-        raise ValueError("Dataset must contain a 'time' coordinate for time selection.")
+    if time_dim not in data.coords:
+        raise ValueError(
+            f"Dataset must contain a '{time_dim}' coordinate for time selection."
+        )
 
-    if isinstance(time_selection, TimeSlice):
-        return data.sel(time=time_selection.as_raw_slice())
+    if sample_dim not in data.dims:
+        raise ValueError(
+            f"Dataset must contain a '{sample_dim}' dimension for time selection."
+        )
 
-    if isinstance(time_selection, MonthSelector):
-        return time_selection.select(data)
+    def _time_subselector(sample_ds: xr.Dataset) -> xr.Dataset:
+        if isinstance(time_selection, TimeSlice):
+            ds_subselected = sample_ds.sel(**{time_dim: time_selection.as_raw_slice()})
+        elif isinstance(time_selection, MonthSelector):
+            ds_subselected = time_selection.select(sample_ds)
+        elif isinstance(time_selection, Slice):
+            sl = Slice.shift_left(time_selection, start_timestep)
+            ds_subselected = sample_ds.isel(**{time_dim: sl.slice})
+        else:
+            raise ValueError(f"Unsupported time selection type: {type(time_selection)}")
+        return ds_subselected
 
-    if isinstance(time_selection, Slice):
-        sl = Slice.shift_left(time_selection, start_timestep)
-        return data.isel(time=sl.slice)
-
-    raise ValueError(f"Unsupported time selection type: {type(time_selection)}")
+    data_arrays, time_arrays = [], []
+    for i_sample in range(len(data[sample_dim])):
+        sample_ds = data.isel({sample_dim: i_sample})
+        sample_ds_subselected = _time_subselector(
+            sample_ds.assign_coords({time_dim: sample_ds[time_dim]})
+        )
+        data_arrays.append(
+            sample_ds_subselected.drop_vars(time_dim).expand_dims({sample_dim: 1})
+        )
+        time_arrays.append(
+            sample_ds_subselected[time_dim]
+            .drop_vars(time_dim)
+            .expand_dims({sample_dim: 1})
+        )
+    combined_subsampled_data = xr.concat(data_arrays, dim=sample_dim)
+    combined_time = xr.concat(time_arrays, dim=sample_dim)
+    combined_data = combined_subsampled_data.assign({time_dim: combined_time})
+    return combined_data
 
 
 @dataclasses.dataclass
@@ -152,10 +191,17 @@ class FileWriterConfig:
             can select an index range of steps in an inference, the MonthSelector can be
             used to target specific seasons or months for outputs, and a TimeSlice
             allows for datetime range selection.
-        time_coarsen: Optional TimeCoarsen config for reducing in the time dimension.
+        save_reference: Whether to save the reference/target data alongside predictions.
+            If true, "_target" will be appended to the label for the target data, and
+            "_predictions" will be appended to the label for the predictions data.
+            Ignored if building a single writer via the `build` method.
+        time_coarsen: Configuration for time averaging of outputs.
         format: Configuration for the output format (i.e. netCDF or zarr).
         separate_ensemble_members: Option to write ensemble members to separate files.
-            In this case, time is a datetime coordinate.
+            In this case, time is a datetime coordinate. Only supported when using zarr
+            format. Filenames will have the suffix `_ic{member_index}` appended before
+            the file extension.
+
     """
 
     label: str
@@ -164,7 +210,7 @@ class FileWriterConfig:
     lon_extent: Sequence[float] | None = None
     time_selection: Slice | MonthSelector | TimeSlice | None = None
     save_reference: bool = True
-    time_coarsen: TimeCoarsenConfig | None = None
+    time_coarsen: TimeCoarsenConfig | MonthlyCoarsenConfig | None = None
     format: NetCDFWriterConfig | ZarrWriterConfig = dataclasses.field(
         default_factory=NetCDFWriterConfig
     )
@@ -191,45 +237,72 @@ class FileWriterConfig:
                     "Time coarsening is enabled. "
                     "Time subselection is applied *after* time coarsening."
                 )
-            if isinstance(self.format, ZarrWriterConfig):
+
+        if isinstance(self.format, ZarrWriterConfig):
+            if self.time_selection is not None:
                 raise NotImplementedError(
                     "Time selection is not currently supported when writing to zarr."
                 )
+            if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+                raise NotImplementedError(
+                    "Monthly coarsening is not currently supported for the zarr format."
+                )
+
+        if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+            if self.time_selection is not None:
+                raise NotImplementedError(
+                    "Time selection is not currently supported when using monthly "
+                    "coarsening."
+                )
+
+    @property
+    def filenames(self) -> list[str]:
+        base_filenames = [
+            self.label,
+            f"{self.label}_target",
+            f"{self.label}_predictions",
+        ]
+        return [
+            ".".join([base_filename, self.format.suffix])
+            for base_filename in base_filenames
+        ]
 
     def build_paired(
         self,
         experiment_dir: str,
         n_initial_conditions: int,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
         prediction_suffix: str = "predictions",
         reference_suffix: str = "target",
     ) -> Union["PairedFileWriter", PairedTimeCoarsen]:
-        prediction_writer = dataclasses.replace(
-            self, label=f"{self.label}_{prediction_suffix}"
-        ).build(
-            experiment_dir=experiment_dir,
-            n_initial_conditions=n_initial_conditions,
-            variable_metadata=variable_metadata,
-            coords=coords,
-            dataset_metadata=dataset_metadata,
-            n_timesteps=n_timesteps,
-        )
         if self.save_reference:
-            reference_writer = dataclasses.replace(
-                self, label=f"{self.label}_{reference_suffix}"
-            ).build(
+            reference_label = f"{self.label}_{reference_suffix}"
+            prediction_label = f"{self.label}_{prediction_suffix}"
+            reference_writer = dataclasses.replace(self, label=reference_label).build(
                 experiment_dir=experiment_dir,
                 n_initial_conditions=n_initial_conditions,
+                n_timesteps=n_timesteps,
+                timestep=timestep,
                 variable_metadata=variable_metadata,
                 coords=coords,
                 dataset_metadata=dataset_metadata,
-                n_timesteps=n_timesteps,
             )
         else:
+            prediction_label = self.label
             reference_writer = None
+        prediction_writer = dataclasses.replace(self, label=prediction_label).build(
+            experiment_dir=experiment_dir,
+            n_initial_conditions=n_initial_conditions,
+            n_timesteps=n_timesteps,
+            timestep=timestep,
+            variable_metadata=variable_metadata,
+            coords=coords,
+            dataset_metadata=dataset_metadata,
+        )
         paired_writer = PairedFileWriter(prediction_writer, reference_writer)
         # Time coarsening is built around writer in the single build method
         return paired_writer
@@ -239,6 +312,7 @@ class FileWriterConfig:
         experiment_dir: str,
         n_initial_conditions: int,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
@@ -250,6 +324,7 @@ class FileWriterConfig:
             experiment_dir: The directory where experiment outputs are saved.
             n_initial_conditions: The number of initial conditions or ensemble members.
             n_timesteps: Total number of inference forward steps.
+            timestep: The time delta between each timestep.
             variable_metadata: Metadata for each variable.
             coords: Coordinate arrays for the dataset. These should be the coordinates
                 of the entire global domain, not the subset region coordinates.
@@ -268,6 +343,19 @@ class FileWriterConfig:
                 f"Got {list(coords.keys())}."
             )
 
+        if isinstance(self.time_selection, TimeSlice) and n_initial_conditions > 1:
+            raise NotImplementedError(
+                "TimeSlice selection is not currently supported for multiple "
+                "initial conditions."
+            )
+        elif (
+            isinstance(self.time_selection, MonthSelector) and n_initial_conditions > 1
+        ):
+            raise NotImplementedError(
+                "MonthSelector selection is not currently supported for multiple "
+                "initial conditions."
+            )
+
         subset_coords = xr.Dataset(coords)
         if self.lat_extent or self.lon_extent:
             subset_coords = subset_coords.sel(
@@ -275,9 +363,14 @@ class FileWriterConfig:
             )
         subselect_coords_ = {str(k): v for k, v in subset_coords.coords.items()}
 
-        raw_writer: RawDataWriter | ZarrWriterAdapter | SeparateICZarrWriterAdapter
+        raw_writer: (
+            RawDataWriter
+            | ZarrWriterAdapter
+            | SeparateICZarrWriterAdapter
+            | MonthlyDataWriter
+        )
         if isinstance(self.format, ZarrWriterConfig):
-            if self.time_coarsen:
+            if isinstance(self.time_coarsen, TimeCoarsenConfig):
                 n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
             else:
                 n_timesteps_write = n_timesteps
@@ -293,7 +386,7 @@ class FileWriterConfig:
             raw_writer = zarr_writer_cls(
                 path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                 dims=dims,
-                data_coords=subselect_coords_,
+                data_coords=ensure_numpy_coords(subselect_coords_),
                 n_timesteps=n_timesteps_write,
                 n_initial_conditions=n_initial_conditions,
                 data_vars=self.names,
@@ -308,17 +401,28 @@ class FileWriterConfig:
                     "Writing separate ensemble members is not currently supported for "
                     "netcdf output."
                 )
-            raw_writer = RawDataWriter(
-                path=experiment_dir,
-                label=f"{self.label}.nc",
-                n_initial_conditions=n_initial_conditions,
-                save_names=self.names,
-                variable_metadata=variable_metadata,
-                coords=subselect_coords_,
-                dataset_metadata=dataset_metadata,
-            )
+            if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+                raw_writer = MonthlyDataWriter(
+                    path=experiment_dir,
+                    label=self.label,
+                    n_samples=n_initial_conditions,
+                    save_names=self.names,
+                    variable_metadata=variable_metadata,
+                    coords=subselect_coords_,
+                    dataset_metadata=dataset_metadata,
+                )
+            else:
+                raw_writer = RawDataWriter(
+                    path=experiment_dir,
+                    label=self.label,
+                    n_initial_conditions=n_initial_conditions,
+                    save_names=self.names,
+                    variable_metadata=variable_metadata,
+                    coords=subselect_coords_,
+                    dataset_metadata=dataset_metadata,
+                )
         writer = FileWriter(self, raw_writer, full_coords=coords)
-        if self.time_coarsen is not None:
+        if isinstance(self.time_coarsen, TimeCoarsenConfig):
             return self.time_coarsen.build(writer)
         else:
             return writer
@@ -332,13 +436,17 @@ class FileWriter:
     def __init__(
         self,
         config: FileWriterConfig,
-        writer: RawDataWriter | ZarrWriterAdapter | SeparateICZarrWriterAdapter,
+        writer: RawDataWriter
+        | MonthlyDataWriter
+        | ZarrWriterAdapter
+        | SeparateICZarrWriterAdapter,
         full_coords: Mapping[str, np.ndarray],
     ):
         self.config = config
         self.writer = writer
         self.full_coords = full_coords
         self._no_write_count = 0
+        self._n_timesteps_seen = 0
         if "face" in full_coords:
             self._spatial_dims = DIM_INFO_HEALPIX
         else:
@@ -349,22 +457,24 @@ class FileWriter:
         data: dict[str, torch.Tensor],
         batch_time: xr.DataArray,
         start_timestep: int = 0,
-    ) -> dict[str, torch.Tensor]:
+        sample_dim: str = "sample",
+        time_dim: str = "time",
+    ) -> tuple[dict[str, torch.Tensor], xr.DataArray]:
         use_names = self.config.names or data.keys()
         data_xr = xr.Dataset(
             {
                 k: xr.DataArray(
                     v.cpu().numpy(),
                     dims=[
-                        "batch",
-                        "time",
+                        sample_dim,
+                        time_dim,
                         *[d.name for d in self._spatial_dims],
                     ],
                 )
                 for k, v in data.items()
                 if k in use_names
             },
-            coords={"time": batch_time, **self.full_coords},
+            coords={time_dim: batch_time, **self.full_coords},
         )
 
         if self.config.lat_extent or self.config.lon_extent:
@@ -377,28 +487,36 @@ class FileWriter:
             )
 
         data_xr = _select_time(
-            data_xr, self.config.time_selection, start_timestep=start_timestep
+            data_xr,
+            self.config.time_selection,
+            start_timestep=start_timestep,
+            sample_dim=sample_dim,
+            time_dim=time_dim,
         )
-        return {
+        subselected_data = {
             str(k): torch.from_numpy(v.values)
             for k, v in data_xr.items()
             if v.sizes["time"] > 0
         }
+        return subselected_data, data_xr["time"]
 
     def append_batch(
         self,
         data: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         """
         Filter region and times and append a batch of data to the writer.
         """
-        subselected = self._subselect_data(data, batch_time)
+        start_timestep = self._n_timesteps_seen
+        subselected_data, subselected_time = self._subselect_data(
+            data, batch_time, start_timestep=start_timestep
+        )
+        self._n_timesteps_seen += batch_time.sizes.get("time", 0)
 
         # Warn on empty batch, but it might be expected in some cases
         # so ignore after 10 warnings
-        if not subselected:
+        if not subselected_data:
             self._no_write_count += 1
             if self._no_write_count < 10:
                 logging.warning(
@@ -409,9 +527,8 @@ class FileWriter:
                 logging.warning("Further warnings about empty data will be suppressed.")
             return
         self.writer.append_batch(
-            data=subselected,
-            start_timestep=start_timestep,
-            batch_time=batch_time,
+            data=subselected_data,
+            batch_time=subselected_time,
         )
 
     def flush(self):
@@ -437,18 +554,15 @@ class PairedFileWriter:
         self,
         target: dict[str, torch.Tensor],
         prediction: dict[str, torch.Tensor],
-        start_timestep: int,
         batch_time: xr.DataArray,
     ):
         self.prediction_writer.append_batch(
             data=prediction,
-            start_timestep=start_timestep,
             batch_time=batch_time,
         )
         if self.reference_writer:
             self.reference_writer.append_batch(
                 data=target,
-                start_timestep=start_timestep,
                 batch_time=batch_time,
             )
 

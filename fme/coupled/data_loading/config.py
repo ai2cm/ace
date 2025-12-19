@@ -2,6 +2,7 @@ import dataclasses
 from collections.abc import Sequence
 
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.utils import accumulate_labels
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
@@ -76,6 +77,22 @@ class CoupledDataLoaderConfig:
             for ds in ds_coupled.data_configs
             if ds is not None
         )
+
+    @property
+    def atmosphere_available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the atmosphere dataset.
+        """
+        return accumulate_labels(
+            [ds.atmosphere.available_labels for ds in self.dataset]
+        )
+
+    @property
+    def ocean_available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the ocean dataset.
+        """
+        return accumulate_labels([ds.ocean.available_labels for ds in self.dataset])
 
     @property
     def zarr_engine_used(self) -> bool:

@@ -38,12 +38,15 @@ build_deps_only_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE)-deps-only:$(VERSION) --target deps-only .
 	beaker image create $(IMAGE)-deps-only:$(VERSION) --name $(IMAGE)-deps-only-$(VERSION) --workspace ai2/ace-ci-tests
 
+build_nsight_image:
+	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE)-nsight:$(VERSION) --target nsight .
+	beaker image create $(IMAGE)-nsight:$(VERSION) --name $(IMAGE)-nsight-$(VERSION) --workspace ai2/ace
 
 # recommended to deactivate current conda environment before running this
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME) python=3.11 $(CONDA_PACKAGES)
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) python -m pip install uv
-	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e .[dev,docs]
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e .[dev,docs,graphcast]
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install --no-build-isolation -c constraints.txt -r requirements-healpix.txt
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -r analysis-deps.txt
 
