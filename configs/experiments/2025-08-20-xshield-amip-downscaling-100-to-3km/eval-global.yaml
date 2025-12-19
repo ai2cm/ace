@@ -7,7 +7,7 @@ patch:
 model:
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
   model_updates:
-    churn: 2.5
+    churn: 0
 data:
   static_inputs:
     HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
