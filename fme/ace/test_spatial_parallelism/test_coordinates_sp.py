@@ -46,6 +46,22 @@ def test_lat_lon_ops_from_coords_w_sp(distributed):
     lat_host, lon_host, nlat, nlon, batch_size, input_ = int()
     os.environ["H_PARALLEL_SIZE"] = "2"
     os.environ["W_PARALLEL_SIZE"] = "2"
+    if not torch.cuda.is_available():
+        # physicsnemo DistributedManager assumes that the device_id is a GPU
+        # so we override the init_process_group function to not pass in device_id
+        import torch.distributed as dist
+
+        orig_init = dist.init_process_group
+
+        def cpu_friendly_init(*args, **kwargs):
+            if (
+                "device_id" in kwargs
+                and getattr(kwargs["device_id"], "type", None) == "cpu"
+            ):
+                kwargs.pop("device_id")
+            return orig_init(*args, **kwargs)
+
+        dist.init_process_group = cpu_friendly_init    
     dist = Distributed.get_instance()
     device = get_device()
     lat = lat_host.to(device)

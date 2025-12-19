@@ -12,7 +12,9 @@ from fme.core.loss import LossConfig
 
 
 @pytest.mark.parametrize("global_mean_type", [None])
-def test_loss_builds_and_runs_wo_sp(global_mean_type):
+def test_loss_builds_and_runs_wo_sp(global_mean_type, distributed):
+    if distributed:
+        pytest.skip("Disable serial tests when distributed tests are enabled")
     nx = 8
     ny = 8
     torch.manual_seed(0)
@@ -53,7 +55,22 @@ def test_loss_builds_and_runs_wo_sp(global_mean_type):
 
 
 @pytest.mark.parametrize("global_mean_type", [None])
-def test_loss_builds_and_runs_with_sp(global_mean_type):
+def test_loss_builds_and_runs_with_sp(global_mean_type, distributed):
+    if not distributed:
+        pytest.skip("Distributed tests are not enabled")
+    if not torch.cuda.is_available():
+        # physicsnemo DistributedManager assumes that the device_id is a GPU
+        # so we override the init_process_group function to not pass in device_id
+        import torch.distributed as dist
+        orig_init = dist.init_process_group
+        def cpu_friendly_init(*args, **kwargs):
+            if (
+                "device_id" in kwargs
+                and getattr(kwargs["device_id"], "type", None) == "cpu"
+            ):
+                kwargs.pop("device_id")
+            return orig_init(*args, **kwargs)
+        dist.init_process_group = cpu_friendly_init    
     os.environ["H_PARALLEL_SIZE"] = "2"
     os.environ["W_PARALLEL_SIZE"] = "2"
     nx = 8
@@ -67,14 +84,14 @@ def test_loss_builds_and_runs_with_sp(global_mean_type):
     torch.manual_seed(0)
 
     # tensor_data_host=torch.randn(1, 2, nx, ny)
-    area_weights = torch.ones(nx, ny) * 5.0
+    area_weights = torch.ones(nx, ny, device=get_device()) * 5.0
     aggregator = MeanAggregator(LatLonOperations(area_weights))
     dist = Distributed.get_instance()
     this_shape = (tensor_data_host.shape[-2], tensor_data_host.shape[-1])
     tensor_data_local_host = (
         (tensor_data_host[:, :, *dist.get_local_slices(this_shape)]).detach().clone()
     )
-    tensor_data_local = tensor_data_local_host.to(dist.local_rank)
+    tensor_data_local = tensor_data_local_host.to(get_device())
     example_data = {"a": tensor_data_local}
 
     config = LossConfig(global_mean_type=global_mean_type)
@@ -88,9 +105,9 @@ def test_loss_builds_and_runs_with_sp(global_mean_type):
 
     this_shape_x = (x_host.shape[-2], x_host.shape[-1])
     x_local_host = (x_host[:, :, *dist.get_local_slices(this_shape_x)]).detach().clone()
-    x_local = x_local_host.to(dist.local_rank)
+    x_local = x_local_host.to(get_device())
     y_local_host = (y_host[:, :, *dist.get_local_slices(this_shape_x)]).detach().clone()
-    y_local = y_local_host.to(dist.local_rank)
+    y_local = y_local_host.to(get_device())
 
     result_local = loss(x_local, y_local)
 

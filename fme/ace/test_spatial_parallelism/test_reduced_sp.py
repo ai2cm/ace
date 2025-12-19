@@ -64,6 +64,22 @@ def test_loss_with_sp(distributed):
     tensor_data_host = torch.randn(1, 2, nx, ny)
     area_weights = torch.ones(nx, ny)
     aggregator = MeanAggregator(LatLonOperations(area_weights))
+    if not torch.cuda.is_available():
+        # physicsnemo DistributedManager assumes that the device_id is a GPU
+        # so we override the init_process_group function to not pass in device_id
+        import torch.distributed as dist
+
+        orig_init = dist.init_process_group
+
+        def cpu_friendly_init(*args, **kwargs):
+            if (
+                "device_id" in kwargs
+                and getattr(kwargs["device_id"], "type", None) == "cpu"
+            ):
+                kwargs.pop("device_id")
+            return orig_init(*args, **kwargs)
+
+        dist.init_process_group = cpu_friendly_init        
     dist = Distributed.get_instance()
     this_shape = (tensor_data_host.shape[-2], tensor_data_host.shape[-1])
     tensor_data_local_host = (

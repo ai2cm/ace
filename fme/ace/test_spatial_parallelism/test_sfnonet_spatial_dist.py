@@ -69,6 +69,7 @@ def test_sfnonet_without_sp(distributed):
 
 
 def test_sfnonet_with_sp(distributed):
+    # TODO: this test needs GPU because of alltoall operation
     if not distributed:
         pytest.skip("Distributed tests are not enabled")
     init_seed(333)
