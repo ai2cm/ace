@@ -45,7 +45,7 @@ train_loader:
         stop_time: '2008-12-31'
 validation_loader:
   batch_size: 64
-  num_data_workers: 16
+  num_data_workers: 4
   prefetch_factor: 4
   dataset:
     data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
