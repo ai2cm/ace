@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="ace-aimip-train-rs3-ft-ec"
+JOB_NAME="ace-aimip-train-rs3-1s-ft-ec"
 JOB_GROUP="ace21-era5"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -15,7 +15,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 PRE_TRAINED_CHECKPOINT="01K9B1MXD6V26S8BQH5CKY514C"
 CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
-override="stepper.parameter_init.weights_path=/pre-trained-checkpoint/ckpt.tar"
+override="max_epochs=1 n_forward_steps=1 stepper.parameter_init.weights_path=/pre-trained-checkpoint/ckpt.tar"
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
 
 gantry run \
