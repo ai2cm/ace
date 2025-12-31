@@ -101,32 +101,32 @@ train_loader:
             subset:
               start_time: "0321-01-01T06:00:00"
               stop_time: "0351-01-01T00:00:00"
-          - data_path: /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+          - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
             file_pattern: random-CO2-1xCO2-ic_0001.zarr
             engine: zarr
             subset:
               start_time: "0153-01-01T06:00:00"
-          - data_path: /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+          - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
             file_pattern: random-CO2-2xCO2-ic_0001.zarr
             engine: zarr
             subset:
               start_time: "0153-01-01T06:00:00"
-          - data_path: /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+          - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
             file_pattern: random-CO2-4xCO2-ic_0001.zarr
             engine: zarr
             subset:
               start_time: "0153-01-01T06:00:00"
-          - data_path: /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+          - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
             file_pattern: random-CO2-1xCO2-ic_0002.zarr
             engine: zarr
             subset:
               start_time: "0153-01-01T06:00:00"
-          - data_path: /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+          - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
             file_pattern: random-CO2-2xCO2-ic_0002.zarr
             engine: zarr
             subset:
               start_time: "0153-01-01T06:00:00"
-          - data_path: /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+          - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
             file_pattern: random-CO2-4xCO2-ic_0002.zarr
             engine: zarr
             subset:
@@ -172,19 +172,19 @@ validation_loader:
           subset:
             start_time: "0251-01-03T12:00:00"
             stop_time: "0255-12-29T12:00:00"
-        - data_path: /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+        - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
           file_pattern: random-CO2-1xCO2-ic_0003.zarr
           engine: zarr
           subset:
             start_time: "0155-01-01T06:00:00"
             stop_time: "0156-01-01T00:00:00"
-        - data_path: /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+        - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
           file_pattern: random-CO2-2xCO2-ic_0003.zarr
           engine: zarr
           subset:
             start_time: "0155-01-01T06:00:00"
             stop_time: "0156-01-01T00:00:00"
-        - data_path: /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+        - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
           file_pattern: random-CO2-4xCO2-ic_0003.zarr
           engine: zarr
           subset:
