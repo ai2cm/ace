@@ -292,6 +292,9 @@ class DiffusionModel:
 
     @property
     def fine_shape(self) -> tuple[int, int]:
+        """
+        Calculate the fine shape based on the coarse shape and downscale factor.
+        """
         return self._get_fine_shape(self.coarse_shape)
 
     def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:

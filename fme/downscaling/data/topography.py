@@ -51,8 +51,8 @@ class Topography:
         lon_slice = _range_to_slice(self.coords.lon, lon_interval)
         return self._latlon_index_slice(lat_slice=lat_slice, lon_slice=lon_slice)
 
-    def to_device(self) -> "Topography":
-        device = get_device()
+    def to_device(self, device: torch.device | None = None) -> "Topography":
+        device = device or get_device()
         return Topography(
             data=self.data.to(device),
             coords=LatLonCoordinates(
