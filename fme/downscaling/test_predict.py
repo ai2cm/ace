@@ -31,8 +31,8 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
                 "module": LinearDownscalingDiffusion(
                     factor=1,  # will pass coarse input interpolated to fine shape
                     fine_img_shape=fine_shape,
-                    n_channels_in=3,
-                    n_channels_out=2,
+                    n_channels=3,
+                    n_out_channels=2,
                 )
             },
             expects_interpolated_input=True,

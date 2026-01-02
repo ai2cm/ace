@@ -232,8 +232,8 @@ def get_generate_model_config():
                 "module": LinearDownscalingDiffusion(
                     factor=1,
                     fine_img_shape=(16, 16),
-                    n_channels_in=3,  # var0, var1, topography
-                    n_channels_out=2,  # var0, var1
+                    n_channels=3,  # var0, var1, topography
+                    n_out_channels=2,  # var0, var1
                 )
             },
             expects_interpolated_input=True,

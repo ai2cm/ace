@@ -32,8 +32,8 @@ class LinearDownscaling(torch.nn.Module):
     ):
         super().__init__()
         self.img_shape = fine_img_shape
-        self.n_channels_in = n_channels_in
-        self.n_channels_out = n_channels_out or n_channels_in
+        self.n_channels_in = n_channels
+        self.n_channels_out = n_out_channels or n_channels
         height, width = fine_img_shape
         if n_out_channels is None:
             n_out_channels = n_channels

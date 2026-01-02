@@ -66,7 +66,7 @@ def get_trainer_model_config():
                 "module": LinearDownscalingDiffusion(
                     factor=2,
                     fine_img_shape=(16, 16),
-                    n_channels_in=2,
+                    n_channels=2,
                 )
             },
             expects_interpolated_input=False,
