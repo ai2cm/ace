@@ -202,7 +202,7 @@ class InferenceConfig:
             max_samples_per_gpu: 8
             time_range:
                start_time: "2023-01-01T00:00:00"
-               end_time: "2023-12-31T18:00:00"
+               stop_time: "2023-12-31T18:00:00"
             lat_extent:
                 start: 22.0
                 stop:  50.0
