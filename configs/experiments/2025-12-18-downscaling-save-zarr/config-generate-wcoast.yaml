@@ -1,4 +1,4 @@
-experiment_dir: /results
+experiment_dir: /climate-default/home/andrep/ace2-hiro-results/wcoast-2023
 patch:
   divide_generation: true
   composite_prediction: true
