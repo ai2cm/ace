@@ -44,4 +44,4 @@ gantry run \
     --no-conda \
     --install "pip install --no-deps ." \
     --allow-dirty \
-    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.generate $CONFIG_PATH
+    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
