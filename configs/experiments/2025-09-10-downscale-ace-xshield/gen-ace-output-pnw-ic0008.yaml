@@ -13,12 +13,12 @@ data:
   coarse:
   - data_path: /climate-default/home/troya/ace2-hiro-pnw-results/coarse-ace-data
     engine: zarr
-    file_pattern: output_6hourly_predictions_ic0000.zarr
+    file_pattern: output_6hourly_predictions_ic0008.zarr
   batch_size: 4
   num_data_workers: 2
   strict_ensemble: False
 outputs:
-- name: "PNW_2023_ensemble0000"
+- name: "PNW_2023_ensemble0008"
   save_vars: ["PRATEsfc"]
   n_ens: 1
   max_samples_per_gpu: 32

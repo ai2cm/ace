@@ -3,7 +3,7 @@
 
 set -e
 
-JOB_NAME="downscale-deterministic-ace-100km-to-3km-1-year-pnw-ic0000-no-churn"
+JOB_NAME="downscale-ace-100km-to-3km-10-year-pnw-no-churn"
 
 CONFIG_FILENAME="gen-deterministic-ace-output-pnw-1-year-ic0000.yaml"
 
@@ -21,32 +21,43 @@ IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD
 
-ACE_DATASET=01KCHJQ6MX9MH9CT1TQZ6DVCRJ
-
 wandb_group=""
 
-gantry run \
-    --name $JOB_NAME \
-    --description 'Run 100km to 3km generation on ACE' \
-    --workspace ai2/climate-titan \
-    --priority urgent \
-    --not-preemptible \
-    --cluster ai2/titan \
-    --beaker-image $IMAGE \
-    --env WANDB_USERNAME=$BEAKER_USERNAME \
-    --env WANDB_NAME=$JOB_NAME \
-    --env WANDB_JOB_TYPE=inference \
-    --env WANDB_RUN_GROUP=$wandb_group \
-    --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-    --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
-    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
-    --dataset $ACE_DATASET:output_6hourly_predictions_ic0000.zarr:/output_6hourly_predictions_ic0000.zarr \
-    --weka climate-default:/climate-default \
-    --gpus $NGPU \
-    --shared-memory 400GiB \
-    --budget ai2/climate \
-    --system-python \
-    --install "pip install --no-deps ." \
-    --allow-dirty \
-    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
+run_eval() {
+    local ensemble="$1"
+    local JOB_NAME_RUN="${JOB_NAME}-ic${ensemble}"
+    local CONFIG_FILENAME="gen-ace-output-pnw-ic${ensemble}.yaml"
+    local CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
+    gantry run \
+        --name $JOB_NAME_RUN \
+        --description 'Run 100km to 3km generation on ACE data' \
+        --workspace ai2/ace \
+        --priority high \
+        --not-preemptible \
+        --cluster ai2/titan \
+        --beaker-image $IMAGE \
+        --env WANDB_USERNAME=$BEAKER_USERNAME \
+        --env WANDB_NAME=$JOB_NAME_RUN \
+        --env WANDB_JOB_TYPE=inference \
+        --env WANDB_RUN_GROUP=$wandb_group \
+        --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+        --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+        --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+        --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
+        --weka climate-default:/climate-default \
+        --gpus $NGPU \
+        --shared-memory 400GiB \
+        --budget ai2/climate \
+        --system-python \
+        --install "pip install --no-deps ." \
+        --allow-dirty \
+       -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
+}
+
+n_ensembles_minus_one=9
+
+for ((i=0; i<=n_ensembles_minus_one; i++)); do
+    padded=$(printf "%04d" "$i")   # produces 0000, 0001, ...
+    echo "Running ensemble member $padded"
+    run_eval "$padded"
+done
