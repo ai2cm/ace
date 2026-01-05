@@ -79,7 +79,7 @@ def test_loss_with_sp(distributed):
                 kwargs.pop("device_id")
             return orig_init(*args, **kwargs)
 
-        dist.init_process_group = cpu_friendly_init        
+        dist.init_process_group = cpu_friendly_init
     dist = Distributed.get_instance()
     this_shape = (tensor_data_host.shape[-2], tensor_data_host.shape[-1])
     tensor_data_local_host = (

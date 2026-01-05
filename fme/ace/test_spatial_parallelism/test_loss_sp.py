@@ -62,7 +62,9 @@ def test_loss_builds_and_runs_with_sp(global_mean_type, distributed):
         # physicsnemo DistributedManager assumes that the device_id is a GPU
         # so we override the init_process_group function to not pass in device_id
         import torch.distributed as dist
+
         orig_init = dist.init_process_group
+
         def cpu_friendly_init(*args, **kwargs):
             if (
                 "device_id" in kwargs
@@ -70,7 +72,8 @@ def test_loss_builds_and_runs_with_sp(global_mean_type, distributed):
             ):
                 kwargs.pop("device_id")
             return orig_init(*args, **kwargs)
-        dist.init_process_group = cpu_friendly_init    
+
+        dist.init_process_group = cpu_friendly_init
     os.environ["H_PARALLEL_SIZE"] = "2"
     os.environ["W_PARALLEL_SIZE"] = "2"
     nx = 8

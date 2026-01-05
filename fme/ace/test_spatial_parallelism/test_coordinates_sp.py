@@ -61,7 +61,7 @@ def test_lat_lon_ops_from_coords_w_sp(distributed):
                 kwargs.pop("device_id")
             return orig_init(*args, **kwargs)
 
-        dist.init_process_group = cpu_friendly_init    
+        dist.init_process_group = cpu_friendly_init
     dist = Distributed.get_instance()
     device = get_device()
     lat = lat_host.to(device)
