@@ -1,0 +1,21 @@
+input_dataset:
+  zarr_path: /climate-default/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+  time_chunk_size: 500
+  names:
+    - DLWRFsfc
+    - DSWRFsfc
+    - ULWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - eastward_surface_wind_stress
+    - northward_surface_wind_stress
+window_timedelta: "5D"
+output_name: cm4-piControl-200yr-5daily-sfc-flux
+output_directory: /climate-default
+first_timestamp: "0151-01-03T12:00:00"
+last_timestamp: "0350-12-29T12:00:00"
+output_writer:
+  n_dask_workers: 16
+version: "2025-08-07"

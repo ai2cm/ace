@@ -22,7 +22,6 @@ from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.device import get_device, using_gpu
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -239,7 +238,6 @@ class SingleModuleStep(StepABC):
         self.in_names = config.in_names
         self.out_names = config.out_names
 
-
     @property
     def config(self) -> SingleModuleStepConfig:
         return self._config
@@ -329,7 +327,7 @@ class SingleModuleStep(StepABC):
             The state of the stepper.
         """
         # iterate over parameters and gather them from the ranks
-        state_dict= self.dist.gather_model_state_dict(self.module)
+        state_dict = self.dist.gather_model_state_dict(self.module)
         return {
             "module": state_dict,
         }
@@ -342,13 +340,14 @@ class SingleModuleStep(StepABC):
             state: The state to load.
         """
         module = state["module"]
-        #CHECK: Getting an error because this key is missing
+        # CHECK: Getting an error because this key is missing
         # if I use strict=true
         if "module.device_buffer" in module:
-        #    for backwards compatibility with old checkpoints
-          del module["module.device_buffer"]
-        module=self.dist.scatter_model_state_dict(self.module, module,strict=False)
-        self.module.load_state_dict(module,strict=False)
+            #    for backwards compatibility with old checkpoints
+            del module["module.device_buffer"]
+        module = self.dist.scatter_model_state_dict(self.module, module, strict=False)
+        self.module.load_state_dict(module, strict=False)
+
 
 def step_with_adjustments(
     input: TensorMapping,

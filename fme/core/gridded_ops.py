@@ -10,11 +10,11 @@ from fme.core import metrics
 from fme.core.cuhpx.sht import SHT as CuHpxSHT
 from fme.core.cuhpx.sht import iSHT as CuHpxiSHT
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.hpx.reorder import get_reordering_xy_to_ring
 from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
 from fme.core.tensors import assert_dict_allclose
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.distributed import Distributed
 
 
 class GriddedOperations(abc.ABC):
@@ -297,10 +297,10 @@ class LatLonOperations(GriddedOperations):
 
         dist = Distributed.get_instance()
         if dist.spatial_parallelism:
-          area_weights = area_weights[*dist.get_local_slices(area_weights.shape)]
+            area_weights = area_weights[*dist.get_local_slices(area_weights.shape)]
 
         self._device_area = area_weights.to(get_device())
-        #NOTE: we do not need the *.to("cpu") lines.
+        # NOTE: we do not need the *.to("cpu") lines.
         self._cpu_area = area_weights.to("cpu")
         self._device_mask_provider = mask_provider.to(get_device())
         self._cpu_mask_provider = mask_provider.to("cpu")

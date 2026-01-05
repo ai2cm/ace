@@ -472,7 +472,8 @@ class Trainer:
                 metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
                 n_samples_seen_since_logging = 0
-            if (self.config.checkpoint_every_n_batches > 0
+            if (
+                self.config.checkpoint_every_n_batches > 0
                 and self.num_batches_seen % self.config.checkpoint_every_n_batches == 0
             ):
                 self._save_restart_checkpoints()
@@ -606,8 +607,8 @@ class Trainer:
             else:
                 data["ema"].pop("ema_params")  # don't need if not saving optimization
             if dist.is_root():
-              torch.save(data, temporary_location)
-              os.replace(temporary_location, checkpoint_path)
+                torch.save(data, temporary_location)
+                os.replace(temporary_location, checkpoint_path)
         finally:
             if dist.is_root() and os.path.exists(temporary_location):
                 os.remove(temporary_location)

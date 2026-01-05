@@ -19,7 +19,6 @@ import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
-from fme.core.distributed import Distributed
 from fme.core.coordinates import (
     DepthCoordinate,
     HorizontalCoordinates,
@@ -31,6 +30,7 @@ from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
+from fme.core.distributed import Distributed
 from fme.core.mask_provider import MaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
@@ -44,7 +44,6 @@ from .utils import (
     load_series_data,
     load_series_data_zarr_async,
 )
-
 
 SLICE_NONE = slice(None)
 GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD = 12
@@ -860,18 +859,20 @@ class XarrayDataset(DatasetABC):
                 tensor_dict = load_series_data(
                     idx=start,
                     n_steps=n_steps,
-                    ds=ds, #ds_local,
+                    ds=ds,  # ds_local,
                     names=self._time_dependent_names,
                     final_dims=self.dims,
-                    final_shape=shape, #shape_local,
+                    final_shape=shape,  # shape_local,
                     fill_nans=self.fill_nans,
                 )
                 # ds_local.close()
                 # del ds_local
                 ds.close()
                 del ds
-                #CHECK: DO I also need to del ds
-            tensor_dict_local=self._dist.get_local_tensor_dict(tensor_dict, self._shape_excluding_time_after_selection)
+                # CHECK: DO I also need to del ds
+            tensor_dict_local = self._dist.get_local_tensor_dict(
+                tensor_dict, self._shape_excluding_time_after_selection
+            )
 
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict_local[n])
@@ -895,12 +896,17 @@ class XarrayDataset(DatasetABC):
                     variable = variable.fillna(self.fill_nans.value)
                 tensor_globar = as_broadcasted_tensor(variable, self.dims, shape)
                 if len(shape) == 3:
-                  tensors[name]=tensor_globar[:,*self._dist.get_local_slices(self._shape_excluding_time_after_selection)]
+                    tensors[name] = tensor_globar[
+                        :,
+                        *self._dist.get_local_slices(
+                            self._shape_excluding_time_after_selection
+                        ),
+                    ]
                 else:
-                  tensors[name] = tensor_globar
+                    tensors[name] = tensor_globar
             # ds_local.close()
             # del ds_local
-            #CHECK: DO I also need to del ds
+            # CHECK: DO I also need to del ds
             ds.close()
             del ds
 
