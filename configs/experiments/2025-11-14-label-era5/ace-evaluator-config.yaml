@@ -1,6 +1,6 @@
 experiment_dir: /results
 forward_steps_in_memory: 40
-n_forward_steps: 67576
+n_forward_steps: 64652
 checkpoint_path: /ckpt.tar
 logging:
   log_to_screen: true
