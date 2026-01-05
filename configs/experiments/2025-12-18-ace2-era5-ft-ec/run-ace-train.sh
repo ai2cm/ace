@@ -2,14 +2,14 @@
 
 set -e
 
-JOB_NAME="ace-aimip-train-rs3-1s-ft-ec"
+JOB_NAME="ace-aimip-train-rs3-1s-ft-ec-debug"
 JOB_GROUP="ace21-era5"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 WANDB_USERNAME=spencerc_ai2
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8
+N_GPUS=4
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -23,11 +23,10 @@ gantry run \
     --task-name $JOB_NAME \
     --description 'Run ACE training on AIMIP data' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority low \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
-    --cluster ai2/ceres \
-    --cluster ai2/jupiter \
+    --cluster ai2/titan \
     --env WANDB_USERNAME=$WANDB_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=training \
