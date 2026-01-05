@@ -14,7 +14,7 @@ from fme.core.dataset.time import TimeSlice
 from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
-from .monthly import MonthlyDataWriter, months_for_timesteps
+from .monthly import MonthlyDataWriter
 from .raw import NetCDFWriterConfig, RawDataWriter
 from .time_coarsen import (
     MonthlyCoarsenConfig,
@@ -23,7 +23,12 @@ from .time_coarsen import (
     TimeCoarsenConfig,
 )
 from .utils import DIM_INFO_HEALPIX, DIM_INFO_LATLON
-from .zarr import SeparateICZarrWriterAdapter, ZarrWriterAdapter, ZarrWriterConfig
+from .zarr import (
+    SeparateICZarrWriterAdapter,
+    ZarrWriterAdapter,
+    ZarrWriterConfig,
+    ensure_numpy_coords,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +386,7 @@ class FileWriterConfig:
             raw_writer = zarr_writer_cls(
                 path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                 dims=dims,
-                data_coords=subselect_coords_,
+                data_coords=ensure_numpy_coords(subselect_coords_),
                 n_timesteps=n_timesteps_write,
                 n_initial_conditions=n_initial_conditions,
                 data_vars=self.names,
@@ -401,7 +406,6 @@ class FileWriterConfig:
                     path=experiment_dir,
                     label=self.label,
                     n_samples=n_initial_conditions,
-                    n_months=months_for_timesteps(n_timesteps, timestep),
                     save_names=self.names,
                     variable_metadata=variable_metadata,
                     coords=subselect_coords_,

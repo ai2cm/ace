@@ -6,6 +6,7 @@ from typing import Literal
 import torch
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 from fme.core.models.conditional_sfno.sfnonet import (
     Context,
     ContextConfig,
@@ -53,7 +54,9 @@ class NoiseConditionedSFNO(torch.nn.Module):
         self.embed_dim = embed_dim
         self.noise_type = noise_type
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, labels: torch.Tensor | None = None
+    ) -> torch.Tensor:
         if self.noise_type == "isotropic":
             lmax = self.conditional_model.itrans_up.lmax
             mmax = self.conditional_model.itrans_up.mmax
@@ -77,7 +80,7 @@ class NoiseConditionedSFNO(torch.nn.Module):
             [*x.shape[:-3], 0], device=x.device, dtype=x.dtype
         )
         return self.conditional_model(
-            x, Context(embedding_scalar=embedding_scalar, noise=noise)
+            x, Context(embedding_scalar=embedding_scalar, labels=labels, noise=noise)
         )
 
 
@@ -129,6 +132,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         normalize_big_skip: Whether to normalize the big_skip connection.
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
+        filter_num_groups: Number of groups to use in grouped convolutions
+            for the spectral filter.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -160,20 +165,22 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     local_blocks: list[int] | None = None
     normalize_big_skip: bool = False
     affine_norms: bool = False
+    filter_num_groups: int = 1
 
     def build(
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ):
         sfno_net = get_lat_lon_sfnonet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
-            img_shape=img_shape,
+            img_shape=dataset_info.img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
+                embed_dim_labels=len(dataset_info.all_labels),
                 embed_dim_noise=self.noise_embed_dim,
             ),
         )

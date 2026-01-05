@@ -1,7 +1,8 @@
+version: "2025-11-03"
+family_name: E3SMv3-piControl-100yr-coupled
+output_directory: /pscratch/sd/e/elynnwu/fme-dataset
+
 coupled_datasets:
-  version: "2025-10-21"
-  family_name: E3SMv3-piControl-100yr-coupled
-  output_directory: /pscratch/sd/e/elynnwu/fme-dataset
   coupled_ts:
     how: interpolate_sst
   coupled_sea_surface:
@@ -21,10 +22,12 @@ coupled_datasets:
         - surface_precipitation_rate
         - TAUX
         - TAUY
-    sea_ice_window_avg:
+  coupled_sea_ice:
+    window_avg:
       window_timedelta: 120h
       first_timestamp: "0401-01-06T00:00:00"
       shift_timestamps_to_avg_interval_midpoint: true
+    include_ts: true
   output_writer:
     n_dask_workers: 32
   input_field_names:
@@ -39,10 +42,10 @@ input_datasets:
     extra_fields:
       names_and_prefixes: ["ak_", "bk_"]
   ocean:
-    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-09-05-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-11-03-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
     time_chunk_size: 25
     extra_fields:
       names_and_prefixes: ["idepth_", "mask_"]
   stats:
     atmosphere_dir: /pscratch/sd/e/elynnwu/fme-dataset/2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr-stats
-    ocean_dir: /pscratch/sd/e/elynnwu/fme-dataset/2025-08-13-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4-stats
+    ocean_dir: /pscratch/sd/e/elynnwu/fme-dataset/2025-11-03-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4-stats

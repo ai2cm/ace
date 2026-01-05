@@ -1,7 +1,8 @@
+version: "2025-10-21"
+family_name: cm4-1pctCO2-140yr-no-smoothing-coupled
+output_directory: /climate-default
+
 coupled_datasets:
-  version: "2025-10-21"
-  family_name: cm4-1pctCO2-140yr-no-smoothing-coupled
-  output_directory: /climate-default
   coupled_ts:
     how: interpolate_sst
   coupled_sea_surface:
@@ -22,10 +23,12 @@ coupled_datasets:
         - PRATEsfc
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
-    sea_ice_window_avg:
+  coupled_sea_ice:
+    window_avg:
       window_timedelta: 120h
       first_timestamp: "0211-01-06T00:00:00"
       shift_timestamps_to_avg_interval_midpoint: true
+    include_ts: true
   output_writer:
     n_dask_workers: 32
 

@@ -13,19 +13,22 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.requirements import DataRequirements
 from fme.core.dataset.dummy import DummyDataset
+from fme.core.dataset.merged import MergedXarrayDataset
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.time import TimeSlice
+from fme.core.dataset.xarray import XarraySubset
 from fme.core.distributed import Distributed
+from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData
-from fme.coupled.data_loading.config import (
-    CoupledDatasetConfig,
-    CoupledDatasetWithOptionalOceanConfig,
-)
+from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.data_typing import (
     CoupledDataset,
     CoupledDatasetProperties,
 )
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
+
+ComponentDatasetType = XarraySubset | MergedXarrayDataset
 
 
 @dataclasses.dataclass
@@ -47,7 +50,7 @@ class InferenceDataLoaderConfig:
         num_data_workers: Number of parallel workers to use for data loading.
     """
 
-    dataset: CoupledDatasetConfig | CoupledDatasetWithOptionalOceanConfig
+    dataset: CoupledDatasetWithOptionalOceanConfig
     start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList
     num_data_workers: int = 0
 
@@ -55,6 +58,17 @@ class InferenceDataLoaderConfig:
         self._zarr_engine_used = any(
             ds.zarr_engine_used for ds in self.dataset.data_configs if ds is not None
         )
+        # issue warning if subset is used in the atmosphere dataset
+        if self.dataset.atmosphere.subset != Slice(None, None, None):
+            raise ValueError(
+                "'subset' cannot be used in the atmosphere dataset during inference."
+            )
+        if self.dataset.ocean is not None and self.dataset.ocean.subset != Slice(
+            None, None, None
+        ):
+            raise ValueError(
+                "'subset' cannot be used in the ocean dataset during inference."
+            )
 
     @property
     def zarr_engine_used(self) -> bool:
@@ -79,11 +93,12 @@ class InferenceDataset(torch.utils.data.Dataset):
     ):
         ocean_reqs = requirements.ocean_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
-        ocean: torch.utils.data.Dataset
-        atmosphere: torch.utils.data.Dataset
+        ocean: ComponentDatasetType | DummyDataset
+        atmosphere: ComponentDatasetType
+
         if config.dataset.ocean is not None:
             ocean, ocean_properties = config.dataset.ocean.build(
-                ocean_reqs.names, ocean_reqs.n_timesteps
+                ocean_reqs.names, ocean_reqs.n_timesteps_schedule
             )
         else:
             assert dataset_info is not None
@@ -93,14 +108,12 @@ class InferenceDataset(torch.utils.data.Dataset):
                 total_coupled_steps=total_coupled_steps,
                 ocean_reqs=ocean_reqs,
             )
-        all_ic_times = ocean.sample_start_times
         ocean_properties = self._update_ocean_mask(ocean_properties, dataset_info)
+        config.dataset.atmosphere.update_subset(TimeSlice(start_time=ocean.first_time))
         atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
-            atmosphere_reqs.names, atmosphere_reqs.n_timesteps
+            atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
         )
-        properties = CoupledDatasetProperties(
-            all_ic_times, ocean_properties, atmosphere_properties
-        )
+        properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
         dataset = CoupledDataset(
             ocean=ocean,
             atmosphere=atmosphere,
@@ -109,7 +122,9 @@ class InferenceDataset(torch.utils.data.Dataset):
         )
         self._dataset = dataset
         self._properties = properties
-        self._coupled_steps_in_memory = requirements.ocean_requirements.n_timesteps - 1
+        self._coupled_steps_in_memory = (
+            requirements.ocean_requirements.n_timesteps_schedule.get_value(0) - 1
+        )
         self._total_coupled_steps = total_coupled_steps
         self._n_initial_conditions = config.n_initial_conditions
 
@@ -117,6 +132,11 @@ class InferenceDataset(torch.utils.data.Dataset):
             self._start_indices = config.start_indices.as_indices(dataset.all_ic_times)
         else:
             self._start_indices = config.start_indices.as_indices()
+
+        self._dataset.validate_inference_length(
+            max_start_index=max(self._start_indices),
+            max_window_len=self._total_coupled_steps + 1,
+        )
 
     def _update_ocean_mask(
         self,
@@ -159,6 +179,8 @@ class InferenceDataset(torch.utils.data.Dataset):
             atmosphere_horizontal_dims=list(
                 self.properties.horizontal_coordinates.atmosphere.dims
             ),
+            ocean_label_encoding=None,
+            atmosphere_label_encoding=None,
         )
 
     def __getitem__(self, index) -> CoupledBatchData:
@@ -200,7 +222,7 @@ class CoupledForcingDataLoaderConfig:
                 num_data_workers=self.num_data_workers,
             )
         return InferenceDataLoaderConfig(
-            dataset=CoupledDatasetConfig(
+            dataset=CoupledDatasetWithOptionalOceanConfig(
                 atmosphere=self.atmosphere.dataset,
                 ocean=self.ocean.dataset,
             ),
@@ -214,7 +236,7 @@ def _make_dummy_ocean_forcing(
     initial_time: xr.DataArray,
     total_coupled_steps: int,
     ocean_reqs: DataRequirements,
-) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+) -> tuple[DummyDataset, DatasetProperties]:
     ocean_property = DatasetProperties(
         variable_metadata=dict(dataset_info.ocean.variable_metadata),
         vertical_coordinate=dataset_info.ocean.vertical_coordinate,
@@ -229,7 +251,8 @@ def _make_dummy_ocean_forcing(
         start_time=initial_time.squeeze().values.flat[0],
         end_time=initial_time.squeeze().values.flat[-1] + ts * total_coupled_steps,
         timestep=ts,
-        n_timesteps=ocean_reqs.n_timesteps,
+        n_timesteps=ocean_reqs.n_timesteps_schedule,
         horizontal_coordinates=dataset_info.ocean.horizontal_coordinates,
+        labels=None,
     )
     return ocean, ocean_property

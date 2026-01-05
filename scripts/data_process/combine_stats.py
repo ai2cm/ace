@@ -34,9 +34,9 @@ class Config:
     stats: StatsConfig
 
 
-def add_history_attrs(ds, config_filename: str, stats_output_dir: str):
-    ds.attrs["history"] = (
-        "Created by full-model/fv3gfs_data_process/combine_stats.py from "
+def _make_history_string(config_filename: str, stats_output_dir: str):
+    return (
+        "Created by full-model/data_process/combine_stats.py from "
         f"configuration file {config_filename} using inputs at {stats_output_dir}."
     )
 
@@ -50,26 +50,19 @@ def open_datasets(roots: List[str], filename: str) -> List[xr.Dataset]:
     return datasets
 
 
-@click.command()
-@click.argument("config_yaml", type=str)
-def main(config_yaml: str):
+def combine_stats(
+    stats_roots: list[str],
+    output_directory: str,
+    subdirectory: str = "combined",
+    history: str | None = None,
+):
     """
-    Combine statistics for the data processing pipeline.
+    Combine statistics.
 
-    Arguments:
-    config_yaml -- Path to the configuration file for the data processing pipeline.
+    Args:
+        stats_roots: List of root directories with the stats to combine.
     """
-    with open(config_yaml, "r") as f:
-        config_data = yaml.load(f, Loader=yaml.CLoader)
-    config = dacite.from_dict(data_class=Config, data=config_data)
-    xr.set_options(keep_attrs=True)
-
-    stats_roots = [
-        config.stats.output_directory + "/" + run + "/"
-        for run in config.runs.keys()
-        if run not in config.stats.exclude_runs
-    ]
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory() as tmpdir, xr.set_options(keep_attrs=True):
         for filename in (
             "centering.nc",
             "scaling-residual.nc",
@@ -88,12 +81,12 @@ def main(config_yaml: str):
                     average = combined.weighted(samples).mean(dim="run")
             else:
                 average = datasets[0]
-
-            add_history_attrs(average, config_yaml, config.stats.output_directory)
+            if history is not None:
+                average.attrs["history"] = history
             average.to_netcdf(tmpdir + "/" + filename)
             copy(
                 tmpdir + "/" + filename,
-                config.stats.output_directory + "/combined/" + filename,
+                output_directory + f"/{subdirectory}/" + filename,
             )
         # for scaling-full-field.nc, we also need to account for the means.
         full_field_filename = "scaling-full-field.nc"
@@ -111,11 +104,13 @@ def main(config_yaml: str):
         else:
             average = full_field_datasets[0]
 
-        add_history_attrs(average, config_yaml, config.stats.output_directory)
+        if history is not None:
+            average.attrs["history"] = history
+
         average.to_netcdf(tmpdir + "/" + full_field_filename)
         copy(
             tmpdir + "/" + full_field_filename,
-            config.stats.output_directory + "/combined/" + full_field_filename,
+            output_directory + f"/{subdirectory}/" + full_field_filename,
         )
 
 
@@ -127,6 +122,31 @@ def get_combined_stats(full_field_datasets, centering_datasets, samples):
     total_variance = centering_variance + combined_scaling**2
     average = total_variance.weighted(samples).mean(dim="run") ** 0.5
     return average
+
+
+@click.command()
+@click.argument("config_yaml", type=str)
+def main(config_yaml: str):
+    """
+    Combine statistics for the data processing pipeline.
+
+    Arguments:
+    config_yaml -- Path to the configuration file for the data processing pipeline.
+    """
+    with open(config_yaml, "r") as f:
+        config_data = yaml.load(f, Loader=yaml.CLoader)
+    config = dacite.from_dict(data_class=Config, data=config_data)
+
+    stats_roots = [
+        config.stats.output_directory + "/" + run + "/"
+        for run in config.runs.keys()
+        if run not in config.stats.exclude_runs
+    ]
+    combine_stats(
+        stats_roots=stats_roots,
+        output_directory=config.stats.output_directory,
+        history=_make_history_string(config_yaml, config.stats.output_directory),
+    )
 
 
 if __name__ == "__main__":

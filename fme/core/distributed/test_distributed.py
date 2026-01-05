@@ -5,12 +5,11 @@ import torch
 import torch.multiprocessing as mp
 
 from fme import get_device
-
-from .distributed import (
-    Distributed,
-    gather_irregular,
-    pad_tensor_at_end,
-    unpad_tensor_at_end,
+from fme.core.distributed import Distributed
+from fme.core.distributed.torch_distributed import (
+    _gather_irregular,
+    _pad_tensor_at_end,
+    _unpad_tensor_at_end,
 )
 
 
@@ -24,7 +23,7 @@ from .distributed import (
 )
 def test_pad_tensor_at_end(padding, fill_value):
     tensor = torch.ones(2, 3, 4)
-    padded_tensor = pad_tensor_at_end(tensor, padding, fill_value)
+    padded_tensor = _pad_tensor_at_end(tensor, padding, fill_value)
     assert padded_tensor.size() == (2 + padding[0], 3 + padding[1], 4 + padding[2])
     for dim, pad in enumerate(padding):
         if pad > 0:
@@ -32,6 +31,12 @@ def test_pad_tensor_at_end(padding, fill_value):
                 padded_tensor.select(dim=dim, index=padded_tensor.size(dim) - 1),
                 torch.tensor(fill_value),
             )
+
+
+def test_force_non_distributed():
+    assert not Distributed.get_instance()._force_non_distributed
+    with Distributed.force_non_distributed():
+        assert Distributed.get_instance()._force_non_distributed
 
 
 @pytest.mark.parametrize(
@@ -43,8 +48,8 @@ def test_pad_tensor_at_end(padding, fill_value):
 )
 def test_pad_unpad_rountrip(padding):
     tensor = torch.ones(2, 3, 4, device=get_device())
-    padded_tensor = pad_tensor_at_end(tensor, padding)
-    unpadded_tensor = unpad_tensor_at_end(padded_tensor, padding)
+    padded_tensor = _pad_tensor_at_end(tensor, padding)
+    unpadded_tensor = _unpad_tensor_at_end(padded_tensor, padding)
     assert unpadded_tensor.size() == tensor.size()
     assert torch.allclose(unpadded_tensor, tensor)
 
@@ -111,9 +116,7 @@ def test_gather_irregular():
 
     gathered = []
     for tensor in tensors:
-        gathered_item = gather_irregular(
-            tensor, reduce_max, gather, is_distributed=True, fill_value=0.0
-        )
+        gathered_item = _gather_irregular(tensor, reduce_max, gather, fill_value=0.0)
         assert isinstance(gathered_item, list)
         assert all(isinstance(item, torch.Tensor) for item in gathered_item)
         gathered.append(gathered_item)

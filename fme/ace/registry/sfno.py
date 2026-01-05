@@ -6,6 +6,7 @@ from fme.ace.models.makani.sfnonet import (
 )
 from fme.ace.models.modulus.sfnonet import SphericalFourierNeuralOperatorNet
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
@@ -44,13 +45,17 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ):
+        if len(dataset_info.all_labels) > 0:
+            raise ValueError(
+                "SphericalFourierNeuralOperatorNet does not support labels"
+            )
         sfno_net = SphericalFourierNeuralOperatorNet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
-            img_shape=img_shape,
+            img_shape=dataset_info.img_shape,
         )
 
         return sfno_net
@@ -89,8 +94,11 @@ class SFNO_V0_1_0(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ):
+        img_shape = dataset_info.img_shape
+        if len(dataset_info.all_labels) > 0:
+            raise ValueError("SFNO-v0.1.0 does not support labels")
         return MakaniSFNO(
             inp_chans=n_in_channels,
             out_chans=n_out_channels,

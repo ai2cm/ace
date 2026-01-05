@@ -1,0 +1,80 @@
+ocean_input_file_pattern: /global/cfs/cdirs/m4492/data/E3SMv3-v3.LR.piControl_bonus/archive/ocn/hist/v3.LR.piControl_bonus.mpaso.hist.am.timeSeriesStatsCustom
+ice_input_file_pattern: /global/cfs/cdirs/m4492/data/E3SMv3-v3.LR.piControl_bonus/archive/ice/hist/v3.LR.piControl_bonus.mpassi.hist.am.timeSeriesStatsCustom
+nc_grid_path: /pscratch/sd/e/elynnwu/e3smv3-couple-run/v3_LR_piControl_bonus_mpaso_vertical_info.nc
+reindex_time: True
+time_frequency: 5D
+time_dimension: Time
+spatial_dimension: nCells
+vertical_layer_dimension: nVertLevels
+vertical_interface_dimension: nVertLevelsP1
+resting_thickness_name: restingThickness
+temperature_name: timeCustom_avg_activeTracers_temperature
+ocean_variable_names:
+ - timeCustom_avg_activeTracers_salinity
+ - timeCustom_avg_activeTracers_temperature
+ - timeCustom_avg_velocityMeridional
+ - timeCustom_avg_velocityZonal
+ - timeCustom_avg_ssh
+ - timeCustom_avg_rainFlux
+ - timeCustom_avg_snowFlux
+ - timeCustom_avg_evaporationFlux
+ - timeCustom_avg_totalFreshWaterTemperatureFlux
+ - timeCustom_avg_frazilIceFreshwaterFlux
+ - timeCustom_avg_longWaveHeatFluxDown
+ - timeCustom_avg_evapTemperatureFlux
+ - timeCustom_avg_sensibleHeatFlux
+ - timeCustom_avg_shortWaveHeatFlux
+ - timeCustom_avg_windStressZonal
+ - timeCustom_avg_windStressMeridional
+ - timeCustom_avg_surfaceFrictionVelocity
+ - xtime
+ice_variable_names:
+ - timeCustom_avg_iceAreaCell
+ - timeCustom_avg_iceVolumeCell
+ - timeCustom_avg_snowVolumeCell
+add_sst: True
+renaming:
+  Time: time
+ocean_vertical_target_layer_levels:
+  - 10.0
+  - 25.0
+  - 35.0
+  - 45.0
+  - 65.0
+  - 95.0
+  - 125.0
+  - 155.0
+  - 200.0
+  - 320.0
+  - 470.0
+  - 775.0
+  - 1050.0
+  - 1400.0
+  - 1850.0
+  - 2400.0
+  - 3100.0
+  - 4000.0
+  - 5500.0
+ocean_vertical_target_interface_levels:
+  - 0
+  - 20.0
+  - 30.0
+  - 40.0
+  - 50.0
+  - 80.0
+  - 110.0
+  - 140.0
+  - 170.0
+  - 230.0
+  - 410.0
+  - 530.0
+  - 1020.0
+  - 1080.0
+  - 1720.0
+  - 1980.0
+  - 2820.0
+  - 3380.0
+  - 4620.0
+  - 6380.0
+output_path: /pscratch/sd/e/elynnwu/e3smv3-couple-run/v3.LR.piControl_bonus/vertical_coarsened_test
+output_prefix: v3.LR.piControl_bonus.ocn.ice

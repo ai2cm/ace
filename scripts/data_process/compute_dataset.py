@@ -61,6 +61,8 @@ class StandardNameMapping(StandardDimMapping):
     precip_rate: str = "PRATEsfc"
     surface_snow_rate: str = "SNOWsfc"
     surface_ice_rate: str = "ICEsfc"
+    convective_snow_rate: str = "PRECSC"
+    convective_liquid_ice_rate: str = "PRECC"
     surface_graupel_rate: str = "GRAUPELsfc"
     total_frozen_precip_rate: str = "total_frozen_precipitation_rate"
     precipitable_water_path: str = "precipitable_water_path"
@@ -243,6 +245,8 @@ class DatasetComputationConfig:
         roundtrip_fraction_kept: (optional) fraction of spherical harmonics to
             keep in roundtrip transform. Must be between 0 and 1. If omitted,
             the default, no roundtrip transform is applied.
+        roundtrip_variables: (optional) list of variables to apply sht roundtrip
+            filtering to. If omitted, all variables are filtered.
         renaming: (optional) mapping of names in dataset to renamed output
         standard_names: (optional) mapping of standard names to corresponding
             names of variables in the dataset.
@@ -276,6 +280,7 @@ class DatasetComputationConfig:
     n_split: int = 65
     renaming: Mapping[str, str] = dataclasses.field(default_factory=dict)
     roundtrip_fraction_kept: Optional[float] = None
+    roundtrip_variables: Optional[Sequence[str]] = None
     standard_names: Union[StandardNameMapping, DLWPNameMapping] = dataclasses.field(
         default_factory=StandardNameMapping
     )

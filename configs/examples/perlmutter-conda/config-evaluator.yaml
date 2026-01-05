@@ -1,0 +1,20 @@
+experiment_dir: FME_OUTPUT_DIR
+n_forward_steps: 14600
+forward_steps_in_memory: 50
+checkpoint_path: FME_CHECKPOINT_PATH
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    first: 0
+    n_initial_conditions: 1
+  dataset:
+    data_path: FME_VALID_DIR
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

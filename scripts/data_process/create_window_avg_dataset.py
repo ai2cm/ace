@@ -37,6 +37,7 @@ class WindowAvgDatasetConfig:
             e.g. '2016-01-01T06:00:00'. The 'origin' used in resampling is
             one step (of size window_timedelta) earlier than first_timestamp.
         last_timestamp: Optional final timestamp in case of extra unneeded windows.
+            Used after window averaging but before shifting timestamps.
         shift_timestamps_to_avg_interval_midpoint: If True, shift time axis labels
             backwards by half the window size.
         time_dim: Name of the time dimension.
@@ -49,11 +50,6 @@ class WindowAvgDatasetConfig:
     shift_timestamps_to_avg_interval_midpoint: bool = False
     time_dim: str = "time"
     subset_names: list[str] | None = None
-
-    def __post_init__(self):
-        logging.info(f"  Window timedelta: {self.window_timedelta}")
-        if self.subset_names is not None:
-            logging.info(f"  Subset of variables: {self.subset_names}")
 
     def _compute_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
         if self.subset_names is not None:

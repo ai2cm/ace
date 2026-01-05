@@ -1,0 +1,38 @@
+runs:
+  2025-09-16-cm4-1pctCO2-140yr-sea-ice: s3://emulators/ai2_colab/2025-04-04-CM4-1pctCO2-simulation
+data_output_directory: gs://leap-scratch/jpdunc23
+dataset_computation:
+  ice_zarr: ice_6hourly.zarr
+  nc_mosaic_path: s3://emulators/ai2_colab/2024-11-11-static-data/ocean_hgrid.nc
+  nc_target_grid_path: s3://emulators/ai2_colab/2024-11-11-static-data/gaussian_grid_180_by_360.nc
+  ocean_static:
+    zarr: ocean_static.zarr
+    names:
+    - wet
+    - areacello
+    renaming:
+      xh: x
+      yh: y
+  outer_chunks:
+    time_dim: 360
+    latitude_dim: 180
+    longitude_dim: 360
+n_split: 320
+dask:
+  n_workers: 16
+  use_gateway: true
+  cluster_options:
+    worker_resource_allocation: "8CPU, 57.9Gi"
+    idle_timeout_minutes: 10
+filesystem:
+  protocol: s3
+  storage_options:
+    profile: ai2
+    client_kwargs:
+      endpoint_url: https://nyu1.osn.mghpcc.org
+stats:
+  output_directory: /dev/null
+  start_date: null
+  end_date: null
+  data_type: CM4
+  beaker_dataset: not_used
