@@ -7,7 +7,6 @@ from typing import TypeVar
 
 import torch
 from einops import rearrange
-from timm.models.vision_transformer import trunc_normal_
 from torch import nn
 
 __all__ = [
@@ -97,7 +96,7 @@ def init_weights(m: nn.Module):
     if isinstance(
         m, nn.Linear | nn.Conv2d | nn.Conv3d | nn.ConvTranspose2d | nn.ConvTranspose3d
     ):
-        trunc_normal_(m.weight, std=0.02)
+        nn.init.trunc_normal_(m.weight, std=0.02)
         if m.bias is not None:
             nn.init.constant_(m.bias, 0)
     elif isinstance(m, nn.LayerNorm):

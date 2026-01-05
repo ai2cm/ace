@@ -8,9 +8,21 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from timm.layers import to_2tuple
+from itertools import repeat
+import collections.abc
 
 __all__ = ["LevelPatchEmbed"]
+
+def _ntuple(n):
+    # Originally from PyTorch internals,
+    # copied from https://github.com/pprp/timm/blob/e9aac412de82310e6905992e802b1ee4dc52b5d1/timm/layers/helpers.py to here
+    def parse(x):
+        if isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
+            return tuple(x)
+        return tuple(repeat(x, n))
+    return parse
+
+to_2tuple = _ntuple(2)
 
 
 class LevelPatchEmbed(nn.Module):
