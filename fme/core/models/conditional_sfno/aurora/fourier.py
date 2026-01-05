@@ -8,7 +8,8 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
-from aurora.area import area, radius_earth
+
+from .area import area, radius_earth
 
 __all__ = [
     "FourierExpansion",

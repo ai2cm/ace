@@ -10,8 +10,9 @@ Copied from https://github.com/microsoft/aurora/blob/ab2afd6962fb1c6e4f2c5b99e36
 
 import torch
 import torch.nn.functional as F
-from aurora.model.fourier import FourierExpansion
-from timm.layers import to_2tuple
+
+from .fourier import FourierExpansion
+from .patchembed import to_2tuple
 
 __all__ = ["pos_scale_enc"]
 

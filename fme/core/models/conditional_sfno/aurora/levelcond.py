@@ -7,7 +7,8 @@ from collections.abc import Callable
 
 import torch
 import torch.nn as nn
-from aurora.normalisation import level_to_str
+
+from .normalisation import level_to_str
 
 __all__ = ["LevelConditioned"]
 

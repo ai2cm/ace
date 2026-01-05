@@ -3,15 +3,16 @@
 Originally copied from https://github.com/microsoft/aurora/blob/ab2afd6962fb1c6e4f2c5b99e3657f063831ace1/aurora/model/patchembed.py
 """
 
+import collections.abc
 import math
+from itertools import repeat
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from itertools import repeat
-import collections.abc
 
 __all__ = ["LevelPatchEmbed"]
+
 
 def _ntuple(n):
     # Originally from PyTorch internals,
@@ -20,7 +21,9 @@ def _ntuple(n):
         if isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
             return tuple(x)
         return tuple(repeat(x, n))
+
     return parse
+
 
 to_2tuple = _ntuple(2)
 

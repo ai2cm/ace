@@ -11,13 +11,14 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from aurora.normalisation import (
+from scipy.interpolate import RegularGridInterpolator as RGI
+
+from .normalisation import (
     normalise_atmos_var,
     normalise_surf_var,
     unnormalise_atmos_var,
     unnormalise_surf_var,
 )
-from scipy.interpolate import RegularGridInterpolator as RGI
 
 __all__ = ["Metadata", "Batch"]
 

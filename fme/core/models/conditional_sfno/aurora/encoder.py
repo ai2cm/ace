@@ -8,20 +8,21 @@ from datetime import timedelta
 import numpy as np
 import torch
 from aurora.batch import Batch
-from aurora.model.fourier import (
+from einops import rearrange
+from torch import nn
+
+from .fourier import (
     absolute_time_expansion,
     lead_time_expansion,
     levels_expansion,
     pos_expansion,
     scale_expansion,
 )
-from aurora.model.levelcond import LevelConditioned
-from aurora.model.patchembed import LevelPatchEmbed
-from aurora.model.perceiver import MLP, PerceiverResampler
-from aurora.model.posencoding import pos_scale_enc
-from aurora.model.util import check_lat_lon_dtype, init_weights
-from einops import rearrange
-from torch import nn
+from .levelcond import LevelConditioned
+from .patchembed import LevelPatchEmbed
+from .perceiver import MLP, PerceiverResampler
+from .posencoding import pos_scale_enc
+from .util import check_lat_lon_dtype, init_weights
 
 __all__ = ["Perceiver3DEncoder"]
 

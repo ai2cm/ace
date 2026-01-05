@@ -140,7 +140,9 @@ def compute_patch_areas(lat: torch.Tensor, lon: torch.Tensor) -> torch.Tensor:
     # Determine squares and return the area of those squares.
     top_left = torch.stack((lat_midpoints[1:, :-1], lon_midpoints[1:, :-1]), dim=-1)
     top_right = torch.stack((lat_midpoints[1:, 1:], lon_midpoints[1:, 1:]), dim=-1)
-    bottom_left = torch.stack((lat_midpoints[:-1, :-1], lon_midpoints[:-1, :-1]), dim=-1)
+    bottom_left = torch.stack(
+        (lat_midpoints[:-1, :-1], lon_midpoints[:-1, :-1]), dim=-1
+    )
     bottom_right = torch.stack((lat_midpoints[:-1, 1:], lon_midpoints[:-1, 1:]), dim=-1)
     polygon = torch.stack((top_left, top_right, bottom_right, bottom_left), dim=-2)
 

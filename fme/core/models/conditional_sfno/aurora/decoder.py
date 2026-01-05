@@ -7,12 +7,13 @@ from datetime import timedelta
 
 import torch
 from aurora.batch import Batch, Metadata
-from aurora.model.fourier import levels_expansion
-from aurora.model.levelcond import LevelConditioned
-from aurora.model.perceiver import PerceiverResampler
-from aurora.model.util import check_lat_lon_dtype, init_weights, unpatchify
 from einops import rearrange
 from torch import nn
+
+from .fourier import levels_expansion
+from .levelcond import LevelConditioned
+from .perceiver import PerceiverResampler
+from .util import check_lat_lon_dtype, init_weights, unpatchify
 
 __all__ = ["Perceiver3DDecoder"]
 
