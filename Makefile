@@ -7,9 +7,9 @@ DEPLOY_TARGET ?= pypi
 BEAKER_WORKSPACE = ai2/ace
 
 ifeq ($(shell uname), Linux)
-	CONDA_PACKAGES=gxx_linux-64 pip
+	CONDA_PACKAGES=gxx_linux-64 pip h5py netcdf4
 else
-	CONDA_PACKAGES=pip
+	CONDA_PACKAGES=pip h5py netcdf4
 endif
 
 build_docker_image:

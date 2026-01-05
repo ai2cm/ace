@@ -9,7 +9,9 @@ RUN apt-get update -y && apt-get install -y \
   curl \
   git \
   gnupg \
-  wget
+  wget \
+  libhdf5-dev \
+  libnetcdf-dev
 
 # Install gcloud- used for monthly netcdf data processing script
 # https://cloud.google.com/sdk/docs/install#deb
@@ -20,7 +22,7 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
 ENV FORCE_CUDA_EXTENSION=1
 # install python deps
 COPY requirements.txt /tmp/requirements.txt
-RUN python3 -m pip install -r /tmp/requirements.txt
+RUN python3 -m pip install -r /tmp/requirements.txt --no-binary h5py,netcdf4
 COPY requirements-healpix.txt /tmp/requirements-healpix.txt
 RUN python3 -m pip install --no-build-isolation -r /tmp/requirements-healpix.txt
 

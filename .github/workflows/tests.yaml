@@ -25,10 +25,12 @@ jobs:
           key: v1-${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('requirements-healpix.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libhdf5-dev libnetcdf-dev
           python -m pip install uv
           # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
           uv venv --python 3.11
-          uv pip install -c constraints.txt -e .[dev]
+          uv pip install -c constraints.txt -e .[dev] --no-binary h5py,netcdf4
           uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
       - name: Run pytest with code coverage
         run: |
@@ -50,8 +52,10 @@ jobs:
           key: v1-${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libhdf5-dev libnetcdf-dev
           python -m pip install uv
-          uv pip install --system -c constraints.txt -e .[dev]
+          uv pip install --system -c constraints.txt -e .[dev] --no-binary h5py,netcdf4
       - name: Run pytest
         run: |
           make test_very_fast
@@ -74,11 +78,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git build-essential
+          sudo apt-get install -y make git build-essential libhdf5-dev libnetcdf-dev
           python -m pip install uv
           # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
           uv venv --python 3.11
-          uv pip install -c constraints.txt -e .[dev]
+          uv pip install -c constraints.txt -e .[dev] --no-binary h5py,netcdf4
           uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
       - name: Run CUDA check and pytest
         run: |
