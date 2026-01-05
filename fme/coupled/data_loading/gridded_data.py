@@ -4,12 +4,15 @@ from collections import namedtuple
 
 import torch
 
-from fme.ace.data_loading.gridded_data import SizedMap
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
-from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
-from fme.core.rand import alternate_seed
+from fme.core.generics.data import (
+    DataLoader,
+    GriddedDataABC,
+    InferenceDataABC,
+    SizedMap,
+)
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.data_typing import (
     CoupledCoords,
@@ -131,10 +134,6 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         """
         Set the epoch for the data loader sampler, if it is a distributed sampler.
         """
-        if self._sampler is not None and isinstance(
-            self._sampler, torch.utils.data.DistributedSampler
-        ):
-            self._sampler.set_epoch(epoch)
         self._loader.set_epoch(epoch)
 
     def alternate_shuffle(self):
@@ -142,10 +141,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         Set the random shuffle of the data loader for the current epoch
         to the "alternate" shuffle.
         """
-        if self._sampler is not None and isinstance(
-            self._sampler, torch.utils.data.DistributedSampler
-        ):
-            self._sampler.set_epoch(alternate_seed(self._sampler.epoch))
+        self._loader.alternate_shuffle()
 
     def log_info(self, name: str):
         logging.info(

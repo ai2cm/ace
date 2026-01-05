@@ -1,5 +1,4 @@
 import pytest
-import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
@@ -10,8 +9,9 @@ from fme.ace.data_loading.dataloader import (
     get_stop_batches,
 )
 from fme.ace.data_loading.getters import CollateFn
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.subset import SubsetDataset
-from fme.core.dataset.testing import TestDataset
+from fme.core.dataset.testing import TestingDataset
 from fme.core.distributed import Distributed
 
 
@@ -23,14 +23,14 @@ def get_sample_tuples(start: int, end: int, times_per_batch: int):
                 data=[list(range(i, i + times_per_batch))],
                 dims=["sample", "time"],
             ),
-            set(),
+            None,
         )
         for i in range(start, end)
     ]
 
 
 def get_batch_time(batch: BatchData):
-    return TestDataset.time_to_int(batch.time.values[0, 0])
+    return TestingDataset.time_to_int(batch.time.values[0, 0])
 
 
 def get_data_loader(
@@ -42,7 +42,7 @@ def get_data_loader(
 ):
     inner_times_per_batch = times_per_batch + time_buffer
     n_skip = time_buffer + 1
-    dataset: TestDataset | SubsetDataset = TestDataset.new(
+    dataset: TestingDataset | SubsetDataset = TestingDataset.new(
         n_times=end - start,
         varnames=["var1"],
         sample_n_times=inner_times_per_batch,
@@ -51,14 +51,10 @@ def get_data_loader(
     dist = Distributed.get_instance()
     sampler = dist.get_sampler(dataset, shuffle=shuffle)
     return TorchDataLoader(
-        loader=torch.utils.data.DataLoader(
-            dataset,
-            sampler=sampler,
-            collate_fn=CollateFn(horizontal_dims=[]),
-            batch_size=1,
-        ),
-        sampler=sampler,
         dataset=dataset,
+        collate_fn=CollateFn(horizontal_dims=[]),
+        batch_size=1,
+        sampler=sampler,
     )
 
 
@@ -75,14 +71,15 @@ def get_sliding_window_data_loader(
     )
     return SlidingWindowDataLoader(
         loader=loader,
-        input_n_timesteps=time_buffer + 1,
-        output_n_timesteps=1,
+        output_n_timesteps=IntSchedule.from_constant(1),
+        time_buffer=time_buffer,
         shuffle=shuffle,
     )
 
 
 def test_torch_data_loader_subset_sequential():
     loader = get_data_loader(0, 10, shuffle=False)
+    assert len(loader) == 10
     subset = loader.subset(start_batch=2)
     assert len(subset) == 8
     times = [get_batch_time(batch) for batch in subset]

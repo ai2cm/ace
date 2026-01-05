@@ -11,9 +11,8 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.dataset.dataset import DatasetABC
+from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.typing_ import TensorDict
 
 
 @dataclasses.dataclass
@@ -159,8 +158,8 @@ class CoupledDatasetProperties:
 
 @dataclasses.dataclass
 class CoupledDatasetItem:
-    ocean: tuple[TensorDict, xr.DataArray, set[str]]
-    atmosphere: tuple[TensorDict, xr.DataArray, set[str]]
+    ocean: DatasetItem
+    atmosphere: DatasetItem
 
 
 class CoupledDataset:
@@ -220,10 +219,6 @@ class CoupledDataset:
         atmosphere = self._atmosphere[fast_idx]
         return CoupledDatasetItem(ocean=ocean, atmosphere=atmosphere)
 
-    def set_epoch(self, epoch: int):
-        self._ocean.set_epoch(epoch)
-        self._atmosphere.set_epoch(epoch)
-
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
         try:
             self._ocean.validate_inference_length(max_start_index, max_window_len)
@@ -241,3 +236,7 @@ class CoupledDataset:
             raise ValueError(
                 "The atmosphere dataset has an insufficient number of timepoints."
             ) from e
+
+    def set_epoch(self, epoch: int):
+        self._ocean.set_epoch(epoch)
+        self._atmosphere.set_epoch(epoch)

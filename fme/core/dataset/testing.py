@@ -11,7 +11,7 @@ from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import TensorMapping
 
 
-class TestDataset(DatasetABC):
+class TestingDataset(DatasetABC):
     START_DATE = "2000-01-01"
     START_DATE_CF = cftime.DatetimeGregorian(2000, 1, 1)
     CALENDAR = "gregorian"
@@ -30,8 +30,9 @@ class TestDataset(DatasetABC):
         sample_n_times: int,
         labels: set[str] | None = None,
         properties: DatasetProperties | None = None,
+        initial_epoch: int | None = None,
     ):
-        self.labels = labels or set()
+        self.labels = labels
         self.time = time
         self.data = data
         self._sample_n_times = sample_n_times
@@ -49,7 +50,7 @@ class TestDataset(DatasetABC):
                 is_remote=False,
                 all_labels=self.labels,
             )
-        self.epoch: int | None = None
+        self.epoch = initial_epoch
 
     @classmethod
     def new(
@@ -59,6 +60,7 @@ class TestDataset(DatasetABC):
         sample_n_times: int,
         labels: set[str] | None = None,
         properties: DatasetProperties | None = None,
+        initial_epoch: int | None = None,
     ) -> Self:
         time = xr.date_range(
             cls.START_DATE,
@@ -68,7 +70,14 @@ class TestDataset(DatasetABC):
             use_cftime=True,
         )
         data = {varname: torch.arange(n_times) for varname in varnames}
-        return cls(time, data, sample_n_times, labels, properties)
+        return cls(
+            time=time,
+            data=data,
+            sample_n_times=sample_n_times,
+            labels=labels,
+            properties=properties,
+            initial_epoch=initial_epoch,
+        )
 
     def __getitem__(self, index) -> DatasetItem:
         time_slice = slice(index, index + self._sample_n_times)
@@ -90,7 +99,7 @@ class TestDataset(DatasetABC):
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         data = {k: v[time_slice] for k, v in self.data.items()}
         time = xr.DataArray(self.time[time_slice], dims=["time"])
-        return data, time, self.labels
+        return data, time, self.labels, self.epoch
 
     @property
     def properties(self) -> DatasetProperties:

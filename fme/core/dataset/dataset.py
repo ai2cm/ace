@@ -4,34 +4,13 @@ from typing import Any, final
 import xarray as xr
 
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.generics.dataset import GenericDataset
 from fme.core.typing_ import TensorDict
 
-DatasetItem = tuple[TensorDict, xr.DataArray, set[str]]
+DatasetItem = tuple[TensorDict, xr.DataArray, set[str] | None, int | None]
 
 
-class SupportsDataLoaderABC(abc.ABC):
-    @abc.abstractmethod
-    def set_epoch(self, epoch: int):
-        pass
-
-    @property
-    @abc.abstractmethod
-    def first_time(self) -> Any:
-        """
-        Start time of the first sample in the dataset.
-        """
-        pass
-
-    @property
-    @abc.abstractmethod
-    def last_time(self) -> Any:
-        """
-        *Start* time of the last sample in the dataset.
-        """
-        pass
-
-
-class DatasetABC(SupportsDataLoaderABC, abc.ABC):
+class DatasetABC(GenericDataset[DatasetItem], abc.ABC):
     @property
     @abc.abstractmethod
     def sample_start_times(self) -> xr.CFTimeIndex:
@@ -56,6 +35,7 @@ class DatasetABC(SupportsDataLoaderABC, abc.ABC):
     def __getitem__(self, index) -> DatasetItem:
         pass
 
+    @final
     def __len__(self) -> int:
         return len(self.sample_start_times)
 

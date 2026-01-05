@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from collections.abc import Sequence
 
 import torch
@@ -7,11 +8,13 @@ import xarray as xr
 from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
+from fme.core.dataset.utils import accumulate_labels
 from fme.core.dataset.xarray import XarrayDataConfig, get_xarray_datasets
 
 
 class XarrayConcat(DatasetABC):
-    def __init__(self, datasets: Sequence[DatasetABC]):
+    def __init__(self, datasets: Sequence[DatasetABC], strict: bool = True):
         self._dataset = torch.utils.data.ConcatDataset(datasets)
         self._wrapped_datasets = datasets
         sample_start_times = datasets[0].sample_start_times
@@ -28,7 +31,15 @@ class XarrayConcat(DatasetABC):
         self._sample_n_times = datasets[0].sample_n_times
         self._properties = datasets[0].properties.copy()
         for dataset in datasets[1:]:
-            self._properties.update(dataset.properties)
+            if strict:
+                self._properties.update(dataset.properties)
+            else:
+                try:
+                    self._properties.update(dataset.properties)
+                except ValueError as e:
+                    warnings.warn(
+                        f"Metadata for each ensemble member are not the same: {e}"
+                    )
 
     def __getitem__(self, idx: int) -> DatasetItem:
         return self._dataset[idx]
@@ -77,13 +88,13 @@ class XarrayConcat(DatasetABC):
 def get_dataset(
     dataset_configs: Sequence[XarrayDataConfig],
     names: Sequence[str],
-    n_timesteps: int,
+    n_timesteps: IntSchedule,
     strict: bool = True,
 ) -> tuple[XarrayConcat, DatasetProperties]:
     datasets, properties = get_xarray_datasets(
         dataset_configs, names, n_timesteps, strict=strict
     )
-    ensemble = XarrayConcat(datasets)
+    ensemble = XarrayConcat(datasets, strict=strict)
     return ensemble, properties
 
 
@@ -107,7 +118,7 @@ class ConcatDatasetConfig(DatasetConfigABC):
     def build(
         self,
         names: Sequence[str],
-        n_timesteps: int,
+        n_timesteps: IntSchedule,
     ) -> tuple[DatasetABC, DatasetProperties]:
         return get_dataset(
             self.concat,
@@ -115,3 +126,10 @@ class ConcatDatasetConfig(DatasetConfigABC):
             n_timesteps,
             strict=self.strict,
         )
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return accumulate_labels([ds.available_labels for ds in self.concat])

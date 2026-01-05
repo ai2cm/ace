@@ -16,9 +16,6 @@ class SubsetDataset(DatasetABC):
         self._dataset = dataset
         self._indices = indices
 
-    def __len__(self) -> int:
-        return len(self._indices)
-
     @property
     def sample_start_times(self) -> xr.CFTimeIndex:
         """Return cftime index corresponding to start time of each sample."""

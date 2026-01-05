@@ -129,8 +129,11 @@ def test_stepper_gradient_accumulation_integration():
 
 @pytest.mark.parametrize("from_coupled_stepper_state", [True, False])
 def test_stepper_parameter_init_integration(
-    tmp_path: pathlib.Path, from_coupled_stepper_state: bool
+    tmp_path: pathlib.Path, from_coupled_stepper_state: bool, very_fast_only: bool
 ):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
     ocean_in_names = ["o_prog", "o_sfc_temp", "o_mask", "a_diag1"]
     ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag1", "o_diag2"]
     atmos_in_names = ["a_prog1", "a_prog2", "a_sfc_temp", "ocean_frac", "o_prog"]
