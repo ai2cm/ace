@@ -431,10 +431,10 @@ class CoupledSeaIceConfig:
 
 
 def compute_coupled_sea_ice(
-    ocean: xr.Dataset,
     atmos: xr.Dataset,
     config: CoupledSeaIceConfig,
     sea_ice: xr.Dataset | None = None,
+    ocean: xr.Dataset | None = None,
     input_field_names: CoupledFieldNamesConfig | None = None,
     atmos_extras: ExtraFieldsConfig | None = None,
     sea_ice_extras: ExtraFieldsConfig | None = None,
@@ -445,12 +445,13 @@ def compute_coupled_sea_ice(
     information from the processed atmosphere and ocean datasets.
 
     Args:
-        ocean: Ocean dataset containing SST and (optionally) sea surface fraction.
         atmos: Atmosphere dataset containing land fraction, sea ice fraction, and
             ocean fraction.
         sea_ice: Optional separate sea ice dataset. If provided, sea ice fraction
             is taken from here instead of from atmosphere dataset. Assumed to have
             the same temporal resolution as the atmos dataset.
+        ocean: Optional separate dataset containing sea surface fraction. Unused if
+            sea_ice is non-null and contains sea surface fraction.
         config: Configuration for window averaging and including surface temperature.
         input_field_names: Names of input fields. If None, uses defaults.
         atmos_extras: Optional configuration for copying extra variables from the
@@ -477,8 +478,6 @@ def compute_coupled_sea_ice(
     latdim = input_field_names.latitude_dim
     londim = input_field_names.longitude_dim
 
-    ocean = ocean.assign_coords({latdim: atmos[latdim], londim: atmos[londim]})
-
     # atmosphere inputs
     lfrac_name = input_field_names.atmosphere.land_fraction_name
     ifrac_name = input_field_names.atmosphere.sea_ice_fraction_name
@@ -493,43 +492,34 @@ def compute_coupled_sea_ice(
 
     lfrac = atmos[lfrac_name].clip(min=0.0, max=1.0)
 
-    if sea_ice is None:
-        ifrac = atmos[ifrac_name].clip(min=0.0, max=1.0)
-
-        try:
-            sfrac = ocean[sfrac_name].fillna(0.0).clip(min=0.0, max=1.0)
-        except KeyError:
-            logging.warning(
-                f"{sfrac_name} not found in ocean dataset. "
-                "Assuming sea surface fraction is 1 - land fraction."
-            )
-            sfrac = 1 - lfrac
-            sfrac = sfrac.fillna(0.0).clip(min=0.0, max=1.0)
-            sfrac.attrs = {
-                "long_name": "sea surface fraction",
-                "units": "unitless",
-            }
+    sfrac = 1 - lfrac
+    if sea_ice is not None and sfrac_name in sea_ice:
+        sfrac = sea_ice[sfrac_name]
+    elif ocean is not None and sfrac_name in ocean:
+        sfrac = ocean[sfrac_name]
     else:
-        sea_ice = sea_ice.assign_coords({latdim: atmos.lat, londim: atmos.lon})
-        ifrac = sea_ice[ifrac_name].fillna(0.0).clip(min=0.0, max=1.0)
-        try:
-            sfrac = sea_ice[sfrac_name].fillna(0.0).clip(min=0.0, max=1.0)
-            if tdim in sfrac.dims:
-                logging.warning(
-                    f"{sfrac_name} has a time dimension. Using first timepoint."
-                )
-                sfrac = sfrac.isel({tdim: 0}).drop_vars(tdim)
-        except KeyError:
-            logging.warning(
-                f"{sfrac_name} not found in ice dataset. "
-                "Assuming sea surface fraction is 1 - land fraction."
-            )
-            sfrac = 1 - lfrac
-            sfrac = sfrac.fillna(0.0).clip(min=0.0, max=1.0)
-            sfrac.attrs = {
-                "long_name": "sea surface fraction",
-                "units": "unitless",
-            }
+        logging.warning(
+            f"{sfrac_name} not found. "
+            "Assuming sea surface fraction is 1 - land fraction."
+        )
+    sfrac = (
+        sfrac.fillna(0.0)
+        .clip(min=0.0, max=1.0)
+        .assign_coords({latdim: atmos.lat, londim: atmos.lon})
+    )
+    sfrac.attrs = {
+        "long_name": "sea surface fraction",
+        "units": "unitless",
+    }
+
+    ifrac = atmos[ifrac_name].clip(min=0.0, max=1.0)
+    if sea_ice is not None:
+        ifrac = (
+            sea_ice[ifrac_name]
+            .fillna(0.0)
+            .clip(min=0.0, max=1.0)
+            .assign_coords({latdim: atmos[latdim], londim: atmos[londim]})
+        )
 
     sfrac_mod = (1 - lfrac).where(sfrac > 0, 0.0)
     lfrac_mod = 1 - sfrac_mod

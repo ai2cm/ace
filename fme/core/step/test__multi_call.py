@@ -1,9 +1,11 @@
 import dataclasses
+from collections.abc import Callable
 from datetime import timedelta
 
 import numpy as np
 import torch
 import xarray as xr
+from torch import nn
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData
@@ -14,12 +16,13 @@ from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.module import ModuleSelector
+from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.timing import GlobalTimer
 
-from .multi_call import MultiCallConfig, get_multi_call_name
+from ._multi_call import MultiCallConfig, get_multi_call_name
 
 TEST_CONFIG = MultiCallConfig(
     forcing_name="CO2",
@@ -28,10 +31,8 @@ TEST_CONFIG = MultiCallConfig(
 )
 
 
-def _step(input, next_step_forcing, *_):
-    names = TEST_CONFIG.output_names
-    prediction = {k: input["CO2"].detach().clone() for k in names}
-    return prediction
+def _step(args: StepArgs, wrapper: Callable[[nn.Module], nn.Module] = lambda x: x):
+    return {k: args.input["CO2"].detach().clone() for k in TEST_CONFIG.output_names}
 
 
 def test_multi_call_names():
@@ -55,7 +56,14 @@ def test_multi_call():
     initial_condition = {"temperature": torch.ones(shape)}
     co2_data = {"CO2": torch.full(shape, co2_value)}
 
-    output = multi_call.step(initial_condition | co2_data, {})
+    output = multi_call.step(
+        args=StepArgs(
+            input=initial_condition | co2_data,
+            next_step_input_data={},
+            labels=None,
+        ),
+        wrapper=lambda x: x,
+    )
 
     assert set(output) == set(config.names)
     for name in config.output_names:
@@ -164,7 +172,7 @@ def test_integration_with_stepper():
             for n in expected_all_names
         },
         time,
-        labels=[set() for _ in range(full_shape[0])],
+        labels=None,
     )
     with GlobalTimer():
         output = stepper.train_on_batch(data, NullOptimization())

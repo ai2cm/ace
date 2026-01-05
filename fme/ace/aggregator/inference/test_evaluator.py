@@ -102,11 +102,11 @@ def test_logs_regression():
     time = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
 
     logs = agg.record_batch(
-        data=PairedData(
+        data=PairedData.new_on_device(
             prediction={"a": torch.randn(n_sample, n_time, ny, nx).to(get_device())},
             reference={"a": torch.randn(n_sample, n_time, ny, nx).to(get_device())},
             time=time,
-            labels=[set() for _ in range(n_sample)],
+            labels=None,
         ),
     )
     assert len(logs) == n_time
@@ -187,13 +187,13 @@ def test_inference_logs_labels_exist():
         save_diagnostics=False,
     )
     logs = agg.record_batch(
-        data=PairedData(
+        data=PairedData.new_on_device(
             prediction={
                 "a": torch.randn(n_sample, n_time, ny, nx, device=get_device())
             },
             reference={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
             time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
-            labels=[set() for _ in range(n_sample)],
+            labels=None,
         ),
     )
     assert isinstance(logs, list)
@@ -240,7 +240,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     target_data = BatchData.new_on_device(
         data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
         time=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
-        labels=[set() for _ in range(2)],
+        labels=None,
         horizontal_dims=["lat", "lon"],
     )
     i_start = 0
@@ -252,7 +252,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
             prediction=sample_data,
             reference=target_data.data,
             time=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
-            labels=[set() for _ in range(2)],
+            labels=None,
         )
         logs = agg.record_batch(
             data=paired_data,
@@ -284,7 +284,7 @@ def test_flush_diagnostics(tmpdir):
             prediction=gen_data,
             reference=target_data,
             time=time,
-            labels=[set() for _ in range(n_sample)],
+            labels=None,
         ),
     )
     agg.flush_diagnostics()

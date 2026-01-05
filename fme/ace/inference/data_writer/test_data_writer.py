@@ -21,6 +21,7 @@ from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.core.device import get_device
+from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorMapping
 
 CALENDAR_CFTIME = {
@@ -54,7 +55,9 @@ def get_paired_data(
     return PairedData(
         prediction=prediction,
         reference=reference,
-        labels=[set() for _ in range(n_samples)],
+        labels=BatchLabels.new_from_set(
+            set(), n_samples=n_samples, device=get_device()
+        ),
         time=time,
     )
 
@@ -531,7 +534,9 @@ class TestDataWriter:
             assert ds.attrs["title"] == "ACE monthly mean predictions data file"
             assert ds.attrs["source.inference_version"] == "1.0"
 
-        with xr.open_dataset(tmp_path / "test_region.zarr") as ds:
+        with xr.open_dataset(
+            tmp_path / "test_region.zarr", decode_timedelta=False
+        ) as ds:
             assert "pressure" in ds
             assert "temp" not in ds
             assert ds.pressure.shape == (n_samples, n_timesteps, 2, 3)

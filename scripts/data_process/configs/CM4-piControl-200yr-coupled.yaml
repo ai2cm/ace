@@ -1,7 +1,8 @@
+version: "2025-10-20"
+family_name: cm4-piControl-200yr-no-smoothing-coupled
+output_directory: /climate-default
+
 coupled_datasets:
-  version: "2025-10-20"
-  family_name: cm4-piControl-200yr-no-smoothing-coupled
-  output_directory: /climate-default
   coupled_ts:
     how: interpolate_sst
   coupled_sea_surface:

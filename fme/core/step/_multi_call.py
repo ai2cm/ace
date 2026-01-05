@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from torch import nn
 
+from fme.core.step.args import StepArgs
 from fme.core.typing_ import TensorDict, TensorMapping
 
 LEVEL_PATTERN = re.compile(r"_(\d+)$")
@@ -11,7 +12,8 @@ TEMPLATE = "{name}{suffix}"
 
 
 StepMethod = Callable[
-    [TensorMapping, TensorMapping, Callable[[nn.Module], nn.Module]], TensorDict
+    [StepArgs, Callable[[nn.Module], nn.Module]],
+    TensorDict,
 ]
 
 
@@ -143,18 +145,37 @@ class MultiCall:
     def names(self) -> list[str]:
         return self._names
 
+    def _get_scale_forcing_func(
+        self, multiplier: float
+    ) -> Callable[[TensorMapping], TensorDict]:
+        def scale_forcing(input_data: TensorMapping) -> TensorDict:
+            if self.forcing_name not in input_data:
+                return dict(input_data)
+            else:
+                return {
+                    **input_data,
+                    self.forcing_name: multiplier * input_data[self.forcing_name],
+                }
+
+        return scale_forcing
+
     def step(
         self,
-        input: TensorMapping,
-        next_step_forcing_data: TensorMapping,
+        args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         predictions = {}
-        unscaled_forcing = input[self.forcing_name]
+        if (
+            self.forcing_name not in args.input
+            and self.forcing_name not in args.next_step_input_data
+        ):
+            raise ValueError(
+                f"forcing name {self.forcing_name} not in input or next_step_input_data"
+            )
         for suffix, multiplier in self.forcing_multipliers.items():
-            scaled_input = dict(input)
-            scaled_input[self.forcing_name] = multiplier * unscaled_forcing
-            output = self._step(scaled_input, next_step_forcing_data, wrapper)
+            scale_forcing_func = self._get_scale_forcing_func(multiplier)
+            scaled_args = args.apply_input_process_func(scale_forcing_func)
+            output = self._step(scaled_args, wrapper)
 
             for name in self.output_names:
                 new_name = get_multi_call_name(name, suffix)

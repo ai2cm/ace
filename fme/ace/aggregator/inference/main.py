@@ -291,6 +291,8 @@ class InferenceEvaluatorAggregator(
                 ops,
                 target_time=20,
                 target="norm",
+                include_bias=False,
+                include_grad_mag_percent_diff=False,
                 channel_mean_names=self._channel_mean_names,
             )
             if n_ensemble_per_ic > 1:

@@ -7,6 +7,7 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -103,6 +104,9 @@ class DataLoaderConfig:
         repeat: The number of times to repeat the underlying xarray dataset
             time dimension.  Useful to include longer sequences of small
             data for testing.
+        drop_last: Use drop_last option in sampler. Defaults to False. If True,
+            drop the last samples required to have even batch sizes across ranks.
+            If false, pad with extra samples to make ranks have the same size batches.
     """
 
     coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
@@ -117,6 +121,7 @@ class DataLoaderConfig:
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
     )
     repeat: int = 1
+    drop_last: bool = False
 
     @property
     def full_config(self) -> Sequence[XarrayDataConfig]:
@@ -151,7 +156,7 @@ class DataLoaderConfig:
         return get_dataset(
             self.full_config,
             names,
-            n_timesteps,
+            IntSchedule.from_constant(n_timesteps),
             strict=self.strict_ensemble,
         )
 
@@ -231,7 +236,9 @@ class DataLoaderConfig:
             dist = Distributed.get_instance()
         # Shuffle is not used for generation, it is set to False.
         sampler = (
-            ContiguousDistributedSampler(dataset) if dist.is_distributed() else None
+            ContiguousDistributedSampler(dataset, drop_last=self.drop_last)
+            if dist.is_distributed()
+            else None
         )
         dataloader = DataLoader(
             dataset,
@@ -298,6 +305,9 @@ class PairedDataLoaderConfig:
         sample_with_replacement: If provided, the dataset will be
             sampled randomly with replacement to the given size each period,
             instead of retrieving each sample once (either shuffled or not).
+        drop_last: Use drop_last option in sampler. Defaults to False. If True,
+            drop the last samples required to have even batch sizes across ranks.
+            If false, pad with extra samples to make ranks have the same size batches.
     """
 
     fine: Sequence[XarrayDataConfig]
@@ -314,6 +324,7 @@ class PairedDataLoaderConfig:
     repeat: int = 1
     topography: str | None = None
     sample_with_replacement: int | None = None
+    drop_last: bool = False
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
@@ -355,14 +366,14 @@ class PairedDataLoaderConfig:
         dataset_fine, properties_fine = get_dataset(
             self.fine,
             requirements.fine_names,
-            requirements.n_timesteps,
+            IntSchedule.from_constant(requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
 
         dataset_coarse, properties_coarse = get_dataset(
             self.coarse_full_config,
             requirements.coarse_names,
-            requirements.n_timesteps,
+            IntSchedule.from_constant(requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
 
@@ -464,7 +475,9 @@ class PairedDataLoaderConfig:
             dataset_fine_subset,
             dataset_coarse_subset,
         )
-        sampler = self._get_sampler(dataset=dataset, dist=dist, train=train)
+        sampler = self._get_sampler(
+            dataset=dataset, dist=dist, train=train, drop_last=self.drop_last
+        )
         dataloader = DataLoader(
             dataset,
             batch_size=dist.local_batch_size(int(self.batch_size)),
@@ -503,10 +516,7 @@ class PairedDataLoaderConfig:
         )
 
     def _get_sampler(
-        self,
-        dataset: Dataset,
-        dist: Distributed,
-        train: bool,
+        self, dataset: Dataset, dist: Distributed, train: bool, drop_last: bool = False
     ) -> RandomSampler | DistributedSampler | None:
         # Use RandomSampler with replacement for both distributed and
         # non-distributed cases
@@ -521,9 +531,11 @@ class PairedDataLoaderConfig:
             )
         if dist.is_distributed():
             if train:
-                sampler = DistributedSampler(dataset, shuffle=train)
+                sampler = DistributedSampler(
+                    dataset, shuffle=train, drop_last=drop_last
+                )
             else:
-                sampler = ContiguousDistributedSampler(dataset)
+                sampler = ContiguousDistributedSampler(dataset, drop_last=drop_last)
         else:
             sampler = None
 

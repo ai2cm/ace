@@ -1,6 +1,7 @@
 import sys
 
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
@@ -39,7 +40,7 @@ from fme.ace.registry.hpx import (
     UNetEncoderConfig,
 )
 from fme.ace.registry.land_net import LandNetBuilder
-from fme.ace.registry.m2lines import SamudraBuilder
+from fme.ace.registry.m2lines import FloeNetBuilder, SamudraBuilder
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO
 from fme.ace.stepper import DerivedForcingsConfig, StepperOverrideConfig
@@ -51,8 +52,10 @@ from fme.ace.stepper.parameter_init import (
 )
 from fme.ace.stepper.single_module import Stepper, StepperConfig, StepSelector
 from fme.ace.stepper.time_length_probabilities import (
+    TimeLengthMilestone,
     TimeLengthProbabilities,
     TimeLengthProbability,
+    TimeLengthSchedule,
 )
 from fme.ace.train.train_config import WeatherEvaluationConfig
 from fme.core.cli import ResumeResultsConfig
@@ -66,7 +69,6 @@ from fme.core.dataset.xarray import OverwriteConfig, XarrayDataConfig
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import StepLossConfig
 from fme.core.masking import StaticMaskingConfig
-from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import CheckpointConfig
@@ -78,6 +80,7 @@ from fme.core.step import (
     SeparateRadiationStepConfig,
     SingleModuleStepConfig,
 )
+from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
 
 from . import step

@@ -20,6 +20,7 @@ from fme.core.dataset.merged import (
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.distributed import Distributed
+from fme.core.labels import LabelEncoding
 from fme.core.typing_ import Slice
 
 
@@ -43,7 +44,13 @@ class TimestampList:
             )
             for t in self.times
         ]
-        return np.array([time_index.get_loc(dt) for dt in datetimes])
+        try:
+            return np.array([time_index.get_loc(dt) for dt in datetimes])
+        except KeyError as e:
+            missing = [str(dt) for dt in datetimes if dt not in time_index]
+            raise ValueError(
+                f"Timestamps {missing} were not found in the time index."
+            ) from e
 
     @property
     def n_initial_conditions(self) -> int:
@@ -134,6 +141,14 @@ class InferenceDataLoaderConfig:
         self._zarr_engine_used = self.dataset.zarr_engine_used
 
     @property
+    def using_labels(self) -> bool:
+        return self.dataset.available_labels is not None
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        return self.dataset.available_labels
+
+    @property
     def n_initial_conditions(self) -> int:
         return self.start_indices.n_initial_conditions
 
@@ -185,7 +200,7 @@ class ForcingDataLoaderConfig:
         )
 
 
-class InferenceDataset(torch.utils.data.Dataset):
+class InferenceDataset(torch.utils.data.Dataset[BatchData]):
     def __init__(
         self,
         config: InferenceDataLoaderConfig,
@@ -194,6 +209,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         label_override: list[str] | None = None,
         surface_temperature_name: str | None = None,
         ocean_fraction_name: str | None = None,
+        label_encoding: LabelEncoding | None = None,
         n_ensemble: int | None = None,
     ):
         """
@@ -206,13 +222,17 @@ class InferenceDataset(torch.utils.data.Dataset):
                 in the dataset.
             surface_temperature_name: Name of the surface temperature variable.
             ocean_fraction_name: Name of the ocean fraction variable.
+            label_encoding: Label encoding to use for the labels.
         """
+        if label_encoding is None and config.available_labels is not None:
+            label_encoding = LabelEncoding(labels=sorted(list(config.available_labels)))
+        self._label_encoding = label_encoding
         self._label_override = (
             set(label_override) if label_override is not None else None
         )
         if isinstance(config.dataset, XarrayDataConfig):
             dataset: XarrayDataset | MergedXarrayDataset = XarrayDataset(
-                config.dataset, requirements.names, requirements.n_timesteps
+                config.dataset, requirements.names, requirements.n_timesteps_schedule
             )
             properties = dataset.properties
         elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
@@ -220,7 +240,9 @@ class InferenceDataset(torch.utils.data.Dataset):
             properties = dataset.properties
         self._properties = properties
         self._dataset = dataset
-        self._forward_steps_in_memory = requirements.n_timesteps - 1
+        self._forward_steps_in_memory = (
+            requirements.n_timesteps_schedule.get_value(0) - 1
+        )  # during inference, schedules are ignored
         self._total_forward_steps = total_forward_steps
         self._perturbations = config.perturbations
         self._surface_temperature_name = surface_temperature_name
@@ -233,7 +255,10 @@ class InferenceDataset(torch.utils.data.Dataset):
             )
         else:
             self._start_indices = config.start_indices.as_indices()
-        self._validate_n_forward_steps()
+        self._dataset.validate_inference_length(
+            max_start_index=max(self._start_indices),
+            max_window_len=total_forward_steps + 1,
+        )
         if isinstance(self._properties.horizontal_coordinates, LatLonCoordinates):
             self._lats, self._lons = self._properties.horizontal_coordinates.meshgrid
         else:
@@ -274,7 +299,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                     self._total_forward_steps + self._start_indices[i_member] + 1
                 )
             window_time_slice = slice(i_window_start, i_window_end)
-            tensors, time, labels = self._dataset.get_sample_by_time_slice(
+            tensors, time, labels, epoch = self._dataset.get_sample_by_time_slice(
                 window_time_slice
             )
             if self._label_override is not None:
@@ -296,10 +321,11 @@ class InferenceDataset(torch.utils.data.Dataset):
                         self._lons,
                         tensors[self._ocean_fraction_name],
                     )
-            sample_tuples.append((tensors, time, labels))
+            sample_tuples.append((tensors, time, labels, epoch))
         return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
+            label_encoding=self._label_encoding,
         )
 
     def __getitem__(self, index) -> BatchData:
@@ -323,19 +349,19 @@ class InferenceDataset(torch.utils.data.Dataset):
     def properties(self) -> DatasetProperties:
         return self._properties
 
-    @property
-    def n_forward_steps(self) -> int:
-        return self._total_forward_steps
-
     def _validate_n_forward_steps(self):
-        max_steps = self._dataset.total_timesteps - max(self._start_indices) - 1
-        if self._total_forward_steps > max_steps:
+        try:
+            self._dataset.validate_inference_length(
+                max_start_index=max(self._start_indices),
+                max_window_len=self._total_forward_steps + 1,
+            )
+        except ValueError as e:
             raise ValueError(
                 f"The number of forward inference steps ({self._total_forward_steps}) "
                 "must be less than or equal to the number of possible steps "
-                f"({max_steps}) in dataset after the last initial condition's "
+                f"in dataset after the last initial condition's "
                 "start index."
-            )
+            ) from e
 
     def _resolve_merged_datasets(
         self,
@@ -351,7 +377,7 @@ class InferenceDataset(torch.utils.data.Dataset):
             current_dataset = XarrayDataset(
                 config,
                 per_dataset_names[config_counter],
-                requirements.n_timesteps,
+                requirements.n_timesteps_schedule,
             )
             merged_xarray_datasets.append(current_dataset)
             config_counter += 1

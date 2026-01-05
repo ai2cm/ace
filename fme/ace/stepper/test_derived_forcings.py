@@ -150,8 +150,7 @@ def test_forcing_deriver(insolation: InsolationConfig | None):
             solar_constant_name = insolation.solar_constant.name
             forcing_dict[solar_constant_name] = torch.full(expected_shape, S0)
 
-    labels: list[set[str]] = []
-    forcing = BatchData(forcing_dict, time, labels)
+    forcing = BatchData(forcing_dict, time, labels=None)
     result = forcing_deriver(forcing)
 
     if insolation is None:

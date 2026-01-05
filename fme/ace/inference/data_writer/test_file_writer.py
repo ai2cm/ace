@@ -317,7 +317,9 @@ def test__select_time_file_writer_multiple_samples(time_selection, tmpdir):
     )
     file_writer.finalize()
 
-    with xr.open_dataset(tmpdir / "test_writer.nc") as subselected_data:
+    with xr.open_dataset(
+        tmpdir / "test_writer.nc", decode_timedelta=False
+    ) as subselected_data:
         assert len(subselected_data.sample) == n_samples
         if isinstance(time_selection, Slice):
             assert len(subselected_data.time) == 2
@@ -461,7 +463,7 @@ def test_file_writer_with_healpix_data_and_zarr(tmpdir):
     writer.append_batch(data_first_half, batch_time=batch_time_first_half)
     writer.append_batch(data_second_half, batch_time=batch_time_second_half)
     writer.finalize()
-    zarr_data = xr.open_zarr(tmpdir / "filename.zarr")
+    zarr_data = xr.open_zarr(tmpdir / "filename.zarr", decode_timedelta=False)
     assert dict(zarr_data.sizes) == {
         "sample": n_samples,
         "time": n_timesteps,
@@ -540,7 +542,7 @@ def test_file_writer_monthly(tmpdir):
     ds = xr.open_dataset(tmpdir / f"{label}.nc")
     assert "counts" in ds.coords
     assert "foo" in ds.data_vars
-    assert dict(ds.sizes) == {"sample": 1, "time": 6, "lat": 5, "lon": 5}
+    assert dict(ds.sizes) == {"sample": 1, "time": 4, "lat": 5, "lon": 5}
     assert ds.valid_time.isel(sample=0, time=0).values == np.datetime64("2020-01-15")
     assert ds.valid_time.isel(sample=0, time=1).values == np.datetime64("2020-02-15")
 

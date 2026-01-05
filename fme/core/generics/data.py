@@ -1,12 +1,27 @@
 import abc
-from collections.abc import Iterable, Sized
+from collections.abc import Callable, Iterable, Iterator, Sized
 from typing import Generic, Protocol, TypeVar
 
-T = TypeVar("T", covariant=True)
+_T = TypeVar("_T", covariant=True)
 
 
-class DataLoader(Protocol, Generic[T], Sized, Iterable[T]):
+class DataLoader(Protocol, Generic[_T], Sized, Iterable[_T]):
     pass
+
+
+_U = TypeVar("_U")
+
+
+class SizedMap(Generic[_T, _U], Sized, Iterable[_U]):
+    def __init__(self, func: Callable[[_T], _U], iterable: DataLoader[_T]):
+        self._func = func
+        self._iterable = iterable
+
+    def __len__(self) -> int:
+        return len(self._iterable)
+
+    def __iter__(self) -> Iterator[_U]:
+        return map(self._func, self._iterable)
 
 
 PS = TypeVar("PS")  # prognostic state
@@ -41,10 +56,13 @@ class SimpleInferenceData(InferenceDataABC[PS, FD]):
         return self._loader
 
 
-class GriddedDataABC(abc.ABC, Generic[T]):
+BD = TypeVar("BD", covariant=True)  # batch data
+
+
+class GriddedDataABC(abc.ABC, Generic[BD]):
     @property
     @abc.abstractmethod
-    def loader(self) -> DataLoader[T]: ...
+    def loader(self) -> DataLoader[BD]: ...
 
     @property
     @abc.abstractmethod
@@ -62,9 +80,19 @@ class GriddedDataABC(abc.ABC, Generic[T]):
     def set_epoch(self, epoch: int): ...
 
     @abc.abstractmethod
-    def subset_loader(self, start_batch: int) -> DataLoader[T]:
+    def alternate_shuffle(self):
         """
-        Subset the loader to skip the first `start_batch` batches.
+        Change the random shuffle of the data loader for the current epoch.
+        """
+        ...
+
+    @abc.abstractmethod
+    def subset_loader(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> DataLoader[BD]:
+        """
+        Subset the loader to skip the first `start_batch` batches
+        and stop at the `stop_batch` batch (exclusive).
         """
         ...
 

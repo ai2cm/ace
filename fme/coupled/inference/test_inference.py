@@ -35,6 +35,7 @@ def _setup(
     coupled_steps_in_memory: int,
     n_initial_conditions: int,
     empty_ocean_forcing: bool = False,
+    atmosphere_times_offset: int = 0,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmos_in_names + atmos_out_names)
@@ -57,9 +58,9 @@ def _setup(
         n_forward_times_atmosphere=n_forward_times_atmos,
         ocean_names=ocean_names,
         atmosphere_names=atmos_names,
-        atmosphere_start_time_offset_from_ocean=0,
         n_levels_ocean=1,
         n_levels_atmosphere=1,
+        atmosphere_start_time_offset_from_ocean=atmosphere_times_offset,
     )
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=mock_data.vcoord,
@@ -81,10 +82,11 @@ def _setup(
         atmosphere_timedelta=mock_data.atmosphere.timedelta,
     )
     if empty_ocean_forcing:
+        atmos_forcing_config = mock_data.dataset_config.atmosphere
         forcing_loader = CoupledForcingDataLoaderConfig(
             ocean=None,
             atmosphere=ForcingDataLoaderConfig(
-                dataset=mock_data.dataset_config.atmosphere, num_data_workers=0
+                dataset=atmos_forcing_config, num_data_workers=0
             ),
         )
     else:
@@ -211,8 +213,16 @@ def test_inference(
         }
 
 
+@pytest.mark.parametrize(
+    "atmosphere_times_offset",
+    [
+        0,
+        1,
+    ],
+)
 def test_inference_with_empty_ocean_forcing(
     tmp_path: pathlib.Path,
+    atmosphere_times_offset: int,
     very_fast_only: bool,
 ):
     if very_fast_only:
@@ -235,6 +245,7 @@ def test_inference_with_empty_ocean_forcing(
         coupled_steps_in_memory=coupled_steps_in_memory,
         n_initial_conditions=n_initial_conditions,
         empty_ocean_forcing=True,
+        atmosphere_times_offset=atmosphere_times_offset,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
