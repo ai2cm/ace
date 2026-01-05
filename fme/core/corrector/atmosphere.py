@@ -485,6 +485,8 @@ def _energy_correction_factor(
     See https://www.overleaf.com/read/dqjjcvzxnfvn#d525aa.
     """
     interface_pressure = vertical_coordinate.interface_pressure(gen.surface_pressure)
+    print(f"Minimum surface pressure {gen.surface_pressure.min()}")
+    print(f"Maximum surface pressure {gen.surface_pressure.max()}")
     q_times_dlogp = (
         compute_layer_thickness(
             interface_pressure, gen.air_temperature, gen.specific_total_water

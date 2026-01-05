@@ -368,6 +368,8 @@ def compute_layer_thickness(
     # This is equivalent to setting the TOA pressure to 1 Pa if it is less than that.
     # The ERA5 data has a TOA pressure of 0.0 Pa which causes issues otherwise.
     dlogp = torch.clamp(torch.log(pressure_at_interface), min=0.0).diff(dim=-1)
+    print(f"Minimum dlogp {dlogp.min()}")
+    print(f"Maximum dlogp {dlogp.max()}")
     return dlogp * RDGAS * tv / GRAVITY
 
 
