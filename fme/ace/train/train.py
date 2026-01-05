@@ -285,5 +285,4 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config.resume_results = prepare_directory(
         config.experiment_dir, config_data, config.resume_results
     )
-
     run_train_from_config(config)
