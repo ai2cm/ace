@@ -7,10 +7,10 @@ from datetime import timedelta
 
 import numpy as np
 import torch
-from aurora.batch import Batch
 from einops import rearrange
 from torch import nn
 
+from .batch import Batch
 from .fourier import (
     absolute_time_expansion,
     lead_time_expansion,
@@ -113,7 +113,7 @@ class Perceiver3DEncoder(nn.Module):
         # We treat the static variables as surface variables in the model (and possibly even as
         # atmospheric variables!).
         if static_vars:
-            surf_vars += static_vars
+            surf_vars = surf_vars + static_vars
             if self.atmos_static_vars:
                 # In this case, we prefix the static variables to avoid name clashes. E.g., `z` is
                 # both a static variable and an atmospheric variable.

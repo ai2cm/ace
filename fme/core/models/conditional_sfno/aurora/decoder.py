@@ -6,10 +6,10 @@ Originally copied from https://github.com/microsoft/aurora/blob/ab2afd6962fb1c6e
 from datetime import timedelta
 
 import torch
-from aurora.batch import Batch, Metadata
 from einops import rearrange
 from torch import nn
 
+from .batch import Batch, Metadata
 from .fourier import levels_expansion
 from .levelcond import LevelConditioned
 from .perceiver import PerceiverResampler
