@@ -2,7 +2,7 @@
 
 set -e
 
-CONFIG_FILENAME="train-n384-e5c5-1step.yaml"
+CONFIG_FILENAME="train-n512-e1c9-ft-20step.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -18,6 +18,7 @@ JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
 STATS_DATA=elynn/2025-11-24-E3SMv3-piControl-100yr-coupled-stats
+EXISTING_DATASETS=01KCPVJJ2GV87DWRV63G8CKJ0S
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
@@ -64,6 +65,7 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
           --dataset-secret google-credentials:/tmp/google_application_credentials.json \
           --dataset $STATS_DATA:/statsdata \
+          --dataset $EXISTING_DATASETS:/weights \
           --gpus $N_GPUS \
           --shared-memory 400GiB \
           --budget ai2/climate \
