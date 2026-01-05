@@ -16,13 +16,6 @@ launch_job () {
 
     python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 
-    SPIN_UP_OVERRIDES="experiment_dir=/results/spin-up \
-        initial_condition.start_indices.times=[1989-01-01T00:00:00] \
-        initial_condition.path=/climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002/1989010100.nc \
-        n_forward_steps=1460 \
-        logging.log_to_wandb=false\
-    "
-
     gantry run \
         --name $JOB_NAME \
         --description 'Run ACE inference for SHiELD model' \
