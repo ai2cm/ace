@@ -459,9 +459,9 @@ def _force_conserve_total_energy(
     energy_to_temperature_factor = _energy_correction_factor(gen, vertical_coordinate)
     # take global mean to impose a spatially uniform temperature correction
     energy_to_temp_factor_gm = area_weighted_mean(energy_to_temperature_factor, True)
-    print(f"energy_to_temp_factor_gm is {energy_to_temp_factor_gm.item():0.2f}")
+    print(f"energy_to_temp_factor_gm is {energy_to_temp_factor_gm.squeeze().item():0.2f}")
     temperature_correction = energy_correction / energy_to_temp_factor_gm
-    print(f"temperature_correction is {temperature_correction.item():0.2f}")
+    print(f"temperature_correction is {temperature_correction.squeeze().item():0.2f}")
 
     # apply same temperature correction to all vertical layers
     n_levels = gen.air_temperature.shape[-1]
