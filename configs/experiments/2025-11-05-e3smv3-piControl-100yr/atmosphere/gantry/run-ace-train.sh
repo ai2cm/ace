@@ -13,7 +13,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-v1124-ACE2S-n384-e5c5-1step-E3SMv3-piControl-100yr-no-smooth-ocean"
+JOB_GROUP="BK-v1124-ACE2S-n512-e1c9-ft-20step-E3SMv3-piControl-100yr-no-smooth-ocean"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
