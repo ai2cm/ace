@@ -2,7 +2,7 @@
 
 set -e
 
-CONFIG_FILENAME="train-n512-e5c5-1step.yaml"
+CONFIG_FILENAME="train-n384-e5c5-1step.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -13,7 +13,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-v1124-ACE2S-e5c5-1step-E3SMv3-piControl-100yr-no-smooth-ocean"
+JOB_GROUP="BK-v1124-ACE2S-n384-e5c5-1step-E3SMv3-piControl-100yr-no-smooth-ocean"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
@@ -21,7 +21,7 @@ STATS_DATA=elynn/2025-11-24-E3SMv3-piControl-100yr-coupled-stats
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=2
+N_RANDOM_SEED_RUNS=1
 
 for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
