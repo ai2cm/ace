@@ -4,21 +4,20 @@ Originally copied from https://github.com/microsoft/aurora/blob/ab2afd6962fb1c6e
 """
 
 import dataclasses
+from collections.abc import Callable
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Callable, List
 
 import numpy as np
 import torch
-from scipy.interpolate import RegularGridInterpolator as RGI
-
 from aurora.normalisation import (
     normalise_atmos_var,
     normalise_surf_var,
     unnormalise_atmos_var,
     unnormalise_surf_var,
 )
+from scipy.interpolate import RegularGridInterpolator as RGI
 
 __all__ = ["Metadata", "Batch"]
 
@@ -61,9 +60,13 @@ class Metadata:
         # Validate matrix-valued latitudes and longitudes:
         elif self.lat.dim() == self.lon.dim() == 2:
             if not torch.all(self.lat[1:, :] - self.lat[:-1, :]):
-                raise ValueError("Latitudes must be strictly decreasing along every column.")
+                raise ValueError(
+                    "Latitudes must be strictly decreasing along every column."
+                )
             if not torch.all(self.lon[:, 1:] - self.lon[:, :-1] > 0):
-                raise ValueError("Longitudes must be strictly increasing along every row.")
+                raise ValueError(
+                    "Longitudes must be strictly increasing along every row."
+                )
 
         else:
             raise ValueError(
@@ -106,10 +109,12 @@ class Batch:
         """
         return Batch(
             surf_vars={
-                k: normalise_surf_var(v, k, stats=surf_stats) for k, v in self.surf_vars.items()
+                k: normalise_surf_var(v, k, stats=surf_stats)
+                for k, v in self.surf_vars.items()
             },
             static_vars={
-                k: normalise_surf_var(v, k, stats=surf_stats) for k, v in self.static_vars.items()
+                k: normalise_surf_var(v, k, stats=surf_stats)
+                for k, v in self.static_vars.items()
             },
             atmos_vars={
                 k: normalise_atmos_var(v, k, self.metadata.atmos_levels)
@@ -130,10 +135,12 @@ class Batch:
         """
         return Batch(
             surf_vars={
-                k: unnormalise_surf_var(v, k, stats=surf_stats) for k, v in self.surf_vars.items()
+                k: unnormalise_surf_var(v, k, stats=surf_stats)
+                for k, v in self.surf_vars.items()
             },
             static_vars={
-                k: unnormalise_surf_var(v, k, stats=surf_stats) for k, v in self.static_vars.items()
+                k: unnormalise_surf_var(v, k, stats=surf_stats)
+                for k, v in self.static_vars.items()
             },
             atmos_vars={
                 k: unnormalise_atmos_var(v, k, self.metadata.atmos_levels)
@@ -199,7 +206,6 @@ class Batch:
 
         This function is not optimised for either speed or accuracy. Use at your own risk.
         """
-
         shape = (round(180 / res) + 1, round(360 / res))
         lat_new = torch.from_numpy(np.linspace(90, -90, shape[0]))
         lon_new = torch.from_numpy(np.linspace(0, 360, shape[1], endpoint=False))
@@ -245,7 +251,10 @@ class Batch:
                     for k, v in self.static_vars.items()
                 },
                 **{
-                    f"atmos_{k}": (("batch", "history", "level", "latitude", "longitude"), _np(v))
+                    f"atmos_{k}": (
+                        ("batch", "history", "level", "latitude", "longitude"),
+                        _np(v),
+                    )
                     for k, v in self.atmos_vars.items()
                 },
             },
@@ -269,9 +278,9 @@ class Batch:
 
         ds = xr.load_dataset(path, engine="netcdf4")
 
-        surf_vars: List[str] = []
-        static_vars: List[str] = []
-        atmos_vars: List[str] = []
+        surf_vars: list[str] = []
+        static_vars: list[str] = []
+        atmos_vars: list[str] = []
 
         for k in ds:
             if k.startswith("surf_"):
@@ -283,8 +292,12 @@ class Batch:
 
         return Batch(
             surf_vars={k: torch.from_numpy(ds[f"surf_{k}"].values) for k in surf_vars},
-            static_vars={k: torch.from_numpy(ds[f"static_{k}"].values) for k in static_vars},
-            atmos_vars={k: torch.from_numpy(ds[f"atmos_{k}"].values) for k in atmos_vars},
+            static_vars={
+                k: torch.from_numpy(ds[f"static_{k}"].values) for k in static_vars
+            },
+            atmos_vars={
+                k: torch.from_numpy(ds[f"atmos_{k}"].values) for k in atmos_vars
+            },
             metadata=Metadata(
                 lat=torch.from_numpy(ds.latitude.values),
                 lon=torch.from_numpy(ds.longitude.values),
@@ -307,7 +320,8 @@ def interpolate(
     lon_new: torch.Tensor,
 ) -> torch.Tensor:
     """Interpolate a variable `v` with latitudes `lat` and longitudes `lon` to new latitudes
-    `lat_new` and new longitudes `lon_new`."""
+    `lat_new` and new longitudes `lon_new`.
+    """
     # Perform the interpolation in double precision.
     return torch.from_numpy(
         interpolate_numpy(
@@ -328,7 +342,6 @@ def interpolate_numpy(
     lon_new: np.ndarray,
 ) -> np.ndarray:
     """Like :func:`.interpolate`, but for NumPy tensors."""
-
     # Implement periodic longitudes in `lon`.
     assert (np.diff(lon) > 0).all()
     lon = np.concatenate((lon[-1:] - 360, lon, lon[:1] + 360))

@@ -47,8 +47,14 @@ def unpatchify(x: torch.Tensor, V: int, H: int, W: int, P: int) -> torch.Tensor:
 
 def check_lat_lon_dtype(lat: torch.Tensor, lon: torch.Tensor) -> None:
     """Assert that `lat` and `lon` are at least `float32`s."""
-    assert lat.dtype in [torch.float32, torch.float64], f"Latitude num. unstable: {lat.dtype}."
-    assert lon.dtype in [torch.float32, torch.float64], f"Longitude num. unstable: {lon.dtype}."
+    assert lat.dtype in [
+        torch.float32,
+        torch.float64,
+    ], f"Latitude num. unstable: {lat.dtype}."
+    assert lon.dtype in [
+        torch.float32,
+        torch.float64,
+    ], f"Longitude num. unstable: {lon.dtype}."
 
 
 T = TypeVar("T", tuple[int, int], tuple[int, int, int])
@@ -56,7 +62,8 @@ T = TypeVar("T", tuple[int, int], tuple[int, int, int])
 
 def maybe_adjust_windows(window_size: T, shift_size: T, res: T) -> tuple[T, T]:
     """Adjust the window size and shift size if the input resolution is smaller than the window
-    size."""
+    size.
+    """
     err_msg = f"Expected same length, found {len(window_size)}, {len(shift_size)} and {len(res)}."
     assert len(window_size) == len(shift_size) == len(res), err_msg
 
@@ -69,8 +76,12 @@ def maybe_adjust_windows(window_size: T, shift_size: T, res: T) -> tuple[T, T]:
     new_window_size: T = tuple(mut_window_size)  # type: ignore[assignment]
     new_shift_size: T = tuple(mut_shift_size)  # type: ignore[assignment]
 
-    assert min(new_window_size) > 0, f"Window size must be positive. Found {new_window_size}."
-    assert min(new_shift_size) >= 0, f"Shift size must be non-negative. Found {new_shift_size}."
+    assert (
+        min(new_window_size) > 0
+    ), f"Window size must be positive. Found {new_window_size}."
+    assert (
+        min(new_shift_size) >= 0
+    ), f"Shift size must be non-negative. Found {new_shift_size}."
 
     return new_window_size, new_shift_size
 
@@ -83,7 +94,9 @@ def init_weights(m: nn.Module):
     Args:
         m (torch.nn.Module): Module.
     """
-    if isinstance(m, (nn.Linear, nn.Conv2d, nn.Conv3d, nn.ConvTranspose2d, nn.ConvTranspose3d)):
+    if isinstance(
+        m, nn.Linear | nn.Conv2d | nn.Conv3d | nn.ConvTranspose2d | nn.ConvTranspose3d
+    ):
         trunc_normal_(m.weight, std=0.02)
         if m.bias is not None:
             nn.init.constant_(m.bias, 0)

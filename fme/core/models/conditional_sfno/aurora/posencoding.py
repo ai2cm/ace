@@ -10,9 +10,8 @@ Copied from https://github.com/microsoft/aurora/blob/ab2afd6962fb1c6e4f2c5b99e36
 
 import torch
 import torch.nn.functional as F
-from timm.layers import to_2tuple
-
 from aurora.model.fourier import FourierExpansion
+from timm.layers import to_2tuple
 
 __all__ = ["pos_scale_enc"]
 
@@ -45,8 +44,12 @@ def patch_root_area(
     #
     #   https://www.johndcook.com/blog/2023/02/21/sphere-grid-area/
     #
-    assert (lat_max > lat_min).all(), f"lat_max - lat_min: {torch.min(lat_max - lat_min)}."
-    assert (lon_max > lon_min).all(), f"lon_max - lon_min: {torch.min(lon_max - lon_min)}."
+    assert (
+        lat_max > lat_min
+    ).all(), f"lat_max - lat_min: {torch.min(lat_max - lat_min)}."
+    assert (
+        lon_max > lon_min
+    ).all(), f"lon_max - lon_min: {torch.min(lon_max - lon_min)}."
     assert (abs(lat_max) <= 90.0).all() and (abs(lat_min) <= 90.0).all()
     assert (lon_max <= 360.0).all() and (lon_min <= 360.0).all()
     assert (lon_max >= 0.0).all() and (lon_min >= 0.0).all()
@@ -192,4 +195,6 @@ def pos_scale_enc(
         scale_expansion=scale_expansion,
     )
 
-    return pos_encoding.squeeze(0), scale_encoding.squeeze(0)  # Return without batch dimension.
+    return pos_encoding.squeeze(0), scale_encoding.squeeze(
+        0
+    )  # Return without batch dimension.

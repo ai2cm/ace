@@ -4,7 +4,6 @@ Originally copied from https://github.com/microsoft/aurora/blob/ab2afd6962fb1c6e
 """
 
 import math
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -16,7 +15,8 @@ __all__ = ["LevelPatchEmbed"]
 
 class LevelPatchEmbed(nn.Module):
     """At either the surface or at a single pressure level, maps all variables into a single
-    embedding."""
+    embedding.
+    """
 
     def __init__(
         self,
@@ -24,7 +24,7 @@ class LevelPatchEmbed(nn.Module):
         patch_size: int,
         embed_dim: int,
         history_size: int = 1,
-        norm_layer: Optional[nn.Module] = None,
+        norm_layer: nn.Module | None = None,
         flatten: bool = True,
     ) -> None:
         """Initialise.
@@ -74,7 +74,9 @@ class LevelPatchEmbed(nn.Module):
         #
         #   https://pytorch.org/docs/stable/_modules/torch/nn/modules/conv.html#Conv3d
         #
-        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(next(iter(self.weights.values())))
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(
+            next(iter(self.weights.values()))
+        )
         if fan_in != 0:
             bound = 1 / math.sqrt(fan_in)
             nn.init.uniform_(self.bias, -bound, bound)
@@ -97,7 +99,9 @@ class LevelPatchEmbed(nn.Module):
         assert self.kernel_size[0] >= T, f"{T} > {self.kernel_size[0]}."
         assert H % self.kernel_size[1] == 0, f"{H} % {self.kernel_size[0]} != 0."
         assert W % self.kernel_size[2] == 0, f"{W} % {self.kernel_size[1]} != 0."
-        assert len(set(var_names)) == len(var_names), f"{var_names} contains duplicates."
+        assert len(set(var_names)) == len(
+            var_names
+        ), f"{var_names} contains duplicates."
 
         # Select the weights of the variables and history dimensions that are present in the batch.
         weight = torch.cat(

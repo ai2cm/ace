@@ -8,7 +8,6 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
-
 from aurora.area import area, radius_earth
 
 __all__ = [
@@ -64,7 +63,9 @@ class FourierExpansion(nn.Module):
             torch.Tensor: Fourier series-style expansion of `x` of shape `(..., n, d)`.
         """
         # If the input is not within the configured range, the embedding might be ambiguous!
-        in_range = torch.logical_and(self.lower <= x.abs(), torch.all(x.abs() <= self.upper))
+        in_range = torch.logical_and(
+            self.lower <= x.abs(), torch.all(x.abs() <= self.upper)
+        )
         in_range_or_zero = torch.all(
             torch.logical_or(in_range, x == 0)
         )  # Allow zeros to pass through.

@@ -206,7 +206,9 @@ class PerceiverResampler(nn.Module):
                             num_heads=num_heads,
                             ln_k_q=ln_k_q if i == 0 else False,
                         ),
-                        MLP(dim=latent_dim, hidden_features=mlp_hidden_dim, dropout=drop),
+                        MLP(
+                            dim=latent_dim, hidden_features=mlp_hidden_dim, dropout=drop
+                        ),
                         nn.LayerNorm(latent_dim, eps=ln_eps),
                         nn.LayerNorm(latent_dim, eps=ln_eps),
                     ]

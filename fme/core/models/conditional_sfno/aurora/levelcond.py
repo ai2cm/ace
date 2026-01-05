@@ -3,11 +3,10 @@
 Originally copied from https://github.com/microsoft/aurora/blob/ab2afd6962fb1c6e4f2c5b99e3657f063831ace1/aurora/model/levelcond.py
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
-
 from aurora.normalisation import level_to_str
 
 __all__ = ["LevelConditioned"]

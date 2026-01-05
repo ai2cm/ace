@@ -4,7 +4,6 @@ Originally copied from https://github.com/microsoft/aurora/blob/ab2afd6962fb1c6e
 """
 
 from functools import partial
-from typing import Optional
 
 import torch
 
@@ -37,7 +36,7 @@ def level_to_str(level: float) -> str:
 def normalise_surf_var(
     x: torch.Tensor,
     name: str,
-    stats: Optional[dict[str, tuple[float, float]]] = None,
+    stats: dict[str, tuple[float, float]] | None = None,
     unnormalise: bool = False,
 ) -> torch.Tensor:
     """Normalise a surface-level variable."""

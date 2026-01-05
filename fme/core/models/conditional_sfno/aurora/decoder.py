@@ -4,21 +4,15 @@ Originally copied from https://github.com/microsoft/aurora/blob/ab2afd6962fb1c6e
 """
 
 from datetime import timedelta
-from typing import Optional
 
 import torch
-from einops import rearrange
-from torch import nn
-
 from aurora.batch import Batch, Metadata
 from aurora.model.fourier import levels_expansion
 from aurora.model.levelcond import LevelConditioned
 from aurora.model.perceiver import PerceiverResampler
-from aurora.model.util import (
-    check_lat_lon_dtype,
-    init_weights,
-    unpatchify,
-)
+from aurora.model.util import check_lat_lon_dtype, init_weights, unpatchify
+from einops import rearrange
+from torch import nn
 
 __all__ = ["Perceiver3DDecoder"]
 
@@ -42,7 +36,7 @@ class Perceiver3DDecoder(nn.Module):
         mlp_ratio: float = 4.0,
         drop_rate: float = 0.0,
         perceiver_ln_eps: float = 1e-5,
-        level_condition: Optional[tuple[int | float, ...]] = None,
+        level_condition: tuple[int | float, ...] | None = None,
         separate_perceiver: tuple[str, ...] = (),
         modulation_heads: tuple[str, ...] = (),
     ) -> None:
@@ -80,8 +74,12 @@ class Perceiver3DDecoder(nn.Module):
 
         # If additional modulation heads are required, simulate them as different variables with
         # the suffix `_mod`.
-        surf_vars += tuple(f"{name}_mod" for name in surf_vars if name in modulation_heads)
-        atmos_vars += tuple(f"{name}_mod" for name in atmos_vars if name in modulation_heads)
+        surf_vars += tuple(
+            f"{name}_mod" for name in surf_vars if name in modulation_heads
+        )
+        atmos_vars += tuple(
+            f"{name}_mod" for name in atmos_vars if name in modulation_heads
+        )
         if modulation_heads:
             separate_perceiver += tuple(f"{name}_mod" for name in separate_perceiver)
 
@@ -118,11 +116,17 @@ class Perceiver3DDecoder(nn.Module):
             )
 
         self.surf_heads = nn.ParameterDict(
-            {name: LinearPatchReconstruction(embed_dim, patch_size**2) for name in surf_vars}
+            {
+                name: LinearPatchReconstruction(embed_dim, patch_size**2)
+                for name in surf_vars
+            }
         )
         if not self.level_condition:
             self.atmos_heads = nn.ParameterDict(
-                {name: LinearPatchReconstruction(embed_dim, patch_size**2) for name in atmos_vars}
+                {
+                    name: LinearPatchReconstruction(embed_dim, patch_size**2)
+                    for name in atmos_vars
+                }
             )
         else:
             self.atmos_heads = nn.ParameterDict(
@@ -161,7 +165,9 @@ class Perceiver3DDecoder(nn.Module):
         x = x.flatten(0, 1)  # (BxL, C', D)
         _msg = f"Batch size mismatch. Found {level_embed.size(0)} and {x.size(0)}."
         assert level_embed.size(0) == x.size(0), _msg
-        assert len(level_embed.shape) == 3, f"Expected 3 dims, found {level_embed.dims()}."
+        assert (
+            len(level_embed.shape) == 3
+        ), f"Expected 3 dims, found {level_embed.dims()}."
         assert x.dim() == 3, f"Expected 3 dims, found {x.dim()}."
 
         x = level_decoder(level_embed, x)  # (BxL, C, D)
@@ -192,8 +198,12 @@ class Perceiver3DDecoder(nn.Module):
 
         # If additional modulation heads are required, simulate them as different variables with
         # the suffix `_mod`.
-        surf_vars += tuple(f"{name}_mod" for name in surf_vars if name in self.modulation_heads)
-        atmos_vars += tuple(f"{name}_mod" for name in atmos_vars if name in self.modulation_heads)
+        surf_vars += tuple(
+            f"{name}_mod" for name in surf_vars if name in self.modulation_heads
+        )
+        atmos_vars += tuple(
+            f"{name}_mod" for name in atmos_vars if name in self.modulation_heads
+        )
 
         # Compress the latent dimension from the U-net skip concatenation.
         B, L, D = x.shape
@@ -214,7 +224,9 @@ class Perceiver3DDecoder(nn.Module):
         )
 
         # Decode surface vars. Run the head for every surface-level variable.
-        x_surf = torch.stack([self.surf_heads[name](x[..., :1, :]) for name in surf_vars], dim=-1)
+        x_surf = torch.stack(
+            [self.surf_heads[name](x[..., :1, :]) for name in surf_vars], dim=-1
+        )
         x_surf = x_surf.reshape(*x_surf.shape[:3], -1)  # (B, L, 1, V_S*p*p)
         surf_preds = unpatchify(x_surf, len(surf_vars), H, W, self.patch_size)
         surf_preds = surf_preds.squeeze(2)  # (B, V_S, H, W)
