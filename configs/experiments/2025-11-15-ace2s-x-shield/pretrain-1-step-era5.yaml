@@ -41,7 +41,7 @@ train_loader:
   dataset:
     strict: false
     concat:
-      # Cut ERA5 around the datas when the parallel streams were merged
+      # Cut around the dates of ERA5 when parallel streams were merged
       # For details see Section 3 of H Hersbach, 2020 (https://rmets.onlinelibrary.wiley.com/doi/10.1002/qj.3803)
       - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
         subset:
