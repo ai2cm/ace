@@ -10,7 +10,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import xarray as xr
-from netCDF4 import Dataset
+from h5netcdf.legacyapi import Dataset
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.utils import (
@@ -224,9 +224,6 @@ class RawDataWriter:
 
         if current_lead_time_size > 0:
             init_times_numeric: np.ndarray = self.dataset.variables[INIT_TIME][:]
-            init_times_numeric = (
-                init_times_numeric.filled()
-            )  # convert masked array to ndarray
             init_times: np.ndarray = cftime.num2date(
                 init_times_numeric,
                 units=self.dataset.variables[INIT_TIME].units,

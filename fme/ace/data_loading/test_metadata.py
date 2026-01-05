@@ -60,7 +60,7 @@ def _save_netcdf(
         data_vars[f"bk_{i}"] = float(i + 1)
 
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
-    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4")
 
 
 @pytest.mark.parametrize("n_ensemble_members", [1, 2])

@@ -21,7 +21,7 @@ from fme.downscaling.test_utils import data_paths_helper
 def test_single_xarray_config_accepts_single_config():
     """Test that _single_xarray_config accepts a single XarrayDataConfig."""
     xarray_config = XarrayDataConfig(
-        data_path="/path/to/data", file_pattern="*.nc", engine="netcdf4"
+        data_path="/path/to/data", file_pattern="*.nc", engine="h5netcdf"
     )
     result = DownscalingOutputConfig._single_xarray_config([xarray_config])
     assert result == [xarray_config]
@@ -30,10 +30,10 @@ def test_single_xarray_config_accepts_single_config():
 def test_single_xarray_config_rejects_multiple_configs():
     """Test that _single_xarray_config rejects multiple configs."""
     config1 = XarrayDataConfig(
-        data_path="/path1", file_pattern="*.nc", engine="netcdf4"
+        data_path="/path1", file_pattern="*.nc", engine="h5netcdf"
     )
     config2 = XarrayDataConfig(
-        data_path="/path2", file_pattern="*.nc", engine="netcdf4"
+        data_path="/path2", file_pattern="*.nc", engine="h5netcdf"
     )
 
     with pytest.raises(NotImplementedError, match="single XarrayDataConfig"):
@@ -84,7 +84,7 @@ def loader_config(tmp_path):
             XarrayDataConfig(
                 data_path=str(test_data_path.coarse),
                 file_pattern="*.nc",
-                engine="netcdf4",
+                engine="h5netcdf",
             )
         ],
         batch_size=2,

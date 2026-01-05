@@ -49,7 +49,7 @@ def create_test_data_on_disk(
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     unlimited_dims = ["time"] if "time" in ds.dims else None
 
-    ds.to_netcdf(filename, unlimited_dims=unlimited_dims, format="NETCDF4_CLASSIC")
+    ds.to_netcdf(filename, unlimited_dims=unlimited_dims, format="NETCDF4")
     return filename
 
 

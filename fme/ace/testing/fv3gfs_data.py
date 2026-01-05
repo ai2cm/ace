@@ -92,7 +92,7 @@ def save_nd_netcdf(
         for name in variable_names:
             for i in range(dim_sizes.n_time):
                 ds[name].isel(time=i).values[:] = time_varying_values[i]
-    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4")
     if return_ds:
         return ds
     return None
@@ -103,7 +103,7 @@ def save_scalar_netcdf(
     variable_names: list[str],
 ):
     ds = get_scalar_dataset(variable_names)
-    ds.to_netcdf(filename, format="NETCDF4_CLASSIC")
+    ds.to_netcdf(filename, format="NETCDF4")
 
 
 @dataclasses.dataclass
@@ -219,7 +219,7 @@ class MonthlyReferenceData:
             months_list.append(xr.DataArray(months, dims=["time"]))
         ds = xr.concat(member_datasets, dim="sample")
         ds.coords["valid_time"] = xr.concat(months_list, dim="sample")
-        ds.to_netcdf(self.data_filename, format="NETCDF4_CLASSIC")
+        ds.to_netcdf(self.data_filename, format="NETCDF4")
         self.start_time = cftime.DatetimeProlepticGregorian(2000, 1, 1)
 
     @property

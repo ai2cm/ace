@@ -52,7 +52,7 @@ class ComponentInitialConditionConfig:
     """
 
     path: str
-    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    engine: Literal["h5netcdf", "zarr"] = "h5netcdf"
 
     def get_dataset(self, start_indices: StartIndices | None = None) -> xr.Dataset:
         ic_config = InitialConditionConfig(

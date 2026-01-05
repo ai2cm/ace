@@ -1,1 +1,1 @@
-earth2grid @ git+https://github.com/NVlabs/earth2grid.git@d2d077d573f42335687c8a61a811ceb215081206
+earth2grid @ git+https://github.com/NVlabs/earth2grid.git@11dcf1b0787a7eb6a8497a3a5a5e1fdcc31232d3

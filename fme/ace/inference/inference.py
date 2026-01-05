@@ -66,7 +66,7 @@ class InitialConditionConfig:
     """
 
     path: str
-    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    engine: Literal["h5netcdf", "zarr"] = "h5netcdf"
     start_indices: StartIndices | None = None
 
     def get_dataset(self) -> xr.Dataset:
@@ -408,5 +408,5 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
             with GlobalTimer():
                 run_inference_from_config(config_copy)
         config_copy.initial_condition = InitialConditionConfig(
-            path=restart_path, engine="netcdf4"
+            path=restart_path, engine="h5netcdf"
         )

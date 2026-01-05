@@ -192,7 +192,7 @@ def _get_data(
         filenames.append(filename)
 
     initial_condition_names = ()
-    start_indices = _get_cumulative_timesteps(_get_raw_times(filenames, "netcdf4"))
+    start_indices = _get_cumulative_timesteps(_get_raw_times(filenames, "h5netcdf"))
     if write_extra_vars:
         variable_names = VariableNames(
             time_dependent_names=(*var_names, "varying_scalar_var"),
@@ -289,7 +289,7 @@ def mock_monthly_zarr_ensemble_dim(
     )
 
 
-def load_files_without_dask(files, engine="netcdf4") -> xr.Dataset:
+def load_files_without_dask(files, engine="h5netcdf") -> xr.Dataset:
     """Load a sequence of files without dask, concatenating along the time dimension.
 
     We load the data from the files into memory to ensure Datasets are properly closed,
@@ -407,7 +407,7 @@ def xarray_dataset_constructor(
 @pytest.mark.parametrize(
     "mock_data_fixture, engine, file_pattern, labels",
     [
-        ("mock_monthly_netcdfs", "netcdf4", "*.nc", set()),
+        ("mock_monthly_netcdfs", "h5netcdf", "*.nc", set()),
         ("mock_monthly_zarr", "zarr", "*.zarr", {"foo_label"}),
     ],
 )
@@ -777,7 +777,7 @@ def test_dataset_config_dtype_raises():
 @pytest.mark.parametrize(
     "mock_data_fixture, engine, file_pattern",
     [
-        ("mock_monthly_netcdfs_with_nans", "netcdf4", "*.nc"),
+        ("mock_monthly_netcdfs_with_nans", "h5netcdf", "*.nc"),
         ("mock_monthly_zarr_with_nans", "zarr", "*.zarr"),
     ],
 )
@@ -1049,7 +1049,7 @@ def test_invalid_config_field_raises_error(kwargs):
 @pytest.mark.parametrize(
     "mock_data_fixture, engine, file_pattern",
     [
-        ("mock_monthly_netcdfs_ensemble_dim", "netcdf4", "*.nc"),
+        ("mock_monthly_netcdfs_ensemble_dim", "h5netcdf", "*.nc"),
         ("mock_monthly_zarr_ensemble_dim", "zarr", "*.zarr"),
     ],
 )
@@ -1074,7 +1074,7 @@ def test_dataset_with_nonspacetime_dim(
 @pytest.mark.parametrize(
     "mock_data_fixture, engine, file_pattern",
     [
-        ("mock_monthly_netcdfs_ensemble_dim", "netcdf4", "*.nc"),
+        ("mock_monthly_netcdfs_ensemble_dim", "h5netcdf", "*.nc"),
         ("mock_monthly_zarr_ensemble_dim", "zarr", "*.zarr"),
     ],
 )
@@ -1098,7 +1098,7 @@ def test_dataset_raise_error_on_dim_mismatch(
 @pytest.mark.parametrize(
     "mock_data_fixture, engine, file_pattern",
     [
-        ("mock_monthly_netcdfs_ensemble_dim", "netcdf4", "*.nc"),
+        ("mock_monthly_netcdfs_ensemble_dim", "h5netcdf", "*.nc"),
         ("mock_monthly_zarr_ensemble_dim", "zarr", "*.zarr"),
     ],
 )
@@ -1191,7 +1191,7 @@ def test_parallel__get_raw_times(tmpdir):
         ds.isel(time=time_slice).to_netcdf(path)
         paths.append(path)
 
-    result = np.concatenate(_get_raw_times(paths, engine="netcdf4"))
+    result = np.concatenate(_get_raw_times(paths, engine="h5netcdf"))
     np.testing.assert_equal(result, times)
 
 

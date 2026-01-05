@@ -7,7 +7,7 @@ import cftime
 import numpy as np
 import torch
 import xarray as xr
-from netCDF4 import Dataset
+from h5netcdf.legacyapi import Dataset
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.utils import (
@@ -269,7 +269,7 @@ class MonthlyDataWriter:
         month_min = np.min(months)
         month_range = np.max(months) - month_min + 1
 
-        old_size = self.dataset.variables[LEAD_TIME_DIM].size
+        old_size = self.dataset.variables[LEAD_TIME_DIM].shape[0]
         new_size = month_min + month_range
 
         self._extend_lead_time(old_size, new_size)
@@ -303,7 +303,7 @@ class MonthlyDataWriter:
 
             # Add the data to the variable totals
             # Have to extract the data and write it back as `.at` does not play nicely
-            # with netCDF4
+            # with h5netcdf
             # We pull just the month subset we need for speed reasons
             self._extend_variable(variable_name, old_size, new_size, initial_value=0.0)
             month_data = self.dataset.variables[variable_name][
@@ -320,7 +320,7 @@ class MonthlyDataWriter:
             ] = month_data
         # counts must be added after data, as we use the base counts when updating means
         for i_sample in range(n_samples_data):
-            self.dataset.variables[COUNTS][i_sample] += np.bincount(
+            self.dataset.variables[COUNTS][i_sample : i_sample + 1] += np.bincount(
                 months[i_sample], minlength=self.dataset.variables[COUNTS].shape[1]
             )
 

@@ -113,7 +113,7 @@ def _save_netcdf(
                     data_vars[name] = data_vars[name].where(mask == 1, float("nan"))
             data_vars[f"idepth_{i}"] = float(i)
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
-    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4")
     return ds
 
 
@@ -451,14 +451,14 @@ def test_zarr_engine_used_true():
     config = CoupledDataLoaderConfig(
         dataset=[
             CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                ocean=XarrayDataConfig(data_path="ocean", engine="h5netcdf"),
                 atmosphere=XarrayDataConfig(
                     data_path="atmos", file_pattern="data.zarr", engine="zarr"
                 ),
             ),
             CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
-                atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+                ocean=XarrayDataConfig(data_path="ocean", engine="h5netcdf"),
+                atmosphere=XarrayDataConfig(data_path="atmos", engine="h5netcdf"),
             ),
         ],
         batch_size=1,
@@ -470,8 +470,8 @@ def test_zarr_engine_used_false():
     config = CoupledDataLoaderConfig(
         dataset=[
             CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
-                atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+                ocean=XarrayDataConfig(data_path="ocean", engine="h5netcdf"),
+                atmosphere=XarrayDataConfig(data_path="atmos", engine="h5netcdf"),
             )
         ],
         batch_size=1,
@@ -482,7 +482,7 @@ def test_zarr_engine_used_false():
 def test_zarr_engine_used_true_inference():
     config = InferenceDataLoaderConfig(
         dataset=CoupledDatasetWithOptionalOceanConfig(
-            ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+            ocean=XarrayDataConfig(data_path="ocean", engine="h5netcdf"),
             atmosphere=XarrayDataConfig(
                 data_path="atmos", file_pattern="data.zarr", engine="zarr"
             ),
@@ -495,8 +495,8 @@ def test_zarr_engine_used_true_inference():
 def test_zarr_engine_used_false_inference():
     config = InferenceDataLoaderConfig(
         dataset=CoupledDatasetWithOptionalOceanConfig(
-            ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
-            atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+            ocean=XarrayDataConfig(data_path="ocean", engine="h5netcdf"),
+            atmosphere=XarrayDataConfig(data_path="atmos", engine="h5netcdf"),
         ),
         start_indices=ExplicitIndices([0]),
     )

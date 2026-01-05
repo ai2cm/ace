@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 import xarray as xr
-from netCDF4 import Dataset
+from h5netcdf.legacyapi import Dataset
 from xarray.coding.times import CFDatetimeCoder
 
 from fme.ace.data_loading.batch_data import PairedData
