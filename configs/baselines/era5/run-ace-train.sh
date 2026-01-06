@@ -5,9 +5,9 @@ set -e
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
-WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
+WANDB_USERNAME=spencerc_ai2
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8
+N_GPUS=4
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -30,11 +30,10 @@ run_training() {
     --task-name "$job_name" \
     --description 'Run ACE2-ERA5 training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority normal \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
-    --cluster ai2/ceres-cirrascale \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -52,4 +51,4 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "ace-train-config.yaml" "ace2-era5-train" "ace2-era5"
+run_training "ace-train-config.yaml" "ace2-era5-train-h5netcdf" "ace2-era5"
