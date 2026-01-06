@@ -2,14 +2,14 @@
 
 set -e
 
-JOB_NAME="ace2-era5-evaluator"
+JOB_NAME="ace2-era5-evaluator-h5netcdf"
 JOB_GROUP="ace2-era5"
 EXISTING_RESULTS_DATASET="01K013CYF8HX12KJK91YJ8MM92"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+BEAKER_USERNAME=spencerc_ai2
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
@@ -21,11 +21,10 @@ cd $REPO_ROOT && gantry run \
     --task-name $JOB_NAME \
     --description 'Run ACE2-ERA5 evaluator' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority normal \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --not-preemptible \
-    --cluster ai2/saturn-cirrascale \
-    --cluster ai2/ceres-cirrascale \
+    --cluster ai2/titan \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
