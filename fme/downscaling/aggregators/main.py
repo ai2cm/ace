@@ -18,7 +18,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicHistograms
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorMapping, TensorDict
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import ComparedDynamicHistogramsAdapter
 from fme.downscaling.data import PairedBatchData
@@ -134,6 +134,59 @@ class Mean:
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
         Get the running average metric logs for wandb.
+        """
+        prefix = ensure_trailing_slash(prefix)
+        return {
+            f"{prefix}{self._name}{k}": v.detach().cpu().numpy()
+            for k, v in self.get().items()
+        }
+    
+
+class Max:
+    """
+    Tracks the maximum value of a metric over multiple batches.
+
+    Args:
+        metric: The metric function to be calculated and compared for the maximum.
+        name: The name to use for the metric in the wandb output.
+    """
+
+    def __init__(
+        self,
+        metric: SingleInputFunc,
+        name: str = "",
+    ) -> None:
+        self._mapped_metric = map_tensor_mapping(metric)
+        self._max: TensorDict | None = None
+        self._dist = Distributed.get_instance()
+        self._name = ensure_trailing_slash(name)
+
+    @torch.no_grad()
+    def record_batch(self, data: TensorMapping) -> None:
+        """
+        Record the metric for the current batch.
+        """
+        metric = self._mapped_metric(data)
+
+        if self._max is None:
+            self._max = {k: torch.full_like(v, float("-inf")) for k, v in metric.items()}
+
+        for k in metric:
+            self._max[k] = torch.maximum(self._max[k], metric[k])
+
+    def get(self) -> TensorMapping:
+        """
+        Calculates and return the current maximum of the metric values.
+        """
+        if self._max is None:
+            raise ValueError("No values have been added to determine the maximum")
+        return {
+            k: self._dist.reduce_max(self._max[k]) for k in sorted(list(self._max))
+        }
+
+    def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
+        """
+        Get the running maximum metric logs for wandb.
         """
         prefix = ensure_trailing_slash(prefix)
         return {

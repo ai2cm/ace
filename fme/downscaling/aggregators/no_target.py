@@ -15,6 +15,7 @@ from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import DynamicHistogramsAdapter
 from fme.downscaling.aggregators.main import (
     Mean,
+    Max,
     ZonalPowerSpectrumAggregator,
     batch_mean,
     ensure_trailing_slash,
@@ -256,6 +257,13 @@ class TimeSeriesAggregator:
                 variable_metadata=self._variable_metadata.get(key),
             )
         return ret
+    
+
+def batch_max(tensor: torch.Tensor, batch_dim=0) -> torch.Tensor:
+    """
+    Calculate the maximum over the batch dimension for each tensor in the mapping.
+    """
+    return torch.amax(tensor, dim=batch_dim)
 
 
 class _MapAggregator:
@@ -266,6 +274,7 @@ class _MapAggregator:
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         self._mean_prediction = Mean(batch_mean, name="prediction")
+        self._max_prediction = Max(batch_max, name="prediction")
         self._mean_coarse = Mean(batch_mean, name="coarse")
         self.gap_width = gap_width
         self._name = ensure_trailing_slash(name)
@@ -298,6 +307,7 @@ class _MapAggregator:
 
         self._mean_prediction.record_batch(prediction)
         self._mean_coarse.record_batch(coarse)
+        self._max_prediction.record_batch(prediction)
 
     def _get_maps(self) -> Mapping[str, Any]:
         coarse = self._mean_coarse.get()
@@ -355,9 +365,12 @@ class _MapAggregator:
         """
         coarse = self._mean_coarse.get()
         prediction = self._mean_prediction.get()
+        max_prediction = self._max_prediction.get()
+
         data = {}
         for key in prediction:
             data[f"{self._name}coarse.{key}"] = coarse[key].cpu().numpy()
             data[f"{self._name}prediction.{key}"] = prediction[key].cpu().numpy()
+            data[f"{self._name}max_prediction.{key}"] = max_prediction[key].cpu().numpy()
         ds = xr.Dataset({k: (("lat", "lon"), v) for k, v in data.items()})
         return ds
