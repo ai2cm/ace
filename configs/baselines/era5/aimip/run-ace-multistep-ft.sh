@@ -56,5 +56,6 @@ launch_job () {
 for ((i = 0; i < ${#PRETRAINED_MODELS[@]}; i++)); do
     JOB_NAME="${JOB_NAME_BASE}-rs${i}"
     PRETRAINED_MODEL="${PRETRAINED_MODELS[$i]}"
-    launch_job "$JOB_NAME" "$PRETRAINED_MODEL"
+    OVERRIDE="seed=${i}"
+    launch_job "$JOB_NAME" "$PRETRAINED_MODEL" "$OVERRIDE"
 done
