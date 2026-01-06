@@ -18,6 +18,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     Topography,
     get_normalized_topography,
+    StaticInputs
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
@@ -126,6 +127,7 @@ class DiffusionModelConfig:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         rename: dict[str, str] | None = None,
+        static_inputs: StaticInputs | None = None,
     ) -> "DiffusionModel":
         invert_rename = {v: k for k, v in (rename or {}).items()}
         orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
@@ -158,6 +160,7 @@ class DiffusionModelConfig:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
+            static_inputs=static_inputs,
         )
 
     def get_state(self) -> Mapping[str, Any]:
@@ -258,6 +261,7 @@ class DiffusionModel:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        static_inputs: StaticInputs | None = None,
     ) -> None:
         """
         Args:
@@ -273,6 +277,8 @@ class DiffusionModel:
                 coarse to fine.
             sigma_data: The standard deviation of the data, used for diffusion
                 model preconditioning.
+            static_inputs: Optional static inputs to the model that may be loaded
+                from saved checkpoint.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
@@ -285,6 +291,7 @@ class DiffusionModel:
         self.out_packer = Packer(config.out_names)
         self.config = config
         self._channel_axis = -3
+        self.static_inputs = static_inputs
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -468,11 +475,17 @@ class DiffusionModel:
         )
 
     def get_state(self) -> Mapping[str, Any]:
+        if self.static_inputs is not None:
+            static_inputs_state = self.static_inputs.to_state()
+        else:
+            static_inputs_state = None
+        
         return {
             "config": self.config.get_state(),
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
+            "static_inputs": static_inputs_state
         }
 
     @classmethod
@@ -484,6 +497,7 @@ class DiffusionModel:
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
+
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model

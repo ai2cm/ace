@@ -25,6 +25,7 @@ from fme.downscaling.data.topography import (
     Topography,
     get_normalized_topography,
     get_topography_downscale_factor,
+    StaticInputs
 )
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
@@ -161,16 +162,25 @@ class DataLoaderConfig:
         )
 
     def build_topography(
-        self, coarse_coords: LatLonCoordinates, requires_topography: bool
+        self, coarse_coords: LatLonCoordinates, requires_topography: bool,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> Topography | None:
         if requires_topography is False:
             return None
-        if self.topography is None:
-            raise ValueError(
-                "Topography is required for this model, but no topography "
-                "dataset was specified in the configuration."
-            )
-        topography = get_normalized_topography(self.topography)
+        if static_inputs_from_checkpoint is not None:
+            # TODO: change to use full static inputs list
+            topography = static_inputs_from_checkpoint[0]
+        else:
+            if self.topography is None:
+                raise ValueError(
+                    "Topography is required for this model, but no topography "
+                    "dataset was specified in the configuration nor provided "
+                    "in model checkpoint."
+                )
+            topography = get_normalized_topography(self.topography)
+
+
+            
         # Fine grid boundaries are adjusted to exactly match the coarse grid
         fine_lat_interval = adjust_fine_coord_range(
             self.lat_extent,
@@ -218,6 +228,7 @@ class DataLoaderConfig:
         self,
         requirements: DataRequirements,
         dist: Distributed | None = None,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
         xr_dataset, properties = self.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
@@ -256,6 +267,7 @@ class DataLoaderConfig:
         subset_topography = self.build_topography(
             coarse_coords=latlon_coords,
             requires_topography=requirements.use_fine_topography,
+            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
         )
         return GriddedData(
             _loader=dataloader,

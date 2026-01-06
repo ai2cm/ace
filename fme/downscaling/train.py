@@ -25,6 +25,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
+    StaticInputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
 
@@ -447,6 +448,7 @@ class TrainerConfig:
         downscaling_model = self.model.build(
             model_coarse_shape,
             train_data.downscale_factor,
+            static_inputs=StaticInputs([train_data.topography]),
         )
 
         optimization = self.optimization.build(
