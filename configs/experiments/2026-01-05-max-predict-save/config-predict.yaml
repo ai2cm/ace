@@ -1,0 +1,32 @@
+experiment_dir: /results
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+data:
+  topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  coarse:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 100km.zarr
+    subset:
+      start_time: "2023-01-01T00:00:00"
+      stop_time: null
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 256.0
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: False
+n_samples: 32
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
