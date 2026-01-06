@@ -467,7 +467,7 @@ def _force_conserve_total_energy(
     n_levels = gen.air_temperature.shape[-1]
     for k in range(n_levels):
         name = f"air_temperature_{k}"
-        gen.data[name] = gen.data[name] + torch.nan_to_num(
+        gen.data[name] = gen.data[name] + 0.1 * torch.nan_to_num(
             temperature_correction, nan=0.0
         )
 

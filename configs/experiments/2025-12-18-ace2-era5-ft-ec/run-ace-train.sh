@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="ace-aimip-train-rs3-1s-b1-lr-zero-ft-ec-debug"
+JOB_NAME="ace-aimip-train-rs3-1s-b1-ft-partial-ec-debug"
 JOB_GROUP="ace21-era5"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
