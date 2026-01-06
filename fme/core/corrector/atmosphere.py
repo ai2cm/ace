@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import datetime
 from collections.abc import Callable, Mapping
@@ -425,6 +426,7 @@ def _force_conserve_total_energy(
 
     This function also inserts the unaccounted heating into the generated data.
     """
+    original_gen_data = copy.deepcopy(gen_data)
     if method != "constant_temperature":
         raise NotImplementedError(
             f"Method {method} not implemented for total energy conservation"
@@ -440,6 +442,9 @@ def _force_conserve_total_energy(
         atmosphere_data[name] = tensor
     gen = AtmosphereData(atmosphere_data, vertical_coordinate)
 
+    for k, v in original_gen_data.items():
+        torch.testing.assert_close(gen.data[k], v, msg=f"Unexpectedly modified {k}")
+
     gen_energy_path = gen.total_energy_ace2_path
     input_energy_path = input.total_energy_ace2_path
     predicted_energy_flux_into_atmosphere = gen.net_energy_flux_into_atmosphere
@@ -450,6 +455,9 @@ def _force_conserve_total_energy(
         predicted_energy_flux_into_atmosphere, keepdim=True
     )
 
+    for k, v in original_gen_data.items():
+        torch.testing.assert_close(gen.data[k], v, msg=f"Unexpectedly modified {k}")
+
     desired_energy_path_global_mean = (
         input_energy_path_global_mean
         + (energy_flux_global_mean + unaccounted_heating) * timestep_seconds
@@ -457,19 +465,30 @@ def _force_conserve_total_energy(
 
     energy_correction = desired_energy_path_global_mean - gen_energy_path_global_mean
     energy_to_temperature_factor = _energy_correction_factor(gen, vertical_coordinate)
+
+    for k, v in original_gen_data.items():
+        torch.testing.assert_close(gen.data[k], v, msg=f"Unexpectedly modified {k}")
+
     # take global mean to impose a spatially uniform temperature correction
     energy_to_temp_factor_gm = area_weighted_mean(energy_to_temperature_factor, True)
     print(f"energy_to_temp_factor_gm is {energy_to_temp_factor_gm}")
     temperature_correction = energy_correction / energy_to_temp_factor_gm
     print(f"temperature_correction is {temperature_correction}")
 
+    for k, v in original_gen_data.items():
+        torch.testing.assert_close(gen.data[k], v, msg=f"Unexpectedly modified {k}")
+
     # apply same temperature correction to all vertical layers
     n_levels = gen.air_temperature.shape[-1]
     for k in range(n_levels):
         name = f"air_temperature_{k}"
-        gen.data[name] = gen.data[name] + 0.0 * torch.nan_to_num(
+        gen.data[name] = gen.data[name] + torch.nan_to_num(
             temperature_correction, nan=0.0
         )
+
+    for k, v in original_gen_data.items():
+        if "air_temperature" not in k:
+            torch.testing.assert_close(gen.data[k], v, msg=f"Unexpectedly modified {k}")
 
     # filter required here because we merged forcing data into gen above
     return {k: v for k, v in gen.data.items() if k in gen_data}
