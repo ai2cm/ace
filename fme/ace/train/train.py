@@ -277,6 +277,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
+    torch.autograd.set_detect_anomaly(True)
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
         data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
