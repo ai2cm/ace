@@ -272,11 +272,11 @@ class TimeSeriesAggregator:
         return ret
 
 
-def batch_max(tensor: torch.Tensor, batch_dim=0) -> torch.Tensor:
+def batch_max(tensor: torch.Tensor, dim=0) -> torch.Tensor:
     """
     Calculate the maximum over the batch dimension for each tensor in the mapping.
     """
-    return torch.amax(tensor, dim=batch_dim)
+    return torch.amax(tensor, dim=dim)
 
 
 class _MapAggregator:
@@ -425,10 +425,10 @@ class _EnsMapAggregator(_MapAggregator):
                 )
             
         ens_mean_prediction = {
-            k: batch_mean(v, batch_dim=self.ensemble_dim) for k, v in prediction.items()
+            k: batch_mean(v, dim=self.ensemble_dim) for k, v in prediction.items()
         }
         ens_max_prediction = {
-            k: batch_max(v, batch_dim=self.ensemble_dim) for k, v in prediction.items()
+            k: batch_max(v, dim=self.ensemble_dim) for k, v in prediction.items()
         }
 
         self._mean_prediction.record_batch(ens_mean_prediction)

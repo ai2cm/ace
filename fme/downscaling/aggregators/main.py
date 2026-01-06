@@ -556,10 +556,7 @@ class SnapshotAggregator:
 
 
 def batch_mean(x: torch.Tensor, dim: int = 0) -> torch.Tensor:
-    assert (
-        len(x.shape) == 3
-    ), f"Expected input (batch, height, width) but got {x.shape}."
-    return x.mean(dim=0)
+    return x.mean(dim=dim)
 
 
 class MeanMapAggregator:
