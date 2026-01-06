@@ -2,7 +2,6 @@ experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 120
-n_forward_steps: 2
 seed: 0
 ema:
   decay: 0.999
@@ -60,8 +59,11 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper:
+  n_ensemble: 2
+  train_n_forward_steps: 1
+  optimize_last_step_only: true
   loss:
-    type: MSE
+    type: EnsembleLoss
     weights:
       air_temperature_0: 0.5
       air_temperature_1: 0.5
@@ -77,6 +79,9 @@ stepper:
       DSWRFsfc: 2
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
   step:
     type: single_module
     config:
@@ -84,7 +89,8 @@ stepper:
         type: NoiseConditionedSFNO
         config:
           embed_dim: 384
-          noise_embed_dim: 0
+          noise_embed_dim: 64
+          noise_type: isotropic
           filter_type: linear
           use_mlp: true
           num_layers: 8

@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-train"
+JOB_NAME_BASE="ace2.1s-aimip-train"
 JOB_GROUP="ace-aimip"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -49,7 +49,7 @@ launch_job () {
 }
 
 # random seed ensemble
-for SEED in 0 1 2 3; do
+for SEED in 0 1; do
     JOB_NAME="${JOB_NAME_BASE}-rs${SEED}"
     OVERRIDE="seed=${SEED}"
     launch_job "$JOB_NAME" "$OVERRIDE"
