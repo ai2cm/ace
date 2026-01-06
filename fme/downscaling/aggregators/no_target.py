@@ -14,8 +14,8 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import DynamicHistogramsAdapter
 from fme.downscaling.aggregators.main import (
-    Mean,
     Max,
+    Mean,
     ZonalPowerSpectrumAggregator,
     batch_mean,
     ensure_trailing_slash,
@@ -257,7 +257,7 @@ class TimeSeriesAggregator:
                 variable_metadata=self._variable_metadata.get(key),
             )
         return ret
-    
+
 
 def batch_max(tensor: torch.Tensor, batch_dim=0) -> torch.Tensor:
     """
@@ -371,6 +371,8 @@ class _MapAggregator:
         for key in prediction:
             data[f"{self._name}coarse.{key}"] = coarse[key].cpu().numpy()
             data[f"{self._name}prediction.{key}"] = prediction[key].cpu().numpy()
-            data[f"{self._name}max_prediction.{key}"] = max_prediction[key].cpu().numpy()
+            data[f"{self._name}max_prediction.{key}"] = (
+                max_prediction[key].cpu().numpy()
+            )
         ds = xr.Dataset({k: (("lat", "lon"), v) for k, v in data.items()})
         return ds

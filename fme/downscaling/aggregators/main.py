@@ -18,7 +18,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicHistograms
-from fme.core.typing_ import TensorMapping, TensorDict
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import ComparedDynamicHistogramsAdapter
 from fme.downscaling.data import PairedBatchData
@@ -140,7 +140,7 @@ class Mean:
             f"{prefix}{self._name}{k}": v.detach().cpu().numpy()
             for k, v in self.get().items()
         }
-    
+
 
 class Max:
     """
@@ -169,7 +169,9 @@ class Max:
         metric = self._mapped_metric(data)
 
         if self._max is None:
-            self._max = {k: torch.full_like(v, float("-inf")) for k, v in metric.items()}
+            self._max = {
+                k: torch.full_like(v, float("-inf")) for k, v in metric.items()
+            }
 
         for k in metric:
             self._max[k] = torch.maximum(self._max[k], metric[k])
@@ -180,9 +182,7 @@ class Max:
         """
         if self._max is None:
             raise ValueError("No values have been added to determine the maximum")
-        return {
-            k: self._dist.reduce_max(self._max[k]) for k in sorted(list(self._max))
-        }
+        return {k: self._dist.reduce_max(self._max[k]) for k in sorted(list(self._max))}
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
