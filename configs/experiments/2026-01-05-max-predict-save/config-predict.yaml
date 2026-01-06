@@ -23,7 +23,7 @@ data:
   batch_size: 4
   num_data_workers: 2
   strict_ensemble: False
-n_samples: 32
+n_samples: 8
 logging:
   log_to_screen: true
   log_to_wandb: true

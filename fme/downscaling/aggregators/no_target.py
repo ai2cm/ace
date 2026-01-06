@@ -60,8 +60,15 @@ class NoTargetAggregator:
                 name="single_sample_time_mean_power_spectrum",
             ),
             _MapAggregator(
-                name="single_sample_time_mean",
+                name="single_sample",
                 variable_metadata=variable_metadata,
+            ),
+        ]
+        self.full_ens_aggregators: list[_AggregatorInterface] = [
+            _EnsMapAggregator(
+                name="full_ensemble",
+                variable_metadata=variable_metadata,
+                ensemble_dim=ensemble_dim,
             ),
         ]
         self.aggregators: list[_AggregatorInterface] = [
@@ -88,6 +95,8 @@ class NoTargetAggregator:
                 prediction=subselect_and_squeeze(prediction, self.ensemble_dim),
                 coarse=subselect_and_squeeze(coarse, self.ensemble_dim),
             )
+        for full_ens_agg in self.full_ens_aggregators:
+            full_ens_agg.record_batch(prediction=prediction, coarse=coarse)
         for agg in self.aggregators:
             agg.record_batch(prediction=prediction, coarse=coarse, time=time)
 
@@ -95,6 +104,8 @@ class NoTargetAggregator:
         ret: dict[str, Any] = {}
         for single_sample_agg in self.single_sample_aggregators:
             ret.update(single_sample_agg.get_wandb(prefix))
+        for full_ens_agg in self.full_ens_aggregators:
+            ret.update(full_ens_agg.get_wandb(prefix))
         for agg in self.aggregators:
             ret.update(agg.get_wandb(prefix))
         return ret
@@ -106,6 +117,8 @@ class NoTargetAggregator:
         ds = xr.Dataset()
         for single_sample_agg in self.single_sample_aggregators:
             ds = ds.merge(single_sample_agg.get_dataset())
+        for full_ens_agg in self.full_ens_aggregators:
+            ds = ds.merge(full_ens_agg.get_dataset())
         for agg in self.aggregators:
             ds = ds.merge(agg.get_dataset())
         if self.latlon_coordinates is not None:
@@ -376,3 +389,48 @@ class _MapAggregator:
             )
         ds = xr.Dataset({k: (("lat", "lon"), v) for k, v in data.items()})
         return ds
+
+class _EnsMapAggregator(_MapAggregator):
+    """
+    Aggregator that calculates mean and max maps over an additional 
+    ensemble dimension.
+    """
+
+    def __init__(
+        self,
+        name: str = "",
+        gap_width: int = 4,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        ensemble_dim: int = 1,
+    ):
+        super().__init__(
+            name=name,
+            gap_width=gap_width,
+            variable_metadata=variable_metadata,
+        )
+        self.ensemble_dim = ensemble_dim
+        self._expected_ndims = 4
+    
+    @torch.no_grad()
+    def record_batch(self, prediction, coarse):
+        coarse = filter_tensor_mapping(coarse, prediction.keys())
+        downscale_factor = self._get_downscale_factor(prediction, coarse)
+        coarse = {k: upsample_tensor(v, downscale_factor) for k, v in coarse.items()}
+        for data in [prediction, coarse]:
+            ndim = get_data_dim(data)
+            if ndim != self._expected_ndims:
+                raise ValueError(
+                    "Data passed to _EnsMapAggregator must be 4D, i.e. with ensemble "
+                    "dimension present."
+                )
+            
+        ens_mean_prediction = {
+            k: batch_mean(v, batch_dim=self.ensemble_dim) for k, v in prediction.items()
+        }
+        ens_max_prediction = {
+            k: batch_max(v, batch_dim=self.ensemble_dim) for k, v in prediction.items()
+        }
+
+        self._mean_prediction.record_batch(ens_mean_prediction)
+        self._mean_coarse.record_batch(coarse)
+        self._max_prediction.record_batch(ens_max_prediction)
