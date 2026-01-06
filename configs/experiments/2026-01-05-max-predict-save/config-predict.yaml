@@ -20,7 +20,7 @@ data:
   lon_extent:
     start: 230.0
     stop: 256.0
-  batch_size: 4
+  batch_size: 16
   num_data_workers: 2
   strict_ensemble: False
 n_samples: 8
