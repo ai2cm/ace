@@ -434,3 +434,6 @@ class _EnsMapAggregator(_MapAggregator):
         self._mean_prediction.record_batch(ens_mean_prediction)
         self._mean_coarse.record_batch(coarse)
         self._max_prediction.record_batch(ens_max_prediction)
+
+    def _get_maps(self) -> Mapping[str, Any]:
+        return {}
