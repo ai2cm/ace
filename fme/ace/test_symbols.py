@@ -76,8 +76,10 @@ def test_inference_config_nested_dataclass_symbols_are_imported():
         MISSING_SYMBOLS.clear()
 
 
-WHITELISTED_SYMBOLS = [
-    "PreBuiltBuilder"  # used only for testing, not in __all__
+WHITELISTED_SYMBOLS = [  # used only for testing, not in __all__
+    "PreBuiltBuilder",
+    "MockModuleBuilder",
+    "MockStepConfig",
 ]
 
 
