@@ -2,14 +2,14 @@
 
 set -e
 
-JOB_NAME="ace-aimip-train-rs3-1s-ft-ec-debug"
+JOB_NAME="ace-aimip-train-rs3-1s-b1-ft-ec-debug"
 JOB_GROUP="ace21-era5"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 WANDB_USERNAME=spencerc_ai2
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
+N_GPUS=1
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 

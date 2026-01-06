@@ -33,8 +33,8 @@ logging:
   project: ace
   entity: ai2cm
 train_loader:
-  batch_size: 16
-  num_data_workers: 16
+  batch_size: 1
+  num_data_workers: 1
   prefetch_factor: 4
   dataset:
     data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
