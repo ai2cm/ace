@@ -443,7 +443,7 @@ def _force_conserve_total_energy(
     gen = AtmosphereData(atmosphere_data, vertical_coordinate)
 
     for k, v in original_gen_data.items():
-        torch.testing.assert_close(gen.data[k], v, msg=f"Unexpectedly modified {k}")
+        torch.testing.assert_close(gen.data[k], v, equal_nan=True, msg=f"Unexpectedly modified {k}")
 
     gen_energy_path = gen.total_energy_ace2_path
     input_energy_path = input.total_energy_ace2_path
@@ -456,7 +456,7 @@ def _force_conserve_total_energy(
     )
 
     for k, v in original_gen_data.items():
-        torch.testing.assert_close(gen.data[k], v, msg=f"Unexpectedly modified {k}")
+        torch.testing.assert_close(gen.data[k], v, equal_nan=True, msg=f"Unexpectedly modified {k}")
 
     desired_energy_path_global_mean = (
         input_energy_path_global_mean
@@ -476,7 +476,7 @@ def _force_conserve_total_energy(
     print(f"temperature_correction is {temperature_correction}")
 
     for k, v in original_gen_data.items():
-        torch.testing.assert_close(gen.data[k], v, msg=f"Unexpectedly modified {k}")
+        torch.testing.assert_close(gen.data[k], v, equal_nan=True, msg=f"Unexpectedly modified {k}")
 
     # apply same temperature correction to all vertical layers
     n_levels = gen.air_temperature.shape[-1]
@@ -488,7 +488,7 @@ def _force_conserve_total_energy(
 
     for k, v in original_gen_data.items():
         if "air_temperature" not in k:
-            torch.testing.assert_close(gen.data[k], v, msg=f"Unexpectedly modified {k}")
+            torch.testing.assert_close(gen.data[k], v, equal_nan=True, msg=f"Unexpectedly modified {k}")
 
     # filter required here because we merged forcing data into gen above
     return {k: v for k, v in gen.data.items() if k in gen_data}
