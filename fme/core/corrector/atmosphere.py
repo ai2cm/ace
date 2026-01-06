@@ -426,7 +426,7 @@ def _force_conserve_total_energy(
 
     This function also inserts the unaccounted heating into the generated data.
     """
-    original_gen_data = copy.deepcopy(gen_data)
+    original_gen_data = {k: copy.deepcopy(v.detach()) for k, v in gen_data.items()}
     if method != "constant_temperature":
         raise NotImplementedError(
             f"Method {method} not implemented for total energy conservation"
