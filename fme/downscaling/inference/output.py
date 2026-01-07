@@ -13,7 +13,7 @@ from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
 from fme.core.writer import ZarrWriter
 
-from ..data import ClosedInterval, DataLoaderConfig, LatLonCoordinates
+from ..data import ClosedInterval, DataLoaderConfig, LatLonCoordinates, StaticInputs
 from ..data.config import XarrayEnsembleDataConfig
 from ..predictors import PatchPredictionConfig
 from ..requirements import DataRequirements
@@ -210,6 +210,7 @@ class DownscalingOutputConfig(ABC):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         dist: Distributed | None = None,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> SliceWorkItemGriddedData:
         xr_dataset, properties = loader_config.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
@@ -220,10 +221,14 @@ class DownscalingOutputConfig(ABC):
                 "Downscaling data loader only supports datasets with latlon coords."
             )
         dataset = loader_config.build_batchitem_dataset(xr_dataset, properties)
-        topography = loader_config.build_topography(
-            coords,
-            requires_topography=requirements.use_fine_topography,
-        )
+        if static_inputs_from_checkpoint is None:
+            topography = loader_config.build_topography(
+                coords,
+                requires_topography=requirements.use_fine_topography,
+            )
+        else:
+            # TODO: update to support full list of static inputs
+            topography = static_inputs_from_checkpoint[0]
         if topography is None:
             raise ValueError("Topography is required for downscaling generation.")
 
@@ -276,6 +281,7 @@ class DownscalingOutputConfig(ABC):
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
         coarse: list[XarrayDataConfig],
+        static_inputs_from_checkpoint: StaticInputs | None = None
     ) -> DownscalingOutput:
         updated_loader_config = self._replace_loader_config(
             time,
@@ -288,6 +294,7 @@ class DownscalingOutputConfig(ABC):
         gridded_data = self._build_gridded_data(
             updated_loader_config,
             requirements,
+            static_inputs_from_checkpoint=static_inputs_from_checkpoint
         )
 
         if self.zarr_chunks is None:
@@ -360,6 +367,7 @@ class EventConfig(DownscalingOutputConfig):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
+        static_inputs_from_checkpoint: StaticInputs | None = None
     ) -> DownscalingOutput:
         # Convert single time to TimeSlice
         time: Slice | TimeSlice
@@ -382,6 +390,7 @@ class EventConfig(DownscalingOutputConfig):
             requirements=requirements,
             patch=patch,
             coarse=coarse,
+            static_inputs_from_checkpoint=static_inputs_from_checkpoint
         )
 
 
@@ -425,6 +434,7 @@ class TimeRangeConfig(DownscalingOutputConfig):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
+        static_inputs_from_checkpoint: StaticInputs | None = None
     ) -> DownscalingOutput:
         coarse = self._single_xarray_config(loader_config.coarse)
         return self._build(
@@ -435,4 +445,5 @@ class TimeRangeConfig(DownscalingOutputConfig):
             requirements=requirements,
             patch=patch,
             coarse=coarse,
+            static_inputs_from_checkpoint=static_inputs_from_checkpoint
         )

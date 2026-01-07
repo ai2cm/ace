@@ -98,6 +98,8 @@ class DiffusionModelConfig:
         churn: The amount of stochasticity during generation.
         num_diffusion_generation_steps: Number of diffusion generation steps
         use_fine_topography: Whether to use fine topography in the model.
+        static_inputs: Optional mapping of variable names to dataset paths
+            for static input variables.
     """
 
     module: DiffusionModuleRegistrySelector
@@ -113,6 +115,7 @@ class DiffusionModelConfig:
     num_diffusion_generation_steps: int
     predict_residual: bool
     use_fine_topography: bool = False
+    static_inputs: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -152,6 +155,7 @@ class DiffusionModelConfig:
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
         )
+
         return DiffusionModel(
             config=self,
             module=module,
@@ -556,6 +560,9 @@ class CheckpointModelConfig:
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["out_names"]
             ]
+            # backwards compatibility for models before static inputs serialization
+            checkpoint_data["model"].setdefault("static_inputs", None)
+
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
             if self.model_updates is not None:
@@ -566,12 +573,17 @@ class CheckpointModelConfig:
     def build(
         self,
     ) -> DiffusionModel:
+        if self._checkpoint["model"]["static_inputs"] is not None:
+            static_inputs=StaticInputs.from_state(self._checkpoint["model"]["static_inputs"])
+        else:
+            static_inputs=None
         model = _CheckpointModelConfigSelector.from_state(
             self._checkpoint["model"]["config"]
         ).build(
             coarse_shape=self._checkpoint["model"]["coarse_shape"],
             downscale_factor=self._checkpoint["model"]["downscale_factor"],
             rename=self._rename,
+            static_inputs=static_inputs,
         )
         model.module.load_state_dict(self._checkpoint["model"]["module"])
         return model
