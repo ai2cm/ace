@@ -1,0 +1,21 @@
+datasets:
+  train: cm4_piControl # these values are keys in datasets.yaml
+  validation: cm4_piControl
+  inference: cm4_piControl
+
+train:
+  subset: # atmos, ocean, and coupled use same subset
+    start_time: '0151-01-03T12:00:00' # earlier times nan
+    stop_time: '0156-01-03T12:00:00'
+
+validation:
+  subset: # atmos, ocean, and coupled use same subset
+    start_time: '0306-01-03T12:00:00'
+    stop_time: '0308-01-01T06:00:00'
+
+inference:
+  atmos:
+    n_forward_steps: 2920
+  times: # atmos, ocean, and coupled use same times
+    - '0151-01-03T12:00:00'
+    - '0171-01-03T12:00:00'
