@@ -236,15 +236,16 @@ class InferenceConfig:
         )
 
     def build(self) -> Downscaler:
+        model = self.model.build()
         outputs = [
             output_cfg.build(
                 loader_config=self.data,
                 requirements=self.model.data_requirements,
                 patch=self.patch,
+                static_inputs_from_checkpoint=model.static_inputs,
             )
             for output_cfg in self.outputs
         ]
-        model = self.model.build()
         return Downscaler(model=model, outputs=outputs, output_dir=self.experiment_dir)
 
 
