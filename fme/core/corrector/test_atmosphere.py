@@ -283,7 +283,7 @@ def test_force_positive():
     torch.testing.assert_close(fixed_data["bar"], data["bar"])
 
 
-def _get_corrector_test_input(tensor_shape):
+def _get_corrector_test_input(tensor_shape, requires_grad=False):
     """Generate test input that has necessary variables for all correctors."""
     # debugging a bit easier with realistic scales for input variables
     # tuples of (name, mean, std) for each variable
@@ -309,21 +309,25 @@ def _get_corrector_test_input(tensor_shape):
     forcing_names = ["HGTsfc", "DSWRFtoa"]
     non_forcing_names = [name for name, _, _ in variables if name not in forcing_names]
     input_data = {
-        name: centering + scale * torch.rand(size=tensor_shape)
+        name: centering
+        + scale * torch.rand(size=tensor_shape, requires_grad=requires_grad)
         for name, centering, scale in variables
     }
     gen_data = {
-        name: centering + scale * torch.rand(size=tensor_shape)
+        name: centering
+        + scale * torch.rand(size=tensor_shape, requires_grad=requires_grad)
         for name, centering, scale in variables
         if name in non_forcing_names
     }
     forcing_data = {
-        name: centering + scale * torch.rand(size=tensor_shape)
+        name: centering
+        + scale * torch.rand(size=tensor_shape, requires_grad=requires_grad)
         for name, centering, scale in variables
         if name in forcing_names
     }
     vertical_coord = HybridSigmaPressureCoordinate(
-        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+        ak=torch.asarray([3.0, 1.0, 0.0], requires_grad=requires_grad),
+        bk=torch.asarray([0.0, 0.6, 1.0], requires_grad=requires_grad),
     )
     return input_data, gen_data, forcing_data, vertical_coord
 
@@ -416,7 +420,8 @@ def test__force_conserve_energy_doesnt_clobber():
     torch.testing.assert_close(corrected_gen_data["PRESsfc"], gen_data["PRESsfc"])
 
 
-def test_corrector_integration():
+@pytest.mark.parametrize("negative_pressure", [True, False])
+def test_corrector_integration(negative_pressure):
     """Ensures that the corrector can be called with all methods active
     but doesn't check results."""
     config = AtmosphereCorrectorConfig(
@@ -427,11 +432,20 @@ def test_corrector_integration():
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
     )
     tensor_shape = (5, 5)
-    test_input = _get_corrector_test_input(tensor_shape)
+    test_input = _get_corrector_test_input(tensor_shape, requires_grad=True)
     input_data, gen_data, forcing_data, vertical_coord = test_input
+    if negative_pressure:
+        input_data["PRESsfc"] = -1 * input_data["PRESsfc"]
     ops = LatLonOperations(
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
     corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
-    corrector(input_data, gen_data, forcing_data)
+    gen_data = corrector(input_data, gen_data, forcing_data)
+
+    # Verify that we can backpropagate through all components of the corrector
+    # with or without negative surface pressure.
+    with torch.autograd.detect_anomaly():
+        # Take the sum to reduce gen_data to a scalar prior to backpropagation
+        # to avoid the need to provide a gradient argument to backward.
+        sum(tensor.sum() for tensor in gen_data.values()).backward()
