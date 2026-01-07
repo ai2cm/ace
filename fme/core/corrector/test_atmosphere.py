@@ -344,8 +344,6 @@ def test__force_conserve_total_energy(negative_pressure: bool):
     if negative_pressure:
         input_data["PRESsfc"] = -1 * input_data["PRESsfc"]
 
-    correction_expected = not negative_pressure
-
     corrected_gen_data = _force_conserve_total_energy(
         input_data=input_data,
         gen_data=gen_data,
@@ -356,17 +354,13 @@ def test__force_conserve_total_energy(negative_pressure: bool):
         unaccounted_heating=extra_heating,
     )
 
-    # ensure only temperature is modified
+    # ensure only temperature is modified and is not -inf, inf, or NaN
     for name in gen_data:
         if "air_temperature" in name:
-            if correction_expected:
-                assert not torch.allclose(
-                    corrected_gen_data[name], gen_data[name], rtol=1e-6
-                )
-            else:
-                assert torch.allclose(
-                    corrected_gen_data[name], gen_data[name], rtol=1e-6
-                )
+            assert not torch.allclose(
+                corrected_gen_data[name], gen_data[name], rtol=1e-6
+            )
+            assert torch.isfinite(corrected_gen_data[name]).all()
         else:
             torch.testing.assert_close(corrected_gen_data[name], gen_data[name])
 
@@ -383,11 +377,9 @@ def test__force_conserve_total_energy(negative_pressure: bool):
         ops.area_weighted_mean(corrected_gen.net_energy_flux_into_atmosphere)
         + extra_heating
     )
-    if correction_expected:
-        expected_gm_mse = (
-            input_gm_mse + predicted_mse_tendency * timestep.total_seconds()
-        )
-        torch.testing.assert_close(corrected_gen_gm_mse, expected_gm_mse)
+
+    expected_gm_mse = input_gm_mse + predicted_mse_tendency * timestep.total_seconds()
+    torch.testing.assert_close(corrected_gen_gm_mse, expected_gm_mse)
 
     # ensure the temperature correction is constant
     corrected_gen_temperature = corrected_gen_data["air_temperature_1"]
