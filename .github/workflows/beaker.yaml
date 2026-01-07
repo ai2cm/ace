@@ -17,6 +17,7 @@ jobs:
     # Only deploy on manual trigger or push to main
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     env:
+      CONFIG_PATH: docs/evaluator-config.yaml
       BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
       BEAKER_WORKSPACE: ai2/ace-ci-tests
       BEAKER_CHECKPOINT_TEST_DATASET: elynn/ci-inference
@@ -31,11 +32,6 @@ jobs:
         run: |
           COMMIT_SHA=$(git rev-parse --short HEAD)
           echo "JOB_NAME=ci-ace-evaluator-${COMMIT_SHA}" >> $GITHUB_ENV
-
-      - name: Set config path
-        run: |
-          cp docs/evaluator-config.yaml /workspace/evaluator-config.yaml
-          echo "CONFIG_PATH=/workspace/evaluator-config.yaml" >> $GITHUB_ENV
 
       - uses: astral-sh/setup-uv@v6
         with:
