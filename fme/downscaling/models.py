@@ -16,9 +16,9 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import (
     BatchData,
     PairedBatchData,
+    StaticInputs,
     Topography,
     get_normalized_topography,
-    StaticInputs
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
@@ -115,7 +115,6 @@ class DiffusionModelConfig:
     num_diffusion_generation_steps: int
     predict_residual: bool
     use_fine_topography: bool = False
-    static_inputs: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -483,13 +482,13 @@ class DiffusionModel:
             static_inputs_state = self.static_inputs.to_state()
         else:
             static_inputs_state = None
-        
+
         return {
             "config": self.config.get_state(),
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
-            "static_inputs": static_inputs_state
+            "static_inputs": static_inputs_state,
         }
 
     @classmethod
@@ -501,7 +500,6 @@ class DiffusionModel:
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
-
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
@@ -574,9 +572,11 @@ class CheckpointModelConfig:
         self,
     ) -> DiffusionModel:
         if self._checkpoint["model"]["static_inputs"] is not None:
-            static_inputs=StaticInputs.from_state(self._checkpoint["model"]["static_inputs"])
+            static_inputs = StaticInputs.from_state(
+                self._checkpoint["model"]["static_inputs"]
+            )
         else:
-            static_inputs=None
+            static_inputs = None
         model = _CheckpointModelConfigSelector.from_state(
             self._checkpoint["model"]["config"]
         ).build(
