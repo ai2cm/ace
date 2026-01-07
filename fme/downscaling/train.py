@@ -25,8 +25,11 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
+    StaticInputs,
+    get_normalized_topography
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
+from fme.core.dataset.xarray import get_raw_paths
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -412,6 +415,7 @@ class TrainerConfig:
     coarse_patch_extent_lat: int | None = None
     coarse_patch_extent_lon: int | None = None
     resume_results_dir: str | None = None
+    
 
     def __post_init__(self):
         if (
@@ -444,9 +448,17 @@ class TrainerConfig:
             )
         else:
             model_coarse_shape = train_data.coarse_shape
+        
+        # load full spatial range of topography to save with model
+        # TODO: this will be replaced in the future with a more general call
+        # to get normalized static inputs from a model config field
+        full_topography = get_normalized_topography(
+            get_raw_paths(self.train_data.fine[0].data_path, self.train_data.fine[0].file_pattern)[0]
+        )
         downscaling_model = self.model.build(
             model_coarse_shape,
             train_data.downscale_factor,
+            static_inputs=StaticInputs([full_topography]),
         )
 
         optimization = self.optimization.build(

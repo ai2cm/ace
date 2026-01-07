@@ -122,3 +122,20 @@ def test_StaticInputs_generate_from_patches():
     # land_frac field values are -1 * topography
     assert torch.equal(generated_patches[0][1].data, expected_topography_patch_0 * -1.0)
     assert torch.equal(generated_patches[1][1].data, expected_topography_patch_1 * -1.0)
+
+
+def test_StaticInputs_serialize():
+    data = torch.arange(16).reshape(4, 4)
+    topography = Topography(
+        data,
+        LatLonCoordinates(torch.arange(4), torch.arange(4)),
+    )
+    land_frac = Topography(
+        data * -1.0,
+        LatLonCoordinates(torch.arange(4), torch.arange(4)),
+    )
+    static_inputs = StaticInputs([topography, land_frac])
+    state = static_inputs.to_state()
+    static_inputs_reconstructed = StaticInputs.from_state(state)
+    assert static_inputs_reconstructed[0].data.equal(static_inputs[0].data)
+    assert static_inputs_reconstructed[1].data.equal(static_inputs[1].data)
