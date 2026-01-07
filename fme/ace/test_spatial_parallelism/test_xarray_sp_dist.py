@@ -10,7 +10,7 @@ from fme.core.dataset.concat import get_dataset
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
-
+from fme.core.dataset.test_xarray import mock_monthly_netcdfs
 
 # TODO: Make this run with a Bash script; I am running this test manually.
 # 1. Get an interactive node in PM.
