@@ -78,7 +78,7 @@ done
 
 # stochastic multistep fine-tuned (but not pressure level output fine-tuned)
 for (( i=0; i<${#STOCHASTIC_SEED_CHECKPOINT_IDS[@]}; i++ )); do
-    JOB_NAME="$JOB_NAME_BASE-RS$i"
+    JOB_NAME="$JOB_NAME_BASE-stochastic-RS$i"
     echo "Launching job for seed $i checkpoint ID: ${STOCHASTIC_SEED_CHECKPOINT_IDS[$i]}"
     launch_job "$JOB_NAME" "${STOCHASTIC_SEED_CHECKPOINT_IDS[$i]}"
 done
