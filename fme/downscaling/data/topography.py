@@ -207,15 +207,18 @@ class StaticInputs:
         return {
             "fields": [field.to_state() for field in self.fields],
         }
-    
+
     @classmethod
     def from_state(cls, state: dict) -> "StaticInputs":
         return cls(
-            fields=[Topography(
-                data=field_state["data"],
-                coords=LatLonCoordinates(
-                    lat=field_state["coords"]["lat"],
-                    lon=field_state["coords"]["lon"],
+            fields=[
+                Topography(
+                    data=field_state["data"],
+                    coords=LatLonCoordinates(
+                        lat=field_state["coords"]["lat"],
+                        lon=field_state["coords"]["lon"],
+                    ),
                 )
-            ) for field_state in state["fields"]]
+                for field_state in state["fields"]
+            ]
         )
