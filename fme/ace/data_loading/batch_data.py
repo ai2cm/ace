@@ -233,16 +233,6 @@ class BatchData:
             **kwargs,
         )
 
-    def _repeat_interleave_batch_dim(self: SelfType, repeats: int) -> SelfType:
-        new_labels: list[set[str]] = np.repeat(self.labels, repeats).tolist()
-        return self.__class__(
-            data=repeat_interleave_batch_dim(self.data, repeats),
-            time=xr.concat([self.time] * repeats, dim="sample"),
-            labels=new_labels,
-            horizontal_dims=self.horizontal_dims,
-            n_ensemble=repeats,
-        )
-
     def __post_init__(self):
         if len(self.time.shape) != 2:
             raise ValueError(
