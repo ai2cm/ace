@@ -42,7 +42,8 @@ jobs:
           uv tool install 'beaker-gantry>=3.1,<4.0'
 
       - name: ACE evaluator beaker job
-        run: gantry run \
+        run: |
+          gantry run \
             --show-logs \
             --name ${{ env.JOB_NAME }} \
             --task-name ${{ env.JOB_NAME }} \
