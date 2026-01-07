@@ -281,7 +281,8 @@ class DiffusionModel:
             sigma_data: The standard deviation of the data, used for diffusion
                 model preconditioning.
             static_inputs: Optional static inputs to the model that may be loaded
-                from saved checkpoint.
+                from saved checkpoint. If these are not provided but are required,
+                they are expected to be provided in the loaded dataset.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
