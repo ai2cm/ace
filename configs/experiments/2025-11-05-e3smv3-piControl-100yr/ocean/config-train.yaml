@@ -123,7 +123,7 @@ stepper:
           - 1
           norm: instance
           upscale_factor: 2
-          checkpoint_simple: true
+          checkpoint_strategy: all
       normalization:
         network:
           global_means_path: FME_STATS_DIR/centering.nc
