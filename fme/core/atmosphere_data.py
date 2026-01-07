@@ -364,10 +364,10 @@ def compute_layer_thickness(
     approximate this using specific total water.
     """
     tv = air_temperature * (1 + (RVGAS / RDGAS - 1.0) * specific_total_water)
-    # Enforce min log(p) = 0 so that geopotential energy calculation is finite.
-    # This is equivalent to setting the TOA pressure to 1 Pa if it is less than that.
-    # The ERA5 data has a TOA pressure of 0.0 Pa which causes issues otherwise.
-    dlogp = torch.clamp(torch.log(pressure_at_interface), min=0.0).diff(dim=-1)
+    # Clamp the minimum pressure to 1 Pa to ensure that log(p) is finite and 
+    # greater than or equal to 0.0. The ERA5 data has a TOA pressure of 0.0 
+    # Pa which causes issues otherwise.
+    dlogp = torch.log(torch.clamp(pressure_at_interface, min=1.0)).diff(dim=-1)
     return dlogp * RDGAS * tv / GRAVITY
 
 
