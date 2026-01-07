@@ -559,6 +559,7 @@ class Trainer:
             f"Starting validation step for model trained for "
             f"{self._epochs_trained} epochs"
         )
+        self.valid_data.set_epoch(self._epochs_trained)
         self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_validation_aggregator()
         logging.info("Starting loop over validation data")

@@ -14,7 +14,7 @@ from fme.core.dataset.time import TimeSlice
 from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
-from .monthly import MonthlyDataWriter, months_for_timesteps
+from .monthly import MonthlyDataWriter
 from .raw import NetCDFWriterConfig, RawDataWriter
 from .time_coarsen import (
     MonthlyCoarsenConfig,
@@ -406,7 +406,6 @@ class FileWriterConfig:
                     path=experiment_dir,
                     label=self.label,
                     n_samples=n_initial_conditions,
-                    n_months=months_for_timesteps(n_timesteps, timestep),
                     save_names=self.names,
                     variable_metadata=variable_metadata,
                     coords=subselect_coords_,

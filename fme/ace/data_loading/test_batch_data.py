@@ -8,8 +8,11 @@ from fme.core.device import get_device
 from fme.core.labels import BatchLabels
 
 
-def assert_metadata_equal(a: BatchData, b: BatchData):
+def assert_metadata_equal(a: BatchData, b: BatchData, check_labels: bool = True):
     assert a.horizontal_dims == b.horizontal_dims
+    assert a.epoch == b.epoch
+    if check_labels:
+        assert a.labels == b.labels
 
 
 def get_batch_data(
@@ -38,6 +41,84 @@ def get_batch_data(
         horizontal_dims=horizontal_dims,
         labels=labels,
     )
+
+
+def test_to_device():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    batch_data = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+    device_data = batch_data.to_device()
+    device = get_device()
+    assert_metadata_equal(device_data, batch_data)
+    for name in names:
+        assert device_data.data[name].device == device
+        np.testing.assert_allclose(
+            device_data.data[name].cpu().numpy(),
+            batch_data.data[name].cpu().numpy(),
+        )
+    if batch_data.labels is not None:
+        assert device_data.labels.tensor.device == device
+        np.testing.assert_allclose(
+            device_data.labels.tensor.cpu().numpy(),
+            batch_data.labels.tensor.cpu().numpy(),
+        )
+
+
+def test_to_cpu():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    batch_data = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+    cpu_data = batch_data.to_cpu()
+    assert_metadata_equal(cpu_data, batch_data)
+    for name in names:
+        assert cpu_data.data[name].device.type == "cpu"
+        np.testing.assert_allclose(
+            cpu_data.data[name].cpu().numpy(),
+            batch_data.data[name].cpu().numpy(),
+        )
+    if batch_data.labels is not None:
+        assert cpu_data.labels.tensor.device.type == "cpu"
+        np.testing.assert_allclose(
+            cpu_data.labels.tensor.cpu().numpy(),
+            batch_data.labels.tensor.cpu().numpy(),
+        )
+
+
+@pytest.mark.parametrize(
+    "epoch_1, epoch_2",
+    [
+        (None, 0),
+        (0, 1),
+    ],
+)
+def test_from_sample_tuples_raises_on_mismatched_epochs(epoch_1: int, epoch_2: int):
+    sample1 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_1)
+    sample2 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_2)
+
+    with pytest.raises(ValueError, match="same epoch"):
+        BatchData.from_sample_tuples([sample1, sample2])
 
 
 @pytest.mark.parametrize(
@@ -292,7 +373,9 @@ def test_broadcast_ensemble(n_ensemble):
             gen_data.data["bar"][i],
         )
 
-    assert_metadata_equal(ensemble_gen_data, gen_data)
+    assert_metadata_equal(
+        ensemble_gen_data, gen_data, check_labels=False
+    )  # labels checked above
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 2, 3])

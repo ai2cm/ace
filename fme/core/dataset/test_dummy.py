@@ -7,13 +7,14 @@ import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.dummy import DummyDataset
+from fme.core.dataset.schedule import IntSchedule
 
 
 def test_dummy_dataset_has_expected_information():
     start_time = cftime.DatetimeGregorian(2000, 1, 1)
     end_time = cftime.DatetimeGregorian(2000, 1, 10)
     timestep = datetime.timedelta(days=1)
-    n_timesteps = 3
+    n_timesteps = IntSchedule.from_constant(3)
     horizontal_coordinates = LatLonCoordinates(
         lat=torch.Tensor(np.arange(12)),
         lon=torch.Tensor(np.arange(6)),

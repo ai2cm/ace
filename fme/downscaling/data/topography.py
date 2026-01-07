@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 
 import torch
 import xarray as xr
@@ -18,6 +18,7 @@ def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
     return slice(indices[0].item(), indices[-1].item() + 1)
 
 
+# TODO: rename to StaticInput, make _apply_patch public
 @dataclasses.dataclass
 class Topography:
     data: torch.Tensor
@@ -137,3 +138,61 @@ def get_topography_downscale_factor(
             f"shape {data_coords_shape}"
         )
     return topography_downscale_factor
+
+
+@dataclasses.dataclass
+class StaticInputs:
+    fields: list[Topography]
+
+    def __post_init__(self):
+        for i, field in enumerate(self.fields[1:]):
+            if field.coords != self.fields[0].coords:
+                raise ValueError(
+                    f"All StaticInput fields must have the same coordinates. "
+                    f"Fields {i} and 0 do not match coordinates."
+                )
+
+    def __getitem__(self, index: int):
+        return self.fields[index]
+
+    @property
+    def input_tensors(self) -> list[torch.Tensor]:
+        if len(self.fields) > 0:
+            return [field.data for field in self.fields]
+        else:
+            return torch.tensor([])
+
+    @property
+    def coords(self) -> LatLonCoordinates:
+        if len(self.fields) == 0:
+            raise ValueError("No fields in StaticInputs to get coordinates from.")
+        return self.fields[0].coords
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        if len(self.fields) == 0:
+            raise ValueError("No fields in StaticInputs to get shape from.")
+        return self.fields[0].shape
+
+    def subset_latlon(
+        self,
+        lat_interval: ClosedInterval,
+        lon_interval: ClosedInterval,
+    ) -> "StaticInputs":
+        return StaticInputs(
+            fields=[
+                field.subset_latlon(lat_interval, lon_interval) for field in self.fields
+            ]
+        )
+
+    def to_device(self) -> "StaticInputs":
+        return StaticInputs(fields=[field.to_device() for field in self.fields])
+
+    def generate_from_patches(
+        self,
+        patches: list[Patch],
+    ) -> Iterator["StaticInputs"]:
+        for patch in patches:
+            yield StaticInputs(
+                fields=[field._apply_patch(patch) for field in self.fields]
+            )

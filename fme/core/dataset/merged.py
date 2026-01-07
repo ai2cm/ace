@@ -7,6 +7,7 @@ from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import accumulate_labels
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
@@ -45,22 +46,30 @@ class MergedXarrayDataset(DatasetABC):
     def __getitem__(self, idx: int) -> DatasetItem:
         tensors: TensorDict = {}
         labels = None
+        epochs = []
         for dataset in self.datasets:
-            ds_tensors, time, ds_labels = dataset[idx]
+            ds_tensors, time, ds_labels, ds_epoch = dataset[idx]
             if labels is None:
                 labels = ds_labels
             else:
                 if ds_labels is not None:
                     labels = labels.union(ds_labels)
             tensors.update(ds_tensors)
-        return tensors, time, labels
+            epochs.append(ds_epoch)
+        if not all(epoch == epochs[0] for epoch in epochs):
+            raise ValueError(
+                "All datasets in a merged dataset must have the same epoch."
+            )
+        return tensors, time, labels, epochs[0]
 
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         tensors: TensorDict = {}
         for dataset in self.datasets:
-            ds_tensors, time, labels = dataset.get_sample_by_time_slice(time_slice)
+            ds_tensors, time, labels, epoch = dataset.get_sample_by_time_slice(
+                time_slice
+            )
             tensors.update(ds_tensors)
-        return tensors, time, labels
+        return tensors, time, labels, epoch
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
@@ -134,7 +143,7 @@ class MergeDatasetConfig(DatasetConfigABC):
     def build(
         self,
         names: Sequence[str],
-        n_timesteps: int,
+        n_timesteps: IntSchedule,
     ):
         return get_merged_datasets(
             self,
@@ -184,7 +193,7 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
     def build(
         self,
         names: Sequence[str],
-        n_timesteps: int,
+        n_timesteps: IntSchedule,
     ) -> tuple[MergedXarrayDataset, DatasetProperties]:
         return get_merged_datasets(
             MergeDatasetConfig(merge=self.merge),
@@ -203,7 +212,7 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
 def get_merged_datasets(
     merged_config: MergeDatasetConfig | MergeNoConcatDatasetConfig,
     names: Sequence[str],
-    n_timesteps: int,
+    n_timesteps: IntSchedule,
 ) -> tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
     merged_properties: DatasetProperties | None = None

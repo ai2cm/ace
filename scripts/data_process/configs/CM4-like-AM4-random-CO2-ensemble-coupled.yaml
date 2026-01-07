@@ -1,0 +1,104 @@
+version: "2025-12-04"
+family_name: CM4-like-AM4-random-CO2-coupled
+output_directory: /climate-default
+
+coupled_datasets:
+  coupled_sea_ice:
+    window_avg:
+      window_timedelta: 120h
+      first_timestamp: "0152-10-06T00:00:00"
+      shift_timestamps_to_avg_interval_midpoint: true
+    include_ts: true
+  output_writer:
+    n_dask_workers: 32
+
+stats:
+  start_date: "0153-01-01T06:00:00"
+
+input_datasets:
+  runs:
+    random-CO2-1xCO2-ic_0001:
+      atmosphere:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0001.zarr
+        time_chunk_size: 500
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      sea_ice:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-ensemble-sea-ice/random-CO2-1xCO2-ic_0001.zarr
+        time_chunk_size: 500
+    random-CO2-2xCO2-ic_0001:
+      atmosphere:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0001.zarr
+        time_chunk_size: 500
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      sea_ice:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-ensemble-sea-ice/random-CO2-2xCO2-ic_0001.zarr
+        time_chunk_size: 500
+    random-CO2-4xCO2-ic_0001:
+      atmosphere:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0001.zarr
+        time_chunk_size: 500
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      sea_ice:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-ensemble-sea-ice/random-CO2-4xCO2-ic_0001.zarr
+        time_chunk_size: 500
+    random-CO2-1xCO2-ic_0002:
+      atmosphere:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0002.zarr
+        time_chunk_size: 500
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      sea_ice:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-ensemble-sea-ice/random-CO2-1xCO2-ic_0002.zarr
+        time_chunk_size: 500
+    random-CO2-2xCO2-ic_0002:
+      atmosphere:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0002.zarr
+        time_chunk_size: 500
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      sea_ice:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-ensemble-sea-ice/random-CO2-2xCO2-ic_0002.zarr
+        time_chunk_size: 500
+    random-CO2-4xCO2-ic_0002:
+      atmosphere:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0002.zarr
+        time_chunk_size: 500
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      sea_ice:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-ensemble-sea-ice/random-CO2-4xCO2-ic_0002.zarr
+        time_chunk_size: 500
+    random-CO2-1xCO2-ic_0003:
+      atmosphere:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0003.zarr
+        time_chunk_size: 500
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      sea_ice:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-ensemble-sea-ice/random-CO2-1xCO2-ic_0003.zarr
+        time_chunk_size: 500
+    random-CO2-2xCO2-ic_0003:
+      atmosphere:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0003.zarr
+        time_chunk_size: 500
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      sea_ice:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-ensemble-sea-ice/random-CO2-2xCO2-ic_0003.zarr
+        time_chunk_size: 500
+    random-CO2-4xCO2-ic_0003:
+      atmosphere:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0003.zarr
+        time_chunk_size: 500
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      sea_ice:
+        zarr_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-ensemble-sea-ice/random-CO2-4xCO2-ic_0003.zarr
+        time_chunk_size: 500
+  climate_data_type: "CM4"
+  stats:
+    atmosphere_dir: /climate-default/2025-12-02-CM4-like-AM4-random-CO2-stats/combined
+

@@ -7,7 +7,7 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.generics.dataset import GenericDataset
 from fme.core.typing_ import TensorDict
 
-DatasetItem = tuple[TensorDict, xr.DataArray, set[str] | None]
+DatasetItem = tuple[TensorDict, xr.DataArray, set[str] | None, int | None]
 
 
 class DatasetABC(GenericDataset[DatasetItem], abc.ABC):

@@ -1,6 +1,7 @@
 """Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
+import math
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Literal, Self, cast
 
@@ -13,6 +14,7 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.generics.data import SizedMap
@@ -185,8 +187,8 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, key) -> tuple[TensorMapping, xr.DataArray, set[str] | None]:
-        batch, times, _ = self.dataset[key]
+    def __getitem__(self, key) -> DatasetItem:
+        batch, times, _, epoch = self.dataset[key]
         batch = {
             k: v[
                 ...,
@@ -195,7 +197,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             ]
             for k, v in batch.items()
         }
-        return batch, times, self._properties.all_labels
+        return batch, times, self._properties.all_labels, epoch
 
 
 class BatchItemDatasetAdapter(torch.utils.data.Dataset):
@@ -217,7 +219,7 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         return len(self._dataset)
 
     def __getitem__(self, idx) -> BatchItem:
-        fields, time, _ = self._dataset[idx]
+        fields, time, _, epoch = self._dataset[idx]
         fields = {k: v.squeeze() for k, v in fields.items()}
         field_example = next(iter(fields.values()))
 
@@ -637,17 +639,35 @@ class ContiguousDistributedSampler(DistributedSampler):
     in time, for example generating new datasets for downstream training.
     """
 
-    def __init__(
-        self,
-        dataset,
-        num_replicas=None,
-        rank=None,
-    ):
-        super().__init__(dataset, num_replicas=num_replicas, rank=rank, shuffle=False)
+    def __init__(self, dataset, num_replicas=None, rank=None, drop_last: bool = False):
+        super().__init__(
+            dataset,
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=False,
+            drop_last=drop_last,
+        )
+
+        # If the dataset length is evenly divisible by # of replicas, then there
+        # is no need to drop any data, since the dataset will be split equally.
+        if self.drop_last and len(self.dataset) % self.num_replicas != 0:  # type: ignore[arg-type]
+            # Split to nearest available length that is evenly divisible.
+            # This is to ensure each rank receives the same amount of data when
+            # using this Sampler.
+            self.num_samples = math.ceil(
+                (len(self.dataset) - self.num_replicas) / self.num_replicas  # type: ignore[arg-type]
+            )
+        else:
+            self.num_samples = math.ceil(len(self.dataset) / self.num_replicas)  # type: ignore[arg-type]
+        self.total_size = self.num_samples * self.num_replicas
 
     def __iter__(self):
         # Deterministically split data into contiguous chunks
         indices = list(range(len(self.dataset)))
+
+        if self.drop_last:
+            # remove tail of data to make it evenly divisible.
+            indices = indices[: self.total_size]
 
         # Subsample contiguous chunk for this rank
         total_size = len(indices)

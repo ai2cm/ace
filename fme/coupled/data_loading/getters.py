@@ -72,10 +72,10 @@ def get_dataset(
     ocean: torch.utils.data.Dataset
     atmosphere: torch.utils.data.Dataset
     ocean, ocean_properties = config.ocean.build(
-        ocean_reqs.names, ocean_reqs.n_timesteps
+        ocean_reqs.names, ocean_reqs.n_timesteps_schedule
     )
     atmosphere, atmosphere_properties = config.atmosphere.build(
-        atmosphere_reqs.names, atmosphere_reqs.n_timesteps
+        atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
     )
     properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
     dataset = CoupledDataset(
@@ -299,7 +299,7 @@ def get_forcing_data(
             available_times = XarrayDataset(
                 config.ocean.dataset,
                 window_requirements.ocean_requirements.names,
-                window_requirements.ocean_requirements.n_timesteps,
+                window_requirements.ocean_requirements.n_timesteps_schedule,
             ).all_times
         elif isinstance(config.ocean.dataset, MergeNoConcatDatasetConfig):
             # Some forcing variables may not be in the first dataset,
@@ -308,7 +308,7 @@ def get_forcing_data(
                 available_times = XarrayDataset(
                     config.ocean.dataset.merge[0],
                     names=[],
-                    n_timesteps=window_requirements.ocean_requirements.n_timesteps,
+                    n_timesteps=window_requirements.ocean_requirements.n_timesteps_schedule,
                 ).all_times
             else:
                 raise ValueError("Forcing data cannot be concatenated.")
