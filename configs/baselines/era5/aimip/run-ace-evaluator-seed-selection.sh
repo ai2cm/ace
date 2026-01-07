@@ -9,6 +9,9 @@ SEED_CHECKPOINT_IDS=("01K9B1MR70QWN90KNY7NM22K5M" \
   "01K9B1MVP3VS3NEABHT0W151AX" \
   "01K9B1MXD6V26S8BQH5CKY514C" \
   )
+STOCHASTIC_SEED_CHECKPOINT_IDS=("01KEA574WWRSDGYGKYDPYJA1B6" \
+  "01KEBMDTKJMCCXPJZC7V46CX9M" \
+  )
 FINE_TUNED_SEED_CHECKPOINT_IDS=("01KA2F5J9768HR54369MKEHYB4"\
   "01KADMD5RAEANTP3M6GWZTXNXA" \
   "01KAC0B5ZC96GVJV46HNK9QZ9X" \
@@ -71,6 +74,13 @@ for (( i=0; i<${#SEED_CHECKPOINT_IDS[@]}; i++ )); do
     JOB_NAME="$JOB_NAME_BASE-RS$i"
     echo "Launching job for seed $i checkpoint ID: ${SEED_CHECKPOINT_IDS[$i]}"
     launch_job "$JOB_NAME" "${SEED_CHECKPOINT_IDS[$i]}"
+done
+
+# stochastic multistep fine-tuned (but not pressure level output fine-tuned)
+for (( i=0; i<${#STOCHASTIC_SEED_CHECKPOINT_IDS[@]}; i++ )); do
+    JOB_NAME="$JOB_NAME_BASE-RS$i"
+    echo "Launching job for seed $i checkpoint ID: ${STOCHASTIC_SEED_CHECKPOINT_IDS[$i]}"
+    launch_job "$JOB_NAME" "${STOCHASTIC_SEED_CHECKPOINT_IDS[$i]}"
 done
 
 # fine-tuned
