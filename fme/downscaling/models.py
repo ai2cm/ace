@@ -98,8 +98,6 @@ class DiffusionModelConfig:
         churn: The amount of stochasticity during generation.
         num_diffusion_generation_steps: Number of diffusion generation steps
         use_fine_topography: Whether to use fine topography in the model.
-        static_inputs: Optional mapping of variable names to dataset paths
-            for static input variables.
     """
 
     module: DiffusionModuleRegistrySelector
