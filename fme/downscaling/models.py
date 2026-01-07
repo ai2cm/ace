@@ -98,8 +98,6 @@ class DiffusionModelConfig:
         churn: The amount of stochasticity during generation.
         num_diffusion_generation_steps: Number of diffusion generation steps
         use_fine_topography: Whether to use fine topography in the model.
-        static_inputs: Optional mapping of variable names to dataset paths
-            for static input variables.
     """
 
     module: DiffusionModuleRegistrySelector
@@ -115,7 +113,6 @@ class DiffusionModelConfig:
     num_diffusion_generation_steps: int
     predict_residual: bool
     use_fine_topography: bool = False
-    static_inputs: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -282,7 +279,8 @@ class DiffusionModel:
             sigma_data: The standard deviation of the data, used for diffusion
                 model preconditioning.
             static_inputs: Optional static inputs to the model that may be loaded
-                from saved checkpoint.
+                from saved checkpoint. If required by the model but not passed at
+                init, they are expected to be provided in the loaded dataset.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
