@@ -436,7 +436,7 @@ def test_corrector_integration():
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
     )
     tensor_shape = (5, 5)
-    test_input = _get_corrector_test_input(tensor_shape, requires_grad=True)
+    test_input = _get_corrector_test_input(tensor_shape)
     input_data, gen_data, forcing_data, vertical_coord = test_input
     ops = LatLonOperations(
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
