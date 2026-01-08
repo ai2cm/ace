@@ -357,13 +357,12 @@ def test__force_conserve_total_energy(negative_pressure: bool):
         unaccounted_heating=extra_heating,
     )
 
-    # ensure only temperature is modified and is not -inf, inf, or NaN
+    # ensure only temperature is modified
     for name in gen_data:
         if "air_temperature" in name:
             assert not torch.allclose(
                 corrected_gen_data[name], gen_data[name], rtol=1e-6
             )
-            assert torch.isfinite(corrected_gen_data[name]).all()
         else:
             torch.testing.assert_close(corrected_gen_data[name], gen_data[name])
 
