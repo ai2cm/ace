@@ -110,6 +110,7 @@ class Trainer:
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
         self.config = config
+        self.random_offset = config.random_offset
         self.patch_data = (
             True
             if (config.coarse_patch_extent_lat and config.coarse_patch_extent_lon)
@@ -182,7 +183,7 @@ class Trainer:
         batch: PairedBatchData
         wandb = WandB.get_instance()
         train_batch_generator = self._get_batch_generator(
-            self.train_data, random_offset=False, shuffle=True
+            self.train_data, random_offset=self.random_offset, shuffle=True
         )
         outputs = None
         for i, (batch, topography) in enumerate(train_batch_generator):
@@ -415,6 +416,7 @@ class TrainerConfig:
     coarse_patch_extent_lat: int | None = None
     coarse_patch_extent_lon: int | None = None
     resume_results_dir: str | None = None
+    random_offset: bool = True
 
     def __post_init__(self):
         if (

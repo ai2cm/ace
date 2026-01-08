@@ -91,6 +91,7 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
+random_offset: false
 max_epochs: 1500
 validate_interval: 25
 experiment_dir: /results
