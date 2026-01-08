@@ -43,6 +43,7 @@ from fme.ace.registry.land_net import LandNetBuilder
 from fme.ace.registry.m2lines import FloeNetBuilder, SamudraBuilder
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
+from fme.ace.step import FCN3StepConfig
 from fme.ace.stepper import DerivedForcingsConfig, StepperOverrideConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.parameter_init import (
@@ -86,7 +87,6 @@ from fme.core.step import (
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
 
-from .step import FCN3Config, FCN3Selector, FCN3StepConfig
 from .train.train import run_train
 from .train.train_config import (
     CopyWeightsConfig,
