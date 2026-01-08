@@ -182,7 +182,7 @@ class Trainer:
         batch: PairedBatchData
         wandb = WandB.get_instance()
         train_batch_generator = self._get_batch_generator(
-            self.train_data, random_offset=True, shuffle=True
+            self.train_data, random_offset=False, shuffle=True
         )
         outputs = None
         for i, (batch, topography) in enumerate(train_batch_generator):
