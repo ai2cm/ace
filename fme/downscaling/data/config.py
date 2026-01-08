@@ -230,6 +230,12 @@ class DataLoaderConfig:
         dist: Distributed | None = None,
         static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
+        # TODO: static_inputs_from_checkpoint is currently passed from the model
+        # to allow loading fine topography when no fine data is available.
+        # See PR https://github.com/ai2cm/ace/pull/728
+        # In the future we could disentangle this dependency between the data loader
+        # and model by enabling the built GriddedData objects to take in full static
+        # input fields and subset them to the same coordinate range as data.
         xr_dataset, properties = self.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
         )
@@ -372,6 +378,13 @@ class PairedDataLoaderConfig:
         dist: Distributed | None = None,
         static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> PairedGriddedData:
+        # TODO: static_inputs_from_checkpoint is currently passed from the model
+        # to allow loading fine topography when no fine data is available.
+        # See PR https://github.com/ai2cm/ace/pull/728
+        # In the future we could disentangle this dependency between the data loader
+        # and model by enabling the built GriddedData objects to take in full static
+        # input fields and subset them to the same coordinate range as data.
+
         if dist is None:
             dist = Distributed.get_instance()
 
