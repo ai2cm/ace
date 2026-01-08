@@ -340,9 +340,8 @@ def test__force_conserve_total_energy(negative_pressure: bool):
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
-    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
-        tensor_shape
-    )
+    test_input = _get_corrector_test_input(tensor_shape, requires_grad=True)
+    input_data, gen_data, forcing_data, vertical_coord = test_input
     extra_heating = 10.0
 
     if negative_pressure:
@@ -395,6 +394,13 @@ def test__force_conserve_total_energy(negative_pressure: bool):
     )
     torch.testing.assert_close(temperature_correction_0, temperature_1_correction)
 
+    # ensure we can backpropagate through the result without anomalies
+    with torch.autograd.detect_anomaly():
+        # Take the sum to reduce corrected_gen_data to a scalar prior to
+        # backpropagation to avoid the need to provide a gradient argument
+        # to backward.
+        sum(tensor.sum() for tensor in corrected_gen_data.values()).backward()
+
 
 def test__force_conserve_energy_doesnt_clobber():
     tensor_shape = (5, 5)
@@ -420,8 +426,7 @@ def test__force_conserve_energy_doesnt_clobber():
     torch.testing.assert_close(corrected_gen_data["PRESsfc"], gen_data["PRESsfc"])
 
 
-@pytest.mark.parametrize("negative_pressure", [True, False])
-def test_corrector_integration(negative_pressure):
+def test_corrector_integration():
     """Ensures that the corrector can be called with all methods active
     but doesn't check results."""
     config = AtmosphereCorrectorConfig(
@@ -434,18 +439,9 @@ def test_corrector_integration(negative_pressure):
     tensor_shape = (5, 5)
     test_input = _get_corrector_test_input(tensor_shape, requires_grad=True)
     input_data, gen_data, forcing_data, vertical_coord = test_input
-    if negative_pressure:
-        input_data["PRESsfc"] = -1 * input_data["PRESsfc"]
     ops = LatLonOperations(
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
     corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
-    gen_data = corrector(input_data, gen_data, forcing_data)
-
-    # Verify that we can backpropagate through all components of the corrector
-    # with or without negative surface pressure.
-    with torch.autograd.detect_anomaly():
-        # Take the sum to reduce gen_data to a scalar prior to backpropagation
-        # to avoid the need to provide a gradient argument to backward.
-        sum(tensor.sum() for tensor in gen_data.values()).backward()
+    corrector(input_data, gen_data, forcing_data)
