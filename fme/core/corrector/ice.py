@@ -204,12 +204,12 @@ class IceCorrectorConfig:
     described in the ``budget_correction`` attribute.
 
     Parameters:
-        budget_correction: If True, force the generated data to conserve sea ice
+        budget_correction: If specified, force the generated data to conserve sea ice
             and/or snow-on-sea-ice mass and area by replacing the predicted
             sea ice concentration, sea ice mass, and/or snow mass with the
             integral of individual budget terms added to the initial state.
     """
-    
+
     # Correctors here. Can add more as needed
     budget_correction: IceBudgetCorrectionConfig | None = None
 
