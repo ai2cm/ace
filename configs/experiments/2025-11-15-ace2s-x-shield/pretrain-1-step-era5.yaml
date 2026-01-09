@@ -43,6 +43,8 @@ train_loader:
     concat:
       # Cut around the dates of ERA5 when parallel streams were merged
       # For details see Section 3 of H Hersbach, 2020 (https://rmets.onlinelibrary.wiley.com/doi/10.1002/qj.3803)
+      # Also see https://github.com/ai2cm/explore2/blob/main/jeremym/era5/plot_skipped_years.py for further analysis
+      # on the effect the the merging of parallel data streams in ERA5.
       - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
         subset:
           start_time: '1979-01-01T00:00:00'
