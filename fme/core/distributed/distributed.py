@@ -2,7 +2,8 @@ import contextlib
 import logging
 from collections.abc import Iterator
 
-import torch.distributed
+import torch
+import torch.multiprocessing as mp
 
 from .base import DistributedBackend
 from .non_distributed import NonDistributed
@@ -27,6 +28,7 @@ class Distributed:
     """
 
     def __init__(self, force_non_distributed: bool = False):
+        mp.set_start_method("spawn", force=True)
         if TorchDistributed.is_available() and not force_non_distributed:
             self._distributed: DistributedBackend = TorchDistributed()
         else:
