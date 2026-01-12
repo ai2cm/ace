@@ -283,6 +283,16 @@ def _get_test_yaml_files(
     else:
         train_n_forward_steps = n_forward_steps
 
+    if crps_training:
+        loss = StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        )
+        n_ensemble: int = 2
+    else:
+        loss = StepLossConfig(type="MSE")
+        n_ensemble = 1
+
     train_config = TrainConfig(
         train_loader=DataLoaderConfig(
             dataset=ConcatDatasetConfig(
@@ -324,15 +334,14 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=StepLossConfig(type="MSE"),
-            crps_training=crps_training,
+            loss=loss,
+            n_ensemble=n_ensemble,
             train_n_forward_steps=train_n_forward_steps,
             derived_forcings=derived_forcings,
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
                     SingleModuleStepConfig(
-                        crps_training=crps_training,
                         in_names=in_variable_names,
                         out_names=out_variable_names,
                         normalization=NetworkAndLossNormalizationConfig(

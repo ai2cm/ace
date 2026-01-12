@@ -15,7 +15,7 @@ from fme.core.generics.writer import WriterABC
 
 from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
-from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
+from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
@@ -372,7 +372,6 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                     path=path,
                     label="monthly_mean_predictions",
                     n_samples=n_initial_conditions,
-                    n_months=months_for_timesteps(n_timesteps, timestep),
                     save_names=save_names,
                     variable_metadata=variable_metadata,
                     coords=coords,
