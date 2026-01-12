@@ -113,6 +113,7 @@ class Trainer:
             if (config.coarse_patch_extent_lat and config.coarse_patch_extent_lon)
             else False
         )
+        self.max_patches = config.max_patches
 
         self.startEpoch = 0
         self.segment_epochs = self.config.segment_epochs
@@ -154,7 +155,11 @@ class Trainer:
         )
 
     def _get_batch_generator(
-        self, data: PairedGriddedData, random_offset: bool, shuffle: bool
+        self,
+        data: PairedGriddedData,
+        random_offset: bool,
+        shuffle: bool,
+        max_patches: int | None = None,
     ):
         if self.patch_data:
             batch_generator = data.get_patched_generator(
@@ -163,6 +168,7 @@ class Trainer:
                 drop_partial_patches=True,
                 random_offset=random_offset,
                 shuffle=shuffle,
+                max_patches=max_patches,
             )
         else:
             batch_generator = data.get_generator()
@@ -180,7 +186,10 @@ class Trainer:
         batch: PairedBatchData
         wandb = WandB.get_instance()
         train_batch_generator = self._get_batch_generator(
-            self.train_data, random_offset=True, shuffle=True
+            self.train_data,
+            random_offset=True,
+            shuffle=True,
+            max_patches=self.max_patches,
         )
         outputs = None
         for i, (batch, static_inputs) in enumerate(train_batch_generator):
@@ -257,7 +266,10 @@ class Trainer:
             )
             batch: PairedBatchData
             validation_batch_generator = self._get_batch_generator(
-                self.validation_data, random_offset=False, shuffle=False
+                self.validation_data,
+                random_offset=False,
+                shuffle=False,
+                max_patches=self.max_patches,
             )
             for batch, static_inputs in validation_batch_generator:
                 outputs = self.model.train_on_batch(
@@ -414,6 +426,8 @@ class TrainerConfig:
     coarse_patch_extent_lat: int | None = None
     coarse_patch_extent_lon: int | None = None
     resume_results_dir: str | None = None
+    random_offset: bool = True
+    max_patches: int | None = None
 
     def __post_init__(self):
         if (
