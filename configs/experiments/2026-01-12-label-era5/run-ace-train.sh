@@ -51,5 +51,6 @@ run_training() {
 
 # run_training "train-era5-infill-1step.yaml" "train-era5-infill-1step"
 # run_training "train-combined-infill-1step.yaml" "train-combined-infill-1step"
-run_training "train-combined-infill-1step-makani.yaml" "train-combined-infill-1step-makani"
-run_training "train-combined-infill-1step-makani-g64.yaml" "train-combined-infill-1step-makani-g64"
+# run_training "train-combined-infill-1step-makani.yaml" "train-combined-infill-1step-makani"
+# run_training "train-combined-infill-1step-makani-g64.yaml" "train-combined-infill-1step-makani-g64"
+run_training "train-combined-infill-1step-amp.yaml" "train-combined-infill-1step-amp"
