@@ -132,7 +132,8 @@ stepper:
           embed_dim: 512
           noise_embed_dim: 64
           noise_type: isotropic
-          filter_type: linear
+          filter_type: makani-linear
+          filter_num_groups: 1
           use_mlp: true
           num_layers: 8
           operator_type: dhconv
