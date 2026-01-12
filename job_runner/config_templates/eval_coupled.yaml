@@ -1,0 +1,40 @@
+experiment_dir: /results
+n_coupled_steps: <N_COUPLED_STEPS>
+coupled_steps_in_memory: <COUPLED_STEPS_IN_MEMORY>
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: <OCEAN_WRITER_NAMES>
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: <ATMOSPHERE_WRITER_NAMES>
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: <WANDB_PROJECT>
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: <COUPLED_OCEAN_ZARR>
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: <OCEAN_ZARR>
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: <COUPLED_ATMOS_ZARR>
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: <ATMOS_ZARR>
+          engine: zarr
+  start_indices:
+    times: <INFERENCE_TIMES>
