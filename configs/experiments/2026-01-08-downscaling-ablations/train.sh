@@ -4,8 +4,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-8x8_patch"
-CONFIG_FILENAME="train_8x8_patch.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-no_patch_offset"
+CONFIG_FILENAME="train_no_random_offset.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

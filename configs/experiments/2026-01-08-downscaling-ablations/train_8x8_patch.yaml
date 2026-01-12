@@ -1,3 +1,4 @@
+max_patches: 704
 model:
   out_names:
   - PRATEsfc
