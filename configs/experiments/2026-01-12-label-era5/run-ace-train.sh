@@ -50,8 +50,7 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-# run_training "train-era5-extrapolate-1step.yaml" "train-era5-extrapolate-1step"
-# run_training "train-combined-extrapolate-1step.yaml" "train-combined-extrapolate-1step"
 # run_training "train-era5-infill-1step.yaml" "train-era5-infill-1step"
 # run_training "train-combined-infill-1step.yaml" "train-combined-infill-1step"
-run_training "train-combined-extrapolate-n512-e5c5-1step-ft-20step-v2.yaml" "train-combined-extrapolate-1step-n512-e5c5-1step-ft-20step-v2"
+run_training "train-combined-infill-1step-makani.yaml" "train-combined-infill-1step-makani"
+run_training "train-combined-infill-1step-makani-g64.yaml" "train-combined-infill-1step-makani-g64"
