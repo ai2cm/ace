@@ -3,8 +3,9 @@ import dataclasses
 from collections.abc import Callable
 
 # we use Type to distinguish from type attr of StepSelector
-from typing import Any, ClassVar, Type, TypeVar, cast, final  # noqa: UP035
+from typing import Any, ClassVar, Self, Type, TypeVar, cast, final  # noqa: UP035
 
+import dacite
 import torch
 from torch import nn
 
@@ -113,6 +114,10 @@ class StepConfigABC(abc.ABC):
         Update configuration in-place so it does not depend on external files.
         """
         pass
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> Self:
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
 
 T = TypeVar("T", bound=StepConfigABC)
