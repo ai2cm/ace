@@ -1,0 +1,391 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.999
+max_epochs: 32
+inference:
+  n_forward_steps: 29200
+  forward_steps_in_memory: 10
+  loader:
+    start_indices:
+      times:
+        # 8 evenly spaced, spanning training set
+        - "0256-01-03T12:00:00"
+        - "0259-05-04T18:00:00"
+        - "0262-09-03T06:00:00"
+        - "0266-01-03T06:00:00"
+        - "0321-01-01T06:00:00"
+        - "0324-05-02T12:00:00"
+        - "0327-09-01T00:00:00"
+        - "0331-01-01T00:00:00"
+    dataset:
+      merge:
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/1pctCO2
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+          engine: zarr
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/1pctCO2
+          file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+    num_data_workers: 1
+  aggregator:
+    log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+  wandb_dir_in_experiment_dir: true
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 10
+  dataset:
+    merge:
+      - concat:
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/1pctCO2
+            file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: "0256-01-03T12:00:00"
+              stop_time: "0286-01-03T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/1pctCO2
+            file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: "0321-01-01T06:00:00"
+              stop_time: "0351-01-01T00:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-1xCO2-ic_0001-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-2xCO2-ic_0001-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-4xCO2-ic_0001-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-1xCO2-ic_0002-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-2xCO2-ic_0002-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-4xCO2-ic_0002-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+        strict: false
+      - concat:
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/1pctCO2
+            file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+            engine: zarr
+            subset:
+              start_time: "0256-01-03T12:00:00"
+              stop_time: "0286-01-03T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/1pctCO2
+            file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+            engine: zarr
+            subset:
+              start_time: "0321-01-01T06:00:00"
+              stop_time: "0351-01-01T00:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-1xCO2-ic_0001.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-2xCO2-ic_0001.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-4xCO2-ic_0001.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-1xCO2-ic_0002.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-2xCO2-ic_0002.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+          - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+            file_pattern: random-CO2-4xCO2-ic_0002.zarr
+            engine: zarr
+            subset:
+              start_time: "0153-01-01T06:00:00"
+        strict: false
+validation_loader:
+  batch_size: 64
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 10
+  dataset:
+    merge:
+      - concat:
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/1pctCO2
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+          engine: zarr
+          subset:
+            start_time: "0251-01-03T12:00:00"
+            stop_time: "0255-12-29T12:00:00"
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+          file_pattern: random-CO2-1xCO2-ic_0003-sea_ice.zarr
+          engine: zarr
+          subset:
+            start_time: "0155-01-01T06:00:00"
+            stop_time: "0156-01-01T00:00:00"
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+          file_pattern: random-CO2-2xCO2-ic_0003-sea_ice.zarr
+          engine: zarr
+          subset:
+            start_time: "0155-01-01T06:00:00"
+            stop_time: "0156-01-01T00:00:00"
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+          file_pattern: random-CO2-4xCO2-ic_0003-sea_ice.zarr
+          engine: zarr
+          subset:
+            start_time: "0155-01-01T06:00:00"
+            stop_time: "0156-01-01T00:00:00"
+        strict: false
+      - concat:
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/1pctCO2
+          file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+          subset:
+            start_time: "0251-01-03T12:00:00"
+            stop_time: "0255-12-29T12:00:00"
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+          file_pattern: random-CO2-1xCO2-ic_0003.zarr
+          engine: zarr
+          subset:
+            start_time: "0155-01-01T06:00:00"
+            stop_time: "0156-01-01T00:00:00"
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+          file_pattern: random-CO2-2xCO2-ic_0003.zarr
+          engine: zarr
+          subset:
+            start_time: "0155-01-01T06:00:00"
+            stop_time: "0156-01-01T00:00:00"
+        - data_path: /home/Spencer.Clark/scratch/datasets/CM4/random-CO2
+          file_pattern: random-CO2-4xCO2-ic_0003.zarr
+          engine: zarr
+          subset:
+            start_time: "0155-01-01T06:00:00"
+            stop_time: "0156-01-01T00:00:00"
+        strict: false
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper:
+  n_ensemble: 2
+  train_n_forward_steps:
+    outcomes:
+    - steps: 1
+      probability: 0.6
+    - steps: 2
+      probability: 0.2
+    - steps: 4
+      probability: 0.1
+    - steps: 12
+      probability: 0.05
+    - steps: 20
+      probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    weights:
+      air_temperature_0: 0.5
+      air_temperature_1: 0.5
+      eastward_wind_0: 0.5
+      northward_wind_0: 0.5
+      specific_total_water_0: 0.5
+      specific_total_water_1: 0.25
+      specific_total_water_2: 0.5
+      PRATEsfc: 0.5
+      h500: 10
+      TMP850: 5
+      Q2m: 0.5
+      DLWRFsfc: 2
+      ULWRFsfc: 5
+      USWRFsfc: 2
+      DSWRFsfc: 2
+      USWRFtoa: 2
+      tendency_of_total_water_path_due_to_advection: 0.5
+      PRESsfc: 3
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+  step:
+    type: single_module
+    config:
+      residual_prediction: false
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 384
+          noise_embed_dim: 64
+          noise_type: isotropic
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+      normalization:
+        network:
+          global_means_path: /home/Spencer.Clark/scratch/datasets/CM4/merged-stats/centering.nc
+          global_stds_path: /home/Spencer.Clark/scratch/datasets/CM4/merged-stats/scaling-full-field.nc
+        residual:
+          global_means_path: /home/Spencer.Clark/scratch/datasets/CM4/merged-stats/centering.nc
+          global_stds_path: /home/Spencer.Clark/scratch/datasets/CM4/merged-stats/scaling-residual.nc
+      ocean:
+        surface_temperature_name: surface_temperature
+        ocean_fraction_name: ocean_fraction
+        interpolate: true
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        total_energy_budget_correction:
+          method: constant_temperature
+        force_positive_names:
+          - specific_total_water_0
+          - specific_total_water_1
+          - specific_total_water_2
+          - specific_total_water_3
+          - specific_total_water_4
+          - specific_total_water_5
+          - specific_total_water_6
+          - specific_total_water_7
+          - Q2m
+          - PRATEsfc
+          - ULWRFsfc
+          - ULWRFtoa
+          - DLWRFsfc
+          - DSWRFsfc
+          - USWRFsfc
+          - USWRFtoa
+          - total_frozen_precipitation_rate
+      next_step_forcing_names:
+        - DSWRFtoa
+        - carbon_dioxide
+      in_names:
+        - land_fraction
+        - lake_fraction
+        - ocean_fraction
+        - sea_ice_fraction
+        - DSWRFtoa
+        - HGTsfc
+        - PRESsfc
+        - surface_temperature
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
+        - carbon_dioxide
+      out_names:
+        - PRESsfc
+        - surface_temperature
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - ULWRFsfc
+        - ULWRFtoa
+        - DLWRFsfc
+        - DSWRFsfc
+        - USWRFsfc
+        - USWRFtoa
+        - tendency_of_total_water_path_due_to_advection
+        - TMP850
+        - h500
+        - total_frozen_precipitation_rate
+        - TMP2m
+        - Q2m
+        - UGRD10m
+        - VGRD10m
+        - eastward_surface_wind_stress
+        - northward_surface_wind_stress
