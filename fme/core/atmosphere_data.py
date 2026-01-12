@@ -10,7 +10,6 @@ from fme.core.constants import (
     RDGAS,
     RVGAS,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
-    SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME,
 )
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -327,10 +326,27 @@ class AtmosphereData:
         geoportential energy, and approximate specific humidity with specific total
         water. We also ignore the ice water contribution to total energy.
         """
+        tv = self.air_temperature * (
+            1 + (RVGAS / RDGAS - 1.0) * self.specific_total_water
+        )
+        interface_pressure = self._vertical_coordinate.interface_pressure(
+            self.surface_pressure
+        )
+        layer_thickness = compute_layer_thickness(
+            pressure_at_interface=interface_pressure,
+            air_temperature=self.air_temperature,
+            specific_total_water=self.specific_total_water,
+        )
+        interface_height = _height_at_interface(layer_thickness, self.surface_height)
+        pressure_times_height = interface_pressure * interface_height
+        pressure_thickness = interface_pressure[..., 1:] - interface_pressure[..., :-1]
+        delta_pressure_times_height = (
+            pressure_times_height[..., 1:] - pressure_times_height[..., :-1]
+        )
         return (
-            self.air_temperature * SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
+            GRAVITY * delta_pressure_times_height / pressure_thickness
+            + tv * SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE
             + self.specific_total_water * LATENT_HEAT_OF_VAPORIZATION
-            + self.height_at_midpoint * GRAVITY
         )
 
     @property
