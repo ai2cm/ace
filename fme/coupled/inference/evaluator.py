@@ -125,6 +125,8 @@ def load_stepper_config(
     checkpoint = torch.load(
         checkpoint_path, map_location=fme.get_device(), weights_only=False
     )
+    if "crps_training" in checkpoint["stepper"]["config"]:
+        del checkpoint["stepper"]["config"]["crps_training"]
     config = CoupledStepperConfig.from_state(checkpoint["stepper"]["config"])
 
     return config

@@ -641,8 +641,6 @@ class CoupledStepperConfig:
         if "sst_is_snapshot" in state_copy:
             # FIXME: don't merge
             del state_copy["sst_is_snapshot"]
-        if "crps_training" in state_copy:
-            del state_copy["crps_training"]
         return state_copy
 
 
