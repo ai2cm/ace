@@ -1,0 +1,28 @@
+experiment_dir: /results
+n_forward_steps: 7300
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+aggregator:
+  log_zonal_mean_images: false
+loader:
+  start_indices:
+    times:
+      - "0153-01-01T00:00:00"
+  dataset:
+    merge:
+    - data_path:  /climate-default/2025-12-04-CM4-like-AM4-random-CO2-coupled
+      file_pattern: random-CO2-2xCO2-ic_0003-sea_ice.zarr
+      engine: zarr
+    - data_path:  /climate-default/2025-12-02-CM4-like-AM4-random-CO2
+      file_pattern: random-CO2-2xCO2-ic_0003.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

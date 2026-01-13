@@ -1,0 +1,28 @@
+experiment_dir: /results
+n_forward_steps: 58400
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+aggregator:
+  log_zonal_mean_images: false
+loader:
+  start_indices:
+    times:
+      - "0211-01-01T06:00:00"
+  dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
