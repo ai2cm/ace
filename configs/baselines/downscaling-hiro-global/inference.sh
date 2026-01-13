@@ -24,13 +24,15 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling inference' \
-    --workspace ai2/ace \
-    --priority high  \
-    --preemptible \
-    --cluster ai2/jupiter \
+    --workspace ai2/climate-titan \
+    --priority urgent  \
+    --not-preemptible \
+    --cluster ai2/titan \
     --gpus $NGPU \
     --budget ai2/climate \
     --beaker-image $DEPS_ONLY_IMAGE \
+    --weka climate-default:/climate-default \
+    --shared-memory 400GiB \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
@@ -39,6 +41,8 @@ gantry run \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/hiro-public-ckpt.tar \
-    --system-python \
+    --no-conda \
+    --allow-dirty \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
+
