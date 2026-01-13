@@ -110,7 +110,7 @@ validation_loader:
 optimization:
   enable_automatic_mixed_precision: true
   lr: 0.0001
-  optimizer_type: FusedAdam
+  optimizer_type: AdamW
   kwargs:
     weight_decay: 0.01
 stepper:
