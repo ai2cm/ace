@@ -1,0 +1,47 @@
+experiment_dir: /climate-default/home/annak/scratch/2026-01-12-ckpt-test/results-beaker
+model:
+    checkpoint_path: /hiro-public-ckpt.tar
+data:
+    #topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+    coarse:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      engine: zarr
+      file_pattern: 100km.zarr
+    batch_size: 2  # Value is overidden by each output
+    num_data_workers: 1
+    strict_ensemble: False
+patch:
+    divide_generation: true
+    composite_prediction: true
+    coarse_horizontal_overlap: 0
+outputs:
+  - name: "WA_AR_20230206"
+    save_vars: ["PRATEsfc"]
+    n_ens: 2
+    max_samples_per_gpu: 8
+    event_time: "2023-02-06T06:00:00"
+    lat_extent:
+        start: 36.0
+        stop:  52.0
+    lon_extent:
+        start: 228.0
+        stop: 244.0
+  - name: "CONUS_2023"
+    save_vars: ["PRATEsfc"]
+    n_ens: 2
+    max_samples_per_gpu: 8
+    time_range:
+        start_time: "2023-01-01T00:00"
+        stop_time: "2023-01-09T18:00"
+    lat_extent:
+        start: 22.0
+        stop:  50.0
+    lon_extent:
+        start: 230.0
+        stop: 295.0
+logging:
+    log_to_screen: true
+    log_to_wandb: false
+    log_to_file: true
+    project: annak-downscaling
+    entity: ai2cm
