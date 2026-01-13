@@ -1,4 +1,4 @@
-experiment_dir: /climate-default/home/annak/scratch/2026-01-12-ckpt-test/results-beaker-2
+experiment_dir: /climate-default/home/annak/scratch/2026-01-12-ckpt-test/results-beaker-3
 model:
     checkpoint_path: /hiro-public-ckpt.tar
 data:
