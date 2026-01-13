@@ -21,8 +21,8 @@ outputs:
     max_samples_per_gpu: 8
     event_time: "2023-02-06T06:00:00"
     lat_extent:
-        start: 76
-        stop:  90
+        start: 75
+        stop:  89
     lon_extent:
         start: 228.0
         stop: 244.0
@@ -32,8 +32,8 @@ outputs:
     max_samples_per_gpu: 8
     event_time: "2023-02-06T06:00:00"
     lat_extent:
-        start: -90
-        stop:  -76
+        start: -89
+        stop:  -75
     lon_extent:
         start: 0
         stop: 16.0
@@ -43,8 +43,8 @@ outputs:
     max_samples_per_gpu: 8
     event_time: "2023-02-06T06:00:00"
     lat_extent:
-        start: -90
-        stop:  -76
+        start: -89
+        stop:  -75
     lon_extent:
         start: 344.0
         stop: 360.0
