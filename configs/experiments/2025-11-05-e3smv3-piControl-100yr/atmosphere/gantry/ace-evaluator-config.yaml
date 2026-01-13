@@ -13,12 +13,13 @@ loader:
     times:
      - '0421-01-01T06:00:00'
   dataset:
-    - data_path: /climate-default
-      file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
-      engine: zarr
-    - data_path: /climate-default
-      file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
-      engine: zarr
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+        engine: zarr
   num_data_workers: 4
 aggregator:
   log_zonal_mean_images: false
