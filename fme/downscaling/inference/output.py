@@ -221,14 +221,12 @@ class DownscalingOutputConfig(ABC):
                 "Downscaling data loader only supports datasets with latlon coords."
             )
         dataset = loader_config.build_batchitem_dataset(xr_dataset, properties)
-        if static_inputs_from_checkpoint is None:
-            topography = loader_config.build_topography(
-                coords,
-                requires_topography=requirements.use_fine_topography,
-            )
-        else:
+        topography = loader_config.build_topography(
+            coords,
+            requires_topography=requirements.use_fine_topography,
             # TODO: update to support full list of static inputs
-            topography = static_inputs_from_checkpoint[0]
+            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+        )
         if topography is None:
             raise ValueError("Topography is required for downscaling generation.")
 
