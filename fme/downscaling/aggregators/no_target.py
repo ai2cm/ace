@@ -390,9 +390,10 @@ class _MapAggregator:
         ds = xr.Dataset({k: (("lat", "lon"), v) for k, v in data.items()})
         return ds
 
+
 class _EnsMapAggregator(_MapAggregator):
     """
-    Aggregator that calculates mean and max maps over an additional 
+    Aggregator that calculates mean and max maps over an additional
     ensemble dimension.
     """
 
@@ -410,7 +411,7 @@ class _EnsMapAggregator(_MapAggregator):
         )
         self.ensemble_dim = ensemble_dim
         self._expected_ndims = 4
-    
+
     @torch.no_grad()
     def record_batch(self, prediction, coarse):
         coarse = filter_tensor_mapping(coarse, prediction.keys())
@@ -423,16 +424,19 @@ class _EnsMapAggregator(_MapAggregator):
                     "Data passed to _EnsMapAggregator must be 4D, i.e. with ensemble "
                     "dimension present."
                 )
-            
+
         ens_mean_prediction = {
             k: batch_mean(v, dim=self.ensemble_dim) for k, v in prediction.items()
+        }
+        ens_mean_coarse = {
+            k: batch_mean(v, dim=self.ensemble_dim) for k, v in coarse.items()
         }
         ens_max_prediction = {
             k: batch_max(v, dim=self.ensemble_dim) for k, v in prediction.items()
         }
 
         self._mean_prediction.record_batch(ens_mean_prediction)
-        self._mean_coarse.record_batch(coarse)
+        self._mean_coarse.record_batch(ens_mean_coarse)
         self._max_prediction.record_batch(ens_max_prediction)
 
     def _get_maps(self) -> Mapping[str, Any]:
