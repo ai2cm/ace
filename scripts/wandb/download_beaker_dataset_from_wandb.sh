@@ -21,7 +21,7 @@
 #       --output-dir /path/to/output \
 #       --prefix checkpoints/
 #
-# The dataset will be downloaded to: <output-dir>/<entity>/<project>/<jobid>/
+# The dataset will be downloaded to: <output-dir>/<entity>/<project>/runs/<jobid>/
 
 # Get beaker dataset ID from experiment ID
 # Args: $1 = EXPERIMENT_ID
@@ -88,7 +88,7 @@ DATASET_ID=$(get_beaker_dataset_from_experiment "$EXPERIMENT_ID")
 
 # Fetch dataset to output directory
 if [[ -n "${PREFIX}" ]]; then
-    beaker dataset fetch "$DATASET_ID" --output "$OUTPUT_DIR/$ENTITY/$PROJECT/$JOBID" --prefix "$PREFIX"
+    beaker dataset fetch "$DATASET_ID" --output "$OUTPUT_DIR/$ENTITY/$PROJECT/runs/$JOBID" --prefix "$PREFIX"
 else
-    beaker dataset fetch "$DATASET_ID" --output "$OUTPUT_DIR/$ENTITY/$PROJECT/$JOBID"
+    beaker dataset fetch "$DATASET_ID" --output "$OUTPUT_DIR/$ENTITY/$PROJECT/runs/$JOBID"
 fi
