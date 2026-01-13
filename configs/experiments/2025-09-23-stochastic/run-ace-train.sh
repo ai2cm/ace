@@ -27,8 +27,8 @@ run_training() {
     --name "$job_name" \
     --description 'Run ACE training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority high \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
     --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
@@ -75,10 +75,11 @@ base_name="stochastic"
 # run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-rs2.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-rs2"
 # run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-rs3.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-rs3"
 # run_training "train-era5-n384-e1c9-1step-ft-20step-rs1.yaml" "$base_name-era5-n384-e1c9-1step-era5-ft-20step-v2-rs1"
+run_training "train-era5-n384-e1c9-1step-ft-20sched-v0-rs1.yaml" "$base_name-era5-n384-e1c9-1step-era5-ft-20sched-v0-rs1"
 # run_training "train-x-shield-n384-e1c9-20-step-ERA5-ft-20step-x-shield-v2-rs1.yaml" "$base_name-x-shield-n384-e1c9-20step-era5-ft-20step-v2-rs1"
 # run_training "train-x-shield-n384-e1c9-1step-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-rs0"
 # run_training "train-x-shield-n384-e1c9-1step-rs1.yaml" "$base_name-x-shield-n384-e1c9-1step-rs1"
 # run_training "train-x-shield-only-n384-e1c9-1step-ft-20step-v2-rs1.yaml" "$base_name-x-shield-only-n384-e1c9-1step-ft-20step-v2-rs1"
 # run_training "train-x-shield-n384-e1c9-1step-big-skip-rs1.yaml" "$base_name-x-shield-n384-e1c9-1step-big-skip-rs1"
-run_training "train-x-shield-only-n384-e1c9-1step-ft-20step-full.yaml" "$base_name-x-shield-only-n384-e1c9-1step-ft-20step-full-rs1"
+# run_training "train-x-shield-only-n384-e1c9-1step-ft-20step-full.yaml" "$base_name-x-shield-only-n384-e1c9-1step-ft-20step-full-rs1"
 
