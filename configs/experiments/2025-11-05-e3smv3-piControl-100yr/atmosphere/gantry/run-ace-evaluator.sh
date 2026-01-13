@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="BK-v1124-ACE2S-n512-e1c9-ft-20step-E3SMv3-piControl-eval-best-inference-ckpt"
+JOB_NAME="BK-v1124-ACE2S-n512-e1c9-ft-20step-E3SMv3-piControl-eval-last-ckpt"
 JOB_GROUP="BK-v1124-ACE2S-n512-e1c9-ft-20step-E3SMv3-piControl-100yr-eval"
 EXISTING_RESULTS_DATASET="01KENDK3NS5SRPAHSTZEQXP4JF"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-evaluator-config.yaml"
@@ -36,7 +36,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/ckpt.tar:/ckpt.tar \
     --gpus 1 \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
