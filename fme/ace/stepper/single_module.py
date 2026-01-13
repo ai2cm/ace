@@ -1175,6 +1175,7 @@ class Stepper(
 
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
+
             with optimizer.autocast():
                 state = self.step(
                     StepArgs(
