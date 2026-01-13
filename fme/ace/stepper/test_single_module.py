@@ -1864,7 +1864,7 @@ def _get_ocean_data_for_predict_paired(
         img_shape: Shape of spatial dimensions.
 
     Returns:
-        Tuple of (initial_condition, forcing_data).
+        Tuple of (initial_condition, data).
     """
     n_ic_timesteps = 1
     total_timesteps = n_ic_timesteps + n_steps
@@ -1914,16 +1914,16 @@ def _get_ocean_data_for_predict_paired(
         dims=["sample", "time"],
     )
 
-    forcing_data = BatchData.new_on_device(
+    data = BatchData.new_on_device(
         data=data_dict,
         time=time,
         labels=None,
     )
 
     prognostic_names = [n for n in out_names if n in in_names]
-    input_data = forcing_data.get_start(prognostic_names, n_ic_timesteps)
+    input_data = data.get_start(prognostic_names, n_ic_timesteps)
 
-    return input_data, forcing_data
+    return input_data, data
 
 
 @pytest.mark.parametrize(
@@ -1961,18 +1961,18 @@ def test_ocean_derived_variables_integration(
     )
 
     n_steps = 3
-    input_data, forcing_data = _get_ocean_data_for_predict_paired(
+    input_data, data = _get_ocean_data_for_predict_paired(
         n_steps=n_steps,
         in_names=in_names,
         out_names=out_names,
     )
-    derived_data = forcing_data.compute_derived_variables(
-        derive_func=stepper.derive_func, forcing_data=forcing_data
+    derived_data = data.compute_derived_variables(
+        derive_func=stepper.derive_func, forcing_data=data
     )
 
     paired_output, _ = stepper.predict_paired(
         input_data,
-        forcing_data,
+        data,
         compute_derived_variables=True,
     )
 
