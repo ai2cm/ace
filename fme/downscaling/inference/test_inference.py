@@ -362,6 +362,7 @@ def test_generation_main(generation_config_path, skip_slow):
     assert event["var0"].sizes[TIME_NAME] == 1
 
 
+@pytest.mark.parametrize("loader_config", [False], indirect=True)
 @pytest.mark.skipif(
     (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
     reason="Skipping multi-GPU test: less than 2 GPUs available.",
