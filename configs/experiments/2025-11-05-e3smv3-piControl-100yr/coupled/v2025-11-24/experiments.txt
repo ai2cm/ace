@@ -3,9 +3,7 @@ fto-v1124-sfno-m351zi95-rv0ike6m||01KC2T0JJ4HCFTZ9D954EX4V9J|training|best_infer
 
 fto-v1124-sfno-c5ocb8t1-rv0ike6m||01KCA45QWR2WSN30MY4W7JK1TK|training|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto-v1124-sfno-m351zi95-rv0ike6m||01KCA4JTWJ29XZG0Z4JNG9TADP|training|best_inference_ckpt|normal|--not-preemptible
-
-ft_fto-v1124-sfno-m351zi95-rv0ike6m||01KED7FTEEDWQZAJ9DB4KPJ127|training|best_inference_ckpt|normal|--not-preemptible
+ft_fto-v1124-sfno-m351zi95-rv0ike6m||01KCA4JTWJ29XZG0Z4JNG9TADP|run_ICx1-40yr|best_inference_ckpt|normal|--not-preemptible
 
 fto-v1124-pesvhsm3-vw7bwz18||01KED7JK1MV06MT3DXXMN0JNZS|training|best_inference_ckpt|normal|--not-preemptible
 
