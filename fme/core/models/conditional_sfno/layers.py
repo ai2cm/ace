@@ -327,7 +327,99 @@ class PatchEmbed(nn.Module):
         return x
 
 
-class MLP(nn.Module):
+class LoraConv2d(nn.Module):
+    """
+    LoRA adapter for Conv2d.
+
+    Returns ONLY the low-rank update (delta), so you can do:
+        y = base_conv(x) + lora_conv(x)
+
+    Design:
+      - Down projection: Conv2d(in -> r, same kernel/stride/pad/dilation/groups as base)
+      - Up projection:   1x1 Conv2d(r -> out)
+      - delta scaled by (alpha / r)
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int | tuple[int, int],
+        stride: int | tuple[int, int] = 1,
+        padding: int | tuple[int, int] = 0,
+        dilation: int | tuple[int, int] = 1,
+        groups: int = 1,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
+        dropout: float = 0.0,
+        bias: bool = False,  # LoRA update typically no bias; keep False unless you want it
+    ) -> None:
+        super().__init__()
+        if lora_rank <= 0:
+            raise ValueError(f"lora_rank must be > 0, got {lora_rank}")
+
+        if in_channels % groups != 0:
+            raise ValueError("in_channels must be divisible by groups")
+        if out_channels % groups != 0:
+            raise ValueError("out_channels must be divisible by groups")
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.groups = groups
+        self.rank = int(lora_rank)
+        self.alpha = float(lora_alpha) if lora_alpha is not None else float(self.rank)
+        self.scaling = self.alpha / self.rank
+
+        # LoRA dropout is applied on the input to the adapter (common choice)
+        self.lora_dropout = (
+            nn.Dropout(dropout) if dropout and dropout > 0.0 else nn.Identity()
+        )
+
+        # Down: match base conv's spatial behavior; keep same groups so it composes cleanly.
+        self.down = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=self.rank,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            bias=False,
+        )
+
+        # Up: 1x1 to map rank -> out_channels; use same groups for consistency.
+        # Note: requires rank divisible by groups (since conv groups split channels).
+        if self.rank % groups != 0:
+            raise ValueError(
+                f"lora_rank ({self.rank}) must be divisible by groups ({groups})"
+            )
+        self.up = nn.Conv2d(
+            in_channels=self.rank,
+            out_channels=out_channels,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            dilation=1,
+            groups=groups,
+            bias=bias,
+        )
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        # Common LoRA init: down ~ Kaiming, up = 0 so initial delta is exactly 0.
+        nn.init.kaiming_uniform_(self.down.weight, a=math.sqrt(5))
+        nn.init.zeros_(self.up.weight)
+        if self.up.bias is not None:
+            nn.init.zeros_(self.up.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.lora_dropout(x)
+        delta = self.up(self.down(x))
+        return delta * self.scaling
+
+
+class LoRAMLP(nn.Module):
     """
     Basic CNN with support for gradient checkpointing
     """
@@ -340,34 +432,62 @@ class MLP(nn.Module):
         act_layer=nn.GELU,
         output_bias=True,
         drop_rate=0.0,
-        checkpointing=0,
+        lora_rank: int = 0,
+        lora_alpha: int | None = None,
     ):  # pragma: no cover
-        super(MLP, self).__init__()
-        self.checkpointing = checkpointing
+        super(LoRAMLP, self).__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
 
         fc1 = nn.Conv2d(in_features, hidden_features, 1, bias=True)
         act = act_layer()
         fc2 = nn.Conv2d(hidden_features, out_features, 1, bias=output_bias)
+        # self.fwd structure is kept for backwards compatibility with old checkpoints
         if drop_rate > 0.0:
             drop = nn.Dropout(drop_rate)
             self.fwd = nn.Sequential(fc1, act, drop, fc2, drop)
         else:
             self.fwd = nn.Sequential(fc1, act, fc2)
 
+        if lora_rank > 0:
+            self.lora1: None | LoraConv2d = LoraConv2d(
+                in_features,
+                hidden_features,
+                1,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
+            )
+            self.lora2: None | LoraConv2d = LoraConv2d(
+                hidden_features,
+                out_features,
+                1,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
+            )
+        else:
+            self.lora1 = None
+            self.lora2 = None
+
         # by default, all weights are shared
 
-    @torch.jit.ignore
-    def checkpoint_forward(self, x):  # pragma: no cover
-        """Forward method with support for gradient checkpointing"""
-        return checkpoint(self.fwd, x)
-
     def forward(self, x):  # pragma: no cover
-        if self.checkpointing >= 2:
-            return self.checkpoint_forward(x)
+        if len(self.fwd) == 5:
+            fc1, act, drop1, fc2, drop2 = self.fwd
         else:
-            return self.fwd(x)
+            fc1, act, fc2 = self.fwd
+            drop1 = drop2 = nn.Identity()
+        if self.lora1 is not None:
+            x = fc1(x) + self.lora1(x)
+        else:
+            x = fc1(x)
+        x = act(x)
+        x = drop1(x)
+        if self.lora2 is not None:
+            x = fc2(x) + self.lora2(x)
+        else:
+            x = fc2(x)
+        x = drop2(x)
+        return x
 
 
 class RealFFT2(nn.Module):

@@ -32,7 +32,7 @@ from .initialization import trunc_normal_
 # import global convolution and non-linear spectral layers
 # helpers
 from .layers import (
-    MLP,
+    LoRAMLP,
     ConditionalLayerNorm,
     Context,
     ContextConfig,
@@ -257,14 +257,12 @@ class FourierNeuralOperatorBlock(nn.Module):
         )
 
         if use_mlp == True:
-            MLPH = MLP
             mlp_hidden_dim = int(embed_dim * mlp_ratio)
-            self.mlp = MLPH(
+            self.mlp = LoRAMLP(
                 in_features=embed_dim,
                 hidden_features=mlp_hidden_dim,
                 act_layer=act_layer,
                 drop_rate=drop_rate,
-                checkpointing=checkpointing,
             )
 
         if outer_skip == "linear":
