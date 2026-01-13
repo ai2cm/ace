@@ -1176,14 +1176,15 @@ class Stepper(
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
 
-            state = self.step(
-                StepArgs(
-                    input=input_data,
-                    next_step_input_data=next_step_input_dict,
-                    labels=labels,
-                ),
-                wrapper=checkpoint,
-            )
+            with optimizer.autocast():
+                state = self.step(
+                    StepArgs(
+                        input=input_data,
+                        next_step_input_data=next_step_input_dict,
+                        labels=labels,
+                    ),
+                    wrapper=checkpoint,
+                )
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
