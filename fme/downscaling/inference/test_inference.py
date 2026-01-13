@@ -11,7 +11,12 @@ import yaml
 
 from fme.core.dataset.time import TimeSlice
 from fme.core.logging_utils import LoggingConfig
-from fme.downscaling.data import LatLonCoordinates, Topography
+from fme.downscaling.data import (
+    LatLonCoordinates,
+    StaticInputs,
+    Topography,
+    get_normalized_topography,
+)
 from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
 from fme.downscaling.inference.inference import Downscaler, InferenceConfig, main
 from fme.downscaling.inference.output import (
@@ -19,7 +24,6 @@ from fme.downscaling.inference.output import (
     EventConfig,
     TimeRangeConfig,
 )
-from fme.downscaling.inference.test_output import loader_config  # noqa
 from fme.downscaling.inference.work_items import SliceWorkItemGriddedData
 from fme.downscaling.models import (
     CheckpointModelConfig,
@@ -260,13 +264,23 @@ def get_generate_model_config():
 
 
 @pytest.fixture
-def checkpointed_model_config(tmp_path):
+def checkpointed_model_config(
+    tmp_path,
+    loader_config,
+):
     """Create and return a path to a checkpointed model for testing."""
     model_config = get_generate_model_config()
     # TODO: ensure this gets connected to centralized data helper
     coarse_shape = (8, 8)
     model_config.use_fine_topography = True
-    model = model_config.build(coarse_shape, 2)
+
+    # loader_config is passed in to add static inputs into model
+    # that correspond to the dataset coordinates
+    topography_path = (
+        f"{loader_config.coarse[0].data_path.replace('coarse', 'fine')}/data.nc"
+    )
+    static_inputs = StaticInputs([get_normalized_topography(topography_path)])
+    model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"
     model.get_state()
@@ -319,6 +333,7 @@ def generation_config_path(generation_config):
     return config_path
 
 
+@pytest.mark.parametrize("loader_config", [False], indirect=True)
 def test_generation_main(generation_config_path, skip_slow):
     """Test the main generation process end-to-end."""
     if skip_slow:
@@ -347,6 +362,7 @@ def test_generation_main(generation_config_path, skip_slow):
     assert event["var0"].sizes[TIME_NAME] == 1
 
 
+@pytest.mark.parametrize("loader_config", [False], indirect=True)
 @pytest.mark.skipif(
     (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
     reason="Skipping multi-GPU test: less than 2 GPUs available.",

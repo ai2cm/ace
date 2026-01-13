@@ -37,7 +37,10 @@ def test_can_call_sfnonet(
     n_samples = 4
     device = get_device()
     params = SimpleNamespace(
-        embed_dim=16, num_layers=2, residual_filter_factor=residual_filter_factor
+        embed_dim=16,
+        num_layers=2,
+        residual_filter_factor=residual_filter_factor,
+        filter_type="makani-linear",
     )
     model = get_lat_lon_sfnonet(
         params=params,

@@ -132,6 +132,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         normalize_big_skip: Whether to normalize the big_skip connection.
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
+        filter_num_groups: Number of groups to use in grouped convolutions
+            for the spectral filter.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -163,6 +165,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     local_blocks: list[int] | None = None
     normalize_big_skip: bool = False
     affine_norms: bool = False
+    filter_num_groups: int = 1
 
     def build(
         self,
