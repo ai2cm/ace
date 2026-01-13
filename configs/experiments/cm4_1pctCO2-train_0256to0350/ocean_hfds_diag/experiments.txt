@@ -1,1 +1,3 @@
 group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
+
+1pct_nosmooth_0256to0350_hfds_diag|rs0||training|best_inference_ckpt|normal|--not-preemptible
