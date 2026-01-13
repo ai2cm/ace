@@ -15,33 +15,66 @@ patch:
     composite_prediction: true
     coarse_horizontal_overlap: 0
 outputs:
-  - name: "WA_AR_20230206"
+  - name: "north_polar_snapshot"
     save_vars: ["PRATEsfc"]
     n_ens: 2
     max_samples_per_gpu: 8
     event_time: "2023-02-06T06:00:00"
     lat_extent:
-        start: 36.0
-        stop:  52.0
+        start: 76
+        stop:  90
     lon_extent:
         start: 228.0
         stop: 244.0
-  - name: "CONUS_2023"
+  - name: "south_polar_snapshot"
     save_vars: ["PRATEsfc"]
     n_ens: 2
     max_samples_per_gpu: 8
-    time_range:
-        start_time: "2023-01-01T00:00"
-        stop_time: "2023-01-09T18:00"
+    event_time: "2023-02-06T06:00:00"
     lat_extent:
-        start: 22.0
-        stop:  50.0
+        start: -90
+        stop:  -76
     lon_extent:
-        start: 230.0
-        stop: 295.0
+        start: 0
+        stop: 16.0
+  - name: "south_polar_snapshot2"
+    save_vars: ["PRATEsfc"]
+    n_ens: 2
+    max_samples_per_gpu: 8
+    event_time: "2023-02-06T06:00:00"
+    lat_extent:
+        start: -90
+        stop:  -76
+    lon_extent:
+        start: 344.0
+        stop: 360.0
+#   - name: "WA_AR_20230206"
+#     save_vars: ["PRATEsfc"]
+#     n_ens: 2
+#     max_samples_per_gpu: 8
+#     event_time: "2023-02-06T06:00:00"
+#     lat_extent:
+#         start: 36.0
+#         stop:  52.0
+#     lon_extent:
+#         start: 228.0
+#         stop: 244.0
+#   - name: "CONUS_2023"
+#     save_vars: ["PRATEsfc"]
+#     n_ens: 2
+#     max_samples_per_gpu: 8
+#     time_range:
+#         start_time: "2023-01-01T00:00"
+#         stop_time: "2023-01-09T18:00"
+#     lat_extent:
+#         start: 22.0
+#         stop:  50.0
+#     lon_extent:
+#         start: 230.0
+#         stop: 295.0
 logging:
     log_to_screen: true
-    log_to_wandb: false
+    log_to_wandb: true
     log_to_file: true
     project: annak-downscaling
     entity: ai2cm

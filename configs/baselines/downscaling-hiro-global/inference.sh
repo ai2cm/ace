@@ -3,10 +3,10 @@
 set -e
 
 # for now, just using a single node
-NGPU=2
+NGPU=1
 
 
-JOB_NAME="test-release-model-with-serialized-data"  # recommended but not required to change this
+JOB_NAME="test-polar-generation"  # recommended but not required to change this
 CONFIG_FILENAME="inference.yaml"
 
 EXISTING_RESULTS_DATASET="01KET96PB1RJMVJDADX04NDQJH"  # 25km-to-3km https://beaker.allen.ai/orgs/ai2/workspaces/downscaling/work/01JS04B56S6AS5X96H8AMB7FE7
