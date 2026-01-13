@@ -7,3 +7,5 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 1pct_nosmooth_0256to0350_hfds_diag|rs0|01KETE4SGVCRRD85RF5JDMCCYB|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350_hfds_diag|rs1|01KETE57J3MRGKW9M81HRS7258|training|best_inference_ckpt|normal|--not-preemptible
+
+resume_5bebup7b_ep18_w_EC-1pct_nosmooth_0256to0350_hfds_diag||01KEWF3PY9P75QQ944EJAX7CSJ|training|best_inference_ckpt|normal|--not-preemptible
