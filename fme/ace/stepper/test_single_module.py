@@ -1984,8 +1984,14 @@ def test_ocean_derived_variables_integration(
     assert "ocean_heat_content_tendency" in paired_output.reference
     assert "net_energy_flux_into_ocean_column" in paired_output.prediction
     assert "net_energy_flux_into_ocean_column" in paired_output.reference
-    assert "ocean_heat_content_tendency_imbalance" in paired_output.prediction
-    assert "ocean_heat_content_tendency_imbalance" in paired_output.reference
+    assert (
+        "implied_tendency_of_ocean_heat_content_due_to_advection"
+        in paired_output.prediction
+    )
+    assert (
+        "implied_tendency_of_ocean_heat_content_due_to_advection"
+        in paired_output.reference
+    )
 
     ic_ohc = derived_data.data["ocean_heat_content"][:, 0]
     pred_ohc = paired_output.prediction["ocean_heat_content"]
@@ -1997,8 +2003,12 @@ def test_ocean_derived_variables_integration(
     pred_flux = paired_output.prediction["net_energy_flux_into_ocean_column"]
     ref_flux = paired_output.reference["net_energy_flux_into_ocean_column"]
 
-    pred_imbalance = paired_output.prediction["ocean_heat_content_tendency_imbalance"]
-    ref_imbalance = paired_output.reference["ocean_heat_content_tendency_imbalance"]
+    pred_imbalance = paired_output.prediction[
+        "implied_tendency_of_ocean_heat_content_due_to_advection"
+    ]
+    ref_imbalance = paired_output.reference[
+        "implied_tendency_of_ocean_heat_content_due_to_advection"
+    ]
 
     dt = OCEAN_TIMESTEP.total_seconds()
 
