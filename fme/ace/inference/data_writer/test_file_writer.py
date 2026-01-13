@@ -542,7 +542,7 @@ def test_file_writer_monthly(tmpdir):
     ds = xr.open_dataset(tmpdir / f"{label}.nc")
     assert "counts" in ds.coords
     assert "foo" in ds.data_vars
-    assert dict(ds.sizes) == {"sample": 1, "time": 6, "lat": 5, "lon": 5}
+    assert dict(ds.sizes) == {"sample": 1, "time": 4, "lat": 5, "lon": 5}
     assert ds.valid_time.isel(sample=0, time=0).values == np.datetime64("2020-01-15")
     assert ds.valid_time.isel(sample=0, time=1).values == np.datetime64("2020-02-15")
 

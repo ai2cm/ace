@@ -1,11 +1,11 @@
 import torch
 
 from fme.core.dataset.subset import SubsetDataset
-from fme.core.dataset.testing import TestDataset
+from fme.core.dataset.testing import TestingDataset
 
 
 def test_subset_dataset_first_last_time():
-    dataset = TestDataset.new(n_times=20, varnames=["var1"], sample_n_times=2)
+    dataset = TestingDataset.new(n_times=20, varnames=["var1"], sample_n_times=2)
 
     subset = SubsetDataset(dataset, indices=[2, 3, 5, 7])
 
@@ -14,7 +14,7 @@ def test_subset_dataset_first_last_time():
 
 
 def test_subset_dataset_getitem():
-    dataset = TestDataset.new(n_times=20, varnames=["var1"], sample_n_times=2)
+    dataset = TestingDataset.new(n_times=20, varnames=["var1"], sample_n_times=2)
 
     subset = SubsetDataset(dataset, indices=[2, 3, 5, 7])
 
@@ -25,7 +25,7 @@ def test_subset_dataset_getitem():
 
 
 def test_subset_dataset_set_epoch():
-    dataset = TestDataset.new(n_times=20, varnames=["var1"], sample_n_times=2)
+    dataset = TestingDataset.new(n_times=20, varnames=["var1"], sample_n_times=2)
 
     subset = SubsetDataset(dataset, indices=[2, 3, 5, 7])
 
@@ -35,7 +35,7 @@ def test_subset_dataset_set_epoch():
 
 
 def test_subset_dataset_len():
-    dataset = TestDataset.new(n_times=20, varnames=["var1"], sample_n_times=2)
+    dataset = TestingDataset.new(n_times=20, varnames=["var1"], sample_n_times=2)
 
     subset = SubsetDataset(dataset, indices=[2, 3, 5, 7])
 

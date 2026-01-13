@@ -1,6 +1,6 @@
 import dataclasses
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -62,6 +62,7 @@ class Samudra(torch.nn.Module):
         norm: str | None = "instance",
         norm_kwargs: Mapping[str, Any] | None = None,
         upscale_factor: int = 4,
+        checkpoint_strategy: Literal["all", "simple"] | None = None,
     ):
         super().__init__()
 
@@ -77,6 +78,7 @@ class Samudra(torch.nn.Module):
         self.last_kernel_size = 3
         self.N_pad = int((self.last_kernel_size - 1) / 2)
         self.upscale_factor = upscale_factor
+        self.checkpoint_strategy = checkpoint_strategy
 
         ch_width_with_input = (self.input_channels, *self.ch_width)
 
@@ -93,6 +95,7 @@ class Samudra(torch.nn.Module):
                     norm=self.norm,
                     norm_kwargs=self.norm_kwargs,
                     upscale_factor=self.upscale_factor,
+                    checkpoint_strategy=self.checkpoint_strategy,
                 )
             )
             layers.append(AvgPool())
@@ -106,6 +109,7 @@ class Samudra(torch.nn.Module):
                 norm=self.norm,
                 norm_kwargs=self.norm_kwargs,
                 upscale_factor=self.upscale_factor,
+                checkpoint_strategy=self.checkpoint_strategy,
             )
         )
         layers.append(BilinearUpsample(in_channels=b, out_channels=b))
@@ -123,6 +127,7 @@ class Samudra(torch.nn.Module):
                     norm=self.norm,
                     norm_kwargs=self.norm_kwargs,
                     upscale_factor=self.upscale_factor,
+                    checkpoint_strategy=self.checkpoint_strategy,
                 )
             )
             layers.append(BilinearUpsample(in_channels=b, out_channels=b))
@@ -136,6 +141,7 @@ class Samudra(torch.nn.Module):
                 norm=self.norm,
                 norm_kwargs=self.norm_kwargs,
                 upscale_factor=self.upscale_factor,
+                checkpoint_strategy=self.checkpoint_strategy,
             )
         )
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
@@ -155,7 +161,10 @@ class Samudra(torch.nn.Module):
                 fts = torch.nn.functional.pad(
                     fts, (0, 0, self.N_pad, self.N_pad), mode="constant"
                 )
-            fts = layer(fts)
+            if self.checkpoint_strategy == "all":
+                fts = torch.utils.checkpoint.checkpoint(layer, fts, use_reentrant=False)
+            else:
+                fts = layer(fts)
             if count < self.num_steps:
                 if isinstance(layer, ConvNeXtBlock):
                     temp.append(fts)

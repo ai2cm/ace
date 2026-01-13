@@ -7,6 +7,7 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -21,6 +22,7 @@ from fme.downscaling.data.datasets import (
     PairedGriddedData,
 )
 from fme.downscaling.data.topography import (
+    StaticInputs,
     Topography,
     get_normalized_topography,
     get_topography_downscale_factor,
@@ -103,6 +105,9 @@ class DataLoaderConfig:
         repeat: The number of times to repeat the underlying xarray dataset
             time dimension.  Useful to include longer sequences of small
             data for testing.
+        drop_last: Use drop_last option in sampler. Defaults to False. If True,
+            drop the last samples required to have even batch sizes across ranks.
+            If false, pad with extra samples to make ranks have the same size batches.
     """
 
     coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
@@ -117,6 +122,7 @@ class DataLoaderConfig:
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
     )
     repeat: int = 1
+    drop_last: bool = False
 
     @property
     def full_config(self) -> Sequence[XarrayDataConfig]:
@@ -151,21 +157,30 @@ class DataLoaderConfig:
         return get_dataset(
             self.full_config,
             names,
-            n_timesteps,
+            IntSchedule.from_constant(n_timesteps),
             strict=self.strict_ensemble,
         )
 
     def build_topography(
-        self, coarse_coords: LatLonCoordinates, requires_topography: bool
+        self,
+        coarse_coords: LatLonCoordinates,
+        requires_topography: bool,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> Topography | None:
         if requires_topography is False:
             return None
-        if self.topography is None:
-            raise ValueError(
-                "Topography is required for this model, but no topography "
-                "dataset was specified in the configuration."
-            )
-        topography = get_normalized_topography(self.topography)
+        if static_inputs_from_checkpoint is not None:
+            # TODO: change to use full static inputs list
+            topography = static_inputs_from_checkpoint[0]
+        else:
+            if self.topography is None:
+                raise ValueError(
+                    "Topography is required for this model, but no topography "
+                    "dataset was specified in the configuration nor provided "
+                    "in model checkpoint."
+                )
+            topography = get_normalized_topography(self.topography)
+
         # Fine grid boundaries are adjusted to exactly match the coarse grid
         fine_lat_interval = adjust_fine_coord_range(
             self.lat_extent,
@@ -213,7 +228,14 @@ class DataLoaderConfig:
         self,
         requirements: DataRequirements,
         dist: Distributed | None = None,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
+        # TODO: static_inputs_from_checkpoint is currently passed from the model
+        # to allow loading fine topography when no fine data is available.
+        # See PR https://github.com/ai2cm/ace/pull/728
+        # In the future we could disentangle this dependency between the data loader
+        # and model by enabling the built GriddedData objects to take in full static
+        # input fields and subset them to the same coordinate range as data.
         xr_dataset, properties = self.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
         )
@@ -231,7 +253,9 @@ class DataLoaderConfig:
             dist = Distributed.get_instance()
         # Shuffle is not used for generation, it is set to False.
         sampler = (
-            ContiguousDistributedSampler(dataset) if dist.is_distributed() else None
+            ContiguousDistributedSampler(dataset, drop_last=self.drop_last)
+            if dist.is_distributed()
+            else None
         )
         dataloader = DataLoader(
             dataset,
@@ -249,6 +273,7 @@ class DataLoaderConfig:
         subset_topography = self.build_topography(
             coarse_coords=latlon_coords,
             requires_topography=requirements.use_fine_topography,
+            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
         )
         return GriddedData(
             _loader=dataloader,
@@ -298,6 +323,9 @@ class PairedDataLoaderConfig:
         sample_with_replacement: If provided, the dataset will be
             sampled randomly with replacement to the given size each period,
             instead of retrieving each sample once (either shuffled or not).
+        drop_last: Use drop_last option in sampler. Defaults to False. If True,
+            drop the last samples required to have even batch sizes across ranks.
+            If false, pad with extra samples to make ranks have the same size batches.
     """
 
     fine: Sequence[XarrayDataConfig]
@@ -314,6 +342,7 @@ class PairedDataLoaderConfig:
     repeat: int = 1
     topography: str | None = None
     sample_with_replacement: int | None = None
+    drop_last: bool = False
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
@@ -347,7 +376,15 @@ class PairedDataLoaderConfig:
         train: bool,
         requirements: DataRequirements,
         dist: Distributed | None = None,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> PairedGriddedData:
+        # TODO: static_inputs_from_checkpoint is currently passed from the model
+        # to allow loading fine topography when no fine data is available.
+        # See PR https://github.com/ai2cm/ace/pull/728
+        # In the future we could disentangle this dependency between the data loader
+        # and model by enabling the built GriddedData objects to take in full static
+        # input fields and subset them to the same coordinate range as data.
+
         if dist is None:
             dist = Distributed.get_instance()
 
@@ -355,14 +392,14 @@ class PairedDataLoaderConfig:
         dataset_fine, properties_fine = get_dataset(
             self.fine,
             requirements.fine_names,
-            requirements.n_timesteps,
+            IntSchedule.from_constant(requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
 
         dataset_coarse, properties_coarse = get_dataset(
             self.coarse_full_config,
             requirements.coarse_names,
-            requirements.n_timesteps,
+            IntSchedule.from_constant(requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
 
@@ -401,7 +438,10 @@ class PairedDataLoaderConfig:
         )
 
         if requirements.use_fine_topography:
-            if self.topography is None:
+            if static_inputs_from_checkpoint is not None:
+                # TODO: change to use full static inputs list
+                fine_topography = static_inputs_from_checkpoint[0]
+            elif self.topography is None:
                 data_path = self.fine[0].data_path
                 file_pattern = self.fine[0].file_pattern
                 raw_paths = get_raw_paths(data_path, file_pattern)
@@ -412,6 +452,7 @@ class PairedDataLoaderConfig:
                 fine_topography = get_normalized_topography(raw_paths[0])
             else:
                 fine_topography = get_normalized_topography(self.topography)
+
             fine_topography = fine_topography.to_device()
             if (
                 get_topography_downscale_factor(
@@ -424,6 +465,7 @@ class PairedDataLoaderConfig:
                     f"Fine topography shape {fine_topography.shape} does not match "
                     f"fine data shape {properties_fine.horizontal_coordinates.shape}."
                 )
+
             fine_topography = fine_topography.subset_latlon(
                 lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
             )
@@ -464,7 +506,9 @@ class PairedDataLoaderConfig:
             dataset_fine_subset,
             dataset_coarse_subset,
         )
-        sampler = self._get_sampler(dataset=dataset, dist=dist, train=train)
+        sampler = self._get_sampler(
+            dataset=dataset, dist=dist, train=train, drop_last=self.drop_last
+        )
         dataloader = DataLoader(
             dataset,
             batch_size=dist.local_batch_size(int(self.batch_size)),
@@ -503,10 +547,7 @@ class PairedDataLoaderConfig:
         )
 
     def _get_sampler(
-        self,
-        dataset: Dataset,
-        dist: Distributed,
-        train: bool,
+        self, dataset: Dataset, dist: Distributed, train: bool, drop_last: bool = False
     ) -> RandomSampler | DistributedSampler | None:
         # Use RandomSampler with replacement for both distributed and
         # non-distributed cases
@@ -521,9 +562,11 @@ class PairedDataLoaderConfig:
             )
         if dist.is_distributed():
             if train:
-                sampler = DistributedSampler(dataset, shuffle=train)
+                sampler = DistributedSampler(
+                    dataset, shuffle=train, drop_last=drop_last
+                )
             else:
-                sampler = ContiguousDistributedSampler(dataset)
+                sampler = ContiguousDistributedSampler(dataset, drop_last=drop_last)
         else:
             sampler = None
 

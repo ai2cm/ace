@@ -231,7 +231,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         )
         if isinstance(config.dataset, XarrayDataConfig):
             dataset: XarrayDataset | MergedXarrayDataset = XarrayDataset(
-                config.dataset, requirements.names, requirements.n_timesteps
+                config.dataset, requirements.names, requirements.n_timesteps_schedule
             )
             properties = dataset.properties
         elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
@@ -239,7 +239,9 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             properties = dataset.properties
         self._properties = properties
         self._dataset = dataset
-        self._forward_steps_in_memory = requirements.n_timesteps - 1
+        self._forward_steps_in_memory = (
+            requirements.n_timesteps_schedule.get_value(0) - 1
+        )  # during inference, schedules are ignored
         self._total_forward_steps = total_forward_steps
         self._perturbations = config.perturbations
         self._surface_temperature_name = surface_temperature_name
@@ -295,7 +297,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                     self._total_forward_steps + self._start_indices[i_member] + 1
                 )
             window_time_slice = slice(i_window_start, i_window_end)
-            tensors, time, labels = self._dataset.get_sample_by_time_slice(
+            tensors, time, labels, epoch = self._dataset.get_sample_by_time_slice(
                 window_time_slice
             )
             if self._label_override is not None:
@@ -317,7 +319,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                         self._lons,
                         tensors[self._ocean_fraction_name],
                     )
-            sample_tuples.append((tensors, time, labels))
+            sample_tuples.append((tensors, time, labels, epoch))
         return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
@@ -373,7 +375,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             current_dataset = XarrayDataset(
                 config,
                 per_dataset_names[config_counter],
-                requirements.n_timesteps,
+                requirements.n_timesteps_schedule,
             )
             merged_xarray_datasets.append(current_dataset)
             config_counter += 1

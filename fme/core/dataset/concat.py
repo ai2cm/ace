@@ -8,6 +8,7 @@ import xarray as xr
 from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import accumulate_labels
 from fme.core.dataset.xarray import XarrayDataConfig, get_xarray_datasets
 
@@ -87,7 +88,7 @@ class XarrayConcat(DatasetABC):
 def get_dataset(
     dataset_configs: Sequence[XarrayDataConfig],
     names: Sequence[str],
-    n_timesteps: int,
+    n_timesteps: IntSchedule,
     strict: bool = True,
 ) -> tuple[XarrayConcat, DatasetProperties]:
     datasets, properties = get_xarray_datasets(
@@ -117,7 +118,7 @@ class ConcatDatasetConfig(DatasetConfigABC):
     def build(
         self,
         names: Sequence[str],
-        n_timesteps: int,
+        n_timesteps: IntSchedule,
     ) -> tuple[DatasetABC, DatasetProperties]:
         return get_dataset(
             self.concat,

@@ -97,6 +97,11 @@ def merge_stats(config: MergeStatsConfig):
         stats = xr.Dataset(combined_stats)
         for rename_config in config.rename:
             stats = rename_config.rename_var(stats)
+        stats.attrs["input_samples"] = datasets[0].attrs["input_samples"]
+        logging.info(
+            "Using first stats dataset's 'input_samples' attribute of "
+            f"{stats.attrs['input_samples']} for the merged stats."
+        )
         print(stats.load())
         with tempfile.TemporaryDirectory() as tmpdir:
             local_path = os.path.join(tmpdir, fname)

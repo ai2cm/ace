@@ -3,7 +3,6 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-import warnings
 from collections.abc import Callable, Generator, Mapping
 from typing import Any, Literal, cast
 
@@ -24,7 +23,11 @@ from fme.ace.stepper.parameter_init import (
     WeightsAndHistoryLoader,
     null_weights_and_history,
 )
-from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLength,
+    TimeLengthProbabilities,
+    TimeLengthSchedule,
+)
 from fme.core.coordinates import (
     NullPostProcessFn,
     SerializableVerticalCoordinate,
@@ -32,6 +35,7 @@ from fme.core.coordinates import (
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
@@ -102,7 +106,6 @@ class SingleModuleStepperConfig:
         multi_call: The configuration of multi-called diagnostics.
         include_multi_call_in_loss: Whether to include multi-call diagnostics in the
             loss. The same loss configuration as specified in 'loss' is used.
-        crps_training: Whether to use CRPS training for stochastic models.
         residual_prediction: Whether to have ML module predict tendencies for
             prognostic variables.
     """
@@ -124,7 +127,6 @@ class SingleModuleStepperConfig:
     residual_normalization: NormalizationConfig | None = None
     multi_call: MultiCallConfig | None = None
     include_multi_call_in_loss: bool = False
-    crps_training: bool = False
     residual_prediction: bool = False
 
     def __post_init__(self):
@@ -214,6 +216,8 @@ class SingleModuleStepperConfig:
             del state_copy["prescriber"]
         if "activation_checkpointing" in state_copy:
             del state_copy["activation_checkpointing"]
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]  # training value, ok to break
         return state_copy
 
     def to_stepper_config(
@@ -240,7 +244,6 @@ class SingleModuleStepperConfig:
         return StepperConfig(
             step=self._to_step_config(normalizer, loss_normalizer),
             loss=self.loss,
-            crps_training=self.crps_training,
             parameter_init=self.parameter_init,
         )
 
@@ -297,7 +300,6 @@ class SingleModuleStepperConfig:
             ocean=self.ocean,
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
-            crps_training=self.crps_training,
             residual_prediction=self.residual_prediction,
         )
 
@@ -495,8 +497,6 @@ class StepperConfig:
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
-        crps_training: Deprecated, kept for backwards compatibility. Use
-            n_ensemble=2 with a CRPS loss instead.
         parameter_init: The parameter initialization configuration.
         input_masking: Config for masking step inputs.
         train_n_forward_steps: The number of timesteps to train on and associated
@@ -511,34 +511,24 @@ class StepperConfig:
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
-    crps_training: bool = False
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
     input_masking: StaticMaskingConfig | None = None
-    train_n_forward_steps: TimeLengthProbabilities | int | None = None
+    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
     derived_forcings: DerivedForcingsConfig = dataclasses.field(
         default_factory=lambda: DerivedForcingsConfig()
     )
 
     @property
-    def train_n_forward_steps_sampler(self) -> TimeLengthProbabilities | None:
-        if isinstance(self.train_n_forward_steps, int):
-            return TimeLengthProbabilities.from_constant(self.train_n_forward_steps)
-        return self.train_n_forward_steps
+    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
+        if self.train_n_forward_steps is None:
+            return None
+        if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
+            return self.train_n_forward_steps
+        return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
 
     def __post_init__(self):
-        if self.crps_training:
-            warnings.warn(
-                "crps_training is deprecated, use n_ensemble=2 "
-                "with a CRPS loss instead",
-                DeprecationWarning,
-            )
-            self.n_ensemble = 2
-            self.loss = StepLossConfig(
-                type="EnsembleLoss",
-                kwargs={"crps_weight": 1.0},
-            )
         if self.n_ensemble == -1:
             if self.loss.type == "EnsembleLoss":
                 self.n_ensemble = 2
@@ -559,7 +549,7 @@ class StepperConfig:
                     "default_n_forward_steps is required if "
                     "train_n_forward_steps is not provided"
                 )
-            n_forward_steps = default_n_forward_steps
+            n_forward_steps: int | IntSchedule = default_n_forward_steps
         elif isinstance(self.train_n_forward_steps, int):
             n_forward_steps = self.train_n_forward_steps
         else:
@@ -600,7 +590,11 @@ class StepperConfig:
         )
         return self.derived_forcings.update_requirements(requirements)
 
-    def _window_steps_required(self, n_forward_steps: int) -> int:
+    def _window_steps_required(
+        self, n_forward_steps: int | IntSchedule
+    ) -> int | IntSchedule:
+        if isinstance(n_forward_steps, IntSchedule):
+            return n_forward_steps.add(self.n_ic_timesteps)
         return n_forward_steps + self.n_ic_timesteps
 
     def as_loaded_dict(self):
@@ -738,6 +732,8 @@ class StepperConfig:
     @classmethod
     def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]  # training value, ok to break
         return state_copy
 
     def replace_ocean(self, ocean: OceanConfig | None):
@@ -793,6 +789,17 @@ class StepperConfig:
         )
 
 
+class EpochNotProvidedError(ValueError):
+    pass
+
+
+def probabilities_from_time_length(value: TimeLength) -> TimeLengthProbabilities:
+    if isinstance(value, TimeLengthProbabilities):
+        return value
+    else:
+        return TimeLengthProbabilities.from_constant(value)
+
+
 class Stepper(
     TrainStepperABC[
         PrognosticState,
@@ -843,7 +850,17 @@ class Stepper(
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
-        self._train_n_forward_steps_sampler = config.train_n_forward_steps_sampler
+        self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
+        self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
+        if config.train_n_forward_steps_schedule is None:
+            pass
+        elif len(config.train_n_forward_steps_schedule.milestones) == 0:
+            self._train_n_forward_steps_sampler = probabilities_from_time_length(
+                config.train_n_forward_steps_schedule.start_value
+            )
+        else:
+            self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
+        self._epoch: int | None = None  # to keep track of cached values
 
         def get_loss_obj() -> StepLoss:
             loss_normalizer = step.get_loss_normalizer()
@@ -892,6 +909,23 @@ class Stepper(
 
         self._dataset_info = dataset_info
         self._forcing_deriver = config.derived_forcings.build(dataset_info)
+
+    def _init_for_epoch(self, epoch: int | None):
+        if epoch is None and self._train_n_forward_steps_schedule is not None:
+            raise EpochNotProvidedError(
+                "current configuration requires epoch to be provided "
+                "on BatchData during training"
+            )
+        if self._epoch == epoch:
+            return
+        if self._train_n_forward_steps_schedule is not None:
+            assert epoch is not None  # already checked, but needed for mypy
+            self._train_n_forward_steps_sampler = probabilities_from_time_length(
+                self._train_n_forward_steps_schedule.get_value(epoch)
+            )
+        else:
+            self._train_n_forward_steps_sampler = None
+        self._epoch = epoch
 
     @property
     def _loaded_loss_normalizer(self) -> StandardNormalizer:
@@ -1142,14 +1176,15 @@ class Stepper(
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
 
-            state = self.step(
-                StepArgs(
-                    input=input_data,
-                    next_step_input_data=next_step_input_dict,
-                    labels=labels,
-                ),
-                wrapper=checkpoint,
-            )
+            with optimizer.autocast():
+                state = self.step(
+                    StepArgs(
+                        input=input_data,
+                        next_step_input_data=next_step_input_dict,
+                        labels=labels,
+                    ),
+                    wrapper=checkpoint,
+                )
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
@@ -1326,6 +1361,7 @@ class Stepper(
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
+        self._init_for_epoch(data.epoch)
         metrics: dict[str, float] = {}
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         target_data = self.get_forward_data(data, compute_derived_variables=False)

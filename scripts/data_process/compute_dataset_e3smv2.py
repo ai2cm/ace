@@ -9,6 +9,7 @@
 # 1hr 10min to complete, using a max of about 100 GB of memory for 21 years of
 # input data.
 
+import logging
 import os
 import time
 from glob import glob
@@ -25,15 +26,18 @@ from compute_dataset import (
     assert_column_integral_of_moisture_is_conserved,
     assert_global_dry_air_mass_conservation,
     assert_global_moisture_conservation,
+    clear_compressors_encoding,
     compute_column_advective_moisture_tendency,
     compute_column_moisture_integral,
     compute_specific_total_water,
     compute_tendencies,
     compute_vertical_coarsening,
 )
-from dask.diagnostics import ProgressBar
 from dask.distributed import Client
+from xarray.coding.times import CFDatetimeCoder
 from xtorch_harmonics import roundtrip_filter
+
+coder = CFDatetimeCoder(use_cftime=True)
 
 # default paths for input/output; can be changed when calling this script
 INPUT_DIR = "/global/cfs/cdirs/e3sm/golaz/E3SM/fme/20230614.v2.LR.F2010/post/atm/180x360_gaussian/ts"  # noqa: E501
@@ -106,6 +110,38 @@ def get_time_invariant_nc_paths(
     return paths
 
 
+def open_coupled_dataset(
+    input_dir: str, config: DatasetComputationConfig
+) -> xr.Dataset:
+    dataset_dirs = {}
+    datasets = {}
+    input_variable_names = config.variable_sources
+    chunks = config.chunking.get_chunks(config.standard_names)
+    for key in config.variable_sources.keys():
+        if key == "time_invariant":
+            path = get_time_invariant_nc_paths(config.time_invariant_dir)
+            ds = xr.open_dataset(path[key][0]).drop_vars(
+                DROP_VARIABLE_NAMES["2D"], errors="ignore"
+            )
+            if "time" in ds.coords:
+                ds = ds.isel(time=0, drop=True)
+            for varname in input_variable_names["time_invariant"]:
+                if varname not in datasets and varname in ds.variables:
+                    datasets[varname] = ds
+        if key != "time_invariant":
+            dataset_dirs[key] = os.path.join(input_dir, key)
+            ds = xr.open_mfdataset(
+                os.path.join(f"{input_dir}/{key}", "*.nc"),
+                decode_times=coder,
+                chunks=chunks,
+                data_vars="minimal",
+                coords="minimal",
+            ).drop(["time_bnds"], errors="ignore")
+            datasets[key] = ds
+    ds = xr.merge(datasets.values(), compat="override", join="override")
+    return ds
+
+
 def open_dataset(
     dataset_dirs: MutableMapping[str, str],
     config: DatasetComputationConfig,
@@ -115,8 +151,9 @@ def open_dataset(
     input_variable_names = config.variable_sources
     for key in dataset_dirs.keys():
         var_paths.update(get_nc_paths(dataset_dirs[key], input_variable_names[key]))
+
     var_paths.update(get_time_invariant_nc_paths(config.time_invariant_dir))
-    print(
+    logging.info(
         f"Opening {len(list(chain.from_iterable(var_paths.values())))} files with "
         f"{len(var_paths.keys())} vars..."
     )
@@ -153,8 +190,8 @@ def open_dataset(
             coords="minimal",
             parallel=True,
         ).drop(drop_vars, errors="ignore")
-        print(f"{varname} files opened in {time.time() - var_start:.2f} s...")
-    print(f"All files opened in {time.time() - start:.2f} s. Merging...")
+        logging.info(f"{varname} files opened in {time.time() - var_start:.2f} s...")
+    logging.info(f"All files opened in {time.time() - start:.2f} s. Merging...")
     return xr.merge(datasets.values(), compat="override", join="override")
 
 
@@ -228,8 +265,20 @@ def compute_surface_precipitation_rate(
     total_precip_rate_name,
     liquid_precip_density: float = LIQUID_PRECIP_DENSITY,
     output_name: str = SURFACE_PRECIPITATION,
+    standard_names=None,
 ):
-    precip_mass_flux = ds[total_precip_rate_name] * liquid_precip_density
+    if total_precip_rate_name not in ds.variables:
+        precip = (
+            ds[standard_names.surface_snow_rate]
+            + ds[standard_names.surface_ice_rate]
+            + ds[standard_names.convective_snow_rate]
+            + ds[standard_names.convective_liquid_ice_rate]
+        )
+        precip.attrs["long_name"] = "Total surface precipitation rate"
+        ds[total_precip_rate_name] = precip
+    else:
+        precip = ds[total_precip_rate_name]
+    precip_mass_flux = precip * liquid_precip_density
     precip_mass_flux.attrs["units"] = "kg/m2/s"
     precip_mass_flux.attrs["long_name"] = output_name.replace("_", " ")
     return ds.assign({output_name: precip_mass_flux})
@@ -263,20 +312,41 @@ def compute_rad_fluxes(
 def construct_lazy_dataset(
     config: DatasetComputationConfig,
     dataset_dirs: MutableMapping[str, str],
+    coupled: bool = False,
+    input_dir: str = INPUT_DIR,
 ) -> xr.Dataset:
     start = time.time()
     standard_names = config.standard_names
-    print(f"Opening dataset...")
-    ds = open_dataset(dataset_dirs, config)
-    print(f"Dataset opened in {time.time() - start:.2f} s total.")
-    print(f"Input dataset size is {ds.nbytes / 1e9} GB")
+    logging.info(f"Opening dataset...")
+    if coupled:
+        ds = open_coupled_dataset(input_dir, config)
+    else:
+        ds = open_dataset(dataset_dirs, config)
+    logging.info(f"Dataset opened in {time.time() - start:.2f} s total.")
+    logging.info(f"Input dataset size is {ds.nbytes / 1e9} GB")
     if config.roundtrip_fraction_kept is not None:
-        ds = roundtrip_filter(
-            ds,
-            lat_dim=standard_names.latitude_dim,
-            lon_dim=standard_names.longitude_dim,
-            fraction_modes_kept=config.roundtrip_fraction_kept,
-        )
+        if config.roundtrip_variables is None:
+            logging.info(f"Applying roundtrip filter to all variables...")
+            ds = roundtrip_filter(
+                ds,
+                lat_dim=standard_names.latitude_dim,
+                lon_dim=standard_names.longitude_dim,
+                fraction_modes_kept=config.roundtrip_fraction_kept,
+            )
+        else:
+            logging.info(
+                f"Applying roundtrip filter to variables: {config.roundtrip_variables}"
+            )
+            vars_to_filter = config.roundtrip_variables
+            ds_filtered = ds[vars_to_filter]
+            ds_unfilterd = ds.drop_vars(vars_to_filter)
+            ds_filtered = roundtrip_filter(
+                ds_filtered,
+                lat_dim=standard_names.latitude_dim,
+                lon_dim=standard_names.longitude_dim,
+                fraction_modes_kept=config.roundtrip_fraction_kept,
+            )
+            ds = xr.merge([ds_filtered, ds_unfilterd])
 
     ds = compute_pressure_thickness(
         ds,
@@ -291,6 +361,7 @@ def construct_lazy_dataset(
     ds = compute_surface_precipitation_rate(
         ds,
         total_precip_rate_name=standard_names.precip_rate,
+        standard_names=standard_names,
     )
     water_species_name = [
         item for item in standard_names.water_species if item.lower() != "none"
@@ -335,8 +406,11 @@ def construct_lazy_dataset(
     )
     ds = xr.merge([ds, ak_bk_ds])
     ds_dirs = list(dataset_dirs.values())
-    chunks = config.chunking.get_chunks(config.standard_names)
-    ds = ds.chunk(chunks).astype(np.float32)
+    if config.sharding is None:
+        outer_chunks = config.chunking.get_chunks(config.standard_names)
+    else:
+        outer_chunks = config.sharding.get_chunks(config.standard_names)
+    ds = ds.chunk(outer_chunks).astype(np.float32)
     ds.attrs["history"] = (
         "Dataset computed by full-model/scripts/e3smv2_data_process"
         "/compute_dataset_e3smv2.py"
@@ -369,6 +443,7 @@ def construct_lazy_dataset(
     help="Create a dataset of 2D vars for checking the water budget.",
 )
 @click.option("--n-workers", default=4, help="Number of Dask workers.")
+@click.option("--coupled-atm", is_flag=True, help="Open coupled atmosphere dataset.")
 def main(
     config,
     input_dir,
@@ -378,7 +453,9 @@ def main(
     check_conservation,
     water_budget_dataset,
     n_workers,
+    coupled_atm,
 ):
+    logging.basicConfig(level=logging.INFO)
     xr.set_options(keep_attrs=True)
     _ = Client(n_workers=n_workers)
     config = DatasetConfig.from_file(config).dataset_computation
@@ -387,7 +464,9 @@ def main(
     for key in config.variable_sources.keys():
         if key != "time_invariant":
             dataset_dirs[key] = os.path.join(input_dir, key)
-    ds = construct_lazy_dataset(config, dataset_dirs)
+    ds = construct_lazy_dataset(
+        config, dataset_dirs, coupled=coupled_atm, input_dir=input_dir
+    )
     if subsample:
         ds = ds.isel(time=slice(10, 13))
     if check_conservation:
@@ -452,22 +531,38 @@ def main(
                 "FSNTOA",
                 "PRECSC",
                 "PRECSL",
+                "PRECC",
+                "PRECL",
                 "QFLX",
             ]
         )
-        ds = ds.drop(dropped_variables, errors="ignore")
-    print(f"Output dataset size is {ds.nbytes / 1e9} GB")
+        ds = ds.drop_vars(dropped_variables, errors="ignore")
+
+    if config.sharding is None:
+        inner_chunks = None
+    else:
+        inner_chunks = config.chunking.get_chunks(standard_names)
+
+    ds = clear_compressors_encoding(ds)
+    logging.info(f"Output dataset size is {ds.nbytes / 1e9} GB")
     if debug:
         with xr.set_options(display_max_rows=500):
-            print(ds)
+            logging.debug(ds)
     else:
-        ds.partition.initialize_store(output)
+        ds.partition.initialize_store(output, inner_chunks=inner_chunks)
         for i in range(config.n_split):
-            print(f"Writing segment {i + 1} / {config.n_split}")
-            with ProgressBar():
-                ds.partition.write(
-                    output, config.n_split, ["time"], i, collect_variable_writes=True
-                )
+            segment_number = f"{i + 1} / {config.n_split}"
+            logging.info(f"Writing segment {segment_number}")
+            segment_time = time.time()
+            ds.partition.write(
+                output,
+                config.n_split,
+                [config.standard_names.time_dim],
+                i,
+                collect_variable_writes=True,
+            )
+            segment_time = time.time() - segment_time
+            logging.info(f"Segment {segment_number} time: {segment_time:0.2f} seconds")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import torch
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.core.dataset.dataset import DatasetItem
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.distributed import Distributed
 from fme.core.generics.dataloader import GenericDataLoader
 from fme.core.generics.dataset import GenericDataset
@@ -17,7 +18,7 @@ from fme.core.rand import alternate_seed
 def get_data_loader(
     dataset: GenericDataset[DatasetItem],
     batch_size: int,
-    n_window_timesteps: int,
+    n_window_timesteps: IntSchedule,
     time_buffer: int,
     num_workers: int,
     sampler: torch.utils.data.Sampler,
@@ -48,11 +49,10 @@ def get_data_loader(
     )
     dataloader: DataLoaderABC
     if time_buffer > 0:
-        n_timesteps_preloaded = time_buffer + n_window_timesteps
         dataloader = SlidingWindowDataLoader(
             loader=torch_dataloader,
-            input_n_timesteps=n_timesteps_preloaded,
             output_n_timesteps=n_window_timesteps,
+            time_buffer=time_buffer,
             shuffle=shuffled,
         )
     else:
@@ -65,7 +65,7 @@ def get_data_loader(
             f"batch size is {dataloader.batch_size}"
         )
         if time_buffer > 0:
-            msg += f", and an outer sample length is {n_timesteps_preloaded}"
+            msg += f", and time_buffer is {time_buffer}"
         raise ValueError(msg)
 
     return dataloader
@@ -161,8 +161,8 @@ class SlidingWindowDataLoader(DataLoaderABC):
     def __init__(
         self,
         loader: TorchDataLoader,
-        input_n_timesteps: int,
-        output_n_timesteps: int,
+        output_n_timesteps: IntSchedule,
+        time_buffer: int,
         shuffle: bool,
         n_skipped_input_batches: int = 0,
         skip_first_n_output_batches: int = 0,
@@ -175,11 +175,10 @@ class SlidingWindowDataLoader(DataLoaderABC):
 
         Args:
             loader: Pre-batched input data loader that returns batches of
-                `input_n_timesteps` timesteps.
-            input_n_timesteps: Number of timesteps in the input batch, i.e., the size of
-                the sliding window.
-            output_n_timesteps: Number of timesteps in the output batch, must be smaller
-                than the number of input timesteps.
+                `output_n_timesteps + time_buffer` timesteps.
+            output_n_timesteps: Number of timesteps in the output batch.
+            time_buffer: Number of extra timesteps in the input batches to allow
+                creating multiple output batches from a single input batch.
             shuffle: Whether to shuffle the start indices for the sliding window.
             n_skipped_input_batches: Number of input batches that have been skipped in
                 the base loader. Helpful to ensure that the random order of samples
@@ -195,10 +194,11 @@ class SlidingWindowDataLoader(DataLoaderABC):
         """
         self._input_loader_len = len(loader)
         self._loader = loader
-        assert output_n_timesteps <= input_n_timesteps
-        self._input_n_timesteps = input_n_timesteps
-        self._output_n_timesteps = output_n_timesteps
-        self._n_new_batches = input_n_timesteps - output_n_timesteps + 1
+        self._input_n_timesteps_schedule = output_n_timesteps.add(time_buffer)
+        self._n_new_batches = time_buffer + 1
+        self._time_buffer = time_buffer
+        self._output_n_timesteps_schedule = output_n_timesteps
+        self._update_n_timesteps_for_epoch(0)
         self._shuffle = shuffle
         self._n_skipped_input_batches = n_skipped_input_batches
         self._i_batch = self._n_skipped_input_batches
@@ -206,7 +206,12 @@ class SlidingWindowDataLoader(DataLoaderABC):
         self._skip_last_n_output_batches = skip_last_n_output_batches
         self._current_batch: BatchData | None = None
         self.set_epoch(0)
-        self._init_shuffle_indices()
+
+    def _update_n_timesteps_for_epoch(self, epoch: int):
+        self._input_n_timesteps = self._input_n_timesteps_schedule.get_value(epoch)
+        self._output_n_timesteps = self._output_n_timesteps_schedule.get_value(epoch)
+        assert self._output_n_timesteps <= self._input_n_timesteps
+        self._stored_shuffle_indices = None  # needs to be re-generated
 
     def __iter__(self) -> Iterator[BatchData]:
         # reset the iterator state
@@ -217,27 +222,29 @@ class SlidingWindowDataLoader(DataLoaderABC):
         except StopIteration:
             return iter([])
         self._counter = self._skip_first_n_output_batches
-        self._init_shuffle_indices()
         return self
 
-    def _init_shuffle_indices(self):
-        if self._shuffle:
-            self._shuffle_indices = torch.from_numpy(
-                random_columns_no_replacement(
-                    self._n_skipped_input_batches + self._input_loader_len,
-                    self._n_new_batches,
-                    seed=self._seed,
+    @property
+    def _shuffle_indices(self):
+        if self._stored_shuffle_indices is None:
+            if self._shuffle:
+                self._stored_shuffle_indices = torch.from_numpy(
+                    random_columns_no_replacement(
+                        self._n_skipped_input_batches + self._input_loader_len,
+                        self._n_new_batches,
+                        seed=self._seed,
+                    )
                 )
-            )
-        else:
-            self._shuffle_indices = torch.arange(self._n_new_batches)[
-                None, :
-            ].broadcast_to(
-                (
-                    self._n_skipped_input_batches + self._input_loader_len,
-                    self._n_new_batches,
+            else:
+                self._stored_shuffle_indices = torch.arange(self._n_new_batches)[
+                    None, :
+                ].broadcast_to(
+                    (
+                        self._n_skipped_input_batches + self._input_loader_len,
+                        self._n_new_batches,
+                    )
                 )
-            )
+        return self._stored_shuffle_indices
 
     def __len__(self) -> int:
         return self._input_loader_len * self._n_new_batches
@@ -275,7 +282,7 @@ class SlidingWindowDataLoader(DataLoaderABC):
         """
         Number of samples per dataset outer item, i.e., in a window.
         """
-        return self._input_n_timesteps - self._output_n_timesteps + 1
+        return self._n_new_batches
 
     def log_info(self, name: str):
         logging.info(
@@ -307,26 +314,29 @@ class SlidingWindowDataLoader(DataLoaderABC):
             start_batch=n_batches_to_skip, stop_batch=n_batches_to_stop
         )
         self._loaditer = iter(subsetted_loader)
-        return SlidingWindowDataLoader(
+        loader = SlidingWindowDataLoader(
             cast(TorchDataLoader, subsetted_loader),
-            input_n_timesteps=self._input_n_timesteps,
-            output_n_timesteps=self._output_n_timesteps,
+            output_n_timesteps=self._output_n_timesteps_schedule,
+            time_buffer=self._time_buffer,
             shuffle=self._shuffle,
             n_skipped_input_batches=n_batches_to_skip,
             skip_first_n_output_batches=n_sub_batches_to_skip,
             skip_last_n_output_batches=n_sub_batches_to_skip_last,
         )
+        loader.set_epoch(self._epoch)
+        return loader
 
     def set_epoch(self, epoch: int):
         self._epoch = epoch
         dist = Distributed.get_instance()
         self._seed = self._epoch + dist.get_seed()
         self._loader.set_epoch(epoch)
+        self._update_n_timesteps_for_epoch(epoch)
 
     def alternate_shuffle(self):
         self._loader.alternate_shuffle()
         self._seed = alternate_seed(self._seed)
-        self._init_shuffle_indices()
+        self._stored_shuffle_indices = None  # needs to be re-generated
 
 
 def get_skip_batches(
