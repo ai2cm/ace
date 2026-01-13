@@ -20,7 +20,7 @@ aggregator:
 loader:
   num_data_workers: 1
   dataset:
-    ocean:
+    atmosphere:
       merge:
         - data_path: /climate-default
           file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
@@ -28,7 +28,7 @@ loader:
         - data_path: /climate-default
           file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
           engine: zarr
-    atmosphere:
+    ocean:
       merge:
         - data_path: /climate-default
           file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
