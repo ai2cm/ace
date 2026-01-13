@@ -115,7 +115,7 @@ class Optimization(OptimizationABC):
     @contextlib.contextmanager
     def autocast(self):
         enabled = self.gscaler is not None
-        dtype = torch.bfloat16 if enabled else None
+        dtype = torch.float16 if enabled else None
         with torch.amp.autocast("cuda", enabled=enabled, dtype=dtype):
             yield
 
