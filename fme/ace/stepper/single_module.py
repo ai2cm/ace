@@ -736,13 +736,6 @@ class StepperConfig:
             del state_copy["crps_training"]  # training value, ok to break
         return state_copy
 
-    @classmethod
-    def from_dict(cls, state) -> "StepperConfig":
-        state = cls.remove_deprecated_keys(state)
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
-
     def replace_ocean(self, ocean: OceanConfig | None):
         self.step.replace_ocean(ocean)
 
@@ -791,6 +784,7 @@ class StepperConfig:
 
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )

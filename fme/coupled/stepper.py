@@ -633,7 +633,7 @@ class CoupledStepperConfig:
             data_class=cls,
             data=state,
             config=dacite.Config(
-                strict=True, type_hooks={StepperConfig: StepperConfig.from_dict}
+                strict=True, type_hooks={StepperConfig: StepperConfig.from_state}
             ),
         )
 
