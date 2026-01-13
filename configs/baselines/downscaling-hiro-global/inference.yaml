@@ -2,7 +2,7 @@ experiment_dir: /climate-default/home/annak/scratch/2026-01-12-ckpt-test/results
 model:
     checkpoint_path: /hiro-public-ckpt.tar
 data:
-    #topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+    topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
     coarse:
     - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
       engine: zarr
