@@ -1892,8 +1892,8 @@ def _get_ocean_data_for_predict_paired(
         )
 
     # Set forcing variables to known values
-    if "hfds_prognostic" in data_dict:
-        data_dict["hfds_prognostic"] = torch.full(
+    if "hfds_forcing" in data_dict:
+        data_dict["hfds_forcing"] = torch.full(
             (n_samples, total_timesteps, *img_shape), 99.0, device=DEVICE
         ) + torch.arange(total_timesteps, device=DEVICE).view(
             total_timesteps, 1, 1
@@ -1941,7 +1941,7 @@ def _get_ocean_data_for_predict_paired(
             [
                 "thetao_0",
                 "thetao_1",
-                "hfds_prognostic",
+                "hfds_forcing",
                 "hfgeou",
                 "sea_surface_fraction",
             ],
