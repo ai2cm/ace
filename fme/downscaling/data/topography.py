@@ -89,6 +89,12 @@ class Topography:
         for patch in patches:
             yield self._apply_patch(patch)
 
+    def to_state(self) -> dict:
+        return {
+            "data": self.data.cpu(),
+            "coords": self.coords.to_state(),
+        }
+
 
 def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
     if path.endswith(".zarr"):
@@ -196,3 +202,23 @@ class StaticInputs:
             yield StaticInputs(
                 fields=[field._apply_patch(patch) for field in self.fields]
             )
+
+    def to_state(self) -> dict:
+        return {
+            "fields": [field.to_state() for field in self.fields],
+        }
+
+    @classmethod
+    def from_state(cls, state: dict) -> "StaticInputs":
+        return cls(
+            fields=[
+                Topography(
+                    data=field_state["data"],
+                    coords=LatLonCoordinates(
+                        lat=field_state["coords"]["lat"],
+                        lon=field_state["coords"]["lon"],
+                    ),
+                )
+                for field_state in state["fields"]
+            ]
+        )
