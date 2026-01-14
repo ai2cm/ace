@@ -130,7 +130,7 @@ def ocean_heat_content_tendency(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    """Compute the column-integrated ocean heat content."""
+    """Compute the column-integrated ocean heat content tendency."""
     ohc = data.ocean_heat_content
     ohc_tendency = torch.zeros_like(ohc)
     ohc_tendency[:, 1:] = torch.diff(ohc, n=1, dim=1) / timestep.total_seconds()
@@ -140,21 +140,20 @@ def ocean_heat_content_tendency(
 @register(
     VariableMetadata(
         "W/m**2",
-        "Imbalance in tendency of ocean heat content and net incoming energy flux",
+        "Implied advective tendency of ocean heat content assuming closed budget",
     )
 )
-def ocean_heat_content_tendency_imbalance(
+def implied_tendency_of_ocean_heat_content_due_to_advection(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    """Columnwise imbalance in the ocean heat content tendency.
-
+    """Implied tendency of ocean heat content due to advection.
     This is computed as a residual from the column total energy budget.
     """
     column_energy_tendency = ocean_heat_content_tendency(data, timestep)
     flux_through_vertical_boundaries = data.net_energy_flux_into_ocean
-    imbalance = column_energy_tendency - flux_through_vertical_boundaries
-    return imbalance
+    implied_column_heating = column_energy_tendency - flux_through_vertical_boundaries
+    return implied_column_heating
 
 
 @register(

@@ -784,6 +784,7 @@ class StepperConfig:
 
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
@@ -1176,14 +1177,15 @@ class Stepper(
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
 
-            state = self.step(
-                StepArgs(
-                    input=input_data,
-                    next_step_input_data=next_step_input_dict,
-                    labels=labels,
-                ),
-                wrapper=checkpoint,
-            )
+            with optimizer.autocast():
+                state = self.step(
+                    StepArgs(
+                        input=input_data,
+                        next_step_input_data=next_step_input_dict,
+                        labels=labels,
+                    ),
+                    wrapper=checkpoint,
+                )
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
