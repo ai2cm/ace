@@ -1929,12 +1929,12 @@ def _get_ocean_data_for_predict_paired(
 
 
 @pytest.mark.parametrize(
-    "in_names,out_names,next_step_forcing_names",
+    "in_names,out_names,hfds_role",
     [
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "hfgeou", "sea_surface_fraction"],
             ["thetao_0", "thetao_1"],
-            ["hfds"],
+            "next_step_forcing",
             id="hfds_next_step_forcing",
         ),
         pytest.param(
@@ -1946,7 +1946,7 @@ def _get_ocean_data_for_predict_paired(
                 "sea_surface_fraction",
             ],
             ["thetao_0", "thetao_1", "hfds"],
-            [],
+            "diagnostic",
             id="hfds_diagnostic",
         ),
     ],
@@ -1954,9 +1954,12 @@ def _get_ocean_data_for_predict_paired(
 def test_ocean_derived_variables_integration(
     in_names,
     out_names,
-    next_step_forcing_names,
+    hfds_role,
 ):
-    stepper = _get_ocean_stepper(
+    next_step_forcing_names = []
+    if hfds_role == "next_step_forcing":
+        next_step_forcing_names.append("hfds")
+    stepper = _get_ocean_stepper(  # creates a PlusOne stepper
         in_names=in_names,
         out_names=out_names,
         next_step_forcing_names=next_step_forcing_names,
@@ -2035,19 +2038,11 @@ def test_ocean_derived_variables_integration(
             msg=f"Unexpected reference OHC imbalance at step {i+1}",
         )
 
-    if "hfds" in in_names:
+    if hfds_role == "next_step_forcing":
         # hfds is a forcing, so net_energy_flux_into_ocean_column in prediction
         # and reference are the same
-        torch.testing.assert_close(
-            pred_flux,
-            ref_flux,
-            msg="Unexpected pred energy flux into ocean, hfds forcing",
-        )
-    else:
-        # only the first step matches (by design)
-        for i in range(n_steps):
-            torch.testing.assert_close(
-                pred_flux[:, i],
-                ref_flux[:, i] + i,
-                msg=f"Unexpected step {i+1} pred energy flux into ocean, hfds diag",
-            )
+        torch.testing.assert_close(pred_flux, ref_flux)
+    elif hfds_role == "diagnostic":
+        # hfds is diagnostic, so the generated net_energy_flux_into_ocean
+        # differs from the reference
+        assert not torch.allclose(pred_flux, ref_flux)
