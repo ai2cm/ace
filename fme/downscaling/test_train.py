@@ -205,7 +205,10 @@ def test_train_main_logs(default_trainer_config, tmp_path, very_fast_only: bool)
         assert len(keys) > 5 or keys == set(["train/batch_loss"])
 
 
-def test_restore_checkpoint(default_trainer_config, tmp_path):
+def test_restore_checkpoint(default_trainer_config, tmp_path, very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
     config = dacite.from_dict(data_class=TrainerConfig, data=default_trainer_config)
     trainer1 = config.build()
     trainer2 = config.build()
