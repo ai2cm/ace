@@ -1,0 +1,35 @@
+experiment_dir: /results
+n_forward_steps: 21
+forward_steps_in_memory: 1
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 12
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+  wandb_dir_in_experiment_dir: true
+loader:
+  start_indices:
+    times:
+      - '2020-01-01T12:00:00'
+      - '2020-02-01T12:00:00'
+      - '2020-03-01T12:00:00'
+      #- '2020-04-01T12:00:00'
+      #- '2020-05-01T12:00:00'
+      #- '2020-06-01T12:00:00'
+      #- '2020-07-01T12:00:00'
+      #- '2020-08-01T12:00:00'
+      #- '2020-09-01T12:00:00'
+      #- '2020-10-01T12:00:00'
+      #- '2020-11-01T12:00:00'
+      #- '2020-12-01T12:00:00'
+  dataset:
+    data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+  num_data_workers: 16
+aggregator:
+  log_zonal_mean_images: 0
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
