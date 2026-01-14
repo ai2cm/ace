@@ -784,6 +784,7 @@ class StepperConfig:
 
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
