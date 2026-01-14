@@ -91,8 +91,13 @@ class SpectralFilterLayer(nn.Module):
         drop_rate=0.0,
         num_groups=1,
         filter_residual=False,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
     ):
         super(SpectralFilterLayer, self).__init__()
+
+        if lora_rank != 0 and filter_type != "linear":
+            raise NotImplementedError("LoRA is only supported for linear filter type.")
 
         if filter_type == "non-linear":
             self.filter = SpectralAttentionS2(
@@ -122,6 +127,8 @@ class SpectralFilterLayer(nn.Module):
                 bias=True,
                 use_tensorly=False if factorization is None else True,
                 filter_residual=filter_residual,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
             )
         elif filter_type == "makani-linear":
             self.filter = SpectralConv(
@@ -198,6 +205,8 @@ class FourierNeuralOperatorBlock(nn.Module):
         filter_num_groups: int = 1,
         lora_rank: int = 0,
         lora_alpha: float | None = None,
+        spectral_lora_rank: int = 0,
+        spectral_lora_alpha: float | None = None,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -232,6 +241,8 @@ class FourierNeuralOperatorBlock(nn.Module):
             drop_rate=drop_rate,
             filter_residual=filter_residual,
             num_groups=filter_num_groups,
+            lora_rank=spectral_lora_rank,
+            lora_alpha=spectral_lora_alpha,
         )
 
         if inner_skip == "linear":
@@ -547,6 +558,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         affine_norms: bool = False,
         lora_rank: int = 0,
         lora_alpha: float | None = None,
+        spectral_lora_rank: int = 0,
+        spectral_lora_alpha: float | None = None,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
@@ -664,6 +677,16 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.lora_alpha = (
             params.lora_alpha if hasattr(params, "lora_alpha") else lora_alpha
         )
+        self.spectral_lora_rank = (
+            params.spectral_lora_rank
+            if hasattr(params, "spectral_lora_rank")
+            else spectral_lora_rank
+        )
+        self.spectral_lora_alpha = (
+            params.spectral_lora_alpha
+            if hasattr(params, "spectral_lora_alpha")
+            else spectral_lora_alpha
+        )
 
         # no global padding because we removed the horizontal distributed code
         self.padding = (0, 0)
@@ -777,6 +800,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 filter_num_groups=self.filter_num_groups,
                 lora_rank=self.lora_rank,
                 lora_alpha=self.lora_alpha,
+                spectral_lora_rank=self.spectral_lora_rank,
+                spectral_lora_alpha=self.spectral_lora_alpha,
             )
 
             self.blocks.append(block)
@@ -828,7 +853,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
     def _init_weights(self, m):
         """Helper routine for weight initialization"""
-        if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
+        if isinstance(m, LoRAConv2d):
+            m.reset_parameters()
+        elif isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
             trunc_normal_(m.weight, std=0.02)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)

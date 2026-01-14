@@ -101,11 +101,7 @@ class LoRAConv2d(nn.Conv2d):
                 else nn.Identity()
             )
 
-            # Init: down ~ Kaiming, up = 0 so the module starts
-            # identical to base Conv2d.
-            nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
-            nn.init.zeros_(self.lora_up.weight)
-
+            self.reset_parameters()
             # Scaling as in LoRA: alpha / r
             self.lora_scaling = self.lora_alpha / float(self.lora_rank)
         else:
@@ -114,6 +110,12 @@ class LoRAConv2d(nn.Conv2d):
             self.lora_up = None
             self.lora_dropout = nn.Identity()
             self.lora_scaling = 0.0
+
+    def reset_parameters(self) -> None:
+        # Init: down ~ Kaiming, up = 0 so the module starts
+        # identical to base Conv2d.
+        nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_up.weight)
 
     def extra_repr(self) -> str:
         base = super().extra_repr()
