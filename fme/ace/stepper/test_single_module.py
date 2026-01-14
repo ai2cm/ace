@@ -1895,7 +1895,9 @@ def _get_ocean_data_for_predict_paired(
     if "hfds_prognostic" in data_dict:
         data_dict["hfds_prognostic"] = torch.full(
             (n_samples, total_timesteps, *img_shape), 99.0, device=DEVICE
-        ) + torch.arange(total_timesteps).view(total_timesteps, 1, 1)  # add a trend
+        ) + torch.arange(total_timesteps, device=DEVICE).view(
+            total_timesteps, 1, 1
+        )  # add a trend
     if "hfds" in data_dict:
         data_dict["hfds"] = torch.full(
             (n_samples, total_timesteps, *img_shape), 100.0, device=DEVICE
