@@ -2010,7 +2010,7 @@ def test_ocean_derived_variables_integration(
     torch.testing.assert_close(
         pred_tendency[:, 0],
         expected_pred_tendency_step1,
-        msg="Unexpected ped OHC tendency at step 1",
+        msg="Unexpected pred OHC tendency at step 1",
     )
     expected_ref_tendency_step1 = (ref_ohc[:, 0] - ic_ohc) / dt
     torch.testing.assert_close(
