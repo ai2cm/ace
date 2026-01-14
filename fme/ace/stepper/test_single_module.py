@@ -1976,22 +1976,15 @@ def test_ocean_derived_variables_integration(
         compute_derived_variables=True,
     )
 
-    assert "ocean_heat_content" in derived_data.data
-    assert "ocean_heat_content_tendency" in derived_data.data
-    assert "ocean_heat_content" in paired_output.prediction
-    assert "ocean_heat_content" in paired_output.reference
-    assert "ocean_heat_content_tendency" in paired_output.prediction
-    assert "ocean_heat_content_tendency" in paired_output.reference
-    assert "net_energy_flux_into_ocean_column" in paired_output.prediction
-    assert "net_energy_flux_into_ocean_column" in paired_output.reference
-    assert (
-        "implied_tendency_of_ocean_heat_content_due_to_advection"
-        in paired_output.prediction
-    )
-    assert (
-        "implied_tendency_of_ocean_heat_content_due_to_advection"
-        in paired_output.reference
-    )
+    for derived_var in [
+        "ocean_heat_content",
+        "ocean_heat_content_tendency",
+        "net_energy_flux_into_ocean_column",
+        "implied_tendency_of_ocean_heat_content_due_to_advection",
+    ]:
+        assert derived_var in derived_data.data
+        assert derived_var in paired_output.prediction
+        assert derived_var in paired_output.reference
 
     ic_ohc = derived_data.data["ocean_heat_content"][:, 0]
     pred_ohc = paired_output.prediction["ocean_heat_content"]
