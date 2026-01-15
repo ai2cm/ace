@@ -109,8 +109,9 @@ class DataLoaderConfig:
             have no fine-res paired targets.
             If None, no topography data will be loaded.
         lat_extent: The latitude extent to use for the dataset specified in
-            degrees (-88.0, 88.0).  The extent is inclusive, so the start and
-            stop values are included in the extent. The limits are set to avoid
+            degrees, limited to (-88.0, 88.0). The extent is inclusive, so the start and
+            stop values are included in the extent. Defaults to [-66, 70] which
+            covers continental land masses aside from Antarctica.
         lon_extent: The longitude extent to use for the dataset specified in
             degrees (0, 360). The extent is inclusive, so the start and
             stop values are included in the extent.
