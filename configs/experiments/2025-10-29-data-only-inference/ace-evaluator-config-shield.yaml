@@ -1,3 +1,4 @@
+experiment_dir: /results
 checkpoint_path: /ckpt.tar
 logging:
   log_to_screen: true
