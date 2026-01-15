@@ -127,7 +127,8 @@ def apply_by_include(
     if len(remaining_includes) > 0:
         raise UnusedRuleError(
             f"Model has include rules that do not match any parameters, "
-            f"include rules: {remaining_includes}"
+            f"include rules: {remaining_includes}, "
+            f"parameters: {list(model.state_dict().keys())}"
         )
     return model
 
@@ -159,6 +160,7 @@ def apply_by_exclude(
     if len(remaining_excludes) > 0:
         raise UnusedRuleError(
             f"Model has exclude rules that do not match any parameters, "
-            f"exclude rules: {remaining_excludes}"
+            f"exclude rules: {remaining_excludes}, "
+            f"parameters: {list(model.state_dict().keys())}"
         )
     return model
