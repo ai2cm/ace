@@ -2,4 +2,5 @@ group|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|
 fto-v1124-sfno-m351zi95-rv0ike6m||ocean-emulator-e3sm|rv0ike6m|best_inference_ckpt|ace-eamv3|m351zi95|best_inference_ckpt|skip|high||8|800GiB|2|ai2/ace||01KBQY7TN6ZBPA314DQYE88GV3|01KB2WD6GYC3PHWZ57Q5YED8ZG
 fto-v1124-sfno-c5ocb8t1-rv0ike6m||ocean-emulator-e3sm|rv0ike6m|best_inference_ckpt|ace-eamv3|c5ocb8t1|best_inference_ckpt|skip|high||8|800GiB|2|ai2/ace||01KC5KXMBE82ZAXJX3T7ZNNFAV|01KB2WD6GYC3PHWZ57Q5YED8ZG
 fto-v1124-pesvhsm3-vw7bwz18||ocean-emulator-e3sm|vw7bwz18|best_inference_ckpt|ace-eamv3|pesvhsm3|best_inference_ckpt|skip|high||8|800GiB|2|ai2/ace||01KCPT7B79YK6FDRX2KZEC6F27|01KB2YD040P3JA5JNN4FQHE5NZ
-fto-v1124-pesvhsm3-rv0ike6m||ocean-emulator-e3sm|rv0ike6m|best_inference_ckpt|ace-eamv3|pesvhsm3|best_inference_ckpt|train|high||8|800GiB|2|ai2/ace||01KCPT7B79YK6FDRX2KZEC6F27|01KB2WD6GYC3PHWZ57Q5YED8ZG
+fto-v1124-pesvhsm3-rv0ike6m||ocean-emulator-e3sm|rv0ike6m|best_inference_ckpt|ace-eamv3|pesvhsm3|best_inference_ckpt|skip|high||8|800GiB|2|ai2/ace||01KCPT7B79YK6FDRX2KZEC6F27|01KB2WD6GYC3PHWZ57Q5YED8ZG
+fto-v1124-ACE2S-cpwvww40-rv0ike6m||ocean-emulator-e3sm|rv0ike6m|best_inference_ckpt|ace-eamv3|cpwvww40|best_inference_ckpt|train|high||8|800GiB|2|ai2/ace||01KENDK3NS5SRPAHSTZEQXP4JF|01KB2WD6GYC3PHWZ57Q5YED8ZG
