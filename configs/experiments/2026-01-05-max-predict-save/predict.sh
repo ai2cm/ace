@@ -40,7 +40,7 @@ gantry run \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
-    --dataset $ACE_OUTPUT_DATASET:output_6hourly_predictions_ic${IC}.zarr:/ace-outputs.zarr \
+    --dataset $ACE_OUTPUT_DATASET:output_6hourly_predictions_ic${IC}.zarr:/ace_outputs.zarr \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
