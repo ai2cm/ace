@@ -31,6 +31,18 @@ from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
 
 
+def enforce_lat_bounds(lat: ClosedInterval):
+    if lat.start < -88.0 or lat.stop > 88.0:
+        raise ValueError(
+            "Latitude bounds must be within +/-88.24 degrees, "
+            f"got {lat.start} to {lat.stop}."
+            "This is enforced because the 3 km X-SHiELD dataset "
+            "does not have 32 fine grid midpoints between the last two "
+            "coarse latitude midpoints of the 100 km dataset, which breaks "
+            "the assumption used for subsetting fine grid latitudes."
+        )
+
+
 @dataclasses.dataclass
 class XarrayEnsembleDataConfig:
     """
@@ -97,8 +109,8 @@ class DataLoaderConfig:
             have no fine-res paired targets.
             If None, no topography data will be loaded.
         lat_extent: The latitude extent to use for the dataset specified in
-            degrees (-90, 90).  The extent is inclusive, so the start and
-            stop values are included in the extent.
+            degrees (-88.0, 88.0).  The extent is inclusive, so the start and
+            stop values are included in the extent. The limits are set to avoid
         lon_extent: The longitude extent to use for the dataset specified in
             degrees (0, 360). The extent is inclusive, so the start and
             stop values are included in the extent.
@@ -116,7 +128,7 @@ class DataLoaderConfig:
     strict_ensemble: bool
     topography: str | None = None
     lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+        default_factory=lambda: ClosedInterval(-88, 88.0)
     )
     lon_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
@@ -236,6 +248,7 @@ class DataLoaderConfig:
         # In the future we could disentangle this dependency between the data loader
         # and model by enabling the built GriddedData objects to take in full static
         # input fields and subset them to the same coordinate range as data.
+        enforce_lat_bounds(self.lat_extent)
         xr_dataset, properties = self.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
         )
@@ -309,7 +322,7 @@ class PairedDataLoaderConfig:
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
         lat_extent: The latitude extent to use for the dataset specified in
-            degrees (-90, 90).  The extent is inclusive, so the start and
+            degrees (-88, 88).  The extent is inclusive, so the start and
             stop values are included in the extent.
         lon_extent: The longitude extent to use for the dataset specified in
             degrees (0, 360). The extent is inclusive, so the start and
@@ -334,7 +347,7 @@ class PairedDataLoaderConfig:
     num_data_workers: int
     strict_ensemble: bool
     lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+        default_factory=lambda: ClosedInterval(-88, 88.0)
     )
     lon_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
@@ -384,7 +397,7 @@ class PairedDataLoaderConfig:
         # In the future we could disentangle this dependency between the data loader
         # and model by enabling the built GriddedData objects to take in full static
         # input fields and subset them to the same coordinate range as data.
-
+        enforce_lat_bounds(self.lat_extent)
         if dist is None:
             dist = Distributed.get_instance()
 
