@@ -12,6 +12,7 @@ from fme.core.corrector.ocean import (
     SeaIceFractionConfig,
 )
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
 from fme.core.ocean_data import OceanData
 from fme.core.typing_ import TensorMapping
@@ -207,13 +208,20 @@ def test_sea_ice_thickness_correction():
 
 def test_ocean_heat_content_correction():
     config = OceanCorrectorConfig(ocean_heat_content_correction=True)
-    ops = LatLonOperations(torch.ones(size=[3, 3]))
     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
     nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
     mask = torch.ones(nsamples, nlat, nlon, nlevels)
     mask[:, 0, 0, 0] = 0.0
     mask[:, 0, 0, 1] = 0.0
     mask[:, 0, 1, 1] = 0.0
+    masks = {
+        "mask_0": mask[:, :, :, 0],
+        "mask_1": mask[:, :, :, 1],
+        "mask_2d": mask[:, :, :, 0],
+    }
+    mask_provider = MaskProvider(masks)
+    ops = LatLonOperations(torch.ones(size=[3, 3]), mask_provider)
+
     idepth = torch.tensor([2.5, 10, 20])
     depth_coordinate = DepthCoordinate(idepth, mask)
 
@@ -234,12 +242,11 @@ def test_ocean_heat_content_correction():
     gen_data_corrected_dict = corrector(input_data_dict, gen_data_dict, {})
     gen_data_corrected = OceanData(gen_data_corrected_dict, depth_coordinate)
 
-    input_ohc = input_data.ocean_heat_content.sum(dim=(-1, -2), keepdim=True)
-    gen_ohc = gen_data.ocean_heat_content.sum(dim=(-1, -2), keepdim=True)
-    torch.allclose(
+    input_ohc = input_data.ocean_heat_content.nansum(dim=(-1, -2), keepdim=True)
+    gen_ohc = gen_data.ocean_heat_content.nansum(dim=(-1, -2), keepdim=True)
+    torch.testing.assert_close(
         gen_ohc,
         input_ohc * 2,
-        atol=1e-10,
         equal_nan=True,
     )
     ohc_change = (
@@ -250,9 +257,8 @@ def test_ocean_heat_content_correction():
         key: value * corrector_ratio for key, value in gen_data_dict.items()
     }
     expected_gen_data = OceanData(expected_gen_data_dict, depth_coordinate)
-    torch.allclose(
-        expected_gen_data.ocean_heat_content.nansum(dim=(-1, -2)),
-        gen_data_corrected.ocean_heat_content.nansum(dim=(-1, -2)),
-        atol=1e-10,
+    torch.testing.assert_close(
+        expected_gen_data.ocean_heat_content,
+        gen_data_corrected.ocean_heat_content,
         equal_nan=True,
     )
