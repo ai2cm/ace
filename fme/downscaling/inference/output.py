@@ -403,10 +403,12 @@ class TimeRangeConfig(DownscalingOutputConfig):
 
     Attributes:
         time_range: Time selection specification. Can be:
+
             - TimeSlice: Start/stop timestamps (e.g.,
               TimeSlice(start_time="2021-01-01", stop_time="2021-12-31"))
             - Slice: Integer indices (e.g., Slice(0, 365))
             - RepeatedInterval: Repeating time pattern
+
         lat_extent: Latitude bounds in degrees [-90, 90]. Default: full extent
             of the underlying data.
         lon_extent: Longitude bounds in degrees [-180, 360]. Default: full extent

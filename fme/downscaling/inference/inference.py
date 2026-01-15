@@ -166,8 +166,8 @@ class InferenceConfig:
         logging: Logging configuration.
         patch: Default patch prediction configuration.
 
-    Example YAML configuration:
-    ```yaml
+    Example YAML configuration::
+
         experiment_dir: /results
         model:
             checkpoint_path: /checkpoints/best_histogram_tail.ckpt
@@ -215,7 +215,6 @@ class InferenceConfig:
             log_to_file: true
             project: downscaling
             entity: my_organization
-    ```
     """
 
     model: CheckpointModelConfig | CascadePredictorConfig
