@@ -324,8 +324,10 @@ class PairedDataLoaderConfig:
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
         lat_extent: The latitude extent to use for the dataset specified in
-            degrees (-88, 88).  The extent is inclusive, so the start and
+            degrees [-88, 88].  The extent is inclusive, so the start and
             stop values are included in the extent.
+            Defaults to [-66, 70] which covers continental land masses aside
+            from Antarctica.
         lon_extent: The longitude extent to use for the dataset specified in
             degrees (0, 360). The extent is inclusive, so the start and
             stop values are included in the extent.

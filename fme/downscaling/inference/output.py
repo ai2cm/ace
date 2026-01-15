@@ -346,8 +346,9 @@ class EventConfig(DownscalingOutputConfig):
             time_format. Required field.
         time_format: strptime format for parsing event_time string.
             Default: "%Y-%m-%dT%H:%M:%S" (ISO 8601)
-        lat_extent: Latitude bounds in degrees [-88, 88]. Default: full extent
-            of the underlying data.
+        lat_extent: Latitude bounds in degrees limited to [-88, 88].
+        Defaults to (-66, 70) which covers continental land masses aside
+            from Antarctica.
         lon_extent: Longitude bounds in degrees [-180, 360]. Default: full extent
             of the underlying data.
     """
@@ -414,8 +415,9 @@ class TimeRangeConfig(DownscalingOutputConfig):
               TimeSlice(start_time="2021-01-01", stop_time="2021-12-31"))
             - Slice: Integer indices (e.g., Slice(0, 365))
             - RepeatedInterval: Repeating time pattern
-        lat_extent: Latitude bounds in degrees [-88, 88]. Default: full extent
-            of the underlying data.
+        lat_extent: Latitude bounds in degrees limited to [-88, 88].
+            Defaults to (-66, 70) which covers continental land masses aside
+            from Antarctica.
         lon_extent: Longitude bounds in degrees [-180, 360]. Default: full extent
             of the underlying data.
     """
