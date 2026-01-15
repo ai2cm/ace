@@ -581,6 +581,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.img_shape_eff = (self.itrans_up.lat_shapes[dist.comm_get_rank("h")], self.itrans_up.lon_shapes[dist.comm_get_rank("w")])
             self.h_loc = self.itrans.lat_shapes[dist.comm_get_rank("h")]
             self.w_loc = self.itrans.lon_shapes[dist.comm_get_rank("w")]
+            # Store full shape arrays for scatter/gather
+            self._lat_shapes = self.trans_down.lat_shapes
+            self._lon_shapes = self.trans_down.lon_shapes
         else:
             self.img_shape_loc = (self.trans_down.nlat, self.trans_down.nlon)
             #CHECK: should be itrans_up?
@@ -736,17 +739,18 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         # learned position embedding
         if self.pos_embed:
-            # Use full img_shape dimensions since pos_embed is added before
-            # spatial distribution occurs in the first FNO block's transform
+            # Use local dimensions for pos_embed since input is scattered to local
+            # before pos_embed is added
             self.pos_embed = nn.Parameter(
                 torch.zeros(
-                    1, self.embed_dim, self.img_shape[0], self.img_shape[1]
+                    1, self.embed_dim, self.img_shape_loc[0], self.img_shape_loc[1]
                 )
             )
             # self.pos_embed = nn.Parameter( torch.zeros(1, self.embed_dim, self.img_shape_eff[0], self.img_shape_eff[1]) )
             if dist.spatial_parallelism:
-              # pos_embed now has full dimensions, shared across spatial ranks
-              self.pos_embed.is_shared_mp = ["spatial"]
+              self.pos_embed.is_shared_mp = []
+              self.pos_embed.sharded_dims_mp = [None, None, "h", "w"]
+              self.pos_embed.type = "direct"
             else:
               self.pos_embed.is_shared_mp = ["matmul"]
 
@@ -780,10 +784,64 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         return x
 
+    def _scatter_spatial(self, x):
+        """Extract local spatial portion from full tensor when using spatial parallelism."""
+        dist = Distributed.get_instance()
+        if not dist.spatial_parallelism:
+            return x
+        
+        h_rank = dist.comm_get_rank("h")
+        w_rank = dist.comm_get_rank("w")
+        
+        # Compute slice boundaries using stored shape arrays
+        lat_start = sum(self._lat_shapes[:h_rank])
+        lat_end = lat_start + self._lat_shapes[h_rank]
+        lon_start = sum(self._lon_shapes[:w_rank])
+        lon_end = lon_start + self._lon_shapes[w_rank]
+        
+        return x[..., lat_start:lat_end, lon_start:lon_end].contiguous()
+
+    def _gather_spatial(self, x, full_shape):
+        """Gather local spatial portions back to full tensor when using spatial parallelism."""
+        dist = Distributed.get_instance()
+        if not dist.spatial_parallelism:
+            return x
+        
+        h_rank = dist.comm_get_rank("h")
+        w_rank = dist.comm_get_rank("w")
+        
+        # Create full-sized output tensor
+        batch_size = x.shape[0]
+        channels = x.shape[1]
+        full_h, full_w = full_shape
+        out = torch.zeros(batch_size, channels, full_h, full_w, device=x.device, dtype=x.dtype)
+        
+        # Compute slice boundaries using stored shape arrays
+        lat_start = sum(self._lat_shapes[:h_rank])
+        lat_end = lat_start + self._lat_shapes[h_rank]
+        lon_start = sum(self._lon_shapes[:w_rank])
+        lon_end = lon_start + self._lon_shapes[w_rank]
+        
+        # Place local data in the correct position
+        out[..., lat_start:lat_end, lon_start:lon_end] = x
+        
+        # All-gather across spatial ranks to get full output on all ranks
+        torch.distributed.all_reduce(out, group=dist.comm_get_group("spatial"))
+        
+        return out
+
     def forward(self, x):
-        # save big skip
+        # Store original shape for gather at the end
+        orig_shape = (x.shape[-2], x.shape[-1])
+        
+        # save big skip BEFORE scattering (residual filters are non-distributed)
         if self.big_skip:
             residual = self.residual_filter_up(self.residual_filter_down(x))
+            # Scatter residual to local portion to match decoder output
+            residual = self._scatter_spatial(residual)
+        
+        # Scatter input to local portions when using spatial parallelism
+        x = self._scatter_spatial(x)
 
         if self.checkpointing >= 1:
             x = checkpoint(self.encoder, x)
@@ -791,7 +849,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             x = self.encoder(x)
 
         if hasattr(self, "pos_embed"):
-            # old way of treating unequally shaped weights
+            # pos_embed is now local-sized, x is also local-sized
             if self.img_shape_loc != self.img_shape_eff:
                 xp = torch.zeros_like(x)
                 xp[..., : self.img_shape_loc[0], : self.img_shape_loc[1]] = (
@@ -815,6 +873,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             x = checkpoint(self.decoder, x)
         else:
             x = self.decoder(x)
+
+        # Gather local outputs back to full tensor
+        x = self._gather_spatial(x, orig_shape)
 
         return x
 # this part exposes the model to modulus by constructing modulus Modules
