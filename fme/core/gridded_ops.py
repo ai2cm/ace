@@ -14,7 +14,6 @@ from fme.core.hpx.reorder import get_reordering_xy_to_ring
 from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
 from fme.core.tensors import assert_dict_allclose
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.distributed import Distributed
 
 
 class GriddedOperations(abc.ABC):
@@ -294,10 +293,6 @@ class LatLonOperations(GriddedOperations):
                 "Area weights must be longitudinally uniform, "
                 "as assumed for zonal mean."
             )
-
-        dist = Distributed.get_instance()
-        if dist.spatial_parallelism:
-          area_weights = area_weights[*dist.get_local_slices(area_weights.shape)]
 
         self._device_area = area_weights.to(get_device())
         #NOTE: we do not need the *.to("cpu") lines.
