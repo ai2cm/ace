@@ -296,7 +296,11 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
         "ocean_sea_ice_fraction",
     ]
     ocean_out_names = ["thetao_0", "thetao_1", "sst", "ocean_sea_ice_fraction"]
-    ocean_derived_names = ["ocean_heat_content", "sea_ice_fraction"]
+    ocean_derived_names = [
+        "ocean_heat_content",
+        "ocean_heat_content_tendency",
+        "sea_ice_fraction",
+    ]
     atmos_in_names = [
         "DLWRFsfc",
         "PRESsfc",
