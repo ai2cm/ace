@@ -41,7 +41,7 @@ Please be responsive to feedback during the review process.
 You can install a developer environment using the `conda` package manager with
 `make create_environment`.
 
-Install pre-commit to ensure linting and type-hinting requirements are met before
+Install pre-commit hooks to ensure linting and type-hinting requirements are met before
 committing code: `pre-commit install`.
 
 You can run local tests with `pytest`. As a shortcut for running only faster unit
