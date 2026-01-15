@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
+import warnings
 from collections.abc import Callable, Generator, Mapping
 from typing import Any, Literal, cast
 
@@ -784,6 +785,7 @@ class StepperConfig:
 
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
@@ -852,14 +854,9 @@ class Stepper(
         self._parameter_initializer = parameter_initializer
         self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
         self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
-        if config.train_n_forward_steps_schedule is None:
-            pass
-        elif len(config.train_n_forward_steps_schedule.milestones) == 0:
-            self._train_n_forward_steps_sampler = probabilities_from_time_length(
-                config.train_n_forward_steps_schedule.start_value
-            )
-        else:
+        if config.train_n_forward_steps_schedule is not None:
             self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
+
         self._epoch: int | None = None  # to keep track of cached values
 
         def get_loss_obj() -> StepLoss:
@@ -911,11 +908,12 @@ class Stepper(
         self._forcing_deriver = config.derived_forcings.build(dataset_info)
 
     def _init_for_epoch(self, epoch: int | None):
-        if epoch is None and self._train_n_forward_steps_schedule is not None:
-            raise EpochNotProvidedError(
-                "current configuration requires epoch to be provided "
-                "on BatchData during training"
+        if epoch is None:
+            warnings.warn(
+                "epoch is not provided in BatchData during call to train_on_batch;"
+                " will assume epoch 0, and some features may not work as expected."
             )
+            epoch = 0
         if self._epoch == epoch:
             return
         if self._train_n_forward_steps_schedule is not None:
@@ -1176,14 +1174,15 @@ class Stepper(
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
 
-            state = self.step(
-                StepArgs(
-                    input=input_data,
-                    next_step_input_data=next_step_input_dict,
-                    labels=labels,
-                ),
-                wrapper=checkpoint,
-            )
+            with optimizer.autocast():
+                state = self.step(
+                    StepArgs(
+                        input=input_data,
+                        next_step_input_data=next_step_input_dict,
+                        labels=labels,
+                    ),
+                    wrapper=checkpoint,
+                )
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
