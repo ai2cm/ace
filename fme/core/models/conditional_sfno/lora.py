@@ -38,6 +38,8 @@ class LoRAConv2d(nn.Conv2d):
         lora_dropout: float = 0.0,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
+        self.lora_down: nn.Conv2d | None = None
+        self.lora_up: nn.Conv2d | None = None
         super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -101,21 +103,24 @@ class LoRAConv2d(nn.Conv2d):
                 else nn.Identity()
             )
 
-            self.reset_parameters()
             # Scaling as in LoRA: alpha / r
             self.lora_scaling = self.lora_alpha / float(self.lora_rank)
         else:
-            # Keep attributes for easier introspection, but no parameters.
-            self.lora_down = None
-            self.lora_up = None
             self.lora_dropout = nn.Identity()
             self.lora_scaling = 0.0
+        self.reset_parameters()
 
     def reset_parameters(self) -> None:
+        super().reset_parameters()
+        self._reset_lora_parameters()
+
+    def _reset_lora_parameters(self):
         # Init: down ~ Kaiming, up = 0 so the module starts
         # identical to base Conv2d.
-        nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
-        nn.init.zeros_(self.lora_up.weight)
+        if self.lora_down is not None:
+            nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
+        if self.lora_up is not None:
+            nn.init.zeros_(self.lora_up.weight)
 
     def extra_repr(self) -> str:
         base = super().extra_repr()
