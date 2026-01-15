@@ -110,8 +110,7 @@ stepper:
     parameters:
       - frozen:
           exclude:
-            - "*.lora_A.*"
-            - "*.lora_B.*"
+            - "*.lora_*"
   step:
     type: single_module
     config:
