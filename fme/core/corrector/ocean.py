@@ -116,6 +116,7 @@ class OceanCorrector(CorrectorABC):
             gen_data = _force_conserve_ocean_heat_content(
                 input_data,
                 gen_data,
+                forcing_data,
                 self._gridded_operations.area_weighted_sum,
                 self._vertical_coordinate,
                 self._timestep.total_seconds(),
@@ -135,6 +136,7 @@ class AreaWeightedSum(Protocol):
 def _force_conserve_ocean_heat_content(
     input_data: TensorMapping,
     gen_data: TensorMapping,
+    forcing_data: TensorMapping,
     area_weighted_sum: AreaWeightedSum,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
@@ -145,6 +147,7 @@ def _force_conserve_ocean_heat_content(
             "ocean_heat_content is required to force ocean heat content conservation"
         )
     gen = OceanData(gen_data, vertical_coordinate)
+    forcing = OceanData(forcing_data)
     global_gen_ocean_heat_content = area_weighted_sum(
         gen.ocean_heat_content,
         keepdim=True,
@@ -156,8 +159,8 @@ def _force_conserve_ocean_heat_content(
         name="ocean_heat_content",
     )
     net_energy_flux_into_ocean = (
-        gen.net_downward_surface_heat_flux + input.geothermal_heat_flux
-    ) * input.sea_surface_fraction
+        gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+    ) * forcing.sea_surface_fraction
     expected_change_ocean_heat_content = area_weighted_sum(
         net_energy_flux_into_ocean * timestep_seconds,
         keepdim=True,
@@ -165,14 +168,15 @@ def _force_conserve_ocean_heat_content(
     )
     heat_content_correction_ratio = (
         global_input_ocean_heat_content + expected_change_ocean_heat_content
-    ) / (global_gen_ocean_heat_content)
+    ) / global_gen_ocean_heat_content
 
     # apply same temperature correction to all vertical layers
     n_levels = gen.sea_water_potential_temperature.shape[-1]
     for k in range(n_levels):
         name = f"thetao_{k}"
-        gen.data[name] = gen.data[name] * torch.nan_to_num(
-            heat_content_correction_ratio, nan=1.0
-        )
-
+        gen.data[name] = gen.data[name] * heat_content_correction_ratio
+    if "sst" in gen.data:
+        gen.data["sst"] = (  # assuming sst in Kelvin
+            gen.data["sst"] - 273.15
+        ) * heat_content_correction_ratio + 273.15
     return gen.data
