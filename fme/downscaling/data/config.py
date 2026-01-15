@@ -34,7 +34,7 @@ from fme.downscaling.requirements import DataRequirements
 def enforce_lat_bounds(lat: ClosedInterval):
     if lat.start < -88.0 or lat.stop > 88.0:
         raise ValueError(
-            "Latitude bounds must be within +/-88.24 degrees, "
+            "Latitude bounds must be within +/-88 degrees, "
             f"got {lat.start} to {lat.stop}."
             "This is enforced because the 3 km X-SHiELD dataset "
             "does not have 32 fine grid midpoints between the last two "
