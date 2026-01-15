@@ -228,10 +228,12 @@ def test_ocean_heat_content_correction():
     input_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon),
         "thetao_1": torch.ones(nsamples, nlat, nlon),
+        "sst": torch.ones(nsamples, nlat, nlon) + 273.15,
     }
     gen_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon) * 2,
         "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
+        "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
         "hfds": torch.ones(nsamples, nlat, nlon),
     }
     forcing_data_dict = {
@@ -244,7 +246,6 @@ def test_ocean_heat_content_correction():
     gen_data_corrected_dict = corrector(
         input_data_dict, gen_data_dict, forcing_data_dict
     )
-    gen_data_corrected = OceanData(gen_data_corrected_dict, depth_coordinate)
 
     input_ohc = input_data.ocean_heat_content.nansum(dim=(-1, -2), keepdim=True)
     gen_ohc = gen_data.ocean_heat_content.nansum(dim=(-1, -2), keepdim=True)
@@ -258,9 +259,20 @@ def test_ocean_heat_content_correction():
     )  # 2 because of hfds + hfgeou and 8 because of mask
     corrector_ratio = (input_ohc + ohc_change) / gen_ohc
     expected_gen_data_dict = {
-        key: value * corrector_ratio for key, value in gen_data_dict.items()
+        key: value * corrector_ratio if key.startswith("thetao") else value
+        for key, value in gen_data_dict.items()
     }
+    expected_gen_data_dict["sst"] = (
+        gen_data_dict["sst"] - 273.15
+    ) * corrector_ratio + 273.15
+
+    torch.testing.assert_close(
+        gen_data_corrected_dict["sst"],
+        expected_gen_data_dict["sst"],
+    )
+
     expected_gen_data = OceanData(expected_gen_data_dict, depth_coordinate)
+    gen_data_corrected = OceanData(gen_data_corrected_dict, depth_coordinate)
     torch.testing.assert_close(
         expected_gen_data.ocean_heat_content,
         gen_data_corrected.ocean_heat_content,

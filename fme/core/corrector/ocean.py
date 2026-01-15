@@ -168,14 +168,15 @@ def _force_conserve_ocean_heat_content(
     )
     heat_content_correction_ratio = (
         global_input_ocean_heat_content + expected_change_ocean_heat_content
-    ) / (global_gen_ocean_heat_content)
+    ) / global_gen_ocean_heat_content
 
     # apply same temperature correction to all vertical layers
     n_levels = gen.sea_water_potential_temperature.shape[-1]
     for k in range(n_levels):
         name = f"thetao_{k}"
-        gen.data[name] = gen.data[name] * torch.nan_to_num(
-            heat_content_correction_ratio, nan=1.0
-        )
-
+        gen.data[name] = gen.data[name] * heat_content_correction_ratio
+    if "sst" in gen.data:
+        gen.data["sst"] = (  # assuming sst in Kelvin
+            gen.data["sst"] - 273.15
+        ) * heat_content_correction_ratio + 273.15
     return gen.data
