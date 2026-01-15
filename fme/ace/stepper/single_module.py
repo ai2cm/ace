@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
+import warnings
 from collections.abc import Callable, Generator, Mapping
 from typing import Any, Literal, cast
 
@@ -907,11 +908,12 @@ class Stepper(
         self._forcing_deriver = config.derived_forcings.build(dataset_info)
 
     def _init_for_epoch(self, epoch: int | None):
-        if epoch is None and self._train_n_forward_steps_schedule is not None:
-            raise EpochNotProvidedError(
-                "current configuration requires epoch to be provided "
-                "on BatchData during training"
+        if epoch is None:
+            warnings.warn(
+                "epoch is not provided in BatchData during call to train_on_batch;"
+                " will assume epoch 0, and some features may not work as expected."
             )
+            epoch = 0
         if self._epoch == epoch:
             return
         if self._train_n_forward_steps_schedule is not None:

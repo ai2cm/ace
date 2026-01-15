@@ -30,7 +30,6 @@ from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriv
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
-    EpochNotProvidedError,
     Stepper,
     StepperConfig,
     StepperOverrideConfig,
@@ -40,8 +39,9 @@ from fme.ace.stepper.single_module import (
     load_stepper_config,
 )
 from fme.ace.stepper.time_length_probabilities import (
-    TimeLength,
     TimeLengthMilestone,
+    TimeLengthProbabilities,
+    TimeLengthProbability,
     TimeLengthSchedule,
 )
 from fme.ace.testing import DimSizes
@@ -142,6 +142,127 @@ def get_dataset_info(
 
 def get_scalar_data(names, value):
     return {n: float(value) for n in names}
+
+
+def test_stepper_no_train_step_specified():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is None
+
+
+def test_stepper_step_probabilities():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        train_n_forward_steps=TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=1, probability=0.5),
+                TimeLengthProbability(steps=2, probability=0.5),
+            ]
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    assert stepper._train_n_forward_steps_schedule is not None
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is not None
+
+
+def test_stepper_step_schedule():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        train_n_forward_steps=TimeLengthSchedule(
+            start_value=1,
+            milestones=[
+                TimeLengthMilestone(
+                    epoch=1,
+                    value=TimeLengthProbabilities(
+                        outcomes=[
+                            TimeLengthProbability(steps=1, probability=0.5),
+                            TimeLengthProbability(steps=2, probability=0.5),
+                        ]
+                    ),
+                ),
+            ],
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    assert stepper._train_n_forward_steps_schedule is not None
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is not None
 
 
 def test_train_on_batch_normalizer_changes_only_norm_data():
@@ -580,58 +701,6 @@ def _setup_and_train_on_batch(
     dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
     return stepper.train_on_batch(data, optimization=optimization)
-
-
-@pytest.mark.parametrize("has_epoch", [True, False])
-@pytest.mark.parametrize("uses_scheduling", [True, False])
-def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
-    in_names, out_names = ["a"], ["a"]
-    data = BatchData.new_for_testing(
-        names=["a"], n_samples=2, n_timesteps=3, epoch=0 if has_epoch else None
-    ).to_device()
-    module = ReturnZerosModule(len(in_names), len(out_names))
-
-    optimization_config = OptimizationConfig()
-    optimization = optimization_config.build(modules=[module], max_epochs=2)
-
-    if uses_scheduling:
-        train_n_forward_steps: TimeLengthSchedule | TimeLength = TimeLengthSchedule(
-            start_value=2,
-            milestones=[
-                TimeLengthMilestone(epoch=1, value=3),
-            ],
-        )
-    else:
-        train_n_forward_steps = 2
-
-    config = StepperConfig(
-        step=StepSelector(
-            type="single_module",
-            config=dataclasses.asdict(
-                SingleModuleStepConfig(
-                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
-                    in_names=in_names,
-                    out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(set(in_names + out_names), 0.0),
-                            stds=get_scalar_data(set(in_names + out_names), 1.0),
-                        ),
-                    ),
-                )
-            ),
-        ),
-        train_n_forward_steps=train_n_forward_steps,
-        loss=StepLossConfig(type="MSE"),
-    )
-
-    dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
-    if uses_scheduling and not has_epoch:
-        with pytest.raises(EpochNotProvidedError):
-            stepper.train_on_batch(data, optimization=optimization)
-    else:
-        stepper.train_on_batch(data, optimization=optimization)
 
 
 @pytest.mark.parametrize(
