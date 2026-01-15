@@ -8,9 +8,9 @@ model:
 data:
   topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   coarse:
-  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /
     engine: zarr
-    file_pattern: 100km.zarr
+    file_pattern: ace_outputs.zarr
     subset:
       start_time: "2023-01-01T00:00:00"
       stop_time: null

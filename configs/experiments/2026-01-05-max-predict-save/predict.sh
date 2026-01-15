@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="predict-xshield-amip-100km-to-3km-zarr-outputs-test-multi-patch"
+JOB_NAME="predict-xshield-amip-100km-to-3km-zarr-outputs-test-max-save"
 CONFIG_FILENAME="config-predict.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -19,6 +19,9 @@ IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 
 #EXISTING_RESULTS_DATASET=01K8P3P5205396WR50FCMZR6P7 # best crps checkpoint from job using global validation
 EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD # best hist checkpoint from job using global validation
+
+ACE_OUTPUT_DATASET=01KBG82WNTS5355FR95PV7ZY2F # ace outputs for 10-year runs
+IC=0000
 
 wandb_group=""
 
@@ -37,6 +40,7 @@ gantry run \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
+    --dataset $ACE_OUTPUT_DATASET:output_6hourly_predictions_ic${IC}.zarr:/ace-outputs.zarr \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
