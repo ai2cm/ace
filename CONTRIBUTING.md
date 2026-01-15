@@ -1,7 +1,7 @@
 
 # Contributing
 
-Thank you for your interest in contributing to this project!This is a research codebase
+Thank you for your interest in contributing to this project! This is a research codebase
 for the [Ai2 Climate Modeling](https://allenai.org/climate-modeling) group. While we welcome
 external users, please note that we do not guarantee backwards compatibility or supporting
 features that don't align with our research priorities.
