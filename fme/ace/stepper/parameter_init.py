@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -8,7 +9,7 @@ from torch import nn
 from fme.core.device import get_device
 from fme.core.training_history import TrainingHistory
 from fme.core.weight_ops import overwrite_weights
-from fme.core.wildcard import apply_by_wildcard, wildcard_match
+from fme.core.wildcard import apply_by_exclude, apply_by_include, wildcard_match
 
 Weights = list[Mapping[str, Any]]
 StepperWeightsAndHistory = tuple[Weights | None, TrainingHistory]
@@ -30,32 +31,35 @@ class FrozenParameterConfig:
     a rule in one of the lists is not matched by any parameters in the model
     (including if it is already matched by an earlier rule).
 
+    By default no parameters are frozen.
+
     Parameters:
-        include: list of parameter names to freeze (set requires_grad = False)
-        exclude: list of parameter names to ignore
+        include: list of parameter names to freeze (set requires_grad = False),
+          if given then all other parameters are left unfrozen
+        exclude: list of parameter names to ignore, if given then all other
+          parameters are frozen. Cannot be given if include is given.
     """
 
     include: list[str] = dataclasses.field(default_factory=list)
     exclude: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
-        for pattern in self.include:
-            if any(wildcard_match(pattern, exclude) for exclude in self.exclude):
-                raise ValueError(
-                    f"Parameter {pattern} is included in both include "
-                    f"{self.include} and exclude {self.exclude}"
-                )
-        for pattern in self.exclude:
-            if any(wildcard_match(pattern, include) for include in self.include):
-                raise ValueError(
-                    f"Parameter {pattern} is included in both include "
-                    f"{self.include} and exclude {self.exclude}"
-                )
+        if len(self.include) > 0 and len(self.exclude) > 0:
+            warnings.warn(
+                "Cannot provide both include and exclude lists "
+                "for FrozenParameterConfig, will not be able to apply freezing."
+            )  # defer exception to apply, for inference backwards compatibility
 
     def apply(self, model: nn.Module):
-        apply_by_wildcard(
-            model, _freeze_weight, self.include, self.exclude, raise_if_unused=True
-        )
+        if len(self.include) > 0 and len(self.exclude) > 0:
+            raise ValueError(
+                "Cannot provide both include and exclude lists "
+                "for FrozenParameterConfig"
+            )
+        if len(self.include) > 0:
+            apply_by_include(model, _freeze_weight, self.include)
+        elif len(self.exclude) > 0:
+            apply_by_exclude(model, _freeze_weight, self.exclude)
 
 
 def _freeze_weight(module: nn.Module, name: str):
