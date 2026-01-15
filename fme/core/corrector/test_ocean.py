@@ -228,18 +228,22 @@ def test_ocean_heat_content_correction():
     input_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon),
         "thetao_1": torch.ones(nsamples, nlat, nlon),
-        "hfds": torch.ones(nsamples, nlat, nlon),
-        "hfgeou": torch.ones(nsamples, nlat, nlon),
-        "sea_surface_fraction": mask[:, :, :, 0],
     }
     gen_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon) * 2,
         "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
+        "hfds": torch.ones(nsamples, nlat, nlon),
+    }
+    forcing_data_dict = {
+        "hfgeou": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": mask[:, :, :, 0],
     }
     input_data = OceanData(input_data_dict, depth_coordinate)
     gen_data = OceanData(gen_data_dict, depth_coordinate)
     corrector = OceanCorrector(config, ops, depth_coordinate, timestep)
-    gen_data_corrected_dict = corrector(input_data_dict, gen_data_dict, {})
+    gen_data_corrected_dict = corrector(
+        input_data_dict, gen_data_dict, forcing_data_dict
+    )
     gen_data_corrected = OceanData(gen_data_corrected_dict, depth_coordinate)
 
     input_ohc = input_data.ocean_heat_content.nansum(dim=(-1, -2), keepdim=True)
