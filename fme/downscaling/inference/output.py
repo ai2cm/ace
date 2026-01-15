@@ -118,7 +118,7 @@ class DownscalingOutputConfig(ABC):
     Output targets define what data to generate, where to generate it, and how
     to save it.
 
-    Attributes:
+    Parameters:
         name: Unique identifier for this target (used in output filename)
         n_ens: Number of ensemble members to generate when downscaling
         save_vars: List of variable names to save to zarr output.  If None,
@@ -335,7 +335,7 @@ class EventConfig(DownscalingOutputConfig):
     If n_ens > max_samples_per_gpu, this event can be run in a distributed manner
     where each GPU generates a subset of the ensemble members for the event.
 
-    Attributes:
+    Parameters:
         event_time: Timestamp or integer index of the event. If string, must match
             time_format. Required field.
         time_format: strptime format for parsing event_time string.
@@ -401,7 +401,7 @@ class TimeRangeConfig(DownscalingOutputConfig):
     downscaled data over regions like CONUS, continental areas, or custom domains
     over extended time periods.
 
-    Attributes:
+    Parameters:
         time_range: Time selection specification. Can be:
 
             - TimeSlice: Start/stop timestamps (e.g.,

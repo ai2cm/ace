@@ -154,7 +154,7 @@ class InferenceConfig:
     sizes, and output variables. Outputs are processed sequentially, with generation
     parallelized across GPUs using distributed data loading.
 
-    Attributes:
+    Parameters:
         model: Model specification to load for generation.
         data: Base data loader configuration that is shared to each output
             generation task. Specifics for each output like the time(range),
