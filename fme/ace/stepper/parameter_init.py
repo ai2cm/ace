@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 import warnings
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -57,8 +58,10 @@ class FrozenParameterConfig:
                 "for FrozenParameterConfig"
             )
         if len(self.include) > 0:
+            logging.info("applying freeze to parameters by include")
             apply_by_include(model, _freeze_weight, self.include)
         elif len(self.exclude) > 0:
+            logging.info("applying freeze to parameters by exclude")
             apply_by_exclude(model, _freeze_weight, self.exclude)
 
 
