@@ -853,14 +853,9 @@ class Stepper(
         self._parameter_initializer = parameter_initializer
         self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
         self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
-        if config.train_n_forward_steps_schedule is None:
-            pass
-        elif len(config.train_n_forward_steps_schedule.milestones) == 0:
-            self._train_n_forward_steps_sampler = probabilities_from_time_length(
-                config.train_n_forward_steps_schedule.start_value
-            )
-        else:
+        if config.train_n_forward_steps_schedule is not None:
             self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
+
         self._epoch: int | None = None  # to keep track of cached values
 
         def get_loss_obj() -> StepLoss:
