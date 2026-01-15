@@ -86,20 +86,6 @@ We use the :ref:`Builder pattern <Builder Pattern>` to load this configuration i
    :show-inheritance:
    :noindex:
 
-The configuration consists of the following main sections:
-
-- **model**: Model specification to load for generation. Can be either a :class:`fme.downscaling.models.CheckpointModelConfig` (single model) or :class:`fme.downscaling.predictors.cascade.CascadePredictorConfig` (cascaded models). For most use cases (including the public release model) this is a `fme.downscaling.models.CheckpointModelConfig`.
-
-- **data**: Base data loader configuration (:class:`fme.downscaling.data.config.DataLoaderConfig`) that is shared across all outputs. This includes the coarse input data source and data loading settings. Each output selects its own spatial and temporal extents.
-
-- **experiment_dir**: Directory where generated zarr datasets and logs will be saved.
-
-- **outputs**: List of output specifications. Each output is either an :class:`fme.downscaling.inference.output.EventConfig` or :class:`fme.downscaling.inference.output.TimeRangeConfig`. Each output generates a separate zarr file.
-
-- **logging**: Logging configuration (:class:`fme.core.logging_utils.LoggingConfig`) for screen, file, and wandb logging.
-
-- **patch**: Default patch prediction configuration (:class:`fme.downscaling.predictors.PatchPredictionConfig`) for specifying how to handle composite generation of domains larger than the model's patch size.
-
 
 Output Configuration Types
 ----------------------------
@@ -115,15 +101,9 @@ EventConfig
 
 :class:`fme.downscaling.inference.output.EventConfig` is used for generating a single time snapshot over a spatial region. This is useful for capturing specific events like hurricane landfall, extreme weather events, or any single-timestep high-resolution snapshot of a region.
 
-If ``n_ens > max_samples_per_gpu``, this event can be run in a distributed manner where each GPU generates a subset of the ensemble members for the event.
-
-Required Fields:
-  - **event_time**: Timestamp or integer index of the event. If string, must match ``time_format``.
-
-Optional Fields:
-  - **time_format**: strptime format for parsing ``event_time`` string. Default: ``"%Y-%m-%dT%H:%M:%S"`` (ISO 8601).
-  - **lat_extent**: Latitude bounds in degrees [-88, 88]. Default: full extent of the underlying data.
-  - **lon_extent**: Longitude bounds in degrees [-180, 360]. Default: full extent of the underlying data.
+.. autoclass:: fme.downscaling.inference.output.EventConfig
+   :show-inheritance:
+   :noindex:
 
 Example EventConfig:
 
@@ -155,105 +135,51 @@ You can also use integer indices for ``event_time``:
          start: 30.0
          stop: 40.0
 
-.. autoclass:: fme.downscaling.inference.output.EventConfig
-   :show-inheritance:
-   :noindex:
 
 TimeRangeConfig
 ^^^^^^^^^^^^^^^
 
 :class:`fme.downscaling.inference.output.TimeRangeConfig` is used for generating a time segment over a spatial region. This is the most common and flexible configuration, suitable for generating downscaled data over regions like CONUS, continental areas, or custom domains over extended time periods.
 
-Required Fields:
-  - **time_range**: Time selection specification. Can be one of three formats (see below).
+.. autoclass:: fme.downscaling.inference.output.TimeRangeConfig
+   :show-inheritance:
+   :noindex:
 
-Optional Fields:
-  - **lat_extent**: Latitude bounds in degrees [-88, 88]. Default: full extent of the underlying data.
-  - **lon_extent**: Longitude bounds in degrees [-180, 360]. Default: full extent of the underlying data.
-
-Time Range Formats
-"""""""""""""""""""
-
-The ``time_range`` field supports three formats:
-
-1. **TimeSlice** (timestamp-based): Use start and stop timestamps.
-
-   .. code-block:: yaml
-
-      time_range:
-          start_time: "2023-01-01T00:00:00"
-          end_time: "2023-12-31T18:00:00"
-
-2. **Slice** (index-based): Use integer indices.
-
-   .. code-block:: yaml
-
-      time_range:
-          start: 0
-          stop: 36
-
-3. **RepeatedInterval** (repeating pattern): Use a repeating time pattern.
-
-   .. code-block:: yaml
-
-      time_range:
-          interval_length: "1d"
-          block_length: "7d"
-          start: "2d"
-
-   This example selects 1 day of data starting after 2 days, repeated every 7 days. All three values can be either integers (for index-based) or strings representing timedeltas (e.g., "1d", "7d", "2d").
 
 Example TimeRangeConfig with TimeSlice:
 
 .. code-block:: yaml
 
    - name: "CONUS_full_year"
-     save_vars: ["PRATEsfc"]
-     n_ens: 8
-     max_samples_per_gpu: 8
+     n_ens: 4
+     max_samples_per_gpu: 4
      time_range:
          start_time: "2023-01-01T00:00:00"
          end_time: "2023-12-31T18:00:00"
-     lat_extent:
-         start: 22.0
-         stop: 50.0
-     lon_extent:
-         start: 230.0
-         stop: 295.0
 
 Example TimeRangeConfig with Slice:
 
 .. code-block:: yaml
 
    - name: "first_year_indices"
-     save_vars: ["PRATEsfc"]
      n_ens: 4
      max_samples_per_gpu: 4
      time_range:
          start: 0
-         stop: 365
-     lat_extent:
-         start: 30.0
-         stop: 45.0
+         stop: 36
 
 Example TimeRangeConfig with RepeatedInterval:
 
 .. code-block:: yaml
 
    - name: "weekly_snapshots"
-     n_ens: 16
-     max_samples_per_gpu: 8
+     n_ens: 4
+     max_samples_per_gpu: 4
      time_range:
          interval_length: "1d"
          block_length: "7d"
          start: "0d"
-     lat_extent:
-         start: 35.0
-         stop: 50.0
 
-.. autoclass:: fme.downscaling.inference.output.TimeRangeConfig
-   :show-inheritance:
-   :noindex:
 
 Common Configuration Patterns
 ------------------------------
