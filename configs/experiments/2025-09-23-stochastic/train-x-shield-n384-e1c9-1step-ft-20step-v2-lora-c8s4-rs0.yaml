@@ -108,10 +108,10 @@ stepper:
   parameter_init:
     weights_path: /weights/training_checkpoints/best_ckpt.tar
     parameters:
-      frozen:
-        exclude:
-        - "*.lora_A.*"
-        - "*.lora_B.*"
+      - frozen:
+          exclude:
+            - "*.lora_A.*"
+            - "*.lora_B.*"
   step:
     type: single_module
     config:
