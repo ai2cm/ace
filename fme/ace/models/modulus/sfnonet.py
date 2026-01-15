@@ -736,17 +736,17 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         # learned position embedding
         if self.pos_embed:
-            # currently using deliberately a differently shape position embedding
+            # Use full img_shape dimensions since pos_embed is added before
+            # spatial distribution occurs in the first FNO block's transform
             self.pos_embed = nn.Parameter(
                 torch.zeros(
-                    1, self.embed_dim, self.img_shape_loc[0], self.img_shape_loc[1]
+                    1, self.embed_dim, self.img_shape[0], self.img_shape[1]
                 )
             )
             # self.pos_embed = nn.Parameter( torch.zeros(1, self.embed_dim, self.img_shape_eff[0], self.img_shape_eff[1]) )
             if dist.spatial_parallelism:
-              self.pos_embed.is_shared_mp = []
-              self.pos_embed.sharded_dims_mp = [None, None, "h", "w"]
-              self.pos_embed.type = "direct"
+              # pos_embed now has full dimensions, shared across spatial ranks
+              self.pos_embed.is_shared_mp = ["spatial"]
             else:
               self.pos_embed.is_shared_mp = ["matmul"]
 
