@@ -20,4 +20,4 @@ resume_diugpsky_ep37_w_EC-1pct_nosmooth_0256to0350_hfds_diag||01KEXF7F0ZYYN877VM
 
 resume_diugpsky_ep37_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag||01KF1R44WJSCZXS9Q42339J596|training|best_inference_ckpt|normal|--not-preemptible
 
-resume_5bebup7b_ep18_w_EC-1pct_nosmooth_0256to0350_hfds_diag|ep62||run_ICx1|best_inference_ckpt|normal|--not-preemptible|01KEZC341E3Y8QBM6MMJCVS64T
+resume_5bebup7b_ep18_w_EC-1pct_nosmooth_0256to0350_hfds_diag|ep62||run_ICx1|best_inference_ckpt|normal|--not-preemptible||01KEZC341E3Y8QBM6MMJCVS64T
