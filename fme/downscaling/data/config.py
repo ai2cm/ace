@@ -136,6 +136,9 @@ class DataLoaderConfig:
     repeat: int = 1
     drop_last: bool = False
 
+    def __post_init__(self):
+        enforce_lat_bounds(self.lat_extent)
+
     @property
     def full_config(self) -> Sequence[XarrayDataConfig]:
         # Expands any XarrayEnsembleDataConfig so it is converted
@@ -248,7 +251,6 @@ class DataLoaderConfig:
         # In the future we could disentangle this dependency between the data loader
         # and model by enabling the built GriddedData objects to take in full static
         # input fields and subset them to the same coordinate range as data.
-        enforce_lat_bounds(self.lat_extent)
         xr_dataset, properties = self.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
         )
@@ -357,6 +359,9 @@ class PairedDataLoaderConfig:
     sample_with_replacement: int | None = None
     drop_last: bool = False
 
+    def __post_init__(self):
+        enforce_lat_bounds(self.lat_extent)
+
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
 
@@ -397,7 +402,6 @@ class PairedDataLoaderConfig:
         # In the future we could disentangle this dependency between the data loader
         # and model by enabling the built GriddedData objects to take in full static
         # input fields and subset them to the same coordinate range as data.
-        enforce_lat_bounds(self.lat_extent)
         if dist is None:
             dist = Distributed.get_instance()
 
