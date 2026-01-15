@@ -355,7 +355,9 @@ class EventConfig(DownscalingOutputConfig):
     # event_time required, but must specify as optional kwarg to allow subclassing
     event_time: str | int = ""
     time_format: str = "%Y-%m-%dT%H:%M:%S"
-    lat_extent: ClosedInterval = field(default_factory=lambda: ClosedInterval(-88, 88))
+    lat_extent: ClosedInterval = field(
+        default_factory=lambda: ClosedInterval(-66.0, 70)
+    )
     lon_extent: ClosedInterval = field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
     )
@@ -422,7 +424,7 @@ class TimeRangeConfig(DownscalingOutputConfig):
         default_factory=lambda: Slice(-1, 1)
     )
     lat_extent: ClosedInterval = field(
-        default_factory=lambda: ClosedInterval(-88, 88.0)
+        default_factory=lambda: ClosedInterval(-66.0, 70.0)
     )
     lon_extent: ClosedInterval = field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))

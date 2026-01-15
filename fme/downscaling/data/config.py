@@ -128,7 +128,7 @@ class DataLoaderConfig:
     strict_ensemble: bool
     topography: str | None = None
     lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-88, 88.0)
+        default_factory=lambda: ClosedInterval(-66, 70)
     )
     lon_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
@@ -349,7 +349,7 @@ class PairedDataLoaderConfig:
     num_data_workers: int
     strict_ensemble: bool
     lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-88, 88.0)
+        default_factory=lambda: ClosedInterval(-66.0, 70.0)
     )
     lon_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))

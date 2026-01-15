@@ -66,7 +66,7 @@ class EventConfig:
     name: str
     date: str
     lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-88.0, 88.0)
+        default_factory=lambda: ClosedInterval(-66.0, 70.0)
     )
     lon_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(-180.0, 360.0)
