@@ -853,12 +853,12 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
     def _init_weights(self, m):
         """Helper routine for weight initialization"""
-        if isinstance(m, LoRAConv2d):
-            m.reset_parameters()
-        elif isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
+        if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
             trunc_normal_(m.weight, std=0.02)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
+            if isinstance(m, LoRAConv2d):
+                m.reset_lora_parameters()
         elif isinstance(m, ConditionalLayerNorm):
             m.reset_parameters()
 

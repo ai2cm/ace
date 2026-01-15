@@ -108,13 +108,13 @@ class LoRAConv2d(nn.Conv2d):
         else:
             self.lora_dropout = nn.Identity()
             self.lora_scaling = 0.0
-        self.reset_parameters()
+        self.reset_lora_parameters()  # base parameters already reset in super init
 
     def reset_parameters(self) -> None:
         super().reset_parameters()
-        self._reset_lora_parameters()
+        self.reset_lora_parameters()
 
-    def _reset_lora_parameters(self):
+    def reset_lora_parameters(self):
         # Init: down ~ Kaiming, up = 0 so the module starts
         # identical to base Conv2d.
         if self.lora_down is not None:
