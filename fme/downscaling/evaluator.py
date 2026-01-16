@@ -13,7 +13,12 @@ from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
-from fme.downscaling.data import PairedDataLoaderConfig, PairedGriddedData, StaticInputs
+from fme.downscaling.data import (
+    PairedDataLoaderConfig,
+    PairedGriddedData,
+    StaticInputs,
+    enforce_lat_bounds,
+)
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predict import EventConfig
 from fme.downscaling.predictors import (
@@ -155,6 +160,7 @@ class PairedEventConfig(EventConfig):
         requirements: DataRequirements,
         static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> PairedGriddedData:
+        enforce_lat_bounds(self.lat_extent)
         time_slice = self._time_selection_slice
         event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
         event_coarse = dataclasses.replace(
