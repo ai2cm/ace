@@ -17,5 +17,6 @@ def inter_filesystem_copy(source: str, destination: str):
 
 
 def is_local(path: str | Path) -> bool:
-    """Check if a given path is on a local filesystem. Assuming fsspec conventions."""
-    return "://" not in str(path)
+    """Check if path is on a local filesystem assuming fsspec conventions."""
+    fs, _ = fsspec.url_to_fs(path)
+    return isinstance(fs, fsspec.implementations.local.LocalFileSystem)
