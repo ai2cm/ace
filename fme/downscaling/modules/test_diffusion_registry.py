@@ -150,8 +150,7 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp):
         if isinstance(output, torch.Tensor):
             captured_dtypes.append(output.dtype)
 
-    # Register hook on the actual SongUNet model inside EDMPrecond
-    # module.unet is EDMPrecond, which has .model attribute that is the SongUNet
+    # Register hook on the SongUNet model inside EDMPrecond
     edm_precond = module.unet
     edm_precond.model.register_forward_hook(forward_hook)
 
