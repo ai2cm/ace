@@ -2,16 +2,21 @@
 
 set -x
 
-# wandb config
-export WANDB_NAME=PM-AMIP-EAMv3-spatial-parallelism-1x4-batch-fix-train-rs2
-export WANDB_RUN_GROUP=2025-04-01-AMIP-EAMv3
-
-export COMMIT=23552337c
-
 # directories for input data (training, validation, inference, stats)
-export FME_TRAIN_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1deg/traindata
-export FME_VALID_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1deg/validdata
+export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-08-01-sample-E3SMv3-coupled-atm-wcycl1850-r025.zarr
+export FME_VALID_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-08-01-sample-E3SMv3-coupled-atm-wcycl1850-r025.zarr
 export FME_STATS_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1deg/2025-04-01-e3smv3-1deg
+export EMBED_DIM_VALUE=256
+export SCALE_FACTOR_VALUE=1
+export H_PARALLEL_SIZE=8
+export W_PARALLEL_SIZE=8
+
+nodes=16
+# wandb config
+export WANDB_NAME=PM-EAMv3-wcycl1850-25km-old-branch-${nodes}nodes-sp-${H_PARALLEL_SIZE}x${W_PARALLEL_SIZE}-n${EMBED_DIM_VALUE}-scale-factor-${SCALE_FACTOR_VALUE}-train
+export WANDB_RUN_GROUP=wcycl1850-25km
+
+export COMMIT=$(git rev-parse --short HEAD)
 
 # if resuming a failed job, provide its slurm job ID below and uncomment;
 # note that information entered above should be consistent with that of

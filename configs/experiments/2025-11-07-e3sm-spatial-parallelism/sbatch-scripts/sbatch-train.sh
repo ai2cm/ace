@@ -4,11 +4,11 @@
 #SBATCH -q regular
 #SBATCH -C gpu
 #SBATCH -J train-fme
-#SBATCH --nodes=4
+#SBATCH --nodes=16
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128
-#SBATCH -t 04:00:00
+#SBATCH -t 01:00:00
 #SBATCH --output=joblogs/%j.out
 #SBATCH --signal=USR1@60
 #SBATCH --requeue
@@ -43,14 +43,13 @@ sed -i "s|FME_OUTPUT_DIR|${FME_OUTPUT_DIR}|" ${TRAIN_CONFIG}
 sed -i "s|FME_TRAIN_DIR|${FME_TRAIN_DIR}|" ${TRAIN_CONFIG}
 sed -i "s|FME_VALID_DIR|${FME_VALID_DIR}|" ${TRAIN_CONFIG}
 sed -i "s|FME_STATS_DIR|${FME_STATS_DIR}|" ${TRAIN_CONFIG}
+sed -i "s|EMBED_DIM_VALUE|${EMBED_DIM_VALUE}|" ${TRAIN_CONFIG}
+sed -i "s|SCALE_FACTOR_VALUE|${SCALE_FACTOR_VALUE}|" ${TRAIN_CONFIG}
 
 cp -r $CONFIG_DIR $FME_OUTPUT_DIR/job_config
 
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29507
-
-export H_PARALLEL_SIZE=1
-export W_PARALLEL_SIZE=4
 
 export NCCL_BLOCKING_WAIT=1
 export NCCL_TIMEOUT=10800
