@@ -51,10 +51,6 @@ cp -r $CONFIG_DIR $FME_OUTPUT_DIR/job_config
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29507
 
-export NCCL_BLOCKING_WAIT=1
-export NCCL_TIMEOUT=10800
-export NCCL_IB_TIMEOUT=7200
-
 echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT"
 # run the requeueable job
 srun -u $CONFIG_DIR/requeueable-train.sh
