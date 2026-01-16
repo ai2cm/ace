@@ -1,0 +1,30 @@
+experiment_dir: /output_directory
+n_forward_steps: 1460
+forward_steps_in_memory: 40
+checkpoint_path: /ACE2S.ckpt
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace
+initial_condition:
+  path: /initial_conditions/ic_2023.nc
+  start_indices:
+    times:
+      - "2023-01-01T00:00:00"
+forcing_loader:
+  dataset:
+    data_path: /forcing_data
+  num_data_workers: 4
+data_writer:
+  files:
+  - format:
+      name: zarr
+    label: output_6hourly_ace2s
+    names:
+    - PRATEsfc
+    - UGRD10m
+    - VGRD10m
+    separate_ensemble_members: true
+  save_monthly_files: false
+  save_prediction_files: false
