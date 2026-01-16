@@ -32,6 +32,36 @@ The following example shows a configuration which generates two outputs: one usi
 .. literalinclude:: downscaling-inference-config.yaml
    :language: yaml
 
+
+
+.. testcode::
+   :hide:
+
+   from fme.downscaling.inference import InferenceConfig
+   import yaml
+   import dacite
+
+   with open('downscaling-inference-config.yaml', 'r') as f:
+      config_dict = yaml.safe_load(f)
+
+   config = dacite.from_dict(
+      InferenceConfig,
+      data=config_dict,
+      config=dacite.Config(strict=True)
+   )
+   # these paths are used in the documentation on this page
+   # if they change then update the docs!
+   assert config.model.checkpoint_path == "/HiRO.ckpt"
+   assert config.data.coarse[0].data_path == "/output_directory"
+   print("Loaded successfully")
+
+.. testoutput::
+   :hide:
+
+   Loaded successfully
+
+
+
 Configuration Structure
 -----------------------
 
