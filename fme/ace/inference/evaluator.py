@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 import logging
-import os
 from collections.abc import Callable, Mapping, Sequence
 
 import dacite
@@ -26,7 +25,7 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.cloud import is_local
+from fme.core.cloud import mkdirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
@@ -223,8 +222,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer.start_outer("inference")
     timer.start("initialization")
 
-    if not os.path.isdir(config.experiment_dir) and is_local(config.experiment_dir):
-        os.makedirs(config.experiment_dir, exist_ok=True)
+    mkdirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
     env_vars = logging_utils.retrieve_env_vars()
     beaker_url = logging_utils.log_beaker_url()

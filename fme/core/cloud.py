@@ -20,3 +20,9 @@ def is_local(path: str | Path) -> bool:
     """Check if path is on a local filesystem assuming fsspec conventions."""
     fs, _ = fsspec.url_to_fs(path)
     return isinstance(fs, fsspec.implementations.local.LocalFileSystem)
+
+
+def mkdirs(path: str | Path, exist_ok: bool = False):
+    """Create directory on any filesystem assuming fsspec conventions."""
+    fs, _ = fsspec.url_to_fs(path)
+    fs.mkdirs(path, exist_ok=exist_ok)

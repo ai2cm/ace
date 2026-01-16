@@ -3,11 +3,10 @@ import tempfile
 from collections.abc import Mapping
 from typing import Protocol
 
-import fsspec
 import numpy as np
 import xarray as xr
 
-from fme.core.cloud import inter_filesystem_copy
+from fme.core.cloud import inter_filesystem_copy, mkdirs
 from fme.core.distributed import Distributed
 
 
@@ -55,8 +54,7 @@ def write_reduced_diagnostics(
         output_dir = os.path.join(output_dir, subdir)
     dist = Distributed.get_instance()
     if dist.is_root():
-        fs = fsspec.url_to_fs(output_dir)[0]
-        fs.makedirs(output_dir, exist_ok=True)
+        mkdirs(output_dir, exist_ok=True)
         for name, ds in reduced_diagnostics.items():
             if len(ds) > 0:
                 with tempfile.TemporaryDirectory() as tmpdir:
