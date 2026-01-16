@@ -16,3 +16,5 @@ ft_fto-v1124-pesvhsm3-vw7bwz18-lr-1e-5||01KEZ5KTQ4EQ59GAC70HEGQXAD|training|best
 fto-v1124-pesvhsm3-rv0ike6m||01KF215EYBQDEMX6SSKHCZQF6T|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v1124-ACE2S-cpwvww40-rv0ike6m||01KF21ADSYTP3E70KHEHHQKTDW|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v1124-ACE2S-cpwvww40-rv0ike6m||01KF3YYTEMKF2KCJ5R9SX7437P|training|best_inference_ckpt|normal|--not-preemptible
