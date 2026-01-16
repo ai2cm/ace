@@ -35,6 +35,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -1324,6 +1325,16 @@ class Stepper(
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
+        # Scatter all data to local spatial portions for spatial parallelism
+        dist = Distributed.get_instance()
+        if dist.spatial_parallelism:
+            data = BatchData(
+                data=dist.scatter_tensor_dict(dict(data.data)),
+                time=data.time,
+                labels=data.labels,
+                horizontal_dims=data.horizontal_dims,
+            )
+        
         metrics: dict[str, float] = {}
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         target_data = self.get_forward_data(data, compute_derived_variables=False)

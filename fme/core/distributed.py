@@ -262,6 +262,41 @@ class Distributed:
 
         return tensor_dict_local
 
+    def scatter_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Scatter a tensor's spatial dimensions to local portions.
+        
+        Handles tensors of any shape where the last two dimensions are spatial (lat, lon).
+        If not using spatial parallelism or tensor is already local-sized, returns unchanged.
+        """
+        if not self.spatial_parallelism:
+            return tensor
+        
+        # Get spatial dimensions (last two)
+        spatial_shape = (tensor.shape[-2], tensor.shape[-1])
+        slices = self.get_local_slices(spatial_shape)
+        
+        # Check if already local-sized (slices would be full range)
+        if slices[0] == slice(None, None):
+            return tensor
+        
+        return tensor[..., slices[0], slices[1]].contiguous()
+
+    def scatter_tensor_dict(self, tensor_dict: dict) -> dict:
+        """Scatter all tensors in a dict to local spatial portions.
+        
+        Tensors with at least 2 dimensions have their last two (spatial) dimensions scattered.
+        """
+        if not self.spatial_parallelism:
+            return tensor_dict
+        
+        result = {}
+        for name, tensor in tensor_dict.items():
+            if tensor.ndim >= 2:
+                result[name] = self.scatter_tensor(tensor)
+            else:
+                result[name] = tensor
+        return result
+
     def get_local_slices(self, crop_shape):
         if self.spatial_parallelism:
             crop_offset = (0, 0)
