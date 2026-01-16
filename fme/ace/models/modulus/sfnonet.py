@@ -581,6 +581,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.img_shape_eff = (self.itrans_up.lat_shapes[dist.comm_get_rank("h")], self.itrans_up.lon_shapes[dist.comm_get_rank("w")])
             self.h_loc = self.itrans.lat_shapes[dist.comm_get_rank("h")]
             self.w_loc = self.itrans.lon_shapes[dist.comm_get_rank("w")]
+            self._lat_shapes = self.trans_down.lat_shapes
+            self._lon_shapes = self.trans_down.lon_shapes
             # residual filters are non-distributed, only work when factor=1 (Identity)
             if self.residual_filter_factor != 1:
                 raise NotImplementedError(
@@ -786,8 +788,37 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         return x
 
+    def _scatter_spatial(self, x):
+        """Extract local spatial portion from full tensor when using spatial parallelism.
+        
+        If input is already local-sized, returns it unchanged.
+        This allows the model to handle both full and local inputs.
+        """
+        dist = Distributed.get_instance()
+        if not dist.spatial_parallelism:
+            return x
+        
+        # Check if already local-sized
+        if x.shape[-2] == self.img_shape_loc[0] and x.shape[-1] == self.img_shape_loc[1]:
+            return x
+        
+        h_rank = dist.comm_get_rank("h")
+        w_rank = dist.comm_get_rank("w")
+        
+        # Compute slice boundaries using stored shape arrays
+        lat_start = sum(self._lat_shapes[:h_rank])
+        lat_end = lat_start + self._lat_shapes[h_rank]
+        lon_start = sum(self._lon_shapes[:w_rank])
+        lon_end = lon_start + self._lon_shapes[w_rank]
+        
+        return x[..., lat_start:lat_end, lon_start:lon_end].contiguous()
+
     def forward(self, x):
-        # save big skip
+        # Scatter input to local portions when using spatial parallelism
+        # (handles both full-sized and already-local inputs)
+        x = self._scatter_spatial(x)
+        
+        # save big skip (now on local data)
         if self.big_skip:
             residual = self.residual_filter_up(self.residual_filter_down(x))
 
@@ -820,7 +851,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             x = checkpoint(self.decoder, x)
         else:
             x = self.decoder(x)
-
         return x
 # this part exposes the model to modulus by constructing modulus Modules
 @dataclass
