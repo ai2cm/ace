@@ -581,14 +581,16 @@ def test_file_writer_paired_save_reference(tmpdir, save_reference: bool):
         pytest.param(MonthlyCoarsenConfig(), id="monthly-coarsen"),
     ],
 )
-def test_file_writer_with_non_local_experiment_dir(
+def test_netcdf_file_writer_with_non_local_experiment_dir(
     time_coarsen: TimeCoarsenConfig | MonthlyCoarsenConfig | None,
 ):
     experiment_dir = "memory://experiment_dir"
+    format = NetCDFWriterConfig()
     config = FileWriterConfig(
         label="test",
         names=["temperature"],
         time_coarsen=time_coarsen,
+        format=format,
     )
     with pytest.raises(ValueError, match="only supports local"):
         config.build(

@@ -23,6 +23,7 @@ from fme.ace.data_loading.inference import (
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
+from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
     StepperOverrideConfig,
@@ -1242,6 +1243,7 @@ def test_evaluator_with_non_local_experiment_dir(
         dim_sizes=dim_sizes,
         timestep_days=TIMESTEP.total_seconds() / 86400,
     )
+    files = [FileWriterConfig("autoregressive", format=ZarrWriterConfig())]
     config = InferenceEvaluatorConfig(
         experiment_dir=experiment_dir,
         n_forward_steps=2,
@@ -1256,6 +1258,7 @@ def test_evaluator_with_non_local_experiment_dir(
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
+            files=files,
         ),
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -1279,5 +1282,12 @@ def test_evaluator_with_non_local_experiment_dir(
     fs, _ = fsspec.url_to_fs(experiment_dir)
     for file in expected_files:
         assert fs.exists(os.path.join(experiment_dir, file))
+
+    expected_directories = [
+        "autoregressive_predictions.zarr",
+        "autoregressive_target.zarr",
+    ]
+    for directory in expected_directories:
+        assert fs.isdir(os.path.join(experiment_dir, directory))
 
     fs.rm(experiment_dir, recursive=True)
