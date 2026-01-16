@@ -13,7 +13,7 @@ from fme.core.cloud import is_local, mkdirs
         ("file://path/somefile", True),
         ("local://path/somefile", True),
         pytest.param(Path("/absolute/path/somefile"), True, id="Path object"),
-        ("gs://mybucket/somefile", False),
+        ("https://path/somefile", False),
     ],
 )
 def test_is_local(path: str | Path, expected: bool):
