@@ -1249,7 +1249,7 @@ def test_evaluator_with_non_local_experiment_dir(
         checkpoint_path=str(stepper_path),
         logging=LoggingConfig(
             log_to_screen=True,
-            log_to_file=False,
+            log_to_file=True,
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
@@ -1262,7 +1262,9 @@ def test_evaluator_with_non_local_experiment_dir(
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
-    main(yaml_config=str(config_filename))
+
+    with pytest.warns(UserWarning, match="local file system"):
+        main(yaml_config=str(config_filename))
 
     expected_files = [
         "config.yaml",
