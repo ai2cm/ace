@@ -31,6 +31,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
+        log_power_spectrum: bool = True,
         channel_mean_names: Sequence[str] | None = None,
     ):
         """
@@ -42,6 +43,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
                 used in loss computation.
             log_snapshots: Whether to include snapshots in diagnostics.
             log_mean_maps: Whether to include mean maps in diagnostics.
+            log_power_spectrum: Whether to compute spherical power spectrum.
             channel_mean_names: Names to include in channel-mean metrics.
         """
         self._deterministic_aggregator = OneStepDeterministicAggregator(
@@ -51,6 +53,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             loss_scaling=loss_scaling,
             log_snapshots=log_snapshots,
             log_mean_maps=log_mean_maps,
+            log_power_spectrum=log_power_spectrum,
             channel_mean_names=channel_mean_names,
         )
         self._ensemble_aggregator = get_one_step_ensemble_aggregator(
@@ -118,10 +121,12 @@ class OneStepAggregatorConfig:
     Arguments:
         log_snapshots: Whether to log snapshot images.
         log_mean_maps: Whether to log mean map images.
+        log_power_spectrum: Whether to compute spherical power spectrum.
     """
 
     log_snapshots: bool = True
     log_mean_maps: bool = True
+    log_power_spectrum: bool = True
 
     def build(
         self,
@@ -138,5 +143,6 @@ class OneStepAggregatorConfig:
             loss_scaling=loss_scaling,
             log_snapshots=self.log_snapshots,
             log_mean_maps=self.log_mean_maps,
+            log_power_spectrum=self.log_power_spectrum,
             channel_mean_names=channel_mean_names,
         )

@@ -59,6 +59,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
+        log_power_spectrum: bool = True,
         channel_mean_names: Sequence[str] | None = None,
     ):
         """
@@ -71,6 +72,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
                 used in loss computation.
             log_snapshots: Whether to include snapshots in diagnostics.
             log_mean_maps: Whether to include mean maps in diagnostics.
+            log_power_spectrum: Whether to compute spherical power spectrum.
             channel_mean_names: Names of variables whose RMSE will be averaged. If
                 not provided, all available variables will be used.
         """
@@ -90,14 +92,15 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
                 include_grad_mag_percent_diff=False,
             ),
         }
-        try:
-            self._aggregators["power_spectrum"] = SpectrumAggregator(
-                dataset_info.gridded_operations,
-            )
-        except NotImplementedError:
-            logging.warning(
-                "Spectrum aggregator not implemented for this grid type, omitting."
-            )
+        if log_power_spectrum:
+            try:
+                self._aggregators["power_spectrum"] = SpectrumAggregator(
+                    dataset_info.gridded_operations,
+                )
+            except NotImplementedError:
+                logging.warning(
+                    "Spectrum aggregator not implemented for this grid type, omitting."
+                )
         if log_snapshots:
             self._aggregators["snapshot"] = SnapshotAggregator(
                 horizontal_coordinates.dims, dataset_info.variable_metadata
