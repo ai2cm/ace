@@ -23,15 +23,14 @@ outputs:
   max_samples_per_gpu: 32
   time_range:
     start_time: "2023-01-01T00:00:00"
+    stop_time: "2024-01-01T00:00:00"
   lat_extent:
-    start: -65.0
-    stop: 65.0
+    start: -66.0
+    stop: 70.0
   lon_extent:
     start: 0
     stop: 360
 logging:
   log_to_screen: true
-  log_to_wandb: true
+  log_to_wandb: false
   log_to_file: true
-  project: ace-downscaling
-  entity: ai2cm
