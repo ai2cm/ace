@@ -311,12 +311,6 @@ class ComplexModule(torch.nn.Module):
 def test_frozen_parameter_config(apply_config: bool):
     module = ComplexModule(10, 20)
     config = parameter_init.FrozenParameterConfig(
-        include=[
-            "linear2.*",
-            "custom_param",
-            "linear1.custom_param",
-            "linear1.linear.bias",
-        ],
         exclude=["linear1.linear.weight"],
     )
     if apply_config:
@@ -342,22 +336,32 @@ def test_frozen_parameter_config(apply_config: bool):
 @pytest.mark.parametrize(
     "include, exclude, expect_exception",
     [
-        pytest.param(["*"], ["*"], True, id="both"),
-        pytest.param(["*"], [], False, id="include"),
-        pytest.param([], ["*"], False, id="exclude"),
-        pytest.param(["linear1.*"], ["linear1.*"], True, id="both_same"),
-        pytest.param(["linear1.*"], ["linear2.*"], False, id="both_different"),
-        pytest.param(["linear1.*"], [], False, id="include"),
-        pytest.param([], ["linear1.*"], False, id="exclude"),
-        pytest.param(["linear1.*.weight"], ["linear1.*"], True, id="internal_wildcard"),
+        pytest.param(
+            [
+                "linear2.*",
+                "custom_param",
+                "linear1.custom_param",
+                "linear1.linear.bias",
+            ],
+            ["linear1.linear.weight"],
+            True,
+            id="both",
+        ),
+        pytest.param([], ["linear1.linear.weight"], False, id="one"),
     ],
 )
-def test_frozen_parameter_config_no_overlaps(include, exclude, expect_exception):
+def test_frozen_parameter_config_raises_on_apply_if_both_given(
+    include, exclude, expect_exception
+):
+    module = ComplexModule(10, 20)
+    config = parameter_init.FrozenParameterConfig(
+        include=include, exclude=exclude
+    )  # for backwards compatibility, cannot raise at init time
     if expect_exception:
         with pytest.raises(ValueError):
-            parameter_init.FrozenParameterConfig(include=include, exclude=exclude)
+            config.apply(module)
     else:
-        parameter_init.FrozenParameterConfig(include=include, exclude=exclude)
+        config.apply(module)
 
 
 def test_parameter_init_with_regularizer(tmpdir):
