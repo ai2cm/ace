@@ -151,7 +151,10 @@ class OceanData:
     @property
     def sea_surface_fraction(self) -> torch.Tensor:
         """Returns the sea surface fraction."""
-        return self._get("sea_surface_fraction")
+        try:
+            return self._get("sea_surface_fraction")
+        except KeyError:
+            return 1 - self.land_fraction
 
     @property
     def net_downward_surface_heat_flux(self) -> torch.Tensor:
@@ -161,7 +164,10 @@ class OceanData:
     @property
     def geothermal_heat_flux(self) -> torch.Tensor:
         """Geothermal heat flux."""
-        return self._get("geothermal_heat_flux")
+        try:
+            return self._get("geothermal_heat_flux")
+        except KeyError:
+            return torch.zeros_like(self.sea_surface_fraction)
 
     @property
     def net_energy_flux_into_ocean(self) -> torch.Tensor:
