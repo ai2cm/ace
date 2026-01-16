@@ -44,13 +44,14 @@ def edm_sampler(
         x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
 
         # Euler step.
-        denoised = net(x_hat, coarse, t_hat).to(torch.float32)
+        # Note: net (UNetDiffusionModule -> EDMPrecond) always returns float32, so conversion is redundant
+        denoised = net(x_hat, coarse, t_hat)
         d_cur = (x_hat - denoised) / t_hat
         x_next = x_hat + (t_next - t_hat) * d_cur
 
         # Apply 2nd order correction.
         if i < num_steps - 1:
-            denoised = net(x_next, coarse, t_next).to(torch.float32)
+            denoised = net(x_next, coarse, t_next)
             d_prime = (x_next - denoised) / t_next
             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
