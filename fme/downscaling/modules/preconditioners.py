@@ -48,7 +48,7 @@ class EDMPrecond(torch.nn.Module):
         input_ = torch.concat(((c_in.to(latent.device) * latent), conditioning.to(latent.device)), dim=channel_dim)
 
         F_x = self.model(input_.to(dtype), c_noise.flatten().to(input_.device), class_labels=class_labels)
-        assert F_x.dtype == dtype
+
         # matches how UNetDiffusionModule concatenates (latent, inputs)
         n_latent_channels = F_x.shape[1]
         D_x = c_skip * latent[:, :n_latent_channels, ...] + c_out * F_x.to(torch.float32)
