@@ -2,12 +2,15 @@ import os
 
 import pytest
 import torch
+import xarray as xr
 import yaml
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
+from fme.downscaling.data import StaticInputs, Topography
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
@@ -96,7 +99,8 @@ def create_predictor_config(
     return out_path
 
 
-def test_predictor_runs(tmp_path, very_fast_only: bool):
+@pytest.mark.parametrize("static_inputs_on_model", [True, False])
+def test_predictor_runs(static_inputs_on_model, tmp_path, very_fast_only: bool):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
     n_samples = 2
@@ -115,12 +119,38 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
     os.makedirs(
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
     )
+
+    if static_inputs_on_model:
+        # ensure model static inputs shape is consistent with the test data
+        fine_data = xr.load_dataset(predictor_config["data"]["topography"])
+        topo_data = fine_data["HGTsfc"]
+        model.static_inputs = StaticInputs(
+            [
+                Topography(
+                    data=torch.randn(topo_data.shape[-2:]),
+                    coords=LatLonCoordinates(
+                        lat=torch.tensor(topo_data.lat.values),
+                        lon=torch.tensor(topo_data.lon.values),
+                    ),
+                )
+            ]
+        )
+        # overwrite dataset removing HGTsfc (fine data path is same as topography path)
+        fine_data.drop_vars("HGTsfc").to_netcdf(
+            predictor_config["data"]["topography"], mode="w"
+        )
+        # overwrite config to remove topography path
+        predictor_config["data"]["topography"] = None
+        with open(predictor_config_path, "w") as f:
+            yaml.dump(predictor_config, f)
+
     torch.save(
         {
             "model": model.get_state(),
         },
         predictor_config["model"]["checkpoint_path"],
     )
+
     with mock_wandb():
         predict.main(str(predictor_config_path))
     assert os.path.exists(
