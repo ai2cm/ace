@@ -242,7 +242,9 @@ Use the ``save_vars`` field to specify which variables to save to the output zar
 Patch Prediction for Large Domains
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For domains larger than the model's patch size, subdivision of the full domain into patches for prediction can be enabled. Configure this in the top-level ``patch`` section:
+For domains larger than the model's patch size, subdivision of the full domain into patches for prediction must be configured in the top-level ``patch`` section.
+Generation for region sizes smaller than the size the model was trained on is not supported.
+
 
 .. code-block:: yaml
 
