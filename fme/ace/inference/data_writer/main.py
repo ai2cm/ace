@@ -1,16 +1,17 @@
 import dataclasses
 import datetime
 import os
+import tempfile
 import warnings
 from collections.abc import Mapping, Sequence
 from typing import TypeAlias
 
-import fsspec
 import numpy as np
 import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.core.cloud import inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 
@@ -304,9 +305,12 @@ def _write(
     data_arrays["time"] = time_array
     ds = xr.Dataset(data_arrays, coords=coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
-    netcdf_in_memory = ds.to_netcdf(path=None, engine="h5netcdf")
-    with fsspec.open(os.path.join(path, filename), "wb") as f:
-        f.write(netcdf_in_memory)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source = os.path.join(tmpdir, filename)
+        ds.to_netcdf(source)
+        destination = os.path.join(path, filename)
+        inter_filesystem_copy(source, destination)
 
 
 class DataWriter(WriterABC[PrognosticState, PairedData]):
