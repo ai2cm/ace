@@ -1,0 +1,16 @@
+---
+description: Context about the ai2cm/ace repository
+globs: ["**/*.py"]
+alwaysApply: true
+---
+
+## Repository Context: ai2cm/ace
+
+This is a Python machine learning project for atmospheric modeling (ACE - AI2 Climate Emulator).
+
+### Key Conventions
+
+- Code is in the `fme/` directory (ace, core, coupled, diffusion, downscaling modules)
+- Tests follow pytest conventions
+- Configuration uses YAML files in `configs/`
+- The project uses PyTorch for ML components
