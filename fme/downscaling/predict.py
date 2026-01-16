@@ -17,7 +17,12 @@ from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import NoTargetAggregator, SampleAggregator
-from fme.downscaling.data import ClosedInterval, DataLoaderConfig, GriddedData
+from fme.downscaling.data import (
+    ClosedInterval,
+    DataLoaderConfig,
+    GriddedData,
+    StaticInputs,
+)
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predictors import (
     CascadePredictor,
@@ -85,7 +90,10 @@ class EventConfig:
         return TimeSlice(self.date, _stop)
 
     def get_gridded_data(
-        self, base_data_config: DataLoaderConfig, requirements: DataRequirements
+        self,
+        base_data_config: DataLoaderConfig,
+        requirements: DataRequirements,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
         event_coarse = dataclasses.replace(
             base_data_config.full_config[0], subset=self._time_selection_slice
@@ -99,7 +107,10 @@ class EventConfig:
             lat_extent=self.lat_extent,
             lon_extent=self.lon_extent,
         )
-        return event_data_config.build(requirements=requirements)
+        return event_data_config.build(
+            requirements=requirements,
+            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+        )
 
 
 class EventDownscaler:
@@ -292,10 +303,11 @@ class DownscalerConfig:
         )
 
     def build(self) -> list[Downscaler | EventDownscaler]:
+        model = self.model.build()
         dataset = self.data.build(
             requirements=self.model.data_requirements,
+            static_inputs_from_checkpoint=model.static_inputs,
         )
-        model = self.model.build()
         downscaler = Downscaler(
             data=dataset,
             model=model,
@@ -306,7 +318,9 @@ class DownscalerConfig:
         event_downscalers = []
         for event_config in self.events or []:
             event_dataset = event_config.get_gridded_data(
-                base_data_config=self.data, requirements=self.model.data_requirements
+                base_data_config=self.data,
+                requirements=self.model.data_requirements,
+                static_inputs_from_checkpoint=model.static_inputs,
             )
             event_downscalers.append(
                 EventDownscaler(

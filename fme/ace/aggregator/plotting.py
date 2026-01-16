@@ -18,24 +18,37 @@ def get_cmap_limits(data: np.ndarray, diverging=False) -> tuple[float, float]:
     return vmin, vmax
 
 
+def _is_healpix_data(data: np.ndarray) -> bool:
+    return data.ndim == 3 and data.shape[0] == 12
+
+
+def _roll_lon_by_n_pixels(data: np.ndarray, pixels: int = 5) -> np.ndarray:
+    if _is_healpix_data(data):
+        return data
+    lon_dim = -1
+    return np.roll(data, pixels, axis=lon_dim)
+
+
 def plot_imshow(
     data: np.ndarray,
     vmin: float | None = None,
     vmax: float | None = None,
     cmap: str | Colormap | None = None,
     flip_lat: bool = True,
+    roll_lon: bool = True,
     use_colorbar: bool = True,
     ax: plt.Axes | None = None,
 ) -> Figure:
     """Plot a 2D array using imshow, ensuring figure size is same as array size."""
     min_ = np.nanmin(data) if vmin is None else vmin
     max_ = np.nanmax(data) if vmax is None else vmax
-    if len(data.shape) == 3:
+    if roll_lon:
+        data = _roll_lon_by_n_pixels(data)
+    if _is_healpix_data(data):
         data = fold_healpix_data(data, fill_value=0.5 * (min_ + max_))
     if flip_lat:
         lat_dim = -2
         data = np.flip(data, axis=lat_dim)
-
     if use_colorbar:
         height, width = data.shape
         colorbar_width = max(1, int(0.025 * width))
@@ -60,7 +73,7 @@ def plot_imshow(
 
 
 def fold_healpix_data(data: np.ndarray, fill_value: float) -> np.ndarray:
-    if data.shape[0] != 12:
+    if not _is_healpix_data(data):
         raise ValueError(
             "first dimension must be 12 (face) for healpix data, "
             f"got shape {data.shape}"
@@ -107,6 +120,7 @@ def plot_paneled_data(
     data: list[list[np.ndarray]],
     diverging: bool,
     caption: str | None = None,
+    roll_lon: bool = True,
 ) -> Image:
     """Plot a list of 2D data arrays in a paneled plot."""
     if diverging:
@@ -135,9 +149,10 @@ def plot_paneled_data(
         fill_value = 0.5 * (vmin + vmax)
     else:
         fill_value = vmin
+    if roll_lon:
+        data = [[_roll_lon_by_n_pixels(arr) for arr in row] for row in data]
     all_data = _stitch_data_panels(data, fill_value=fill_value)
-
-    fig = plot_imshow(all_data, vmin=vmin, vmax=vmax, cmap=cmap)
+    fig = plot_imshow(all_data, vmin=vmin, vmax=vmax, cmap=cmap, roll_lon=False)
     wandb = WandB.get_instance()
     wandb_image = wandb.Image(fig, caption=caption)
     plt.close(fig)
