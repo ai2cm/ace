@@ -76,6 +76,7 @@ while read TRAIN_EXPER; do
     OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
     EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f9)
     WORKSPACE=$(echo "$TRAIN_EXPER" | cut -d"|" -f10)
+    CLUSTER=$(echo "$TRAIN_EXPER" | cut -d"|" -f11)
 
     # Check if STATUS starts with "run_"
     if [[ ! "$STATUS" =~ ^run_ ]]; then
@@ -93,7 +94,7 @@ while read TRAIN_EXPER; do
     CURRENT_CONFIG_FILENAME="evaluator-config-${CURRENT_CONFIG_TAG}.yaml"
 
     JOB_GROUP="${JOB_GROUP}-eval_${CKPT}-${CURRENT_CONFIG_TAG}"
-    
+
     # Construct JOB_NAME using TAG if present
     if [[ -n "$TAG" ]]; then
         JOB_NAME="${JOB_GROUP}-${TAG}"
@@ -130,12 +131,17 @@ while read TRAIN_EXPER; do
         WORKSPACE=ai2/ace
     fi
 
+    if [[ -z "$CLUSTER" ]]; then
+        CLUSTER="a100+h100"
+    fi
+
     # Set dummy variables for print functions
     GROUP="$JOB_GROUP"
     N_GPUS=1
     SHARED_MEM="20GiB"
-    CLUSTER="ceres"
     FME_MODULE="$FME_MODULE_EVALUATOR"
+
+    build_cluster_args "$CLUSTER" "$WORKSPACE"
 
     # Print job info based on dry-run mode
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -171,7 +177,7 @@ while read TRAIN_EXPER; do
             --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
             --priority "$PRIORITY" \
             $PREEMPTIBLE \
-            --cluster ceres \
+            "${CLUSTER_ARGS[@]}" \
             --workspace "$WORKSPACE" \
             --weka climate-default:/climate-default \
             --env WANDB_USERNAME="$BEAKER_USERNAME" \
