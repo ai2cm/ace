@@ -39,6 +39,16 @@ class EDMPrecond(torch.nn.Module):
         class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=latent.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
         dtype = torch.float16 if (self.use_fp16 and not force_fp32 and latent.device.type == 'cuda') else torch.float32
 
+        # Check if autocast is enabled (e.g., via UNetDiffusionModule with use_amp=True)
+        # If so, allow bfloat16 as a valid dtype for input
+        autocast_enabled = torch.is_autocast_enabled()
+        if autocast_enabled and latent.device.type == 'cuda':
+            # When autocast with bfloat16 is enabled, use bfloat16 for input
+            # This allows autocast to work efficiently without unnecessary dtype conversions
+            model_input_dtype = torch.bfloat16
+        else:
+            model_input_dtype = dtype
+
         c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
         c_out = sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2).sqrt()
         c_in = 1 / (self.sigma_data ** 2 + sigma ** 2).sqrt()
@@ -47,8 +57,12 @@ class EDMPrecond(torch.nn.Module):
         channel_dim = 1
         input_ = torch.concat(((c_in.to(latent.device) * latent), conditioning.to(latent.device)), dim=channel_dim)
 
-        F_x = self.model(input_.to(dtype), c_noise.flatten().to(input_.device), class_labels=class_labels)
-        assert F_x.dtype == dtype
+        F_x = self.model(input_.to(model_input_dtype), c_noise.flatten().to(input_.device), class_labels=class_labels)
+        # Allow bfloat16 when autocast is enabled (e.g., via UNetDiffusionModule with use_amp=True)
+        assert F_x.dtype in (dtype, torch.bfloat16), (
+            f"Expected F_x.dtype to be {dtype} or bfloat16 (when autocast enabled), "
+            f"but got {F_x.dtype}"
+        )
         # matches how UNetDiffusionModule concatenates (latent, inputs)
         n_latent_channels = F_x.shape[1]
         D_x = c_skip * latent[:, :n_latent_channels, ...] + c_out * F_x.to(torch.float32)
