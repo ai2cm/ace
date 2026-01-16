@@ -106,7 +106,7 @@ def test_UNetDiffusionModule_forward_pass():
 
 
 @pytest.mark.parametrize(
-    "use_amp",
+    "use_amp_bf16",
     [
         pytest.param(
             True,
@@ -118,14 +118,14 @@ def test_UNetDiffusionModule_forward_pass():
         False,
     ],
 )
-def test_UNetDiffusionModule_use_amp_precision(use_amp):
-    """Test that use_amp parameter correctly sets precision (bfloat16 or float32)."""
+def test_UNetDiffusionModule_use_amp_precision(use_amp_bf16):
+    """Test that use_amp_bf16 parameter correctly sets precision (bfloat16 or float32)."""
     downscale_factor = 2
     coarse_shape = (8, 16)
     fine_shape = coarse_shape[0] * downscale_factor, coarse_shape[1] * downscale_factor
     n_channels = 3
 
-    # Build module with specified use_amp value
+    # Build module with specified use_amp_bf16 value
     module = DiffusionModuleRegistrySelector(
         "unet_diffusion_song", {"model_channels": 4}
     ).build(
@@ -134,7 +134,7 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp):
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         sigma_data=1.0,
-        use_amp=use_amp,
+        use_amp_bf16=use_amp_bf16,
     )
 
     batch_size = 1
@@ -157,7 +157,7 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp):
     module(latent, conditioning, noise)
 
     assert len(captured_dtypes) > 0, "No dtypes captured from forward hook"
-    if use_amp:
+    if use_amp_bf16:
         assert torch.bfloat16 in captured_dtypes, (
             f"Expected bfloat16 in captured dtypes {captured_dtypes}, "
             "but autocast to bfloat16 was not used"
@@ -167,6 +167,6 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp):
             dtype == torch.float32 for dtype in captured_dtypes
         ), f"Expected all dtypes to be float32, but got {captured_dtypes}"
         assert torch.bfloat16 not in captured_dtypes, (
-            "Expected no bfloat16 when use_amp=False, "
+            "Expected no bfloat16 when use_amp_bf16=False, "
             f"but found bfloat16 in {captured_dtypes}"
         )

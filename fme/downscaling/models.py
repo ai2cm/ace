@@ -98,7 +98,7 @@ class DiffusionModelConfig:
         churn: The amount of stochasticity during generation.
         num_diffusion_generation_steps: Number of diffusion generation steps
         use_fine_topography: Whether to use fine topography in the model.
-        use_amp: Whether to use automatic mixed precision (bfloat16) in the
+        use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
             UNetDiffusionModule.
     """
 
@@ -115,7 +115,7 @@ class DiffusionModelConfig:
     num_diffusion_generation_steps: int
     predict_residual: bool
     use_fine_topography: bool = False
-    use_amp: bool = False
+    use_amp_bf16: bool = False
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -154,7 +154,7 @@ class DiffusionModelConfig:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
-            use_amp=self.use_amp,
+            use_amp_bf16=self.use_amp_bf16,
         )
 
         return DiffusionModel(
