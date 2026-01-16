@@ -23,7 +23,7 @@ outputs:
   max_samples_per_gpu: 32
   time_range:
     start_time: "2023-01-01T00:00:00"
-    stop_time: "2024-01-01T00:00:00"
+    stop_time: "2023-12-31T18:00:00"
   lat_extent:
     start: -66.0
     stop: 70.0
