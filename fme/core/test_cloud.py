@@ -1,8 +1,15 @@
 from pathlib import Path
 
+import fsspec
 import pytest
+import xarray as xr
 
-from fme.core.cloud import is_local, makedirs
+from fme.core.cloud import (
+    inter_filesystem_copy,
+    is_local,
+    makedirs,
+    to_netcdf_via_inter_filesystem_copy,
+)
 
 
 @pytest.mark.parametrize(
@@ -36,3 +43,28 @@ def test_makedirs(tmp_path: Path, use_str_input: bool):
 
     with pytest.raises(FileExistsError):
         makedirs(input_path)
+
+
+def test_inter_filesystem_copy(tmp_path: Path):
+    source_path = tmp_path / "source.txt"
+    source_path.write_text("test")
+    source = str(source_path)
+    destination = "memory://destination/destination.txt"
+
+    inter_filesystem_copy(source, destination)
+
+    fs, _ = fsspec.url_to_fs(destination)
+    assert fs.exists(destination)
+    assert fs.read_text(destination) == "test"
+
+    fs.rm(destination, recursive=True)
+
+
+def test_to_netcdf_via_inter_filesystem_copy(tmp_path: Path):
+    ds = xr.Dataset(
+        data_vars={"var": ("x", [1, 2, 3])},
+        coords={"x": [1, 2, 3]},
+    )
+    to_netcdf_via_inter_filesystem_copy(ds, tmp_path, "test.nc")
+    result = xr.open_dataset(tmp_path / "test.nc")
+    xr.testing.assert_identical(ds, result)

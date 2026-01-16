@@ -1,7 +1,10 @@
+import os
 import shutil
+import tempfile
 from pathlib import Path
 
 import fsspec
+import xarray as xr
 
 
 def inter_filesystem_copy(source: str, destination: str):
@@ -26,3 +29,14 @@ def makedirs(path: str | Path, exist_ok: bool = False):
     """Create directories on any filesystem assuming fsspec conventions."""
     fs, _ = fsspec.url_to_fs(path)
     fs.makedirs(path, exist_ok=exist_ok)
+
+
+def to_netcdf_via_inter_filesystem_copy(
+    ds: xr.Dataset, path: str | Path, filename: str
+):
+    """Write an xarray dataset to a netCDF file via an inter-filesystem copy."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source = os.path.join(tmpdir, filename)
+        destination = os.path.join(path, filename)
+        ds.to_netcdf(source)
+        inter_filesystem_copy(source, destination)

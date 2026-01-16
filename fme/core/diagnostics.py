@@ -1,12 +1,11 @@
 import os
-import tempfile
 from collections.abc import Mapping
 from typing import Protocol
 
 import numpy as np
 import xarray as xr
 
-from fme.core.cloud import inter_filesystem_copy, makedirs
+from fme.core.cloud import makedirs, to_netcdf_via_inter_filesystem_copy
 from fme.core.distributed import Distributed
 
 
@@ -57,8 +56,5 @@ def write_reduced_diagnostics(
         makedirs(output_dir, exist_ok=True)
         for name, ds in reduced_diagnostics.items():
             if len(ds) > 0:
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    source = os.path.join(tmpdir, f"{name}_diagnostics.nc")
-                    ds.to_netcdf(source)
-                    destination = os.path.join(output_dir, f"{name}_diagnostics.nc")
-                    inter_filesystem_copy(source, destination)
+                filename = f"{name}_diagnostics.nc"
+                to_netcdf_via_inter_filesystem_copy(ds, output_dir, filename)
