@@ -21,31 +21,43 @@ IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD # best hist checkpoint from job using global validation
 
 ACE_OUTPUT_DATASET=01KBG82WNTS5355FR95PV7ZY2F # ace outputs for 10-year runs
-IC=0000
+IC_LIST=("0000" "0001" "0002" "0003")
+SEASONS=("djf" "mam" "jja" "son")
 
 wandb_group=""
 
-gantry run \
-    --name $JOB_NAME \
-    --description 'Run 100km to 3km generation aggregation on coarsened X-SHiELD' \
-    --workspace ai2/climate-titan \
-    --priority urgent \
-    --cluster ai2/titan \
-    --beaker-image $IMAGE \
-    --env WANDB_USERNAME=$BEAKER_USERNAME \
-    --env WANDB_NAME=$JOB_NAME \
-    --env WANDB_JOB_TYPE=inference \
-    --env WANDB_RUN_GROUP=$wandb_group \
-    --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-    --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
-    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
-    --dataset $ACE_OUTPUT_DATASET:output_6hourly_predictions_ic${IC}.zarr:/ace_outputs.zarr \
-    --weka climate-default:/climate-default \
-    --gpus $NGPU \
-    --shared-memory 400GiB \
-    --budget ai2/climate \
-    --no-conda \
-    --install "pip install --no-deps ." \
-    --allow-dirty \
-    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.predict $CONFIG_PATH
+for IC in "${IC_LIST[@]}"; do
+    for SEASON in "${SEASONS[@]}"; do
+        CONFIG_FILENAME="config-predict-${SEASON}.yaml"
+
+        CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
+
+        CURR_JOB_NAME="${JOB_NAME}-ic${IC}-${SEASON}"
+
+         gantry run \
+            --name $CURR_JOB_NAME \
+            --description "Run 100km to 3km generation aggregation on coarsened X-SHiELD for IC ${IC} and season ${SEASON}" \
+            --workspace ai2/climate-titan \
+            --priority high \
+            --cluster ai2/titan \
+            --beaker-image $IMAGE \
+            --env WANDB_USERNAME=$BEAKER_USERNAME \
+            --env WANDB_NAME=$CURR_JOB_NAME \
+            --env WANDB_JOB_TYPE=inference \
+            --env WANDB_RUN_GROUP=$wandb_group \
+            --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+            --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+            --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+            --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
+            --dataset $ACE_OUTPUT_DATASET:output_6hourly_predictions_ic${IC}.zarr:/ace_outputs.zarr \
+            --weka climate-default:/climate-default \
+            --gpus $NGPU \
+            --shared-memory 400GiB \
+            --budget ai2/climate \
+            --no-conda \
+            --install "pip install --no-deps ." \
+            --allow-dirty \
+            -- torchrun --nproc_per_node $NGPU -m fme.downscaling.predict $CONFIG_PATH
+
+    done
+done

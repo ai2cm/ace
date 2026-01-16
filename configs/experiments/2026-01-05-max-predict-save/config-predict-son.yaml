@@ -1,0 +1,32 @@
+experiment_dir: /results
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 0
+model:
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+  rename:
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+data:
+  topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  coarse:
+  - data_path: /
+    engine: zarr
+    file_pattern: ace_outputs.zarr
+    subset:
+      start_time: "2023-09-01T00:00:00"
+      stop_time: "2023-11-30T18:00:00"
+  lat_extent:
+    start: -66.0
+    stop: 70.0
+  batch_size: 16
+  num_data_workers: 2
+  strict_ensemble: False
+n_samples: 8
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
