@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 import logging
-from math import exp
 import os
 import pathlib
 import tempfile
@@ -9,6 +8,7 @@ from collections.abc import Iterable
 from unittest.mock import patch
 
 import dacite
+import fsspec
 import numpy as np
 import pytest
 import torch
@@ -1207,14 +1207,15 @@ def test_evaluator_with_derived_forcings(
     assert insolation_name not in ds
 
 
-def test_evaluator_with_in_memory_experiment_dir(
-    tmp_path: pathlib.Path,
-    very_fast_only: bool
+def test_evaluator_with_non_local_experiment_dir(
+    tmp_path: pathlib.Path, very_fast_only: bool
 ):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 
+    # Use an in-memory filesystem for the experiment directory.
     experiment_dir = "memory://experiment_dir"
+
     forward_steps_in_memory = 2
     in_names = ["var", "forcing_var"]
     out_names = ["var"]
@@ -1262,3 +1263,19 @@ def test_evaluator_with_in_memory_experiment_dir(
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     main(yaml_config=str(config_filename))
+
+    expected_files = [
+        "config.yaml",
+        "initial_condition.nc",
+        "restart.nc",
+        "mean_diagnostics.nc",
+        "mean_norm_diagnostics.nc",
+        "zonal_mean_diagnostics.nc",
+        "time_mean_diagnostics.nc",
+        "time_mean_norm_diagnostics.nc",
+    ]
+    fs, _ = fsspec.url_to_fs(experiment_dir)
+    for file in expected_files:
+        assert fs.exists(os.path.join(experiment_dir, file))
+
+    fs.rm(experiment_dir, recursive=True)
