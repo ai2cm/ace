@@ -4,7 +4,7 @@ globs: []
 alwaysApply: false
 ---
 
-When asked to re-review a pull request (e.g., "Re-review PR #742" or "Check if my comments were addressed on PR #742"):
+When asked to re-review a pull request (e.g., "Re-review PR #N" or "Check if my comments were addressed on PR #N"):
 
 ## Context Detection
 
@@ -18,7 +18,7 @@ First, determine what context is available:
 
 ### Step 1: Determine Starting Point
 
-- **If a commit SHA is provided** (e.g., "from commit acf1793"): Use that as the starting point for reviewing new changes.
+- **If a commit SHA is provided** (e.g., "from commit <SHA>"): Use that as the starting point for reviewing new changes.
 - **If no commit SHA is provided**: Ask the user for the commit SHA where the previous review ended, OR offer to review all changes since the last review comment timestamp.
 
 ### Step 2: Fetch PR Data Using GitHub MCP Tools
@@ -114,4 +114,4 @@ Clear list of what still needs attention before the PR can be merged:
 - Author replies that explain design decisions count as "addressed" even without code changes
 - Be concise in the re-review - focus on delta from previous state
 - If the PR has been significantly refactored, consider suggesting a fresh full review instead
-
+- For large PRs with many commits, consider batching API calls or limiting the number of commits fetched to avoid rate limits

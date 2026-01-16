@@ -4,7 +4,7 @@ globs: []
 alwaysApply: false
 ---
 
-When asked to review a pull request (e.g., "Review PR #742 in the ace repo"):
+When asked to review a pull request (e.g., "Review PR #N in the ace repo"):
 
 ## Instructions
 
