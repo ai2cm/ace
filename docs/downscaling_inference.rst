@@ -177,10 +177,10 @@ For example, ACE outputs coarse grid 10m winds as ``UGRD10m`` and ``VGRD10m``, w
 .. code-block:: yaml
 
    model:
-   checkpoint_path: /HiRO.ckpt
-   rename:
-      eastward_wind_at_ten_meters: UGRD10m
-      northward_wind_at_ten_meters: VGRD10m
+      checkpoint_path: /HiRO.ckpt
+      rename:
+         eastward_wind_at_ten_meters: UGRD10m
+         northward_wind_at_ten_meters: VGRD10m
 
 
 Multiple Outputs
