@@ -295,13 +295,10 @@ class LatLonOperations(GriddedOperations):
                 "as assumed for zonal mean."
             )
 
-        # Slice area_weights to local dimensions when using spatial parallelism
-        dist = Distributed.get_instance()
-        if dist.spatial_parallelism:
-            area_weights = area_weights[*dist.get_local_slices(area_weights.shape)]
-
+        # Store FULL area_weights - slicing done dynamically in _get_area_weights
+        # based on tensor size (supports both full and local tensors)
+        self._full_shape = area_weights.shape
         self._device_area = area_weights.to(get_device())
-        #NOTE: we do not need the *.to("cpu") lines.
         self._cpu_area = area_weights.to("cpu")
         self._device_mask_provider = mask_provider.to(get_device())
         self._cpu_mask_provider = mask_provider.to("cpu")
@@ -326,6 +323,15 @@ class LatLonOperations(GriddedOperations):
         else:
             area_weights = self._device_area
             mask_provider = self._device_mask_provider
+        
+        # Dynamically slice weights to match tensor spatial dimensions
+        # This supports both full and local tensors with spatial parallelism
+        data_lat, data_lon = data.shape[-2], data.shape[-1]
+        if (data_lat, data_lon) != self._full_shape:
+            dist = Distributed.get_instance()
+            if dist.spatial_parallelism:
+                area_weights = area_weights[*dist.get_local_slices(self._full_shape)]
+        
         area_weights = _mask_area_weights(area_weights, mask_provider, name)
         if regional_weights is None:
             return area_weights
