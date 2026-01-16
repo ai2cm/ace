@@ -68,10 +68,10 @@ class LoggingConfig:
         if self.log_to_file and self._dist.is_root():
             if not is_local(experiment_dir):
                 warnings.warn(
-                    "Logging to a file is only supported for if the experiment "
-                    "directory is on a local file system. Got experiment "
-                    f"directory='{experiment_dir}', so no logs will be "
-                    "saved to a file."
+                    f"Logging to a file is only supported if the experiment "
+                    f"directory is on a local file system. Got experiment "
+                    f"directory={experiment_dir!r}, so no logs will be saved "
+                    f"to a file."
                 )
                 return
             if not os.path.exists(experiment_dir):
