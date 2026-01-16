@@ -8,6 +8,8 @@ from fme.core.wildcard import (
     ConflictingRuleError,
     MissingParameterError,
     UnusedRuleError,
+    apply_by_exclude,
+    apply_by_include,
     apply_by_wildcard,
     wildcard_match,
 )
@@ -178,3 +180,78 @@ def test_apply_by_wildcard_empty_wildcard_allowed():
     model = nn.Module()
     assert len(model.state_dict()) == 0
     apply_by_wildcard(model, lambda x, y: None, [], ["*"], raise_if_unused=True)
+
+
+@pytest.mark.parametrize(
+    "include, expected_applied, expected_error",
+    [
+        pytest.param(["*"], ["weight", "nested.weight"], None, id="include all"),
+        pytest.param(["weight"], ["weight"], None, id="weight included"),
+        pytest.param(
+            ["nested.*"], ["nested.weight"], None, id="nested weight included"
+        ),
+        pytest.param(["missing.*"], [], UnusedRuleError, id="nested weight included"),
+    ],
+)
+def test_apply_by_include(include, expected_applied, expected_error):
+    model = NestedModule1()
+
+    applied = set()
+
+    def func(module: nn.Module, name: str):
+        assert name not in applied
+        applied.add(name)
+
+    if expected_error is not None:
+        context = pytest.raises(expected_error)
+    else:
+        context = contextlib.nullcontext()
+
+    with context:
+        apply_by_include(
+            model,
+            func,
+            include,
+        )
+
+    if expected_error is None:
+        assert applied == set(expected_applied)
+
+
+@pytest.mark.parametrize(
+    "exclude, expected_applied, expected_error",
+    [
+        pytest.param(["*"], [], None, id="exclude all"),
+        pytest.param(["weight"], ["nested.weight"], None, id="weight excluded"),
+        pytest.param(["nested.*"], ["weight"], None, id="nested weight excluded"),
+        pytest.param(
+            ["missing.*"],
+            [],
+            UnusedRuleError,
+            id="unused_exclude_rule",
+        ),
+    ],
+)
+def test_apply_by_exclude(exclude, expected_applied, expected_error):
+    model = NestedModule1()
+
+    applied = set()
+
+    def func(module: nn.Module, name: str):
+        assert name not in applied
+        applied.add(name)
+
+    if expected_error is not None:
+        context = pytest.raises(expected_error)
+    else:
+        context = contextlib.nullcontext()
+
+    with context:
+        apply_by_exclude(
+            model,
+            func,
+            exclude,
+        )
+
+    if expected_error is None:
+        assert applied == set(expected_applied)
