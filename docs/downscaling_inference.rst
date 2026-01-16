@@ -29,53 +29,8 @@ Example YAML Configuration
 
 The following example shows a configuration which generates two outputs: one using ``EventConfig`` for a single time snapshot, and one using ``TimeRangeConfig`` for a time range.
 
-.. code-block:: yaml
-
-   experiment_dir: /results
-   model:
-       checkpoint_path: /checkpoints/best.ckpt
-   data:
-       coarse:
-       - data_path: /climate-default/X-SHiELD-AMIP-downscaling
-         engine: zarr
-         file_pattern: 100km.zarr
-       num_data_workers: 2
-       strict_ensemble: False
-   patch:
-       divide_generation: true
-       composite_prediction: true
-       coarse_horizontal_overlap: 1
-   outputs:
-     - name: "WA_AR_20230206"
-       save_vars: ["PRATEsfc"]
-       n_ens: 128
-       max_samples_per_gpu: 8
-       event_time: "2023-02-06T06:00:00"
-       lat_extent:
-           start: 36.0
-           stop:  52.0
-       lon_extent:
-           start: 228.0
-           stop: 244.0
-     - name: "CONUS_2023"
-       save_vars: ["PRATEsfc"]
-       n_ens: 8
-       max_samples_per_gpu: 8
-       time_range:
-          start_time: "2023-01-01T00:00:00"
-          end_time: "2023-12-31T18:00:00"
-       lat_extent:
-           start: 22.0
-           stop:  50.0
-       lon_extent:
-           start: 230.0
-           stop: 295.0
-   logging:
-       log_to_screen: true
-       log_to_wandb: false
-       log_to_file: true
-       project: downscaling
-       entity: my_organization
+.. literalinclude:: downscaling-inference-config.yaml
+   :language: yaml
 
 Configuration Structure
 -----------------------
@@ -90,11 +45,8 @@ We use the :ref:`Builder pattern <Builder Pattern>` to load this configuration i
 Output Configuration Types
 ----------------------------
 
-The ``outputs`` list can contain two types of configurations: ``EventConfig`` for single time snapshots and ``TimeRangeConfig`` for time ranges. Both inherit from :class:`fme.downscaling.inference.output.DownscalingOutputConfig`.
+The ``outputs`` list can contain two types of configurations: ``EventConfig`` for single time snapshots and ``TimeRangeConfig`` for time ranges.
 
-.. autoclass:: fme.downscaling.inference.output.DownscalingOutputConfig
-   :show-inheritance:
-   :noindex:
 
 EventConfig
 ^^^^^^^^^^^
@@ -109,31 +61,31 @@ Example EventConfig:
 
 .. code-block:: yaml
 
-   - name: "hurricane_landfall_2023"
-     save_vars: ["PRATEsfc"]
-     n_ens: 64
-     max_samples_per_gpu: 8
-     event_time: "2023-09-15T12:00:00"
-     time_format: "%Y-%m-%dT%H:%M:%S"
-     lat_extent:
-         start: 25.0
-         stop: 35.0
-     lon_extent:
-         start: 260.0
-         stop: 275.0
+   name: "hurricane_landfall_2023"
+   save_vars: ["PRATEsfc"]
+   n_ens: 64
+   max_samples_per_gpu: 8
+   event_time: "2023-09-15T12:00:00"
+   time_format: "%Y-%m-%dT%H:%M:%S"
+   lat_extent:
+      start: 25.0
+      stop: 35.0
+   lon_extent:
+      start: 260.0
+      stop: 275.0
 
 You can also use integer indices for ``event_time``:
 
 .. code-block:: yaml
 
-   - name: "event_at_index_100"
-     save_vars: ["PRATEsfc"]
-     n_ens: 32
-     max_samples_per_gpu: 4
-     event_time: 100
-     lat_extent:
-         start: 30.0
-         stop: 40.0
+   name: "event_at_index_100"
+   save_vars: ["PRATEsfc"]
+   n_ens: 32
+   max_samples_per_gpu: 4
+   event_time: 100
+   lat_extent:
+      start: 30.0
+      stop: 40.0
 
 
 TimeRangeConfig
@@ -146,33 +98,33 @@ TimeRangeConfig
    :noindex:
 
 
-Example TimeRangeConfig with TimeSlice:
+Example TimeRangeConfig with :class:`TimeSlice <fme.core.dataset.time.TimeSlice>`:
 
 .. code-block:: yaml
 
-   - name: "CONUS_full_year"
+     name: "CONUS_full_year"
      n_ens: 4
      max_samples_per_gpu: 4
      time_range:
          start_time: "2023-01-01T00:00:00"
-         end_time: "2023-12-31T18:00:00"
+         stop_time: "2023-12-31T18:00:00"
 
-Example TimeRangeConfig with Slice:
+Example TimeRangeConfig with :class:`Slice <fme.core.typing_.Slice>`:
 
 .. code-block:: yaml
 
-   - name: "first_year_indices"
+     name: "first_year_indices"
      n_ens: 4
      max_samples_per_gpu: 4
      time_range:
          start: 0
          stop: 36
 
-Example TimeRangeConfig with RepeatedInterval:
+Example TimeRangeConfig with :class:`RepeatedInterval <fme.core.dataset.time.RepeatedInterval>`:
 
 .. code-block:: yaml
 
-   - name: "weekly_snapshots"
+     name: "weekly_snapshots"
      n_ens: 4
      max_samples_per_gpu: 4
      time_range:
@@ -183,6 +135,23 @@ Example TimeRangeConfig with RepeatedInterval:
 
 Common Configuration Patterns
 ------------------------------
+
+Renaming model variables
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can rename input/output variables for the model loaded from the checkpoint.
+This is useful if the model input variables' names are not the same as the variable names in the coarse input dataset, or if the model output variables are not the same as the variable names you want to save.
+
+For example, ACE outputs coarse grid 10m winds as ``UGRD10m`` and ``VGRD10m``, while the downscaling checkpoint was created using data with variable names ``eastward_wind_at_ten_meters`` and ``northward_wind_at_ten_meters``. Thus, the ``model`` configuration in the example requires the following ``rename`` fields
+
+.. code-block:: yaml
+
+   model:
+   checkpoint_path: /HiRO.ckpt
+   rename:
+      eastward_wind_at_ten_meters: UGRD10m
+      northward_wind_at_ten_meters: VGRD10m
+
 
 Multiple Outputs
 ^^^^^^^^^^^^^^^^
@@ -200,8 +169,7 @@ You can mix ``EventConfig`` and ``TimeRangeConfig`` outputs in a single configur
      - name: "time_range_1"
        time_range:
            start_time: "2023-01-01T00:00:00"
-           end_time: "2023-03-31T18:00:00"
-       save_vars: ["PRATEsfc", "TMP2m"]
+           stop_time: "2023-03-31T18:00:00"
        n_ens: 8
        max_samples_per_gpu: 8
 
@@ -219,7 +187,7 @@ Both ``EventConfig`` and ``TimeRangeConfig`` support spatial extent configuratio
        start: 230.0
        stop: 295.0
 
-Latitude bounds must be within (-88, 88) degrees. Longitude can be in the range (-180, 360) degrees. If not specified, the generated dataset region will default to these ranges. **Note- this will generate a very large output dataset!**
+Latitude bounds must be within (-88, 88) degrees. Longitude can be in the range (-180, 360) degrees. If not specified, the generated dataset region will default to the latitude range used in training (-66, 70) degrees. **Note- this will generate a very large output dataset!**
 
 Ensemble Size Configuration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -244,7 +212,7 @@ Use the ``save_vars`` field to specify which variables to save to the output zar
 Patch Prediction for Large Domains
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For domains larger than the model's patch size, subdivision of the full domain into patches for prediction can be enabled. Configure this in the top-level ``patch`` section or override per-output:
+For domains larger than the model's patch size, subdivision of the full domain into patches for prediction can be enabled. Configure this in the top-level ``patch`` section:
 
 .. code-block:: yaml
 
@@ -253,9 +221,9 @@ For domains larger than the model's patch size, subdivision of the full domain i
        composite_prediction: true
        coarse_horizontal_overlap: 0
 
-- ``divide_generation``: Enable patch-based generation for large domains.
-- ``composite_prediction``: Composite patches together (recommended for seamless outputs).
-- ``coarse_horizontal_overlap``: Overlap between patches in coarse grid cells is averaged in final prediction (0 means no overlap).
+.. autoclass:: fme.downscaling.predictors.composite.PatchPredictionConfig
+   :show-inheritance:
+   :noindex:
 
 Related Configuration Classes
 -----------------------------

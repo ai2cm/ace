@@ -166,6 +166,7 @@ class InferenceConfig:
         logging: Logging configuration.
         patch: Default patch prediction configuration.
 
+    Exclude following from autoclass documentation:
     Example YAML configuration::
 
         experiment_dir: /results
