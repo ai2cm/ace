@@ -54,6 +54,7 @@ ignore = ["D1", "D200", "D205", "D212", "E203", "W293", "F541", "E402"]
 "*/__init__.py" = ["F401"]
 "scripts/*" = ["D", "UP"]  # scripts may run in different python env, so ignore UP rules
 "test_*.py" = ["D"]
+"fme/core/models/conditional_sfno/aurora/*.py" = ["E501", "W505"]  # long lines in aurora code
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
