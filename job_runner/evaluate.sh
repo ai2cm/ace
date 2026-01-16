@@ -158,6 +158,7 @@ while read TRAIN_EXPER; do
         echo " - Group: ${JOB_GROUP}"
         echo " - Checkpoint: ${CKPT}"
         echo " - Training results dataset ID: ${EXISTING_RESULTS_DATASET}"
+        echo " - Cluster: ${CLUSTER}"
         echo " - Priority: ${PRIORITY}"
         echo " - ${PREEMPTIBLE}"
         echo " - --override args: ${OVERRIDE_ARGS}"

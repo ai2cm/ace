@@ -29,6 +29,8 @@ https://github.com/ai2cm/full-model/compare/job_runner
 
 - Remove `set_default_stats()`
 - Allow `--atmos_stats` and `--ocean_stats` to be used separately.
+- CLUSTER can be now be set for eval jobs
+- Add "h100" as an additional CLUSTER option
 
 ### Fixed
 
