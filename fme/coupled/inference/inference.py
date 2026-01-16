@@ -16,7 +16,7 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.inference import InitialConditionConfig, get_initial_condition
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.cloud import mkdirs
+from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -225,7 +225,7 @@ def run_inference_from_config(config: InferenceConfig):
     timer.start_outer("inference")
     timer.start("initialization")
 
-    mkdirs(config.experiment_dir, exist_ok=True)
+    makedirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
     env_vars = logging_utils.retrieve_env_vars()
     beaker_url = logging_utils.log_beaker_url()

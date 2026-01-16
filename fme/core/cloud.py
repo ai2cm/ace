@@ -22,7 +22,7 @@ def is_local(path: str | Path) -> bool:
     return isinstance(fs, fsspec.implementations.local.LocalFileSystem)
 
 
-def mkdirs(path: str | Path, exist_ok: bool = False):
-    """Create directory on any filesystem assuming fsspec conventions."""
+def makedirs(path: str | Path, exist_ok: bool = False):
+    """Create directories on any filesystem assuming fsspec conventions."""
     fs, _ = fsspec.url_to_fs(path)
-    fs.mkdirs(path, exist_ok=exist_ok)
+    fs.makedirs(path, exist_ok=exist_ok)

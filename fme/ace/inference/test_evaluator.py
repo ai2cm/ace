@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import logging
+from math import exp
 import os
 import pathlib
 import tempfile
@@ -1204,3 +1205,60 @@ def test_evaluator_with_derived_forcings(
 
     # Forcings, including those that are derived, do not end up in output.
     assert insolation_name not in ds
+
+
+def test_evaluator_with_in_memory_experiment_dir(
+    tmp_path: pathlib.Path,
+    very_fast_only: bool
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    experiment_dir = "memory://experiment_dir"
+    forward_steps_in_memory = 2
+    in_names = ["var", "forcing_var"]
+    out_names = ["var"]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = tmp_path / "stepper"
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+    )
+    config = InferenceEvaluatorConfig(
+        experiment_dir=experiment_dir,
+        n_forward_steps=2,
+        forward_steps_in_memory=forward_steps_in_memory,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=False,
+        ),
+        loader=data.inference_data_loader_config,
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+        ),
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    main(yaml_config=str(config_filename))

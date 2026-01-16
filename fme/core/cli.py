@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import fsspec
 import yaml
 
-from fme.core.cloud import mkdirs
+from fme.core.cloud import makedirs
 from fme.core.distributed import Distributed
 from fme.core.wandb import WANDB_RUN_ID_FILE, WandB
 
@@ -80,7 +80,7 @@ def prepare_directory(
     """Create experiment directory and dump config_data to it."""
     dist = Distributed.get_instance()
     if dist.is_root():
-        mkdirs(path, exist_ok=True)
+        makedirs(path, exist_ok=True)
     dist.barrier()
     if resume_results is not None and not os.path.isdir(
         os.path.join(path, "training_checkpoints")

@@ -6,7 +6,7 @@ from typing import Protocol
 import numpy as np
 import xarray as xr
 
-from fme.core.cloud import inter_filesystem_copy, mkdirs
+from fme.core.cloud import inter_filesystem_copy, makedirs
 from fme.core.distributed import Distributed
 
 
@@ -54,7 +54,7 @@ def write_reduced_diagnostics(
         output_dir = os.path.join(output_dir, subdir)
     dist = Distributed.get_instance()
     if dist.is_root():
-        mkdirs(output_dir, exist_ok=True)
+        makedirs(output_dir, exist_ok=True)
         for name, ds in reduced_diagnostics.items():
             if len(ds) > 0:
                 with tempfile.TemporaryDirectory() as tmpdir:
