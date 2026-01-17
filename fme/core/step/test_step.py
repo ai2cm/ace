@@ -24,6 +24,7 @@ from fme.core.normalizer import NetworkAndLossNormalizationConfig, Normalization
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
+from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
@@ -167,7 +168,11 @@ def get_single_module_noise_conditioned_selector(
                     ),
                 ),
                 in_names=["forcing_shared", "forcing_rad"],
-                out_names=["diagnostic_main", "diagnostic_rad"],
+                out_names=["diagnostic_main"],
+                secondary_decoder=SecondaryDecoderConfig(
+                    secondary_diagnostic_names=["diagnostic_rad"],
+                    network=ModuleSelector(type="MLP", config={}),
+                ),
                 normalization=normalization,
             ),
         ),
