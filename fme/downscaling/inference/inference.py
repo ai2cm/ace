@@ -154,7 +154,7 @@ class InferenceConfig:
     sizes, and output variables. Outputs are processed sequentially, with generation
     parallelized across GPUs using distributed data loading.
 
-    Attributes:
+    Parameters:
         model: Model specification to load for generation.
         data: Base data loader configuration that is shared to each output
             generation task. Specifics for each output like the time(range),
@@ -166,8 +166,9 @@ class InferenceConfig:
         logging: Logging configuration.
         patch: Default patch prediction configuration.
 
-    Example YAML configuration:
-    ```yaml
+    Exclude following from autoclass documentation:
+    Example YAML configuration::
+
         experiment_dir: /results
         model:
             checkpoint_path: /checkpoints/best_histogram_tail.ckpt
@@ -215,7 +216,6 @@ class InferenceConfig:
             log_to_file: true
             project: downscaling
             entity: my_organization
-    ```
     """
 
     model: CheckpointModelConfig | CascadePredictorConfig

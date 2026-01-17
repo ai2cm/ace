@@ -39,7 +39,7 @@ class DownscalingOutput:
     Encapsulates all data and metadata needed to generate downscaled outputs
     for a specific region, time range, and ensemble configuration.
 
-    Attributes:
+    Parameters:
         name: Identifier for this target (used as output filenames).
         save_vars: List of variable names to save to zarr.
         n_ens: Total number of ensemble members to generate.
@@ -118,7 +118,7 @@ class DownscalingOutputConfig(ABC):
     Output targets define what data to generate, where to generate it, and how
     to save it.
 
-    Attributes:
+    Parameters:
         name: Unique identifier for this target (used in output filename)
         n_ens: Number of ensemble members to generate when downscaling
         save_vars: List of variable names to save to zarr output.  If None,
@@ -335,7 +335,19 @@ class EventConfig(DownscalingOutputConfig):
     If n_ens > max_samples_per_gpu, this event can be run in a distributed manner
     where each GPU generates a subset of the ensemble members for the event.
 
-    Attributes:
+    Parameters:
+        name: Unique identifier for this target (used in output filename)
+        n_ens: Number of ensemble members to generate when downscaling
+        save_vars: List of variable names to save to zarr output.  If None,
+            all variables from the model output will be saved.
+        zarr_chunks: Optional chunk sizes for zarr dimensions. If None, automatically
+            calculated to target lat/lon shape <=10MB per chunk. Ensemble and time
+            dimensions chunks are length 1.
+        zarr_shards: Optional shard sizes for zarr dimensions. If None, defaults to
+            maximum output size for a single unit of downscaling work.  This ensures
+            that parallel generation tasks write to separate shards.
+        max_samples_per_gpu: Number of time and/or ensemble samples to include in a
+            single GPU generation. Controls memory usage and time to generate.
         event_time: Timestamp or integer index of the event. If string, must match
             time_format. Required field.
         time_format: strptime format for parsing event_time string.
@@ -401,12 +413,27 @@ class TimeRangeConfig(DownscalingOutputConfig):
     downscaled data over regions like CONUS, continental areas, or custom domains
     over extended time periods.
 
-    Attributes:
+    Parameters:
+        name: Unique identifier for this target (used in output filename)
+        n_ens: Number of ensemble members to generate when downscaling
+        save_vars: List of variable names to save to zarr output.  If None,
+            all variables from the model output will be saved.
+        zarr_chunks: Optional chunk sizes for zarr dimensions. If None, automatically
+            calculated to target lat/lon shape <=10MB per chunk. Ensemble and time
+            dimensions chunks are length 1.
+        zarr_shards: Optional shard sizes for zarr dimensions. If None, defaults to
+            maximum output size for a single unit of downscaling work.  This ensures
+            that parallel generation tasks write to separate shards.
+        max_samples_per_gpu: Number of time and/or ensemble samples to include in a
+            single GPU generation. Controls memory usage and time to generate.
+
         time_range: Time selection specification. Can be:
+
             - TimeSlice: Start/stop timestamps (e.g.,
               TimeSlice(start_time="2021-01-01", stop_time="2021-12-31"))
             - Slice: Integer indices (e.g., Slice(0, 365))
             - RepeatedInterval: Repeating time pattern
+
         lat_extent: Latitude bounds in degrees [-90, 90]. Default: full extent
             of the underlying data.
         lon_extent: Longitude bounds in degrees [-180, 360]. Default: full extent
