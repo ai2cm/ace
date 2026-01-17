@@ -1,0 +1,1 @@
+nvidia-physicsnemo @ git+https://github.com/NVIDIA/physicsnemo@327d9928abc17983ad7aa3df94da9566c197c468
