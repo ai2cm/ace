@@ -5,6 +5,7 @@ from collections.abc import Mapping
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.main import DataWriterConfig, PairedDataWriter
+from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 from fme.coupled.data_loading.batch_data import (
@@ -47,11 +48,9 @@ class CoupledDataWriterConfig:
         dataset_metadata: dict[str, DatasetMetadata],
     ) -> "CoupledPairedDataWriter":
         ocean_dir = os.path.join(experiment_dir, OCEAN_OUTPUT_DIR_NAME)
-        if not os.path.exists(ocean_dir):
-            os.makedirs(ocean_dir)
+        makedirs(ocean_dir, exist_ok=True)
         atmos_dir = os.path.join(experiment_dir, ATMOSPHERE_OUTPUT_DIR_NAME)
-        if not os.path.exists(atmos_dir):
-            os.makedirs(atmos_dir)
+        makedirs(atmos_dir, exist_ok=True)
         return CoupledPairedDataWriter(
             ocean_writer=self.ocean.build_paired(
                 experiment_dir=ocean_dir,

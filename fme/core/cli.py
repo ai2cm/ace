@@ -4,8 +4,10 @@ import os
 import shutil
 from collections.abc import Sequence
 
+import fsspec
 import yaml
 
+from fme.core.cloud import makedirs
 from fme.core.distributed import Distributed
 from fme.core.wandb import WANDB_RUN_ID_FILE, WandB
 
@@ -77,8 +79,8 @@ def prepare_directory(
 ) -> ResumeResultsConfig | None:
     """Create experiment directory and dump config_data to it."""
     dist = Distributed.get_instance()
-    if not os.path.isdir(path) and dist.is_root():
-        os.makedirs(path, exist_ok=True)
+    if dist.is_root():
+        makedirs(path, exist_ok=True)
     dist.barrier()
     if resume_results is not None and not os.path.isdir(
         os.path.join(path, "training_checkpoints")
@@ -88,7 +90,7 @@ def prepare_directory(
         # either not given or ignored because we already resumed once before
         resume_results = None
     dist.barrier()
-    with open(os.path.join(path, "config.yaml"), "w") as f:
+    with fsspec.open(os.path.join(path, "config.yaml"), "w") as f:
         yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
     return resume_results
 
