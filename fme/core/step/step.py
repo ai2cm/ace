@@ -1,11 +1,11 @@
 import abc
 import dataclasses
-import warnings
 from collections.abc import Callable
 
 # we use Type to distinguish from type attr of StepSelector
-from typing import Any, ClassVar, Type, TypeVar, cast, final  # noqa: UP035
+from typing import Any, ClassVar, Self, Type, TypeVar, cast, final  # noqa: UP035
 
+import dacite
 import torch
 from torch import nn
 
@@ -13,6 +13,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
+from fme.core.step.args import StepArgs
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -114,6 +115,10 @@ class StepConfigABC(abc.ABC):
         """
         pass
 
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> Self:
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+
 
 T = TypeVar("T", bound=StepConfigABC)
 
@@ -211,7 +216,7 @@ class StepSelector(StepConfigABC):
         self.config = dataclasses.asdict(self._step_config_instance)
 
 
-class StepABC(abc.ABC, nn.Module):
+class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
     @property
@@ -317,49 +322,20 @@ class StepABC(abc.ABC, nn.Module):
     @abc.abstractmethod
     def step(
         self: SelfType,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
+        args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
         Args:
-            input: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This data is used as input for pytorch
-                module(s) and is assumed to contain all input variables
-                and be denormalized.
-            next_step_input_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This must contain the necessary input
-                data at the output timestep, such as might be needed to prescribe
-                sea surface temperature or use a corrector.
+            args: The arguments to the step function.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
         """
         pass
-
-    @final
-    def forward(
-        self, input: TensorMapping, next_step_input_data: TensorMapping
-    ) -> TensorDict:
-        return self.step(input, next_step_input_data)
-
-    @final
-    def export(
-        self: SelfType,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
-    ) -> torch.export.ExportedProgram:
-        """
-        Script the step function.
-        """
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message=".*does not reference an nn.Module.*"
-            )
-            return torch.export.export(self, (input, next_step_input_data))
 
     @abc.abstractmethod
     def get_state(self) -> dict[str, Any]:

@@ -21,6 +21,7 @@ from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.core.device import get_device
+from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorMapping
 
 CALENDAR_CFTIME = {
@@ -54,7 +55,9 @@ def get_paired_data(
     return PairedData(
         prediction=prediction,
         reference=reference,
-        labels=[set() for _ in range(n_samples)],
+        labels=BatchLabels.new_from_set(
+            set(), n_samples=n_samples, device=get_device()
+        ),
         time=time,
     )
 

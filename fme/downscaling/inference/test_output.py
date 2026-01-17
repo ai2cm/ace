@@ -4,7 +4,7 @@ import pytest
 
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.downscaling.data import ClosedInterval, DataLoaderConfig
+from fme.downscaling.data import ClosedInterval
 from fme.downscaling.inference.output import (
     DownscalingOutput,
     DownscalingOutputConfig,
@@ -13,7 +13,6 @@ from fme.downscaling.inference.output import (
 )
 from fme.downscaling.predictors import PatchPredictionConfig
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.test_utils import data_paths_helper
 
 # Tests for OutputTargetConfig validation
 
@@ -70,31 +69,6 @@ def test_region_config_requires_time_range():
 
 
 @pytest.fixture
-def loader_config(tmp_path):
-    """Create DataLoaderConfig with test data."""
-    path = tmp_path / "test_data"
-    path.mkdir()
-    # TODO: should probably consolidate cross imported
-    # .      data path helpers to a single file instead
-    # .      of importing from test_train in each location
-    test_data_path = data_paths_helper(path)
-
-    return DataLoaderConfig(
-        coarse=[
-            XarrayDataConfig(
-                data_path=str(test_data_path.coarse),
-                file_pattern="*.nc",
-                engine="netcdf4",
-            )
-        ],
-        batch_size=2,
-        num_data_workers=0,
-        strict_ensemble=False,
-        topography=f"{test_data_path.fine}/data.nc",
-    )
-
-
-@pytest.fixture
 def requirements():
     """Create DataRequirements for generation."""
     return DataRequirements(
@@ -114,6 +88,7 @@ def patch_config():
 # Integration tests for Config.build()
 
 
+@pytest.mark.parametrize("loader_config", [True], indirect=True)
 def test_event_config_build_creates_output_target_with_single_time(
     loader_config, requirements, patch_config
 ):
@@ -144,6 +119,7 @@ def test_event_config_build_creates_output_target_with_single_time(
     assert tuple(output_target.shards.values()) == output_target.data.max_output_shape
 
 
+@pytest.mark.parametrize("loader_config", [True], indirect=True)
 def test_region_config_build_creates_output_target_with_time_range(
     loader_config, requirements, patch_config
 ):

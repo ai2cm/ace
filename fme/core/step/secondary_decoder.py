@@ -1,6 +1,7 @@
 """Secondary decoder for computing additional diagnostic variables."""
 
 import dataclasses
+from collections.abc import Callable
 
 import torch
 from torch import nn
@@ -8,7 +9,7 @@ from torch import nn
 from fme.core.dataset_info import DatasetInfo
 from fme.core.packer import Packer
 from fme.core.registry import ModuleSelector
-from fme.core.registry.module import ModuleConfig
+from fme.core.registry.module import Module, ModuleConfig
 from fme.core.typing_ import TensorDict
 
 
@@ -107,7 +108,7 @@ class SecondaryDecoder:
             network: ModuleSelector specifying the network architecture.
         """
         out_dim = len(out_names)
-        self._module: nn.Module = network.build(
+        self._module: Module = network.build(
             n_in_channels=in_dim,
             n_out_channels=out_dim,
             dataset_info=DatasetInfo(),  # Not needed for MLP
@@ -115,14 +116,23 @@ class SecondaryDecoder:
         self._packer = Packer(out_names)
 
     @property
-    def module(self) -> nn.Module:
+    def torch_module(self) -> nn.Module:
         """The underlying nn.Module."""
+        return self._module.torch_module
+
+    @property
+    def module(self) -> Module:
         return self._module
 
     @module.setter
     def module(self, value: nn.Module) -> None:
-        """Set the underlying nn.Module."""
         self._module = value
+
+    def wrap_module(
+        self, callable: Callable[[nn.Module], nn.Module]
+    ) -> "SecondaryDecoder":
+        self._module = self._module.wrap_module(callable)
+        return self
 
     def to(self, device) -> "SecondaryDecoder":
         """Move the module to the specified device."""
@@ -150,10 +160,10 @@ class SecondaryDecoder:
         """
         return self._packer.unpack(tensor, axis=axis)
 
-    def module_state_dict(self) -> dict:
+    def get_module_state(self) -> dict:
         """Return the state dict of the underlying module."""
-        return self._module.state_dict()
+        return self._module.get_state()
 
-    def load_module_state_dict(self, state_dict: dict) -> None:
+    def load_module_state(self, state_dict: dict) -> None:
         """Load the state dict into the underlying module."""
-        self._module.load_state_dict(state_dict)
+        self._module.load_state(state_dict)

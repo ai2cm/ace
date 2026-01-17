@@ -8,10 +8,10 @@ from torch.utils.data import DataLoader
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
+from fme.core.generics.data import SizedMap
 
 from ..data import BatchData, Topography
 from ..data.config import BatchItemDatasetAdapter
-from ..data.datasets import SizedMap
 from .constants import ENSEMBLE_NAME, TIME_NAME
 
 

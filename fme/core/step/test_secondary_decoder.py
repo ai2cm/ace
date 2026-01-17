@@ -72,9 +72,9 @@ class TestMLPConfig:
         module = selector.build(
             n_in_channels=4, n_out_channels=2, dataset_info=DatasetInfo()
         )
-        assert isinstance(module, torch.nn.Sequential)
+        assert isinstance(module.torch_module, torch.nn.Module)
         # depth=3: Conv2d, GELU, Conv2d, GELU, Conv2d
-        assert len(module) == 5
+        assert len(module.torch_module) == 5
 
 
 class TestSecondaryDecoderConfig:
@@ -148,7 +148,7 @@ class TestSecondaryDecoder:
             out_names=["diag1"],
             network=network,
         )
-        assert isinstance(decoder.module, torch.nn.Module)
+        assert isinstance(decoder.module.torch_module, torch.nn.Module)
 
     def test_module_state_dict_and_load_module_state_dict(self):
         network = ModuleSelector(type="MLP", config={"hidden_dim": 16, "depth": 2})
@@ -163,8 +163,8 @@ class TestSecondaryDecoder:
             network=network,
         )
         # Save state from decoder1, load into decoder2
-        state = decoder1.module_state_dict()
-        decoder2.load_module_state_dict(state)
+        state = decoder1.get_module_state()
+        decoder2.load_module_state(state)
         # Check that parameters match
         x = torch.randn(1, 4, 4, 4)
         torch.testing.assert_close(decoder1(x), decoder2(x))
