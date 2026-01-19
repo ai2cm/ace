@@ -175,8 +175,4 @@ def _force_conserve_ocean_heat_content(
     for k in range(n_levels):
         name = f"thetao_{k}"
         gen.data[name] = gen.data[name] * heat_content_correction_ratio
-    if "sst" in gen.data:
-        gen.data["sst"] = (  # assuming sst in Kelvin
-            gen.data["sst"] - 273.15
-        ) * heat_content_correction_ratio + 273.15
     return gen.data
