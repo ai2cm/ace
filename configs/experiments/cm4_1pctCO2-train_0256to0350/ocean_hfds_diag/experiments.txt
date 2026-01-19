@@ -15,3 +15,5 @@ resume_diugpsky_ep37_w_EC-1pct_nosmooth_0256to0350_hfds_diag||01KEXF7F0ZYYN877VM
 resume_diugpsky_ep37_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag||01KF1R44WJSCZXS9Q42339J596|training|best_inference_ckpt|normal|--not-preemptible
 
 resume_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs0|01KFAC2EZW67HDB4MSMG8VB0PK|training|best_inference_ckpt|normal|--not-preemptible
+
+resume_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|01KFAC2P3JSSYNZTNTG7VJKRJD|training|best_inference_ckpt|normal|--not-preemptible
