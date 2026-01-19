@@ -21,3 +21,5 @@ resume_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|01KFAC2P3JSSYNZTNTG7VJKRJ
 1pct_nosmooth_0256to0350_correctOHC|rs1|01KFACJRNA996P6WFATJ3X7A1P|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs0|01KFC226RBWE7NKXZ0VA0DQ0N3|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|01KFC22Q4Y082R52BK15AQW0SX|training|best_inference_ckpt|normal|--not-preemptible
