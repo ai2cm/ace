@@ -1,1 +1,4 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs0|ace-samudra-cm4|5bebup7b|best_ckpt|train|high|a100+h100|2|300GiB|3||stepper.step.config.corrector.config.ocean_heat_content_correction=true max_epochs=10
+ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|ace-samudra-cm4|diugpsky|best_ckpt|train|high|a100+h100|2|300GiB|3||stepper.step.config.corrector.config.ocean_heat_content_correction=true max_epochs=10
