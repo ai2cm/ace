@@ -78,6 +78,10 @@ class SingleModuleStepConfig(StepConfigABC):
                     raise ValueError(
                         f"secondary_diagnostic_name is an input variable: '{name}'"
                     )
+                if name in self.out_names:
+                    raise ValueError(
+                        f"secondary_diagnostic_name is an output variable: '{name}'"
+                    )
 
     @property
     def n_ic_timesteps(self) -> int:
