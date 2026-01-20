@@ -243,10 +243,14 @@ def get_generate_model_config():
         out_names=["var0", "var1"],
         normalization=PairedNormalizationConfig(
             NormalizationConfig(
-                means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}, force_fp_32=True
+                means={"var0": 0.0, "var1": 0.0},
+                stds={"var0": 1.0, "var1": 1.0},
+                force_fp_32=True,
             ),
             NormalizationConfig(
-                means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}, force_fp_32=True
+                means={"var0": 0.0, "var1": 0.0},
+                stds={"var0": 1.0, "var1": 1.0},
+                force_fp_32=True,
             ),
         ),
         p_mean=0,

@@ -203,6 +203,7 @@ def test_unets_output_shape():
     outputs = unet(inputs)
     assert outputs.shape == (2, 3, *fine_shape)
 
+
 @pytest.mark.parametrize(
     "channel_mult,attn_resolution",
     [

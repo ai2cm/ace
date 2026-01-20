@@ -1,6 +1,9 @@
 import pytest
 
-from fme.downscaling.modules.unets_update import check_level_compatibility, validate_shape
+from fme.downscaling.modules.unets_update import (
+    check_level_compatibility,
+    validate_shape,
+)
 
 
 @pytest.mark.parametrize(

@@ -8,7 +8,9 @@ from typing import Any
 
 import dacite
 import torch
+from physicsnemo.models.diffusion import Linear, PositionalEmbedding
 from torch import nn
+from torch.nn.functional import silu
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
@@ -47,8 +49,6 @@ from fme.core.weight_ops import strip_leading_module
 from fme.diffusion.loss import WeightedMappingLossConfig
 from fme.diffusion.registry import ModuleSelector
 from fme.downscaling.models import condition_with_noise_for_training
-from physicsnemo.models.diffusion import Linear, PositionalEmbedding
-from torch.nn.functional import silu
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
