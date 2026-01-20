@@ -7,7 +7,7 @@ import fsspec
 import xarray as xr
 
 
-def inter_filesystem_copy(source: str, destination: str):
+def inter_filesystem_copy(source: str | Path, destination: str | Path):
     """Copy between any two 'filesystems'. Do not use for large files.
 
     Args:
@@ -31,12 +31,9 @@ def makedirs(path: str | Path, exist_ok: bool = False):
     fs.makedirs(path, exist_ok=exist_ok)
 
 
-def to_netcdf_via_inter_filesystem_copy(
-    ds: xr.Dataset, path: str | Path, filename: str
-):
+def to_netcdf_via_inter_filesystem_copy(ds: xr.Dataset, filename: str | Path):
     """Write an xarray dataset to a netCDF file via an inter-filesystem copy."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        source = os.path.join(tmpdir, filename)
-        destination = os.path.join(path, filename)
+        source = os.path.join(tmpdir, "temp.nc")
         ds.to_netcdf(source)
-        inter_filesystem_copy(source, destination)
+        inter_filesystem_copy(source, filename)

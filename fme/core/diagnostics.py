@@ -56,5 +56,5 @@ def write_reduced_diagnostics(
         makedirs(output_dir, exist_ok=True)
         for name, ds in reduced_diagnostics.items():
             if len(ds) > 0:
-                filename = f"{name}_diagnostics.nc"
-                to_netcdf_via_inter_filesystem_copy(ds, output_dir, filename)
+                filename = os.path.join(output_dir, f"{name}_diagnostics.nc")
+                to_netcdf_via_inter_filesystem_copy(ds, filename)

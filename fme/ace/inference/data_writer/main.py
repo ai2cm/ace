@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import os
 import warnings
 from collections.abc import Mapping, Sequence
 from typing import TypeAlias
@@ -303,7 +304,7 @@ def _write(
     data_arrays["time"] = time_array
     ds = xr.Dataset(data_arrays, coords=coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
-    to_netcdf_via_inter_filesystem_copy(ds, path, filename)
+    to_netcdf_via_inter_filesystem_copy(ds, os.path.join(path, filename))
 
 
 class DataWriter(WriterABC[PrognosticState, PairedData]):

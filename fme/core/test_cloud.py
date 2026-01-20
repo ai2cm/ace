@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import fsspec
@@ -46,9 +47,8 @@ def test_makedirs(tmp_path: Path, use_str_input: bool):
 
 
 def test_inter_filesystem_copy(tmp_path: Path):
-    source_path = tmp_path / "source.txt"
-    source_path.write_text("test")
-    source = str(source_path)
+    source = tmp_path / "source.txt"
+    source.write_text("test")
     destination = "memory://destination/destination.txt"
 
     inter_filesystem_copy(source, destination)
@@ -65,6 +65,7 @@ def test_to_netcdf_via_inter_filesystem_copy(tmp_path: Path):
         data_vars={"var": ("x", [1, 2, 3])},
         coords={"x": [1, 2, 3]},
     )
-    to_netcdf_via_inter_filesystem_copy(ds, tmp_path, "test.nc")
-    result = xr.open_dataset(tmp_path / "test.nc")
+    filename = os.path.join(tmp_path, "test.nc")
+    to_netcdf_via_inter_filesystem_copy(ds, filename)
+    result = xr.open_dataset(filename)
     xr.testing.assert_identical(ds, result)
