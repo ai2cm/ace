@@ -31,7 +31,6 @@ Diffusion-Based Generative Models".
 from typing import List, Union
 
 import numpy as np
-import nvtx
 import torch
 from torch.nn.functional import silu
 from torch.utils.checkpoint import checkpoint
@@ -378,7 +377,6 @@ class SongUNet(torch.nn.Module):
                     in_channels=cout, out_channels=out_channels, kernel=3, **init_zero
                 )
 
-    @nvtx.annotate(message="SongUNet", color="blue")
     def forward(self, x, noise_labels, class_labels, augment_labels=None):
         validate_shape(
             x.shape[2:],
@@ -411,51 +409,49 @@ class SongUNet(torch.nn.Module):
         skips = []
         aux = x
         for name, block in self.enc.items():
-            with nvtx.annotate(f"SongUNet encoder: {name}", color="blue"):
-                if "aux_down" in name:
-                    aux = block(aux)
-                elif "aux_skip" in name:
-                    x = skips[-1] = x + block(aux)
-                elif "aux_residual" in name:
-                    x = skips[-1] = aux = (x + block(aux)) / np.sqrt(2)
-                elif "_conv" in name:
-                    x = block(x)
-                    if self.additive_pos_embed:
-                        x = x + self.spatial_emb.to(dtype=x.dtype)
-                    skips.append(x)
-                else:
-                    # For UNetBlocks check if we should use gradient checkpointing
-                    if isinstance(block, UNetBlock):
-                        if x.shape[-1] > self.checkpoint_threshold:
-                            x = checkpoint(block, x, emb, use_reentrant=False)
-                        else:
-                            x = block(x, emb)
+            if "aux_down" in name:
+                aux = block(aux)
+            elif "aux_skip" in name:
+                x = skips[-1] = x + block(aux)
+            elif "aux_residual" in name:
+                x = skips[-1] = aux = (x + block(aux)) / np.sqrt(2)
+            elif "_conv" in name:
+                x = block(x)
+                if self.additive_pos_embed:
+                    x = x + self.spatial_emb.to(dtype=x.dtype)
+                skips.append(x)
+            else:
+                # For UNetBlocks check if we should use gradient checkpointing
+                if isinstance(block, UNetBlock):
+                    if x.shape[-1] > self.checkpoint_threshold:
+                        x = checkpoint(block, x, emb, use_reentrant=False)
                     else:
-                        x = block(x)
-                    skips.append(x)
+                        x = block(x, emb)
+                else:
+                    x = block(x)
+                skips.append(x)
 
         # Decoder.
         aux = None
         tmp = None
         for name, block in self.dec.items():
-            with nvtx.annotate(f"SongUNet decoder: {name}", color="blue"):
-                if "aux_up" in name:
-                    aux = block(aux)
-                elif "aux_norm" in name:
-                    tmp = block(x)
-                elif "aux_conv" in name:
-                    tmp = block(silu(tmp))
-                    aux = tmp if aux is None else tmp + aux
+            if "aux_up" in name:
+                aux = block(aux)
+            elif "aux_norm" in name:
+                tmp = block(x)
+            elif "aux_conv" in name:
+                tmp = block(silu(tmp))
+                aux = tmp if aux is None else tmp + aux
+            else:
+                if x.shape[1] != block.in_channels:
+                    x = torch.cat([x, skips.pop()], dim=1)
+                # check for checkpointing on decoder blocks and up sampling blocks
+                if (
+                    x.shape[-1] > self.checkpoint_threshold and "_block" in name
+                ) or (
+                    x.shape[-1] > (self.checkpoint_threshold / 2) and "_up" in name
+                ):
+                    x = checkpoint(block, x, emb, use_reentrant=False)
                 else:
-                    if x.shape[1] != block.in_channels:
-                        x = torch.cat([x, skips.pop()], dim=1)
-                    # check for checkpointing on decoder blocks and up sampling blocks
-                    if (
-                        x.shape[-1] > self.checkpoint_threshold and "_block" in name
-                    ) or (
-                        x.shape[-1] > (self.checkpoint_threshold / 2) and "_up" in name
-                    ):
-                        x = checkpoint(block, x, emb, use_reentrant=False)
-                    else:
-                        x = block(x, emb)
+                    x = block(x, emb)
         return aux
