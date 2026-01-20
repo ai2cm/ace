@@ -1,6 +1,6 @@
 cartopy>=0.22.0
 dacite
-einops  # required by physicsnemo but not declared in its dependencies
+einops>=0.8.1
 gcsfs
 h5netcdf
 h5py
@@ -9,7 +9,6 @@ matplotlib
 moviepy
 netcdf4
 numpy
-nvidia-physicsnemo @ git+https://github.com/NVIDIA/physicsnemo@327d9928abc17983ad7aa3df94da9566c197c468
 omegaconf>=2.1.0
 pandas
 plotly
