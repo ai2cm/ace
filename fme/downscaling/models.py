@@ -22,7 +22,7 @@ from fme.downscaling.data import (
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.samplers_update import stochastic_sampler as edm_sampler
+from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 

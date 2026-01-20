@@ -1,6 +1,6 @@
 import pytest
 
-from fme.downscaling.modules.unets_update import (
+from fme.downscaling.modules.unets import (
     check_level_compatibility,
     validate_shape,
 )
