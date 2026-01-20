@@ -86,6 +86,16 @@ class SecondaryDecoderConfig:
                 f"Valid types are: {_VALID_NETWORK_TYPES}"
             )
 
+    def build(
+        self,
+        n_in_channels: int,
+    ) -> "SecondaryDecoder":
+        return SecondaryDecoder(
+            in_dim=n_in_channels,
+            out_names=self.secondary_diagnostic_names,
+            network=self.network,
+        )
+
 
 class SecondaryDecoder:
     """
@@ -131,9 +141,9 @@ class SecondaryDecoder:
         self._module = value
 
     def wrap_module(
-        self, callable: Callable[[nn.Module], nn.Module]
+        self, wrapper: Callable[[nn.Module], nn.Module]
     ) -> "SecondaryDecoder":
-        self._module = self._module.wrap_module(callable)
+        self._module = self._module.wrap_module(wrapper)
         return self
 
     def to(self, device) -> "SecondaryDecoder":
@@ -160,3 +170,41 @@ class SecondaryDecoder:
     def load_module_state(self, state_dict: dict) -> None:
         """Load the state dict into the underlying module."""
         self._module.load_state(state_dict)
+
+
+class NoSecondaryDecoder:
+    """A placeholder for when no secondary decoder is used."""
+
+    def __init__(self):
+        pass
+
+    def __call__(self, x: torch.Tensor) -> TensorDict:
+        """Return an empty dictionary."""
+        return {}
+
+    def to(self, device) -> "NoSecondaryDecoder":
+        """No-op for device transfer."""
+        return self
+
+    def detach(self) -> "NoSecondaryDecoder":
+        """No-op for detach."""
+        return self
+
+    def wrap_module(
+        self, wrapper: Callable[[nn.Module], nn.Module]
+    ) -> "NoSecondaryDecoder":
+        """No-op for wrapping module."""
+        return self
+
+    @property
+    def torch_module(self) -> None:
+        """No underlying module."""
+        return None
+
+    def get_module_state(self) -> dict:
+        """Return an empty state dict."""
+        return {}
+
+    def load_module_state(self, state_dict: dict) -> None:
+        """No-op for loading state dict."""
+        pass

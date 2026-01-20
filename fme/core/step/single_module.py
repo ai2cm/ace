@@ -21,7 +21,11 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
-from fme.core.step.secondary_decoder import SecondaryDecoder, SecondaryDecoderConfig
+from fme.core.step.secondary_decoder import (
+    NoSecondaryDecoder,
+    SecondaryDecoder,
+    SecondaryDecoderConfig,
+)
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -242,32 +246,26 @@ class SingleModuleStep(StepABC):
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
         )
-
         self.module = module.to(get_device())
 
+        dist = Distributed.get_instance()
+
         if config.secondary_decoder is not None:
-            secondary_diagnostic_names = (
-                config.secondary_decoder.secondary_diagnostic_names
+            self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
+                config.secondary_decoder.build(
+                    n_in_channels=n_out_channels,
+                ).to(get_device())
             )
-            self.secondary_decoder: SecondaryDecoder | None = SecondaryDecoder(
-                in_dim=n_out_channels,
-                out_names=secondary_diagnostic_names,
-                network=config.secondary_decoder.network,
-            ).to(get_device())
         else:
-            self.secondary_decoder = None
+            self.secondary_decoder = NoSecondaryDecoder()
 
         init_weights(self.modules)
         self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
-        dist = Distributed.get_instance()
         self.module = self.module.wrap_module(dist.wrap_module)
-        if self.secondary_decoder is not None:
-            self.secondary_decoder = self.secondary_decoder.wrap_module(
-                dist.wrap_module
-            )
+        self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
         self._timestep = dataset_info.timestep
 
         self._corrector = corrector
@@ -313,14 +311,10 @@ class SingleModuleStep(StepABC):
         Returns:
             A list of modules being trained.
         """
-        if self.secondary_decoder is not None:
-            return nn.ModuleList(
-                [
-                    self.module.torch_module,
-                    self.secondary_decoder.torch_module,
-                ]
-            )
-        return nn.ModuleList([self.module.torch_module])
+        modules = [self.module.torch_module]
+        if self.secondary_decoder.torch_module is not None:
+            modules.append(self.secondary_decoder.torch_module)
+        return nn.ModuleList(modules)
 
     def step(
         self,
@@ -344,13 +338,10 @@ class SingleModuleStep(StepABC):
                 input_tensor,
                 labels=args.labels,
             )
-            if self.secondary_decoder is not None:
-                secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                    output_tensor.detach()  # detach avoids changing base outputs
-                )
-            else:
-                secondary_output_dict = {}
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
+                output_tensor.detach()  # detach avoids changing base outputs
+            )
             output_dict.update(secondary_output_dict)
             return output_dict
 
@@ -376,8 +367,7 @@ class SingleModuleStep(StepABC):
         state = {
             "module": self.module.get_state(),
         }
-        if self.secondary_decoder is not None:
-            state["secondary_decoder"] = self.secondary_decoder.get_module_state()
+        state["secondary_decoder"] = self.secondary_decoder.get_module_state()
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -392,7 +382,7 @@ class SingleModuleStep(StepABC):
             # for backwards compatibility with old checkpoints
             del module["module.device_buffer"]
         self.module.load_state(module)
-        if self.secondary_decoder is not None:
+        if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
 
 
