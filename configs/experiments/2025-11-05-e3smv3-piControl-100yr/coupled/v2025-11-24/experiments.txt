@@ -1,22 +1,22 @@
 
-fto-v1124-sfno-m351zi95-rv0ike6m||01KC2T0JJ4HCFTZ9D954EX4V9J|training|best_inference_ckpt|normal|--not-preemptible
+fto-v1124-sfno-m351zi95-rv0ike6m||01KC2T0JJ4HCFTZ9D954EX4V9J|training|best_inference_ckpt|high|--not-preemptible
 
-fto-v1124-sfno-c5ocb8t1-rv0ike6m||01KCA45QWR2WSN30MY4W7JK1TK|training|best_inference_ckpt|normal|--not-preemptible
+fto-v1124-sfno-c5ocb8t1-rv0ike6m||01KCA45QWR2WSN30MY4W7JK1TK|training|best_inference_ckpt|high|--not-preemptible
 
-ft_fto-v1124-sfno-m351zi95-rv0ike6m||01KCA4JTWJ29XZG0Z4JNG9TADP|run_ICx1-40yr|best_inference_ckpt|high|--not-preemptible
+ft_fto-v1124-sfno-m351zi95-rv0ike6m||01KCA4JTWJ29XZG0Z4JNG9TADP|done|best_inference_ckpt|high|--not-preemptible
 
-fto-v1124-pesvhsm3-vw7bwz18||01KED7JK1MV06MT3DXXMN0JNZS|training|best_inference_ckpt|normal|--not-preemptible
+fto-v1124-pesvhsm3-vw7bwz18||01KED7JK1MV06MT3DXXMN0JNZS|run_ICx1-40yr|best_inference_ckpt|high|--not-preemptible
 
-ft_fto-v1124-pesvhsm3-vw7bwz18||01KETVPVSVC6625BQ1F9115YJV|training|best_inference_ckpt|normal|--not-preemptible
+ft_fto-v1124-pesvhsm3-vw7bwz18||01KETVPVSVC6625BQ1F9115YJV|training|best_inference_ckpt|high|--not-preemptible
 
-ft_fto-v1124-pesvhsm3-vw7bwz18-ckpt-0010||01KEWY7RWP9RVB7E5ZA4AV78HT|training|best_inference_ckpt|normal|--not-preemptible
+ft_fto-v1124-pesvhsm3-vw7bwz18-ckpt-0010||01KEWY7RWP9RVB7E5ZA4AV78HT|training|best_inference_ckpt|high|--not-preemptible
 
-ft_fto-v1124-pesvhsm3-vw7bwz18-lr-1e-5||01KEZ5KTQ4EQ59GAC70HEGQXAD|training|best_inference_ckpt|normal|--not-preemptible
+ft_fto-v1124-pesvhsm3-vw7bwz18-lr-1e-5||01KEZ5KTQ4EQ59GAC70HEGQXAD|training|best_inference_ckpt|high|--not-preemptible
 
-fto-v1124-pesvhsm3-rv0ike6m||01KF215EYBQDEMX6SSKHCZQF6T|training|best_inference_ckpt|normal|--not-preemptible
+fto-v1124-pesvhsm3-rv0ike6m||01KF215EYBQDEMX6SSKHCZQF6T|run_ICx1-40yr|best_inference_ckpt|high|--not-preemptible
 
-fto-v1124-ACE2S-cpwvww40-rv0ike6m||01KF21ADSYTP3E70KHEHHQKTDW|training|best_inference_ckpt|normal|--not-preemptible
+fto-v1124-ACE2S-cpwvww40-rv0ike6m||01KF21ADSYTP3E70KHEHHQKTDW|training|best_inference_ckpt|high|--not-preemptible
 
-fto-v1124-ACE2S-cpwvww40-rv0ike6m||01KF3YYTEMKF2KCJ5R9SX7437P|training|best_inference_ckpt|normal|--not-preemptible
+fto-v1124-ACE2S-cpwvww40-rv0ike6m||01KF3YYTEMKF2KCJ5R9SX7437P|run_ICx1-40yr|best_inference_ckpt|high|--not-preemptible
 
-ft_fto-v1124-pesvhsm3-rv0ike6m||01KFEPM4VCM4FJYG46ZSEH1A87|training|best_inference_ckpt|normal|--not-preemptible
+ft_fto-v1124-pesvhsm3-rv0ike6m||01KFEPM4VCM4FJYG46ZSEH1A87|training|best_inference_ckpt|high|--not-preemptible
