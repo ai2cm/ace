@@ -46,7 +46,7 @@ build_nsight_image:
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME) python=3.11 $(CONDA_PACKAGES)
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) python -m pip install uv
-	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e .[dev,docs,graphcast]
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e .[dev,docs,graphcast,downscaling]
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install --no-build-isolation -c constraints.txt -r requirements-healpix.txt
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -r analysis-deps.txt
 
