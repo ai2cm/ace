@@ -23,12 +23,10 @@ https://github.com/NVIDIA/physicsnemo/blob/327d9928abc17983ad7aa3df94da9566c197c
 # limitations under the License.
 
 
-from typing import Callable, Optional
+from typing import Callable
 
 import torch
 from torch import Tensor
-
-from physicsnemo.utils.patching import GridPatching2D
 
 
 def stochastic_sampler(
