@@ -346,7 +346,7 @@ class SingleModuleStep(StepABC):
             )
             if self.secondary_decoder is not None:
                 secondary_output_tensor = self.secondary_decoder.wrap_module(wrapper)(
-                    output_tensor.detach()
+                    output_tensor.detach()  # detach avoids changing base outputs
                 )
                 secondary_output_dict = self.secondary_decoder.unpack(
                     secondary_output_tensor, axis=self.CHANNEL_DIM
@@ -397,11 +397,6 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if self.secondary_decoder is not None:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
-        elif "secondary_decoder" in state:
-            logging.warning(
-                "Checkpoint contains secondary_decoder state, "
-                "but the current configuration does not use it, ignoring."
-            )
 
 
 def step_with_adjustments(

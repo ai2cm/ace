@@ -73,7 +73,7 @@ class SecondaryDecoderConfig:
     Parameters:
         secondary_diagnostic_names: Names of additional diagnostic variables, to be
             diagnosed directly from outputs without access to latent variables.
-        network: Configuration for the decoder network (uses ModuleSelector registry).
+        network: Configuration for the decoder network.
     """
 
     secondary_diagnostic_names: list[str]
