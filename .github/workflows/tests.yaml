@@ -51,7 +51,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install uv
-          uv pip install --system -c constraints.txt -e .[dev]
+          uv pip install --system -c constraints.txt -e .[dev,downscaling]
       - name: Run pytest
         run: |
           make test_very_fast
@@ -79,7 +79,7 @@ jobs:
           # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
           uv venv --python 3.11
           uv pip install -c constraints.txt -e .[dev]
-          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
+          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast,downscaling]
       - name: Run CUDA check and pytest
         run: |
             source .venv/bin/activate
