@@ -31,6 +31,7 @@ class Packer:
         """
         shape = next(iter(tensors.values())).shape
         for name in tensors:
+            print(name, tensors[name].shape, shape)
             if tensors[name].shape != shape:
                 raise DataShapesNotUniform(
                     f"Cannot pack tensors of different shapes. "

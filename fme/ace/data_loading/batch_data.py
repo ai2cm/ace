@@ -410,8 +410,6 @@ class BatchData:
                 "Can only broadcast singleton ensembles, but this BatchData has "
                 f"n_ensemble={self.n_ensemble} and cannot be broadcast."
             )
-        data = repeat_interleave_batch_dim(self.data, n_ensemble)
-        time = xr.concat([self.time] * n_ensemble, dim="sample")
         if self.labels is None:
             labels = None
         else:
@@ -420,11 +418,10 @@ class BatchData:
                 self.labels.names,
             )
         return self.__class__(
-            data={k: v.to(get_device()) for k, v in data.items()},
-            time=time,
-            horizontal_dims=self.horizontal_dims,
+            data=repeat_interleave_batch_dim(self.data, n_ensemble),
+            time=xr.concat([self.time] * n_ensemble, dim="sample"),
             labels=labels,
-            epoch=self.epoch,
+            horizontal_dims=self.horizontal_dims,
             n_ensemble=n_ensemble,
         )
 
