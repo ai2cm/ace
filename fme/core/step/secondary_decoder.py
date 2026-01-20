@@ -95,6 +95,8 @@ class SecondaryDecoder:
     output channels into additional diagnostic variables.
     """
 
+    CHANNEL_DIM = -3
+
     def __init__(
         self,
         in_dim: int,
@@ -143,21 +145,12 @@ class SecondaryDecoder:
         """Forward pass through the decoder."""
         return self._module(x)
 
-    def __call__(self, x: torch.Tensor) -> torch.Tensor:
-        """Make the decoder callable."""
-        return self.forward(x)
+    def __call__(self, x: torch.Tensor) -> TensorDict:
+        """Call the decoder and unpack the outputs."""
+        out = self.forward(x)
+        return self._unpack(out, axis=self.CHANNEL_DIM)
 
-    def unpack(self, tensor: torch.Tensor, axis: int = 0) -> TensorDict:
-        """
-        Unpack a tensor into a dictionary using the decoder's packer.
-
-        Args:
-            tensor: Tensor to unpack.
-            axis: Index of the concatenation axis.
-
-        Returns:
-            Dictionary from variable names to tensors.
-        """
+    def _unpack(self, tensor: torch.Tensor, axis: int) -> TensorDict:
         return self._packer.unpack(tensor, axis=axis)
 
     def get_module_state(self) -> dict:

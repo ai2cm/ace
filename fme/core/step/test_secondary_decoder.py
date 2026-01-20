@@ -4,56 +4,27 @@ import torch
 from fme.core.dataset_info import DatasetInfo
 from fme.core.registry import ModuleSelector
 
-from .secondary_decoder import (
-    MLPConfig,
-    SecondaryDecoder,
-    SecondaryDecoderConfig,
-    _build_mlp,
-)
-
-
-class TestBuildMLP:
-    def test_depth_1_creates_single_layer(self):
-        mlp = _build_mlp(in_dim=4, out_dim=2, n_hidden=8, depth=1)
-        # depth=1: just one Conv2d layer
-        assert len(mlp) == 1
-        assert isinstance(mlp[0], torch.nn.Conv2d)
-        assert mlp[0].in_channels == 4
-        assert mlp[0].out_channels == 2
-
-    def test_depth_2_creates_two_layers_with_activation(self):
-        mlp = _build_mlp(in_dim=4, out_dim=2, n_hidden=8, depth=2)
-        # depth=2: Conv2d, GELU, Conv2d
-        assert len(mlp) == 3
-        assert isinstance(mlp[0], torch.nn.Conv2d)
-        assert isinstance(mlp[1], torch.nn.GELU)
-        assert isinstance(mlp[2], torch.nn.Conv2d)
-        assert mlp[0].in_channels == 4
-        assert mlp[0].out_channels == 8
-        assert mlp[2].in_channels == 8
-        assert mlp[2].out_channels == 2
-
-    def test_depth_3_creates_three_layers(self):
-        mlp = _build_mlp(in_dim=4, out_dim=2, n_hidden=8, depth=3)
-        # depth=3: Conv2d, GELU, Conv2d, GELU, Conv2d
-        assert len(mlp) == 5
-        assert isinstance(mlp[0], torch.nn.Conv2d)
-        assert isinstance(mlp[1], torch.nn.GELU)
-        assert isinstance(mlp[2], torch.nn.Conv2d)
-        assert isinstance(mlp[3], torch.nn.GELU)
-        assert isinstance(mlp[4], torch.nn.Conv2d)
-
-    def test_depth_0_raises_error(self):
-        with pytest.raises(ValueError, match="depth must be >= 1"):
-            _build_mlp(in_dim=4, out_dim=2, n_hidden=8, depth=0)
-
-    def test_negative_depth_raises_error(self):
-        with pytest.raises(ValueError, match="depth must be >= 1"):
-            _build_mlp(in_dim=4, out_dim=2, n_hidden=8, depth=-1)
+from .secondary_decoder import MLPConfig, SecondaryDecoder, SecondaryDecoderConfig
 
 
 class TestMLPConfig:
-    def test_build_creates_mlp(self):
+    def test_depth_0_raises_error(self):
+        config = MLPConfig(hidden_dim=8, depth=0)
+        with pytest.raises(ValueError, match="depth must be >= 1"):
+            config.build(n_in_channels=4, n_out_channels=2, dataset_info=DatasetInfo())
+
+    def test_build_creates_mlp_single_layer(self):
+        config = MLPConfig(hidden_dim=8, depth=1)
+        module = config.build(
+            n_in_channels=4, n_out_channels=2, dataset_info=DatasetInfo()
+        )
+        # depth=1: just one Conv2d layer
+        assert len(module) == 1
+        assert isinstance(module[0], torch.nn.Conv2d)
+        assert module[0].in_channels == 4
+        assert module[0].out_channels == 2
+
+    def test_build_creates_mlp_two_layers(self):
         config = MLPConfig(hidden_dim=16, depth=2)
         module = config.build(
             n_in_channels=4, n_out_channels=2, dataset_info=DatasetInfo()
@@ -97,7 +68,7 @@ class TestSecondaryDecoderConfig:
 
 
 class TestSecondaryDecoder:
-    def test_forward_pass_shape(self):
+    def test_forward_and_unpack_integration(self):
         network = ModuleSelector(type="MLP", config={"hidden_dim": 16, "depth": 2})
         decoder = SecondaryDecoder(
             in_dim=4,
@@ -107,39 +78,10 @@ class TestSecondaryDecoder:
         # Input: [batch, channels, height, width]
         x = torch.randn(2, 4, 8, 8)
         output = decoder(x)
-        assert output.shape == (2, 2, 8, 8)
-
-    def test_unpack_returns_dict(self):
-        network = ModuleSelector(type="MLP", config={})
-        decoder = SecondaryDecoder(
-            in_dim=4,
-            out_names=["diag1", "diag2"],
-            network=network,
-        )
-        # Tensor with 2 channels on axis 1
-        tensor = torch.randn(2, 2, 8, 8)
-        result = decoder.unpack(tensor, axis=1)
-        assert isinstance(result, dict)
-        assert set(result.keys()) == {"diag1", "diag2"}
-        assert result["diag1"].shape == (2, 8, 8)
-        assert result["diag2"].shape == (2, 8, 8)
-
-    def test_forward_and_unpack_integration(self):
-        network = ModuleSelector(type="MLP", config={"hidden_dim": 16, "depth": 2})
-        out_names = ["temp", "pressure", "humidity"]
-        decoder = SecondaryDecoder(
-            in_dim=8,
-            out_names=out_names,
-            network=network,
-        )
-        x = torch.randn(4, 8, 16, 16)
-        output_tensor = decoder(x)
-        assert output_tensor.shape == (4, 3, 16, 16)
-
-        output_dict = decoder.unpack(output_tensor, axis=1)
-        assert set(output_dict.keys()) == set(out_names)
-        for name in out_names:
-            assert output_dict[name].shape == (4, 16, 16)
+        assert isinstance(output, dict)
+        assert set(output.keys()) == {"diag1", "diag2"}
+        assert output["diag1"].shape == (2, 8, 8)
+        assert output["diag2"].shape == (2, 8, 8)
 
     def test_module_property_returns_nn_module(self):
         network = ModuleSelector(type="MLP", config={})

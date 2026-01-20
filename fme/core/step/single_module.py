@@ -345,11 +345,8 @@ class SingleModuleStep(StepABC):
                 labels=args.labels,
             )
             if self.secondary_decoder is not None:
-                secondary_output_tensor = self.secondary_decoder.wrap_module(wrapper)(
+                secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
                     output_tensor.detach()  # detach avoids changing base outputs
-                )
-                secondary_output_dict = self.secondary_decoder.unpack(
-                    secondary_output_tensor, axis=self.CHANNEL_DIM
                 )
             else:
                 secondary_output_dict = {}
