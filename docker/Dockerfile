@@ -23,6 +23,8 @@ COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install -r /tmp/requirements.txt
 COPY requirements-healpix.txt /tmp/requirements-healpix.txt
 RUN python3 -m pip install --no-build-isolation -r /tmp/requirements-healpix.txt
+COPY requirements-downscaling.txt /tmp/requirements-downscaling.txt
+RUN python3 -m pip install --no-build-isolation -r /tmp/requirements-downscaling.txt
 
 # set default matplotlib cmap
 RUN mkdir -p $HOME/.config/matplotlib && \
