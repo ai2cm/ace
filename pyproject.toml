@@ -31,6 +31,7 @@ optional-dependencies.dev = { file = "requirements-dev.txt" }
 optional-dependencies.docs = { file = "docs/requirements.txt" }
 optional-dependencies.deploy = { file = "requirements-deploy.txt" }
 optional-dependencies.graphcast = { file = "requirements-graphcast.txt" }
+optional-dependencies.downscaling = { file = "requirements-downscaling.txt" }
 
 [tool.setuptools.packages]
 find = {}
