@@ -110,7 +110,7 @@ def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
 
     topography_normalized = (topography - topography.mean()) / topography.std()
 
-    return Topography(data=torch.tensor(topography_normalized.values), coords=coords)
+    return Topography(data=torch.tensor(topography_normalized.values, dtype=torch.float32), coords=coords)
 
 
 def get_topography_downscale_factor(

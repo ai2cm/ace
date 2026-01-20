@@ -47,7 +47,8 @@ from fme.core.weight_ops import strip_leading_module
 from fme.diffusion.loss import WeightedMappingLossConfig
 from fme.diffusion.registry import ModuleSelector
 from fme.downscaling.models import condition_with_noise_for_training
-from fme.downscaling.modules.unets import Linear, PositionalEmbedding, silu
+from physicsnemo.models.diffusion import Linear, PositionalEmbedding
+from torch.nn.functional import silu
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)

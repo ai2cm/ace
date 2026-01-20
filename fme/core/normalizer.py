@@ -40,6 +40,7 @@ class NormalizationConfig:
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
     fill_nans_on_denormalize: bool = False
+    force_fp_32: bool = False
 
     def __post_init__(self):
         using_path = (
