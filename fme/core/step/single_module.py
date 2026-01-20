@@ -241,7 +241,6 @@ class SingleModuleStep(StepABC):
 
         self.module = module.to(get_device())
 
-        # Initialize secondary decoder if configured
         if config.secondary_decoder is not None:
             secondary_diagnostic_names = (
                 config.secondary_decoder.secondary_diagnostic_names
@@ -262,7 +261,7 @@ class SingleModuleStep(StepABC):
         dist = Distributed.get_instance()
         self.module = self.module.wrap_module(dist.wrap_module)
         if self.secondary_decoder is not None:
-            self.secondary_decoder.module = self.secondary_decoder.module.wrap_module(
+            self.secondary_decoder = self.secondary_decoder.wrap_module(
                 dist.wrap_module
             )
         self._timestep = dataset_info.timestep
@@ -314,7 +313,7 @@ class SingleModuleStep(StepABC):
             return nn.ModuleList(
                 [
                     self.module.torch_module,
-                    self.secondary_decoder.module.torch_module,
+                    self.secondary_decoder.torch_module,
                 ]
             )
         return nn.ModuleList([self.module.torch_module])
