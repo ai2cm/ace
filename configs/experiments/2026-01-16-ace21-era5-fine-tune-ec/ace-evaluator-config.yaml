@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_forward_steps: 121260
+n_forward_steps: 64280
 forward_steps_in_memory: 50
 checkpoint_path: /ckpt.tar
 logging:
@@ -11,7 +11,7 @@ logging:
 loader:
   start_indices:
     times:
-      - "1940-01-01T12:00:00"
+      - "1979-01-01T12:00:00"
   dataset:
     data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
   num_data_workers: 16
