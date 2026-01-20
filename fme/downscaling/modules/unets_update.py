@@ -5,6 +5,7 @@ https://github.com/NVIDIA/physicsnemo/blob/327d9928abc17983ad7aa3df94da9566c197c
 
 # fmt: off
 # flake8: noqa
+# mypy: ignore-errors
 
 # SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-FileCopyrightText: All rights reserved.
@@ -23,7 +24,7 @@ https://github.com/NVIDIA/physicsnemo/blob/327d9928abc17983ad7aa3df94da9566c197c
 # limitations under the License.
 
 """
-Model architectures used in the paper "Elucidating the Design Space of 
+Model architectures used in the paper "Elucidating the Design Space of
 Diffusion-Based Generative Models".
 """
 
@@ -212,7 +213,7 @@ class SongUNet(torch.nn.Module):
             raise ValueError(
                 f"Invalid decoder_type: {decoder_type}. Must be one of {valid_decoder_types}."
             )
-        
+
         check_img_resolution = min(img_resolution) if isinstance(img_resolution, list) else img_resolution
         check_level_compatibility(
             check_img_resolution, channel_mult, attn_resolutions

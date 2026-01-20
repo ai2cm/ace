@@ -23,7 +23,7 @@ https://github.com/NVIDIA/physicsnemo/blob/327d9928abc17983ad7aa3df94da9566c197c
 # limitations under the License.
 
 """
-Preconditioning schemes used in the paper"Elucidating the Design Space of 
+Preconditioning schemes used in the paper"Elucidating the Design Space of
 Diffusion-Based Generative Models".
 """
 

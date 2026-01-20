@@ -1,3 +1,12 @@
+"""
+This file is vendorized from physicsnemo/physicsnemo/models/diffusion/layers.py which you can find here:
+https://github.com/NVIDIA/physicsnemo/blob/327d9928abc17983ad7aa3df94da9566c197c468/physicsnemo/models/diffusion/layers.py
+"""
+
+# fmt: off
+# flake8: noqa
+# mypy: ignore-errors
+
 # SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -15,11 +24,11 @@
 # limitations under the License.
 
 """
-Model architecture layers used in the paper "Elucidating the Design Space of 
+Model architecture layers used in the paper "Elucidating the Design Space of
 Diffusion-Based Generative Models".
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 import torch
@@ -54,12 +63,12 @@ def weight_init(shape: tuple, mode: str, fan_in: int, fan_out: int):
         this typically represents the number of output channels times the kernel height
         times the kernel width.
 
-    Returns
+    Returns:
     -------
     torch.Tensor
         The initialized tensor based on the specified mode.
 
-    Raises
+    Raises:
     ------
     ValueError
         If the provided `mode` is not one of the supported initialization modes.
@@ -184,7 +193,7 @@ class Conv2d(torch.nn.Module):
         bias: bool = True,
         up: bool = False,
         down: bool = False,
-        resample_filter: List[int] = [1, 1],
+        resample_filter: list[int] = [1, 1],
         fused_resample: bool = False,
         init_mode: str = "kaiming_normal",
         init_weight: float = 1.0,
@@ -296,7 +305,7 @@ class GroupNorm(torch.nn.Module):
         A small number added to the variance to prevent division by zero, by default
         1e-5.
 
-    Notes
+    Notes:
     -----
     If `num_channels` is not divisible by `num_groups`, the actual number of groups
     might be adjusted to satisfy the `min_channels_per_group` condition.
@@ -444,11 +453,11 @@ class UNetBlock(torch.nn.Module):
         dropout: float = 0.0,
         skip_scale: float = 1.0,
         eps: float = 1e-5,
-        resample_filter: List[int] = [1, 1],
+        resample_filter: list[int] = [1, 1],
         resample_proj: bool = False,
         adaptive_scale: bool = True,
-        init: Dict[str, Any] = dict(),
-        init_zero: Dict[str, Any] = dict(init_weight=0),
+        init: dict[str, Any] = dict(),
+        init_zero: dict[str, Any] = dict(init_weight=0),
         init_attn: Any = None,
     ):
         super().__init__()
