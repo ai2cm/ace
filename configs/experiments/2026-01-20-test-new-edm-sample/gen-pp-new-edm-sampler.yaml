@@ -1,4 +1,4 @@
-experiment_dir: /climate-default/home/troya/pp-new-edm-sampler/test-8176166-commmit/
+experiment_dir: /results
 patch:
   divide_generation: true
   composite_prediction: true
@@ -8,22 +8,17 @@ model:
   model_updates:
     churn: 2.5
 data:
-  topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   coarse:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
+    infer_timestep: false
+    subset:
+      start_time: '2023-01-01T00:00:00'
+      stop_time: '2023-01-31T18:00:00'
   batch_size: 4
   num_data_workers: 2
   strict_ensemble: False
-outputs:
-- name: "1_patch_perfect_jan_2023"
-  save_vars: ["PRATEsfc"]
-  n_ens: 1
-  max_samples_per_gpu: 32
-  time_range:
-    start_time: "2023-01-01T00:00:00"
-    stop_time: "2023-01-31T18:00:00"
   lat_extent:
     start: 36.0
     stop:  52.0
