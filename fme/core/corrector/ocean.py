@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 from collections.abc import Mapping
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import dacite
 import torch
@@ -9,7 +9,6 @@ import torch
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.masking import StaticMaskingConfig
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -50,29 +49,55 @@ class SeaIceFractionConfig:
         return out
 
 
+@dataclasses.dataclass
+class OHCBudgetConfig:
+    """Configuration for ocean heat content budget correction.
+
+    Parameters:
+        method: Method to use for OHC budget correction. The available option is
+            "constant_temperature", which enforces conservation of heat content
+            by imposing a vertically and horizontally uniform potential
+            temperature correction.
+        constant_unaccounted_heating: Column-integrated heating in W/m**2 to be added
+            to the energy flux into the ocean when conserving the heat content.
+            This can be useful for correcting errors in heat budget in target data.
+            The same additional heating is imposed at all time steps and grid cells.
+
+    """
+
+    method: Literal["constant_temperature"]
+    constant_unaccounted_heating: float = 0.0
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig:
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
-    # NOTE: OceanCorrector.masking is deprecated and kept for backwards
-    # compatibility with legacy SingleModuleStepperConfig checkpoints. Please
-    # use SingleModuleStepConfig.input_masking instead.
-    masking: StaticMaskingConfig | None = None
-    ocean_heat_content_correction: bool = False
-
-    def __post_init__(self):
-        if self.masking is not None and self.masking.mask_value != 0:
-            raise ValueError(
-                "mask_value must be 0 for OceanCorrector, but got "
-                f"{self.masking.mask_value}"
-            )
+    ocean_heat_content_correction: OHCBudgetConfig | None = None
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        state_copy = dict(state)
+        if "masking" in state_copy:
+            del state_copy["masking"]
+        if "ocean_heat_content_correction" in state_copy and isinstance(
+            state_copy["ocean_heat_content_correction"], bool
+        ):
+            if state_copy["ocean_heat_content_correction"]:
+                state_copy["ocean_heat_content_correction"] = OHCBudgetConfig(
+                    method="constant_temperature"
+                )
+            else:
+                state_copy["ocean_heat_content_correction"] = None
+        return state_copy
 
 
 class OceanCorrector(CorrectorABC):
@@ -88,15 +113,6 @@ class OceanCorrector(CorrectorABC):
         self._vertical_coordinate = vertical_coordinate
         self._timestep = timestep
 
-        if config.masking is not None:
-            if vertical_coordinate is None:
-                raise ValueError(
-                    "OceanCorrector.masking configured but DepthCoordinate missing."
-                )
-            self._masking = config.masking.build(vertical_coordinate)
-        else:
-            self._masking = None
-
     def __call__(
         self,
         input_data: TensorMapping,
@@ -107,7 +123,7 @@ class OceanCorrector(CorrectorABC):
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.sea_ice_fraction_correction is not None:
             gen_data = self._config.sea_ice_fraction_correction(gen_data, input_data)
-        if self._config.ocean_heat_content_correction:
+        if self._config.ocean_heat_content_correction is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
                     "Ocean heat content correction is turned on, but no vertical "
@@ -120,10 +136,9 @@ class OceanCorrector(CorrectorABC):
                 self._gridded_operations.area_weighted_sum,
                 self._vertical_coordinate,
                 self._timestep.total_seconds(),
+                self._config.ocean_heat_content_correction.method,
+                self._config.ocean_heat_content_correction.constant_unaccounted_heating,
             )
-        if self._masking is not None:
-            # NOTE: masking should be applied last to avoid overwriting
-            gen_data = self._masking(gen_data)
         return dict(gen_data)
 
 
@@ -140,7 +155,14 @@ def _force_conserve_ocean_heat_content(
     area_weighted_sum: AreaWeightedSum,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
+    method: Literal["constant_temperature"] = "constant_temperature",
+    unaccounted_heating: float = 0.0,
 ) -> TensorDict:
+    if method != "constant_temperature":
+        raise NotImplementedError(
+            f"Method {method} not implemented for ocean heat content conservation"
+        )
+
     input = OceanData(input_data, vertical_coordinate)
     if input.ocean_heat_content is None:
         raise ValueError(
@@ -166,11 +188,14 @@ def _force_conserve_ocean_heat_content(
         net_energy_flux_into_ocean = (
             input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
         ) * forcing.sea_surface_fraction
-    expected_change_ocean_heat_content = area_weighted_sum(
-        net_energy_flux_into_ocean * timestep_seconds,
+    energy_flux_global_sum = area_weighted_sum(
+        net_energy_flux_into_ocean,
         keepdim=True,
         name="ocean_heat_content",
     )
+    expected_change_ocean_heat_content = (
+        energy_flux_global_sum + unaccounted_heating
+    ) * timestep_seconds
     heat_content_correction_ratio = (
         global_input_ocean_heat_content + expected_change_ocean_heat_content
     ) / global_gen_ocean_heat_content

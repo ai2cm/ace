@@ -1,5 +1,4 @@
 import datetime
-import math
 
 import pytest
 import torch
@@ -9,35 +8,13 @@ from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrector,
     OceanCorrectorConfig,
+    OHCBudgetConfig,
     SeaIceFractionConfig,
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.mask_provider import MaskProvider
-from fme.core.masking import StaticMaskingConfig
 from fme.core.ocean_data import OceanData
 from fme.core.typing_ import TensorMapping
-
-
-def test_ocean_corrector_init_error():
-    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
-    timestep = datetime.timedelta(seconds=3600)
-
-    config = OceanCorrectorConfig()
-    # no error
-    _ = OceanCorrector(config, ops, None, timestep)
-
-    config = OceanCorrectorConfig(
-        masking=StaticMaskingConfig(
-            mask_value=0,
-            fill_value=float("nan"),
-        ),
-    )
-    with pytest.raises(
-        ValueError,
-        match="OceanCorrector.masking configured but DepthCoordinate missing.",
-    ):
-        _ = OceanCorrector(config, ops, None, timestep)
-
 
 DEVICE = get_device()
 IMG_SHAPE = (5, 5)
@@ -79,42 +56,6 @@ class _MockDepth:
 
 
 _VERTICAL_COORD = _MockDepth()
-
-
-@pytest.mark.parametrize("fill_value", [float("nan"), -1.0, 100.0])
-def test_ocean_corrector_integration(fill_value):
-    """Ensures that OceanCorrector can be called with all methods active
-    but doesn't check results."""
-    torch.manual_seed(0)
-    config = OceanCorrectorConfig(
-        masking=StaticMaskingConfig(
-            mask_value=0,
-            fill_value=fill_value,
-        ),
-        force_positive_names=["so_0", "so_1"],
-    )
-    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
-    timestep = datetime.timedelta(seconds=3600)
-    corrector = OceanCorrector(config, ops, _VERTICAL_COORD, timestep)
-    input_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
-    input_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
-    gen_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
-    gen_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
-    corrected_gen = corrector(input_data, gen_data, {})
-    for name in ["so_0", "so_1", "sst"]:
-        if math.isnan(fill_value):
-            assert corrected_gen[name][_LAT, _LON].isnan().item()
-        else:
-            torch.testing.assert_close(
-                corrected_gen[name][_LAT, _LON],
-                torch.tensor(fill_value, device=DEVICE),
-                rtol=0,
-                atol=0,
-            )
-    for name in ["so_0", "so_1"]:
-        x = corrected_gen[name].clone()
-        x[_LAT, _LON] = 0.0
-        assert torch.all(x >= 0.0)
 
 
 def test_ocean_corrector_has_no_negative_ocean_fraction():
@@ -214,7 +155,12 @@ def test_sea_ice_thickness_correction():
     ],
 )
 def test_ocean_heat_content_correction(hfds_in_gen_data):
-    config = OceanCorrectorConfig(ocean_heat_content_correction=True)
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OHCBudgetConfig(
+            method="constant_temperature",
+            constant_unaccounted_heating=0.1,
+        )
+    )
     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
     nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
     mask = torch.ones(nsamples, nlat, nlon, nlevels)
@@ -265,8 +211,8 @@ def test_ocean_heat_content_correction(hfds_in_gen_data):
         equal_nan=True,
     )
     ohc_change = (
-        2 * timestep.total_seconds() * 8
-    )  # 2 because of hfds + hfgeou and 8 because of mask
+        (2 * 8 + 0.1) * timestep.total_seconds()
+    )  # 2 because of hfds + hfgeou, 8 because of mask, and 0.1 unaccounted heating
     corrector_ratio = (input_ohc + ohc_change) / gen_ohc
     expected_gen_data_dict = {
         key: value * corrector_ratio if key.startswith("thetao") else value
