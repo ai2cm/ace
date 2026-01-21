@@ -48,23 +48,35 @@ class NoiseConditionedSFNO(torch.nn.Module):
         conditional_model: ConditionalSFNO,
         img_shape: tuple[int, int],
         noise_type: Literal["isotropic", "gaussian"] = "gaussian",
-        embed_dim: int = 256,
-        pos_embed_dim: int = 0,
+        embed_dim_noise: int = 256,
+        embed_dim_pos: int = 0,
+        embed_dim_labels: int = 0,
     ):
         super().__init__()
         self.conditional_model = conditional_model
-        self.embed_dim = embed_dim
+        self.embed_dim = embed_dim_noise
         self.noise_type = noise_type
+        self.label_pos_embed: torch.nn.Parameter | None = None
         # register pos embed if pos_embed_dim != 0
-        if pos_embed_dim != 0:
+        if embed_dim_pos != 0:
             self.pos_embed = torch.nn.Parameter(
                 torch.zeros(
-                    1, pos_embed_dim, img_shape[0], img_shape[1], requires_grad=True
+                    1, embed_dim_pos, img_shape[0], img_shape[1], requires_grad=True
                 )
             )
             # initialize pos embed with std=0.02
-            self.pos_embed.is_shared_mp = ["matmul"]
             torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
+            if embed_dim_labels > 0:
+                self.label_pos_embed = torch.nn.Parameter(
+                    torch.zeros(
+                        embed_dim_labels,
+                        embed_dim_pos,
+                        img_shape[0],
+                        img_shape[1],
+                        requires_grad=True,
+                    )
+                )
+                torch.nn.init.trunc_normal_(self.label_pos_embed, std=0.02)
         else:
             self.pos_embed = None
 
@@ -93,6 +105,11 @@ class NoiseConditionedSFNO(torch.nn.Module):
 
         if self.pos_embed is not None:
             embedding_pos = self.pos_embed.repeat(noise.shape[0], 1, 1, 1)
+            if self.label_pos_embed is not None and labels is not None:
+                label_embedding_pos = torch.einsum(
+                    "blp, lpxy -> bpxy", labels, self.label_pos_embed
+                )
+                embedding_pos = embedding_pos + label_embedding_pos
         else:
             embedding_pos = None
 
@@ -209,15 +226,16 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             img_shape=dataset_info.img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
-                embed_dim_labels=len(dataset_info.all_labels),
                 embed_dim_pos=self.context_pos_embed_dim,
                 embed_dim_noise=self.noise_embed_dim,
+                embed_dim_labels=len(dataset_info.all_labels),
             ),
         )
         return NoiseConditionedSFNO(
             sfno_net,
             noise_type=self.noise_type,
-            embed_dim=self.noise_embed_dim,
-            pos_embed_dim=self.context_pos_embed_dim,
+            embed_dim_noise=self.noise_embed_dim,
+            embed_dim_pos=self.context_pos_embed_dim,
+            embed_dim_labels=len(dataset_info.all_labels),
             img_shape=dataset_info.img_shape,
         )
