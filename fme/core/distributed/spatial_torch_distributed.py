@@ -2,6 +2,7 @@ import logging
 import os
 from collections.abc import Callable
 from datetime import timedelta
+from typing import Any
 
 import torch.distributed
 from torch.nn import SyncBatchNorm
@@ -25,18 +26,17 @@ class SpatialTorchDistributed(DistributedBackend):
         w_parallel_size = int(os.environ.get("W_PARALLEL_SIZE", 1))
         logger.debug(f" Spatial parallelism dimension in h {h_parallel_size}")
         logger.debug(f" Spatial parallelism dimension in w {w_parallel_size}")
-        fin_parallel_size=1#args.fin_parallel_size
-        fout_parallel_size=1#args.fout_parallel_size
+        fin_parallel_size=1 #  in_parallel_size
+        fout_parallel_size=1 # fout_parallel_size
         self.spatial_parallelism=False
         if (h_parallel_size>1) or (w_parallel_size >1):
           self.spatial_parallelism=True
-          logger.debug(" Spatial parallelism dimension in enable")
-          params={}
+          logger.debug(" Spatial parallelism enable.")
+          params: dict[str, Any] = {}
           params["fin_parallel_size"] = fin_parallel_size
           params["fout_parallel_size"] = fout_parallel_size
           params["h_parallel_size"] = h_parallel_size
           params["w_parallel_size"] = w_parallel_size
-
           params["model_parallel_sizes"] = [h_parallel_size, w_parallel_size, fin_parallel_size, fout_parallel_size]
           params["model_parallel_names"] = ["h", "w", "fin", "fout"]
 
@@ -53,7 +53,7 @@ class SpatialTorchDistributed(DistributedBackend):
           torch.backends.cudnn.allow_tf32 = True
         else:
             raise ValueError(
-                "Spatial Distributed backend initialized without h_parallel_size or w_parallel_size set to 1"
+                "Spatially distributed backend: h_parallel_size and w_parallel_size are both <=1."
             )  
 
     @classmethod
