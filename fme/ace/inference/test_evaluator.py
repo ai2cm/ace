@@ -1215,7 +1215,7 @@ def test_evaluator_with_non_local_experiment_dir(
         pytest.skip("Skipping non-fast tests")
 
     # Use an in-memory filesystem for the experiment directory to test using
-    # an exeriment_dir on a non-local filesystem.
+    # an experiment_dir on a non-local filesystem.
     experiment_dir = "memory://experiment_dir"
 
     forward_steps_in_memory = 2
