@@ -2,6 +2,4 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 
 1pct_nosmooth_0256to0350_hfds|rs0|01KC7292K76EK9Y280TPTM91FH|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds|rs0|01KFFDS5TZ8DP4CBC5T32TTY6K|training|best_inference_ckpt|normal|--not-preemptible
-
-ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds|rs0_ep1||run_ICx1|best_inference_ckpt|normal|--not-preemptible||01KFFDS631CMHSSGAW2YMEEA5Z
+ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds|rs0|01KFFDS5TZ8DP4CBC5T32TTY6K|run_ICx1|best_inference_ckpt|high|--not-preemptible
