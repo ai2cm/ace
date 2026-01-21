@@ -203,16 +203,16 @@ def test_ocean_heat_content_correction(hfds_in_gen_data):
         input_data_dict, gen_data_dict, forcing_data_dict
     )
 
-    input_ohc = input_data.ocean_heat_content.nansum(dim=(-1, -2), keepdim=True)
-    gen_ohc = gen_data.ocean_heat_content.nansum(dim=(-1, -2), keepdim=True)
+    input_ohc = input_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
+    gen_ohc = gen_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
     torch.testing.assert_close(
         gen_ohc,
         input_ohc * 2,
         equal_nan=True,
     )
     ohc_change = (
-        (2 * 8 + 0.1) * timestep.total_seconds()
-    )  # 2 because of hfds + hfgeou, 8 because of mask, and 0.1 unaccounted heating
+        2.1 * timestep.total_seconds()
+    )  # 2.1 because of hfds + hfgeou + unaccounted heating
     corrector_ratio = (input_ohc + ohc_change) / gen_ohc
     expected_gen_data_dict = {
         key: value * corrector_ratio if key.startswith("thetao") else value

@@ -133,7 +133,7 @@ class OceanCorrector(CorrectorABC):
                 input_data,
                 gen_data,
                 forcing_data,
-                self._gridded_operations.area_weighted_sum,
+                self._gridded_operations.area_weighted_mean,
                 self._vertical_coordinate,
                 self._timestep.total_seconds(),
                 self._config.ocean_heat_content_correction.method,
@@ -142,7 +142,7 @@ class OceanCorrector(CorrectorABC):
         return dict(gen_data)
 
 
-class AreaWeightedSum(Protocol):
+class AreaWeightedMean(Protocol):
     def __call__(
         self, data: torch.Tensor, keepdim: bool, name: str | None = None
     ) -> torch.Tensor: ...
@@ -152,7 +152,7 @@ def _force_conserve_ocean_heat_content(
     input_data: TensorMapping,
     gen_data: TensorMapping,
     forcing_data: TensorMapping,
-    area_weighted_sum: AreaWeightedSum,
+    area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
     method: Literal["constant_temperature"] = "constant_temperature",
@@ -170,12 +170,12 @@ def _force_conserve_ocean_heat_content(
         )
     gen = OceanData(gen_data, vertical_coordinate)
     forcing = OceanData(forcing_data)
-    global_gen_ocean_heat_content = area_weighted_sum(
+    global_gen_ocean_heat_content = area_weighted_mean(
         gen.ocean_heat_content,
         keepdim=True,
         name="ocean_heat_content",
     )
-    global_input_ocean_heat_content = area_weighted_sum(
+    global_input_ocean_heat_content = area_weighted_mean(
         input.ocean_heat_content,
         keepdim=True,
         name="ocean_heat_content",
@@ -188,18 +188,17 @@ def _force_conserve_ocean_heat_content(
         net_energy_flux_into_ocean = (
             input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
         ) * forcing.sea_surface_fraction
-    energy_flux_global_sum = area_weighted_sum(
+    energy_flux_global_mean = area_weighted_mean(
         net_energy_flux_into_ocean,
         keepdim=True,
         name="ocean_heat_content",
     )
     expected_change_ocean_heat_content = (
-        energy_flux_global_sum + unaccounted_heating
+        energy_flux_global_mean + unaccounted_heating
     ) * timestep_seconds
     heat_content_correction_ratio = (
         global_input_ocean_heat_content + expected_change_ocean_heat_content
     ) / global_gen_ocean_heat_content
-
     # apply same temperature correction to all vertical layers
     n_levels = gen.sea_water_potential_temperature.shape[-1]
     for k in range(n_levels):
