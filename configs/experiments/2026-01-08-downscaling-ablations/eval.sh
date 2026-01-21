@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-downscaling-100km-to-3km-8x8patch"
-CONFIG_FILENAME="eval_8x8_patch.yaml"
+JOB_NAME="eval-xshield-downscaling-100km-to-3km-nonshifted_aligned"
+CONFIG_FILENAME="eval_nonshifted_aligned.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -20,7 +20,8 @@ NGPU=2
 #IMAGE with B200 pytorch installed
 IMAGE=01JWJ96JMF89D812JS159VF37N
 
-EXISTING_RESULTS_DATASET=01KESVJP7J74NN6KP85MK1KX2M  # best hist checkpoint from 8x8 patch training  01KESVJNZGBN3SYME19M7KKAXC
+#EXISTING_RESULTS_DATASET=01KESVJP7J74NN6KP85MK1KX2M  # best checkpoint from 8x8 patch training  01KESVJNZGBN3SYME19M7KKAXC
+EXISTING_RESULTS_DATASET=01KEFXTBPQAY52Y9JZ561VP31X  # best ckpt from non shifted patch training 01KEFXTBE6ZPVFYJWNTEBPNT6V
 wandb_group=""
 
 gantry run \
