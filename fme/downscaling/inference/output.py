@@ -13,7 +13,13 @@ from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
 from fme.core.writer import ZarrWriter
 
-from ..data import ClosedInterval, DataLoaderConfig, LatLonCoordinates, StaticInputs
+from ..data import (
+    ClosedInterval,
+    DataLoaderConfig,
+    LatLonCoordinates,
+    StaticInputs,
+    enforce_lat_bounds,
+)
 from ..data.config import XarrayEnsembleDataConfig
 from ..predictors import PatchPredictionConfig
 from ..requirements import DataRequirements
@@ -352,8 +358,9 @@ class EventConfig(DownscalingOutputConfig):
             time_format. Required field.
         time_format: strptime format for parsing event_time string.
             Default: "%Y-%m-%dT%H:%M:%S" (ISO 8601)
-        lat_extent: Latitude bounds in degrees [-90, 90]. Default: full extent
-            of the underlying data.
+        lat_extent: Latitude bounds in degrees limited to [-88, 88].
+        Defaults to (-66, 70) which covers continental land masses aside
+            from Antarctica.
         lon_extent: Longitude bounds in degrees [-180, 360]. Default: full extent
             of the underlying data.
     """
@@ -362,7 +369,7 @@ class EventConfig(DownscalingOutputConfig):
     event_time: str | int = ""
     time_format: str = "%Y-%m-%dT%H:%M:%S"
     lat_extent: ClosedInterval = field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+        default_factory=lambda: ClosedInterval(-66.0, 70)
     )
     lon_extent: ClosedInterval = field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
@@ -371,6 +378,7 @@ class EventConfig(DownscalingOutputConfig):
     def __post_init__(self):
         if not self.event_time:
             raise ValueError("event_time must be specified for EventConfig.")
+        enforce_lat_bounds(self.lat_extent)
 
     def build(
         self,
@@ -433,9 +441,9 @@ class TimeRangeConfig(DownscalingOutputConfig):
               TimeSlice(start_time="2021-01-01", stop_time="2021-12-31"))
             - Slice: Integer indices (e.g., Slice(0, 365))
             - RepeatedInterval: Repeating time pattern
-
-        lat_extent: Latitude bounds in degrees [-90, 90]. Default: full extent
-            of the underlying data.
+        lat_extent: Latitude bounds in degrees limited to [-88, 88].
+            Defaults to (-66, 70) which covers continental land masses aside
+            from Antarctica.
         lon_extent: Longitude bounds in degrees [-180, 360]. Default: full extent
             of the underlying data.
     """
@@ -444,7 +452,7 @@ class TimeRangeConfig(DownscalingOutputConfig):
         default_factory=lambda: Slice(-1, 1)
     )
     lat_extent: ClosedInterval = field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+        default_factory=lambda: ClosedInterval(-66.0, 70.0)
     )
     lon_extent: ClosedInterval = field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
@@ -453,6 +461,7 @@ class TimeRangeConfig(DownscalingOutputConfig):
     def __post_init__(self):
         if self.time_range == Slice(-1, 1):
             raise ValueError("time_range must be specified for RegionConfig.")
+        enforce_lat_bounds(self.lat_extent)
 
     def build(
         self,
