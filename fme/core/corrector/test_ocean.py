@@ -206,7 +206,14 @@ def test_sea_ice_thickness_correction():
     )
 
 
-def test_ocean_heat_content_correction():
+@pytest.mark.parametrize(
+    "hfds_in_gen_data",
+    [
+        pytest.param(False, id="hfds_in_input"),
+        pytest.param(True, id="hfds_in_gen"),
+    ],
+)
+def test_ocean_heat_content_correction(hfds_in_gen_data):
     config = OceanCorrectorConfig(ocean_heat_content_correction=True)
     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
     nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
@@ -234,8 +241,11 @@ def test_ocean_heat_content_correction():
         "thetao_0": torch.ones(nsamples, nlat, nlon) * 2,
         "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
         "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
-        "hfds": torch.ones(nsamples, nlat, nlon),
     }
+    if hfds_in_gen_data:
+        gen_data_dict["hfds"] = torch.ones(nsamples, nlat, nlon)
+    else:
+        input_data_dict["hfds"] = torch.ones(nsamples, nlat, nlon)
     forcing_data_dict = {
         "hfgeou": torch.ones(nsamples, nlat, nlon),
         "sea_surface_fraction": mask[:, :, :, 0],
