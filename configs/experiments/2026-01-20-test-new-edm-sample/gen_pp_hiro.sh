@@ -23,7 +23,7 @@ wandb_group=""
 
 cd "$REPO_ROOT"
 
-JOB_NAME="downscale-perfect-100km-to-3km-main-benchmark"
+JOB_NAME="downscale-perfect-100km-to-3km-main-current"
 
 gantry run \
     --name $JOB_NAME \
@@ -48,4 +48,4 @@ gantry run \
     --system-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
-    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
+    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.predict $CONFIG_PATH
