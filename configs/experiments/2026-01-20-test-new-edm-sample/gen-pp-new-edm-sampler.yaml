@@ -5,8 +5,6 @@ patch:
   coarse_horizontal_overlap: 1
 model:
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
-  model_updates:
-    churn: 2.5
 data:
   topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   coarse:
