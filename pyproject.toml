@@ -76,7 +76,3 @@ exclude_also = [
     # Don't complain about abstract methods, they aren't run:
     "@(abc\\.)?abstractmethod",
     ]
-
-
-[tool.pytest.ini_options]
-norecursedirs = ["filtered_repo"]

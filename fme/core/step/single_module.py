@@ -20,6 +20,12 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.step.args import StepArgs
+from fme.core.step.secondary_decoder import (
+    NoSecondaryDecoder,
+    SecondaryDecoder,
+    SecondaryDecoderConfig,
+)
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -28,6 +34,7 @@ DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
 @StepSelector.register("single_module")
+@StepSelector.register("default")
 @dataclasses.dataclass
 class SingleModuleStepConfig(StepConfigABC):
     """
@@ -38,12 +45,11 @@ class SingleModuleStepConfig(StepConfigABC):
         in_names: Names of input variables.
         out_names: Names of output variables.
         normalization: The normalization configuration.
-        additional_diagnostic_names: Names of additional diagnostic variables, to be
-            diagnosed directly from outputs without access to latent variables.
+        secondary_decoder: Configuration for the secondary decoder that computes
+            additional diagnostic variables from outputs.
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
-        crps_training: Unused, kept for backwards compatibility.
         residual_prediction: Whether to use residual prediction.
     """
 
@@ -51,14 +57,12 @@ class SingleModuleStepConfig(StepConfigABC):
     in_names: list[str]
     out_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
-    additional_diagnostic_names: list[str] = dataclasses.field(default_factory=list)
-    additional_diagnostic_hidden_dim: int = 256
+    secondary_decoder: SecondaryDecoderConfig | None = None
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
-    crps_training: bool | None = None
     residual_prediction: bool = False
 
     def __post_init__(self):
@@ -72,11 +76,16 @@ class SingleModuleStepConfig(StepConfigABC):
                 raise ValueError(
                     f"next_step_forcing_name is an output variable: '{name}'"
                 )
-        for name in self.additional_diagnostic_names:
-            if name in self.in_names:
-                raise ValueError(
-                    f"additional_diagnostic_name is an input variable: '{name}'"
-                )
+        if self.secondary_decoder is not None:
+            for name in self.secondary_decoder.secondary_diagnostic_names:
+                if name in self.in_names:
+                    raise ValueError(
+                        f"secondary_diagnostic_name is an input variable: '{name}'"
+                    )
+                if name in self.out_names:
+                    raise ValueError(
+                        f"secondary_diagnostic_name is an output variable: '{name}'"
+                    )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -133,7 +142,12 @@ class SingleModuleStepConfig(StepConfigABC):
 
     @property
     def output_names(self) -> list[str]:
-        return list(set(self.out_names).union(self.additional_diagnostic_names))
+        secondary_names = (
+            self.secondary_decoder.secondary_diagnostic_names
+            if self.secondary_decoder is not None
+            else []
+        )
+        return list(set(self.out_names).union(secondary_names))
 
     @property
     def next_step_input_names(self) -> list[str]:
@@ -162,6 +176,8 @@ class SingleModuleStepConfig(StepConfigABC):
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]
         return state_copy
 
     def get_step(
@@ -181,7 +197,6 @@ class SingleModuleStepConfig(StepConfigABC):
             dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
-            timestep=dataset_info.timestep,
             init_weights=init_weights,
         )
 
@@ -216,7 +231,6 @@ class SingleModuleStep(StepABC):
         dataset_info: DatasetInfo,
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
-        timestep: datetime.timedelta,
         init_weights: Callable[[list[nn.Module]], None],
     ):
         """
@@ -231,43 +245,41 @@ class SingleModuleStep(StepABC):
         super().__init__()
         n_in_channels = len(config.in_names)
         n_out_channels = len(config.out_names)
-        n_additional_out_channels = len(config.additional_diagnostic_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
-        self.additional_out_packer = Packer(config.additional_diagnostic_names)
         self._normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
-                config.in_names, config.out_names, timestep
+                config.in_names, config.out_names, dataset_info.timestep
             )
         else:
             self.ocean = None
-        self.module = config.builder.build(
+        module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
-        ).to(get_device())
-        if n_additional_out_channels > 0:
-            self.additional_diagnostic_module = MLP(
-                n_out_channels,
-                n_additional_out_channels,
-                n_hidden=config.additional_diagnostic_hidden_dim,
-            ).to(get_device())
+        )
+        self.module = module.to(get_device())
+
+        dist = Distributed.get_instance()
+
+        if config.secondary_decoder is not None:
+            self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
+                config.secondary_decoder.build(
+                    n_in_channels=n_out_channels,
+                ).to(get_device())
+            )
         else:
-            self.additional_diagnostic_module = None
+            self.secondary_decoder = NoSecondaryDecoder()
+
         init_weights(self.modules)
         self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
-        dist = Distributed.get_instance()
-        self.module = dist.wrap_module(self.module)
-        if self.additional_diagnostic_module is not None:
-            self.additional_diagnostic_module = dist.wrap_module(
-                self.additional_diagnostic_module
-            )
-
-        self._timestep = timestep
+        self.module = self.module.wrap_module(dist.wrap_module)
+        self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
+        self._timestep = dataset_info.timestep
 
         self._corrector = corrector
         self.in_names = config.in_names
@@ -312,27 +324,21 @@ class SingleModuleStep(StepABC):
         Returns:
             A list of modules being trained.
         """
-        if self.additional_diagnostic_module is not None:
-            return nn.ModuleList([self.module, self.additional_diagnostic_module])
-        return nn.ModuleList([self.module])
+        modules = [self.module.torch_module]
+        if self.secondary_decoder.torch_module is not None:
+            modules.append(self.secondary_decoder.torch_module)
+        return nn.ModuleList(modules)
 
     def step(
         self,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
+        args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
         Args:
-            input: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from the
-                initial timestep. In practice this contains the ML inputs.
-            next_step_input_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from
-                the output timestep. In practice this contains the necessary data
-                at the output timestep for the ocean model and corrector.
+            args: The arguments to the step function.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
@@ -341,23 +347,20 @@ class SingleModuleStep(StepABC):
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            output_tensor = wrapper(self.module)(input_tensor)
-            if self.additional_diagnostic_module is not None:
-                additional_output_tensor = wrapper(self.additional_diagnostic_module)(
-                    output_tensor.detach()
-                )
-                additional_output_dict = self.additional_out_packer.unpack(
-                    additional_output_tensor, axis=self.CHANNEL_DIM
-                )
-            else:
-                additional_output_dict = {}
+            output_tensor = self.module.wrap_module(wrapper)(
+                input_tensor,
+                labels=args.labels,
+            )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
-            output_dict.update(additional_output_dict)
+            secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
+                output_tensor.detach()  # detach avoids changing base outputs
+            )
+            output_dict.update(secondary_output_dict)
             return output_dict
 
         return step_with_adjustments(
-            input=input,
-            next_step_input_data=next_step_input_data,
+            input=args.input,
+            next_step_input_data=args.next_step_input_data,
             network_calls=network_call,
             normalizer=self.normalizer,
             corrector=self._corrector,
@@ -375,12 +378,9 @@ class SingleModuleStep(StepABC):
             The state of the stepper.
         """
         state = {
-            "module": self.module.state_dict(),
+            "module": self.module.get_state(),
         }
-        if self.additional_diagnostic_module is not None:
-            state["additional_diagnostic_module"] = (
-                self.additional_diagnostic_module.state_dict()
-            )
+        state["secondary_decoder"] = self.secondary_decoder.get_module_state()
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -394,16 +394,9 @@ class SingleModuleStep(StepABC):
         if "module.device_buffer" in module:
             # for backwards compatibility with old checkpoints
             del module["module.device_buffer"]
-        self.module.load_state_dict(module)
-        if self.additional_diagnostic_module is not None:
-            self.additional_diagnostic_module.load_state_dict(
-                state["additional_diagnostic_module"]
-            )
-        elif "additional_diagnostic_module" in state:
-            logging.warning(
-                "Checkpoint contains additional_diagnostic_module state, "
-                "but the current configuration does not use it, ignoring."
-            )
+        self.module.load_state(module)
+        if "secondary_decoder" in state:
+            self.secondary_decoder.load_module_state(state["secondary_decoder"])
 
 
 def step_with_adjustments(

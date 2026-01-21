@@ -5,10 +5,11 @@ import pytest
 import torch
 
 from fme.core.dataset_info import DatasetInfo
-from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import StandardNormalizer
+from fme.core.step.args import StepArgs
 
 from .multi_call import (
+    MultiCallConfig,
     MultiCallStepConfig,
     _extend_normalizer_with_multi_call_outputs,
     replace_multi_call,
@@ -22,8 +23,8 @@ def test_multi_call(include_multi_call_in_loss: bool):
     output_names = ["b", "c"]
     multi_call_output_names = ["c"]
 
-    def _step(input, next_step_input_data, wrapper):
-        prediction = {k: input["CO2"].detach().clone() for k in output_names}
+    def _step(args: StepArgs, wrapper=lambda x: x):
+        prediction = {k: args.input["CO2"].detach().clone() for k in output_names}
         return prediction
 
     config = MultiCallStepConfig(
@@ -52,7 +53,14 @@ def test_multi_call(include_multi_call_in_loss: bool):
             "b": torch.randn(1, 2, 3, 4),
             "CO2": torch.randn(1, 2, 3, 4),
         }
-        out = step.step(input, {})
+        out = step.step(
+            args=StepArgs(
+                input=input,
+                next_step_input_data={},
+                labels=None,
+            ),
+            wrapper=lambda x: x,
+        )
     torch.testing.assert_close(out["b"], input["CO2"])
     torch.testing.assert_close(out["c"], input["CO2"])
     torch.testing.assert_close(out["c_doubled_co2"], input["CO2"] * 2)

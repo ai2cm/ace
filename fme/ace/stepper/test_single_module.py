@@ -30,6 +30,7 @@ from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriv
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
+    EpochNotProvidedError,
     Stepper,
     StepperConfig,
     StepperOverrideConfig,
@@ -38,9 +39,17 @@ from fme.ace.stepper.single_module import (
     load_stepper,
     load_stepper_config,
 )
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLength,
+    TimeLengthMilestone,
+    TimeLengthProbabilities,
+    TimeLengthProbability,
+    TimeLengthSchedule,
+)
 from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData
 from fme.core.coordinates import (
+    DepthCoordinate,
     DimSize,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
@@ -52,7 +61,6 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.loss import StepLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
-from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import (
@@ -61,8 +69,11 @@ from fme.core.optimization import (
     Optimization,
     OptimizationConfig,
 )
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.step import SingleModuleStepConfig, StepSelector
+from fme.core.step.args import StepArgs
+from fme.core.step.multi_call import MultiCallConfig
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict
@@ -86,7 +97,7 @@ DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig(insolation=INSOLATION_CONFIG)
 EMPTY_DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig()
 
 
-def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
+def get_data(names: Iterable[str], n_samples, n_time, epoch: int = 0) -> SphericalData:
     data_dict = {}
     n_lat, n_lon, nz = 5, 5, 7
 
@@ -102,7 +113,8 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
             np.zeros((n_samples, n_time)),
             dims=["sample", "time"],
         ),
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
+        epoch=epoch,
     )
     return SphericalData(data, area_weights, vertical_coord)
 
@@ -132,6 +144,162 @@ def get_dataset_info(
 
 def get_scalar_data(names, value):
     return {n: float(value) for n in names}
+
+
+def test_stepper_no_train_step_specified():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is None
+
+
+def test_stepper_step_int():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        train_n_forward_steps=2,
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    assert stepper._train_n_forward_steps_schedule is not None
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is not None
+
+
+def test_stepper_step_probabilities():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        train_n_forward_steps=TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=1, probability=0.5),
+                TimeLengthProbability(steps=2, probability=0.5),
+            ]
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    assert stepper._train_n_forward_steps_schedule is not None
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is not None
+
+
+def test_stepper_step_schedule():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        train_n_forward_steps=TimeLengthSchedule(
+            start_value=1,
+            milestones=[
+                TimeLengthMilestone(
+                    epoch=1,
+                    value=TimeLengthProbabilities(
+                        outcomes=[
+                            TimeLengthProbability(steps=1, probability=0.5),
+                            TimeLengthProbability(steps=2, probability=0.5),
+                        ]
+                    ),
+                ),
+            ],
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    assert stepper._train_n_forward_steps_schedule is not None
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is not None
 
 
 def test_train_on_batch_normalizer_changes_only_norm_data():
@@ -572,6 +740,58 @@ def _setup_and_train_on_batch(
     return stepper.train_on_batch(data, optimization=optimization)
 
 
+@pytest.mark.parametrize("has_epoch", [True, False])
+@pytest.mark.parametrize("uses_scheduling", [True, False])
+def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
+    in_names, out_names = ["a"], ["a"]
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=3, epoch=0 if has_epoch else None
+    ).to_device()
+    module = ReturnZerosModule(len(in_names), len(out_names))
+
+    optimization_config = OptimizationConfig()
+    optimization = optimization_config.build(modules=[module], max_epochs=2)
+
+    if uses_scheduling:
+        train_n_forward_steps: TimeLengthSchedule | TimeLength = TimeLengthSchedule(
+            start_value=2,
+            milestones=[
+                TimeLengthMilestone(epoch=1, value=3),
+            ],
+        )
+    else:
+        train_n_forward_steps = 2
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), 0.0),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        train_n_forward_steps=train_n_forward_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    if uses_scheduling and not has_epoch:
+        with pytest.raises(EpochNotProvidedError):
+            stepper.train_on_batch(data, optimization=optimization)
+    else:
+        stepper.train_on_batch(data, optimization=optimization)
+
+
 @pytest.mark.parametrize(
     "is_input,is_output,is_prescribed",
     [
@@ -793,7 +1013,8 @@ def test_stepper_corrector(
     batch_data = BatchData.new_on_cpu(
         data=data,
         time=time,
-        labels=[set() for _ in range(time.shape[0])],
+        labels=None,
+        epoch=0,
     ).to_device()
     # run the stepper on the data
     with torch.no_grad():
@@ -927,9 +1148,12 @@ def _get_stepper(
 
 def test_step():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    n_samples = 3
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
-    output = stepper.step(input_data, {})
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
@@ -937,8 +1161,11 @@ def test_step():
 
 def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
-    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
-    output = stepper.step(input_data, {})
+    n_samples = 3
+    input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
 
@@ -952,8 +1179,11 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
         norm_mean=norm_mean,
         residual_prediction=residual_prediction,
     )
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    output = stepper.step(input_data, {})
+    n_samples = 3
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
     else:
@@ -969,7 +1199,9 @@ def test_step_with_prescribed_ocean():
     )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
-    output = stepper.step(input_data, ocean_data)
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
+    )
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
         ocean_data["a"],
@@ -1016,7 +1248,7 @@ def get_data_for_predict(
         BatchData.new_on_device(
             data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
             time=input_time,
-            labels=[set() for _ in range(n_samples)],
+            labels=None,
         )
         .broadcast_ensemble(n_ensemble)
         .get_start(
@@ -1030,7 +1262,7 @@ def get_data_for_predict(
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
         },
         time=forcing_time,
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
     ).broadcast_ensemble(n_ensemble)
     return input_data, forcing_data
 
@@ -1158,7 +1390,7 @@ def test_prepend_initial_condition():
     ic = BatchData.new_on_device(
         data=ic_data,
         time=xr.DataArray(np.zeros((batch_size, 1)), dims=["sample", "time"]),
-        labels=[set() for _ in range(batch_size)],
+        labels=None,
     ).get_start(
         prognostic_names=["a", "b"],
         n_ic_timesteps=1,
@@ -1441,7 +1673,7 @@ def get_regression_stepper_and_data(
 
     dataset_info = get_dataset_info(img_shape=img_shape)
     stepper = config.get_stepper(dataset_info)
-    data = BatchData(
+    data = BatchData.new_on_device(
         data={
             "a": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
             "b": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
@@ -1451,7 +1683,8 @@ def get_regression_stepper_and_data(
             np.zeros((n_samples, n_forward_steps + 1)),
             dims=["sample", "time"],
         ),
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
+        epoch=0,
         horizontal_dims=["lat", "lon"],
     )
     return stepper, data
@@ -1692,3 +1925,282 @@ def test_replace_derived_forcings_error():
 
     with pytest.raises(ValueError, match="insolation_name"):
         stepper.config.replace_derived_forcings(replacement)
+
+
+OCEAN_TIMESTEP = datetime.timedelta(days=5)
+N_OCEAN_LEVELS = 2
+
+
+def _get_ocean_dataset_info(
+    img_shape=(5, 5),
+) -> DatasetInfo:
+    """Create a DatasetInfo with DepthCoordinate for ocean testing."""
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.linspace(-89.5, 89.5, img_shape[0], device=DEVICE),
+        lon=torch.linspace(0, 360, img_shape[1], device=DEVICE),
+    )
+    # Create depth coordinate with 2 levels
+    idepth = torch.tensor([0.0, 10.0, 50.0], device=DEVICE)  # interface depths
+    mask = torch.ones(*img_shape, N_OCEAN_LEVELS, device=DEVICE)  # all ocean
+    depth_coordinate = DepthCoordinate(idepth=idepth, mask=mask)
+
+    return DatasetInfo(
+        horizontal_coordinates=horizontal_coordinate,
+        vertical_coordinate=depth_coordinate,
+        timestep=OCEAN_TIMESTEP,
+    )
+
+
+def _get_ocean_stepper(
+    in_names: list[str],
+    out_names: list[str],
+    next_step_forcing_names: list[str],
+) -> Stepper:
+    """Create an ocean stepper for testing derived variables.
+
+    Args:
+        in_names: Input variable names.
+        out_names: Output variable names.
+        next_step_forcing_names: Names of forcing variables taken from next timestep.
+
+    Returns:
+        A configured ocean Stepper.
+    """
+
+    class PlusOne(torch.nn.Module):
+        """Adds 1 to the input."""
+
+        def forward(self, x):
+            return x + 1
+
+    all_names = list(set(in_names + out_names))
+    kwargs = {}
+    if next_step_forcing_names is not None:
+        kwargs["next_step_forcing_names"] = next_step_forcing_names
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": PlusOne()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={name: 0.0 for name in all_names},
+                            stds={name: 1.0 for name in all_names},
+                        ),
+                    ),
+                    corrector=CorrectorSelector("ocean_corrector", {}),
+                    next_step_forcing_names=next_step_forcing_names,
+                )
+            ),
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = _get_ocean_dataset_info()
+    return config.get_stepper(dataset_info)
+
+
+def _get_ocean_data_for_predict_paired(
+    n_steps: int,
+    in_names: list[str],
+    out_names: list[str],
+    n_samples: int = 2,
+    img_shape: tuple[int, int] = (5, 5),
+) -> tuple[PrognosticState, BatchData]:
+    """Create test data for ocean stepper prediction.
+
+    Args:
+        n_steps: Number of forward steps.
+        in_names: Input variable names.
+        out_names: Output variable names.
+        n_samples: Number of samples in batch.
+        img_shape: Shape of spatial dimensions.
+
+    Returns:
+        Tuple of (initial_condition, data).
+    """
+    n_ic_timesteps = 1
+    total_timesteps = n_ic_timesteps + n_steps
+
+    # Create data with a time dimension
+    data_dict = {}
+    all_names = list(set(in_names + out_names))
+    for name in all_names:
+        # Use deterministic values so we can verify derived variables
+        data_dict[name] = torch.rand(
+            n_samples, total_timesteps, *img_shape, device=DEVICE
+        )
+
+    # Set thetao values to known values for testing OHC computation
+    # This ensures OHC is predictable and we can verify tendency computation
+    if "thetao_0" in data_dict:
+        # Temperature at level 0: constant 20°C
+        data_dict["thetao_0"] = torch.full(
+            (n_samples, total_timesteps, *img_shape), 20.0, device=DEVICE
+        )
+    if "thetao_1" in data_dict:
+        # Temperature at level 1: constant 15°C
+        data_dict["thetao_1"] = torch.full(
+            (n_samples, total_timesteps, *img_shape), 15.0, device=DEVICE
+        )
+
+    # Set forcing variables to known values
+    if "hfds_forcing" in data_dict:
+        data_dict["hfds_forcing"] = torch.full(
+            (n_samples, total_timesteps, *img_shape), 99.0, device=DEVICE
+        ) + torch.arange(total_timesteps, device=DEVICE).view(
+            total_timesteps, 1, 1
+        )  # add a trend
+    if "hfds" in data_dict:
+        data_dict["hfds"] = torch.full(
+            (n_samples, total_timesteps, *img_shape), 100.0, device=DEVICE
+        )
+    if "hfgeou" in data_dict:
+        data_dict["hfgeou"] = torch.full(
+            (n_samples, total_timesteps, *img_shape), 0.05, device=DEVICE
+        )
+    if "sea_surface_fraction" in data_dict:
+        data_dict["sea_surface_fraction"] = torch.ones(
+            n_samples, total_timesteps, *img_shape, device=DEVICE
+        )
+
+    time = xr.DataArray(
+        np.broadcast_to(np.arange(total_timesteps), (n_samples, total_timesteps)),
+        dims=["sample", "time"],
+    )
+
+    data = BatchData.new_on_device(
+        data=data_dict,
+        time=time,
+        labels=None,
+    )
+
+    prognostic_names = [n for n in out_names if n in in_names]
+    input_data = data.get_start(prognostic_names, n_ic_timesteps)
+
+    return input_data, data
+
+
+@pytest.mark.parametrize(
+    "in_names,out_names,hfds_role",
+    [
+        pytest.param(
+            ["thetao_0", "thetao_1", "hfds", "hfgeou", "sea_surface_fraction"],
+            ["thetao_0", "thetao_1"],
+            "next_step_forcing",
+            id="hfds_next_step_forcing",
+        ),
+        pytest.param(
+            [
+                "thetao_0",
+                "thetao_1",
+                "hfds_forcing",
+                "hfgeou",
+                "sea_surface_fraction",
+            ],
+            ["thetao_0", "thetao_1", "hfds"],
+            "diagnostic",
+            id="hfds_diagnostic",
+        ),
+    ],
+)
+def test_ocean_derived_variables_integration(
+    in_names,
+    out_names,
+    hfds_role,
+):
+    next_step_forcing_names = []
+    if hfds_role == "next_step_forcing":
+        next_step_forcing_names.append("hfds")
+    stepper = _get_ocean_stepper(  # creates a PlusOne stepper
+        in_names=in_names,
+        out_names=out_names,
+        next_step_forcing_names=next_step_forcing_names,
+    )
+
+    n_steps = 3
+    input_data, data = _get_ocean_data_for_predict_paired(
+        n_steps=n_steps,
+        in_names=in_names,
+        out_names=out_names,
+    )
+    derived_data = data.compute_derived_variables(
+        derive_func=stepper.derive_func, forcing_data=data
+    )
+
+    paired_output, _ = stepper.predict_paired(
+        input_data,
+        data,
+        compute_derived_variables=True,
+    )
+
+    for derived_var in [
+        "ocean_heat_content",
+        "ocean_heat_content_tendency",
+        "net_energy_flux_into_ocean_column",
+        "implied_tendency_of_ocean_heat_content_due_to_advection",
+    ]:
+        assert derived_var in derived_data.data
+        assert derived_var in paired_output.prediction
+        assert derived_var in paired_output.reference
+
+    ic_ohc = derived_data.data["ocean_heat_content"][:, 0]
+    pred_ohc = paired_output.prediction["ocean_heat_content"]
+    ref_ohc = paired_output.reference["ocean_heat_content"]
+
+    pred_tendency = paired_output.prediction["ocean_heat_content_tendency"]
+    ref_tendency = paired_output.reference["ocean_heat_content_tendency"]
+
+    pred_flux = paired_output.prediction["net_energy_flux_into_ocean_column"]
+    ref_flux = paired_output.reference["net_energy_flux_into_ocean_column"]
+
+    pred_imbalance = paired_output.prediction[
+        "implied_tendency_of_ocean_heat_content_due_to_advection"
+    ]
+    ref_imbalance = paired_output.reference[
+        "implied_tendency_of_ocean_heat_content_due_to_advection"
+    ]
+
+    dt = OCEAN_TIMESTEP.total_seconds()
+
+    # check that the first step uses the initial condition correctly
+    expected_pred_tendency_step1 = (pred_ohc[:, 0] - ic_ohc) / dt
+    torch.testing.assert_close(
+        pred_tendency[:, 0],
+        expected_pred_tendency_step1,
+        msg="Unexpected pred OHC tendency at step 1",
+    )
+    expected_ref_tendency_step1 = (ref_ohc[:, 0] - ic_ohc) / dt
+    torch.testing.assert_close(
+        ref_tendency[:, 0],
+        expected_ref_tendency_step1,
+        msg="Unexpected reference OHC tendency at step 1",
+    )
+    # check imbalance for forward steps
+    for i in range(n_steps):
+        expected_pred_imbalance = pred_tendency[:, i] - pred_flux[:, i]
+        torch.testing.assert_close(
+            pred_imbalance[:, i],
+            expected_pred_imbalance,
+            msg=f"Unexpected pred OHC imbalance at step {i+1}",
+        )
+        expected_ref_imbalance = ref_tendency[:, i] - ref_flux[:, i]
+        torch.testing.assert_close(
+            ref_imbalance[:, i],
+            expected_ref_imbalance,
+            msg=f"Unexpected reference OHC imbalance at step {i+1}",
+        )
+
+    if hfds_role == "next_step_forcing":
+        # hfds is a forcing, so net_energy_flux_into_ocean_column in prediction
+        # and reference are the same
+        torch.testing.assert_close(pred_flux, ref_flux)
+    elif hfds_role == "diagnostic":
+        # hfds is diagnostic, so the generated net_energy_flux_into_ocean
+        # differs from the reference
+        assert not torch.allclose(pred_flux, ref_flux)

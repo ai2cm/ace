@@ -68,8 +68,8 @@ class PairedSphericalPowerSpectrumAggregator:
         self,
         target_data: TensorMapping,
         gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
+        target_data_norm: TensorMapping | None = None,
+        gen_data_norm: TensorMapping | None = None,
         i_time_start: int = 0,
     ):
         self._gen_aggregator.record_batch(gen_data)

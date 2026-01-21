@@ -22,6 +22,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector
+from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -422,26 +423,21 @@ class FCN3Step(StepABC):
 
     def step(
         self,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
+        args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
         Args:
-            input: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from the
-                initial timestep. In practice this contains the ML inputs.
-            next_step_input_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from
-                the output timestep. In practice this contains the necessary data
-                at the output timestep for the ocean model and corrector.
+            args: The arguments to the step function.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
         """
+        if args.labels is not None:
+            raise ValueError("Labels are not supported for FCN3")
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             forcing_tensor = self.forcing_packer.pack(input_norm, axis=self.CHANNEL_DIM)
@@ -466,8 +462,8 @@ class FCN3Step(StepABC):
             }
 
         return step_with_adjustments(
-            input=input,
-            next_step_input_data=next_step_input_data,
+            input=args.input,
+            next_step_input_data=args.next_step_input_data,
             network_calls=network_call,
             normalizer=self.normalizer,
             corrector=self._corrector,
