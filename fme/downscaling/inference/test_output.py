@@ -145,3 +145,25 @@ def test_region_config_build_creates_output_target_with_time_range(
     assert tuple(output_target.chunks.values())[:2] == (1, 1)
     assert output_target.shards is not None
     assert tuple(output_target.shards.values()) == output_target.data.max_output_shape
+
+
+def test_time_range_config_raise_error_invalid_lat_extent():
+    with pytest.raises(ValueError):
+        TimeRangeConfig(
+            name="test_region",
+            time_range=TimeSlice("2000-01-01T00:00:00", "2000-01-02T00:00:00"),
+            n_ens=4,
+            save_vars=["var0", "var1"],
+            lat_extent=ClosedInterval(-90, 90),
+        )
+
+
+def test_event_config_raise_error_invalid_lat_extent():
+    with pytest.raises(ValueError):
+        EventConfig(
+            name="test_event",
+            event_time="2000-01-01T00:00:00",
+            n_ens=4,
+            save_vars=["var0", "var1"],
+            lat_extent=ClosedInterval(-90, 90),
+        )
