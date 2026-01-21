@@ -158,9 +158,14 @@ def _force_conserve_ocean_heat_content(
         keepdim=True,
         name="ocean_heat_content",
     )
-    net_energy_flux_into_ocean = (
-        gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
-    ) * forcing.sea_surface_fraction
+    try:
+        net_energy_flux_into_ocean = (
+            gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+        ) * forcing.sea_surface_fraction
+    except KeyError:
+        net_energy_flux_into_ocean = (
+            input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+        ) * forcing.sea_surface_fraction
     expected_change_ocean_heat_content = area_weighted_sum(
         net_energy_flux_into_ocean * timestep_seconds,
         keepdim=True,
