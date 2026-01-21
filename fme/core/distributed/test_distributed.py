@@ -5,7 +5,7 @@ import torch
 import torch.multiprocessing as mp
 
 from fme import get_device
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, model_torch_distributed
 from fme.core.distributed.torch_distributed import (
     _gather_irregular,
     _pad_tensor_at_end,
@@ -37,6 +37,30 @@ def test_force_non_distributed():
     assert not Distributed.get_instance()._force_non_distributed
     with Distributed.force_non_distributed():
         assert Distributed.get_instance()._force_non_distributed
+
+
+def test_defaults_non_distributed_when_spatial_disabled(monkeypatch):
+    monkeypatch.setenv("H_PARALLEL_SIZE", "1")
+    monkeypatch.setenv("W_PARALLEL_SIZE", "1")
+    monkeypatch.delenv("RANK", raising=False)
+    monkeypatch.delenv("LOCAL_RANK", raising=False)
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    monkeypatch.delenv("SLURM_PROCID", raising=False)
+    monkeypatch.delenv("SLURM_NTASKS", raising=False)
+    monkeypatch.delenv("SRUN_DIST_FILE_PATH", raising=False)
+
+    dist = Distributed(force_non_distributed=False)
+
+    assert not dist.is_distributed()
+    assert dist.world_size == 1
+
+
+def test_import_without_physicsnemo_when_spatial_disabled(monkeypatch):
+    monkeypatch.setenv("H_PARALLEL_SIZE", "1")
+    monkeypatch.setenv("W_PARALLEL_SIZE", "1")
+    monkeypatch.setattr(model_torch_distributed, "pnd", None)
+
+    assert model_torch_distributed.ModelTorchDistributed.is_available() is False
 
 
 @pytest.mark.parametrize(

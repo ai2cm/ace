@@ -82,7 +82,14 @@ class TorchDistributed(DistributedBackend):
     def total_data_parallel_ranks(self) -> int:
         return self.total_ranks  # no model parallelism
 
-    def get_local_slices(self, tensor_shape, rank: int, data_parallel_dim: int | None):
+    def get_local_slices(
+        self,
+        tensor_shape,
+        rank: int | None = None,
+        data_parallel_dim: int | None = None,
+    ):
+        if rank is None:
+            rank = self._rank
         return_list = [slice(None, None) for _ in tensor_shape]
         if data_parallel_dim is not None:
             if tensor_shape[data_parallel_dim] % self.total_data_parallel_ranks != 0:
@@ -97,11 +104,14 @@ class TorchDistributed(DistributedBackend):
             )
         return tuple(return_list)
 
+    def get_local_rank(self) -> int:
+        return self._device_id
+
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size // self.total_ranks
 
-    def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None:
-        torch.distributed.all_reduce(tensor)
+    def reduce_mean(self, tensor: torch.Tensor, group=None) -> torch.Tensor | None:
+        torch.distributed.all_reduce(tensor, group=group)
         return tensor / self.total_ranks
 
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor | None:
@@ -161,6 +171,15 @@ class TorchDistributed(DistributedBackend):
         self.barrier()
         logger.debug(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()
+
+    def comm_get_size(self, key: str):
+        return 1
+
+    def comm_get_group(self, key: str):
+        return None
+
+    def comm_get_rank(self, key: str):
+        return 0
 
 
 def _gather_irregular(

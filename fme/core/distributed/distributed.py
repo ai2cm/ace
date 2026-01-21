@@ -5,6 +5,7 @@ from collections.abc import Iterator
 import torch.distributed
 
 from .base import DistributedBackend
+from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
 from .torch_distributed import TorchDistributed
 
@@ -27,10 +28,13 @@ class Distributed:
     """
 
     def __init__(self, force_non_distributed: bool = False):
-        if TorchDistributed.is_available() and not force_non_distributed:
-            self._distributed: DistributedBackend = TorchDistributed()
-        else:
-            self._distributed = NonDistributed()
+        # NOTE: we set to NonDistributed as default
+        self._distributed: DistributedBackend = NonDistributed()
+        # NOTE: we then check for ModelTorchDistributed and TorchDistributed (in order)
+        if ModelTorchDistributed.is_available() and not force_non_distributed:
+            self._distributed = ModelTorchDistributed()
+        elif TorchDistributed.is_available() and not force_non_distributed:
+            self._distributed = TorchDistributed()
         self._seed = 0
         self._force_non_distributed = force_non_distributed  # for debugging
 
@@ -43,6 +47,21 @@ class Distributed:
         if singleton is None:
             singleton = cls()
         return singleton
+
+    @classmethod
+    def reset(cls) -> None:
+        """
+        Reset the singleton instance, allowing a new one to be created.
+
+        This is intended for use in tests to ensure each test gets a fresh
+        instance that picks up the current environment configuration.
+
+        Note: this does NOT call shutdown() on the old instance, because
+        that would destroy the torch.distributed process group which
+        cannot be re-initialized within the same torchrun session.
+        """
+        global singleton
+        singleton = None
 
     @classmethod
     @contextlib.contextmanager
@@ -62,7 +81,7 @@ class Distributed:
     @contextlib.contextmanager
     def replace_backend(cls, backend: DistributedBackend) -> Iterator["Distributed"]:
         """
-        Force the distributed singleton to be in non-distributed mode.
+        Force the distributed singleton to temporarily swap backends.
         """
         instance = cls.get_instance()
         original_backend = instance._distributed
@@ -105,6 +124,9 @@ class Distributed:
         """
         return self._distributed.total_ranks
 
+    def get_local_rank(self) -> int:
+        return self._distributed.get_local_rank()
+
     def get_sampler(
         self,
         dataset: torch.utils.data.Dataset,
@@ -114,8 +136,8 @@ class Distributed:
         return torch.utils.data.DistributedSampler(
             dataset,
             shuffle=shuffle,
-            num_replicas=self._distributed.total_ranks,
-            rank=self._distributed.rank,
+            num_replicas=self._distributed.total_data_parallel_ranks,
+            rank=self._distributed.data_parallel_rank,
             seed=self._seed,
             drop_last=drop_last,
         )
@@ -126,7 +148,7 @@ class Distributed:
         """
         return self._distributed.local_batch_size(batch_size)
 
-    def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor:
+    def reduce_mean(self, tensor: torch.Tensor, group=None) -> torch.Tensor:
         """
         Reduce a tensor representing a mean across all processes.
 
@@ -135,7 +157,7 @@ class Distributed:
 
         Modifies the input tensor in-place as a side effect.
         """
-        return self._distributed.reduce_mean(tensor)
+        return self._distributed.reduce_mean(tensor, group)
 
     def get_local_slices(
         self,
@@ -169,10 +191,10 @@ class Distributed:
 
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         """
-        Reduce a tensor representing a sum across all processes.
+        Reduce a tensor by summing across all processes (world group).
 
-        Whether the tensor represents a mean is important because to reduce a mean,
-        we must divide by the number of processes. To reduce a sum, we must not.
+        Unlike ``reduce_mean``, this always uses the default (world) process
+        group because current callers require the global sum.
 
         Modifies the input tensor in-place as a side effect.
         """
@@ -180,7 +202,8 @@ class Distributed:
 
     def reduce_min(self, tensor: torch.Tensor) -> torch.Tensor:
         """
-        Reduce a tensor representing a min across all processes.
+        Reduce a tensor by taking the element-wise minimum across all
+        processes (world group).
 
         Modifies the input tensor in-place as a side effect.
         """
@@ -188,7 +211,8 @@ class Distributed:
 
     def reduce_max(self, tensor: torch.Tensor) -> torch.Tensor:
         """
-        Reduce a tensor representing a max across all processes.
+        Reduce a tensor by taking the element-wise maximum across all
+        processes (world group).
 
         Modifies the input tensor in-place as a side effect.
         """
@@ -310,6 +334,15 @@ class Distributed:
 
     def shutdown(self):
         return self._distributed.shutdown()
+
+    def comm_get_size(self, key: str):
+        return self._distributed.comm_get_size(key)
+
+    def comm_get_group(self, key: str):
+        return self._distributed.comm_get_group(key)
+
+    def comm_get_rank(self, key: str):
+        return self._distributed.comm_get_rank(key)
 
 
 singleton: Distributed | None = None

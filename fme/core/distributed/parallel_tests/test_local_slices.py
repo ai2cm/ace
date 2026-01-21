@@ -3,6 +3,7 @@ import torch
 
 from fme.core import get_device
 from fme.core.distributed import Distributed
+from fme.core.distributed.parallel_tests._helpers import WORLD_SIZE
 
 
 def test_gather_tensor_from_local_slices():
@@ -13,7 +14,7 @@ def test_gather_tensor_from_local_slices():
     "batch" parallelism in this test.
     """
     dist = Distributed.get_instance()
-    global_shape = (2, 4, 4)
+    global_shape = (WORLD_SIZE * 2, 4, 4)
     x_global = (
         torch.arange(np.prod(global_shape), device=get_device()).reshape(global_shape)
         + 1
@@ -39,7 +40,7 @@ def test_local_slices_subdivide_domain():
     "batch" parallelism in this test.
     """
     dist = Distributed.get_instance()
-    global_shape = (2, 4, 4)
+    global_shape = (WORLD_SIZE * 2, 4, 4)
     x_global = torch.zeros(global_shape, device=get_device())
     total_size = np.prod(global_shape)
     assert (

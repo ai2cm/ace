@@ -10,6 +10,7 @@ from fme.core import metrics
 from fme.core.cuhpx.sht import SHT as CuHpxSHT
 from fme.core.cuhpx.sht import iSHT as CuHpxiSHT
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.hpx.reorder import get_reordering_xy_to_ring
 from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
 from fme.core.tensors import assert_dict_allclose
@@ -293,6 +294,8 @@ class LatLonOperations(GriddedOperations):
                 "Area weights must be longitudinally uniform, "
                 "as assumed for zonal mean."
             )
+        dist = Distributed.get_instance()
+        area_weights = area_weights[*dist.get_local_slices(area_weights.shape)]
         self._device_area = area_weights.to(get_device())
         self._cpu_area = area_weights.to("cpu")
         self._device_mask_provider = mask_provider.to(get_device())

@@ -37,15 +37,21 @@ class DistributedBackend(ABC):
         """
 
     @abstractmethod
+    def get_local_rank(self) -> int: ...
+
+    @abstractmethod
     def local_batch_size(self, batch_size: int) -> int: ...
 
     @abstractmethod
     def get_local_slices(
-        self, tensor_shape, rank: int, data_parallel_dim: int | None
+        self,
+        tensor_shape,
+        rank: int | None = None,
+        data_parallel_dim: int | None = None,
     ): ...
 
     @abstractmethod
-    def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None: ...
+    def reduce_mean(self, tensor: torch.Tensor, group=None) -> torch.Tensor | None: ...
 
     @abstractmethod
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor | None: ...
@@ -104,6 +110,15 @@ class DistributedBackend(ABC):
         with the passed module's state contained under "module".
         """
         ...
+
+    @abstractmethod
+    def comm_get_size(self, key: str): ...
+
+    @abstractmethod
+    def comm_get_group(self, key: str): ...
+
+    @abstractmethod
+    def comm_get_rank(self, key: str): ...
 
     @abstractmethod
     def barrier(self): ...
