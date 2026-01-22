@@ -22,6 +22,7 @@ from fme.downscaling.data import (
     DataLoaderConfig,
     GriddedData,
     StaticInputs,
+    enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predictors import (
@@ -65,7 +66,7 @@ class EventConfig:
     name: str
     date: str
     lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+        default_factory=lambda: ClosedInterval(-66.0, 70.0)
     )
     lon_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(-180.0, 360.0)
@@ -95,6 +96,7 @@ class EventConfig:
         requirements: DataRequirements,
         static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
+        enforce_lat_bounds(self.lat_extent)
         event_coarse = dataclasses.replace(
             base_data_config.full_config[0], subset=self._time_selection_slice
         )

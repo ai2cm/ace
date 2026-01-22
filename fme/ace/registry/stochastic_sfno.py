@@ -46,22 +46,49 @@ class NoiseConditionedSFNO(torch.nn.Module):
     def __init__(
         self,
         conditional_model: ConditionalSFNO,
+        img_shape: tuple[int, int],
         noise_type: Literal["isotropic", "gaussian"] = "gaussian",
-        embed_dim: int = 256,
+        embed_dim_noise: int = 256,
+        embed_dim_pos: int = 0,
+        embed_dim_labels: int = 0,
     ):
         super().__init__()
         self.conditional_model = conditional_model
-        self.embed_dim = embed_dim
+        self.embed_dim = embed_dim_noise
         self.noise_type = noise_type
+        self.label_pos_embed: torch.nn.Parameter | None = None
+        # register pos embed if pos_embed_dim != 0
+        if embed_dim_pos != 0:
+            self.pos_embed = torch.nn.Parameter(
+                torch.zeros(
+                    1, embed_dim_pos, img_shape[0], img_shape[1], requires_grad=True
+                )
+            )
+            # initialize pos embed with std=0.02
+            torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
+            if embed_dim_labels > 0:
+                self.label_pos_embed = torch.nn.Parameter(
+                    torch.zeros(
+                        embed_dim_labels,
+                        embed_dim_pos,
+                        img_shape[0],
+                        img_shape[1],
+                        requires_grad=True,
+                    )
+                )
+                torch.nn.init.trunc_normal_(self.label_pos_embed, std=0.02)
+        else:
+            self.pos_embed = None
 
     def forward(
         self, x: torch.Tensor, labels: torch.Tensor | None = None
     ) -> torch.Tensor:
+        x = x.reshape(-1, *x.shape[-3:])
         if self.noise_type == "isotropic":
             lmax = self.conditional_model.itrans_up.lmax
             mmax = self.conditional_model.itrans_up.mmax
             noise = isotropic_noise(
-                tuple(x.shape[:-3]) + (self.embed_dim,),
+                (x.shape[0], self.embed_dim),
                 lmax,
                 mmax,
                 self.conditional_model.itrans_up,
@@ -69,18 +96,34 @@ class NoiseConditionedSFNO(torch.nn.Module):
             )
         elif self.noise_type == "gaussian":
             noise = torch.randn(
-                [*x.shape[:-3], self.embed_dim, *x.shape[-2:]],
+                [x.shape[0], self.embed_dim, *x.shape[-2:]],
                 device=x.device,
                 dtype=x.dtype,
             )
         else:
             raise ValueError(f"Invalid noise type: {self.noise_type}")
 
+        if self.pos_embed is not None:
+            embedding_pos = self.pos_embed.repeat(noise.shape[0], 1, 1, 1)
+            if self.label_pos_embed is not None and labels is not None:
+                label_embedding_pos = torch.einsum(
+                    "blp, lpxy -> bpxy", labels, self.label_pos_embed
+                )
+                embedding_pos = embedding_pos + label_embedding_pos
+        else:
+            embedding_pos = None
+
         embedding_scalar = torch.zeros(
             [*x.shape[:-3], 0], device=x.device, dtype=x.dtype
         )
         return self.conditional_model(
-            x, Context(embedding_scalar=embedding_scalar, labels=labels, noise=noise)
+            x,
+            Context(
+                embedding_scalar=embedding_scalar,
+                embedding_pos=embedding_pos,
+                labels=labels,
+                noise=noise,
+            ),
         )
 
 
@@ -103,6 +146,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         embed_dim: Dimension of the embedding.
         noise_embed_dim: Dimension of the noise embedding.
         noise_type: Type of noise to use for conditioning.
+        context_pos_embed_dim: Dimension of the position embedding to use
+            for conditioning.
         global_layer_norm: Whether to reduce along the spatial domain when applying
             layer normalization.
         num_layers: Number of blocks (SFNO and MLP)in the model.
@@ -150,6 +195,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     residual_filter_factor: int = 1
     embed_dim: int = 256
     noise_embed_dim: int = 256
+    context_pos_embed_dim: int = 0
     noise_type: Literal["isotropic", "gaussian"] = "gaussian"
     global_layer_norm: bool = False
     num_layers: int = 12
@@ -192,10 +238,16 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             img_shape=dataset_info.img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
-                embed_dim_labels=len(dataset_info.all_labels),
+                embed_dim_pos=self.context_pos_embed_dim,
                 embed_dim_noise=self.noise_embed_dim,
+                embed_dim_labels=len(dataset_info.all_labels),
             ),
         )
         return NoiseConditionedSFNO(
-            sfno_net, noise_type=self.noise_type, embed_dim=self.noise_embed_dim
+            sfno_net,
+            noise_type=self.noise_type,
+            embed_dim_noise=self.noise_embed_dim,
+            embed_dim_pos=self.context_pos_embed_dim,
+            embed_dim_labels=len(dataset_info.all_labels),
+            img_shape=dataset_info.img_shape,
         )

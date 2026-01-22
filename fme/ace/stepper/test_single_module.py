@@ -177,6 +177,41 @@ def test_stepper_no_train_step_specified():
     assert stepper._train_n_forward_steps_sampler is None
 
 
+def test_stepper_step_int():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        train_n_forward_steps=2,
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    assert stepper._train_n_forward_steps_schedule is not None
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is not None
+
+
 def test_stepper_step_probabilities():
     normalization_config = NetworkAndLossNormalizationConfig(
         network=NormalizationConfig(
