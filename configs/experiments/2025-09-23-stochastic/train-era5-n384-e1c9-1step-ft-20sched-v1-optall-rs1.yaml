@@ -127,13 +127,13 @@ stepper:
   train_n_forward_steps:
     start_value: 2
     milestones:
-      - epoch: 1
-        value: 4
       - epoch: 2
-        value: 8
+        value: 4
       - epoch: 3
-        value: 12
+        value: 8
       - epoch: 4
+        value: 12
+      - epoch: 5
         value: 20
   optimize_last_step_only: false
   loss:
