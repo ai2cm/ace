@@ -87,7 +87,7 @@ class UNetDiffusionSong:
                 unet,
                 sigma_data=sigma_data,
             ),
-        )  # .to(memory_format=torch.channels_last)
+        ).to(memory_format=torch.channels_last)
 
 
 @dataclasses.dataclass
