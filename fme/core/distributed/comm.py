@@ -26,7 +26,7 @@ from physicsnemo.distributed.config import ProcessGroupNode, ProcessGroupConfig
 
 # we need this
 _DM = None
-_COMM_ROOTS = {}
+_COMM_ROOTS: dict[str, int] = {}
 
 
 def get_size(name: str) -> int:
