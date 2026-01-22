@@ -82,6 +82,22 @@ class SpectralConvS2(nn.Module):
         lora_alpha: float | None = None,
     ):  # pragma: no cover
         super(SpectralConvS2, self).__init__()
+        if operator_type != "dhconv":
+            raise NotImplementedError(
+                "Only 'dhconv' operator type is currently supported."
+            )
+        if factorization is not None:
+            raise NotImplementedError(
+                "Factorizations other than None are not currently supported."
+            )
+        if use_tensorly:
+            raise NotImplementedError(
+                "Tensorly-based implementation is not currently supported."
+            )
+        if separable:
+            raise NotImplementedError(
+                "Separable convolutions are not currently supported."
+            )
 
         if in_channels != out_channels:
             raise NotImplementedError(
