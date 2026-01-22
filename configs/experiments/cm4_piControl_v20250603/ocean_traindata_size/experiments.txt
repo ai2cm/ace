@@ -6,3 +6,5 @@ testrun-traindata_40yrs|rs0||training|best_inference_ckpt|normal|--not-preemptib
 testrun-traindata_40yrs|rs0|01KFJ1SX3Z56ZNQFG3ZCGSPEDA|training|best_inference_ckpt|normal|--not-preemptible
 
 SamudrACE_piControl_ablation-traindata_20yrs|rs0|01KFJ2FW6CW6BXRBVQFK02TFTH|training|best_inference_ckpt|normal|--not-preemptible
+
+SamudrACE_piControl_ablation-traindata_20yrs|rs1|01KFJ2G89EGJ5W9THA12PCZMH0|training|best_inference_ckpt|normal|--not-preemptible
