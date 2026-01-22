@@ -128,8 +128,8 @@ stepper:
           separable: false
           spectral_layers: 3
           spectral_transform: sht
-          lora_rank: 32
-          spectral_lora_rank: 16
+          lora_rank: 128
+          spectral_lora_rank: 64
       normalization:
         network:
           global_means_path: /statsdata/centering.nc
