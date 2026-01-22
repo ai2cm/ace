@@ -1,5 +1,5 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-testrun-traindata_20yrs|rs0|train|high|a100+h100|2|400GiB|3||seed=0
+testrun-traindata_40yrs|rs0|train|high|a100+h100|2|400GiB|3||seed=0
 
 SamudrACE_piControl_ablation-traindata_20yrs|rs0|skip|high|a100+h100|4|400GiB|3||seed=0
