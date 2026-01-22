@@ -281,9 +281,7 @@ def main():
 
     # Define benchmark configurations
     configs = [
-        BenchmarkConfig("baseline (NCHW)", model_channels_last=False, input_channels_last=False),
-        BenchmarkConfig("model_only", model_channels_last=True, input_channels_last=False),
-        BenchmarkConfig("input_only", model_channels_last=False, input_channels_last=True),
+        #BenchmarkConfig("baseline (NCHW)", model_channels_last=False, input_channels_last=False),
         BenchmarkConfig("both (NHWC)", model_channels_last=True, input_channels_last=True),
     ]
 
