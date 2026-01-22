@@ -1,0 +1,2 @@
+
+testrun-traindata_20yrs|rs0|01KFJ1MM4GZHWDWJFPEBT3JNX9|training|best_inference_ckpt|normal|--not-preemptible
