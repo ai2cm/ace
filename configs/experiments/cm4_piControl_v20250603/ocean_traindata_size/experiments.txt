@@ -1,3 +1,5 @@
 group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
 
 SamudrACE_piControl_ablation-traindata_80yrs|rs0|01KFJ5R8C2XJSQ1ZFV0JR13HX6|training|best_inference_ckpt|normal|--not-preemptible
+
+SamudrACE_piControl_ablation-traindata_20yrs|rs0|01KFJ73WG38JMN5NM1VVJZK8VC|training|best_inference_ckpt|normal|--not-preemptible
