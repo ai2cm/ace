@@ -121,8 +121,8 @@ stepper:
           norm: instance
       normalization:
         network:
-          global_means_path: /statsdata/centering.nc
-          global_stds_path: /statsdata/scaling-full-field.nc
+          global_means_path: /ocean_stats/centering.nc
+          global_stds_path: /ocean_stats/scaling-full-field.nc
       corrector:
         type: ocean_corrector
         config:
