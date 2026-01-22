@@ -40,8 +40,8 @@ class UNetDiffusionModule(torch.nn.Module):
             noise_level: The noise level of each example in the batch.
         """
         return self.unet(
-            latent.to(get_device(), memory_format=torch.channels_last),
-            conditioning.to(get_device(), memory_format=torch.channels_last),
+            latent.to(get_device()),  # , memory_format=torch.channels_last),
+            conditioning.to(get_device()),  # , memory_format=torch.channels_last),
             sigma=noise_level.to(get_device()),
             class_labels=None,
         )
