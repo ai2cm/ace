@@ -19,6 +19,7 @@ class ModuleConfig(Protocol):
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_channels_last: bool = True,
     ) -> torch.nn.Module: ...
 
 
@@ -33,6 +34,7 @@ class PreBuiltBuilder:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_channels_last: bool = True,
     ) -> torch.nn.Module:
         return self.module
 
@@ -61,6 +63,7 @@ class UNetDiffusionSong:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_channels_last: bool = True,
     ):
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
         # number of input channels = latents (num desired outputs) + conditioning fields
@@ -82,12 +85,16 @@ class UNetDiffusionSong:
             decoder_type=self.decoder_type,
             resample_filter=self.resample_filter,
         )
-        return UNetDiffusionModule(
+        module = UNetDiffusionModule(
             EDMPrecond(
                 unet,
                 sigma_data=sigma_data,
             ),
-        ).to(memory_format=torch.channels_last)
+            use_channels_last=use_channels_last,
+        )
+        if use_channels_last:
+            module = module.to(memory_format=torch.channels_last)
+        return module
 
 
 @dataclasses.dataclass
@@ -100,11 +107,15 @@ class DiffusionModuleRegistrySelector:
         config: configuration for the model architecture
         expects_interpolated_input: whether the model expects interpolated input
             to the target resolution
+        use_channels_last: whether to use channels_last memory format for the model
+            and forward pass inputs. This can provide 15-25% speedup on modern
+            NVIDIA GPUs (H100, B200) by optimizing memory layout for Tensor Cores.
     """
 
     type: str
     config: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     expects_interpolated_input: bool | None = None
+    use_channels_last: bool = True
 
     def __post_init__(self):
         if self.type == "prebuilt" and self.expects_interpolated_input is None:
@@ -133,6 +144,7 @@ class DiffusionModuleRegistrySelector:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
+            use_channels_last=self.use_channels_last,
         )
 
 

@@ -16,14 +16,19 @@ class UNetDiffusionModule(torch.nn.Module):
 
     Args:
         unet: The U-Net model.
+        use_channels_last: Whether to convert inputs to channels_last memory format.
+            This can provide 15-25% speedup on modern NVIDIA GPUs by optimizing
+            memory layout for Tensor Cores. Default is True.
     """
 
     def __init__(
         self,
         unet: torch.nn.Module,
+        use_channels_last: bool = True,
     ):
         super().__init__()
         self.unet = unet.to(get_device())
+        self.use_channels_last = use_channels_last
 
     def forward(
         self,
@@ -39,9 +44,17 @@ class UNetDiffusionModule(torch.nn.Module):
             latent: The latent diffusion variable on the fine grid.
             noise_level: The noise level of each example in the batch.
         """
+        device = get_device()
+        if self.use_channels_last:
+            latent = latent.to(device, memory_format=torch.channels_last)
+            conditioning = conditioning.to(device, memory_format=torch.channels_last)
+        else:
+            latent = latent.to(device)
+            conditioning = conditioning.to(device)
+
         return self.unet(
-            latent.to(get_device(), memory_format=torch.channels_last),
-            conditioning.to(get_device(), memory_format=torch.channels_last),
-            sigma=noise_level.to(get_device()),
+            latent,
+            conditioning,
+            sigma=noise_level.to(device),
             class_labels=None,
         )
