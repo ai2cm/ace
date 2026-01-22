@@ -56,7 +56,7 @@ def get_group(name: str):
 def get_root(name: str) -> int:
     global _DM
     global _COMM_ROOTS
-    if (name in _COMM_ROOTS) and (_DM.world_size > 1):
+    if (name in _COMM_ROOTS) and (_DM is not None) and (_DM.world_size > 1):
         return _COMM_ROOTS[name]
     else:
         return 0
