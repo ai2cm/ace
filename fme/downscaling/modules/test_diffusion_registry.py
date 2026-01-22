@@ -103,3 +103,31 @@ def test_UNetDiffusionModule_forward_pass():
     assert (batch_size, n_channels, *fine_shape) == module(
         latent, conditioning, noise
     ).shape
+
+
+def test_diffusion_module_has_channels_last_memory_format():
+    """Test DiffusionModuleConfig builds models with channels_last memory format."""
+    downscale_factor = 2
+    coarse_shape = (8, 16)
+    n_channels = 3
+
+    module = DiffusionModuleRegistrySelector(
+        "unet_diffusion_song", {"model_channels": 4}
+    ).build(
+        n_in_channels=n_channels,
+        n_out_channels=n_channels,
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        sigma_data=1.0,
+    )
+
+    # Check that 4D parameters (conv weights) are in channels_last format
+    has_4d_params = False
+    for name, param in module.named_parameters():
+        if param.ndim == 4:
+            if param.is_contiguous(memory_format=torch.channels_last):
+                has_4d_params = True
+                assert param.is_contiguous(
+                    memory_format=torch.channels_last
+                ), f"Parameter {name} is not in channels_last memory format"
+    assert has_4d_params, "Model should have 4D parameters (conv weights) to test"
