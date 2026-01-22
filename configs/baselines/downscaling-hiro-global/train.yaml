@@ -45,8 +45,9 @@ ema:
 validate_using_ema: true
 train_data:
   sample_with_replacement: 160
-  batch_size: 24
-  num_data_workers: 4
+  #batch_size: 36      # 8 GPUs
+  batch_size: 8     # 1 GPU
+  num_data_workers: 2
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 3km.zarr
@@ -66,8 +67,9 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 76
-  num_data_workers: 4
+  #batch_size: 76     # 8 GPUs
+  batch_size: 18      # 1 GPU
+  num_data_workers: 2
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
@@ -75,7 +77,7 @@ validation_data:
     subset:
       start_time: '2023-01-01T00:00:00'
       stop_time: '2024-01-01T00:00:00'
-      step: 19
+      step: 49
   coarse:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
@@ -83,19 +85,20 @@ validation_data:
     subset:
       start_time: '2023-01-01T00:00:00'
       stop_time: '2024-01-01T00:00:00'
-      step: 19
+      step: 49
   lat_extent:
     start: -66.0
     stop: 70.0
   strict_ensemble: false
+  drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 1500
-validate_interval: 10
+max_epochs: 4
+validate_interval: 3
 experiment_dir: /results
-save_checkpoints: true
+save_checkpoints: false
 logging:
-  project: andrep-downscaling
+  project: annak-downscaling
   entity: ai2cm
   log_to_wandb: true
-generate_n_samples: 2
+generate_n_samples: 1
