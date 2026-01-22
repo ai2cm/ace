@@ -40,3 +40,4 @@ prediction_loader:
         file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
         engine: zarr
   num_data_workers: 4
+allow_incompatible_dataset: true # necessary due to addition of masks to 2025-03-21 dataset
