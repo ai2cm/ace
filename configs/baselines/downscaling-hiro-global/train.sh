@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME="xshield-downscaling-convert-to-channels-last"
-CONFIG_FILENAME="train.yaml"
+JOB_NAME="xshield-downscaling-no-convert-to-channels-last"
+CONFIG_FILENAME="train_control.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
