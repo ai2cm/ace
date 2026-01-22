@@ -58,6 +58,24 @@ class _MockDepth:
 _VERTICAL_COORD = _MockDepth()
 
 
+def test_ocean_corrector_force_positive():
+    """"""
+    torch.manual_seed(0)
+    config = OceanCorrectorConfig(force_positive_names=["so_0", "so_1"])
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = OceanCorrector(config, ops, _VERTICAL_COORD, timestep)
+    input_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
+    input_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
+    gen_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
+    gen_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
+    corrected_gen = corrector(input_data, gen_data, {})
+    for name in ["so_0", "so_1"]:
+        x = corrected_gen[name].clone()
+        x[_LAT, _LON] = 0.0
+        assert torch.all(x >= 0.0)
+
+
 def test_ocean_corrector_has_no_negative_ocean_fraction():
     config = OceanCorrectorConfig(
         sea_ice_fraction_correction=SeaIceFractionConfig(
