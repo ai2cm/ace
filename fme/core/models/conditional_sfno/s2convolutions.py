@@ -15,18 +15,12 @@
 # limitations under the License.
 
 # import FactorizedTensor from tensorly for tensorized operations
-import tensorly as tl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-tl.set_backend("pytorch")
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
-
-# from tensorly.plugins import use_opt_einsum
-# use_opt_einsum('optimal')
-from tltorch.factorized_tensors.core import FactorizedTensor
 
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
@@ -41,7 +35,6 @@ from .contractions import (
     real_mul2d_fwd,
     real_muladd2d_fwd,
 )
-from .factorizations import get_contract_fun
 
 
 @torch.jit.script
