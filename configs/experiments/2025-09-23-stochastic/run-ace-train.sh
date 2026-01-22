@@ -1,0 +1,95 @@
+#!/bin/bash
+
+set -e
+
+SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
+REPO_ROOT=$(git rev-parse --show-toplevel)
+N_GPUS=4
+
+cd "$REPO_ROOT"
+
+run_training() {
+  local config_filename="$1"
+  local job_name="$2"
+  local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
+
+  python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
+
+  # Extract additional args from config header
+  local extra_args=()
+  while IFS= read -r line; do
+    [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
+  done < "$CONFIG_PATH"
+
+  gantry run \
+    --name "$job_name" \
+    --description 'Run ACE training' \
+    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
+    --workspace ai2/climate-titan \
+    --priority urgent \
+    --preemptible \
+    --cluster ai2/titan \
+    --env WANDB_USERNAME="$WANDB_USERNAME" \
+    --env WANDB_NAME="$job_name" \
+    --env WANDB_JOB_TYPE=training \
+    --env WANDB_RUN_GROUP= \
+    --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+    --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+    --gpus "$N_GPUS" \
+    --shared-memory 400GiB \
+    --weka climate-default:/climate-default \
+    --budget ai2/climate \
+    --allow-dirty \
+    --system-python \
+    --install "pip install --no-deps ." \
+    "${extra_args[@]}" \
+    -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
+}
+
+base_name="stochastic"
+
+# run_training "train-era5-n384-e9c1-1step.yaml" "$base_name-era5-n384-e9c1-1step"
+# run_training "train-era5-n384-amc9c1-1step.yaml" "$base_name-era5-n384-amc9c1-1step"
+# run_training "train-era5-n384-amc9c1-1step-ft-20step-v2.yaml" "$base_name-era5-n384-amc9c1-1step-ft-20step-v2"
+# run_training "train-era5-n384-e9c1-gauss-1step.yaml" "$base_name-era5-n384-e9c1-gauss-1step"
+# run_training "train-era5-n512-e9c1-1step.yaml" "$base_name-era5-n512-e9c1-1step"
+# run_training "train-era5-n384-e1c9-1step.yaml" "$base_name-era5-n384-e1c9-1step"
+# run_training "train-era5-n384-e1c9-1step-rs1.yaml" "$base_name-era5-n384-e1c9-1step-rs1"
+# run_training "train-era5-n384-e1c9-condpos32-1step-rs1.yaml" "$base_name-era5-n384-e1c9-condpos32-1step-rs1"
+# run_training "train-era5-n384-e1c9-1step-rs2.yaml" "$base_name-era5-n384-e1c9-1step-rs2"
+# run_training "train-era5-n384-e1c9-1step-rs3.yaml" "$base_name-era5-n384-e1c9-1step-rs3"
+# run_training "train-era5-n384-e5c5-1step-rs1.yaml" "$base_name-era5-n384-e5c5-1step-rs1"
+# run_training "train-amip-e9c1-1step.yaml" "$base_name-amip-e9c1-1step"
+# run_training "train-amip-e9c1-gauss-1step.yaml" "$base_name-amip-e9c1-gauss-1step"
+# run_training "train-era5-n512-e5c5-1step.yaml" "$base_name-era5-n512-e5c5-1step"
+# run_training "train-era5-n512-e9c1-1step-ft-20step.yaml" "$base_name-era5-n512-e9c1-1step-ft-20step"
+# run_training "train-era5-n512-e9c1-1step-ft-20su.yaml" "$base_name-era5-n512-e9c1-1step-ft-20su"
+# run_training "train-era5-n512-e9c1-1step-ft-20su-e6c2k2.yaml" "$base_name-era5-n512-e9c1-1step-ft-20su-e6c2k2"
+# run_training "train-era5-n384-e1c9-1step-ft-20su.yaml" "$base_name-era5-n384-e1c9-1step-ft-20su"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20su.yaml" "$base_name-era5-n384-e1c9-1step-ft-20su"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2.yaml" "$base_name-era5-n384-e1c9-1step-ft-20step-v2"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-rs0"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c8s4-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c8s4-rs0"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c8s0-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c8s0-rs0"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c32s16-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c32s16-rs0"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c32s16-pos-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c32s16-pos-rs0"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c128s64-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c128s64-rs0"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-rs1.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-rs1"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-rs2.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-rs2"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-rs3.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-rs3"
+run_training "train-era5-n384-e1c9-1step-ft-20step-rs1.yaml" "$base_name-era5-n384-e1c9-1step-era5-ft-20step-v2-rs1"
+# run_training "train-era5-n384-e1c9-1step-ft-20step-lora-c8s4-rs1.yaml" "$base_name-era5-n384-e1c9-1step-era5-ft-20step-lora-c8s4-rs1"
+# run_training "train-era5-n384-e1c9-1step-ft-20step-lora-c32s16-rs1.yaml" "$base_name-era5-n384-e1c9-1step-era5-ft-20step-lora-c32s16-rs1"
+# run_training "train-era5-n384-e1c9-1step-ft-20sched-v0-rs1.yaml" "$base_name-era5-n384-e1c9-1step-era5-ft-20sched-v0-rs1"
+# run_training "train-era5-n384-e1c9-1step-ft-20sched-v1-rs1.yaml" "$base_name-era5-n384-e1c9-1step-era5-ft-20sched-v1-rs1"
+# run_training "train-era5-n384-e1c9-1step-ft-20sched-v2-rs1.yaml" "$base_name-era5-n384-e1c9-1step-era5-ft-20sched-v2-rs1"
+# run_training "train-x-shield-n384-e1c9-20-step-ERA5-ft-20step-x-shield-v2-rs1.yaml" "$base_name-x-shield-n384-e1c9-20step-era5-ft-20step-v2-rs1"
+# run_training "train-x-shield-n384-e1c9-1step-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-rs0"
+# run_training "train-x-shield-n384-e1c9-1step-rs1.yaml" "$base_name-x-shield-n384-e1c9-1step-rs1"
+# run_training "train-x-shield-only-n384-e1c9-1step-ft-20step-v2-rs1.yaml" "$base_name-x-shield-only-n384-e1c9-1step-ft-20step-v2-rs1"
+# run_training "train-x-shield-n384-e1c9-1step-big-skip-rs1.yaml" "$base_name-x-shield-n384-e1c9-1step-big-skip-rs1"
+# run_training "train-x-shield-only-n384-e1c9-1step-ft-20step-full.yaml" "$base_name-x-shield-only-n384-e1c9-1step-ft-20step-full-rs1"
+
