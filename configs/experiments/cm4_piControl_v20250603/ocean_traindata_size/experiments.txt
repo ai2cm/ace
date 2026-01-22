@@ -1,22 +1,3 @@
-
-testrun-traindata_20yrs|rs0|01KFJ1MM4GZHWDWJFPEBT3JNX9|training|best_inference_ckpt|normal|--not-preemptible
-
-testrun-traindata_40yrs|rs0||training|best_inference_ckpt|normal|--not-preemptible
-
-testrun-traindata_40yrs|rs0|01KFJ1SX3Z56ZNQFG3ZCGSPEDA|training|best_inference_ckpt|normal|--not-preemptible
-
-SamudrACE_piControl_ablation-traindata_20yrs|rs0|01KFJ2FW6CW6BXRBVQFK02TFTH|training|best_inference_ckpt|normal|--not-preemptible
-
-SamudrACE_piControl_ablation-traindata_20yrs|rs1|01KFJ2G89EGJ5W9THA12PCZMH0|training|best_inference_ckpt|normal|--not-preemptible
-
-SamudrACE_piControl_ablation-traindata_20yrs|rs2|01KFJ2GM5ZNHF6M99FMBRKQRTE|training|best_inference_ckpt|normal|--not-preemptible
-
-SamudrACE_piControl_ablation-traindata_40yrs|rs0|01KFJ2KDMG9G7T3F7W71WSTNEQ|training|best_inference_ckpt|normal|--not-preemptible
-
-SamudrACE_piControl_ablation-traindata_40yrs|rs1|01KFJ2KTTPH918VC1MYFFK7V5C|training|best_inference_ckpt|normal|--not-preemptible
-
-SamudrACE_piControl_ablation-traindata_40yrs|rs2|01KFJ2M6QQ3T2GQKVE8FAMB60Q|training|best_inference_ckpt|normal|--not-preemptible
-
-SamudrACE_piControl_ablation-traindata_80yrs|rs0|01KFJ2WQ8FM8PT8FT2AFFSP1QM|training|best_inference_ckpt|normal|--not-preemptible
+group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
 
 SamudrACE_piControl_ablation-traindata_80yrs|rs0|01KFJ5R8C2XJSQ1ZFV0JR13HX6|training|best_inference_ckpt|normal|--not-preemptible
