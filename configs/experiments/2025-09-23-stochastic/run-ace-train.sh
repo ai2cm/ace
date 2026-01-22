@@ -76,7 +76,7 @@ run_training "train-era5-n384-e1c9-condpos32-1step-rs1.yaml" "$base_name-era5-n3
 # run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c8s0-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c8s0-rs0"
 # run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c32s16-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c32s16-rs0"
 # run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c32s16-pos-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c32s16-pos-rs0"
-run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c128s64-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c128s64-rs0"
+# run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-lora-c128s64-rs0.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-lora-c128s64-rs0"
 # run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-rs1.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-rs1"
 # run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-rs2.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-rs2"
 # run_training "train-x-shield-n384-e1c9-1step-ft-20step-v2-rs3.yaml" "$base_name-x-shield-n384-e1c9-1step-era5-ft-20step-v2-rs3"
