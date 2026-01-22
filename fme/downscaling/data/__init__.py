@@ -2,6 +2,7 @@ from .config import (
     ContiguousDistributedSampler,
     DataLoaderConfig,
     PairedDataLoaderConfig,
+    enforce_lat_bounds,
 )
 from .datasets import (
     BatchData,
