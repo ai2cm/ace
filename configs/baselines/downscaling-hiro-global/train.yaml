@@ -44,7 +44,7 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 160
+  sample_with_replacement: 40
   #batch_size: 36      # 8 GPUs
   batch_size: 8     # 1 GPU
   num_data_workers: 2
@@ -75,17 +75,21 @@ validation_data:
     engine: zarr
     file_pattern: 3km.zarr
     subset:
-      start_time: '2023-01-01T00:00:00'
-      stop_time: '2024-01-01T00:00:00'
-      step: 49
+      start: 0
+      stop: 4
+      # start_time: '2023-01-01T00:00:00'
+      # stop_time: '2024-01-01T00:00:00'
+      # step: 49
   coarse:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
     subset:
-      start_time: '2023-01-01T00:00:00'
-      stop_time: '2024-01-01T00:00:00'
-      step: 49
+      start: 0
+      stop: 4
+      # start_time: '2023-01-01T00:00:00'
+      # stop_time: '2024-01-01T00:00:00'
+      # step: 49
   lat_extent:
     start: -66.0
     stop: 70.0
