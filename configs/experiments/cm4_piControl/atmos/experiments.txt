@@ -1,7 +1,7 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
 
-sfno-v1020_sea_ice-5D_ts|rs0|01K96SARRYA0RA9696E20PK912|training|best_inference_ckpt|normal|--not-preemptible
+sfno-v1020_sea_ice-5D_ts|rs0|01K96SARRYA0RA9696E20PK912|run_ICx1|best_inference_ckpt|normal|--not-preemptible
 
-sfno-v1020_sea_ice-5D_ts|rs1|01K96SB51PS70K7XCEWYHP3GQ7|training|best_inference_ckpt|normal|--not-preemptible
+sfno-v1020_sea_ice-5D_ts|rs1|01K9DA7J3DZJ1NEVV6RSAD4G0W|trained|best_inference_ckpt|normal|--not-preemptible
 
-sfno-v1020_sea_ice-5D_ts|rs1|01K9DA7J3DZJ1NEVV6RSAD4G0W|training|best_inference_ckpt|normal|--not-preemptible
+ace-samudra-coupled-cm4-ieuss1qr-decoupled|rs0||run_ICx1_coupled|best_inference_ckpt|high|--not-preemptible||01KFKM4D4EK38DK9Q3RKVABH0Q
