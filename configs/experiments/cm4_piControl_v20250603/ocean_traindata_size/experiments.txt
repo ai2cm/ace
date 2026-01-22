@@ -2,3 +2,5 @@
 testrun-traindata_20yrs|rs0|01KFJ1MM4GZHWDWJFPEBT3JNX9|training|best_inference_ckpt|normal|--not-preemptible
 
 testrun-traindata_40yrs|rs0||training|best_inference_ckpt|normal|--not-preemptible
+
+testrun-traindata_40yrs|rs0|01KFJ1SX3Z56ZNQFG3ZCGSPEDA|training|best_inference_ckpt|normal|--not-preemptible
