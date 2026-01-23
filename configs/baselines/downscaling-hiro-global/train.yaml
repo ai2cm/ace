@@ -8,7 +8,6 @@ model:
   loss:
     type: MSE
   module:
-    use_channels_last: false
     config:
       model_channels: 128
       attn_resolutions: []
@@ -45,10 +44,9 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 40
-  #batch_size: 36      # 8 GPUs
-  batch_size: 8     # 1 GPU
-  num_data_workers: 2
+  sample_with_replacement: 160
+  batch_size: 24
+  num_data_workers: 4
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 3km.zarr
@@ -68,42 +66,36 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  #batch_size: 76     # 8 GPUs
-  batch_size: 2    # 1 GPU
-  num_data_workers: 2
+  batch_size: 76
+  num_data_workers: 4
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 3km.zarr
     subset:
-      start: 0
-      stop: 2
-      # start_time: '2023-01-01T00:00:00'
-      # stop_time: '2024-01-01T00:00:00'
-      # step: 49
+      start_time: '2023-01-01T00:00:00'
+      stop_time: '2024-01-01T00:00:00'
+      step: 19
   coarse:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
     subset:
-      start: 0
-      stop: 2
-      # start_time: '2023-01-01T00:00:00'
-      # stop_time: '2024-01-01T00:00:00'
-      # step: 49
+      start_time: '2023-01-01T00:00:00'
+      stop_time: '2024-01-01T00:00:00'
+      step: 19
   lat_extent:
     start: -66.0
     stop: 70.0
   strict_ensemble: false
-  drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 4
-validate_interval: 3
+max_epochs: 1500
+validate_interval: 10
 experiment_dir: /results
-save_checkpoints: false
+save_checkpoints: true
 logging:
-  project: annak-downscaling
+  project: andrep-downscaling
   entity: ai2cm
   log_to_wandb: true
-generate_n_samples: 1
+generate_n_samples: 2
