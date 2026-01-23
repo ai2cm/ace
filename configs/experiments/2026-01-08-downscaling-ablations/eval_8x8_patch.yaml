@@ -3,7 +3,7 @@ n_samples: 4
 patch:
   divide_generation: true
   composite_prediction: true
-  coarse_horizontal_overlap: 0
+  coarse_horizontal_overlap: 1
 model:
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
 data:
