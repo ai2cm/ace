@@ -2,8 +2,10 @@
 
 set -e
 
-JOB_NAME="xshield-downscaling-apex-gnorm-channels-last-updated-unet"
-CONFIG_FILENAME="train_channels_last.yaml"
+#JOB_NAME="xshield-downscaling-apex-gnorm-channels-last-updated-unet"
+#CONFIG_FILENAME="train_channels_last.yaml"
+JOB_NAME="xshield-downscaling-torch-gnorm-updated-unet"
+CONFIG_FILENAME="train_control.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

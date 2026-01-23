@@ -45,7 +45,7 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 10
+  sample_with_replacement: 20
   #batch_size: 36      # 8 GPUs
   batch_size: 20   # 1 GPU
   num_data_workers: 2
