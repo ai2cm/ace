@@ -47,6 +47,7 @@ def build_model(
     channel_mult: list[int] = None,
     fine_shape: tuple[int, int] = (64, 64),
     n_channels: int = 3,
+    use_channels_last: bool = True,
 ):
     """Build a diffusion model for benchmarking."""
     if channel_mult is None:
@@ -62,6 +63,7 @@ def build_model(
     selector = DiffusionModuleRegistrySelector(
         type="unet_diffusion_song",
         config=config,
+        use_channels_last=use_channels_last,
     )
 
     # Calculate coarse shape (assuming downscale_factor=1 for simplicity)
@@ -101,16 +103,15 @@ def run_benchmark(
     print(f"{'='*60}")
 
     # Build model fresh for each config
+    # Note: use_channels_last controls both model parameter format AND
+    # whether forward() converts inputs to channels_last
     model = build_model(
         model_channels=model_channels,
         channel_mult=channel_mult,
         fine_shape=fine_shape,
         n_channels=n_channels,
+        use_channels_last=config.model_channels_last,
     )
-
-    # Apply channels_last to model if requested
-    if config.model_channels_last:
-        model = model.to(memory_format=torch.channels_last)
 
     # Check model parameter formats
     print("\nModel parameter formats:")
@@ -281,7 +282,7 @@ def main():
 
     # Define benchmark configurations
     configs = [
-        #BenchmarkConfig("baseline (NCHW)", model_channels_last=False, input_channels_last=False),
+        BenchmarkConfig("baseline (NCHW)", model_channels_last=False, input_channels_last=False),
         BenchmarkConfig("both (NHWC)", model_channels_last=True, input_channels_last=True),
     ]
 
@@ -313,22 +314,25 @@ def main():
         speedup_str = f"({speedup:+.1f}%)" if r["config"] != "baseline (NCHW)" else ""
         print(f"{r['config']:<20} {r['forward_ms']:.2f} ± {r['forward_std_ms']:.2f}      {r['full_ms']:.2f} ± {r['full_std_ms']:.2f}  {speedup_str}")
 
-    # Trace format through forward pass for the "both" config
-    print("\n")
-    model = build_model(
-        model_channels=model_channels,
-        channel_mult=channel_mult,
-        fine_shape=fine_shape,
-        n_channels=n_channels,
-    ).to(memory_format=torch.channels_last)
+    # Trace format through forward pass for both configs
+    for trace_config in configs:
+        print(f"\n\nTracing: {trace_config.name}")
+        model = build_model(
+            model_channels=model_channels,
+            channel_mult=channel_mult,
+            fine_shape=fine_shape,
+            n_channels=n_channels,
+            use_channels_last=trace_config.model_channels_last,
+        )
 
-    latent = torch.randn(batch_size, n_channels, *fine_shape, device=device)
-    latent = latent.to(memory_format=torch.channels_last)
-    conditioning = torch.randn(batch_size, n_channels, *fine_shape, device=device)
-    conditioning = conditioning.to(memory_format=torch.channels_last)
-    noise_level = torch.randn(batch_size, 1, 1, 1, device=device)
+        latent = torch.randn(batch_size, n_channels, *fine_shape, device=device)
+        conditioning = torch.randn(batch_size, n_channels, *fine_shape, device=device)
+        if trace_config.input_channels_last:
+            latent = latent.to(memory_format=torch.channels_last)
+            conditioning = conditioning.to(memory_format=torch.channels_last)
+        noise_level = torch.randn(batch_size, 1, 1, 1, device=device)
 
-    trace_format_through_forward(model, latent, conditioning, noise_level)
+        trace_format_through_forward(model, latent, conditioning, noise_level)
 
 
 if __name__ == "__main__":
