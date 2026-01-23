@@ -92,8 +92,11 @@ validation_data:
       # stop_time: '2024-01-01T00:00:00'
       # step: 49
   lat_extent:
-    start: -66.0
-    stop: 70.0
+    start: -8.0
+    stop: 8.0
+  lon_extent:
+    start: 230.0
+    stop: 238.0
   strict_ensemble: false
   drop_last: true
 coarse_patch_extent_lat: 16
