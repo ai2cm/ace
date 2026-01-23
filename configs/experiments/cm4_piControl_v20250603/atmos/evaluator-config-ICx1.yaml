@@ -27,3 +27,4 @@ aggregator:
 data_writer:
   save_prediction_files: false
   save_monthly_files: true
+allow_incompatible_dataset: true
