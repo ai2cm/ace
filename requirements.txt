@@ -1,5 +1,6 @@
 cartopy>=0.22.0
 dacite
+einops>=0.8.1
 gcsfs
 h5netcdf
 h5py
