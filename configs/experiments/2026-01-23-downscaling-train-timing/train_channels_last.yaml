@@ -10,7 +10,7 @@ model:
   module:
     use_channels_last: true
     config:
-      model_channels: 128
+      model_channels: 320
       attn_resolutions: []
       num_blocks: 1
       channel_mult_emb: 6
