@@ -10,7 +10,7 @@ model:
   module:
     use_channels_last: true
     config:
-      model_channels: 320
+      model_channels: 160
       attn_resolutions: []
       num_blocks: 1
       channel_mult_emb: 6
@@ -47,7 +47,7 @@ validate_using_ema: true
 train_data:
   sample_with_replacement: 80
   #batch_size: 36      # 8 GPUs
-  batch_size: 12    # 1 GPU
+  batch_size: 18   # 1 GPU
   num_data_workers: 2
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
