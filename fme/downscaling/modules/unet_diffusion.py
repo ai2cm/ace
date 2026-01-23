@@ -26,10 +26,12 @@ class UNetDiffusionModule(torch.nn.Module):
         self,
         unet: torch.nn.Module,
         use_amp_bf16: bool = True,
+        use_channels_last: bool = True,
     ):
         super().__init__()
         self.unet = unet.to(get_device())
         self.use_amp_bf16 = use_amp_bf16
+        self.use_channels_last = use_channels_last
 
         if self.use_amp_bf16:
             if get_device().type == "mps":
@@ -58,6 +60,10 @@ class UNetDiffusionModule(torch.nn.Module):
         latent = latent.to(device)
         conditioning = conditioning.to(device)
         noise_level = noise_level.to(device)
+
+        if self.use_channels_last:
+            latent = latent.to(memory_format=torch.channels_last)
+            conditioning = conditioning.to(memory_format=torch.channels_last)
 
         if self.use_amp_bf16:
             with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
