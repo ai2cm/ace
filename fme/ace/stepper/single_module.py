@@ -1165,7 +1165,8 @@ class Stepper(
         labels: BatchLabels | None,
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
-        q0 = state["specific_total_water_0"]
+        if "specific_total_water_0" in state:
+            q0 = state["specific_total_water_0"]
         for step in range(n_forward_steps):
             input_forcing = {
                 k: (
@@ -1193,7 +1194,8 @@ class Stepper(
                     ),
                     wrapper=checkpoint,
                 )
-            state["specific_total_water_0"] = q0
+            if "specific_total_water_0" in state:
+                state["specific_total_water_0"] = q0
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
