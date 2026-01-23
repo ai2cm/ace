@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-downscaling-100km-to-3km-nonshifted_aligned"
-CONFIG_FILENAME="eval_nonshifted_aligned.yaml"
+JOB_NAME="eval-xshield-downscaling-100km-to-3km-8x8-patch-no-overlap"
+CONFIG_FILENAME="eval_8x8_patch.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
