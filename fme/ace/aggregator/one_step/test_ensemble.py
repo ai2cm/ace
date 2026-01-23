@@ -1,7 +1,11 @@
 import pytest
 import torch
 
-from fme.ace.aggregator.one_step.ensemble import CRPSMetric, SSRBiasMetric
+from fme.ace.aggregator.one_step.ensemble import (
+    CRPSMetric,
+    EnsembleMeanRMSEMetric,
+    SSRBiasMetric,
+)
 
 
 def get_tensor(shape):
@@ -72,3 +76,23 @@ def test_ssr_bias_metric_doubled_spread(n_sample):
     assert isinstance(got, torch.Tensor)
     assert got.shape == (n_y, n_x)
     torch.testing.assert_close(got.mean(), torch.tensor(1.0), atol=1e-2, rtol=0.0)
+
+
+@pytest.mark.parametrize("n_sample", [2, 10])
+def test_ensemble_mean_metric(n_sample):
+    # this simple check only works for even n_sample
+    torch.manual_seed(0)
+    metric = EnsembleMeanRMSEMetric()
+    n_batch = 5000
+    n_time = 3
+    n_y = 4
+    n_x = 5
+    target = torch.ones((n_batch, 1, n_time, n_y, n_x))
+    gen = torch.ones((n_batch, n_sample, n_time, n_y, n_x)) * 2
+    # half the samples are 0
+    gen[:, : n_sample // 2, ...] = 0
+    metric.record(target=target, gen=gen)
+    got = metric.get()
+    assert isinstance(got, torch.Tensor)
+    assert got.shape == (n_y, n_x)
+    torch.testing.assert_close(got.mean(), torch.tensor(0.0), atol=1e-2, rtol=0.0)

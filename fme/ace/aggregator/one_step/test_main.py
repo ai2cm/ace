@@ -60,6 +60,8 @@ def test_labels_exist():
         "test/crps/mean_map/a",
         "test/ssr_bias/a",
         "test/ssr_bias/mean_map/a",
+        "test/ensemble_mean_rmse/mean_map/a",
+        "test/ensemble_mean_rmse/a",
     ]
     assert set(logs.keys()) == set(expected_keys)
 
