@@ -57,7 +57,7 @@ class OceanHeatContentBudgetConfig:
     Parameters:
         method: Method to use for OHC budget correction. The available option is
             "scaled_temperature", which enforces conservation of heat content
-            by scaling the predicted potential temperature by a vertically and 
+            by scaling the predicted potential temperature by a vertically and
             horizontally uniform correction factor.
         constant_unaccounted_heating: Area-weighted global mean
             column-integrated heating in W/m**2 to be added to the energy flux
