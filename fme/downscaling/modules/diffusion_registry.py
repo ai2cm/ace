@@ -55,6 +55,7 @@ class UNetDiffusionSong:
     encoder_type: str = "standard"
     decoder_type: str = "standard"
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    use_apex_gn: bool = True
 
     def build(
         self,
@@ -84,6 +85,7 @@ class UNetDiffusionSong:
             encoder_type=self.encoder_type,
             decoder_type=self.decoder_type,
             resample_filter=self.resample_filter,
+            use_apex_gn=self.use_apex_gn,
         )
         module = UNetDiffusionModule(
             EDMPrecond(
