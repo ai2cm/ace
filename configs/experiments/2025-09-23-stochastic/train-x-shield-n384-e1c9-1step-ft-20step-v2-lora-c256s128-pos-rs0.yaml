@@ -111,6 +111,7 @@ stepper:
       - frozen:
           exclude:
             - "*.lora_*"
+            - "*.pos_embed"
   step:
     type: single_module
     config:

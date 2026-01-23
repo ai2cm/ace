@@ -112,6 +112,7 @@ stepper:
           exclude:
             - "*.lora_*"
             - "*.pos_embed"
+            - "*.norm*"
   step:
     type: single_module
     config:
@@ -129,8 +130,9 @@ stepper:
           separable: false
           spectral_layers: 3
           spectral_transform: sht
-          lora_rank: 128
-          spectral_lora_rank: 64
+          lora_rank: 256
+          spectral_lora_rank: 128
+          affine_norms: true
       normalization:
         network:
           global_means_path: /statsdata/centering.nc
