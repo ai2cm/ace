@@ -21,4 +21,6 @@ fto-v1124-ACE2S-cpwvww40-rv0ike6m||01KF3YYTEMKF2KCJ5R9SX7437P|done-unstable|best
 
 ft_fto-v1124-pesvhsm3-rv0ike6m||01KFEPM4VCM4FJYG46ZSEH1A87|done|best_inference_ckpt|high|--not-preemptible
 
-fto-v1124-ACE2S-cpwvww40-rv0ike6m-q0-as-input||01KF3YYTEMKF2KCJ5R9SX7437P|run_ICx1-40yr|best_inference_ckpt|high|--not-preemptible
+fto-v1124-ACE2S-cpwvww40-rv0ike6m-q0-as-input||01KF3YYTEMKF2KCJ5R9SX7437P|done|best_inference_ckpt|high|--not-preemptible
+
+fto-v1124-ACE2S-cpwvww40-rv0ike6m-q0-as-climatology||01KF3YYTEMKF2KCJ5R9SX7437P|run_ICx1-40yr|best_inference_ckpt|high|--not-preemptible
