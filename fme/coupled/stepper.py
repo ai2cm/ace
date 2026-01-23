@@ -25,7 +25,7 @@ from fme.ace.stepper.parameter_init import (
     Weights,
     WeightsAndHistoryLoader,
 )
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import InferenceStepper, StepperConfig, TrainStepper
 from fme.ace.stepper.single_module import (
     load_weights_and_history as load_uncoupled_weights_and_history,
 )
@@ -150,7 +150,7 @@ class CoupledOceanFractionConfig:
 
 
 def _load_stepper_weights_and_history_factory(
-    stepper: Stepper,
+    stepper: TrainStepper,
 ) -> WeightsAndHistoryLoader:
     def load_stepper_weights_and_history(*_) -> StepperWeightsAndHistory:
         return_weights: Weights = []
@@ -799,22 +799,14 @@ class CoupledStepperTrainLoss:
         return None
 
 
-class CoupledStepper(
-    TrainStepperABC[
-        CoupledPrognosticState,
-        CoupledBatchData,
-        CoupledBatchData,
-        CoupledPairedData,
-        CoupledTrainOutput,
-    ],
-):
+class CoupledInferenceStepper:
     TIME_DIM = 1
 
     def __init__(
         self,
         config: CoupledStepperConfig,
-        ocean: Stepper,
-        atmosphere: Stepper,
+        ocean: InferenceStepper,
+        atmosphere: InferenceStepper,
         dataset_info: CoupledDatasetInfo,
     ):
         """
@@ -832,16 +824,6 @@ class CoupledStepper(
         self._config = config
         self._dataset_info = dataset_info
         self._ocean_mask_provider = dataset_info.ocean_mask_provider
-
-        ocean_loss = self._config.get_ocean_loss(
-            self.ocean.loss_obj,
-            ocean.TIME_DIM,
-        )
-        atmos_loss = self._config.get_atmosphere_loss(
-            self.atmosphere.loss_obj,
-            atmosphere.TIME_DIM,
-        )
-        self._loss = self._config.get_loss(ocean_loss, atmos_loss)
 
         _: PredictFunction[  # for type checking
             CoupledPrognosticState,
@@ -1317,6 +1299,175 @@ class CoupledStepper(
                     self.atmosphere.n_ic_timesteps,
                 ),
             ),
+        )
+
+    def update_training_history(self, training_job: TrainingJob) -> None:
+        """
+        Update the stepper's history of training jobs.
+
+        Args:
+            training_job: The training job to add to the history.
+        """
+        self.ocean.update_training_history(training_job)
+        self.atmosphere.update_training_history(training_job)
+
+    @classmethod
+    def from_state(cls, state) -> "CoupledInferenceStepper":
+        ocean = Stepper.from_state(state["ocean_state"])
+        atmosphere = Stepper.from_state(state["atmosphere_state"])
+        config = CoupledStepperConfig.from_state(state["config"])
+        if "dataset_info" in state:
+            dataset_info = CoupledDatasetInfo.from_state(state["dataset_info"])
+        else:
+            # NOTE: this is included for backwards compatibility
+            dataset_info = CoupledDatasetInfo(
+                ocean=ocean.training_dataset_info,
+                atmosphere=atmosphere.training_dataset_info,
+            )
+        return cls(
+            config=config,
+            ocean=ocean,
+            atmosphere=atmosphere,
+            dataset_info=dataset_info,
+        )
+
+
+class CoupledStepper(
+    TrainStepperABC[
+        CoupledPrognosticState,
+        CoupledBatchData,
+        CoupledBatchData,
+        CoupledPairedData,
+        CoupledTrainOutput,
+    ],
+):
+    TIME_DIM = 1
+
+    def __init__(
+        self,
+        config: CoupledStepperConfig,
+        ocean: TrainStepper,
+        atmosphere: TrainStepper,
+        dataset_info: CoupledDatasetInfo,
+    ):
+        """
+        Args:
+            config: The configuration.
+            ocean: The ocean stepper.
+            atmosphere: The atmosphere stepper.
+            dataset_info: The CoupledDatasetInfo.
+        """
+        if ocean.n_ic_timesteps != 1 or atmosphere.n_ic_timesteps != 1:
+            raise ValueError("Only n_ic_timesteps = 1 is currently supported.")
+
+        self.inference = CoupledInferenceStepper(
+            config=config,
+            ocean=ocean.inference,
+            atmosphere=atmosphere.inference,
+            dataset_info=dataset_info,
+        )
+
+        self.ocean = ocean
+        self.atmosphere = atmosphere
+        self._config = config
+        self._dataset_info = dataset_info
+        self._ocean_mask_provider = dataset_info.ocean_mask_provider
+
+        ocean_loss = self._config.get_ocean_loss(
+            self.ocean.loss_obj,
+            ocean.TIME_DIM,
+        )
+        atmos_loss = self._config.get_atmosphere_loss(
+            self.atmosphere.loss_obj,
+            atmosphere.TIME_DIM,
+        )
+        self._loss = self._config.get_loss(ocean_loss, atmos_loss)
+
+        _: PredictFunction[  # for type checking
+            CoupledPrognosticState,
+            CoupledBatchData,
+            CoupledPairedData,
+        ] = self.predict_paired
+
+    @property
+    def modules(self) -> nn.ModuleList:
+        return nn.ModuleList([*self.atmosphere.modules, *self.ocean.modules])
+
+    def set_train(self):
+        self.inference.set_train()
+
+    def set_eval(self):
+        self.inference.set_eval()
+
+    def get_state(self):
+        """
+        Returns:
+            The state of the coupled stepper.
+        """
+        return {
+            "config": self._config.get_state(),
+            "atmosphere_state": self.atmosphere.get_state(),
+            "ocean_state": self.ocean.get_state(),
+            "dataset_info": self._dataset_info.to_state(),
+        }
+
+    def load_state(self, state: dict[str, Any]):
+        self.atmosphere.load_state(state["atmosphere_state"])
+        self.ocean.load_state(state["ocean_state"])
+
+    @property
+    def training_dataset_info(self) -> CoupledDatasetInfo:
+        return self._dataset_info
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return 1
+
+    @property
+    def n_inner_steps(self) -> int:
+        """Number of atmosphere steps per ocean step."""
+        return self._config.n_inner_steps
+
+    def get_prediction_generator(
+        self,
+        initial_condition: CoupledPrognosticState,
+        forcing_data: CoupledBatchData,
+        optimizer: OptimizationABC,
+    ) -> Generator[ComponentStepPrediction, None, None]:
+        return self.inference.get_prediction_generator(
+            initial_condition, forcing_data, optimizer
+        )
+
+    def _process_prediction_generator_list(
+        self,
+        output_list: list[ComponentStepPrediction],
+        forcing_data: CoupledBatchData,
+    ) -> CoupledBatchData:
+        atmos_data = process_prediction_generator_list(
+            [x.data for x in output_list if x.realm == "atmosphere"],
+            time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
+            horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
+            labels=forcing_data.atmosphere_data.labels,
+        )
+        ocean_data = process_prediction_generator_list(
+            [x.data for x in output_list if x.realm == "ocean"],
+            time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
+            horizontal_dims=forcing_data.ocean_data.horizontal_dims,
+            labels=forcing_data.ocean_data.labels,
+        )
+        return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmos_data)
+
+    def predict_paired(
+        self,
+        initial_condition: CoupledPrognosticState,
+        forcing: CoupledBatchData,
+        compute_derived_variables: bool = False,
+    ) -> tuple[CoupledPairedData, CoupledPrognosticState]:
+        """
+        Predict multiple steps forward given initial condition and reference data.
+        """
+        return self.inference.predict_paired(
+            initial_condition, forcing, compute_derived_variables
         )
 
     def train_on_batch(
