@@ -134,6 +134,9 @@ def apply_by_include(
             f"parameters: {list(model.state_dict().keys())}"
         )
     logging.info(f"Applied function to parameters: {applied_names}")
+    logging.info(
+        f"Skipped parameters: {set(model.state_dict().keys()) - applied_names}"
+    )
     return model
 
 
@@ -170,4 +173,7 @@ def apply_by_exclude(
             f"parameters: {list(model.state_dict().keys())}"
         )
     logging.info(f"Applied function to parameters: {applied_names}")
+    logging.info(
+        f"Skipped parameters: {set(model.state_dict().keys()) - applied_names}"
+    )
     return model
