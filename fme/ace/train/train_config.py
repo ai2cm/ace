@@ -24,15 +24,18 @@ from fme.ace.requirements import (
     NullDataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.ace.stepper import Stepper
+from fme.ace.stepper import TrainStepper, TrainStepperConfig
 from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
 from fme.core.cli import ResumeResultsConfig
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.logging_utils import LoggingConfig
+from fme.core.loss import StepLossConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
@@ -162,7 +165,7 @@ class TrainConfig:
     Arguments:
         train_loader: Configuration for the training data loader.
         validation_loader: Configuration for the validation data loader.
-        stepper: Configuration for the stepper.
+        stepper: Configuration for the stepper (inference).
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
@@ -177,8 +180,17 @@ class TrainConfig:
         weather_evaluation: Configuration for weather evaluation.
             If None, no weather evaluation is run. Weather evaluation is not
             used to select checkpoints, but is used to provide metrics.
-        n_forward_steps: Number of forward steps during training. Cannot be given
-            at the same time as train_n_forward_steps in StepperConfig.
+        n_forward_steps: Number of forward steps during training.
+        train_n_forward_steps: The number of timesteps to train on and associated
+            sampling probabilities. By default, the stepper will train on the full
+            number of timesteps present in the training dataset samples. Values must
+            be less than or equal to the number of timesteps present
+            in the training dataset samples.
+        loss: The loss configuration for training.
+        optimize_last_step_only: Whether to optimize only the last step.
+        n_ensemble: The number of ensemble members evaluated for each training
+            batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
+            the default is 1.
         train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
@@ -231,6 +243,10 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig | None
     n_forward_steps: int | None = None
+    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
+    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
+    optimize_last_step_only: bool = False
+    n_ensemble: int = -1
     train_aggregator: TrainAggregatorConfig = dataclasses.field(
         default_factory=lambda: TrainAggregatorConfig()
     )
@@ -256,15 +272,12 @@ class TrainConfig:
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
-        if (
-            isinstance(self.stepper, StepperConfig)
-            and self.stepper.train_n_forward_steps is not None
-            and self.n_forward_steps is not None
-        ):
-            raise ValueError(
-                "stepper.train_n_forward_steps may not be given at the same time as "
-                "n_forward_steps at the top level"
-            )
+        # Set default n_ensemble based on loss type
+        if self.n_ensemble == -1:
+            if self.loss.type == "EnsembleLoss":
+                self.n_ensemble = 2
+            else:
+                self.n_ensemble = 1
         if self.train_loader.using_labels != self.validation_loader.using_labels:
             raise ValueError(
                 "train_loader and validation_loader must both use labels or both not "
@@ -326,15 +339,66 @@ class TrainConfig:
         all_epochs = list(range(start_epoch, self.max_epochs + 1))
         return all_epochs[self.inference.epochs.slice]
 
+    @property
+    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
+        if self.train_n_forward_steps is None:
+            return None
+        if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
+            return self.train_n_forward_steps
+        return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
+
+    def get_train_window_data_requirements(
+        self,
+        default_n_forward_steps: int | None = None,
+    ) -> DataRequirements:
+        """
+        Get data requirements for training windows.
+
+        Args:
+            default_n_forward_steps: Default number of forward steps if
+                train_n_forward_steps is not provided. If None, uses
+                self.n_forward_steps.
+        """
+        if default_n_forward_steps is None:
+            default_n_forward_steps = self.n_forward_steps
+        if self.train_n_forward_steps is None:
+            if default_n_forward_steps is None:
+                raise ValueError(
+                    "default_n_forward_steps is required if "
+                    "train_n_forward_steps is not provided"
+                )
+            n_forward_steps: int | IntSchedule = default_n_forward_steps
+        elif isinstance(self.train_n_forward_steps, int):
+            n_forward_steps = self.train_n_forward_steps
+        else:
+            n_forward_steps = self.train_n_forward_steps.max_n_forward_steps
+        n_ic_timesteps = self.stepper.n_ic_timesteps
+        if isinstance(n_forward_steps, IntSchedule):
+            n_timesteps = n_forward_steps.add(n_ic_timesteps)
+        else:
+            n_timesteps = n_forward_steps + n_ic_timesteps
+        requirements = DataRequirements(
+            names=self.stepper.all_names,
+            n_timesteps=n_timesteps,
+        )
+        return self.stepper.derived_forcings.update_requirements(requirements)
+
+    def get_train_stepper_config(self) -> TrainStepperConfig:
+        """Get the training-specific stepper configuration."""
+        return TrainStepperConfig(
+            loss=self.loss,
+            optimize_last_step_only=self.optimize_last_step_only,
+            n_ensemble=self.n_ensemble,
+            train_n_forward_steps=self.train_n_forward_steps,
+        )
+
 
 class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
     def _get_train_window_data_requirements(self) -> DataRequirements:
-        return self.config.stepper.get_train_window_data_requirements(
-            default_n_forward_steps=self.config.n_forward_steps
-        )
+        return self.config.get_train_window_data_requirements()
 
     def _get_evaluation_window_data_requirements(self) -> DataRequirements:
         if self.config.inference is None:
@@ -381,9 +445,29 @@ class TrainBuilders:
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-    ) -> Stepper:
-        return self.config.stepper.get_stepper(
+    ) -> TrainStepper:
+        """
+        Get the training stepper.
+
+        Creates a Stepper for inference and wraps it in a TrainStepper
+        with training-specific configuration including the loss object.
+        """
+        stepper = self.config.stepper.get_stepper(
             dataset_info=dataset_info,
+        )
+        train_stepper_config = self.config.get_train_stepper_config()
+        # Create the loss object for training
+        loss_normalizer = stepper._step_obj.get_loss_normalizer()
+        loss_obj = self.config.loss.build(
+            dataset_info.gridded_operations,
+            out_names=stepper.loss_names,
+            channel_dim=TrainStepper.CHANNEL_DIM,
+            normalizer=loss_normalizer,
+        )
+        return TrainStepper(
+            stepper=stepper,
+            config=train_stepper_config,
+            loss_obj=loss_obj,
         )
 
     def get_ema(self, modules) -> EMATracker:

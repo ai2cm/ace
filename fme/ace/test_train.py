@@ -334,9 +334,6 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=loss,
-            n_ensemble=n_ensemble,
-            train_n_forward_steps=train_n_forward_steps,
             derived_forcings=derived_forcings,
             step=StepSelector(
                 type="single_module",
@@ -368,6 +365,9 @@ def _get_test_yaml_files(
                 ),
             ),
         ),
+        loss=loss,
+        n_ensemble=n_ensemble,
+        train_n_forward_steps=train_n_forward_steps,
         inference=inline_inference_config,
         weather_evaluation=weather_evaluation_config,
         max_epochs=max_epochs,
