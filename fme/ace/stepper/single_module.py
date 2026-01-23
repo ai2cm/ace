@@ -1166,7 +1166,10 @@ class Stepper(
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         if "specific_total_water_0" in state:
-            q0 = torch.zeros_like(state["specific_total_water_0"])
+            q0 = torch.zeros_like(
+                state["specific_total_water_0"],
+                device=state["specific_total_water_0"].device,
+            )
         for step in range(n_forward_steps):
             input_forcing = {
                 k: (
