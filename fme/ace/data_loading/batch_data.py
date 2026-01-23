@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import Any, TypeVar
 
@@ -200,6 +201,14 @@ class BatchData:
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         kwargs = cls._get_kwargs(horizontal_dims)
+        if isinstance(labels, list):
+            warnings.warn(
+                "Passing labels as a list is deprecated, and they will be ignored. "
+                "Please pass a BatchLabels object "
+                "instead, or None to indicate no label information.",
+                DeprecationWarning,
+            )
+            labels = None
         return BatchData(
             data=data,
             time=time,
@@ -224,6 +233,14 @@ class BatchData:
         """
         _check_device(data, get_device())
         kwargs = cls._get_kwargs(horizontal_dims)
+        if isinstance(labels, list):
+            warnings.warn(
+                "Passing labels as a list is deprecated, and they will be ignored. "
+                "Please pass a BatchLabels object "
+                "instead, or None to indicate no label information.",
+                DeprecationWarning,
+            )
+            labels = None
         return BatchData(
             data=data,
             time=time,

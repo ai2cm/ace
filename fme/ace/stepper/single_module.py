@@ -516,11 +516,11 @@ class StepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
-    input_masking: StaticMaskingConfig | None = None
     train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
+    input_masking: StaticMaskingConfig | None = None  # inference
     derived_forcings: DerivedForcingsConfig = dataclasses.field(
         default_factory=lambda: DerivedForcingsConfig()
-    )
+    )  # inference
 
     @property
     def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
@@ -786,6 +786,7 @@ class StepperConfig:
 
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
@@ -854,14 +855,9 @@ class Stepper(
         self._parameter_initializer = parameter_initializer
         self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
         self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
-        if config.train_n_forward_steps_schedule is None:
-            pass
-        elif len(config.train_n_forward_steps_schedule.milestones) == 0:
-            self._train_n_forward_steps_sampler = probabilities_from_time_length(
-                config.train_n_forward_steps_schedule.start_value
-            )
-        else:
+        if config.train_n_forward_steps_schedule is not None:
             self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
+
         self._epoch: int | None = None  # to keep track of cached values
 
         def get_loss_obj() -> StepLoss:
@@ -913,7 +909,11 @@ class Stepper(
         self._forcing_deriver = config.derived_forcings.build(dataset_info)
 
     def _init_for_epoch(self, epoch: int | None):
-        if epoch is None and self._train_n_forward_steps_schedule is not None:
+        if (
+            epoch is None
+            and self._train_n_forward_steps_schedule is not None
+            and len(self._train_n_forward_steps_schedule.milestones) > 0
+        ):
             raise EpochNotProvidedError(
                 "current configuration requires epoch to be provided "
                 "on BatchData during training"
@@ -1178,14 +1178,15 @@ class Stepper(
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
 
-            state = self.step(
-                StepArgs(
-                    input=input_data,
-                    next_step_input_data=next_step_input_dict,
-                    labels=labels,
-                ),
-                wrapper=checkpoint,
-            )
+            with optimizer.autocast():
+                state = self.step(
+                    StepArgs(
+                        input=input_data,
+                        next_step_input_data=next_step_input_dict,
+                        labels=labels,
+                    ),
+                    wrapper=checkpoint,
+                )
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 

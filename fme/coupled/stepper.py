@@ -630,7 +630,11 @@ class CoupledStepperConfig:
     def from_state(cls, state) -> "CoupledStepperConfig":
         state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
+            data_class=cls,
+            data=state,
+            config=dacite.Config(
+                strict=True, type_hooks={StepperConfig: StepperConfig.from_state}
+            ),
         )
 
     @classmethod

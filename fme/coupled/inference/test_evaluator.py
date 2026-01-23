@@ -1,6 +1,7 @@
 import dataclasses
 import inspect
 import pathlib
+import shutil
 
 import pytest
 import torch
@@ -27,6 +28,8 @@ from fme.coupled.inference.evaluator import (
 )
 from fme.coupled.stepper import CoupledStepperConfig
 from fme.coupled.test_stepper import CoupledDatasetInfoBuilder, get_stepper_config
+
+DIR = pathlib.Path(__file__).parent
 
 
 def test_standalone_checkpoints_config_init_args():
@@ -94,31 +97,26 @@ def save_coupled_stepper(
     return str(coupled_path)
 
 
-@pytest.mark.parametrize(
-    (
-        "n_coupled_steps,"
-        "coupled_steps_in_memory,"
-        "n_initial_conditions,"
-        "save_standalone_component_checkpoints,"
-    ),
-    [(2, 1, 2, True), (4, 2, 1, False), (2, 2, 1, False)],
-)
-def test_evaluator_inference(
+def inference_helper(
     tmp_path: pathlib.Path,
+    ocean_in_names: list[str],
+    ocean_out_names: list[str],
+    atmos_in_names: list[str],
+    atmos_out_names: list[str],
     n_coupled_steps: int,
     coupled_steps_in_memory: int,
     n_initial_conditions: int,
-    save_standalone_component_checkpoints: bool,
-    very_fast_only: bool,
+    checkpoint_path: str | StandaloneComponentCheckpointsConfig,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+    """
+    Reusable helper for running coupled inference tests.
 
-    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
-    ocean_out_names = ["o_prog", "sst", "o_diag"]
-    atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]
-    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+    Creates mock data, runs inference using the provided checkpoint, and
+    performs assertions on the output.
 
+    Note: Mock data is created with a 2:1 ratio of atmosphere to ocean timesteps,
+    resulting in ocean_timedelta="2D" and atmosphere_timedelta="1D".
+    """
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmos_in_names + atmos_out_names)
 
@@ -129,7 +127,7 @@ def test_evaluator_inference(
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    # create_coupled_data_on_disk already accounts for one inital condition
+    # create_coupled_data_on_disk already accounts for one initial condition
     n_extra_initial_conditions = n_initial_conditions - 1
     n_forward_times_ocean = n_coupled_steps + n_extra_initial_conditions
     n_forward_times_atmos = n_forward_times_ocean * 2
@@ -142,25 +140,6 @@ def test_evaluator_inference(
         atmosphere_start_time_offset_from_ocean=1,
         n_levels_ocean=1,
         n_levels_atmosphere=1,
-    )
-    dataset_info = CoupledDatasetInfoBuilder(
-        vcoord=mock_data.vcoord,
-        hcoord=mock_data.hcoord,
-        ocean_timestep=mock_data.ocean.timestep,
-        atmos_timestep=mock_data.atmosphere.timestep,
-        ocean_mask_provider=mock_data.ocean.mask_provider,
-        atmos_mask_provider=mock_data.atmosphere.mask_provider,
-    ).dataset_info
-    checkpoint_path = save_coupled_stepper(
-        tmp_path,
-        ocean_in_names=ocean_in_names,
-        ocean_out_names=ocean_out_names,
-        atmos_in_names=atmos_in_names,
-        atmos_out_names=atmos_out_names,
-        dataset_info=dataset_info,
-        save_standalone_component_checkpoints=save_standalone_component_checkpoints,
-        ocean_timedelta=mock_data.ocean.timedelta,
-        atmosphere_timedelta=mock_data.atmosphere.timedelta,
     )
 
     config = InferenceEvaluatorConfig(
@@ -221,3 +200,167 @@ def test_evaluator_inference(
         "ak_0" not in ds_atmos.coords
     ), "TODO: update this assertion now that vertical coords are written"
     assert "ak_0" not in ds_ocean.coords
+
+
+def _create_dataset_info_for_stepper(
+    ocean_in_names: list[str],
+    ocean_out_names: list[str],
+    atmos_in_names: list[str],
+    atmos_out_names: list[str],
+    n_coupled_steps: int,
+    n_initial_conditions: int,
+    data_dir: pathlib.Path,
+):
+    """
+    Create mock data and return dataset_info needed for stepper creation.
+
+    Uses the same parameters as inference_helper to ensure compatibility.
+    """
+    all_ocean_names = set(ocean_in_names + ocean_out_names)
+    all_atmos_names = set(atmos_in_names + atmos_out_names)
+
+    # variables with larger ocean timestep
+    ocean_names = list(all_ocean_names - set(atmos_out_names))
+    # variables with smaller atmosphere timestep
+    atmos_names = list(all_atmos_names - set(ocean_out_names))
+
+    data_dir.mkdir(exist_ok=True)
+    n_extra_initial_conditions = n_initial_conditions - 1
+    n_forward_times_ocean = n_coupled_steps + n_extra_initial_conditions
+    n_forward_times_atmos = n_forward_times_ocean * 2
+    mock_data = create_coupled_data_on_disk(
+        data_dir,
+        n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_atmosphere=n_forward_times_atmos,
+        ocean_names=ocean_names,
+        atmosphere_names=atmos_names,
+        atmosphere_start_time_offset_from_ocean=True,
+        n_levels_ocean=1,
+        n_levels_atmosphere=1,
+    )
+    dataset_info = CoupledDatasetInfoBuilder(
+        vcoord=mock_data.vcoord,
+        hcoord=mock_data.hcoord,
+        ocean_timestep=mock_data.ocean.timestep,
+        atmos_timestep=mock_data.atmosphere.timestep,
+        ocean_mask_provider=mock_data.ocean.mask_provider,
+        atmos_mask_provider=mock_data.atmosphere.mask_provider,
+    ).dataset_info
+    return dataset_info, mock_data
+
+
+@pytest.mark.parametrize(
+    (
+        "n_coupled_steps,"
+        "coupled_steps_in_memory,"
+        "n_initial_conditions,"
+        "save_standalone_component_checkpoints,"
+    ),
+    [(2, 1, 2, True), (4, 2, 1, False), (2, 2, 1, False)],
+)
+def test_evaluator_inference(
+    tmp_path: pathlib.Path,
+    n_coupled_steps: int,
+    coupled_steps_in_memory: int,
+    n_initial_conditions: int,
+    save_standalone_component_checkpoints: bool,
+    very_fast_only: bool,
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
+    ocean_out_names = ["o_prog", "sst", "o_diag"]
+    atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]
+    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+
+    # Create mock data for stepper creation
+    stepper_data_dir = tmp_path / "stepper_data"
+    dataset_info, mock_data = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=n_coupled_steps,
+        n_initial_conditions=n_initial_conditions,
+        data_dir=stepper_data_dir,
+    )
+    checkpoint_path = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        save_standalone_component_checkpoints=save_standalone_component_checkpoints,
+        ocean_timedelta=mock_data.ocean.timedelta,
+        atmosphere_timedelta=mock_data.atmosphere.timedelta,
+    )
+
+    # Run inference using the helper
+    inference_helper(
+        tmp_path=tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=n_coupled_steps,
+        coupled_steps_in_memory=coupled_steps_in_memory,
+        n_initial_conditions=n_initial_conditions,
+        checkpoint_path=checkpoint_path,
+    )
+
+
+def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
+    """
+    Inference test using a serialized model from an earlier commit, to ensure
+    earlier models can be used with the updated inference code.
+    """
+    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
+    ocean_out_names = ["o_prog", "sst", "o_diag"]
+    atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]
+    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+
+    stepper_path = DIR / "coupled_stepper_test_data"
+    n_coupled_steps = 2
+    n_initial_conditions = 1
+
+    if not stepper_path.exists():
+        # This helps us to re-generate data if the stepper changes.
+        # To re-generate, just delete the data and run the test (it will fail).
+        stepper_data_dir = tmp_path / "stepper_data"
+        dataset_info, mock_data = _create_dataset_info_for_stepper(
+            ocean_in_names=ocean_in_names,
+            ocean_out_names=ocean_out_names,
+            atmos_in_names=atmos_in_names,
+            atmos_out_names=atmos_out_names,
+            n_coupled_steps=n_coupled_steps,
+            n_initial_conditions=n_initial_conditions,
+            data_dir=stepper_data_dir,
+        )
+        checkpoint_path = save_coupled_stepper(
+            tmp_path,
+            ocean_in_names=ocean_in_names,
+            ocean_out_names=ocean_out_names,
+            atmos_in_names=atmos_in_names,
+            atmos_out_names=atmos_out_names,
+            dataset_info=dataset_info,
+            save_standalone_component_checkpoints=False,
+            ocean_timedelta=mock_data.ocean.timedelta,
+            atmosphere_timedelta=mock_data.atmosphere.timedelta,
+        )
+        assert isinstance(checkpoint_path, str)
+        shutil.copy(checkpoint_path, stepper_path)
+        assert False, "coupled_stepper_test_data did not exist, it has been created"
+
+    inference_helper(
+        tmp_path=tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=n_coupled_steps,
+        coupled_steps_in_memory=1,
+        n_initial_conditions=n_initial_conditions,
+        checkpoint_path=str(stepper_path),
+    )

@@ -1,0 +1,69 @@
+---
+description: PR Review Assistant for ai2cm/ace repository
+globs: []
+alwaysApply: false
+---
+
+When asked to review a pull request (e.g., "Review PR #N in the ace repo"):
+
+## Instructions
+
+1. **Fetch PR Data** using GitHub MCP tools:
+   - Get PR description and metadata
+   - Get the full diff/changes
+   - Get all comments and review conversations
+
+2. **Analyze and Output** a structured review with these sections:
+
+### PR Summary
+
+- PR title and number
+- Author
+- Target branch
+- Brief description of what the PR aims to accomplish
+
+### Changes Overview
+
+- List of files modified/added/deleted
+- High-level summary of the changes
+
+### Code Review Findings
+
+#### Critical Issues (Must Fix)
+
+- Security vulnerabilities
+- Bugs or logic errors
+- Breaking changes
+
+#### Suggestions (Should Consider)
+
+- Performance improvements
+- Better error handling
+- Code clarity improvements
+
+#### Minor/Nitpicks (Optional)
+
+- Style inconsistencies
+- Naming suggestions
+- Documentation improvements
+
+### Test Coverage Assessment
+
+- Are there sufficient tests?
+- Are edge cases covered?
+
+### Existing Discussion Summary
+
+- Summarize key points from existing PR comments
+- Note any unresolved concerns
+
+### Recommended Actions
+
+- Clear list of what should be addressed before merge
+
+## Output Format
+
+- Use markdown formatting for readability
+- Reference specific files and line numbers when applicable
+- Be constructive and specific in feedback
+- Distinguish between blocking issues vs suggestions
