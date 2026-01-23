@@ -8,7 +8,7 @@ from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrector,
     OceanCorrectorConfig,
-    OHCBudgetConfig,
+    OceanHeatContentBudgetConfig,
     SeaIceFractionConfig,
 )
 from fme.core.gridded_ops import LatLonOperations
@@ -174,8 +174,8 @@ def test_sea_ice_thickness_correction():
 )
 def test_ocean_heat_content_correction(hfds_in_gen_data):
     config = OceanCorrectorConfig(
-        ocean_heat_content_correction=OHCBudgetConfig(
-            method="constant_temperature",
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
             constant_unaccounted_heating=0.1,
         )
     )
