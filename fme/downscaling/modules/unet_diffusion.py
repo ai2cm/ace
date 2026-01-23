@@ -1,3 +1,5 @@
+import contextlib
+
 import torch
 
 from fme.core.device import get_device
@@ -16,19 +18,27 @@ class UNetDiffusionModule(torch.nn.Module):
 
     Args:
         unet: The U-Net model.
-        use_channels_last: Whether to convert inputs to channels_last memory format.
-            This can provide 15-25% speedup on modern NVIDIA GPUs by optimizing
-            memory layout for Tensor Cores. Default is True.
+        use_amp_bf16: use automatic mixed precision casting to bfloat16
+            during forward pass
     """
 
     def __init__(
         self,
         unet: torch.nn.Module,
-        use_channels_last: bool = True,
+        use_amp_bf16: bool = True,
     ):
         super().__init__()
         self.unet = unet.to(get_device())
-        self.use_channels_last = use_channels_last
+        self.use_amp_bf16 = use_amp_bf16
+
+        if self.use_amp_bf16:
+            if get_device().type == "mps":
+                raise ValueError("MPS does not support bfloat16 autocast.")
+            self._amp_context = torch.amp.autocast(
+                get_device().type, dtype=torch.bfloat16
+            )
+        else:
+            self._amp_context = contextlib.nullcontext()
 
     def forward(
         self,
@@ -45,16 +55,22 @@ class UNetDiffusionModule(torch.nn.Module):
             noise_level: The noise level of each example in the batch.
         """
         device = get_device()
-        if self.use_channels_last:
-            latent = latent.to(device, memory_format=torch.channels_last)
-            conditioning = conditioning.to(device, memory_format=torch.channels_last)
-        else:
-            latent = latent.to(device)
-            conditioning = conditioning.to(device)
+        latent = latent.to(device)
+        conditioning = conditioning.to(device)
+        noise_level = noise_level.to(device)
 
-        return self.unet(
-            latent,
-            conditioning,
-            sigma=noise_level.to(device),
-            class_labels=None,
-        )
+        if self.use_amp_bf16:
+            with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
+                return self.unet(
+                    latent,
+                    conditioning,
+                    sigma=noise_level,
+                    class_labels=None,
+                )
+        else:
+            return self.unet(
+                latent,
+                conditioning,
+                sigma=noise_level,
+                class_labels=None,
+            )
