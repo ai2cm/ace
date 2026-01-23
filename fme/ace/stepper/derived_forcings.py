@@ -85,9 +85,10 @@ class ForcingDeriver:
         if self.insolation is not None:
             forcing_dict = self.insolation.compute(forcing.time, forcing_dict)
         return BatchData(
-            forcing_dict,
-            forcing.time,
-            forcing.labels,
-            forcing.horizontal_dims,
-            forcing.n_ensemble,
+            data=forcing_dict,
+            time=forcing.time,
+            horizontal_dims=forcing.horizontal_dims,
+            labels=forcing.labels,
+            n_ensemble=forcing.n_ensemble,
+            epoch=forcing.epoch,
         )
