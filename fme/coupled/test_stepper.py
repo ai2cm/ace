@@ -1229,7 +1229,7 @@ def test__get_atmosphere_forcings(
                 .clone()
                 .expand(*shape_atmos)
             )
-    new_atmos_forcings = coupler._get_atmosphere_forcings(
+    new_atmos_forcings = coupler.inference._get_atmosphere_forcings(
         atmos_forcing_data, forcings_from_ocean
     )
     for name in expected_atmos_forcings:
@@ -1271,7 +1271,7 @@ def test__get_ocean_forcings():
         "exog": atmos_forcings["exog"].mean(dim=1),
         "a_diag": atmos_gen["a_diag"].mean(dim=1),
     }
-    new_ocean_forcings = coupler._get_ocean_forcings(
+    new_ocean_forcings = coupler.inference._get_ocean_forcings(
         ocean_data, atmos_gen, atmos_forcings
     )
     assert new_ocean_forcings.keys() == expected_ocean_forcings.keys()
