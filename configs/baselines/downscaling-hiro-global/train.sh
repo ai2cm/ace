@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME="xshield-downscaling-no-convert-to-channels-last"
-CONFIG_FILENAME="train_control.yaml"
+JOB_NAME="xshield-downscaling-convert-to-channels-last-apex-gnorm"
+CONFIG_FILENAME="train_channels_last.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -15,13 +15,13 @@ N_GPUS=1 # TODO: change to 8 after testing
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
+IMAGE=annak/deps-only-with-apex-v2  #$(cat $REPO_ROOT/latest_deps_only_image.txt)
 
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km training global' \
     --workspace ai2/climate-titan \
-    --priority urgent \
+    --priority low \
     --preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \

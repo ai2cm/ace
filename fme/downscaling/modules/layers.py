@@ -286,8 +286,10 @@ class Conv2d(torch.nn.Module):
 try:
     from apex.contrib.group_norm import GroupNorm as ApexGroupNorm
     _HAS_APEX_GN = True
+    print("Apex GroupNorm imported successfully")
 except ImportError:
     _HAS_APEX_GN = False
+    print("Apex GroupNorm not imported")
 
 
 class GroupNorm(torch.nn.Module):
@@ -348,7 +350,7 @@ class GroupNorm(torch.nn.Module):
     def forward(self, x):
         # Only use Apex GroupNorm if input is already in channels_last format
         # to avoid conversion overhead
-        
+
         if self.use_apex and x.is_contiguous(memory_format=torch.channels_last):
             return self.gn(x)
         elif self.training:
