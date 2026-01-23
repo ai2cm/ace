@@ -36,7 +36,7 @@ from fme.ace.registry.test_hpx import (
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import TrainStepperConfig
 from fme.ace.stepper.time_length_probabilities import (
     TimeLength,
     TimeLengthMilestone,
@@ -333,7 +333,7 @@ def _get_test_yaml_files(
                 kwargs=dict(T_max=1),
             ),
         ),
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             loss=loss,
             n_ensemble=n_ensemble,
             train_n_forward_steps=train_n_forward_steps,

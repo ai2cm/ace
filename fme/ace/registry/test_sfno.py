@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import TrainStepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -26,7 +26,7 @@ def test_sfno_init(shape):
         ak=torch.arange(7), bk=torch.arange(7)
     ).to(get_device())
     num_layers = 2
-    stepper_config = StepperConfig(
+    stepper_config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(

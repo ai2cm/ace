@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper import Stepper, StepperConfig, parameter_init
+from fme.ace.stepper import Stepper, TrainStepperConfig, parameter_init
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -42,7 +42,7 @@ def get_dataset_info(img_shape=(16, 32)) -> DatasetInfo:
 
 
 def test_builder_with_weights_loads_same_state(tmpdir):
-    stepper_config = StepperConfig(
+    stepper_config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -81,7 +81,7 @@ def test_builder_with_weights_loads_same_state(tmpdir):
     }
     dataset_info = get_dataset_info()
     with_builder_stepper = dacite.from_dict(
-        StepperConfig,
+        TrainStepperConfig,
         with_builder_stepper_config_data,
         config=dacite.Config(strict=True),
     ).get_stepper(dataset_info=dataset_info)
@@ -161,13 +161,13 @@ def test_builder_with_weights_sfno_init(
     dataset_info = get_dataset_info(img_shape=built_shape)
     if expect_exception:
         with pytest.raises(ValueError):
-            with_builder_stepper = StepperConfig.from_state(
+            with_builder_stepper = TrainStepperConfig.from_state(
                 with_builder_stepper_config_data
             ).get_stepper(
                 dataset_info=dataset_info,
             )
     else:
-        with_builder_stepper = StepperConfig.from_state(
+        with_builder_stepper = TrainStepperConfig.from_state(
             with_builder_stepper_config_data
         ).get_stepper(
             dataset_info=dataset_info,
@@ -195,7 +195,7 @@ def get_config(
     tmpdir: Path,
 ):
     num_layers = 2
-    stepper_config = StepperConfig(
+    stepper_config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -234,7 +234,7 @@ def get_config(
         weights_path=str(tmpdir / "weights.ckpt"),
     )
     with_builder_stepper_config_data = dataclasses.asdict(
-        StepperConfig(
+        TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -270,7 +270,7 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     with_builder_stepper_config_data, dataset_info, stepper = get_config(
         loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir
     )
-    with_builder_stepper = StepperConfig.from_state(
+    with_builder_stepper = TrainStepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(dataset_info=dataset_info)
     stepper_state = with_builder_stepper.get_state()

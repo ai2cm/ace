@@ -27,7 +27,7 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
-from fme.ace.stepper import StepperConfig
+from fme.ace.stepper import TrainStepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import (
     DimSize,
@@ -62,7 +62,7 @@ def save_stepper(
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(

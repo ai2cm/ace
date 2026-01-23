@@ -32,9 +32,9 @@ from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
     EpochNotProvidedError,
     Stepper,
-    StepperConfig,
     StepperOverrideConfig,
     TrainOutput,
+    TrainStepperConfig,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -157,7 +157,7 @@ def test_stepper_no_train_step_specified():
             stds=get_scalar_data(["a", "b"], 3.0),
         ),
     )
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -190,7 +190,7 @@ def test_stepper_step_int():
             stds=get_scalar_data(["a", "b"], 3.0),
         ),
     )
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -225,7 +225,7 @@ def test_stepper_step_probabilities():
             stds=get_scalar_data(["a", "b"], 3.0),
         ),
     )
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -265,7 +265,7 @@ def test_stepper_step_schedule():
             stds=get_scalar_data(["a", "b"], 3.0),
         ),
     )
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -311,7 +311,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
     )
 
     def get_stepper_config(normalization_config: NetworkAndLossNormalizationConfig):
-        return StepperConfig(
+        return TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -380,7 +380,7 @@ def test_train_on_batch_addition_series():
 
     n_steps = 4
     data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -442,7 +442,7 @@ def test_train_on_batch_crps_loss():
     n_steps = 4
     data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
 
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -491,7 +491,7 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
     n_steps = 4
     data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
 
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -548,7 +548,7 @@ def test_train_on_batch_with_prescribed_ocean():
         "a": 2.0,
         "b": 3.0,
     }
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -594,7 +594,7 @@ def test_train_on_batch_with_prescribed_ocean():
 def test_reloaded_stepper_gives_same_prediction():
     torch.manual_seed(0)
 
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -713,7 +713,7 @@ def _setup_and_train_on_batch(
     else:
         optimization = optimization_config.build(modules=[module], max_epochs=2)
 
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -762,7 +762,7 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
     else:
         train_n_forward_steps = 2
 
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -973,7 +973,7 @@ def test_stepper_corrector(
     )
     assert (mean_advection.abs() > 0.0).all()
 
-    stepper_config = StepperConfig(
+    stepper_config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -1120,7 +1120,7 @@ def _get_stepper(
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
 
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -1414,7 +1414,7 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     # should detect which prognostic variables to use from the set
     residual_means = {"a": 1.0, "b": 1.0, "diagnostic": 1.0}
     residual_stds = {"a": 2.0, "b": 2.0, "diagnostic": 2.0}
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -1641,7 +1641,7 @@ def get_regression_stepper_and_data(
         loss = StepLossConfig(type="MSE")
         n_ensemble = 1
 
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -1814,7 +1814,7 @@ def test_get_serialized_stepper_vertical_coordinate():
 
 def _get_stepper_with_input_masking(dataset_info_has_mask_provider: bool = True):
     # basic StepperConfig with input_masking configured
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -1978,7 +1978,7 @@ def _get_ocean_stepper(
     if next_step_forcing_names is not None:
         kwargs["next_step_forcing_names"] = next_step_forcing_names
 
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(

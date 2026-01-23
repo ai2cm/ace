@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import TrainStepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -34,7 +34,7 @@ def test_landnet_init(shape):
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     ).to(get_device())
-    stepper_config = StepperConfig(
+    stepper_config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(

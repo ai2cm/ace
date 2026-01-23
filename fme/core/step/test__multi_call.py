@@ -9,7 +9,7 @@ from torch import nn
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import TrainStepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
@@ -97,7 +97,7 @@ def _get_stepper_config(
         def eval(self):
             pass
 
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="multi_call",
             config=dataclasses.asdict(

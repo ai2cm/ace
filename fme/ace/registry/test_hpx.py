@@ -16,7 +16,7 @@ from fme.ace.models.healpix.healpix_encoder import UNetEncoder
 from fme.ace.models.healpix.healpix_layers import HEALPixPadding
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
-from fme.ace.stepper import StepperConfig
+from fme.ace.stepper import TrainStepperConfig
 from fme.core.coordinates import HEALPixCoordinates, HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -185,7 +185,7 @@ def test_hpx_init(shape):
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=th.arange(7), bk=th.arange(7)
     ).to(device)
-    stepper_config = StepperConfig(
+    stepper_config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(

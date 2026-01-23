@@ -25,7 +25,7 @@ from fme.ace.requirements import (
     PrognosticStateDataRequirements,
 )
 from fme.ace.stepper import Stepper
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import TrainStepperConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
@@ -223,7 +223,7 @@ class TrainConfig:
 
     train_loader: DataLoaderConfig
     validation_loader: DataLoaderConfig
-    stepper: StepperConfig
+    stepper: TrainStepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
@@ -257,7 +257,7 @@ class TrainConfig:
 
     def __post_init__(self):
         if (
-            isinstance(self.stepper, StepperConfig)
+            isinstance(self.stepper, TrainStepperConfig)
             and self.stepper.train_n_forward_steps is not None
             and self.n_forward_steps is not None
         ):

@@ -32,7 +32,7 @@ from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import Stepper, TrainOutput
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import TrainStepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import (
@@ -99,7 +99,7 @@ def save_plus_one_stepper(
         xr.Dataset({name: xr.DataArray(std) for name in normalization_names}).to_netcdf(
             std_filename
         )
-        config = StepperConfig(
+        config = TrainStepperConfig(
             step=StepSelector(
                 type="multi_call",
                 config=dataclasses.asdict(
@@ -939,7 +939,7 @@ def test_inference_override(tmp_path: pathlib.Path):
 
 
 def validate_stepper_config(
-    stepper_config: StepperConfig,
+    stepper_config: TrainStepperConfig,
     expected_ocean_config: OceanConfig | None,
     expected_multi_call_config: MultiCallConfig | None,
 ):

@@ -31,7 +31,7 @@ from fme.ace.stepper import (
     load_stepper,
     load_stepper_config,
 )
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import TrainStepperConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
@@ -226,7 +226,7 @@ class InferenceConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper(self.checkpoint_path, self.stepper_override)
 
-    def load_stepper_config(self) -> StepperConfig:
+    def load_stepper_config(self) -> TrainStepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper_config(self.checkpoint_path, self.stepper_override)
 

@@ -25,7 +25,7 @@ from fme.ace.stepper.parameter_init import (
     Weights,
     WeightsAndHistoryLoader,
 )
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import TrainStepperConfig
 from fme.ace.stepper.single_module import (
     load_weights_and_history as load_uncoupled_weights_and_history,
 )
@@ -67,7 +67,7 @@ class ComponentConfig:
     """
 
     timedelta: str
-    stepper: StepperConfig
+    stepper: TrainStepperConfig
     loss_contributions: LossContributionsConfig = dataclasses.field(
         default_factory=lambda: LossContributionsConfig()
     )
@@ -633,7 +633,8 @@ class CoupledStepperConfig:
             data_class=cls,
             data=state,
             config=dacite.Config(
-                strict=True, type_hooks={StepperConfig: StepperConfig.from_state}
+                strict=True,
+                type_hooks={TrainStepperConfig: TrainStepperConfig.from_state},
             ),
         )
 

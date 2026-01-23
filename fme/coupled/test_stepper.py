@@ -12,7 +12,7 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.stepper import StepperConfig
+from fme.ace.stepper import TrainStepperConfig
 from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import (
     DepthCoordinate,
@@ -60,7 +60,7 @@ OCEAN_TIMESTEP = datetime.timedelta(days=2)
 ATMOS_TIMESTEP = datetime.timedelta(days=1)
 
 
-ATMOS_STEPPER_CONFIG = StepperConfig(
+ATMOS_STEPPER_CONFIG = TrainStepperConfig(
     step=StepSelector(
         type="single_module",
         config=dataclasses.asdict(
@@ -86,7 +86,7 @@ ATMOS_STEPPER_CONFIG = StepperConfig(
     ),
 )
 
-OCEAN_STEPPER_CONFIG = StepperConfig(
+OCEAN_STEPPER_CONFIG = TrainStepperConfig(
     step=StepSelector(
         type="single_module",
         config=dataclasses.asdict(
@@ -201,7 +201,7 @@ def test_config_names(inputs, expectations):
     atmos_out = inputs.atmos_out + ["a_sfc_temp"]
     atmosphere = ComponentConfig(
         timedelta="6h",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -231,7 +231,7 @@ def test_config_names(inputs, expectations):
     ocean_out = inputs.ocean_out + ["o_sfc_temp"]
     ocean = ComponentConfig(
         timedelta="12h",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -294,7 +294,7 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
     atmos_out = inputs.atmos_out + ["atmos_surface_temp"]
     atmosphere = ComponentConfig(
         timedelta="6h",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -324,7 +324,7 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
     ocean_out = inputs.ocean_out + ["ocean_surface_temp"]
     ocean = ComponentConfig(
         timedelta="12h",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -415,7 +415,7 @@ def test_config_init_atmos_stepper_with_slab_ocean_error():
     # atmosphere is required to have stepper.ocean attribute
     atmosphere = ComponentConfig(
         timedelta="6h",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -499,7 +499,7 @@ def test_config_missing_next_step_forcings_error():
     )
     ocean = ComponentConfig(
         timedelta="5D",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -529,7 +529,7 @@ def test_config_missing_next_step_forcings_error():
 def test_config_ocean_diag_to_atmos_forcing_error():
     atmosphere = ComponentConfig(
         timedelta="6h",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -557,7 +557,7 @@ def test_config_ocean_diag_to_atmos_forcing_error():
     )
     ocean = ComponentConfig(
         timedelta="5D",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -592,7 +592,7 @@ def test_config_parameter_init_error():
     mock_param_init.weights_path = "ckpt.pt"
     atmosphere = ComponentConfig(
         timedelta="6h",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -621,7 +621,7 @@ def test_config_parameter_init_error():
     )
     ocean = ComponentConfig(
         timedelta="5D",
-        stepper=StepperConfig(
+        stepper=TrainStepperConfig(
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
@@ -981,7 +981,7 @@ def get_stepper_config(
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
             timedelta=atmosphere_timedelta,
-            stepper=StepperConfig(
+            stepper=TrainStepperConfig(
                 step=StepSelector(
                     type="single_module",
                     config=dataclasses.asdict(
@@ -1008,7 +1008,7 @@ def get_stepper_config(
         ),
         ocean=ComponentConfig(
             timedelta=ocean_timedelta,
-            stepper=StepperConfig(
+            stepper=TrainStepperConfig(
                 step=StepSelector(
                     type="single_module",
                     config=dataclasses.asdict(
@@ -1516,7 +1516,7 @@ def test_reloaded_stepper_gives_same_prediction():
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
             timedelta="1D",
-            stepper=StepperConfig(
+            stepper=TrainStepperConfig(
                 step=StepSelector(
                     type="single_module",
                     config=dataclasses.asdict(
@@ -1549,7 +1549,7 @@ def test_reloaded_stepper_gives_same_prediction():
         ),
         ocean=ComponentConfig(
             timedelta="2D",
-            stepper=StepperConfig(
+            stepper=TrainStepperConfig(
                 step=StepSelector(
                     type="single_module",
                     config=dataclasses.asdict(

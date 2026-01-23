@@ -11,7 +11,7 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import TrainStepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -124,7 +124,7 @@ def _get_stepper():
         lon=torch.zeros(img_shape[1]),
     )
     vertical_coordinate = spherical_data.vertical_coord
-    config = StepperConfig(
+    config = TrainStepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(

@@ -29,6 +29,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthSchedule,
 )
 from fme.core.coordinates import (
+    DeriveFnABC,
     NullPostProcessFn,
     SerializableVerticalCoordinate,
     VerticalCoordinate,
@@ -44,7 +45,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import StepLoss, StepLossConfig
-from fme.core.masking import NullMasking, StaticMaskingConfig
+from fme.core.masking import NullMasking, StaticMasking, StaticMaskingConfig
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -224,7 +225,7 @@ class SingleModuleStepperConfig:
         self,
         normalizer: StandardNormalizer,
         loss_normalizer: StandardNormalizer,
-    ) -> "StepperConfig":
+    ) -> "TrainStepperConfig":
         """
         Convert the current config to a stepper config.
 
@@ -241,8 +242,10 @@ class SingleModuleStepperConfig:
         Returns:
             A stepper config.
         """
-        return StepperConfig(
-            step=self._to_step_config(normalizer, loss_normalizer),
+        return TrainStepperConfig(
+            inference=InferenceStepperConfig(
+                step=self._to_step_config(normalizer, loss_normalizer),
+            ),
             loss=self.loss,
             parameter_init=self.parameter_init,
         )
@@ -486,28 +489,27 @@ def process_prediction_generator_list(
 
 
 @dataclasses.dataclass
-class StepperConfig:
+class TrainStepperConfig:
     """
-    Configuration for a stepper.
+    Configuration for a stepper during training.
 
     Parameters:
-        step: The step configuration.
+        inference: Configuration for how the model steps forward. Contains anything
+            not relevant to training.
         loss: The loss configuration.
         optimize_last_step_only: Whether to optimize only the last step.
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
         parameter_init: The parameter initialization configuration.
-        input_masking: Config for masking step inputs.
         train_n_forward_steps: The number of timesteps to train on and associated
             sampling probabilities. By default, the stepper will train on the full
             number of timesteps present in the training dataset samples. Values must
             be less than or equal to the number of timesteps present
             in the training dataset samples.
-        derived_forcings: Configuration for deriving forcing variables.
     """
 
-    step: StepSelector
+    inference: "InferenceStepperConfig"
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
@@ -515,10 +517,6 @@ class StepperConfig:
         default_factory=lambda: ParameterInitializationConfig()
     )
     train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
-    input_masking: StaticMaskingConfig | None = None  # inference
-    derived_forcings: DerivedForcingsConfig = dataclasses.field(
-        default_factory=lambda: DerivedForcingsConfig()
-    )  # inference
 
     @property
     def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
@@ -537,7 +535,7 @@ class StepperConfig:
 
     @property
     def n_ic_timesteps(self) -> int:
-        return self.step.n_ic_timesteps
+        return self.inference.n_ic_timesteps
 
     def get_train_window_data_requirements(
         self,
@@ -554,51 +552,27 @@ class StepperConfig:
             n_forward_steps = self.train_n_forward_steps
         else:
             n_forward_steps = self.train_n_forward_steps.max_n_forward_steps
-        requirements = DataRequirements(
-            names=self.all_names,
-            n_timesteps=self._window_steps_required(n_forward_steps),
-        )
-        return self.derived_forcings.update_requirements(requirements)
+        return self.inference.get_evaluation_window_data_requirements(n_forward_steps)
 
     def get_evaluation_window_data_requirements(
         self, n_forward_steps: int
     ) -> DataRequirements:
-        requirements = DataRequirements(
-            names=self.all_names,
-            n_timesteps=self._window_steps_required(n_forward_steps),
-        )
-        return self.derived_forcings.update_requirements(requirements)
+        return self.inference.get_evaluation_window_data_requirements(n_forward_steps)
 
     def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
-        return PrognosticStateDataRequirements(
-            names=self.prognostic_names,
-            n_timesteps=self.n_ic_timesteps,
-        )
+        return self.inference.get_prognostic_state_data_requirements()
 
     @property
     def input_only_names(self) -> list[str]:
-        return list(set(self.input_names) - set(self.output_names))
+        return self.inference.input_only_names
 
     def get_forcing_window_data_requirements(
         self, n_forward_steps: int
     ) -> DataRequirements:
-        requirements = DataRequirements(
-            names=list(
-                set(self.input_only_names).union(self.step.next_step_input_names)
-            ),
-            n_timesteps=self._window_steps_required(n_forward_steps),
-        )
-        return self.derived_forcings.update_requirements(requirements)
-
-    def _window_steps_required(
-        self, n_forward_steps: int | IntSchedule
-    ) -> int | IntSchedule:
-        if isinstance(n_forward_steps, IntSchedule):
-            return n_forward_steps.add(self.n_ic_timesteps)
-        return n_forward_steps + self.n_ic_timesteps
+        return self.inference.get_forcing_window_data_requirements(n_forward_steps)
 
     def as_loaded_dict(self):
-        self.step.load()
+        self.inference.step.load()
         return dataclasses.asdict(self)
 
     def get_stepper(
@@ -625,36 +599,22 @@ class StepperConfig:
             )
         else:
             parameter_initializer = ParameterInitializer()
-        step = self.step.get_step(
-            dataset_info, init_weights=parameter_initializer.freeze_weights
+        inference = self.inference.build(
+            dataset_info, parameter_initializer.freeze_weights
         )
-        derive_func = dataset_info.vertical_coordinate.build_derive_function(
-            dataset_info.timestep
-        )
-        if self.input_masking is None:
-            input_masking = NullMasking()
-        else:
-            input_masking = self.input_masking.build(
-                mask=dataset_info.mask_provider,
-                means=step.normalizer.means,
-            )
-        try:
-            output_process_func = dataset_info.mask_provider.build_output_masker()
-        except MissingDatasetInfo:
-            output_process_func = NullPostProcessFn()
         return Stepper(
             config=self,
-            step=step,
+            step=inference.step,
             dataset_info=dataset_info,
-            input_process_func=input_masking,
-            output_process_func=output_process_func,
-            derive_func=derive_func,
+            input_process_func=inference.input_masking,
+            output_process_func=inference.output_process_func,
+            derive_func=inference.derive_func,
             parameter_initializer=parameter_initializer,
             training_history=training_history,
         )
 
     @classmethod
-    def from_stepper_state(cls, state) -> "StepperConfig":
+    def from_stepper_state(cls, state) -> "TrainStepperConfig":
         """
         Initialize a StepperConfig from a stepper state.
 
@@ -690,10 +650,220 @@ class StepperConfig:
                 normalizer=normalizer, loss_normalizer=loss_normalizer
             )
         except (dacite.exceptions.DaciteError, KeyError):
+            if "inference" not in state:
+                inference = {}
+                for moved_name in ["step", "input_masking", "derived_forcings"]:
+                    if moved_name in state:
+                        inference[moved_name] = state[moved_name]
+                        del state[moved_name]
+                state["inference"] = inference
             state = cls.remove_deprecated_keys(state["config"])
             return dacite.from_dict(
                 data_class=cls, data=state, config=dacite.Config(strict=True)
             )
+
+    @property
+    def loss_names(self):
+        """Names of variables to include in loss."""
+        return self.inference.loss_names
+
+    @property
+    def input_names(self) -> list[str]:
+        """Names of variables which are required as inputs."""
+        return self.inference.input_names
+
+    @property
+    def all_names(self) -> list[str]:
+        """Names of all variables."""
+        return self.inference.all_names
+
+    @property
+    def next_step_forcing_names(self) -> list[str]:
+        """
+        Names of variables which are given as inputs but taken from the output timestep.
+
+        An example might be solar insolation taken during the output window period.
+        """
+        return self.inference.next_step_forcing_names
+
+    @property
+    def prognostic_names(self) -> list[str]:
+        """Names of variables which both inputs and outputs."""
+        return self.inference.prognostic_names
+
+    @property
+    def output_names(self) -> list[str]:
+        """Names of variables which are outputs only."""
+        return self.inference.output_names
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
+        state_copy = state.copy()
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]  # training value, ok to break
+        return state_copy
+
+    def replace_ocean(self, ocean: OceanConfig | None):
+        self.inference.replace_ocean(ocean)
+
+    def get_ocean(self) -> OceanConfig | None:
+        return self.inference.get_ocean()
+
+    def replace_multi_call(
+        self, multi_call: MultiCallConfig | None, state: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Replace the multi-call configuration of self.step and ensure the
+        associated state can be loaded as a multi-call step.
+
+        A value of `None` for `multi_call` will remove the multi-call configuration.
+
+        If the selected type supports it, the multi-call configuration will be
+        updated in place. Otherwise, it will be wrapped in the multi_call step
+        configuration with the given multi_call config or None.
+
+        Note this updates self.step in place, but returns a new state dictionary.
+
+        Args:
+            multi_call: MultiCallConfig for the resulting self.step.
+            state: state dictionary associated with the loaded step.
+
+        Returns:
+            The state dictionary updated to ensure consistency with that of a
+            serialized multi-call step.
+        """
+        new_state = self.inference.replace_multi_call(multi_call, state)
+        return new_state
+
+    def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
+        self.inference.replace_derived_forcings(derived_forcings)
+
+    def get_parameter_initializer(
+        self,
+        load_weights_and_history: WeightsAndHistoryLoader,
+    ) -> ParameterInitializer:
+        """
+        Get the parameter initializer for this stepper configuration.
+        """
+        return self.parameter_init.build(
+            load_weights_and_history=load_weights_and_history
+        )
+
+    @classmethod
+    def from_state(cls, state) -> "TrainStepperConfig":
+        state = cls.remove_deprecated_keys(state)
+        return dacite.from_dict(
+            data_class=cls, data=state, config=dacite.Config(strict=True)
+        )
+
+
+class _InferenceStepper:
+    """
+    Contains objects for stepper inference.
+
+    Currently just a data container, but is also a placeholder
+    for eventually separating inference into its own object.
+    """
+
+    def __init__(
+        self,
+        step: StepABC,
+        derive_func: DeriveFnABC,
+        input_masking: StaticMasking | NullMasking,
+        output_process_func: Callable[[TensorMapping], TensorDict],
+    ):
+        self.step = step
+        self.derive_func = derive_func
+        self.input_masking = input_masking
+        self.output_process_func = output_process_func
+
+
+@dataclasses.dataclass
+class InferenceStepperConfig:
+    """
+    Configuration for a stepper.
+
+    Parameters:
+        step: The step configuration.
+        input_masking: Config for masking step inputs.
+        derived_forcings: Configuration for deriving forcing variables.
+    """
+
+    step: StepSelector
+    input_masking: StaticMaskingConfig | None = None
+    derived_forcings: DerivedForcingsConfig = dataclasses.field(
+        default_factory=lambda: DerivedForcingsConfig()
+    )
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self.step.n_ic_timesteps
+
+    def get_evaluation_window_data_requirements(
+        self, n_forward_steps: int | IntSchedule
+    ) -> DataRequirements:
+        requirements = DataRequirements(
+            names=self.all_names,
+            n_timesteps=self._window_steps_required(n_forward_steps),
+        )
+        return self.derived_forcings.update_requirements(requirements)
+
+    def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
+        return PrognosticStateDataRequirements(
+            names=self.prognostic_names,
+            n_timesteps=self.n_ic_timesteps,
+        )
+
+    @property
+    def input_only_names(self) -> list[str]:
+        return list(set(self.input_names) - set(self.output_names))
+
+    def get_forcing_window_data_requirements(
+        self, n_forward_steps: int | IntSchedule
+    ) -> DataRequirements:
+        requirements = DataRequirements(
+            names=list(
+                set(self.input_only_names).union(self.step.next_step_input_names)
+            ),
+            n_timesteps=self._window_steps_required(n_forward_steps),
+        )
+        return self.derived_forcings.update_requirements(requirements)
+
+    def _window_steps_required(
+        self, n_forward_steps: int | IntSchedule
+    ) -> int | IntSchedule:
+        if isinstance(n_forward_steps, IntSchedule):
+            return n_forward_steps.add(self.n_ic_timesteps)
+        return n_forward_steps + self.n_ic_timesteps
+
+    def as_loaded_dict(self):
+        self.step.load()
+        return dataclasses.asdict(self)
+
+    def build(
+        self, dataset_info: DatasetInfo, init_weights: Callable[[list[nn.Module]], None]
+    ) -> _InferenceStepper:
+        step = self.step.get_step(dataset_info, init_weights=init_weights)
+        derive_func = dataset_info.vertical_coordinate.build_derive_function(
+            dataset_info.timestep
+        )
+        if self.input_masking is None:
+            input_masking = NullMasking()
+        else:
+            input_masking = self.input_masking.build(
+                mask=dataset_info.mask_provider,
+                means=step.normalizer.means,
+            )
+
+        try:
+            output_process_func = dataset_info.mask_provider.build_output_masker()
+        except MissingDatasetInfo:
+            output_process_func = NullPostProcessFn()
+        return _InferenceStepper(
+            step=step,
+            derive_func=derive_func,
+            input_masking=input_masking,
+            output_process_func=output_process_func,
+        )
 
     @property
     def loss_names(self):
@@ -771,19 +941,8 @@ class StepperConfig:
         self.derived_forcings.validate_replacement(derived_forcings)
         self.derived_forcings = derived_forcings
 
-    def get_parameter_initializer(
-        self,
-        load_weights_and_history: WeightsAndHistoryLoader,
-    ) -> ParameterInitializer:
-        """
-        Get the parameter initializer for this stepper configuration.
-        """
-        return self.parameter_init.build(
-            load_weights_and_history=load_weights_and_history
-        )
-
     @classmethod
-    def from_state(cls, state) -> "StepperConfig":
+    def from_state(cls, state) -> "InferenceStepperConfig":
         state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
@@ -819,7 +978,7 @@ class Stepper(
 
     def __init__(
         self,
-        config: StepperConfig,
+        config: TrainStepperConfig,
         step: StepABC,
         dataset_info: DatasetInfo,
         input_process_func: Callable[[TensorMapping], TensorDict],
@@ -904,7 +1063,7 @@ class Stepper(
         ] = self.predict_paired
 
         self._dataset_info = dataset_info
-        self._forcing_deriver = config.derived_forcings.build(dataset_info)
+        self._forcing_deriver = config.inference.derived_forcings.build(dataset_info)
 
     def _init_for_epoch(self, epoch: int | None):
         if (
@@ -941,7 +1100,7 @@ class Stepper(
         return self._loss_obj
 
     @property
-    def config(self) -> StepperConfig:
+    def config(self) -> TrainStepperConfig:
         return self._config
 
     @property
@@ -1559,7 +1718,7 @@ class Stepper(
                 "wrapped_step": {"module": state["module"]}
             }
         except dacite.exceptions.DaciteError:
-            config = StepperConfig.from_stepper_state(state)
+            config = TrainStepperConfig.from_stepper_state(state)
             dataset_info = DatasetInfo.from_state(state["dataset_info"])
         training_history = TrainingHistory.from_state(state.get("training_history", []))
         stepper = config.get_stepper(
@@ -1618,7 +1777,7 @@ class StepperOverrideConfig:
 def load_stepper_config(
     checkpoint_path: str | pathlib.Path,
     override_config: StepperOverrideConfig | None = None,
-) -> StepperConfig:
+) -> TrainStepperConfig:
     """Load a stepper configuration, optionally overriding certain aspects.
 
     Args:

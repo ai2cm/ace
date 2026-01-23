@@ -34,7 +34,7 @@ def test_train_config_nested_dataclass_symbols_are_imported():
         populate_missing_symbols(TrainConfig)
         assert len(MISSING_SYMBOLS) == 0, f"Missing symbols: {MISSING_SYMBOLS}"
         assert ace.DataLoaderConfig.__name__ in CHECKED_SYMBOLS  # sanity checks
-        assert ace.StepperConfig.__name__ in CHECKED_SYMBOLS
+        assert ace.TrainStepperConfig.__name__ in CHECKED_SYMBOLS
         assert ace.OptimizationConfig.__name__ in CHECKED_SYMBOLS
         assert ace.LoggingConfig.__name__ in CHECKED_SYMBOLS
         assert ace.InlineInferenceConfig.__name__ in CHECKED_SYMBOLS
