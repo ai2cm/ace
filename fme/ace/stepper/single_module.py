@@ -1702,8 +1702,8 @@ class TrainStepper(
 
     @classmethod
     def from_state(cls, state: dict[str, Any]) -> "TrainStepper":
-        # Note: This method is primarily for interface compliance.
-        # In practice, TrainStepper is created via TrainConfig.get_train_stepper()
+        # NOTE: This method is primarily for interface compliance.
+        # In practice, TrainStepper is created via TrainConfig.get_stepper()
         raise NotImplementedError(
             "TrainStepper.from_state is not directly supported. "
             "Use TrainConfig to create a TrainStepper from a checkpoint."
