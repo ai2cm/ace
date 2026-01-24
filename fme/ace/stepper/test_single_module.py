@@ -35,6 +35,7 @@ from fme.ace.stepper.single_module import (
     StepperConfig,
     StepperOverrideConfig,
     TrainOutput,
+    TrainStepperConfig,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -171,10 +172,12 @@ def test_stepper_no_train_step_specified():
                 )
             ),
         ),
-        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    train_stepper_config = TrainStepperConfig(
+        loss=StepLossConfig(type="MSE"),
+    )
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     stepper._init_for_epoch(0)
     assert stepper._train_n_forward_steps_sampler is None
 
@@ -204,11 +207,13 @@ def test_stepper_step_int():
                 )
             ),
         ),
+    )
+    dataset_info = get_dataset_info()
+    train_stepper_config = TrainStepperConfig(
         train_n_forward_steps=2,
         loss=StepLossConfig(type="MSE"),
     )
-    dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     assert stepper._train_n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
     assert stepper._train_n_forward_steps_sampler is not None
@@ -239,6 +244,8 @@ def test_stepper_step_probabilities():
                 )
             ),
         ),
+    )
+    train_stepper_config = TrainStepperConfig(
         train_n_forward_steps=TimeLengthProbabilities(
             outcomes=[
                 TimeLengthProbability(steps=1, probability=0.5),
@@ -248,7 +255,7 @@ def test_stepper_step_probabilities():
         loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     assert stepper._train_n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
     assert stepper._train_n_forward_steps_sampler is not None
@@ -279,6 +286,8 @@ def test_stepper_step_schedule():
                 )
             ),
         ),
+    )
+    train_stepper_config = TrainStepperConfig(
         train_n_forward_steps=TimeLengthSchedule(
             start_value=1,
             milestones=[
@@ -296,7 +305,7 @@ def test_stepper_step_schedule():
         loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     assert stepper._train_n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
     assert stepper._train_n_forward_steps_sampler is not None
@@ -325,14 +334,16 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
                     )
                 ),
             ),
-            loss=StepLossConfig(type="MSE"),
         )
 
+    train_stepper_config = TrainStepperConfig(
+        loss=StepLossConfig(type="MSE"),
+    )
     config = get_stepper_config(
         NetworkAndLossNormalizationConfig(network=normalization_config)
     )
     dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
     assert torch.allclose(
         stepped.gen_data["a"], stepped.normalize(stepped.gen_data)["a"]
@@ -349,7 +360,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
             ),
         )
     )
-    stepper = config.get_stepper(dataset_info)
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     stepped_double_std = stepper.train_on_batch(
         data=data, optimization=NullOptimization()
     )
@@ -402,7 +413,10 @@ def test_train_on_batch_addition_series():
         loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    train_stepper_config = TrainStepperConfig(
+        loss=StepLossConfig(type="MSE"),
+    )
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, 1, n_steps + 1, 5, 5)
@@ -461,7 +475,6 @@ def test_train_on_batch_crps_loss():
                 )
             ),
         ),
-        n_ensemble=2,
         loss=StepLossConfig(
             type="EnsembleLoss",
             kwargs={
@@ -471,7 +484,17 @@ def test_train_on_batch_crps_loss():
         ),
     )
     dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    train_stepper_config = TrainStepperConfig(
+        n_ensemble=2,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={
+                "crps_weight": 0.1,
+                "energy_score_weight": 0.9,
+            },
+        ),
+    )
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, 2, n_steps + 1, 5, 5)
@@ -510,6 +533,16 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
                 )
             ),
         ),
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={
+                "crps_weight": 0.1,
+                "energy_score_weight": 0.9,
+            },
+        ),
+    )
+    dataset_info = get_dataset_info()
+    train_stepper_config = TrainStepperConfig(
         optimize_last_step_only=optimize_last_step_only,
         n_ensemble=2,
         loss=StepLossConfig(
@@ -520,8 +553,7 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
             },
         ),
     )
-    dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     optimization = unittest.mock.Mock(wraps=NullOptimization())
     stepper.train_on_batch(data=data_with_ic, optimization=optimization)
     if optimize_last_step_only:
@@ -570,7 +602,8 @@ def test_train_on_batch_with_prescribed_ocean():
         ),
     )
     dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    train_stepper_config = TrainStepperConfig()
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
@@ -620,11 +653,14 @@ def test_reloaded_stepper_gives_same_prediction():
     stepper = config.get_stepper(dataset_info)
     new_stepper = Stepper.from_state(stepper.get_state())
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
-    first_result = stepper.train_on_batch(
+    train_stepper_config = TrainStepperConfig(
+        loss=StepLossConfig(type="MSE"),
+    )
+    first_result = train_stepper_config.build(stepper).train_on_batch(
         data=data,
         optimization=NullOptimization(),
     )
-    second_result = new_stepper.train_on_batch(
+    second_result = train_stepper_config.build(new_stepper).train_on_batch(
         data=data,
         optimization=NullOptimization(),
     )
@@ -736,7 +772,10 @@ def _setup_and_train_on_batch(
     )
 
     dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    train_stepper_config = TrainStepperConfig(
+        loss=StepLossConfig(type="MSE"),
+    )
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     return stepper.train_on_batch(data, optimization=optimization)
 
 
@@ -779,12 +818,15 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
                 )
             ),
         ),
-        train_n_forward_steps=train_n_forward_steps,
         loss=StepLossConfig(type="MSE"),
     )
 
     dataset_info = get_dataset_info()
-    stepper = config.get_stepper(dataset_info)
+    train_stepper_config = TrainStepperConfig(
+        train_n_forward_steps=train_n_forward_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
     if uses_scheduling and not has_epoch:
         with pytest.raises(EpochNotProvidedError):
             stepper.train_on_batch(data, optimization=optimization)
@@ -866,7 +908,9 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     ds_info = DatasetInfo(horizontal_coordinates=lat_lon_coordinates)
     aggregator = OneStepAggregator(ds_info, save_diagnostics=False)
 
-    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    train_stepper_config = TrainStepperConfig()
+    train_stepper = train_stepper_config.build(stepper)
+    stepped = train_stepper.train_on_batch(data, optimization=NullOptimization())
     assert stepped.gen_data["a"].shape[2] == n_forward_steps + 1
 
     aggregator.record_batch(stepped)
@@ -997,7 +1041,8 @@ def test_stepper_corrector(
             ),
         ),
     )
-    stepper = stepper_config.get_stepper(dataset_info)
+    train_stepper_config = TrainStepperConfig()
+    stepper = train_stepper_config.build(stepper_config.get_stepper(dataset_info))
     time = xr.DataArray(
         [
             [
@@ -1621,7 +1666,7 @@ def test_load_stepper_and_load_stepper_config(
 
 def get_regression_stepper_and_data(
     crps_training: bool = False,
-) -> tuple[Stepper, BatchData]:
+) -> tuple[Stepper, TrainStepperConfig, BatchData]:
     in_names = ["a", "b"]
     out_names = ["b", "c"]
     n_forward_steps = 2
@@ -1668,6 +1713,10 @@ def get_regression_stepper_and_data(
             ),
         ),
         loss=loss,
+    )
+
+    train_stepper_config = TrainStepperConfig(
+        loss=loss,
         n_ensemble=n_ensemble,
     )
 
@@ -1687,7 +1736,7 @@ def get_regression_stepper_and_data(
         epoch=0,
         horizontal_dims=["lat", "lon"],
     )
-    return stepper, data
+    return stepper, train_stepper_config, data
 
 
 @pytest.mark.parametrize(
@@ -1706,7 +1755,9 @@ def get_regression_stepper_and_data(
 )
 def test_stepper_train_on_batch_regression(use_optimization: bool, crps_training: bool):
     torch.manual_seed(0)
-    stepper, data = get_regression_stepper_and_data(crps_training=crps_training)
+    stepper, train_stepper_config, data = get_regression_stepper_and_data(
+        crps_training=crps_training
+    )
     if use_optimization:
         optimization_config = OptimizationConfig(
             optimizer_type="Adam",
@@ -1717,8 +1768,9 @@ def test_stepper_train_on_batch_regression(use_optimization: bool, crps_training
         )
     else:
         optimization = NullOptimization()
-    result1 = stepper.train_on_batch(data, optimization)
-    result2 = stepper.train_on_batch(data, optimization)
+    train_stepper = train_stepper_config.build(stepper)
+    result1 = train_stepper.train_on_batch(data, optimization)
+    result2 = train_stepper.train_on_batch(data, optimization)
     output_dict = get_train_outputs_tensor_dict(result1, result2)
     filename = f"testdata/stepper_train_on_batch_regression-{use_optimization}.pt"
     if crps_training:
@@ -1734,7 +1786,7 @@ def test_stepper_train_on_batch_regression(use_optimization: bool, crps_training
 
 def test_stepper_predict_regression():
     torch.manual_seed(0)
-    stepper, data = get_regression_stepper_and_data()
+    stepper, _, data = get_regression_stepper_and_data()
     initial_condition = data.get_start(
         prognostic_names=["b"],
         n_ic_timesteps=1,
@@ -2203,13 +2255,13 @@ def test_ocean_derived_variables_integration(
         torch.testing.assert_close(
             pred_imbalance[:, i],
             expected_pred_imbalance,
-            msg=f"Unexpected pred OHC imbalance at step {i+1}",
+            msg=f"Unexpected pred OHC imbalance at step {i + 1}",
         )
         expected_ref_imbalance = ref_tendency[:, i] - ref_flux[:, i]
         torch.testing.assert_close(
             ref_imbalance[:, i],
             expected_ref_imbalance,
-            msg=f"Unexpected reference OHC imbalance at step {i+1}",
+            msg=f"Unexpected reference OHC imbalance at step {i + 1}",
         )
 
     if hfds_role == "next_step_forcing":

@@ -4,9 +4,10 @@ from .single_module import (
     StepperConfig,
     StepperOverrideConfig,
     TrainOutput,
+    TrainStepper,
+    TrainStepperConfig,
     load_stepper,
     load_stepper_config,
     process_prediction_generator_list,
     stack_list_of_tensor_dicts,
 )
-from .train_stepper import TrainStepper, TrainStepperConfig
