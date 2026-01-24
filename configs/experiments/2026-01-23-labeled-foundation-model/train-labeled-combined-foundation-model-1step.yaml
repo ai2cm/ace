@@ -116,48 +116,48 @@ train_loader:
       - data_path: /climate-default/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/netcdfs/4xCO2-ic_0001
         labels: ["c96-shield"]
 
-      #CM4 control and 1pctCO2 runs
-      - data_path: /climate-default/
-        file_path: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      # #CM4 control and 1pctCO2 runs
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
         engine: zarr
         labels: ["cm4"]
-      - data_path: /climate-default/
-        file_path: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+      - data_path: /climate-default
+        file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
         engine: zarr
         labels: ["cm4"]
       # CM4 random CO2 runs
       - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
-        file_path: random-CO2-1xCO2-ic_0001.zarr
+        file_pattern: random-CO2-1xCO2-ic_0001.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
       - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
-        file_path: random-CO2-2xCO2-ic_0001.zarr
+        file_pattern: random-CO2-2xCO2-ic_0001.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
       - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
-        file_path: random-CO2-4xCO2-ic_0001.zarr
+        file_pattern: random-CO2-4xCO2-ic_0001.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
       - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
-        file_path: random-CO2-1xCO2-ic_0002.zarr
+        file_pattern: random-CO2-1xCO2-ic_0002.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
       - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
-        file_path: random-CO2-2xCO2-ic_0002.zarr
+        file_pattern: random-CO2-2xCO2-ic_0002.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
       - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
-        file_path: random-CO2-4xCO2-ic_0002.zarr
+        file_pattern: random-CO2-4xCO2-ic_0002.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
