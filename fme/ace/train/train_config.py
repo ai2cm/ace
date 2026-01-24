@@ -24,7 +24,7 @@ from fme.ace.requirements import (
     NullDataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.ace.stepper import TrainStepper, TrainStepperConfig
+from fme.ace.stepper import TrainStepper
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.dataset.data_typing import VariableMetadata
@@ -163,9 +163,6 @@ class TrainConfig:
         train_loader: Configuration for the training data loader.
         validation_loader: Configuration for the validation data loader.
         stepper: Configuration for the stepper.
-        train_stepper: Training-specific stepper configuration. If None (default),
-            this is built from parameters on stepper (loss, n_ensemble, etc.).
-            Providing this directly is not yet supported.
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
@@ -266,14 +263,7 @@ class TrainConfig:
                 "stepper.train_n_forward_steps may not be given at the same time as "
                 "n_forward_steps at the top level"
             )
-        # Build TrainStepperConfig from StepperConfig values
-        self.train_stepper = TrainStepperConfig(
-            loss=self.stepper.loss,
-            optimize_last_step_only=self.stepper.optimize_last_step_only,
-            n_ensemble=self.stepper.n_ensemble,
-            train_n_forward_steps=self.stepper.train_n_forward_steps,
-        )
-
+        self.train_stepper = self.stepper.get_train_stepper_config()
         if self.train_loader.using_labels != self.validation_loader.using_labels:
             raise ValueError(
                 "train_loader and validation_loader must both use labels or both not "
@@ -401,8 +391,7 @@ class TrainBuilders:
         stepper = self.config.stepper.get_stepper(
             dataset_info=dataset_info,
         )
-        assert self.config.train_stepper is not None
-        return self.config.train_stepper.build(stepper)
+        return self.config.train_stepper.get_train_stepper(stepper)
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)

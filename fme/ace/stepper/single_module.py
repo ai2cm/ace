@@ -789,6 +789,14 @@ class StepperConfig:
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
 
+    def get_train_stepper_config(self) -> "TrainStepperConfig":
+        return TrainStepperConfig(
+            loss=self.loss,
+            optimize_last_step_only=self.optimize_last_step_only,
+            n_ensemble=self.n_ensemble,
+            train_n_forward_steps=self.train_n_forward_steps,
+        )
+
 
 class EpochNotProvidedError(ValueError):
     pass
@@ -962,6 +970,15 @@ class Stepper(
         """
         if base_training_history is not None:
             self._training_history.extend(base_training_history)
+
+    @property
+    def effective_loss_scaling(self) -> TensorDict:
+        """
+        Effective loss scalings used to normalize outputs before computing loss.
+        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
+        where loss_scaling_i = loss_normalizer_std_i / weight_i.
+        """
+        return self.loss_obj.effective_loss_scaling
 
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         """
@@ -1485,7 +1502,7 @@ class TrainStepperConfig:
         )
         return stepper_config.derived_forcings.update_requirements(requirements)
 
-    def build(self, stepper: Stepper) -> "TrainStepper":
+    def get_train_stepper(self, stepper: Stepper) -> "TrainStepper":
         """
         Build a TrainStepper from this configuration and a Stepper.
 
@@ -1495,17 +1512,9 @@ class TrainStepperConfig:
         Returns:
             A TrainStepper wrapping the given stepper with training functionality.
         """
-        loss_normalizer = stepper._step_obj.get_loss_normalizer()
-        loss_obj = self.loss.build(
-            stepper.training_dataset_info.gridded_operations,
-            out_names=stepper.loss_names,
-            channel_dim=TrainStepper.CHANNEL_DIM,
-            normalizer=loss_normalizer,
-        )
         return TrainStepper(
             stepper=stepper,
             config=self,
-            loss_obj=loss_obj,
         )
 
 
@@ -1532,7 +1541,6 @@ class TrainStepper(
         self,
         stepper: Stepper,
         config: TrainStepperConfig,
-        loss_obj: StepLoss,
     ):
         """
         Args:
@@ -1542,7 +1550,6 @@ class TrainStepper(
         """
         self._stepper = stepper
         self._config = config
-        self._loss_obj = loss_obj
 
         self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
         self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
@@ -1767,7 +1774,7 @@ class TrainStepper(
 
     @property
     def loss_obj(self) -> StepLoss:
-        return self._loss_obj
+        return self._stepper.loss_obj
 
     @property
     def effective_loss_scaling(self) -> TensorDict:
@@ -1776,7 +1783,7 @@ class TrainStepper(
         y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
         where loss_scaling_i = loss_normalizer_std_i / weight_i.
         """
-        return self.loss_obj.effective_loss_scaling
+        return self._stepper.effective_loss_scaling
 
     def _init_for_epoch(self, epoch: int | None):
         if (

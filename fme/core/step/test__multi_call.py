@@ -165,7 +165,7 @@ def test_integration_with_stepper():
     train_stepper_config = TrainStepperConfig(
         loss=StepLossConfig(type="MSE", weights={"temperature": 1.0}),
     )
-    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
     time = xr.DataArray([[1, 1, 1]], dims=["sample", "time"])
     data = BatchData(
         {
@@ -210,7 +210,7 @@ def test_integration_with_stepper():
     config = _get_stepper_config(
         in_names, out_names, expected_all_names, multi_call_config, False
     )
-    stepper = train_stepper_config.build(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
     with GlobalTimer():
         output_without_loss = stepper.train_on_batch(data, NullOptimization())
 
