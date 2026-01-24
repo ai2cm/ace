@@ -240,8 +240,6 @@ class _EnsembleAggregator:
         Args:
             label: Label to prepend to all log keys.
         """
-        temp_keys = [f"{label}/{key}" for key, _ in sorted(self._get_data().items())]
-        print("Logging ensemble aggregator keys:", temp_keys)
         return {
             f"{label}/{key}": data for key, data in sorted(self._get_data().items())
         }
