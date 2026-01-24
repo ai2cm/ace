@@ -1585,7 +1585,7 @@ class TrainStepper(
         )
         data = self._stepper._forcing_deriver(data)
 
-        optimization.set_mode(self._stepper._step_obj.modules)
+        optimization.set_mode(self._stepper.modules)
         output_list = self._accumulate_loss(
             input_data,
             data,
