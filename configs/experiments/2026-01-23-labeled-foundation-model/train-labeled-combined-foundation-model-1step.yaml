@@ -163,13 +163,12 @@ train_loader:
         subset:
           start_time: "0153-01-01T06:00:00"
 
-      # E3SMv3 AMIP run
-      - data_path: /climate-default
-        labels: ["e3smv3"]
-        file_pattern: 2026-01-14-e3smv3-1deg-AMIP-1970-2020-ERA5-format.zarr
-        engine: zarr
-        subset:
-           stop_time: '2020-12-31'
+      # # E3SMv3 AMIP run
+      # NOTE cant be used because it doesnt have co2
+      # - data_path: /climate-default/2026-01-14-e3smv3-1deg-AMIP-1970-2020-ERA5-format
+      #   labels: ["e3smv3"]
+      #   subset:
+      #      stop_time: '2020-12-31'
 
       # SCREAM
       - data_path: /climate-default
