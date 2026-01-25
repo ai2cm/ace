@@ -6,6 +6,7 @@ from typing import Any, Literal, Protocol
 import dacite
 import torch
 
+from fme.core.constants import FREEZING_TEMPERATURE_KELVIN
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
@@ -50,22 +51,23 @@ class SeaIceFractionConfig:
 
 
 @dataclasses.dataclass
-class OHCBudgetConfig:
+class OceanHeatContentBudgetConfig:
     """Configuration for ocean heat content budget correction.
 
     Parameters:
         method: Method to use for OHC budget correction. The available option is
-            "constant_temperature", which enforces conservation of heat content
-            by imposing a vertically and horizontally uniform potential
-            temperature correction.
-        constant_unaccounted_heating: Column-integrated heating in W/m**2 to be added
-            to the energy flux into the ocean when conserving the heat content.
-            This can be useful for correcting errors in heat budget in target data.
-            The same additional heating is imposed at all time steps and grid cells.
+            "scaled_temperature", which enforces conservation of heat content
+            by scaling the predicted potential temperature by a vertically and
+            horizontally uniform correction factor.
+        constant_unaccounted_heating: Area-weighted global mean
+            column-integrated heating in W/m**2 to be added to the energy flux
+            into the ocean when conserving the heat content. This can be useful
+            for correcting errors in heat budget in target data. The same
+            additional heating is imposed at all time steps and grid cells.
 
     """
 
-    method: Literal["constant_temperature"]
+    method: Literal["scaled_temperature"]
     constant_unaccounted_heating: float = 0.0
 
 
@@ -74,7 +76,7 @@ class OHCBudgetConfig:
 class OceanCorrectorConfig:
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
-    ocean_heat_content_correction: OHCBudgetConfig | None = None
+    ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
@@ -92,8 +94,8 @@ class OceanCorrectorConfig:
             state_copy["ocean_heat_content_correction"], bool
         ):
             if state_copy["ocean_heat_content_correction"]:
-                state_copy["ocean_heat_content_correction"] = OHCBudgetConfig(
-                    method="constant_temperature"
+                state_copy["ocean_heat_content_correction"] = (
+                    OceanHeatContentBudgetConfig(method="scaled_temperature")
                 )
             else:
                 state_copy["ocean_heat_content_correction"] = None
@@ -155,14 +157,18 @@ def _force_conserve_ocean_heat_content(
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
-    method: Literal["constant_temperature"] = "constant_temperature",
+    method: Literal["scaled_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
 ) -> TensorDict:
-    if method != "constant_temperature":
+    if method != "scaled_temperature":
         raise NotImplementedError(
-            f"Method {method} not implemented for ocean heat content conservation"
+            f"Method {method!r} not implemented for ocean heat content conservation"
         )
-
+    if "hfds" in gen_data and "hfds" in forcing_data:
+        raise ValueError(
+            "Net downward surface heat flux cannot be present in both gen_data and "
+            "forcing_data."
+        )
     input = OceanData(input_data, vertical_coordinate)
     if input.ocean_heat_content is None:
         raise ValueError(
@@ -206,6 +212,6 @@ def _force_conserve_ocean_heat_content(
         gen.data[name] = gen.data[name] * heat_content_correction_ratio
     if "sst" in gen.data:
         gen.data["sst"] = (  # assuming sst in Kelvin
-            gen.data["sst"] - 273.15
-        ) * heat_content_correction_ratio + 273.15
+            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
+        ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
     return gen.data

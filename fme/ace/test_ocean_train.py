@@ -160,7 +160,9 @@ stepper:
           sea_ice_fraction_correction:
             sea_ice_fraction_name: sea_ice_fraction
             land_fraction_name: land_fraction
-          ocean_heat_content_correction: true
+          ocean_heat_content_correction:
+            method: scaled_temperature
+            constant_unaccounted_heating: 0.1
 inference:
   aggregator:
     monthly_reference_data: {monthly_data_filename}
