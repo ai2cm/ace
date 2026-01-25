@@ -205,6 +205,7 @@ stepper:
                 land_fraction_name: land_fraction
                 remove_negative_ocean_fraction: false
                 sea_ice_thickness_name: HI
+              ocean_heat_content_correction: true
           next_step_forcing_names:
             - DLWRFsfc
             - DSWRFsfc
@@ -386,6 +387,7 @@ stepper:
             - vo_18
             - ocean_sea_ice_fraction
             - HI
+            - hfds
   atmosphere:
     timedelta: 6h
     loss_contributions:
