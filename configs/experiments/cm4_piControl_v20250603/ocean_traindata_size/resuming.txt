@@ -1,15 +1,15 @@
 group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
-SamudrACE_piControl_ablation-traindata_80yrs|rs0|||train|high|a100+h100|2|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFPMG7JDHJ140M93JM8QFSH4
+SamudrACE_piControl_ablation-traindata_80yrs|rs0|||train|high|a100+h100|4|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFPMG7JDHJ140M93JM8QFSH4
 
-SamudrACE_piControl_ablation-traindata_20yrs|rs0|||train|high|a100+h100|2|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFM1KNC5GHTQMX4J0PB01DF6
+SamudrACE_piControl_ablation-traindata_20yrs|rs0|||train|high|a100+h100|4|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFM1KNC5GHTQMX4J0PB01DF6
 
-SamudrACE_piControl_ablation-traindata_20yrs|rs1|||train|high|a100+h100|2|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFKCGM0CC3N4NKC3FZ6RZM1K
+SamudrACE_piControl_ablation-traindata_20yrs|rs1|||train|high|a100+h100|4|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFKCGM0CC3N4NKC3FZ6RZM1K
 
-SamudrACE_piControl_ablation-traindata_20yrs|rs2|||train|high|a100+h100|2|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFKBNFPPNMYX8KYFKWMCM07W
+SamudrACE_piControl_ablation-traindata_20yrs|rs2|||train|high|a100+h100|4|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFKBNFPPNMYX8KYFKWMCM07W
 
-SamudrACE_piControl_ablation-traindata_40yrs|rs0|||train|high|a100+h100|2|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFMCVSGEQD14MFEXE30T3XKD
+SamudrACE_piControl_ablation-traindata_40yrs|rs0|||train|high|a100+h100|4|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFMCVSGEQD14MFEXE30T3XKD
 
-SamudrACE_piControl_ablation-traindata_40yrs|rs1|||train|high|a100+h100|2|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFMWQWC51CMP0722AH609SSS
+SamudrACE_piControl_ablation-traindata_40yrs|rs1|||train|high|a100+h100|4|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFMWQWC51CMP0722AH609SSS
 
-SamudrACE_piControl_ablation-traindata_40yrs|rs2|||train|high|a100+h100|2|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFP3Z2TG58GTA4PC87BSK337
+SamudrACE_piControl_ablation-traindata_40yrs|rs2|||train|high|a100+h100|4|300GiB|3||max_epochs=300 resume_results.resume_wandb=true|01KFP3Z2TG58GTA4PC87BSK337
