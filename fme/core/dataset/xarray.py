@@ -599,6 +599,14 @@ class XarrayDataset(DatasetABC):
         self._global_epoch = torch.tensor(
             -1
         ).share_memory_()  # required for multi-worker parallelism
+        if "global_mean_co2" not in first_dataset:
+            print(
+                f"Warning: 'global_mean_co2' variable not found in dataset. "
+                f"{self.full_paths[0]}"
+            )
+            self._names = [
+                "carbon_dioxide" if x == "global_mean_co2" else x for x in self._names
+            ]
 
     def _ensure_epoch_synchronized(self):
         """Ensure that the local epoch is synchronized with the global epoch.
