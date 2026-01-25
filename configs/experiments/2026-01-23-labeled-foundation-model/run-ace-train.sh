@@ -28,11 +28,10 @@ run_training() {
     --name "$job_name" \
     --description 'Run ACE training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority high \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
-    --cluster ai2/ceres \
-    --cluster ai2/jupiter \
+    --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
