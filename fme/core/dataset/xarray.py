@@ -290,7 +290,7 @@ def _open_xr_dataset(path: str, *args, **kwargs):
     if protocol_kw:
         kwargs.update({"storage_options": protocol_kw})
 
-    return xr.open_dataset(
+    ds = xr.open_dataset(
         path,
         *args,
         decode_times=CFDatetimeCoder(use_cftime=True),
@@ -300,6 +300,16 @@ def _open_xr_dataset(path: str, *args, **kwargs):
         chunks=None,
         **kwargs,
     )
+    if "global_mean_co2" not in ds:
+        if "carbon_dioxide" not in ds:
+            raise ValueError(
+                f"Dataset {path} contains neither 'global_mean_co2' nor"
+                f"'carbon_dioxide' variables. These are aliases and one "
+                f"of them must be present."
+            )
+        else:
+            ds = ds.rename_vars({"global_mean_co2": "carbon_dioxide"})
+    return ds
 
 
 _open_xr_dataset_lru = lru_cache()(_open_xr_dataset)
