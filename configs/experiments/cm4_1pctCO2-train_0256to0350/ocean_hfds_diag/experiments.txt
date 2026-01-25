@@ -8,16 +8,16 @@ resume_5bebup7b_ep18_w_EC-1pct_nosmooth_0256to0350_hfds_diag||01KEXDTMNN1X4HSXFR
 
 resume_diugpsky_ep37_w_EC-1pct_nosmooth_0256to0350_hfds_diag||01KEXF7F0ZYYN877VMK40NCK7W|trained|best_inference_ckpt|normal|--not-preemptible
 
-resume_diugpsky_ep37_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag||01KF1R44WJSCZXS9Q42339J596|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+resume_diugpsky_ep37_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag||01KF1R44WJSCZXS9Q42339J596|trained|best_inference_ckpt|normal|--not-preemptible
 
 resume_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs0|01KFAC2EZW67HDB4MSMG8VB0PK|trained|best_ckpt|normal|--not-preemptible
 
 resume_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|01KFAC2P3JSSYNZTNTG7VJKRJD|trained|best_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350_correctOHC|rs0|01KFACJCG7FH19RQGE9BHR8XRM|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350_correctOHC|rs0|01KFACJCG7FH19RQGE9BHR8XRM|run_ICx1|best_inference_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350_correctOHC|rs1|01KFACJRNA996P6WFATJ3X7A1P|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350_correctOHC|rs1|01KFACJRNA996P6WFATJ3X7A1P|run_ICx1|best_inference_ckpt|normal|--not-preemptible
 
-ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs0|01KFC226RBWE7NKXZ0VA0DQ0N3|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs0|01KFC226RBWE7NKXZ0VA0DQ0N3|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|01KFC22Q4Y082R52BK15AQW0SX|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|01KFC22Q4Y082R52BK15AQW0SX|trained|best_inference_ckpt|normal|--not-preemptible
