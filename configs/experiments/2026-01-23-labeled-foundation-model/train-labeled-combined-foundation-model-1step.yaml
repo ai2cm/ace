@@ -126,37 +126,37 @@ train_loader:
         engine: zarr
         labels: ["cm4"]
       # CM4 random CO2 runs
-      - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
+      - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
         file_pattern: random-CO2-1xCO2-ic_0001.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
-      - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
+      - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
         file_pattern: random-CO2-2xCO2-ic_0001.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
-      - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
+      - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
         file_pattern: random-CO2-4xCO2-ic_0001.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
-      - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
+      - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
         file_pattern: random-CO2-1xCO2-ic_0002.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
-      - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
+      - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
         file_pattern: random-CO2-2xCO2-ic_0002.zarr
         engine: zarr
         labels: ["cm4"]
         subset:
           start_time: "0153-01-01T06:00:00"
-      - data_path: /climate-default/climate-default/2025-12-02-CM4-like-AM4-random-CO2
+      - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
         file_pattern: random-CO2-4xCO2-ic_0002.zarr
         engine: zarr
         labels: ["cm4"]
