@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="2026-01-26-ace2-era5-with-co2-in-sample-evaluator"
+JOB_NAME="2026-01-26-ace2-era5-with-co2-in-sample-evaluator-baseline"
 JOB_GROUP="ace2-era5"
 EXISTING_RESULTS_DATASET="01KFKDVC469PYYG6NZ4P48F60V"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-evaluator-config.yaml"
@@ -34,7 +34,7 @@ cd $REPO_ROOT && gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:fine-tune-with-ec/training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    --dataset $EXISTING_RESULTS_DATASET:pre-train-without-ec/training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
     --gpus 1 \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
