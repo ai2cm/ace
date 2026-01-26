@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from unittest.mock import patch
 
 import dacite
+import fsspec
 import numpy as np
 import pytest
 import torch
@@ -22,6 +23,7 @@ from fme.ace.data_loading.inference import (
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
+from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
     StepperOverrideConfig,
@@ -1204,3 +1206,89 @@ def test_evaluator_with_derived_forcings(
 
     # Forcings, including those that are derived, do not end up in output.
     assert insolation_name not in ds
+
+
+def test_evaluator_with_non_local_experiment_dir(
+    tmp_path: pathlib.Path, very_fast_only: bool
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    # Use an in-memory filesystem for the experiment directory to test using
+    # an experiment_dir on a non-local filesystem.
+    experiment_dir = "memory://experiment_dir"
+
+    forward_steps_in_memory = 2
+    in_names = ["var", "forcing_var"]
+    out_names = ["var"]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = tmp_path / "stepper"
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+    )
+    files = [FileWriterConfig("autoregressive", format=ZarrWriterConfig())]
+    config = InferenceEvaluatorConfig(
+        experiment_dir=experiment_dir,
+        n_forward_steps=2,
+        forward_steps_in_memory=forward_steps_in_memory,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=True,
+            log_to_wandb=False,
+        ),
+        loader=data.inference_data_loader_config,
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=files,
+        ),
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    with pytest.warns(UserWarning, match="local file system"):
+        main(yaml_config=str(config_filename))
+
+    expected_files = [
+        "config.yaml",
+        "initial_condition.nc",
+        "restart.nc",
+        "mean_diagnostics.nc",
+        "mean_norm_diagnostics.nc",
+        "zonal_mean_diagnostics.nc",
+        "time_mean_diagnostics.nc",
+        "time_mean_norm_diagnostics.nc",
+    ]
+    fs, _ = fsspec.url_to_fs(experiment_dir)
+    for file in expected_files:
+        assert fs.exists(os.path.join(experiment_dir, file))
+
+    expected_directories = [
+        "autoregressive_predictions.zarr",
+        "autoregressive_target.zarr",
+    ]
+    for directory in expected_directories:
+        assert fs.isdir(os.path.join(experiment_dir, directory))
+
+    fs.rm(experiment_dir, recursive=True)
