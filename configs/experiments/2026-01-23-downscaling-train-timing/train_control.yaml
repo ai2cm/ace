@@ -8,9 +8,7 @@ model:
   loss:
     type: MSE
   module:
-    use_channels_last: false
     config:
-      use_apex_gn: false
       model_channels: 160
       attn_resolutions: []
       num_blocks: 1
