@@ -28,10 +28,9 @@ for name in "${!MODELS[@]}"; do
         --name $job_name \
         --description 'Run ACE abrupt 4xCO2 evaluator' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/ace \
-        --priority high \
-        --cluster ai2/jupiter \
-        --cluster ai2/ceres \
+        --workspace ai2/climate-titan \
+        --priority urgent \
+        --not-preemptible \
         --cluster ai2/titan \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
         --env WANDB_NAME=$job_name \
