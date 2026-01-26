@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="xshield-downscaling-apex-gnorm-channels-last-updated-unet-bsz16"
+JOB_NAME="xshield-downscaling-apex-gnorm-channels-last-updated-unet-bsz16-ch128"
 CONFIG_FILENAME="train_channels_last.yaml"
 #JOB_NAME="xshield-downscaling-torch-gnorm-updated-unet"
 #CONFIG_FILENAME="train_control.yaml"

@@ -10,7 +10,7 @@ model:
   module:
     use_channels_last: true
     config:
-      model_channels: 160
+      model_channels: 128
       attn_resolutions: []
       num_blocks: 1
       channel_mult_emb: 6
@@ -45,7 +45,7 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 320
+  sample_with_replacement: 160
   #batch_size: 36      # 8 GPUs
   batch_size: 20 # 1 GPU
   num_data_workers: 2
