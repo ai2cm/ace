@@ -1,11 +1,12 @@
 import dataclasses
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 import torch
 from torch import nn
 
-from .wildcard import apply_by_wildcard, wildcard_match
+from .wildcard import apply_by_exclude, apply_by_include, wildcard_match
 
 
 @dataclasses.dataclass
@@ -35,18 +36,10 @@ class CopyWeightsConfig:
     exclude: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
-        for pattern in self.include:
-            if any(wildcard_match(pattern, exclude) for exclude in self.exclude):
-                raise ValueError(
-                    f"Parameter {pattern} is included in both include "
-                    f"{self.include} and exclude {self.exclude}"
-                )
-        for pattern in self.exclude:
-            if any(wildcard_match(pattern, include) for include in self.include):
-                raise ValueError(
-                    f"Parameter {pattern} is included in both include "
-                    f"{self.include} and exclude {self.exclude}"
-                )
+        if len(self.include) > 0 and self.exclude is not None:
+            raise ValueError(
+                "Cannot provide both include and exclude lists " "for CopyWeightsConfig"
+            )
 
     @torch.no_grad()
     def apply(self, weights: list[Mapping[str, Any]], modules: list[nn.Module]):
@@ -69,12 +62,18 @@ class CopyWeightsConfig:
             raise NotImplementedError("only one module currently supported")
         if len(modules) != len(weights):
             raise ValueError("number of modules and weights must match")
-        for module, weight in zip(modules, weights):
+        module = modules[0]
+        weight = weights[0]
 
-            def func(module, name):
-                overwrite_weight_initial_slice(module, name, weight[name])
+        def func(module, name):
+            overwrite_weight_initial_slice(module, name, weight[name])
 
-            apply_by_wildcard(module, func, self.include, self.exclude)
+        if len(self.include) > 0:
+            logging.info("applying freeze to parameters by include")
+            apply_by_include(module, func, self.include)
+        elif self.exclude is not None:
+            logging.info("applying freeze to parameters by exclude")
+            apply_by_exclude(module, func, self.exclude)
         return module
 
 
