@@ -4,7 +4,7 @@ seed: 0
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 120
+max_epochs: 240
 ema:
   decay: 0.999
 inference:
