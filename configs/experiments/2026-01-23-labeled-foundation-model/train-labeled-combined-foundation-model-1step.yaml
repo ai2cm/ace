@@ -171,10 +171,8 @@ train_loader:
       #      stop_time: '2020-12-31'
 
       # SCREAM
-      - data_path: /climate-default
+      - data_path: /climate-default/2025-11-20-scream-masked-Tmp204-update_co2_hgt_TmpNoNans
         labels: ["scream"]
-        file_pattern: 2025-11-20-scream-masked-Tmp204-update_co2_hgt_TmpNoNans
-        engine: zarr
 
       # X-SHiELD
       - data_path: /climate-default
