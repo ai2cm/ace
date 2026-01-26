@@ -2068,6 +2068,10 @@ def _get_ocean_data_for_predict_paired(
         data_dict["sea_surface_fraction"] = torch.ones(
             n_samples, total_timesteps, *img_shape, device=DEVICE
         )
+    if "land_fraction" in data_dict:
+        data_dict["land_fraction"] = torch.ones(
+            n_samples, total_timesteps, *img_shape, device=DEVICE
+        )
 
     time = xr.DataArray(
         np.broadcast_to(np.arange(total_timesteps), (n_samples, total_timesteps)),
@@ -2094,6 +2098,18 @@ def _get_ocean_data_for_predict_paired(
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
             id="hfds_next_step_forcing",
+        ),
+        pytest.param(
+            ["thetao_0", "thetao_1", "hfds", "sea_surface_fraction"],
+            ["thetao_0", "thetao_1"],
+            "next_step_forcing",
+            id="hfds_next_step_forcing_no_hfgeou",
+        ),
+        pytest.param(
+            ["thetao_0", "thetao_1", "hfds", "land_fraction"],
+            ["thetao_0", "thetao_1"],
+            "next_step_forcing",
+            id="hfds_next_step_forcing_land_fraction",
         ),
         pytest.param(
             [
