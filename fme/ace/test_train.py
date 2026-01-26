@@ -325,6 +325,7 @@ def _get_test_yaml_files(
         ),
         optimization=OptimizationConfig(
             use_gradient_accumulation=True,
+            enable_automatic_mixed_precision=True,
             optimizer_type="Adam",
             lr=0.001,
             kwargs=dict(weight_decay=0.01),
