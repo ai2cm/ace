@@ -22,15 +22,13 @@ class FrozenParameterConfig:
     """
     Configuration for freezing parameters in a model.
 
-    Parameter names can include wildcards, e.g. "encoder.*" will select
+    Parameter names are the names used in the module's state_dict. Here
+    they can include wildcards, e.g. "encoder.*" will select
     all parameters in the encoder, while "encoder.*.bias" will select all
-    bias parameters in the encoder. All parameters must be specified
-    in either the include or exclude list, or
-    an exception will be raised.
+    bias parameters in the encoder.
 
-    An exception is raised if a parameter is matched by both lists, or if
-    a rule in one of the lists is not matched by any parameters in the model
-    (including if it is already matched by an earlier rule).
+    An exception is raised when this configuration is applied (e.g.
+    at the start of training) if both lists are non-empty.
 
     By default no parameters are frozen.
 
@@ -42,17 +40,17 @@ class FrozenParameterConfig:
     """
 
     include: list[str] = dataclasses.field(default_factory=list)
-    exclude: list[str] = dataclasses.field(default_factory=list)
+    exclude: list[str] | None = None
 
     def __post_init__(self):
-        if len(self.include) > 0 and len(self.exclude) > 0:
+        if len(self.include) > 0 and self.exclude is not None:
             warnings.warn(
                 "Cannot provide both include and exclude lists "
                 "for FrozenParameterConfig, will not be able to apply freezing."
             )  # defer exception to apply, for inference backwards compatibility
 
     def apply(self, model: nn.Module):
-        if len(self.include) > 0 and len(self.exclude) > 0:
+        if len(self.include) > 0 and self.exclude is not None:
             raise ValueError(
                 "Cannot provide both include and exclude lists "
                 "for FrozenParameterConfig"
@@ -60,7 +58,7 @@ class FrozenParameterConfig:
         if len(self.include) > 0:
             logging.info("applying freeze to parameters by include")
             apply_by_include(model, _freeze_weight, self.include)
-        elif len(self.exclude) > 0:
+        elif self.exclude is not None:
             logging.info("applying freeze to parameters by exclude")
             apply_by_exclude(model, _freeze_weight, self.exclude)
 
@@ -81,16 +79,16 @@ class ParameterClassification:
     Specifies whether parameters are excluded from initialization or frozen.
 
     Parameters:
-        exclude_parameters: list of parameter names to exclude from the loaded
+        exclude: list of parameter names to exclude from the loaded
             weights. Used for example to keep the random initialization for
             final layer(s) of a model, and only overwrite the weights for
             earlier layers. Takes values like "decoder.2.weight".
-        frozen_parameters: configuration for freezing parameters in the built model
+        frozen: configuration for freezing parameters in the built model
     """
 
     exclude: list[str] = dataclasses.field(default_factory=list)
     frozen: FrozenParameterConfig = dataclasses.field(
-        default_factory=lambda: FrozenParameterConfig(exclude=["*"])
+        default_factory=FrozenParameterConfig
     )
 
 
