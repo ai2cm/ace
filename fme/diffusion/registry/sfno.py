@@ -56,6 +56,7 @@ class ConditionalSFNOBuilder(ModuleConfig):
                 embed_dim_scalar=n_sigma_embedding_channels,
                 embed_dim_labels=0,
                 embed_dim_noise=0,
+                embed_dim_pos=0,
             ),
         )
 
