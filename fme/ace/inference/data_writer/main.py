@@ -1,8 +1,8 @@
 import dataclasses
 import datetime
+import os
 import warnings
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import TypeAlias
 
 import numpy as np
@@ -10,6 +10,7 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 
@@ -303,7 +304,7 @@ def _write(
     data_arrays["time"] = time_array
     ds = xr.Dataset(data_arrays, coords=coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
-    ds.to_netcdf(str(Path(path) / filename))
+    to_netcdf_via_inter_filesystem_copy(ds, os.path.join(path, filename))
 
 
 class DataWriter(WriterABC[PrognosticState, PairedData]):
