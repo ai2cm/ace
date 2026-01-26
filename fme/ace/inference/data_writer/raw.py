@@ -122,7 +122,11 @@ class RawDataWriter:
             dataset_metadata: Metadata for the dataset.
         """
         if not is_local(path):
-            raise ValueError("RawDataWriter only supports local file systems.")
+            raise ValueError(
+                "The RawDataWriter only supports local file systems. Consider "
+                "using the ZarrWriter instead, which supports writing to a "
+                "non-local filesystem."
+            )
         filename = str(Path(path) / f"{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata
