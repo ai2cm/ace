@@ -308,7 +308,7 @@ def _open_xr_dataset(path: str, *args, **kwargs):
                 f"of them must be present."
             )
         else:
-            ds = ds.rename_vars({"global_mean_co2": "carbon_dioxide"})
+            ds = ds.rename_vars({"carbon_dioxide": "global_mean_co2"})
     return ds
 
 
