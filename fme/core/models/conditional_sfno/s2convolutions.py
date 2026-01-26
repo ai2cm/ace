@@ -15,18 +15,12 @@
 # limitations under the License.
 
 # import FactorizedTensor from tensorly for tensorized operations
-import tensorly as tl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-tl.set_backend("pytorch")
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
-
-# from tensorly.plugins import use_opt_einsum
-# use_opt_einsum('optimal')
-from tltorch.factorized_tensors.core import FactorizedTensor
 
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
@@ -41,7 +35,42 @@ from .contractions import (
     real_mul2d_fwd,
     real_muladd2d_fwd,
 )
-from .factorizations import get_contract_fun
+
+
+@torch.jit.script
+def _contract_lora(
+    lora_A: torch.Tensor,
+    lora_B: torch.Tensor,
+    x: torch.Tensor,
+):
+    """
+    Performs LoRA update contraction.
+
+    Args:
+        lora_A: LoRA A matrix of shape (group, in_channels, rank, nlat, 2)
+        lora_B: LoRA B matrix of shape (group, rank, out_channels, nlat, 2)
+        x: Complex input tensor of shape
+            (batch_size, group, in_channels, nlat, nlon)
+    """
+    lora_A = torch.view_as_complex(lora_A)
+    lora_B = torch.view_as_complex(lora_B)
+    return torch.einsum("girx,grox,bgixy->bgoxy", lora_A, lora_B, x)
+
+
+@torch.jit.script
+def _contract_dhconv(
+    xc: torch.Tensor, weight: torch.Tensor
+) -> torch.Tensor:  # pragma: no cover
+    """
+    Performs a complex Driscoll-Healy style convolution operation between two tensors
+    'a' and 'b'.
+
+    Args:
+        xc: Complex input tensor of shape (batch_size, group, in_channels, nlat, nlon)
+        weight: Weight tensor of shape (group, in_channels, out_channels, nlat, 2)
+    """
+    wc = torch.view_as_complex(weight)
+    return torch.einsum("bgixy,giox->bgoxy", xc, wc)
 
 
 class SpectralConvS2(nn.Module):
@@ -58,6 +87,7 @@ class SpectralConvS2(nn.Module):
         inverse_transform,
         in_channels,
         out_channels,
+        num_groups: int = 1,
         scale="auto",
         operator_type="diagonal",
         rank=0.2,
@@ -67,11 +97,37 @@ class SpectralConvS2(nn.Module):
         bias=False,
         use_tensorly=True,
         filter_residual: bool = False,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
     ):  # pragma: no cover
         super(SpectralConvS2, self).__init__()
+        if operator_type != "dhconv":
+            raise NotImplementedError(
+                "Only 'dhconv' operator type is currently supported."
+            )
+        if factorization is not None:
+            raise NotImplementedError(
+                "Factorizations other than None are not currently supported."
+            )
+        if use_tensorly:
+            raise NotImplementedError(
+                "Tensorly-based implementation is not currently supported."
+            )
+        if separable:
+            raise NotImplementedError(
+                "Separable convolutions are not currently supported."
+            )
+
+        if in_channels != out_channels:
+            raise NotImplementedError(
+                "Currently only in_channels == out_channels is supported."
+            )
+        assert in_channels % num_groups == 0
+        assert out_channels % num_groups == 0
+        self.num_groups = num_groups
 
         if scale == "auto":
-            scale = 1 / (in_channels * out_channels)
+            scale = 1 / ((in_channels / num_groups) * (out_channels / num_groups))
 
         self.forward_transform = forward_transform
         self.inverse_transform = inverse_transform
@@ -100,11 +156,6 @@ class SpectralConvS2(nn.Module):
         assert self.inverse_transform.lmax == self.modes_lat
         assert self.inverse_transform.mmax == self.modes_lon
 
-        weight_shape = [in_channels]
-
-        if not self.separable:
-            weight_shape += [out_channels]
-
         if isinstance(self.inverse_transform, thd.DistributedInverseRealSHT):
             self.modes_lat_local = self.inverse_transform.lmax_local
             self.modes_lon_local = self.inverse_transform.mmax_local
@@ -116,54 +167,55 @@ class SpectralConvS2(nn.Module):
             self.lpad = 0
             self.mpad = 0
 
-        # padded weights
-        # if self.operator_type == 'diagonal':
-        #     weight_shape += [self.modes_lat_local+self.lpad_local, self.modes_lon_local+self.mpad_local]
-        # elif self.operator_type == 'dhconv':
-        #     weight_shape += [self.modes_lat_local+self.lpad_local]
-        # else:
-        #     raise ValueError(f"Unsupported operator type f{self.operator_type}")
+        weight_shape = [
+            num_groups,
+            in_channels // num_groups,
+            out_channels // num_groups,
+            self.modes_lat_local,
+        ]
 
-        # unpadded weights
-        if self.operator_type == "diagonal":
-            weight_shape += [self.modes_lat_local, self.modes_lon_local]
-        elif self.operator_type == "dhconv":
-            weight_shape += [self.modes_lat_local]
+        assert factorization == "ComplexDense"
+        self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
+        if self.operator_type == "dhconv":
+            self.weight.is_shared_mp = ["matmul", "w"]
         else:
-            raise ValueError(f"Unsupported operator type f{self.operator_type}")
+            self.weight.is_shared_mp = ["matmul"]
 
-        if use_tensorly:
-            # form weight tensors
-            self.weight = FactorizedTensor.new(
-                weight_shape,
-                rank=self.rank,
-                factorization=factorization,
-                fixed_rank_modes=False,
-                **decomposition_kwargs,
+        if lora_rank > 0:
+            self.lora_A = nn.Parameter(
+                scale
+                * torch.randn(
+                    num_groups,
+                    in_channels // num_groups,
+                    lora_rank,
+                    self.modes_lat_local,
+                    2,
+                )
             )
-            # initialization of weights
-            self.weight.normal_(0, scale)
+            self.lora_B = nn.Parameter(
+                torch.zeros(
+                    num_groups,
+                    lora_rank,
+                    out_channels // num_groups,
+                    self.modes_lat_local,
+                    2,
+                )
+            )
+            self.lora_alpha = lora_alpha if lora_alpha is not None else lora_rank
+            self.lora_scaling = self.lora_alpha / lora_rank
         else:
-            assert factorization == "ComplexDense"
-            self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
-            if self.operator_type == "dhconv":
-                self.weight.is_shared_mp = ["matmul", "w"]
-            else:
-                self.weight.is_shared_mp = ["matmul"]
-
-        # get the contraction handle
-        self._contract = get_contract_fun(
-            self.weight, implementation="factorized", separable=separable
-        )
+            self.lora_A = None
+            self.lora_B = None
+            self.lora_scaling = 0.0
 
         if bias:
             self.bias = nn.Parameter(scale * torch.zeros(1, out_channels, 1, 1))
+        self.out_channels = out_channels
 
     def forward(self, x):  # pragma: no cover
         dtype = x.dtype
         residual = x
         x = x.float()
-        B, C, H, W = x.shape
 
         with torch.amp.autocast("cuda", enabled=False):
             x = self.forward_transform(x)
@@ -172,19 +224,27 @@ class SpectralConvS2(nn.Module):
                 residual = self.inverse_transform(x)
                 residual = residual.to(dtype)
 
-        # approach with unpadded weights
+        B, C, H, W = x.shape
+        assert C % self.num_groups == 0
+        x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
+
+        if self.lora_A is not None and self.lora_B is not None:
+            lora_update = _contract_lora(
+                self.lora_A,
+                self.lora_B,
+                x[..., : self.modes_lat_local, : self.modes_lon_local],
+            )
+        else:
+            lora_update = 0.0
+
         xp = torch.zeros_like(x)
-        xp[..., : self.modes_lat_local, : self.modes_lon_local] = self._contract(
+        xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
             x[..., : self.modes_lat_local, : self.modes_lon_local],
             self.weight,
-            separable=self.separable,
-            operator_type=self.operator_type,
         )
+        xp = xp + self.lora_scaling * lora_update
+        xp = xp.reshape(B, self.out_channels, H, W)
         x = xp.contiguous()
-
-        # # approach with padded weights
-        # x = self._contract(x, self.weight, separable=self.separable, operator_type=self.operator_type)
-        # x = x.contiguous()
 
         with torch.amp.autocast("cuda", enabled=False):
             x = self.inverse_transform(x)
