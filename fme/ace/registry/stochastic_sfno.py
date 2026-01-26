@@ -179,6 +179,14 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             normalization layers.
         filter_num_groups: Number of groups to use in grouped convolutions
             for the spectral filter.
+        lora_rank: Rank of the LoRA adaptations outside of spectral convolutions.
+            0 (default) disables LoRA.
+        lora_alpha: Strength of the LoRA adaptations outside of spectral convolutions.
+            Defaults to lora_rank.
+        spectral_lora_rank: Rank of the LoRA adaptations for spectral convolutions.
+            0 (default) disables LoRA.
+        spectral_lora_alpha: Strength of the LoRA adaptations for spectral convolutions.
+            Defaults to spectral_lora_rank.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -212,6 +220,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     normalize_big_skip: bool = False
     affine_norms: bool = False
     filter_num_groups: int = 1
+    lora_rank: int = 0
+    lora_alpha: float | None = None
+    spectral_lora_rank: int = 0
+    spectral_lora_alpha: float | None = None
 
     def build(
         self,

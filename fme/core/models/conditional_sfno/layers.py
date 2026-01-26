@@ -24,6 +24,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+from fme.core.models.conditional_sfno.lora import LoRAConv2d
+
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
 
@@ -368,15 +370,31 @@ class MLP(nn.Module):
         output_bias=True,
         drop_rate=0.0,
         checkpointing=0,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
     ):  # pragma: no cover
         super(MLP, self).__init__()
         self.checkpointing = checkpointing
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
 
-        fc1 = nn.Conv2d(in_features, hidden_features, 1, bias=True)
+        fc1 = LoRAConv2d(
+            in_features,
+            hidden_features,
+            1,
+            bias=True,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+        )
         act = act_layer()
-        fc2 = nn.Conv2d(hidden_features, out_features, 1, bias=output_bias)
+        fc2 = LoRAConv2d(
+            hidden_features,
+            out_features,
+            1,
+            bias=output_bias,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+        )
         if drop_rate > 0.0:
             drop = nn.Dropout(drop_rate)
             self.fwd = nn.Sequential(fc1, act, drop, fc2, drop)
