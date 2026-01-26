@@ -260,6 +260,7 @@ stepper:
         - USWRFtoa
       next_step_forcing_names:
       - DSWRFtoa
+      - global_mean_co2
       in_names:
       - x
       - y
