@@ -130,6 +130,8 @@ stepper:
           operator_type: dhconv
           separable: false
           spectral_transform: sht
+          affine_norms: true
+          filter_num_groups: 16
       normalization:
         network:
           global_means_path: /statsdata/centering.nc
