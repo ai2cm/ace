@@ -46,7 +46,7 @@ class NoiseConditionedSFNO(torch.nn.Module):
     def __init__(
         self,
         conditional_model: ConditionalSFNO,
-        noise_type: Literal["isotropic", "gaussian"] = "gaussian",
+        noise_type: Literal["isotropic", "gaussian", "constant"] = "gaussian",
         embed_dim: int = 256,
     ):
         super().__init__()
@@ -73,6 +73,12 @@ class NoiseConditionedSFNO(torch.nn.Module):
                 device=x.device,
                 dtype=x.dtype,
             )
+        elif self.noise_type == "constant":
+            noise = torch.randn(
+                [*x.shape[:-3], self.embed_dim] + [1] * len(x.shape[-2:]),
+                device=x.device,
+                dtype=x.dtype,
+            ).expand([*x.shape[:-3], self.embed_dim, *x.shape[-2:]])
         else:
             raise ValueError(f"Invalid noise type: {self.noise_type}")
 
@@ -142,7 +148,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     residual_filter_factor: int = 1
     embed_dim: int = 256
     noise_embed_dim: int = 256
-    noise_type: Literal["isotropic", "gaussian"] = "gaussian"
+    noise_type: Literal["isotropic", "gaussian", "constant"] = "gaussian"
     global_layer_norm: bool = False
     num_layers: int = 12
     use_mlp: bool = True
