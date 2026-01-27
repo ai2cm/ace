@@ -312,8 +312,7 @@ class SingleModuleStep(StepABC):
             A list of modules being trained.
         """
         modules = [self.module.torch_module]
-        if self.secondary_decoder.torch_module is not None:
-            modules.append(self.secondary_decoder.torch_module)
+        modules.extend(self.secondary_decoder.torch_modules)
         return nn.ModuleList(modules)
 
     def step(
@@ -366,8 +365,8 @@ class SingleModuleStep(StepABC):
         """
         state = {
             "module": self.module.get_state(),
+            "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
-        state["secondary_decoder"] = self.secondary_decoder.get_module_state()
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:

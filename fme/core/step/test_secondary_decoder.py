@@ -48,7 +48,7 @@ class TestSecondaryDecoder:
             out_names=["diag1"],
             network=network,
         )
-        assert isinstance(decoder.module.torch_module, torch.nn.Module)
+        assert isinstance(decoder.torch_modules, torch.nn.ModuleList)
 
     def test_module_state_dict_and_load_module_state_dict(self):
         network = ModuleSelector(type="MLP", config={"hidden_dim": 16, "depth": 2})

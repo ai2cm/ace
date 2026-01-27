@@ -79,17 +79,9 @@ class SecondaryDecoder:
         self._packer = Packer(out_names)
 
     @property
-    def torch_module(self) -> nn.Module:
-        """The underlying nn.Module."""
-        return self._module.torch_module
-
-    @property
-    def module(self) -> Module:
-        return self._module
-
-    @module.setter
-    def module(self, value: nn.Module) -> None:
-        self._module = value
+    def torch_modules(self) -> nn.ModuleList:
+        """A list of the underlying nn.Module(s)."""
+        return nn.ModuleList([self._module.torch_module])
 
     def wrap_module(
         self, wrapper: Callable[[nn.Module], nn.Module]
@@ -148,9 +140,9 @@ class NoSecondaryDecoder:
         return self
 
     @property
-    def torch_module(self) -> None:
+    def torch_modules(self) -> nn.ModuleList:
         """No underlying module."""
-        return None
+        return nn.ModuleList()
 
     def get_module_state(self) -> dict:
         """Return an empty state dict."""
