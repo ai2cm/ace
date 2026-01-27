@@ -13,7 +13,12 @@ from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
-from fme.downscaling.data import PairedDataLoaderConfig, PairedGriddedData
+from fme.downscaling.data import (
+    PairedDataLoaderConfig,
+    PairedGriddedData,
+    StaticInputs,
+    enforce_lat_bounds,
+)
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predict import EventConfig
 from fme.downscaling.predictors import (
@@ -150,8 +155,12 @@ class EventEvaluator:
 @dataclasses.dataclass
 class PairedEventConfig(EventConfig):
     def get_paired_gridded_data(
-        self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
+        self,
+        base_data_config: PairedDataLoaderConfig,
+        requirements: DataRequirements,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> PairedGriddedData:
+        enforce_lat_bounds(self.lat_extent)
         time_slice = self._time_selection_slice
         event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
         event_coarse = dataclasses.replace(
@@ -167,7 +176,11 @@ class PairedEventConfig(EventConfig):
             lat_extent=self.lat_extent,
             lon_extent=self.lon_extent,
         )
-        return event_data_config.build(train=False, requirements=requirements)
+        return event_data_config.build(
+            train=False,
+            requirements=requirements,
+            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+        )
 
 
 @dataclasses.dataclass
@@ -193,11 +206,12 @@ class EvaluatorConfig:
         )
 
     def _build_default_evaluator(self) -> Evaluator:
-        dataset = self.data.build(
-            train=False, requirements=self.model.data_requirements
-        )
-
         model = self.model.build()
+        dataset = self.data.build(
+            train=False,
+            requirements=self.model.data_requirements,
+            static_inputs_from_checkpoint=model.static_inputs,
+        )
         evaluator_model: DiffusionModel | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(

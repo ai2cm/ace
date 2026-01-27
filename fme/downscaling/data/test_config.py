@@ -109,3 +109,29 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
     )
     data = data_config.build(requirements=requirements, train=True)
     assert len(data.loader) == n_sample
+
+
+def test_config_raise_error_on_invalid_lat_extent():
+    with pytest.raises(ValueError):
+        DataLoaderConfig(
+            coarse=[XarrayDataConfig("coarse_dataset_path")],
+            batch_size=1,
+            num_data_workers=1,
+            strict_ensemble=False,
+            lat_extent=ClosedInterval(-90, 90),
+            lon_extent=ClosedInterval(0, 3),
+        )
+
+
+def test_paired_config_raise_error_on_invalid_lat_extent():
+    with pytest.raises(ValueError):
+        PairedDataLoaderConfig(
+            fine=[XarrayDataConfig("fine_dataset_path")],
+            coarse=[XarrayDataConfig("fine_dataset_path")],
+            batch_size=1,
+            num_data_workers=1,
+            strict_ensemble=False,
+            topography=f"data.nc",
+            lat_extent=ClosedInterval(-90, 90),
+            lon_extent=ClosedInterval(0, 3),
+        )

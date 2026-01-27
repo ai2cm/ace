@@ -22,12 +22,25 @@ from fme.downscaling.data.datasets import (
     PairedGriddedData,
 )
 from fme.downscaling.data.topography import (
+    StaticInputs,
     Topography,
     get_normalized_topography,
     get_topography_downscale_factor,
 )
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
+
+
+def enforce_lat_bounds(lat: ClosedInterval):
+    if lat.start < -88.0 or lat.stop > 88.0:
+        raise ValueError(
+            "Latitude bounds must be within +/-88 degrees, "
+            f"got {lat.start} to {lat.stop}."
+            "This is enforced because the 3 km X-SHiELD dataset "
+            "does not have 32 fine grid midpoints between the last two "
+            "coarse latitude midpoints of the 100 km dataset, which breaks "
+            "the assumption used for subsetting fine grid latitudes."
+        )
 
 
 @dataclasses.dataclass
@@ -96,8 +109,9 @@ class DataLoaderConfig:
             have no fine-res paired targets.
             If None, no topography data will be loaded.
         lat_extent: The latitude extent to use for the dataset specified in
-            degrees (-90, 90).  The extent is inclusive, so the start and
-            stop values are included in the extent.
+            degrees, limited to (-88.0, 88.0). The extent is inclusive, so the start and
+            stop values are included in the extent. Defaults to [-66, 70] which
+            covers continental land masses aside from Antarctica.
         lon_extent: The longitude extent to use for the dataset specified in
             degrees (0, 360). The extent is inclusive, so the start and
             stop values are included in the extent.
@@ -115,13 +129,16 @@ class DataLoaderConfig:
     strict_ensemble: bool
     topography: str | None = None
     lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+        default_factory=lambda: ClosedInterval(-66, 70)
     )
     lon_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
     )
     repeat: int = 1
     drop_last: bool = False
+
+    def __post_init__(self):
+        enforce_lat_bounds(self.lat_extent)
 
     @property
     def full_config(self) -> Sequence[XarrayDataConfig]:
@@ -161,16 +178,25 @@ class DataLoaderConfig:
         )
 
     def build_topography(
-        self, coarse_coords: LatLonCoordinates, requires_topography: bool
+        self,
+        coarse_coords: LatLonCoordinates,
+        requires_topography: bool,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> Topography | None:
         if requires_topography is False:
             return None
-        if self.topography is None:
-            raise ValueError(
-                "Topography is required for this model, but no topography "
-                "dataset was specified in the configuration."
-            )
-        topography = get_normalized_topography(self.topography)
+        if static_inputs_from_checkpoint is not None:
+            # TODO: change to use full static inputs list
+            topography = static_inputs_from_checkpoint[0]
+        else:
+            if self.topography is None:
+                raise ValueError(
+                    "Topography is required for this model, but no topography "
+                    "dataset was specified in the configuration nor provided "
+                    "in model checkpoint."
+                )
+            topography = get_normalized_topography(self.topography)
+
         # Fine grid boundaries are adjusted to exactly match the coarse grid
         fine_lat_interval = adjust_fine_coord_range(
             self.lat_extent,
@@ -218,7 +244,14 @@ class DataLoaderConfig:
         self,
         requirements: DataRequirements,
         dist: Distributed | None = None,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
+        # TODO: static_inputs_from_checkpoint is currently passed from the model
+        # to allow loading fine topography when no fine data is available.
+        # See PR https://github.com/ai2cm/ace/pull/728
+        # In the future we could disentangle this dependency between the data loader
+        # and model by enabling the built GriddedData objects to take in full static
+        # input fields and subset them to the same coordinate range as data.
         xr_dataset, properties = self.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
         )
@@ -256,6 +289,7 @@ class DataLoaderConfig:
         subset_topography = self.build_topography(
             coarse_coords=latlon_coords,
             requires_topography=requirements.use_fine_topography,
+            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
         )
         return GriddedData(
             _loader=dataloader,
@@ -291,8 +325,10 @@ class PairedDataLoaderConfig:
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
         lat_extent: The latitude extent to use for the dataset specified in
-            degrees (-90, 90).  The extent is inclusive, so the start and
+            degrees [-88, 88].  The extent is inclusive, so the start and
             stop values are included in the extent.
+            Defaults to [-66, 70] which covers continental land masses aside
+            from Antarctica.
         lon_extent: The longitude extent to use for the dataset specified in
             degrees (0, 360). The extent is inclusive, so the start and
             stop values are included in the extent.
@@ -316,7 +352,7 @@ class PairedDataLoaderConfig:
     num_data_workers: int
     strict_ensemble: bool
     lat_extent: ClosedInterval = dataclasses.field(
-        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+        default_factory=lambda: ClosedInterval(-66.0, 70.0)
     )
     lon_extent: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
@@ -325,6 +361,9 @@ class PairedDataLoaderConfig:
     topography: str | None = None
     sample_with_replacement: int | None = None
     drop_last: bool = False
+
+    def __post_init__(self):
+        enforce_lat_bounds(self.lat_extent)
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
@@ -358,7 +397,14 @@ class PairedDataLoaderConfig:
         train: bool,
         requirements: DataRequirements,
         dist: Distributed | None = None,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> PairedGriddedData:
+        # TODO: static_inputs_from_checkpoint is currently passed from the model
+        # to allow loading fine topography when no fine data is available.
+        # See PR https://github.com/ai2cm/ace/pull/728
+        # In the future we could disentangle this dependency between the data loader
+        # and model by enabling the built GriddedData objects to take in full static
+        # input fields and subset them to the same coordinate range as data.
         if dist is None:
             dist = Distributed.get_instance()
 
@@ -412,7 +458,10 @@ class PairedDataLoaderConfig:
         )
 
         if requirements.use_fine_topography:
-            if self.topography is None:
+            if static_inputs_from_checkpoint is not None:
+                # TODO: change to use full static inputs list
+                fine_topography = static_inputs_from_checkpoint[0]
+            elif self.topography is None:
                 data_path = self.fine[0].data_path
                 file_pattern = self.fine[0].file_pattern
                 raw_paths = get_raw_paths(data_path, file_pattern)
@@ -423,6 +472,7 @@ class PairedDataLoaderConfig:
                 fine_topography = get_normalized_topography(raw_paths[0])
             else:
                 fine_topography = get_normalized_topography(self.topography)
+
             fine_topography = fine_topography.to_device()
             if (
                 get_topography_downscale_factor(
@@ -435,6 +485,7 @@ class PairedDataLoaderConfig:
                     f"Fine topography shape {fine_topography.shape} does not match "
                     f"fine data shape {properties_fine.horizontal_coordinates.shape}."
                 )
+
             fine_topography = fine_topography.subset_latlon(
                 lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
             )

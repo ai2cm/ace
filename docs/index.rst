@@ -12,6 +12,7 @@ climate model emulators, such as the Ai2 Climate Emulator.
    quickstart
    training_config
    inference_config
+   downscaling_inference
    evaluator_config
    coupled
    gcs_access

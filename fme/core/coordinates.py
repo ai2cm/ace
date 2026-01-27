@@ -384,11 +384,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Cannot build corrector for vertical coordinate {self} with "
                 f"corrector selector {config}."
             )
-        config_instance = dacite.from_dict(
-            data_class=OceanCorrectorConfig,
-            data=config.config,
-            config=dacite.Config(strict=True),
-        )
+        config_instance = OceanCorrectorConfig.from_state(config.config)
         return OceanCorrector(
             config=config_instance,
             gridded_operations=gridded_operations,
@@ -520,11 +516,7 @@ class NullVerticalCoordinate(VerticalCoordinate):
                 timestep=timestep,
             )
         elif config.type == "ocean_corrector":
-            config_instance = dacite.from_dict(
-                data_class=OceanCorrectorConfig,
-                data=config.config,
-                config=dacite.Config(strict=True),
-            )
+            config_instance = OceanCorrectorConfig.from_state(config.config)
             return OceanCorrector(
                 config=config_instance,
                 gridded_operations=gridded_operations,
