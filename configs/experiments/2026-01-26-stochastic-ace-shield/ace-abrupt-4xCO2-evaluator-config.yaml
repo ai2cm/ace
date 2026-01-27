@@ -12,7 +12,7 @@ n_forward_steps: 14604
 experiment_dir: /results
 aggregator:
   log_zonal_mean_images: false
-  log_histograms: false
+  log_histograms: true
 loader:
   dataset:
     data_path: /climate-default/2025-03-28-vertically-resolved-1deg-c96-shield-som-abrupt-co2-increase-fme-dataset
