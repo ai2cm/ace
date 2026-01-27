@@ -23,7 +23,8 @@ class SecondaryDecoderConfig:
 
     Parameters:
         secondary_diagnostic_names: Names of additional diagnostic variables, to be
-            diagnosed directly from outputs without access to latent variables.
+            diagnosed directly from outputs without access to latent variables (i.e.,
+            column-locally).
         network: Configuration for the decoder network.
     """
 
