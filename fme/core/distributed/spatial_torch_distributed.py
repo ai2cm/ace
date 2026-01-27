@@ -40,8 +40,7 @@ class SpatialTorchDistributed(DistributedBackend):
 
           self.world_size = comm.get_world_size()
           self._rank = comm.get_world_rank()
-          self.local_rank = comm.get_local_rank()
-          self._device_id = self.local_rank
+          self._device_id =  comm.get_local_rank()
           # distributed = True
           torch.cuda.set_device(comm.get_local_rank())
           torch.backends.cudnn.benchmark = True
