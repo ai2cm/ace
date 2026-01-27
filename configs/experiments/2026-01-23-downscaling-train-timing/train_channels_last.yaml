@@ -48,7 +48,7 @@ train_data:
   sample_with_replacement: 160
   #batch_size: 36      # 8 GPUs
   batch_size: 20 # 1 GPU
-  num_data_workers: 2
+  num_data_workers: 16
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 3km.zarr
@@ -70,7 +70,7 @@ train_data:
 validation_data:
   #batch_size: 76     # 8 GPUs
   batch_size: 2   # 1 GPU
-  num_data_workers: 2
+  num_data_workers: 8
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
