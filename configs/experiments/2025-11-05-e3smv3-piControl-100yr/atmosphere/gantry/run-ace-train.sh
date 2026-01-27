@@ -2,7 +2,7 @@
 
 set -e
 
-CONFIG_FILENAME="train-n512-e1c9-ft-20step.yaml"
+CONFIG_FILENAME="train-n512-e1c9-ft-20step-ft-energy.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -13,12 +13,12 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="BK-v1124-ACE2S-n512-e1c9-ft-20step-E3SMv3-piControl-100yr-no-smooth-ocean"
+JOB_GROUP="BK-v1124-ACE2S-n512-e1c9-ft-20step-ft-energy-E3SMv3-piControl-100yr"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
 STATS_DATA=elynn/2025-11-24-E3SMv3-piControl-100yr-coupled-stats
-EXISTING_DATASETS=01KCPVJJ2GV87DWRV63G8CKJ0S
+EXISTING_DATASETS=01KENDK3NS5SRPAHSTZEQXP4JF
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
