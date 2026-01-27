@@ -29,7 +29,7 @@ jobs:
           # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
           uv venv --python 3.11
           uv pip install -c constraints.txt -e .[dev]
-          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
+          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast,spatial-parallelism]
       - name: Run pytest with code coverage
         run: |
           source .venv/bin/activate
@@ -52,6 +52,7 @@ jobs:
         run: |
           python -m pip install uv
           uv pip install --system -c constraints.txt -e .[dev]
+          uv pip install --system --no-build-isolation -c constraints.txt -e .[dev,spatial-parallelism]
       - name: Run pytest
         run: |
           make test_very_fast
@@ -79,7 +80,7 @@ jobs:
           # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
           uv venv --python 3.11
           uv pip install -c constraints.txt -e .[dev]
-          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
+          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast,spatial-parallelism]
       - name: Run CUDA check and pytest
         run: |
             source .venv/bin/activate
