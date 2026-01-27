@@ -2,9 +2,9 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-train"
-JOB_GROUP="ace-aimip"
-CONFIG_FILENAME="ace-train-config.yaml"
+JOB_NAME_BASE="ace-aimip-with-co2-train"
+JOB_GROUP="ace-aimip-with-co2"
+CONFIG_FILENAME="ace-train-with-co2-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=bhenn1983
@@ -24,7 +24,7 @@ launch_job () {
     gantry run \
         --name $JOB_NAME \
         --task-name $JOB_NAME \
-        --description 'Run ACE2-ERA5 training on AIMIP period' \
+        --description 'Run ACE2-ERA5 training on AIMIP period with CO2' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
         --priority high \
