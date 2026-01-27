@@ -24,16 +24,16 @@ class CopyWeightsConfig:
     This is less efficient than true parameter freezing, but layer
     freezing is all-or-nothing for each parameter.
 
-    All parameters must be covered by either the include or exclude list,
-    but not both.
-
     Parameters:
-        include: list of wildcard patterns to overwrite
-        exclude: list of wildcard patterns to exclude from overwriting
+        include: list of wildcard patterns to overwrite, if given then
+            only these parameters are overwritten
+        exclude: list of wildcard patterns to exclude from overwriting,
+            if given then all parameters except these are overwritten.
+            Cannot be given together with `include`.
     """
 
     include: list[str] = dataclasses.field(default_factory=list)
-    exclude: list[str] = dataclasses.field(default_factory=list)
+    exclude: list[str] | None = None
 
     def __post_init__(self):
         if len(self.include) > 0 and self.exclude is not None:
