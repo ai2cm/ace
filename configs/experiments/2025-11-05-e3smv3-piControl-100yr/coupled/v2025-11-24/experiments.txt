@@ -20,3 +20,5 @@ fto-v1124-ACE2S-cpwvww40-rv0ike6m||01KF21ADSYTP3E70KHEHHQKTDW|training|best_infe
 fto-v1124-ACE2S-cpwvww40-rv0ike6m||01KF3YYTEMKF2KCJ5R9SX7437P|done-unstable|best_inference_ckpt|high|--not-preemptible
 
 ft_fto-v1124-pesvhsm3-rv0ike6m||01KFEPM4VCM4FJYG46ZSEH1A87|run_ICx1-40yr|best_inference_ckpt|high|--not-preemptible
+
+fto-v1124-phuetnpl-rv0ike6m||01KG08VYB96RT8NEF9ZCR39V2R|training|best_inference_ckpt|normal|--not-preemptible
