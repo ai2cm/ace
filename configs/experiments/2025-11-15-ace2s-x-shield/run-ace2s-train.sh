@@ -54,8 +54,9 @@ base_name="ace2s"
 
 # run_training "pretrain-1-step-era5.yaml" "$base_name-1-step-pre-training-era5-only-rs0"
 # run_training "pretrain-1-step-era5-constant-noise.yaml" "$base_name-1-step-pre-training-era5-only-constant-noise-rs0"
-run_training "pretrain-1-step-era5-constant-noise384.yaml" "$base_name-1-step-pre-training-era5-only-constant-noise384-rs0"
+# run_training "pretrain-1-step-era5-constant-noise384.yaml" "$base_name-1-step-pre-training-era5-only-constant-noise384-rs0"
 # run_training "pretrain-1-step-era5-g16.yaml" "$base_name-1-step-pre-training-era5-only-g16-rs0"
+run_training "pretrain-1-step-era5-n384-g16-blk16.yaml" "$base_name-1-step-pre-training-era5-only-n384-g16-blk16-rs0"
 # run_training "pretrain-1-step-era5-n512-g16.yaml" "$base_name-1-step-pre-training-era5-only-n512-g16-rs0"
 # run_training "pretrain-1-step-era5-n1024-g16.yaml" "$base_name-1-step-pre-training-era5-only-n1024-g16-rs0"
 # For the finetuning stage take beaker dataset id from the above job and add it to
