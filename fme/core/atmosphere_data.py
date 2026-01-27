@@ -116,6 +116,10 @@ class AtmosphereData:
                 return self._get_prefix(prefix)
         raise KeyError(name)
 
+    def get_all_vertical_level_names(self, standard_name: str) -> list[str]:
+        """Return names of all vertical levels for a given standard name."""
+        return self._stacker.get_all_level_names(standard_name, self.data)
+
     @property
     def air_temperature(self) -> torch.Tensor:
         """Returns all vertical levels of air_temperature, e.g. a tensor of
