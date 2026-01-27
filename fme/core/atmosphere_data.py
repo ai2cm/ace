@@ -116,12 +116,9 @@ class AtmosphereData:
                 return self._get_prefix(prefix)
         raise KeyError(name)
 
-    @property
-    def air_temperature_prefix(self) -> str:
-        for prefix in self._prefix_map["air_temperature"]:
-            if any(key.startswith(prefix) for key in self.data.keys()):
-                return prefix
-        raise KeyError("air_temperature")
+    def get_all_vertical_level_names(self, standard_name: str) -> list[str]:
+        """Return names of all vertical levels for a given standard name."""
+        return self._stacker.get_all_level_names(standard_name, self.data)
 
     @property
     def air_temperature(self) -> torch.Tensor:
