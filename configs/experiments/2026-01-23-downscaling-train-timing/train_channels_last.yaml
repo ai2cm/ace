@@ -45,10 +45,11 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
+  prefetch_factor: 4
   sample_with_replacement: 160
   #batch_size: 36      # 8 GPUs
-  batch_size: 20 # 1 GPU
-  num_data_workers: 16
+  batch_size: 32 # 1 GPU
+  num_data_workers: 24
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     file_pattern: 3km.zarr

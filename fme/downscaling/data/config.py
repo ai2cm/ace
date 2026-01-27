@@ -361,6 +361,7 @@ class PairedDataLoaderConfig:
     topography: str | None = None
     sample_with_replacement: int | None = None
     drop_last: bool = False
+    prefetch_factor: int | None = None
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
@@ -540,6 +541,7 @@ class PairedDataLoaderConfig:
             collate_fn=PairedBatchData.from_sequence,
             multiprocessing_context=self._mp_context(),
             persistent_workers=True if self.num_data_workers > 0 else False,
+            prefetch_factor=self.prefetch_factor,
         )
 
         example = dataset[0]
