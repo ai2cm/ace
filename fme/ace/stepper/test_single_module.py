@@ -42,6 +42,8 @@ from fme.ace.stepper.single_module import (
 from fme.ace.stepper.time_length_probabilities import (
     TimeLength,
     TimeLengthMilestone,
+    TimeLengthProbabilities,
+    TimeLengthProbability,
     TimeLengthSchedule,
 )
 from fme.ace.testing import DimSizes
@@ -142,6 +144,162 @@ def get_dataset_info(
 
 def get_scalar_data(names, value):
     return {n: float(value) for n in names}
+
+
+def test_stepper_no_train_step_specified():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is None
+
+
+def test_stepper_step_int():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        train_n_forward_steps=2,
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    assert stepper._train_n_forward_steps_schedule is not None
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is not None
+
+
+def test_stepper_step_probabilities():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        train_n_forward_steps=TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=1, probability=0.5),
+                TimeLengthProbability(steps=2, probability=0.5),
+            ]
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    assert stepper._train_n_forward_steps_schedule is not None
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is not None
+
+
+def test_stepper_step_schedule():
+    normalization_config = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 2.0),
+        ),
+        loss=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 3.0),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=normalization_config,
+                )
+            ),
+        ),
+        train_n_forward_steps=TimeLengthSchedule(
+            start_value=1,
+            milestones=[
+                TimeLengthMilestone(
+                    epoch=1,
+                    value=TimeLengthProbabilities(
+                        outcomes=[
+                            TimeLengthProbability(steps=1, probability=0.5),
+                            TimeLengthProbability(steps=2, probability=0.5),
+                        ]
+                    ),
+                ),
+            ],
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    dataset_info = get_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    assert stepper._train_n_forward_steps_schedule is not None
+    stepper._init_for_epoch(0)
+    assert stepper._train_n_forward_steps_sampler is not None
 
 
 def test_train_on_batch_normalizer_changes_only_norm_data():
@@ -1910,6 +2068,10 @@ def _get_ocean_data_for_predict_paired(
         data_dict["sea_surface_fraction"] = torch.ones(
             n_samples, total_timesteps, *img_shape, device=DEVICE
         )
+    if "land_fraction" in data_dict:
+        data_dict["land_fraction"] = torch.ones(
+            n_samples, total_timesteps, *img_shape, device=DEVICE
+        )
 
     time = xr.DataArray(
         np.broadcast_to(np.arange(total_timesteps), (n_samples, total_timesteps)),
@@ -1936,6 +2098,18 @@ def _get_ocean_data_for_predict_paired(
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
             id="hfds_next_step_forcing",
+        ),
+        pytest.param(
+            ["thetao_0", "thetao_1", "hfds", "sea_surface_fraction"],
+            ["thetao_0", "thetao_1"],
+            "next_step_forcing",
+            id="hfds_next_step_forcing_no_hfgeou",
+        ),
+        pytest.param(
+            ["thetao_0", "thetao_1", "hfds", "land_fraction"],
+            ["thetao_0", "thetao_1"],
+            "next_step_forcing",
+            id="hfds_next_step_forcing_land_fraction",
         ),
         pytest.param(
             [
