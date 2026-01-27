@@ -88,7 +88,7 @@ validation_data:
     file_pattern: 100km.zarr
     subset:
       start: 0
-      stop: 4
+      stop: 2
       # start_time: '2023-01-01T00:00:00'
       # stop_time: '2024-01-01T00:00:00'
       # step: 49
