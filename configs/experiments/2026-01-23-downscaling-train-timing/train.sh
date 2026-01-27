@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="xshield-downscaling-apex-gnorm-channels-last-unetv2-bsz20-ch128"
-CONFIG_FILENAME="train_channels_last.yaml"
-#JOB_NAME="xshield-downscaling-torch-gnorm-updated-unet"
-#CONFIG_FILENAME="train_control.yaml"
+#JOB_NAME="xshield-downscaling-apex-gnorm-channels-last-unetv2-bsz20-ch128"
+#CONFIG_FILENAME="train_channels_last.yaml"
+JOB_NAME="xshield-downscaling-torch-gnorm-unetv2-bsz16-ch128"
+CONFIG_FILENAME="train_control.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -22,8 +22,8 @@ IMAGE=annak/deps-only-with-apex-v2  #$(cat $REPO_ROOT/latest_deps_only_image.txt
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km training global' \
-    --workspace ai2/climate-titan \
-    --priority urgent \
+    --workspace ai2/ace \
+    --priority high \
     --preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
