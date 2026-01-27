@@ -28,6 +28,7 @@ Diffusion-Based Generative Models".
 """
 
 import torch
+from fme.core.device import get_device
 
 
 class EDMPrecond(torch.nn.Module):
@@ -106,7 +107,7 @@ class EDMPrecond(torch.nn.Module):
             class_labels=class_labels,
         )
 
-        if (F_x.dtype != dtype) and not torch.is_autocast_enabled():
+        if (F_x.dtype != dtype) and not torch.amp.is_autocast_enabled(get_device().type):
             raise ValueError(
                 f"Expected the dtype to be {dtype}, but got {F_x.dtype} instead."
             )
