@@ -33,15 +33,10 @@ class SpatialTorchDistributed(DistributedBackend):
         if (h_parallel_size>1) or (w_parallel_size >1):
           self.spatial_parallelism=True
           logger.debug(" Spatial parallelism enable.")
-          params: dict[str, Any] = {}
-          params["fin_parallel_size"] = fin_parallel_size
-          params["fout_parallel_size"] = fout_parallel_size
-          params["h_parallel_size"] = h_parallel_size
-          params["w_parallel_size"] = w_parallel_size
-          params["model_parallel_sizes"] = [h_parallel_size, w_parallel_size, fin_parallel_size, fout_parallel_size]
-          params["model_parallel_names"] = ["h", "w", "fin", "fout"]
+          model_parallel_sizes= [h_parallel_size, w_parallel_size, fin_parallel_size, fout_parallel_size]
+          model_parallel_names = ["h", "w", "fin", "fout"]
 
-          comm.init(model_parallel_sizes=params["model_parallel_sizes"], model_parallel_names=params["model_parallel_names"], verbose=False)
+          comm.init(model_parallel_sizes=model_parallel_sizes, model_parallel_names=model_parallel_names, verbose=False)
 
           self.world_size = comm.get_world_size()
           self._rank = comm.get_world_rank()
