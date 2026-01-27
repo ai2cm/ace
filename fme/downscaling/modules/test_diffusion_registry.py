@@ -119,7 +119,7 @@ def test_UNetDiffusionModule_forward_pass():
     ],
 )
 def test_UNetDiffusionModule_use_amp_precision(use_amp_bf16):
-    """Test that use_amp_bf16 parameter correctly sets precision (bfloat16 or float32)."""
+    """Test that use_amp_bf16 parameter correctly sets precision bfloat16 or float32."""
     downscale_factor = 2
     coarse_shape = (8, 16)
     fine_shape = coarse_shape[0] * downscale_factor, coarse_shape[1] * downscale_factor
@@ -159,14 +159,15 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp_bf16):
     assert len(captured_dtypes) > 0, "No dtypes captured from forward hook"
     if use_amp_bf16:
         assert torch.bfloat16 in captured_dtypes, (
-            f"Expected bfloat16 in captured dtypes {captured_dtypes}, "
-            "but autocast to bfloat16 was not used"
+            "Autocast to bfloat16 was set but did not find bfloat16 in captured "
+            f"dtypes {captured_dtypes}."
         )
     else:
         assert all(
             dtype == torch.float32 for dtype in captured_dtypes
-        ), f"Expected all dtypes to be float32, but got {captured_dtypes}"
+        ), "Expected all dtypes to be float32 when use_amp_bf16=False, "
+        f"but got captured dtypes {captured_dtypes}."
         assert torch.bfloat16 not in captured_dtypes, (
             "Expected no bfloat16 when use_amp_bf16=False, "
-            f"but found bfloat16 in {captured_dtypes}"
+            f"but found bfloat16 in captured dtypes {captured_dtypes}."
         )
