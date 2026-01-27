@@ -111,8 +111,8 @@ def test_UNetDiffusionModule_forward_pass():
         pytest.param(
             True,
             marks=pytest.mark.skipif(
-                not torch.cuda.is_available(),
-                reason="Autocast with bfloat16 requires CUDA",
+                get_device().type == "mps",
+                reason="MPS does not support bfloat16 autocast.",
             ),
         ),
         False,

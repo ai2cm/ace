@@ -1,4 +1,5 @@
 import contextlib
+
 import torch
 
 from fme.core.device import get_device
@@ -17,7 +18,7 @@ class UNetDiffusionModule(torch.nn.Module):
 
     Args:
         unet: The U-Net model.
-        use_amp_bf16: use automatic mixed precision casting to bfloat16 during forward pass
+        use_amp_bf16: use automatic mixed precision casting to bfloat16 in forward pass
     """
 
     def __init__(
@@ -32,7 +33,9 @@ class UNetDiffusionModule(torch.nn.Module):
         if self.use_amp_bf16:
             if get_device().type == "mps":
                 raise ValueError("MPS does not support bfloat16 autocast.")
-            self._amp_context = torch.amp.autocast(get_device().type, dtype=torch.bfloat16)
+            self._amp_context = torch.amp.autocast(
+                get_device().type, dtype=torch.bfloat16
+            )
         else:
             self._amp_context = contextlib.nullcontext()
 
@@ -51,22 +54,10 @@ class UNetDiffusionModule(torch.nn.Module):
             noise_level: The noise level of each example in the batch.
         """
         device = get_device()
-        latent = latent.to(device)
-        conditioning = conditioning.to(device)
-        noise_level = noise_level.to(device)
-
-        if self.use_amp_bf16:
-            with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
-                return self.unet(
-                    latent,
-                    conditioning,
-                    sigma=noise_level,
-                    class_labels=None,
-                )
-        else:
+        with self._amp_context:
             return self.unet(
-                latent,
-                conditioning,
-                sigma=noise_level,
+                latent.to(device),
+                conditioning.to(device),
+                sigma=noise_level.to(device),
                 class_labels=None,
             )
