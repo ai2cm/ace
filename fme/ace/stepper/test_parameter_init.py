@@ -324,7 +324,7 @@ def test_frozen_parameter_config(apply_config: bool):
         loss.backward()
         optimizer.step()
     for name, param in module.named_parameters():
-        if name in config.exclude:
+        if config.exclude is not None and name in config.exclude:
             assert not torch.allclose(param.data, original_state[name])
         else:
             if apply_config:
