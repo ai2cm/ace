@@ -122,7 +122,7 @@ class SpatialTorchDistributed(DistributedBackend):
             return DistributedDataParallel(
                 SyncBatchNorm.convert_sync_batchnorm(module),
                 device_ids=self._device_ids,
-                output_device=output_device,
+                output_device=self._device_ids,
             )
         return DummyWrapper(module)
 
