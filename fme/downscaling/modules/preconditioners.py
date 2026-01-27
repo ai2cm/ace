@@ -31,6 +31,16 @@ import torch
 from fme.core.device import get_device
 
 
+def _is_autocast_enabled():
+    device = get_device()
+    if device.type == "cuda":
+        return torch.is_autocast_enabled()
+    elif device.type == "cpu":
+        return torch.is_autocast_cpu_enabled()
+    else:
+        return False
+
+
 class EDMPrecond(torch.nn.Module):
     """
     Improved preconditioning proposed in the paper "Elucidating the Design Space of
@@ -107,7 +117,7 @@ class EDMPrecond(torch.nn.Module):
             class_labels=class_labels,
         )
 
-        if (F_x.dtype != dtype) and not torch.amp.is_autocast_enabled(get_device().type):
+        if (F_x.dtype != dtype) and not _is_autocast_enabled():
             raise ValueError(
                 f"Expected the dtype to be {dtype}, but got {F_x.dtype} instead."
             )
