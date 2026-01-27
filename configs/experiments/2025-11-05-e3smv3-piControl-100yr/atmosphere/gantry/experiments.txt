@@ -37,3 +37,9 @@ BK-v1124-ACE2S-n512-e1c9-ft-20step-E3SMv3-piControl-100yr-no-smooth-ocean|1|01KE
 BK-v1124-ACE2S-n512-e1c9-ft-20step-ft-energy-E3SMv3-piControl-100yr|1|01KFYX5GSXF76CEFDDT411SF4M|training|best_inference_ckpt
 BK-v1124-ACE2S-n512-e1c9-ft-20step-ft-energy-E3SMv3-piControl-100yr|1|01KFYX5GSXF76CEFDDT411SF4M|training|best_ckpt
 BK-v1124-ACE2S-n512-e1c9-ft-20step-ft-energy-E3SMv3-piControl-100yr|1|01KFYX5GSXF76CEFDDT411SF4M|training|ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-no-smooth-ocean-ft-energy|1|01KFZ121Z9NZM3FJNDR3H7PSZC|training|best_inference_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-no-smooth-ocean-ft-energy|1|01KFZ121Z9NZM3FJNDR3H7PSZC|training|best_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-no-smooth-ocean-ft-energy|1|01KFZ121Z9NZM3FJNDR3H7PSZC|training|ckpt
+BK-v1124-ACE2S-n512-e1c9-ft-20step-ft-energy-E3SMv3-piControl-100yr|1||training|best_inference_ckpt
+BK-v1124-ACE2S-n512-e1c9-ft-20step-ft-energy-E3SMv3-piControl-100yr|1||training|best_ckpt
+BK-v1124-ACE2S-n512-e1c9-ft-20step-ft-energy-E3SMv3-piControl-100yr|1||training|ckpt
