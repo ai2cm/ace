@@ -1,20 +1,16 @@
 import logging
 import os
-from collections.abc import Callable
-from datetime import timedelta
-from typing import Any
 
 import torch.distributed
 from torch.nn import SyncBatchNorm
-from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
-from fme.core.device import get_device, using_gpu, using_srun
+from fme.core.device import using_gpu
+from fme.core.distributed import comm
 
 from .base import DistributedBackend
 from .non_distributed import DummyWrapper
-from fme.core.distributed import comm
-from .torch_distributed import _gather_irregular, _pad_tensor_at_end, _unpad_tensor_at_end
+from .torch_distributed import _gather_irregular
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +23,18 @@ class ModelTorchDistributed(DistributedBackend):
         w_parallel_size = int(os.environ.get("W_PARALLEL_SIZE", 1))
         logger.debug(f" Spatial parallelism dimension in h {h_parallel_size}")
         logger.debug(f" Spatial parallelism dimension in w {w_parallel_size}")
-        if (h_parallel_size>1) or (w_parallel_size >1):
+        if (h_parallel_size > 1) or (w_parallel_size > 1):
             logger.debug(" Spatial parallelism enable.")
-            model_parallel_sizes= [h_parallel_size, w_parallel_size, 1, 1]
+            model_parallel_sizes = [h_parallel_size, w_parallel_size, 1, 1]
             model_parallel_names = ["h", "w", "fin", "fout"]
-            comm.init(model_parallel_sizes=model_parallel_sizes,
-                      model_parallel_names=model_parallel_names, verbose=False)
+            comm.init(
+                model_parallel_sizes=model_parallel_sizes,
+                model_parallel_names=model_parallel_names,
+                verbose=False,
+            )
             self.world_size = comm.get_world_size()
             self._rank = comm.get_world_rank()
-            self._device_id =  comm.get_local_rank()
+            self._device_id = comm.get_local_rank()
             torch.cuda.set_device(self._device_id)
         else:
             raise ValueError(
@@ -46,7 +45,8 @@ class ModelTorchDistributed(DistributedBackend):
     @classmethod
     def is_available(cls) -> bool:
         """Check if Torch distributed is available and "
-        "if spatial parallelism is enabled."""
+        "if spatial parallelism is enabled.
+        """
         return torch.distributed.is_available() and _spatial_parallelism_enabled()
 
     @property
@@ -123,10 +123,11 @@ class ModelTorchDistributed(DistributedBackend):
         logger.debug(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()
 
+
 def _spatial_parallelism_enabled() -> bool:
-  h_parallel_size = int(os.environ.get("H_PARALLEL_SIZE", 1))
-  w_parallel_size = int(os.environ.get("W_PARALLEL_SIZE", 1))
-  if (h_parallel_size>1) or (w_parallel_size >1):
-      return True
-  else:
-      return False
+    h_parallel_size = int(os.environ.get("H_PARALLEL_SIZE", 1))
+    w_parallel_size = int(os.environ.get("W_PARALLEL_SIZE", 1))
+    if (h_parallel_size > 1) or (w_parallel_size > 1):
+        return True
+    else:
+        return False
