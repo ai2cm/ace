@@ -41,3 +41,5 @@ fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-d0zgdwek_mb4prsz7|rs0|01KFSZKJNT0
 
 fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-yumm5pbg_mb4prsz7|rs0|01KFSZM4MXH844C9HZQD4FVSJF|run_ICx1|best_inference_ckpt|normal|--not-preemptible
 fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-yumm5pbg_mb4prsz7|rs0|01KFSZM4MXH844C9HZQD4FVSJF|run_insample|best_inference_ckpt|normal|--not-preemptible
+
+resume_wz9y7dbr-fto-1pctCO2_0256to0350|rs0|01KG32X38YXABBGR9MCSRG3EN2|training|best_inference_ckpt|normal|--not-preemptible
