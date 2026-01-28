@@ -1,14 +1,14 @@
 #!/bin/bash -l
 
-#SBATCH -A m4492_g
+#SBATCH -A e3sm_g
 #SBATCH -q regular
 #SBATCH -C gpu&hbm80g
-#SBATCH -J train-fme
+#SBATCH -J train-era5-25km
 #SBATCH --nodes=16
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128
-#SBATCH -t 01:00:00
+#SBATCH -t 06:00:00
 #SBATCH --output=joblogs/%j.out
 #SBATCH --signal=USR1@60
 #SBATCH --requeue

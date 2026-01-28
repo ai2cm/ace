@@ -4,8 +4,12 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 2
+max_epochs: 1
 n_forward_steps: 2
+train_aggregator:
+  spherical_power_spectrum: false
+validation_aggregator:
+  log_power_spectrum: false
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -13,14 +17,14 @@ logging:
   project: ace-eamv3-25km
   entity: ai2cm
 train_loader:
-  batch_size: 16
+  batch_size: BATCH_SIZE_VALUE
   num_data_workers: 4
   dataset:
     data_path: /pscratch/sd/e/elynnwu/fme-dataset
     file_pattern: 2025-08-01-sample-E3SMv3-coupled-atm-wcycl1850-r025.zarr
     engine: zarr    
 validation_loader:
-  batch_size: 4
+  batch_size: BATCH_SIZE_VALUE
   num_data_workers: 4
   dataset:
     data_path: /pscratch/sd/e/elynnwu/fme-dataset

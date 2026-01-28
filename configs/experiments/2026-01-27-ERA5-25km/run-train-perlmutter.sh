@@ -3,9 +3,9 @@
 set -x
 
 # directories for input data (training, validation, inference, stats)
-export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-08-01-sample-E3SMv3-coupled-atm-wcycl1850-r025.zarr
-export FME_VALID_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-08-01-sample-E3SMv3-coupled-atm-wcycl1850-r025.zarr
-export FME_STATS_DIR=/pscratch/sd/r/rebassoo/fme-preprocess/2025-04-01-e3smv3-1deg/2025-04-01-e3smv3-1deg
+export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2024-05-29-era5-025deg-8layer-2010-2022.zarr
+export FME_VALID_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2024-05-29-era5-025deg-8layer-2010-2022.zarr
+export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2024-05-29-era5-025deg-8layer-2010-2022-stats
 export EMBED_DIM_VALUE=256
 export SCALE_FACTOR_VALUE=1
 export H_PARALLEL_SIZE=4
@@ -14,8 +14,8 @@ export BATCH_SIZE_VALUE=16
 
 nodes=16
 # wandb config
-export WANDB_NAME=PM-EAMv3-wcycl1850-25km-${nodes}nodes-sp-${H_PARALLEL_SIZE}x${W_PARALLEL_SIZE}-n${EMBED_DIM_VALUE}-scale-factor-${SCALE_FACTOR_VALUE}-bs-${BATCH_SIZE_VALUE}-train
-export WANDB_RUN_GROUP=wcycl1850-25km
+export WANDB_NAME=PM-ERA5-25km-1yr-${nodes}nodes-sp-${H_PARALLEL_SIZE}x${W_PARALLEL_SIZE}-n${EMBED_DIM_VALUE}-scale-factor-${SCALE_FACTOR_VALUE}-bs-${BATCH_SIZE_VALUE}-train
+export WANDB_RUN_GROUP=train-1yr-2010
 
 export COMMIT=$(git rev-parse --short HEAD)
 

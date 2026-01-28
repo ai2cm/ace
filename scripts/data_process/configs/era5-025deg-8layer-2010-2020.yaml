@@ -1,0 +1,9 @@
+runs:
+  2024-05-29-era5-025deg-8layer-2010-2022: ""  # no real data source, config only for computing stats
+data_output_directory: /pscratch/sd/e/elynnwu/fme-dataset
+stats:
+  output_directory: /pscratch/sd/e/elynnwu/fme-dataset/2024-05-29-era5-025deg-8layer-2010-2022-stats
+  beaker_dataset: not-used
+  start_date: "2010-01-01"
+  end_date: "2022-12-31"
+  data_type: ERA5
