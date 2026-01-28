@@ -18,10 +18,21 @@ https://github.com/NVIDIA/makani/blob/dbcf2c1dc82cdbc544c81193eecd8ac4a6be337c/m
 
 import math
 
-from physicsnemo.distributed.config import ProcessGroupConfig, ProcessGroupNode
+try:
+    from physicsnemo.distributed.config import ProcessGroupConfig, ProcessGroupNode
+except ImportError:
+    ProcessGroupConfig = None
+    ProcessGroupNode = None
+    if ProcessGroupConfig is None:
+        raise RuntimeError("Spatial parallelism requires physicsnemo to be installed.")
+
+try:
+    from physicsnemo.distributed.manager import DistributedManager
+except ImportError:
+    DistributedManager = None
 
 # we are using the distributed manager from physicsnemo
-from physicsnemo.distributed.manager import DistributedManager
+
 
 # we need this
 _DM = None
