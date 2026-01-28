@@ -19,10 +19,10 @@ runs:
   4xCO2-ic_0003: gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_180_by_360/4xCO2-ic_0003
   4xCO2-ic_0004: gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_180_by_360/4xCO2-ic_0004
   4xCO2-ic_0005: gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_180_by_360/4xCO2-ic_0005
-data_output_directory: gs://vcm-ml-intermediate/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+data_output_directory: gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
 stats:
-  output_directory: gs://vcm-ml-intermediate/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-stats
-  beaker_dataset: 2024-07-09-vertically-resolved-1deg-fme-c96-shield-som-ensemble-dataset-stats
+  output_directory: gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-stats
+  beaker_dataset: 2026-01-28-vertically-resolved-1deg-fme-c96-shield-som-ensemble-dataset-stats
   # These datasets already exclude the one-year divergence period for each
   # ensemble member, so we can use data from all times when computing the
   # stats.
