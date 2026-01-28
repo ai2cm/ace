@@ -9,8 +9,7 @@ def get_crps(
 
     Supports almost-fair modification to CRPS from
     https://arxiv.org/html/2412.15832v1, which claims to be helpful in
-    avoiding numerical issues with fair CRPS. TODO This is not vectorized over
-    ensemble dimension for clarity.
+    avoiding numerical issues with fair CRPS.
 
     Args:
         gen: The generated ensemble members, of shape [n_batch, n_ensemble, ...].
@@ -23,24 +22,26 @@ def get_crps(
         The CRPS loss.
     """
     n_ens = gen.shape[1]
-    epsilon = (1 - alpha) / 2
+    epsilon = (1.0 - alpha) / 2.0
 
-    # Term 1: mean absolute difference between each ensemble member and target
+    # Term 1: E|X - y|
     target_term = torch.mean(torch.abs(gen - target), dim=1)
 
-    # Term 2: mean absolute difference between all pairs of ensemble members
     if n_ens == 1:
         internal_term = torch.zeros_like(target_term)
     else:
-        # Compute |X_i - X_j| for all unique pairs
-        pairwise_diffs = []
-        for i in range(n_ens):
-            for j in range(i + 1, n_ens):
-                pairwise_diffs.append(torch.abs(gen[:, i, ...] - gen[:, j, ...]))
-        internal_term = -0.5 * torch.stack(pairwise_diffs, dim=0).mean(dim=0)
+        # Pairwise |X_i - X_j|
+        # Shape: [batch, n_ens, n_ens, ...]
+        diffs = torch.abs(gen.unsqueeze(2) - gen.unsqueeze(1))
 
-    # Combine terms
-    crps = target_term + (1 - epsilon) * internal_term
+        # Keep only unique pairs i < j
+        idx = torch.triu_indices(n_ens, n_ens, offset=1, device=gen.device)
+        pairwise = diffs[:, idx[0], idx[1], ...]
+
+        # Mean over pairs
+        internal_term = -0.5 * pairwise.mean(dim=1)
+
+    crps = target_term + (1.0 - epsilon) * internal_term
     return crps
 
 
