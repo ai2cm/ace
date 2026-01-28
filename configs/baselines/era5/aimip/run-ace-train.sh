@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-train"
-JOB_GROUP="ace-aimip"
+JOB_NAME_BASE="ace-aimip-old-sfno-train"
+JOB_GROUP="ace-aimip-old-sfno"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -24,7 +24,7 @@ launch_job () {
     gantry run \
         --name $JOB_NAME \
         --task-name $JOB_NAME \
-        --description 'Run ACE2-ERA5 training on AIMIP period' \
+        --description 'Run ACE2-ERA5 training on AIMIP period with old SFNO model' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
         --priority high \
