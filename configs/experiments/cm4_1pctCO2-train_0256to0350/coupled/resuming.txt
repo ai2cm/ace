@@ -1,1 +1,5 @@
 group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|ocean_results_dataset|atmos_results_dataset
+
+resume_wz9y7dbr-fto-1pctCO2_0256to0350|rs0|ace-samudra-coupled-cm4|wz9y7dbr|train|high||8|800GiB|3||max_epochs=80|
+
+resume_berobv1i-fto-1pctCO2_0256to0350|rs0|ace-samudra-coupled-cm4|berobv1i|train|high||8|800GiB|3||max_epochs=80|
