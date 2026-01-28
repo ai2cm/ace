@@ -23,6 +23,8 @@ try:
 except ImportError:
     ProcessGroupConfig = None
     ProcessGroupNode = None
+    if ProcessGroupConfig is None:
+        raise RuntimeError("Spatial parallelism requires physicsnemo to be installed.")
 
 try:
     from physicsnemo.distributed.manager import DistributedManager
