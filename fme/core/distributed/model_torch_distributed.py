@@ -19,7 +19,7 @@ from .torch_distributed import _gather_irregular, _pad_tensor_at_end, _unpad_ten
 logger = logging.getLogger(__name__)
 
 
-class SpatialTorchDistributed(DistributedBackend):
+class ModelTorchDistributed(DistributedBackend):
     """A Spatial distributed backend implementation."""
 
     def __init__(self):
@@ -31,19 +31,22 @@ class SpatialTorchDistributed(DistributedBackend):
             logger.debug(" Spatial parallelism enable.")
             model_parallel_sizes= [h_parallel_size, w_parallel_size, 1, 1]
             model_parallel_names = ["h", "w", "fin", "fout"]
-            comm.init(model_parallel_sizes=model_parallel_sizes, model_parallel_names=model_parallel_names, verbose=False)
+            comm.init(model_parallel_sizes=model_parallel_sizes,
+                      model_parallel_names=model_parallel_names, verbose=False)
             self.world_size = comm.get_world_size()
             self._rank = comm.get_world_rank()
             self._device_id =  comm.get_local_rank()
             torch.cuda.set_device(self._device_id)
         else:
             raise ValueError(
-                "Spatially distributed backend: h_parallel_size and w_parallel_size are both <=1."
+                "Spatially distributed backend: "
+                "h_parallel_size and w_parallel_size are both <=1."
             )
 
     @classmethod
     def is_available(cls) -> bool:
-        """Check if Torch distributed is available and if spatial parallelism is enabled."""
+        """Check if Torch distributed is available and "
+        "if spatial parallelism is enabled."""
         return torch.distributed.is_available() and _spatial_parallelism_enabled()
 
     @property
@@ -107,7 +110,7 @@ class SpatialTorchDistributed(DistributedBackend):
             return DistributedDataParallel(
                 SyncBatchNorm.convert_sync_batchnorm(module),
                 device_ids=self._device_ids,
-                output_device=self._device_ids,
+                output_device=output_device,
             )
         return DummyWrapper(module)
 

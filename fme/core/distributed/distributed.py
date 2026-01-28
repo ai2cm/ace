@@ -7,7 +7,7 @@ import torch.distributed
 from .base import DistributedBackend
 from .non_distributed import NonDistributed
 from .torch_distributed import TorchDistributed
-from .spatial_torch_distributed import SpatialTorchDistributed
+from .model_torch_distributed import ModelTorchDistributed
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +29,8 @@ class Distributed:
 
     def __init__(self, force_non_distributed: bool = False):
 
-        if SpatialTorchDistributed.is_available() and not force_non_distributed:
-            self._distributed: DistributedBackend = SpatialTorchDistributed()
+        if ModelTorchDistributed.is_available() and not force_non_distributed:
+            self._distributed: DistributedBackend = ModelTorchDistributed()
         elif TorchDistributed.is_available() and not force_non_distributed:
             self._distributed = TorchDistributed()
         else:
