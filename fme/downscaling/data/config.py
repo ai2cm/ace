@@ -182,6 +182,7 @@ class DataLoaderConfig:
         coarse_coords: LatLonCoordinates,
         requires_topography: bool,
         static_inputs_from_checkpoint: StaticInputs | None = None,
+        downscale_factor: int | None = None,
     ) -> Topography | None:
         if requires_topography is False:
             return None
@@ -202,11 +203,13 @@ class DataLoaderConfig:
             self.lat_extent,
             full_coarse_coord=coarse_coords.lat,
             full_fine_coord=topography.coords.lat,
+            downscale_factor=downscale_factor,
         )
         fine_lon_interval = adjust_fine_coord_range(
             self.lon_extent,
             full_coarse_coord=coarse_coords.lon,
             full_fine_coord=topography.coords.lon,
+            downscale_factor=downscale_factor,
         )
         subset_topography = topography.subset_latlon(
             lat_interval=fine_lat_interval, lon_interval=fine_lon_interval

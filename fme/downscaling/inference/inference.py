@@ -243,6 +243,7 @@ class InferenceConfig:
                 requirements=self.model.data_requirements,
                 patch=self.patch,
                 static_inputs_from_checkpoint=model.static_inputs,
+                downscale_factor=model.downscale_factor,
             )
             for output_cfg in self.outputs
         ]
