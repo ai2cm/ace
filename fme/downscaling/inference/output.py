@@ -217,6 +217,7 @@ class DownscalingOutputConfig(ABC):
         requirements: DataRequirements,
         dist: Distributed | None = None,
         static_inputs_from_checkpoint: StaticInputs | None = None,
+        downscale_factor: int | None = None,
     ) -> SliceWorkItemGriddedData:
         xr_dataset, properties = loader_config.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
@@ -232,6 +233,7 @@ class DownscalingOutputConfig(ABC):
             requires_topography=requirements.use_fine_topography,
             # TODO: update to support full list of static inputs
             static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+            downscale_factor=downscale_factor,
         )
         if topography is None:
             raise ValueError("Topography is required for downscaling generation.")
@@ -286,6 +288,7 @@ class DownscalingOutputConfig(ABC):
         patch: PatchPredictionConfig,
         coarse: list[XarrayDataConfig],
         static_inputs_from_checkpoint: StaticInputs | None = None,
+        downscale_factor: int | None = None,
     ) -> DownscalingOutput:
         updated_loader_config = self._replace_loader_config(
             time,
@@ -299,6 +302,7 @@ class DownscalingOutputConfig(ABC):
             updated_loader_config,
             requirements,
             static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+            downscale_factor=downscale_factor,
         )
 
         if self.zarr_chunks is None:
@@ -386,6 +390,7 @@ class EventConfig(DownscalingOutputConfig):
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
         static_inputs_from_checkpoint: StaticInputs | None = None,
+        downscale_factor: int | None = None,
     ) -> DownscalingOutput:
         # Convert single time to TimeSlice
         time: Slice | TimeSlice
@@ -409,6 +414,7 @@ class EventConfig(DownscalingOutputConfig):
             patch=patch,
             coarse=coarse,
             static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+            downscale_factor=downscale_factor,
         )
 
 
@@ -469,6 +475,7 @@ class TimeRangeConfig(DownscalingOutputConfig):
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
         static_inputs_from_checkpoint: StaticInputs | None = None,
+        downscale_factor: int | None = None,
     ) -> DownscalingOutput:
         coarse = self._single_xarray_config(loader_config.coarse)
         return self._build(
@@ -480,4 +487,5 @@ class TimeRangeConfig(DownscalingOutputConfig):
             patch=patch,
             coarse=coarse,
             static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+            downscale_factor=downscale_factor,
         )

@@ -154,7 +154,6 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
                 f"lon wraparound not implemented, received lon_min {lon_min} but "
                 f"expected lon_min < {self.lon_interval.start + 360.0}"
             )
-
         assert lats.numel() > 0, "No latitudes found in the specified range."
         assert lons.numel() > 0, "No longitudes found in the specified range."
 
