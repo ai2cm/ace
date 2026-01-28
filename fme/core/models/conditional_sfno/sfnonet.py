@@ -39,6 +39,7 @@ from .layers import (
     DropPath,
     SpectralAttention2d,
 )
+from .lora import LoRAConv2d
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
 from .makani.spectral_convolution import SpectralConv
 
@@ -90,8 +91,13 @@ class SpectralFilterLayer(nn.Module):
         drop_rate=0.0,
         num_groups=1,
         filter_residual=False,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
     ):
         super(SpectralFilterLayer, self).__init__()
+
+        if lora_rank != 0 and filter_type != "linear":
+            raise NotImplementedError("LoRA is only supported for linear filter type.")
 
         if filter_type == "non-linear":
             self.filter = SpectralAttentionS2(
@@ -121,6 +127,8 @@ class SpectralFilterLayer(nn.Module):
                 bias=True,
                 use_tensorly=False if factorization is None else True,
                 filter_residual=filter_residual,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
             )
         elif filter_type == "makani-linear":
             self.filter = SpectralConv(
@@ -195,6 +203,10 @@ class FourierNeuralOperatorBlock(nn.Module):
         filter_residual=False,
         affine_norms=False,
         filter_num_groups: int = 1,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
+        spectral_lora_rank: int = 0,
+        spectral_lora_alpha: float | None = None,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -229,17 +241,28 @@ class FourierNeuralOperatorBlock(nn.Module):
             drop_rate=drop_rate,
             filter_residual=filter_residual,
             num_groups=filter_num_groups,
+            lora_rank=spectral_lora_rank,
+            lora_alpha=spectral_lora_alpha,
         )
 
         if inner_skip == "linear":
-            self.inner_skip = nn.Conv2d(embed_dim, embed_dim, 1, 1)
+            self.inner_skip = LoRAConv2d(
+                embed_dim, embed_dim, 1, 1, lora_rank=lora_rank, lora_alpha=lora_alpha
+            )
         elif inner_skip == "identity":
             self.inner_skip = nn.Identity()
 
         self.concat_skip = concat_skip
 
         if concat_skip and inner_skip is not None:
-            self.inner_skip_conv = nn.Conv2d(2 * embed_dim, embed_dim, 1, bias=False)
+            self.inner_skip_conv = LoRAConv2d(
+                2 * embed_dim,
+                embed_dim,
+                1,
+                bias=False,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
+            )
 
         if filter_type == "linear" or filter_type == "real linear":
             self.act_layer = act_layer()
@@ -257,23 +280,33 @@ class FourierNeuralOperatorBlock(nn.Module):
         )
 
         if use_mlp == True:
-            MLPH = MLP
             mlp_hidden_dim = int(embed_dim * mlp_ratio)
-            self.mlp = MLPH(
+            self.mlp = MLP(
                 in_features=embed_dim,
                 hidden_features=mlp_hidden_dim,
                 act_layer=act_layer,
                 drop_rate=drop_rate,
                 checkpointing=checkpointing,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
             )
 
         if outer_skip == "linear":
-            self.outer_skip = nn.Conv2d(embed_dim, embed_dim, 1, 1)
+            self.outer_skip = LoRAConv2d(
+                embed_dim, embed_dim, 1, 1, lora_rank=lora_rank, lora_alpha=lora_alpha
+            )
         elif outer_skip == "identity":
             self.outer_skip = nn.Identity()
 
         if concat_skip and outer_skip is not None:
-            self.outer_skip_conv = nn.Conv2d(2 * embed_dim, embed_dim, 1, bias=False)
+            self.outer_skip_conv = LoRAConv2d(
+                2 * embed_dim,
+                embed_dim,
+                1,
+                bias=False,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
+            )
 
     def forward(self, x, context_embedding):
         x_norm = torch.zeros_like(x)
@@ -524,6 +557,10 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         local_blocks: Optional[List[int]] = None,
         normalize_big_skip: bool = False,
         affine_norms: bool = False,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
+        spectral_lora_rank: int = 0,
+        spectral_lora_alpha: float | None = None,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
@@ -637,6 +674,20 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             if hasattr(params, "filter_num_groups")
             else filter_num_groups
         )
+        self.lora_rank = params.lora_rank if hasattr(params, "lora_rank") else lora_rank
+        self.lora_alpha = (
+            params.lora_alpha if hasattr(params, "lora_alpha") else lora_alpha
+        )
+        self.spectral_lora_rank = (
+            params.spectral_lora_rank
+            if hasattr(params, "spectral_lora_rank")
+            else spectral_lora_rank
+        )
+        self.spectral_lora_alpha = (
+            params.spectral_lora_alpha
+            if hasattr(params, "spectral_lora_alpha")
+            else spectral_lora_alpha
+        )
 
         # no global padding because we removed the horizontal distributed code
         self.padding = (0, 0)
@@ -676,11 +727,27 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         encoder_modules = []
         for i in range(self.encoder_layers):
             encoder_modules.append(
-                nn.Conv2d(current_dim, encoder_hidden_dim, 1, bias=True)
+                LoRAConv2d(
+                    current_dim,
+                    encoder_hidden_dim,
+                    1,
+                    bias=True,
+                    lora_rank=self.lora_rank,
+                    lora_alpha=self.lora_alpha,
+                )
             )
             encoder_modules.append(self.activation_function())
             current_dim = encoder_hidden_dim
-        encoder_modules.append(nn.Conv2d(current_dim, self.embed_dim, 1, bias=False))
+        encoder_modules.append(
+            LoRAConv2d(
+                current_dim,
+                self.embed_dim,
+                1,
+                bias=False,
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
+            )
+        )
         self.encoder = nn.Sequential(*encoder_modules)
 
         # dropout
@@ -732,6 +799,10 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 filter_residual=self.filter_residual,
                 affine_norms=self.affine_norms,
                 filter_num_groups=self.filter_num_groups,
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
+                spectral_lora_rank=self.spectral_lora_rank,
+                spectral_lora_alpha=self.spectral_lora_alpha,
             )
 
             self.blocks.append(block)
@@ -742,11 +813,27 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         decoder_modules = []
         for i in range(self.encoder_layers):
             decoder_modules.append(
-                nn.Conv2d(current_dim, decoder_hidden_dim, 1, bias=True)
+                LoRAConv2d(
+                    current_dim,
+                    decoder_hidden_dim,
+                    1,
+                    bias=True,
+                    lora_rank=self.lora_rank,
+                    lora_alpha=self.lora_alpha,
+                )
             )
             decoder_modules.append(self.activation_function())
             current_dim = decoder_hidden_dim
-        decoder_modules.append(nn.Conv2d(current_dim, self.out_chans, 1, bias=False))
+        decoder_modules.append(
+            LoRAConv2d(
+                current_dim,
+                self.out_chans,
+                1,
+                bias=False,
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
+            )
+        )
         self.decoder = nn.Sequential(*decoder_modules)
 
         # learned position embedding
@@ -771,6 +858,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             trunc_normal_(m.weight, std=0.02)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
+            if isinstance(m, LoRAConv2d):
+                m.reset_lora_parameters()
         elif isinstance(m, ConditionalLayerNorm):
             m.reset_parameters()
 

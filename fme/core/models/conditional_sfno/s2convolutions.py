@@ -44,6 +44,17 @@ from .contractions import (
 from .factorizations import get_contract_fun
 
 
+@torch.jit.script
+def _contract_lora(
+    lora_A: torch.Tensor,
+    lora_B: torch.Tensor,
+    x: torch.Tensor,
+):
+    lora_A = torch.view_as_complex(lora_A)
+    lora_B = torch.view_as_complex(lora_B)
+    return torch.einsum("irx,rox,bixy->boxy", lora_A, lora_B, x)
+
+
 class SpectralConvS2(nn.Module):
     """
     Spectral Convolution according to Driscoll & Healy. Designed for convolutions on
@@ -67,8 +78,15 @@ class SpectralConvS2(nn.Module):
         bias=False,
         use_tensorly=True,
         filter_residual: bool = False,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
     ):  # pragma: no cover
         super(SpectralConvS2, self).__init__()
+
+        if in_channels != out_channels:
+            raise NotImplementedError(
+                "Currently only in_channels == out_channels is supported."
+            )
 
         if scale == "auto":
             scale = 1 / (in_channels * out_channels)
@@ -151,6 +169,33 @@ class SpectralConvS2(nn.Module):
             else:
                 self.weight.is_shared_mp = ["matmul"]
 
+        if lora_rank > 0:
+            if self.weight.shape != (
+                in_channels,
+                out_channels,
+                self.modes_lat_local,
+                2,
+            ):
+                raise NotImplementedError(
+                    "LoRA is only implemented for dhconv with unpadded weights."
+                )
+            if use_tensorly:
+                raise NotImplementedError(
+                    "LoRA is not implemented for tensorly factorized weights."
+                )
+            self.lora_A = nn.Parameter(
+                scale * torch.randn(in_channels, lora_rank, self.modes_lat_local, 2)
+            )
+            self.lora_B = nn.Parameter(
+                torch.zeros(lora_rank, out_channels, self.modes_lat_local, 2)
+            )
+            self.lora_alpha = lora_alpha if lora_alpha is not None else lora_rank
+            self.lora_scaling = self.lora_alpha / lora_rank
+        else:
+            self.lora_A = None
+            self.lora_B = None
+            self.lora_scaling = 0.0
+
         # get the contraction handle
         self._contract = get_contract_fun(
             self.weight, implementation="factorized", separable=separable
@@ -172,6 +217,15 @@ class SpectralConvS2(nn.Module):
                 residual = self.inverse_transform(x)
                 residual = residual.to(dtype)
 
+        if self.lora_A is not None and self.lora_B is not None:
+            lora_update = _contract_lora(
+                self.lora_A,
+                self.lora_B,
+                x[..., : self.modes_lat_local, : self.modes_lon_local],
+            )
+        else:
+            lora_update = 0.0
+
         # approach with unpadded weights
         xp = torch.zeros_like(x)
         xp[..., : self.modes_lat_local, : self.modes_lon_local] = self._contract(
@@ -180,6 +234,7 @@ class SpectralConvS2(nn.Module):
             separable=self.separable,
             operator_type=self.operator_type,
         )
+        xp = xp + self.lora_scaling * lora_update
         x = xp.contiguous()
 
         # # approach with padded weights
