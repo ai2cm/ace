@@ -163,10 +163,10 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp_bf16):
             f"dtypes {captured_dtypes}."
         )
     else:
-        assert all(
-            dtype == torch.float32 for dtype in captured_dtypes
-        ), ("Expected all dtypes to be float32 when use_amp_bf16=False, "
-        f"but got captured dtypes {captured_dtypes}.")
+        assert all(dtype == torch.float32 for dtype in captured_dtypes), (
+            "Expected all dtypes to be float32 when use_amp_bf16=False, "
+            f"but got captured dtypes {captured_dtypes}."
+        )
         assert torch.bfloat16 not in captured_dtypes, (
             "Expected no bfloat16 when use_amp_bf16=False, "
             f"but found bfloat16 in captured dtypes {captured_dtypes}."
