@@ -14,26 +14,19 @@ ft_fto-1pctCO2_0256to0350-3eqp62bx|rs0|01KB1V2AHJTV46HBZBQSF31YGX|trained|best_i
 
 ft_fto-1pctCO2_0256to0350-czhrv51v|rs0|01KB1V37C1WH8FSHZRCYKPFS9A|trained|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO_w_EC-ewbpxamu_mb4prsz7|rs0|01KC2HD92BFVVN2M00A0M3ZQJW|run_ICx1|best_inference_ckpt|high|--not-preemptible
-fto-1pctCO2_0256to0350-condSFNO_w_EC-ewbpxamu_mb4prsz7|rs0|01KC2HD92BFVVN2M00A0M3ZQJW|run_insample|best_inference_ckpt|high|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO_w_EC-ewbpxamu_mb4prsz7|rs0|01KC2HD92BFVVN2M00A0M3ZQJW|trained|best_inference_ckpt|high|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO_w_EC-c0fmwhnn_mb4prsz7|rs0|01KC2HE84WNN2JWANZAHPWJ7AP|run_ICx1|best_inference_ckpt|high|--not-preemptible
-fto-1pctCO2_0256to0350-condSFNO_w_EC-c0fmwhnn_mb4prsz7|rs0|01KC2HE84WNN2JWANZAHPWJ7AP|run_insample|best_inference_ckpt|high|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO_w_EC-c0fmwhnn_mb4prsz7|rs0|01KC2HE84WNN2JWANZAHPWJ7AP|trained|best_inference_ckpt|high|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_fruab0nq|rs0|01KBENDFHDW14WQPDWE418VJFJ|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_fruab0nq|rs0|01KBENDFHDW14WQPDWE418VJFJ|run_insample|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_fruab0nq|rs0|01KBENDFHDW14WQPDWE418VJFJ|trained|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_fruab0nq|rs0|01KBENEAVH5R9DTCMGS4B8QKHA|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_fruab0nq|rs0|01KBENEAVH5R9DTCMGS4B8QKHA|run_insample|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_fruab0nq|rs0|01KBENEAVH5R9DTCMGS4B8QKHA|trained|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_kd5obbep|rs0|01KC02TX1NJ2K3PGWJ0F207ZSZ|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_kd5obbep|rs0|01KC02TX1NJ2K3PGWJ0F207ZSZ|run_insample|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_kd5obbep|rs0|01KC02TX1NJ2K3PGWJ0F207ZSZ|trained|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_kd5obbep|rs0|01KC02VQT8JF6439QMAG425D62|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_kd5obbep|rs0|01KC02VQT8JF6439QMAG425D62|run_insample|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_kd5obbep|rs0|01KC02VQT8JF6439QMAG425D62|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto-1pctCO2_0256to0350-ubyk6ome|rs0|01KBEH4M4SE36B4CSZX53QWVMY|run_ICx1|best_inference_ckpt|low|--not-preemptible
-ft_fto-1pctCO2_0256to0350-ubyk6ome|rs0|01KBEH4M4SE36B4CSZX53QWVMY|run_insample|best_inference_ckpt|low|--not-preemptible
+ft_fto-1pctCO2_0256to0350-ubyk6ome|rs0|01KBEH4M4SE36B4CSZX53QWVMY|trained|best_inference_ckpt|low|--not-preemptible
 
 ft_fto-1pctCO2_0256to0350-condSFNO-8bwb51e8|rs0|01KC512GQTP1PK4ZYTTC9YAV9A|training|best_inference_ckpt|normal|--not-preemptible
 
@@ -43,6 +36,8 @@ ft_fto-1pctCO2_0256to0350-condSFNO-4nbmuu6e|rs0|01KCHTZB7CKYYMZ04P53SB3665|train
 
 ft_fto-1pctCO2_0256to0350-condSFNO-l3dqrw9s|rs0|01KCHTZZWDHW66NK4Z1M9H9MEV|training|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-d0zgdwek_mb4prsz7|rs0|01KFSZKJNT070YB64J4HY70Q7D|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-d0zgdwek_mb4prsz7|rs0|01KFSZKJNT070YB64J4HY70Q7D|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-d0zgdwek_mb4prsz7|rs0|01KFSZKJNT070YB64J4HY70Q7D|run_insample|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-yumm5pbg_mb4prsz7|rs0|01KFSZM4MXH844C9HZQD4FVSJF|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-yumm5pbg_mb4prsz7|rs0|01KFSZM4MXH844C9HZQD4FVSJF|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-yumm5pbg_mb4prsz7|rs0|01KFSZM4MXH844C9HZQD4FVSJF|run_insample|best_inference_ckpt|normal|--not-preemptible
