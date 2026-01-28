@@ -27,39 +27,24 @@ class SpatialTorchDistributed(DistributedBackend):
         w_parallel_size = int(os.environ.get("W_PARALLEL_SIZE", 1))
         logger.debug(f" Spatial parallelism dimension in h {h_parallel_size}")
         logger.debug(f" Spatial parallelism dimension in w {w_parallel_size}")
-        fin_parallel_size=1 #  in_parallel_size
-        fout_parallel_size=1 # fout_parallel_size
-        self.spatial_parallelism=False
         if (h_parallel_size>1) or (w_parallel_size >1):
-          self.spatial_parallelism=True
-          logger.debug(" Spatial parallelism enable.")
-          model_parallel_sizes= [h_parallel_size, w_parallel_size, fin_parallel_size, fout_parallel_size]
-          model_parallel_names = ["h", "w", "fin", "fout"]
-
-          comm.init(model_parallel_sizes=model_parallel_sizes, model_parallel_names=model_parallel_names, verbose=False)
-
-          self.world_size = comm.get_world_size()
-          self._rank = comm.get_world_rank()
-          self._device_id =  comm.get_local_rank()
-          # distributed = True
-          torch.cuda.set_device(self._device_id)
-          torch.backends.cudnn.benchmark = True
-          torch.backends.cuda.matmul.allow_tf32 = True
-          torch.backends.cudnn.allow_tf32 = True
+            logger.debug(" Spatial parallelism enable.")
+            model_parallel_sizes= [h_parallel_size, w_parallel_size, 1, 1]
+            model_parallel_names = ["h", "w", "fin", "fout"]
+            comm.init(model_parallel_sizes=model_parallel_sizes, model_parallel_names=model_parallel_names, verbose=False)
+            self.world_size = comm.get_world_size()
+            self._rank = comm.get_world_rank()
+            self._device_id =  comm.get_local_rank()
+            torch.cuda.set_device(self._device_id)
         else:
             raise ValueError(
                 "Spatially distributed backend: h_parallel_size and w_parallel_size are both <=1."
-            )  
+            )
 
     @classmethod
     def is_available(cls) -> bool:
-        """Check if torch distributed is available."""
-        h_parallel_size = int(os.environ.get("H_PARALLEL_SIZE", 1))
-        w_parallel_size = int(os.environ.get("W_PARALLEL_SIZE", 1))
-        spatial_parallelism=False
-        if (h_parallel_size>1) or (w_parallel_size >1):
-          spatial_parallelism=True
-        return torch.distributed.is_available() and spatial_parallelism
+        """Check if Torch distributed is available and if spatial parallelism is enabled."""
+        return torch.distributed.is_available() and _spatial_parallelism_enabled()
 
     @property
     def rank(self) -> int:
@@ -134,3 +119,11 @@ class SpatialTorchDistributed(DistributedBackend):
         self.barrier()
         logger.debug(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()
+
+def _spatial_parallelism_enabled() -> bool:
+  h_parallel_size = int(os.environ.get("H_PARALLEL_SIZE", 1))
+  w_parallel_size = int(os.environ.get("W_PARALLEL_SIZE", 1))
+  if (h_parallel_size>1) or (w_parallel_size >1):
+      return True
+  else:
+      return False
