@@ -41,6 +41,7 @@ class LoRAConv2d(nn.Conv2d):
         factory_kwargs = {"device": device, "dtype": dtype}
         self.lora_down: nn.Conv2d | None = None
         self.lora_up: nn.Conv2d | None = None
+        self.scale_init = scale_init
         super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -109,8 +110,6 @@ class LoRAConv2d(nn.Conv2d):
         else:
             self.lora_dropout = nn.Identity()
             self.lora_scaling = 0.0
-        self.scale_init = scale_init
-        self.weight *= self.scale_init
         self.reset_lora_parameters()  # base parameters already reset in super init
 
     def reset_parameters(self) -> None:
