@@ -15,7 +15,6 @@
 # limitations under the License.
 
 import math
-from functools import partial
 from typing import Any, Callable, List, Optional, Tuple
 
 import torch
@@ -24,7 +23,6 @@ import torch.nn as nn
 # get spectral transforms from torch_harmonics
 import torch_harmonics as th
 from torch.utils.checkpoint import checkpoint
-from typing_extensions import Literal
 
 from .initialization import trunc_normal_
 
@@ -37,7 +35,6 @@ from .layers import (
     Context,
     ContextConfig,
     DropPath,
-    SpectralAttention2d,
 )
 from .lora import LoRAConv2d
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
