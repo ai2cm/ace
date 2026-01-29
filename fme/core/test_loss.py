@@ -41,7 +41,7 @@ def test_spectral_energy_score(very_fast_only: bool):
     DEVICE = get_device()
     n_lat, n_lon = 16, 32
     pred = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
-    target = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
+    target = torch.rand(10000, 1, n_lat, n_lon, device=DEVICE)
     sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
     crps_loss = CRPSLoss(alpha=0.95)
@@ -50,7 +50,7 @@ def test_spectral_energy_score(very_fast_only: bool):
 
     n_lat2, n_lon2 = 32, 64
     pred = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
-    target = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
+    target = torch.rand(10000, 1, n_lat2, n_lon2, device=DEVICE)
     sht = LatLonOperations(torch.ones((n_lat2, n_lon2), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
     larger_domain_score = spectral_energy_score_loss(pred, target)

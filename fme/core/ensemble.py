@@ -75,6 +75,11 @@ def get_energy_score(
             f"got {gen.shape[1]} ensemble members. "
             "Update this function (and its tests) to support more."
         )
+    if target.shape[1] != 1:
+        raise ValueError(
+            "Target tensor must have a singleton ensemble member dimension, "
+            f"got shape {target.shape}."
+        )
     # CRPS is `E[|X - y|] - 1/2 E[|X - X'|]`
     # below we compute the first term as the average of two ensemble members
     # meaning the 0.5 factor can be pulled out

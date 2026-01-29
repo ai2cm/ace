@@ -261,26 +261,43 @@ class EnergyScoreLoss(torch.nn.Module):
         self.sht = sht
         self.scaling: torch.Tensor | None = None
         self.mode_weights: torch.Tensor | None = None
+        self._inv_n_m: torch.Tensor | None = None
+        self._total_coeffs: int | None = None
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         x_hat = self.sht(x)
         y_hat = self.sht(y)
-        if self.scaling is None:
-            self.scaling = 2 * (x_hat.shape[-2] * x_hat.shape[-1]) ** 0.5
+        # if self.scaling is None:
+        #     self.scaling = 2 * (x_hat.shape[-2] * x_hat.shape[-1]) ** 0.5
         if self.mode_weights is None:
             # we need to weight the modes properly,
             # with each m mode contributing twice for m!=0:
             H, W = x_hat.shape[-2:]
             self.mode_weights = 2 * torch.ones(
-                (*([1] * (x_hat.ndim - 1)), H, W),
+                (*([1] * (x_hat.ndim - 2)), H, W),
                 device=x_hat.device,
             )
             self.mode_weights[..., 0] = 1
+            self.mode_weights = self.mode_weights * self._inv_n_m
+        if self._inv_n_m is None:
+            n_m = []
+            for i in range(0, x_hat.shape[-2]):
+                n_m.append(2 * i + 1)
+            n_m_tensor = torch.tensor(n_m, device=get_device())[
+                :, None
+            ]  # shape (lmax+1, 1)
+            self._inv_n_m = 1 / n_m_tensor
+            self._total_coeffs = n_m_tensor.sum().item()
+        assert self._total_coeffs is not None
+        scale_powers = (
+            self._inv_n_m
+            * (self.mode_weights * y_hat.abs() ** 2).sum(dim=-1, keepdim=True)
+        ).mean(dim=1) ** 0.5  # keep dims for broadcasting
         return (
-            (get_energy_score(x_hat, y_hat) * self.mode_weights)
+            (get_energy_score(x_hat, y_hat) * self.mode_weights / scale_powers.detach())
             .sum(dim=(-2, -1))
             .mean()
-        ) / self.scaling
+        ) / self._total_coeffs
 
 
 class CRPSLoss(torch.nn.Module):
