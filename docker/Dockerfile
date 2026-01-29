@@ -51,9 +51,7 @@ RUN apt-get update && apt-get install -y \
 RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq &&\
 chmod +x /usr/bin/yq
 
-COPY scripts/ci_beaker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash"]
 
 FROM deps-only AS nsight
 
@@ -73,3 +71,11 @@ RUN wget https://developer.nvidia.com/downloads/assets/tools/secure/nsight-syste
 
 ENTRYPOINT ["/bin/bash"]
 CMD ["-l"]
+
+
+FROM deps-only AS deps-only-apex
+
+COPY scripts/downscaling/install_apex_groupnorm_b200.sh /tmp/install_apex_groupnorm.sh
+RUN chmod +x /tmp/install_apex_groupnorm.sh && /tmp/install_apex_groupnorm.sh && rm /tmp/install_apex_groupnorm.sh
+ENTRYPOINT ["/bin/bash"]
+
