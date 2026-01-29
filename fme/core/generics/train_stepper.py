@@ -47,13 +47,13 @@ class StepperABC(abc.ABC, Generic[PS, BD, FD, SD]):
     def predict_paired(self) -> PredictFunction[PS, FD, SD]:
         pass
 
+    @abc.abstractmethod
     def set_eval(self) -> None:
-        for module in self.modules:
-            module.eval()
+        pass
 
+    @abc.abstractmethod
     def set_train(self) -> None:
-        for module in self.modules:
-            module.train()
+        pass
 
     @abc.abstractmethod
     def update_training_history(self, training_job: TrainingJob) -> None:

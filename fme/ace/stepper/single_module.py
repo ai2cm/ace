@@ -1410,6 +1410,14 @@ class Stepper(
         stepper.load_state(state)
         return stepper
 
+    def set_eval(self) -> None:
+        for module in self.modules:
+            module.eval()
+
+    def set_train(self) -> None:
+        for module in self.modules:
+            module.train()
+
 
 @dataclasses.dataclass
 class TrainStepperConfig:
@@ -1765,6 +1773,12 @@ class TrainStepper(
         else:
             self._train_n_forward_steps_sampler = None
         self._epoch = epoch
+
+    def set_eval(self) -> None:
+        self._stepper.set_eval()
+
+    def set_train(self) -> None:
+        self._stepper.set_train()
 
 
 def get_serialized_stepper_vertical_coordinate(
