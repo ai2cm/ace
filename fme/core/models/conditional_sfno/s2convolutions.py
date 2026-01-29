@@ -130,11 +130,9 @@ class SpectralConvS2(nn.Module):
         self.modes_lon = self.inverse_transform.mmax
 
         if scale == "auto":
-            scale = math.sqrt(1 / (in_channels)) * torch.ones(
-                self.modes_lat, dtype=torch.complex64
-            )
+            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 2)
             # seemingly the first weight is not really complex, so we need to account for that
-            scale[0] *= math.sqrt(2.0)
+            scale[0, :] *= math.sqrt(2.0)
 
         self._round_trip_residual = filter_residual or (
             (self.forward_transform.nlat != self.inverse_transform.nlat)
@@ -205,7 +203,7 @@ class SpectralConvS2(nn.Module):
             self.lora_scaling = 0.0
 
         if bias:
-            self.bias = nn.Parameter(scale * torch.zeros(1, out_channels, 1, 1))
+            self.bias = nn.Parameter(torch.zeros(1, out_channels, 1, 1))
 
     def forward(self, x):  # pragma: no cover
         dtype = x.dtype
