@@ -75,7 +75,7 @@ CMD ["-l"]
 
 FROM deps-only AS deps-only-apex
 
-COPY scripts/downscaling/install_apex_groupnorm_b200.sh /tmp/install_apex_groupnorm.sh
+COPY scripts/downscaling/install_apex_groupnorm.sh /tmp/install_apex_groupnorm.sh
 RUN chmod +x /tmp/install_apex_groupnorm.sh && /tmp/install_apex_groupnorm.sh && rm /tmp/install_apex_groupnorm.sh
 ENTRYPOINT ["/bin/bash"]
 
