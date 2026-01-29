@@ -281,38 +281,14 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
 def test_train_on_batch_addition_series():
     torch.manual_seed(0)
 
-    class AddOne(torch.nn.Module):
-        def forward(self, x):
-            return x + 1
-
     n_steps = 4
     data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
-    config = StepperConfig(
-        step=StepSelector(
-            type="single_module",
-            config=dataclasses.asdict(
-                SingleModuleStepConfig(
-                    builder=ModuleSelector(
-                        type="prebuilt", config={"module": AddOne()}
-                    ),
-                    in_names=["a", "b"],
-                    out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=get_scalar_data(["a", "b"], 1.0),
-                        ),
-                    ),
-                )
-            ),
-        ),
-        loss=StepLossConfig(type="MSE"),
-    )
-    dataset_info = get_dataset_info()
     train_stepper_config = TrainStepperConfig(
         loss=StepLossConfig(type="MSE"),
     )
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(
+        _get_stepper(["a", "b"], ["a", "b"])
+    )
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, 1, n_steps + 1, 5, 5)
@@ -464,42 +440,14 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
 def test_train_on_batch_with_prescribed_ocean():
     torch.manual_seed(0)
 
-    class AddOne(torch.nn.Module):
-        def forward(self, x):
-            return x + 1
-
     n_steps = 3
     data: BatchData = get_data(["a", "b", "mask"], n_samples=5, n_time=n_steps + 1).data
     data.data["mask"][:] = 0
     data.data["mask"][:, :, :, 0] = 1
-    stds = {
-        "a": 2.0,
-        "b": 3.0,
-    }
-    config = StepperConfig(
-        step=StepSelector(
-            type="single_module",
-            config=dataclasses.asdict(
-                SingleModuleStepConfig(
-                    builder=ModuleSelector(
-                        type="prebuilt", config={"module": AddOne()}
-                    ),
-                    in_names=["a", "b"],
-                    out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=stds,
-                        ),
-                    ),
-                    ocean=OceanConfig("b", "mask"),
-                )
-            ),
-        ),
-    )
-    dataset_info = get_dataset_info()
     train_stepper_config = TrainStepperConfig()
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(
+        _get_stepper(["a", "b"], ["a", "b"], ocean_config=OceanConfig("b", "mask"))
+    )
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
@@ -1021,7 +969,7 @@ def _get_stepper(
     norm_mean: float = 0.0,
     derived_forcings: DerivedForcingsConfig | None = None,
     **kwargs,
-):
+) -> Stepper:
     if module_name == "AddOne":
 
         class AddOne(torch.nn.Module):
