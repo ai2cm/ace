@@ -1499,7 +1499,6 @@ class TrainStepper(
         Args:
             stepper: The underlying stepper for inference operations.
             config: Training-specific configuration.
-            loss_obj: The loss function object for training.
         """
         self._stepper = stepper
         self._config = config
@@ -1510,6 +1509,10 @@ class TrainStepper(
             self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
 
         self._epoch: int | None = None  # to keep track of cached values
+
+        self._prognostic_names = self._stepper.prognostic_names
+        self._derive_func = self._stepper.derive_func
+        self._loss_obj = self._stepper.loss_obj
 
     def train_on_batch(
         self,
@@ -1539,7 +1542,7 @@ class TrainStepper(
         """
         self._init_for_epoch(data.epoch)
         metrics: dict[str, float] = {}
-        input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
+        input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         target_data = self._stepper.get_forward_data(
             data, compute_derived_variables=False
         )
@@ -1568,7 +1571,7 @@ class TrainStepper(
             target_data=add_ensemble_dim(target_data.data),
             time=target_data.time,
             normalize=self.normalizer.normalize,
-            derive_func=self.derive_func,
+            derive_func=self._derive_func,
         )
         ic = data.get_start(
             set(data.data.keys()), self.n_ic_timesteps
@@ -1587,7 +1590,7 @@ class TrainStepper(
         optimization: OptimizationABC,
         metrics: dict[str, float],
     ) -> list[EnsembleTensorDict]:
-        input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
+        input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
         n_ensemble = self._config.n_ensemble
@@ -1639,7 +1642,7 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self.loss_obj(gen_step, target_step, step=step)
+                step_loss = self._loss_obj(gen_step, target_step, step=step)
                 metrics[f"loss_step_{step}"] = step_loss.detach()
             if optimize_step:
                 optimization.accumulate_loss(step_loss)
@@ -1673,24 +1676,12 @@ class TrainStepper(
         return self._stepper.n_ic_timesteps
 
     @property
-    def prognostic_names(self) -> list[str]:
-        return self._stepper.prognostic_names
-
-    @property
     def normalizer(self):
         return self._stepper.normalizer
 
     @property
     def loss_names(self) -> list[str]:
         return self._stepper.loss_names
-
-    @property
-    def derive_func(self):
-        return self._stepper.derive_func
-
-    @property
-    def training_history(self) -> TrainingHistory:
-        return self._stepper.training_history
 
     def predict_paired(
         self,
@@ -1701,10 +1692,6 @@ class TrainStepper(
         return self._stepper.predict_paired(
             initial_condition, forcing, compute_derived_variables
         )
-
-    @property
-    def loss_obj(self) -> StepLoss:
-        return self._stepper.loss_obj
 
     @property
     def effective_loss_scaling(self) -> TensorDict:
