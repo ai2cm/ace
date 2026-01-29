@@ -7,7 +7,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
+N_GPUS=8
 
 cd "$REPO_ROOT"
 
@@ -28,10 +28,10 @@ run_training() {
     --name "$job_name" \
     --description 'Run ACE training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority high \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
-    --cluster ai2/titan \
+    --cluster ai2/jupiter \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -52,7 +52,7 @@ run_training() {
 
 base_name="ace2s"
 
-run_training "pretrain-1-step-era5.yaml" "$base_name-1-step-pre-training-era5-only-rs0"
+run_training "pretrain-1-step-era5-e2c8.yaml" "$base_name-1-step-pre-training-era5-only-e2c8-es-reweight-rs0"
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # train-x-shield-multi-step-fine-tuning.yaml then uncomment next line
 # run_training "train-x-shield-multi-step-fine-tuning.yaml" "$base_name-multi-step-fine-tuning-x-shield-only-rs0"
