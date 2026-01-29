@@ -19,6 +19,7 @@ class ModuleConfig(Protocol):
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_amp_bf16: bool = False,
     ) -> torch.nn.Module: ...
 
 
@@ -33,6 +34,7 @@ class PreBuiltBuilder:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_amp_bf16: bool = False,
     ) -> torch.nn.Module:
         return self.module
 
@@ -61,6 +63,7 @@ class UNetDiffusionSong:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_amp_bf16: bool = False,
     ):
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
         # number of input channels = latents (num desired outputs) + conditioning fields
@@ -87,6 +90,7 @@ class UNetDiffusionSong:
                 unet,
                 sigma_data=sigma_data,
             ),
+            use_amp_bf16=use_amp_bf16,
         )
 
 
@@ -122,6 +126,7 @@ class DiffusionModuleRegistrySelector:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_amp_bf16: bool = False,
     ) -> torch.nn.Module:
         return dacite.from_dict(
             data_class=NET_REGISTRY[self.type],
@@ -133,6 +138,7 @@ class DiffusionModuleRegistrySelector:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
+            use_amp_bf16=use_amp_bf16,
         )
 
 
