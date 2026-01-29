@@ -32,7 +32,7 @@ class LoRAConv2d(nn.Conv2d):
         padding_mode: str = "zeros",
         device=None,
         dtype=None,
-        scale_init: float = 1.0,
+        zero_init: bool = False,
         *,
         lora_rank: int = 0,
         lora_alpha: float | None = None,
@@ -41,7 +41,7 @@ class LoRAConv2d(nn.Conv2d):
         factory_kwargs = {"device": device, "dtype": dtype}
         self.lora_down: nn.Conv2d | None = None
         self.lora_up: nn.Conv2d | None = None
-        self.scale_init = scale_init
+        self.zero_init = zero_init
         super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -114,7 +114,8 @@ class LoRAConv2d(nn.Conv2d):
 
     def reset_parameters(self) -> None:
         super().reset_parameters()
-        self.weight *= self.scale_init
+        if self.zero_init:
+            torch.nn.init.zeros_(self.weight)
         self.reset_lora_parameters()
 
     def reset_lora_parameters(self):

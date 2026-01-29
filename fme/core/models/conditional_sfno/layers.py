@@ -367,7 +367,7 @@ class MLP(nn.Module):
             bias=output_bias,
             lora_rank=lora_rank,
             lora_alpha=lora_alpha,
-            scale_init=0.0,
+            zero_init=True,
         )
         if drop_rate > 0.0:
             drop = nn.Dropout(drop_rate)
