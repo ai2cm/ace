@@ -179,7 +179,8 @@ class TrainConfig:
         weather_evaluation: Configuration for weather evaluation.
             If None, no weather evaluation is run. Weather evaluation is not
             used to select checkpoints, but is used to provide metrics.
-        n_forward_steps: Number of forward steps during training.
+        n_forward_steps: Number of forward steps during training. Cannot be given
+            at the same time as train_n_forward_steps in StepperConfig.
         train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
