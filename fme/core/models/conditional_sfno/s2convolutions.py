@@ -15,6 +15,7 @@
 # limitations under the License.
 
 # import FactorizedTensor from tensorly for tensorized operations
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -122,14 +123,18 @@ class SpectralConvS2(nn.Module):
                 "Currently only in_channels == out_channels is supported."
             )
 
-        if scale == "auto":
-            scale = 1 / (in_channels * out_channels)
-
         self.forward_transform = forward_transform
         self.inverse_transform = inverse_transform
 
         self.modes_lat = self.inverse_transform.lmax
         self.modes_lon = self.inverse_transform.mmax
+
+        if scale == "auto":
+            scale = math.sqrt(1 / (in_channels)) * torch.ones(
+                self.modes_lat, dtype=torch.complex64
+            )
+            # seemingly the first weight is not really complex, so we need to account for that
+            scale[0] *= math.sqrt(2.0)
 
         self._round_trip_residual = filter_residual or (
             (self.forward_transform.nlat != self.inverse_transform.nlat)
