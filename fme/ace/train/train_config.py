@@ -339,9 +339,11 @@ class TrainBuilders:
         self.config = config
 
     def _get_train_window_data_requirements(self) -> DataRequirements:
-        return self.config.train_stepper.get_train_window_data_requirements(
-            stepper_config=self.config.stepper,
+        n_forward_steps = self.config.train_stepper.get_n_forward_steps(
             default_n_forward_steps=self.config.n_forward_steps,
+        )
+        return self.config.stepper.get_evaluation_window_data_requirements(
+            n_forward_steps
         )
 
     def _get_evaluation_window_data_requirements(self) -> DataRequirements:

@@ -539,29 +539,8 @@ class StepperConfig:
     def n_ic_timesteps(self) -> int:
         return self.step.n_ic_timesteps
 
-    def get_train_window_data_requirements(
-        self,
-        default_n_forward_steps: int | None,
-    ) -> DataRequirements:
-        if self.train_n_forward_steps is None:
-            if default_n_forward_steps is None:
-                raise ValueError(
-                    "default_n_forward_steps is required if "
-                    "train_n_forward_steps is not provided"
-                )
-            n_forward_steps: int | IntSchedule = default_n_forward_steps
-        elif isinstance(self.train_n_forward_steps, int):
-            n_forward_steps = self.train_n_forward_steps
-        else:
-            n_forward_steps = self.train_n_forward_steps.max_n_forward_steps
-        requirements = DataRequirements(
-            names=self.all_names,
-            n_timesteps=self._window_steps_required(n_forward_steps),
-        )
-        return self.derived_forcings.update_requirements(requirements)
-
     def get_evaluation_window_data_requirements(
-        self, n_forward_steps: int
+        self, n_forward_steps: int | IntSchedule
     ) -> DataRequirements:
         requirements = DataRequirements(
             names=self.all_names,
@@ -1450,18 +1429,19 @@ class TrainStepperConfig:
             return self.train_n_forward_steps
         return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
 
-    def get_train_window_data_requirements(
+    def get_n_forward_steps(
         self,
-        stepper_config: StepperConfig,
         default_n_forward_steps: int | None = None,
-    ) -> DataRequirements:
+    ) -> int | IntSchedule:
         """
-        Get data requirements for training windows.
+        Get the effective n_forward_steps for training.
 
         Args:
-            stepper_config: The stepper configuration to get names and properties from.
             default_n_forward_steps: Default number of forward steps if
                 train_n_forward_steps is not provided.
+
+        Returns:
+            The number of forward steps to use for training data requirements.
         """
         if self.train_n_forward_steps is None:
             if default_n_forward_steps is None:
@@ -1469,22 +1449,11 @@ class TrainStepperConfig:
                     "default_n_forward_steps is required if "
                     "train_n_forward_steps is not provided"
                 )
-            n_forward_steps: int | IntSchedule = default_n_forward_steps
+            return default_n_forward_steps
         elif isinstance(self.train_n_forward_steps, int):
-            n_forward_steps = self.train_n_forward_steps
+            return self.train_n_forward_steps
         else:
-            n_forward_steps = self.train_n_forward_steps.max_n_forward_steps
-        n_ic_timesteps = stepper_config.n_ic_timesteps
-        n_timesteps: int | IntSchedule
-        if isinstance(n_forward_steps, IntSchedule):
-            n_timesteps = n_forward_steps.add(n_ic_timesteps)
-        else:
-            n_timesteps = n_forward_steps + n_ic_timesteps
-        requirements = DataRequirements(
-            names=stepper_config.all_names,
-            n_timesteps=n_timesteps,
-        )
-        return stepper_config.derived_forcings.update_requirements(requirements)
+            return self.train_n_forward_steps.max_n_forward_steps
 
     def get_train_stepper(self, stepper: Stepper) -> "TrainStepper":
         """
