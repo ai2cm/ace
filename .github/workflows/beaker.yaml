@@ -43,7 +43,7 @@ jobs:
 
       - name: ACE evaluator beaker job
         run: |
-          gantry run \
+          exec gantry run \
             --show-logs \
             --name ${{ env.JOB_NAME }} \
             --task-name ${{ env.JOB_NAME }} \
