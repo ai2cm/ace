@@ -23,18 +23,7 @@ FD = TypeVar("FD")  # forcing data
 SD = TypeVar("SD")  # stepped data
 
 
-class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
-    SelfType = TypeVar("SelfType", bound="TrainStepperABC")
-
-    @abc.abstractmethod
-    def train_on_batch(
-        self,
-        data: BD,
-        optimization: OptimizationABC,
-        compute_derived_variables: bool = False,
-    ) -> TO:
-        pass
-
+class StepperABC(abc.ABC, Generic[PS, BD, FD, SD]):
     @property
     @abc.abstractmethod
     def modules(self) -> nn.ModuleList:
@@ -46,11 +35,6 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
 
     @abc.abstractmethod
     def load_state(self, state: dict[str, Any]) -> None:
-        pass
-
-    @classmethod
-    @abc.abstractmethod
-    def from_state(cls: type[SelfType], state: dict[str, Any]) -> SelfType:
         pass
 
     @property
@@ -73,4 +57,17 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
 
     @abc.abstractmethod
     def update_training_history(self, training_job: TrainingJob) -> None:
+        pass
+
+
+class TrainStepperABC(StepperABC, Generic[PS, BD, FD, SD, TO]):
+    SelfType = TypeVar("SelfType", bound="TrainStepperABC")
+
+    @abc.abstractmethod
+    def train_on_batch(
+        self,
+        data: BD,
+        optimization: OptimizationABC,
+        compute_derived_variables: bool = False,
+    ) -> TO:
         pass

@@ -41,7 +41,7 @@ from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.generics.train_stepper import StepperABC, TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
@@ -810,12 +810,11 @@ def probabilities_from_time_length(value: TimeLength) -> TimeLengthProbabilities
 
 
 class Stepper(
-    TrainStepperABC[
+    StepperABC[
         PrognosticState,
         BatchData,
         BatchData,
         PairedData,
-        TrainOutput,
     ]
 ):
     """
@@ -1307,22 +1306,6 @@ class Stepper(
     def _get_regularizer_loss(self) -> torch.Tensor:
         return self._l2_sp_tuning_regularizer() + self._step_obj.get_regularizer_loss()
 
-    def train_on_batch(
-        self,
-        data: BatchData,
-        optimization: OptimizationABC,
-        compute_derived_variables: bool = False,
-    ) -> TrainOutput:
-        """
-        Train the model on a batch of data with one or more forward steps.
-
-        Note: This method raises NotImplementedError. Use TrainStepper for training.
-        The Stepper class provides inference functionality only.
-        """
-        raise NotImplementedError(
-            "Stepper.train_on_batch is not implemented. Use TrainStepper for training."
-        )
-
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
         Update the stepper's history of training jobs.
@@ -1707,15 +1690,6 @@ class TrainStepper(
     def load_state(self, state: dict[str, Any]) -> None:
         self._stepper.load_state(state)
 
-    @classmethod
-    def from_state(cls, state: dict[str, Any]) -> "TrainStepper":
-        # NOTE: This method is primarily for interface compliance.
-        # In practice, TrainStepper is created via TrainConfig.get_stepper()
-        raise NotImplementedError(
-            "TrainStepper.from_state is not directly supported. "
-            "Use TrainConfig to create a TrainStepper from a checkpoint."
-        )
-
     def get_base_weights(self):
         """Get the base weights of the underlying stepper."""
         return self._stepper.get_base_weights()
@@ -1747,20 +1721,6 @@ class TrainStepper(
     @property
     def training_history(self) -> TrainingHistory:
         return self._stepper.training_history
-
-    def predict(
-        self,
-        initial_condition: PrognosticState,
-        forcing: BatchData,
-        compute_derived_variables: bool = False,
-        compute_derived_forcings: bool = True,
-    ) -> tuple[BatchData, PrognosticState]:
-        return self._stepper.predict(
-            initial_condition,
-            forcing,
-            compute_derived_variables,
-            compute_derived_forcings,
-        )
 
     def predict_paired(
         self,
