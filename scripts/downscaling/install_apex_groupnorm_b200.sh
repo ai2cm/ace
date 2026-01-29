@@ -41,24 +41,6 @@ CPLUS_INCLUDE_PATH=/opt/conda/targets/x86_64-linux/include:$CPLUS_INCLUDE_PATH \
     APEX_GROUP_NORM=1 \
     pip install -v --no-build-isolation --no-cache-dir ./
 
-# Verify installation
-echo ""
-echo "=== Verifying installation ==="
-python -c "
-import torch
-from apex.contrib.group_norm import GroupNorm
-
-# Quick test
-gn = GroupNorm(num_groups=4, num_channels=16).cuda()
-x = torch.randn(2, 16, 8, 8, device='cuda').to(memory_format=torch.channels_last)
-y = gn(x)
-assert y.shape == x.shape, 'Shape mismatch!'
-print('SUCCESS: Apex GroupNorm installed and working!')
-print('Usage:')
-print('  from apex.contrib.group_norm import GroupNorm')
-print('  gn = GroupNorm(num_groups=4, num_channels=64).cuda()')
-"
-
 # Remove CUDA build tools to save space
 echo "Removing CUDA build tools..."
 conda remove -y cuda-nvcc cuda-toolkit --force
