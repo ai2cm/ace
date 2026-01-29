@@ -27,8 +27,11 @@ if [ -d "$INSTALL_DIR" ]; then
     echo "Directory exists, removing..."
     rm -rf "$INSTALL_DIR"
 fi
-git clone --depth 1 https://github.com/NVIDIA/apex.git "$INSTALL_DIR"
+APEX_COMMIT="3c57b14c042a89957de51a1f476472fa6ec1e46a"
+git init "$INSTALL_DIR"
 cd "$INSTALL_DIR"
+git fetch --depth 1 https://github.com/NVIDIA/apex.git "$APEX_COMMIT"
+git checkout FETCH_HEAD
 
 # Fix missing <tuple> include in group_norm_v2 (required for std::make_tuple, std::get)
 sed -i '1a #include <tuple>' apex/contrib/csrc/group_norm_v2/gn_cuda_host_template.cuh
