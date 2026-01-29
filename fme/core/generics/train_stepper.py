@@ -23,7 +23,25 @@ FD = TypeVar("FD")  # forcing data
 SD = TypeVar("SD")  # stepped data
 
 
-class StepperABC(abc.ABC, Generic[PS, BD, FD, SD]):
+class StepperABC(abc.ABC, Generic[PS, FD, SD]):
+    @property
+    @abc.abstractmethod
+    def predict_paired(self) -> PredictFunction[PS, FD, SD]:
+        pass
+
+
+class TrainStepperABC(StepperABC[PS, FD, SD], Generic[PS, BD, FD, SD, TO]):
+    SelfType = TypeVar("SelfType", bound="TrainStepperABC")
+
+    @abc.abstractmethod
+    def train_on_batch(
+        self,
+        data: BD,
+        optimization: OptimizationABC,
+        compute_derived_variables: bool = False,
+    ) -> TO:
+        pass
+
     @property
     @abc.abstractmethod
     def modules(self) -> nn.ModuleList:
@@ -37,16 +55,6 @@ class StepperABC(abc.ABC, Generic[PS, BD, FD, SD]):
     def load_state(self, state: dict[str, Any]) -> None:
         pass
 
-    @property
-    @abc.abstractmethod
-    def n_ic_timesteps(self) -> int:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def predict_paired(self) -> PredictFunction[PS, FD, SD]:
-        pass
-
     @abc.abstractmethod
     def set_eval(self) -> None:
         pass
@@ -57,17 +65,4 @@ class StepperABC(abc.ABC, Generic[PS, BD, FD, SD]):
 
     @abc.abstractmethod
     def update_training_history(self, training_job: TrainingJob) -> None:
-        pass
-
-
-class TrainStepperABC(StepperABC, Generic[PS, BD, FD, SD, TO]):
-    SelfType = TypeVar("SelfType", bound="TrainStepperABC")
-
-    @abc.abstractmethod
-    def train_on_batch(
-        self,
-        data: BD,
-        optimization: OptimizationABC,
-        compute_derived_variables: bool = False,
-    ) -> TO:
         pass

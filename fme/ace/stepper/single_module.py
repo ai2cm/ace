@@ -813,7 +813,6 @@ class Stepper(
     StepperABC[
         PrognosticState,
         BatchData,
-        BatchData,
         PairedData,
     ]
 ):
@@ -890,13 +889,7 @@ class Stepper(
             base_training_history=self._parameter_initializer.training_history
         )
 
-        _1: PredictFunction[  # for type checking
-            PrognosticState,
-            BatchData,
-            BatchData,
-        ] = self.predict
-
-        _2: PredictFunction[  # for type checking
+        _: PredictFunction[  # for type checking
             PrognosticState,
             BatchData,
             PairedData,
