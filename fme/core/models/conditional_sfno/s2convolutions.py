@@ -88,7 +88,7 @@ class SpectralConvS2(nn.Module):
         inverse_transform,
         in_channels,
         out_channels,
-        scale="auto",
+        scale="zero",
         operator_type="diagonal",
         rank=0.2,
         factorization=None,
@@ -133,6 +133,8 @@ class SpectralConvS2(nn.Module):
             scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 2)
             # seemingly the first weight is not really complex, so we need to account for that
             scale[0, :] *= math.sqrt(2.0)
+        elif scale == "zero":
+            scale = torch.zeros(self.modes_lat, 2)
 
         self._round_trip_residual = filter_residual or (
             (self.forward_transform.nlat != self.inverse_transform.nlat)

@@ -32,6 +32,7 @@ class LoRAConv2d(nn.Conv2d):
         padding_mode: str = "zeros",
         device=None,
         dtype=None,
+        scale_init: float = 1.0,
         *,
         lora_rank: int = 0,
         lora_alpha: float | None = None,
@@ -108,10 +109,13 @@ class LoRAConv2d(nn.Conv2d):
         else:
             self.lora_dropout = nn.Identity()
             self.lora_scaling = 0.0
+        self.scale_init = scale_init
+        self.weight *= self.scale_init
         self.reset_lora_parameters()  # base parameters already reset in super init
 
     def reset_parameters(self) -> None:
         super().reset_parameters()
+        self.weight *= self.scale_init
         self.reset_lora_parameters()
 
     def reset_lora_parameters(self):
