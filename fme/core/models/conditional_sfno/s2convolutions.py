@@ -218,7 +218,7 @@ class SpectralConvS2(nn.Module):
         x = x.float()
 
         with torch.amp.autocast("cuda", enabled=False):
-            x = self.forward_transform(x)
+            x = self.forward_transform(x.float())
             if self._round_trip_residual:
                 x = x.contiguous()
                 residual = self.inverse_transform(x)

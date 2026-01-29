@@ -284,6 +284,7 @@ class FourierNeuralOperatorBlock(nn.Module):
                 hidden_features=mlp_hidden_dim,
                 act_layer=act_layer,
                 drop_rate=drop_rate,
+                checkpointing=checkpointing,
                 lora_rank=lora_rank,
                 lora_alpha=lora_alpha,
             )

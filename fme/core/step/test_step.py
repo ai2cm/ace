@@ -24,6 +24,7 @@ from fme.core.normalizer import NetworkAndLossNormalizationConfig, Normalization
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
+from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
@@ -167,7 +168,11 @@ def get_single_module_noise_conditioned_selector(
                     ),
                 ),
                 in_names=["forcing_shared", "forcing_rad"],
-                out_names=["diagnostic_main", "diagnostic_rad"],
+                out_names=["diagnostic_main"],
+                secondary_decoder=SecondaryDecoderConfig(
+                    secondary_diagnostic_names=["diagnostic_rad"],
+                    network=ModuleSelector(type="MLP", config={}),
+                ),
                 normalization=normalization,
             ),
         ),
@@ -613,3 +618,38 @@ def test_load_is_required_for_path_config(
     img_shape = DEFAULT_IMG_SHAPE
     with pytest.raises(FileNotFoundError):
         get_step(config, img_shape)
+
+
+@pytest.mark.parametrize(
+    ["conflict"],
+    [
+        pytest.param(
+            "output",
+            id="conflict_with_output",
+        ),
+        pytest.param(
+            "input",
+            id="conflict_with_input",
+        ),
+    ],
+)
+def test_input_output_names_secondary_decoder_conflict(conflict: str):
+    input_names = ["input"]
+    output_names = ["output"]
+    secondary_decoder_names = [conflict]
+    normalization = get_network_and_loss_normalization_config(
+        names=input_names + output_names + secondary_decoder_names,
+        dir=None,
+    )
+    with pytest.raises(ValueError) as err:
+        SingleModuleStepConfig(
+            normalization=normalization,
+            in_names=input_names,
+            out_names=output_names,
+            builder=ModuleSelector(type="MLP", config={}),
+            secondary_decoder=SecondaryDecoderConfig(
+                secondary_diagnostic_names=secondary_decoder_names,
+                network=ModuleSelector(type="MLP", config={}),
+            ),
+        )
+    assert f"secondary_diagnostic_name is an {conflict} variable:" in str(err.value)
