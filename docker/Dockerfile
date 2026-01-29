@@ -55,6 +55,13 @@ COPY scripts/ci_beaker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
 
+FROM deps-only AS deps-only-apex
+
+COPY scripts/downscaling/install_apex_groupnorm.sh /tmp/install_apex_groupnorm.sh
+RUN chmod +x /tmp/install_apex_groupnorm.sh && /tmp/install_apex_groupnorm.sh && rm /tmp/install_apex_groupnorm.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+
 FROM deps-only AS nsight
 
 ENV DEBIAN_FRONTEND=noninteractive
