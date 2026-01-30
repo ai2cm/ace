@@ -34,7 +34,7 @@ class PreBuiltBuilder:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
-        use_channels_last: bool = True,
+        use_channels_last: bool = False,
         use_amp_bf16: bool = False,
     ) -> torch.nn.Module:
         return self.module
@@ -87,7 +87,7 @@ class UNetDiffusionSong:
             decoder_type=self.decoder_type,
             resample_filter=self.resample_filter,
         )
-        module = UNetDiffusionModule(
+        return UNetDiffusionModule(
             EDMPrecond(
                 unet,
                 sigma_data=sigma_data,
@@ -95,7 +95,6 @@ class UNetDiffusionSong:
             use_amp_bf16=use_amp_bf16,
             use_channels_last=False,
         )
-        return module
 
 
 class UNetDiffusionSongv2:
@@ -171,9 +170,11 @@ class DiffusionModuleRegistrySelector:
         expects_interpolated_input: whether the model expects interpolated input
             to the target resolution
         use_channels_last: whether to use channels_last memory format for the model
-            and forward pass inputs. This can provide 15-25% speedup on modern
+            and forward pass inputs. This can provide a speedup on modern
             NVIDIA GPUs (H100, B200) by optimizing memory layout for Tensor Cores.
+            Only supported for SongUNetv2. Other models will ignore this flag.
         use_amp_bf16: whether to use automatic mixed precision with bfloat16
+            during forward pass.
     """
 
     type: str
