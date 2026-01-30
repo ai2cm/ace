@@ -27,6 +27,7 @@ from fme.ace.requirements import (
 from fme.ace.stepper import Stepper
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import ResumeResultsConfig
+from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
@@ -173,7 +174,8 @@ class TrainConfig:
             are saved regardless of other checkpoint configuration settings. If
             true, checkpoints are saved at the end of the training loop, after
             evaluation, and on catching a termination signal.
-        experiment_dir: Directory where checkpoints and logs are saved.
+        experiment_dir: Directory where checkpoints and logs are saved. For the
+            time being, this must be a local directory.
         inference: Configuration for inline inference.
             If None, no inline inference is run,
             and no "best_inline_inference" checkpoint will be saved.
@@ -286,6 +288,11 @@ class TrainConfig:
             raise ValueError(
                 "train_loader and weather_evaluation loader must both use labels or "
                 "both not use labels"
+            )
+        if not is_local(self.experiment_dir):
+            raise ValueError(
+                f"During training, experiment_dir must currently be a local "
+                f"directory, got {self.experiment_dir!r}."
             )
 
     def set_random_seed(self):
