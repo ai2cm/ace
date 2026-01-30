@@ -69,7 +69,7 @@ from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
 from fme.core.generics.metrics_aggregator import MetricsAggregator
-from fme.core.generics.stepper import TrainOutputABC, TrainStepperABC
+from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingJob

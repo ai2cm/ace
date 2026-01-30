@@ -32,7 +32,7 @@ from fme.ace.stepper.single_module import (
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.generics.stepper import TrainOutputABC, TrainStepperABC
+from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OceanData
 from fme.core.optimization import NullOptimization

@@ -32,7 +32,7 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.generics.stepper import TrainStepperABC
+from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.models.conditional_sfno.layers import Context
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
