@@ -1507,7 +1507,7 @@ def test_load_stepper_and_load_stepper_config(
     validate_stepper_ocean(stepper, expected_ocean_config)
     validate_stepper_multi_call(stepper, expected_multi_call_config)
     assert stepper.config.derived_forcings == expected_derived_forcings_config
-    assert isinstance(stepper._forcing_deriver, ForcingDeriver)
+    assert isinstance(stepper.forcing_deriver, ForcingDeriver)
 
 
 def get_regression_stepper_and_data(

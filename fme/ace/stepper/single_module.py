@@ -875,7 +875,7 @@ class Stepper(
         ] = self.predict_paired
 
         self._dataset_info = dataset_info
-        self._forcing_deriver = config.derived_forcings.build(dataset_info)
+        self.forcing_deriver = config.derived_forcings.build(dataset_info)
 
     @property
     def loss_obj(self) -> StepLoss:
@@ -991,7 +991,7 @@ class Stepper(
             derived_forcings: The new derived forcings configuration or None.
         """
         self._config.replace_derived_forcings(derived_forcings)
-        self._forcing_deriver = derived_forcings.build(self._dataset_info)
+        self.forcing_deriver = derived_forcings.build(self._dataset_info)
 
     def get_base_weights(self) -> Weights | None:
         """
@@ -1082,7 +1082,7 @@ class Stepper(
             )
         ic_dict = ic_batch_data.data
         forcing_dict = forcing_data.data
-        return self._predict_generator(
+        return self.predict_generator(
             ic_dict, forcing_dict, n_forward_steps, optimizer, forcing_data.labels
         )
 
@@ -1092,7 +1092,7 @@ class Stepper(
             set(self._step_obj.input_names).difference(set(self._step_obj.output_names))
         )
 
-    def _predict_generator(
+    def predict_generator(
         self,
         ic_dict: TensorMapping,
         forcing_dict: TensorMapping,
@@ -1165,7 +1165,7 @@ class Stepper(
         )
 
         if compute_derived_forcings:
-            forcing = self._forcing_deriver(forcing)
+            forcing = self.forcing_deriver(forcing)
 
         if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
             forcing = forcing.broadcast_ensemble(
@@ -1240,7 +1240,7 @@ class Stepper(
             all target/forcing data at the same timesteps, and 2) the prediction's
             final state, which can be used as a new initial condition.
         """
-        forcing = self._forcing_deriver(forcing)
+        forcing = self.forcing_deriver(forcing)
         prediction, new_initial_condition = self.predict(
             initial_condition,
             forcing,
@@ -1275,7 +1275,7 @@ class Stepper(
                 )
         return data.remove_initial_condition(self.n_ic_timesteps)
 
-    def _get_regularizer_loss(self) -> torch.Tensor:
+    def get_regularizer_loss(self) -> torch.Tensor:
         return self._l2_sp_tuning_regularizer() + self._step_obj.get_regularizer_loss()
 
     def update_training_history(self, training_job: TrainingJob) -> None:
@@ -1546,7 +1546,7 @@ class TrainStepper(
         target_data = self._stepper.get_forward_data(
             data, compute_derived_variables=False
         )
-        data = self._stepper._forcing_deriver(data)
+        data = self._stepper.forcing_deriver(data)
 
         optimization.set_mode(self._stepper.modules)
         output_list = self._accumulate_loss(
@@ -1557,7 +1557,7 @@ class TrainStepper(
             metrics,
         )
 
-        regularizer_loss = self._stepper._get_regularizer_loss()
+        regularizer_loss = self._stepper.get_regularizer_loss()
         if torch.any(regularizer_loss > 0):
             optimization.accumulate_loss(regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
@@ -1602,7 +1602,7 @@ class TrainStepper(
             )
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
-        output_generator = self._stepper._predict_generator(
+        output_generator = self._stepper.predict_generator(
             input_ensemble_data.data,
             forcing_ensemble_data.data,
             n_forward_steps,
