@@ -154,7 +154,6 @@ class DiffusionModelConfig:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
-            use_amp_bf16=self.use_amp_bf16,
         )
 
         return DiffusionModel(

@@ -1,14 +1,12 @@
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import dacite
 import torch
 
-from fme.downscaling.modules.preconditioners import EDMPrecond
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
-from fme.downscaling.modules.unets import SongUNet
-from fme.downscaling.modules.unets_v2 import SongUNetv2
+from fme.downscaling.modules.vendorized import EDMPrecond, SongUNet, SongUNetv2
 
 
 # TODO: Look into why we need to take in coarse and not target shape
@@ -66,7 +64,7 @@ class UNetDiffusionSong:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
-        use_channels_last: bool = True,
+        use_channels_last: bool = False,
         use_amp_bf16: bool = False,
     ):
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
@@ -94,12 +92,28 @@ class UNetDiffusionSong:
                 unet,
                 sigma_data=sigma_data,
             ),
+            use_amp_bf16=use_amp_bf16,
             use_channels_last=False,
         )
         return module
 
 
-class UNetDiffusionSongv2(UNetDiffusionSong):
+class UNetDiffusionSongv2:
+    model_channels: int = 128
+    channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 2, 2])
+
+    channel_mult_emb: int = 4
+    num_blocks: int = 4
+    attn_resolutions: list[int] = dataclasses.field(default_factory=lambda: [16])
+    dropout: float = 0.10
+    label_dropout: int = 0
+
+    embedding_type: Literal["fourier", "positional", "zero"] = "positional"
+    channel_mult_noise: int = 1
+    encoder_type: Literal["standard", "skip", "residual"] = "standard"
+    decoder_type: Literal["standard", "skip"] = "standard"
+    resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+
     use_apex_gn = True
 
     def build(
@@ -110,7 +124,7 @@ class UNetDiffusionSongv2(UNetDiffusionSong):
         downscale_factor: int,
         sigma_data: float,
         use_channels_last: bool = True,
-        use_amp_bf16: bool = False,
+        use_amp_bf16: bool = True,
     ):
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
         # number of input channels = latents (num desired outputs) + conditioning fields
@@ -139,6 +153,7 @@ class UNetDiffusionSongv2(UNetDiffusionSong):
                 sigma_data=sigma_data,
             ),
             use_channels_last=use_channels_last,
+            use_amp_bf16=use_amp_bf16,
         )
         if use_channels_last:
             module = module.to(memory_format=torch.channels_last)
@@ -158,12 +173,13 @@ class DiffusionModuleRegistrySelector:
         use_channels_last: whether to use channels_last memory format for the model
             and forward pass inputs. This can provide 15-25% speedup on modern
             NVIDIA GPUs (H100, B200) by optimizing memory layout for Tensor Cores.
+        use_amp_bf16: whether to use automatic mixed precision with bfloat16
     """
 
     type: str
     config: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     expects_interpolated_input: bool | None = None
-    use_channels_last: bool = True
+    use_channels_last: bool = False
     use_amp_bf16: bool = False
 
     def __post_init__(self):

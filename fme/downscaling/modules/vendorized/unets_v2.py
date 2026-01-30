@@ -1099,7 +1099,7 @@ class SongUNetv2(torch.nn.Module):
     profile_mode : bool, optional, default=False
         A flag indicating whether to enable all nvtx annotations during
         profiling.
-    amp_mode : bool, optional, default=False
+    amp_mode : bool, optional, default=True
         A flag indicating whether mixed-precision (AMP) training is enabled.
 
 
