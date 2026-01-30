@@ -42,7 +42,6 @@ build_nsight_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE)-nsight:$(VERSION) --target nsight .
 	beaker image create $(IMAGE)-nsight:$(VERSION) --name $(IMAGE)-nsight-$(VERSION) --workspace ai2/ace
 
-build_nsight_image:
 # recommended to deactivate current conda environment before running this
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME) python=3.11 $(CONDA_PACKAGES)
