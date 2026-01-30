@@ -462,11 +462,9 @@ def _force_conserve_total_energy(
     temperature_correction = energy_correction / energy_to_temp_factor_gm
 
     # apply same temperature correction to all vertical layers
-    n_levels = gen.air_temperature.shape[-1]
-    for k in range(n_levels):
-        name = f"{gen.air_temperature_prefix}{k}"
+    air_temperature_names = gen.get_all_vertical_level_names("air_temperature")
+    for name in air_temperature_names:
         gen.data[name] = gen.data[name] + temperature_correction
-
     # filter required here because we merged forcing data into gen above
     return {k: v for k, v in gen.data.items() if k in gen_data}
 
