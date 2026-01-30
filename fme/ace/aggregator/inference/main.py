@@ -139,6 +139,7 @@ class InferenceEvaluatorAggregatorConfig:
     log_global_mean_norm_time_series: bool = True
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
+    log_nino34_index: bool = True
 
     def build(
         self,
@@ -182,6 +183,7 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean_reference_data=time_mean,
             record_step_20=record_step_20,
             channel_mean_names=channel_mean_names,
+            log_nino34_index=self.log_nino34_index,
             normalize=normalize,
             save_diagnostics=save_diagnostics,
             n_ensemble_per_ic=n_ensemble_per_ic,

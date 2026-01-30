@@ -51,44 +51,28 @@ def test_inference_evaluator_aggregator_channel_mean_names(
     )
 
     target_data = {
-        "a": torch.ones(
-            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
-        ),
-        "b": torch.ones(
-            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
-        )
-        * 3,
-        "c": torch.ones(
-            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
-        )
-        * 4,
+        "a": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()),
+        "b": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 3,
+        "c": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 4,
     }
     gen_data = {
-        "a": torch.ones(
-            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
-        )
-        * 2.0,
-        "b": torch.ones(
-            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
-        )
-        * 5,
-        "c": torch.ones(
-            [batch_size * n_ensemble, n_timesteps, nx, ny], device=get_device()
-        )
-        * 6,
+        "a": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 2.0,
+        "b": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 5,
+        "c": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 6,
     }
 
     time = xr.DataArray(
         np.zeros((batch_size * n_ensemble, n_timesteps)), dims=["sample", "time"]
     )
 
-    paired_data = PairedData.new_on_device(
-        prediction=gen_data,
-        reference=target_data,
-        labels=None,
-        time=time,
-        n_ensemble=n_ensemble,
-    )
+    target_data = BatchData(data=target_data, time=time)
+    gen_data = BatchData(data=gen_data, time=time)
+
+    target_data = target_data.broadcast_ensemble(n_ensemble=n_ensemble)
+    gen_data = gen_data.broadcast_ensemble(n_ensemble=n_ensemble)
+
+    paired_data = PairedData.from_batch_data(prediction=gen_data, reference=target_data)
+
     agg.record_batch(paired_data)
 
     summary_logs = agg.get_summary_logs()
