@@ -77,6 +77,8 @@ while read RESUMING; do
     WORKSPACE=$(echo "$RESUMING" | cut -d"|" -f11)
     OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f12)
     EXISTING_RESULTS_DATASET=$(echo "$RESUMING" | cut -d"|" -f13)
+    EXISTING_RESULTS_OCEAN_DATASET=$(echo "$RESUMING" | cut -d"|" -f14)
+    EXISTING_RESULTS_ATMOS_DATASET=$(echo "$RESUMING" | cut -d"|" -f15)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -131,6 +133,20 @@ while read RESUMING; do
         --dataset "$EXISTING_RESULTS_DATASET:/existing-results"
         --dataset "$EXISTING_RESULTS_DATASET:training_checkpoints/ckpt.tar:/ckpt.tar"
     )
+
+    if [[ -n $EXISTING_RESULTS_ATMOS_DATASET ]]; then
+        # this is unused but necessary for resuming coupled_train.sh runs
+        CHECKPOINT_DATASET_ARGS+=(
+            --dataset "$EXISTING_RESULTS_ATMOS_DATASET:training_checkpoints/ckpt.tar:/atmos_ckpt.tar"
+        )
+    fi
+
+    if [[ -n $EXISTING_RESULTS_OCEAN_DATASET ]]; then
+        # this is unused but necessary for resuming coupled_train.sh runs
+        CHECKPOINT_DATASET_ARGS+=(
+            --dataset "$EXISTING_RESULTS_OCEAN_DATASET:training_checkpoints/ckpt.tar:/ocean_ckpt.tar"
+        )
+    fi
 
     # Set config path to use the one from existing results
     CONFIG_PATH="/existing-results/config.yaml"
