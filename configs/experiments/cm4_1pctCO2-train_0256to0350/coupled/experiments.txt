@@ -47,3 +47,5 @@ resume_wz9y7dbr-fto-1pctCO2_0256to0350|rs0|01KG32X38YXABBGR9MCSRG3EN2|training|b
 resume_berobv1i-fto-1pctCO2_0256to0350|rs0|01KG32X9YJ89TMSPHFQKYK6RYZ|training|best_inference_ckpt|normal|--not-preemptible
 
 resume_wz9y7dbr-fto-1pctCO2_0256to0350|rs0||training|best_inference_ckpt|normal|--not-preemptible
+
+resume_wz9y7dbr-fto-1pctCO2_0256to0350|rs0|01KG6FVCD39E05G1W608GANS2H|training|best_inference_ckpt|normal|--not-preemptible
