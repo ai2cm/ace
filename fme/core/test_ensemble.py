@@ -17,6 +17,8 @@ class CRPSExperiment:
 @pytest.mark.parametrize("alpha", [1.0, 0.95])
 def test_crps(n_ensemble: int, alpha: float):
     """
+    Test that get_crps is a proper scoring rule.
+
     Scoring rules that are proper are proven to have the lowest
     expected score if the predicted distribution equals the
     underlying distribution of the target variable. Note that
