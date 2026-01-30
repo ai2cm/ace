@@ -116,7 +116,7 @@ train_loader:
       - data_path: /climate-default/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/netcdfs/4xCO2-ic_0001
         labels: ["c96-shield"]
 
-      # #CM4 control and 1pctCO2 runs
+      # CM4 control and 1pctCO2 runs
       - data_path: /climate-default
         file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
         engine: zarr
@@ -220,6 +220,7 @@ stepper:
           embed_dim: 512
           noise_embed_dim: 64
           noise_type: isotropic
+          pos_embed: false
           context_pos_embed_dim: 32
           filter_type: linear
           use_mlp: true
@@ -229,6 +230,7 @@ stepper:
           spectral_layers: 3
           spectral_transform: sht
           normalize_big_skip: true
+          affine_norms: true
       normalization:
         network:
           global_means_path: /statsdata/centering.nc
