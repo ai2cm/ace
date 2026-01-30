@@ -401,7 +401,7 @@ def compute_ocean_fraction(
     land_fraction_name: str,
     sea_ice_fraction_name: str,
 ) -> xr.Dataset:
-    """Compute latent heat flux, if needed."""
+    """Compute ocean fraction, if needed."""
     if output_name in ds.data_vars:
         # if ocean_fraction is already computed, assume that NaNs have been handled
         return ds
