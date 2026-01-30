@@ -8,6 +8,7 @@ import torch
 from fme.downscaling.modules.preconditioners import EDMPrecond
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
 from fme.downscaling.modules.unets import SongUNet
+from fme.downscaling.modules.unets_v2 import SongUNetv2
 
 
 # TODO: Look into why we need to take in coarse and not target shape
@@ -19,6 +20,7 @@ class ModuleConfig(Protocol):
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_channels_last: bool = True,
         use_amp_bf16: bool = False,
     ) -> torch.nn.Module: ...
 
@@ -34,6 +36,7 @@ class PreBuiltBuilder:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_channels_last: bool = True,
         use_amp_bf16: bool = False,
     ) -> torch.nn.Module:
         return self.module
@@ -63,6 +66,7 @@ class UNetDiffusionSong:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        use_channels_last: bool = True,
         use_amp_bf16: bool = False,
     ):
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
@@ -85,13 +89,60 @@ class UNetDiffusionSong:
             decoder_type=self.decoder_type,
             resample_filter=self.resample_filter,
         )
-        return UNetDiffusionModule(
+        module = UNetDiffusionModule(
             EDMPrecond(
                 unet,
                 sigma_data=sigma_data,
             ),
-            use_amp_bf16=use_amp_bf16,
+            use_channels_last=False,
         )
+        return module
+
+
+class UNetDiffusionSongv2(UNetDiffusionSong):
+    use_apex_gn = True
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        coarse_shape: tuple[int, int],
+        downscale_factor: int,
+        sigma_data: float,
+        use_channels_last: bool = True,
+        use_amp_bf16: bool = False,
+    ):
+        target_height, target_width = [s * downscale_factor for s in coarse_shape]
+        # number of input channels = latents (num desired outputs) + conditioning fields
+        n_in_channels_conditioned = n_in_channels + n_out_channels
+        unet = SongUNetv2(
+            min(target_height, target_width),
+            n_in_channels_conditioned,
+            n_out_channels,
+            model_channels=self.model_channels,
+            channel_mult=self.channel_mult,
+            channel_mult_emb=self.channel_mult_emb,
+            num_blocks=self.num_blocks,
+            attn_resolutions=self.attn_resolutions,
+            dropout=self.dropout,
+            label_dropout=self.label_dropout,
+            embedding_type=self.embedding_type,
+            channel_mult_noise=self.channel_mult_noise,
+            encoder_type=self.encoder_type,
+            decoder_type=self.decoder_type,
+            resample_filter=self.resample_filter,
+            use_apex_gn=self.use_apex_gn,
+        )
+        module = UNetDiffusionModule(
+            EDMPrecond(
+                unet,
+                sigma_data=sigma_data,
+            ),
+            use_channels_last=use_channels_last,
+        )
+        if use_channels_last:
+            module = module.to(memory_format=torch.channels_last)
+        return module
 
 
 @dataclasses.dataclass
@@ -104,11 +155,16 @@ class DiffusionModuleRegistrySelector:
         config: configuration for the model architecture
         expects_interpolated_input: whether the model expects interpolated input
             to the target resolution
+        use_channels_last: whether to use channels_last memory format for the model
+            and forward pass inputs. This can provide 15-25% speedup on modern
+            NVIDIA GPUs (H100, B200) by optimizing memory layout for Tensor Cores.
     """
 
     type: str
     config: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     expects_interpolated_input: bool | None = None
+    use_channels_last: bool = True
+    use_amp_bf16: bool = False
 
     def __post_init__(self):
         if self.type == "prebuilt" and self.expects_interpolated_input is None:
@@ -126,7 +182,6 @@ class DiffusionModuleRegistrySelector:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
-        use_amp_bf16: bool = False,
     ) -> torch.nn.Module:
         return dacite.from_dict(
             data_class=NET_REGISTRY[self.type],
@@ -138,16 +193,19 @@ class DiffusionModuleRegistrySelector:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
-            use_amp_bf16=use_amp_bf16,
+            use_channels_last=self.use_channels_last,
+            use_amp_bf16=self.use_amp_bf16,
         )
 
 
 NET_REGISTRY: Mapping[str, type[ModuleConfig]] = {
     "unet_diffusion_song": UNetDiffusionSong,
+    "unet_diffusion_song_v2": UNetDiffusionSongv2,
     "prebuilt": PreBuiltBuilder,
 }
 
 
 EXPECTS_INTERPOLATED = {
     "unet_diffusion_song": True,
+    "unet_diffusion_song_v2": True,
 }
