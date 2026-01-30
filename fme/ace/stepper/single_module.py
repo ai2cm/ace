@@ -41,7 +41,7 @@ from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.generics.stepper import StepperABC, TrainOutputABC, TrainStepperABC
+from fme.core.generics.stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
@@ -788,13 +788,7 @@ def probabilities_from_time_length(value: TimeLength) -> TimeLengthProbabilities
         return TimeLengthProbabilities.from_constant(value)
 
 
-class Stepper(
-    StepperABC[
-        PrognosticState,
-        BatchData,
-        PairedData,
-    ]
-):
+class Stepper:
     """
     Stepper class for selectable step configurations.
     """

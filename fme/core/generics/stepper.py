@@ -3,7 +3,6 @@ from typing import Any, Generic, TypeVar
 
 from torch import nn
 
-from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import TensorDict
@@ -23,14 +22,7 @@ FD = TypeVar("FD")  # forcing data
 SD = TypeVar("SD")  # stepped data
 
 
-class StepperABC(abc.ABC, Generic[PS, FD, SD]):
-    @property
-    @abc.abstractmethod
-    def predict_paired(self) -> PredictFunction[PS, FD, SD]:
-        pass
-
-
-class TrainStepperABC(StepperABC[PS, FD, SD], Generic[PS, BD, FD, SD, TO]):
+class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     SelfType = TypeVar("SelfType", bound="TrainStepperABC")
 
     @abc.abstractmethod
@@ -40,6 +32,15 @@ class TrainStepperABC(StepperABC[PS, FD, SD], Generic[PS, BD, FD, SD, TO]):
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
     ) -> TO:
+        pass
+
+    @abc.abstractmethod
+    def predict_paired(
+        self,
+        initial_condition: PS,
+        forcing: FD,
+        compute_derived_variables: bool = False,
+    ) -> tuple[SD, PS]:
         pass
 
     @property
