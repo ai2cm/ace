@@ -31,7 +31,7 @@ run_training() {
     --workspace ai2/climate-titan \
     --priority urgent \
     --preemptible \
-    --cluster ai2/titan \
+    --cluster ai2/jupiter \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -44,6 +44,7 @@ run_training() {
     --weka climate-default:/climate-default \
     --budget ai2/climate \
     --system-python \
+    --allow-dirty \
     --install "pip install --no-deps ." \
     "${extra_args[@]}" \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"

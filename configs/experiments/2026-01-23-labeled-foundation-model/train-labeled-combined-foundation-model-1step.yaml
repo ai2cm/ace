@@ -60,12 +60,16 @@ train_loader:
           stop_time: '1998-12-31T18:00:00'
 
       # AMIP C96 SHiELD runs
-      - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0001
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/
+        file_pattern: ic_0001.zarr
+        engine: zarr
         labels: ["c96-shield"]
         subset:
           start_time: '1979-01-01'
           stop_time: '2020-12-31'
-      - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/
+        file_pattern: ic_0002.zarr
+        engine: zarr
         labels: ["c96-shield"]
         subset:
           start_time: '1979-01-01'
@@ -109,11 +113,17 @@ train_loader:
           start_time: "2020-01-01T06:00:00"
 
       # C96 SOM
-      - data_path: /climate-default/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/netcdfs/1xCO2-ic_0001
+      - data_path: /climate-default/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 1xCO2-ic_0001.zarr
+        engine: zarr
         labels: ["c96-shield"]
-      - data_path: /climate-default/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/netcdfs/2xCO2-ic_0001
+      - data_path: /climate-default/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 2xCO2-ic_0001.zarr
+        engine: zarr
         labels: ["c96-shield"]
-      - data_path: /climate-default/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/netcdfs/4xCO2-ic_0001
+      - data_path: /climate-default/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 4xCO2-ic_0001.zarr
+        engine: zarr
         labels: ["c96-shield"]
 
       # CM4 control and 1pctCO2 runs
