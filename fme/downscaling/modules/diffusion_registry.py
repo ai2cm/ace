@@ -8,6 +8,7 @@ import torch
 from fme.downscaling.modules.preconditioners import EDMPrecond
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
 from fme.downscaling.modules.unets import SongUNet
+from fme.downscaling.modules.unets_v2 import SongUNetv2
 
 
 # TODO: Look into why we need to take in coarse and not target shape
@@ -55,7 +56,47 @@ class UNetDiffusionSong:
     encoder_type: str = "standard"
     decoder_type: str = "standard"
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
-    use_apex_gn: bool = True
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        coarse_shape: tuple[int, int],
+        downscale_factor: int,
+        sigma_data: float,
+    ):
+        target_height, target_width = [s * downscale_factor for s in coarse_shape]
+        # number of input channels = latents (num desired outputs) + conditioning fields
+        n_in_channels_conditioned = n_in_channels + n_out_channels
+        unet = SongUNet(
+            min(target_height, target_width),
+            n_in_channels_conditioned,
+            n_out_channels,
+            model_channels=self.model_channels,
+            channel_mult=self.channel_mult,
+            channel_mult_emb=self.channel_mult_emb,
+            num_blocks=self.num_blocks,
+            attn_resolutions=self.attn_resolutions,
+            dropout=self.dropout,
+            label_dropout=self.label_dropout,
+            embedding_type=self.embedding_type,
+            channel_mult_noise=self.channel_mult_noise,
+            encoder_type=self.encoder_type,
+            decoder_type=self.decoder_type,
+            resample_filter=self.resample_filter,
+        )
+        module = UNetDiffusionModule(
+            EDMPrecond(
+                unet,
+                sigma_data=sigma_data,
+            ),
+            use_channels_last=False,
+        )
+        return module
+
+
+class UNetDiffusionSongv2(UNetDiffusionSong):
+    use_apex_gn = True
 
     def build(
         self,
@@ -69,7 +110,7 @@ class UNetDiffusionSong:
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
         # number of input channels = latents (num desired outputs) + conditioning fields
         n_in_channels_conditioned = n_in_channels + n_out_channels
-        unet = SongUNet(
+        unet = SongUNetv2(
             min(target_height, target_width),
             n_in_channels_conditioned,
             n_out_channels,
@@ -152,10 +193,12 @@ class DiffusionModuleRegistrySelector:
 
 NET_REGISTRY: Mapping[str, type[ModuleConfig]] = {
     "unet_diffusion_song": UNetDiffusionSong,
+    "unet_diffusion_song_v2": UNetDiffusionSongv2,
     "prebuilt": PreBuiltBuilder,
 }
 
 
 EXPECTS_INTERPOLATED = {
     "unet_diffusion_song": True,
+    "unet_diffusion_song_v2": True,
 }

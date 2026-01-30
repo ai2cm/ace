@@ -22,7 +22,7 @@ IMAGE=annak/fme-deps-only-apex-v2 #$(cat $REPO_ROOT/latest_deps_only_image.txt)
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km training global' \
-    --workspace ai2/ace \
+    --workspace ai2/climate-titan \
     --priority urgent \
     --preemptible \
     --cluster ai2/jupiter \

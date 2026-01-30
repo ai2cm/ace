@@ -44,7 +44,11 @@ cache-keys = [
 ]
 
 [tool.ruff]
-exclude = ["fme/ace/models/makani_fcn3/**"]
+exclude = [
+    "fme/ace/models/makani_fcn3/**",
+    "fme/downscaling/modules/group_norm.py",
+    "fme/downscaling/modules/unets_v2.py",
+]
 
 [tool.ruff.lint]
 select = ["D", "E", "F", "I", "W", "UP"]
@@ -61,6 +65,13 @@ convention = "google"
 [tool.ruff.lint.isort]
 split-on-trailing-comma = false
 known-third-party = ["wandb"]
+
+[[tool.mypy.overrides]]
+module = [
+    "fme.downscaling.modules.group_norm",
+    "fme.downscaling.modules.unets_v2",
+]
+ignore_errors = true
 
 [tool.coverage.run]
 branch = true
