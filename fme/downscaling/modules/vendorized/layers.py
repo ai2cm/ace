@@ -281,25 +281,15 @@ class Conv2d(torch.nn.Module):
             x = x.add_(b.reshape(1, -1, 1, 1))
         return x
 
-# Try to import Apex GroupNorm for optimized CUDA implementation
-try:
-    from apex.contrib.group_norm import GroupNorm as ApexGroupNorm
-    _HAS_APEX_GN = True
-except ImportError:
-    _HAS_APEX_GN = False
-
 
 class GroupNorm(torch.nn.Module):
     """
-    A custom Group Normalization layer implementation with optional Apex CUDA optimization.
+    A custom Group Normalization layer implementation.
 
     Group Normalization (GN) divides the channels of the input tensor into groups and
     normalizes the features within each group independently. It does not require the
     batch size as in Batch Normalization, making itsuitable for batch sizes of any size
     or even for batch-free scenarios.
-
-    When Apex is available, uses the optimized CUDA kernel which natively supports
-    channels_last (NHWC) memory format for both training and inference.
 
     Parameters
     ----------
@@ -319,8 +309,8 @@ class GroupNorm(torch.nn.Module):
     -----
     If `num_channels` is not divisible by `num_groups`, the actual number of groups
     might be adjusted to satisfy the `min_channels_per_group` condition.
-
     """
+
     def __init__(
         self,
         num_channels: int,
@@ -330,27 +320,12 @@ class GroupNorm(torch.nn.Module):
     ):
         super().__init__()
         self.num_groups = min(num_groups, num_channels // min_channels_per_group)
-        self.num_channels = num_channels
         self.eps = eps
-        self.use_apex = _HAS_APEX_GN
-
-        # Always create weight/bias for fallback path (NCHW inputs)
         self.weight = torch.nn.Parameter(torch.ones(num_channels))
         self.bias = torch.nn.Parameter(torch.zeros(num_channels))
 
-        if self.use_apex:
-            # Apex GroupNorm has optimized CUDA kernels and supports NHWC natively
-            self.gn = ApexGroupNorm(
-                num_groups=self.num_groups, num_channels=num_channels, eps=eps
-            )
-
     def forward(self, x):
-        # Only use Apex GroupNorm if input is already in channels_last format
-        # to avoid conversion overhead
-
-        if self.use_apex and x.is_contiguous(memory_format=torch.channels_last):
-            return self.gn(x)
-        elif self.training:
+        if self.training:
             # Use default torch implementation of GroupNorm for training
             # This does not support channels last memory format
             x = torch.nn.functional.group_norm(
@@ -379,7 +354,6 @@ class GroupNorm(torch.nn.Module):
 
             x = x.type(dtype)
         return x
-
 
 
 class AttentionOp(torch.autograd.Function):
