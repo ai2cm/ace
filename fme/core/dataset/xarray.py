@@ -290,7 +290,7 @@ def _open_xr_dataset(path: str, *args, **kwargs):
     if protocol_kw:
         kwargs.update({"storage_options": protocol_kw})
 
-    ds = xr.open_dataset(
+    return xr.open_dataset(
         path,
         *args,
         decode_times=CFDatetimeCoder(use_cftime=True),
@@ -300,16 +300,6 @@ def _open_xr_dataset(path: str, *args, **kwargs):
         chunks=None,
         **kwargs,
     )
-    if "global_mean_co2" not in ds:
-        if "carbon_dioxide" not in ds:
-            raise ValueError(
-                f"Dataset {path} contains neither 'global_mean_co2' nor"
-                f"'carbon_dioxide' variables. These are aliases and one "
-                f"of them must be present."
-            )
-        else:
-            ds = ds.rename_vars({"carbon_dioxide": "global_mean_co2"})
-    return ds
 
 
 _open_xr_dataset_lru = lru_cache()(_open_xr_dataset)
@@ -609,14 +599,6 @@ class XarrayDataset(DatasetABC):
         self._global_epoch = torch.tensor(
             -1
         ).share_memory_()  # required for multi-worker parallelism
-        if "global_mean_co2" not in first_dataset:
-            print(
-                f"Warning: 'global_mean_co2' variable not found in dataset. "
-                f"{self.full_paths[0]}"
-            )
-            self._names = [
-                "carbon_dioxide" if x == "global_mean_co2" else x for x in self._names
-            ]
 
     def _ensure_epoch_synchronized(self):
         """Ensure that the local epoch is synchronized with the global epoch.
