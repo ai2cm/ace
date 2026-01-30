@@ -9,7 +9,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=bhenn1983
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
+N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -26,10 +26,10 @@ launch_job () {
         --task-name $JOB_NAME \
         --description 'Run ACE2-ERA5 training on AIMIP period' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/ace \
-        --priority high \
+        --workspace ai2/climate-titan \
+        --priority urgent \
         --preemptible \
-        --cluster ai2/titan-cirrascale \
+        --cluster ai2/jupiter-cirrascale-2 \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
         --env WANDB_JOB_TYPE=training \
