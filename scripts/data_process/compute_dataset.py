@@ -327,7 +327,7 @@ class DatasetConfig:
 def weighted_mean(da: xr.DataArray, weights: xr.DataArray, dims) -> xr.DataArray:
     """Compute weighted mean of xr.DataArray."""
     # Drop attrs of the weights to ensure weighted_mean propagates the attrs of
-    # the input DataArray instead of the weights. This is to retain
+    # the input DataArray instead of the weights. This is to preserve the
     # pre-pydata/xarray#10726 attrs propagation behavior.
     weights = weights.drop_attrs()
     return (da * weights).sum(dims, skipna=False) / weights.sum(dims)
@@ -407,7 +407,7 @@ def compute_ocean_fraction(
         return ds
     ds[sea_ice_fraction_name] = ds[sea_ice_fraction_name].fillna(0.0)
     ocean_fraction = 1 - ds[sea_ice_fraction_name] - ds[land_fraction_name]
-    # Ensuring that the ocean_fraction has an empty attrs dict, consistent with
+    # Ensure that the ocean_fraction has an empty attrs dict, consistent with
     # the left-most object used in its computation (a scalar number in this
     # case). This is to preserve the pre-pydata/xarray#10726 attrs propagation
     # behavior.
