@@ -466,12 +466,20 @@ def compute_pressure_thickness(
     surface_pressure_name: str,
     output_name: str,
     z_dim: str = "xaxis_1",
+    vertical_coordinate_file_is_local: bool = False,
 ):
     if output_name in ds.data_vars:
         return ds
 
-    with fsspec.open(vertical_coordinate_file) as f:
-        vertical_coordinate = xr.open_dataset(f, decode_timedelta=False).load()
+    if vertical_coordinate_file_is_local:
+        # Used only when testing to work around h5netcdf / netCDF4 wheel
+        # incompatibility issues.
+        vertical_coordinate = xr.open_dataset(
+            vertical_coordinate_file, decode_timedelta=False
+        ).load()
+    else:
+        with fsspec.open(vertical_coordinate_file) as f:
+            vertical_coordinate = xr.open_dataset(f, decode_timedelta=False).load()
 
     vertical_coordinate = vertical_coordinate.astype(ds[surface_pressure_name].dtype)
 

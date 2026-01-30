@@ -127,6 +127,7 @@ def test_compute_pressure_thickness(tmp_path, pressure_thickness_exists):
             "pfull",
             "surface_pressure",
             "pressure_thickness",
+            vertical_coordinate_file_is_local=True,
         )
     xr.testing.assert_identical(result, expected)
 
