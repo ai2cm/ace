@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-train"
-JOB_GROUP="ace-aimip"
+JOB_NAME_BASE="ace-aimip-full-era5-train"
+JOB_GROUP="ace-aimip-full-era5"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
