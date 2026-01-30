@@ -1,5 +1,5 @@
 group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|ocean_results_dataset|atmos_results_dataset
 
-resume_wz9y7dbr-fto-1pctCO2_0256to0350|rs0|ace-samudra-coupled-cm4|wz9y7dbr|train|urgent||8|800GiB|3|ai2/climate-titan|max_epochs=80|
+resume_wz9y7dbr-fto-1pctCO2_0256to0350|rs0|ace-samudra-coupled-cm4|wz9y7dbr|train|urgent||8|800GiB|3|ai2/climate-titan|max_epochs=80||01KFD9R8X5S2DE3WQQM21CHXSW|01KBZP41YFCKYXWZEGSTCDV9S7
 
-resume_berobv1i-fto-1pctCO2_0256to0350|rs0|ace-samudra-coupled-cm4|berobv1i|train|urgent||8|800GiB|3|ai2/climate-titan|max_epochs=80|
+resume_berobv1i-fto-1pctCO2_0256to0350|rs0|ace-samudra-coupled-cm4|berobv1i|train|urgent||8|800GiB|3|ai2/climate-titan|max_epochs=80||01KFC4CEPRRJZ5V3J4JE12S924|01KBZP41YFCKYXWZEGSTCDV9S7
