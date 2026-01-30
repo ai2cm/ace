@@ -24,6 +24,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+from fme.core.models.conditional_sfno.lora import LoRAConv2d
+
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
 
@@ -37,6 +39,7 @@ class ContextConfig:
     embed_dim_scalar: int
     embed_dim_labels: int
     embed_dim_noise: int
+    embed_dim_pos: int
 
 
 @dataclasses.dataclass
@@ -53,6 +56,7 @@ class Context:
     """
 
     embedding_scalar: torch.Tensor | None
+    embedding_pos: torch.Tensor | None
     labels: torch.Tensor | None
     noise: torch.Tensor | None
 
@@ -136,6 +140,7 @@ class ConditionalLayerNorm(nn.Module):
         self.n_channels = n_channels
         self.embed_dim_scalar = context_config.embed_dim_scalar
         self.embed_dim_labels = context_config.embed_dim_labels
+        self.embed_dim_pos = context_config.embed_dim_pos
         self.embed_dim_noise = context_config.embed_dim_noise
         self.epsilon = epsilon
         if self.embed_dim_scalar > 0:
@@ -165,6 +170,17 @@ class ConditionalLayerNorm(nn.Module):
         else:
             self.W_scale_2d = None
             self.W_bias_2d = None
+        if self.embed_dim_pos > 0:
+            # no bias as it is already handled in the non-2d layers
+            self.W_scale_pos = nn.Conv2d(
+                self.embed_dim_pos, self.n_channels, kernel_size=1, bias=False
+            )
+            self.W_bias_pos = nn.Conv2d(
+                self.embed_dim_pos, self.n_channels, kernel_size=1, bias=False
+            )
+        else:
+            self.W_scale_pos = None
+            self.W_bias_pos = None
         if global_layer_norm:
             self.norm = nn.LayerNorm(
                 (self.n_channels, img_shape[0], img_shape[1]),
@@ -199,6 +215,11 @@ class ConditionalLayerNorm(nn.Module):
             torch.nn.init.constant_(self.W_scale_2d.weight, 0.0)
         if self.W_bias_2d is not None:
             torch.nn.init.constant_(self.W_bias_2d.weight, 0.0)
+        if self.W_scale_pos is not None:
+            torch.nn.init.constant_(self.W_scale_pos.weight, 0.0)
+        if self.W_bias_pos is not None:
+            torch.nn.init.constant_(self.W_bias_pos.weight, 0.0)
+        # no bias on 2d layers as it is already handled in the non-2d layers
 
     def forward(self, x: torch.Tensor, context: Context) -> torch.Tensor:
         """
@@ -255,6 +276,14 @@ class ConditionalLayerNorm(nn.Module):
             if context.noise is None:
                 raise ValueError("embedding_2d must be provided")
             bias = bias + self.W_bias_2d(context.noise)
+        if self.W_scale_pos is not None:
+            if context.embedding_pos is None:
+                raise ValueError("embedding_pos must be provided")
+            scale = scale + self.W_scale_pos(context.embedding_pos)
+        if self.W_bias_pos is not None:
+            if context.embedding_pos is None:
+                raise ValueError("embedding_pos must be provided")
+            bias = bias + self.W_bias_pos(context.embedding_pos)
         x_norm: torch.Tensor = self.norm(x)
         return x_norm * scale + bias
 
@@ -341,15 +370,31 @@ class MLP(nn.Module):
         output_bias=True,
         drop_rate=0.0,
         checkpointing=0,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
     ):  # pragma: no cover
         super(MLP, self).__init__()
         self.checkpointing = checkpointing
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
 
-        fc1 = nn.Conv2d(in_features, hidden_features, 1, bias=True)
+        fc1 = LoRAConv2d(
+            in_features,
+            hidden_features,
+            1,
+            bias=True,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+        )
         act = act_layer()
-        fc2 = nn.Conv2d(hidden_features, out_features, 1, bias=output_bias)
+        fc2 = LoRAConv2d(
+            hidden_features,
+            out_features,
+            1,
+            bias=output_bias,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+        )
         if drop_rate > 0.0:
             drop = nn.Dropout(drop_rate)
             self.fwd = nn.Sequential(fc1, act, drop, fc2, drop)
