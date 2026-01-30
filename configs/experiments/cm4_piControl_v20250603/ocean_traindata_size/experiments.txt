@@ -1,6 +1,6 @@
 group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
 
-SamudrACE_piControl_ablation-traindata_80yrs|rs0|01KFSW4E3R46QH3BD6MQYCGKT1|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+SamudrACE_piControl_ablation-traindata_80yrs|rs0|01KFSW4E3R46QH3BD6MQYCGKT1|trained|best_inference_ckpt|normal|--not-preemptible
 
 SamudrACE_piControl_ablation-traindata_20yrs|rs0|01KFSW4JQCANT9MQFBV985C11W|trained|best_inference_ckpt|normal|--not-preemptible
 
@@ -13,3 +13,9 @@ SamudrACE_piControl_ablation-traindata_40yrs|rs0|01KFSW50VFC1Z1S8AA84XT3V15|trai
 SamudrACE_piControl_ablation-traindata_40yrs|rs1|01KFSW56EEWTT67F80AYM5AHAW|trained|best_inference_ckpt|normal|--not-preemptible
 
 SamudrACE_piControl_ablation-traindata_40yrs|rs2|01KFSW5BX8BJ7BEAC9C4QEF4J9|trained|best_inference_ckpt|normal|--not-preemptible
+
+v2025-06-03-mnsf-fpHI-rerun|rs1|01JX3JGZ0K04T8QR7P3Z03RKGT|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+
+v2025-06-03-mnsf-fpHI-rerun|rs2|01JX3JH317M0RC1Q4ZTM10AH0C|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+
+v2025-06-03-mnsf-fpHI-rerun|rs3|01JX3JH6X86YRTJTRP9HJQZZ83|run_ICx1|best_inference_ckpt|normal|--not-preemptible
