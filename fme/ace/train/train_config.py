@@ -29,6 +29,7 @@ from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -338,10 +339,18 @@ class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
+    def _get_n_forward_steps(self) -> int | IntSchedule:
+        """Get n_forward_steps for data loading requirements."""
+        schedule = self.config.train_stepper.train_n_forward_steps_schedule
+        if schedule is not None:
+            return schedule.max_n_forward_steps
+        assert isinstance(
+            self.config.n_forward_steps, int
+        )  # this is already validated in TrainConfig.__post_init__
+        return self.config.n_forward_steps
+
     def _get_train_window_data_requirements(self) -> DataRequirements:
-        n_forward_steps = self.config.train_stepper.get_n_forward_steps(
-            default_n_forward_steps=self.config.n_forward_steps,
-        )
+        n_forward_steps = self._get_n_forward_steps()
         return self.config.stepper.get_evaluation_window_data_requirements(
             n_forward_steps
         )

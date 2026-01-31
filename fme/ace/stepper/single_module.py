@@ -520,14 +520,6 @@ class StepperConfig:
         default_factory=lambda: DerivedForcingsConfig()
     )  # inference
 
-    @property
-    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
-        if self.train_n_forward_steps is None:
-            return None
-        if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
-            return self.train_n_forward_steps
-        return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
-
     def __post_init__(self):
         if self.n_ensemble == -1:
             if self.loss.type == "EnsembleLoss":
@@ -1422,32 +1414,6 @@ class TrainStepperConfig:
         if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
             return self.train_n_forward_steps
         return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
-
-    def get_n_forward_steps(
-        self,
-        default_n_forward_steps: int | None = None,
-    ) -> int | IntSchedule:
-        """
-        Get the effective n_forward_steps for training.
-
-        Args:
-            default_n_forward_steps: Default number of forward steps if
-                train_n_forward_steps is not provided.
-
-        Returns:
-            The number of forward steps to use for training data requirements.
-        """
-        if self.train_n_forward_steps is None:
-            if default_n_forward_steps is None:
-                raise ValueError(
-                    "default_n_forward_steps is required if "
-                    "train_n_forward_steps is not provided"
-                )
-            return default_n_forward_steps
-        elif isinstance(self.train_n_forward_steps, int):
-            return self.train_n_forward_steps
-        else:
-            return self.train_n_forward_steps.max_n_forward_steps
 
     def get_train_stepper(self, stepper: Stepper) -> "TrainStepper":
         """
