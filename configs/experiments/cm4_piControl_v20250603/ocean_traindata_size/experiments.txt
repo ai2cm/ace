@@ -14,10 +14,8 @@ SamudrACE_piControl_ablation-traindata_40yrs|rs1|01KFSW56EEWTT67F80AYM5AHAW|trai
 
 SamudrACE_piControl_ablation-traindata_40yrs|rs2|01KFSW5BX8BJ7BEAC9C4QEF4J9|trained|best_inference_ckpt|normal|--not-preemptible
 
-v2025-06-03-mnsf-fpHI-rerun|rs1|01JX3JGZ0K04T8QR7P3Z03RKGT|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+v2025-06-03-mnsf-fpHI-rerun|rs1|01JX3JGZ0K04T8QR7P3Z03RKGT|trained|best_inference_ckpt|normal|--not-preemptible
 
-v2025-06-03-mnsf-fpHI-rerun|rs2|01JX3JH317M0RC1Q4ZTM10AH0C|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+v2025-06-03-mnsf-fpHI-rerun|rs2|01JX3JH317M0RC1Q4ZTM10AH0C|trained|best_inference_ckpt|normal|--not-preemptible
 
-v2025-06-03-mnsf-fpHI-rerun|rs3|01JX3JH6X86YRTJTRP9HJQZZ83|run_ICx1|best_inference_ckpt|normal|--not-preemptible
-
-SamudrACE_piControl_ablation-traindata_80yrs|rs1|01KG96RSFA1XWPTEESP0JVP03S|training|best_inference_ckpt|normal|--not-preemptible
+v2025-06-03-mnsf-fpHI-rerun|rs3|01JX3JH6X86YRTJTRP9HJQZZ83|trained|best_inference_ckpt|normal|--not-preemptible
