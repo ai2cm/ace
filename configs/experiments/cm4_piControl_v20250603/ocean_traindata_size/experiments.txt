@@ -33,3 +33,5 @@ SamudrACE_piControl_ablation-traindata_20yrs|rs2|01KG97NC62J7VNH62XN0SZEBS6|trai
 SamudrACE_piControl_ablation-traindata_40yrs|rs0|01KG97NHRPN3EE31NPWHRQH6MP|training|best_inference_ckpt|normal|--not-preemptible
 
 SamudrACE_piControl_ablation-traindata_40yrs|rs1|01KG97NPQ4XE1X75SFRC8B463P|training|best_inference_ckpt|normal|--not-preemptible
+
+SamudrACE_piControl_ablation-traindata_40yrs|rs2|01KG97NVNVD3QMZCXZ53Y0RQWP|training|best_inference_ckpt|normal|--not-preemptible
