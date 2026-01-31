@@ -24,11 +24,12 @@ from fme.ace.requirements import (
     NullDataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.ace.stepper import Stepper
+from fme.ace.stepper import TrainStepper
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -259,14 +260,14 @@ class TrainConfig:
 
     def __post_init__(self):
         if (
-            isinstance(self.stepper, StepperConfig)
-            and self.stepper.train_n_forward_steps is not None
+            self.stepper.train_n_forward_steps is not None
             and self.n_forward_steps is not None
         ):
             raise ValueError(
                 "stepper.train_n_forward_steps may not be given at the same time as "
                 "n_forward_steps at the top level"
             )
+        self.train_stepper = self.stepper.get_train_stepper_config()
         if self.train_loader.using_labels != self.validation_loader.using_labels:
             raise ValueError(
                 "train_loader and validation_loader must both use labels or both not "
@@ -338,9 +339,20 @@ class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
+    def _get_n_forward_steps(self) -> int | IntSchedule:
+        """Get n_forward_steps for data loading requirements."""
+        schedule = self.config.train_stepper.train_n_forward_steps_schedule
+        if schedule is not None:
+            return schedule.max_n_forward_steps
+        assert isinstance(
+            self.config.n_forward_steps, int
+        )  # this is already validated in TrainConfig.__post_init__
+        return self.config.n_forward_steps
+
     def _get_train_window_data_requirements(self) -> DataRequirements:
-        return self.config.stepper.get_train_window_data_requirements(
-            default_n_forward_steps=self.config.n_forward_steps
+        n_forward_steps = self._get_n_forward_steps()
+        return self.config.stepper.get_evaluation_window_data_requirements(
+            n_forward_steps
         )
 
     def _get_evaluation_window_data_requirements(self) -> DataRequirements:
@@ -388,10 +400,17 @@ class TrainBuilders:
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-    ) -> Stepper:
-        return self.config.stepper.get_stepper(
+    ) -> TrainStepper:
+        """
+        Get the training stepper.
+
+        Creates a Stepper for inference and wraps it in a TrainStepper
+        with training-specific configuration including the loss object.
+        """
+        stepper = self.config.stepper.get_stepper(
             dataset_info=dataset_info,
         )
+        return self.config.train_stepper.get_train_stepper(stepper)
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)
