@@ -19,3 +19,5 @@ v2025-06-03-mnsf-fpHI-rerun|rs1|01JX3JGZ0K04T8QR7P3Z03RKGT|trained|best_inferenc
 v2025-06-03-mnsf-fpHI-rerun|rs2|01JX3JH317M0RC1Q4ZTM10AH0C|trained|best_inference_ckpt|normal|--not-preemptible
 
 v2025-06-03-mnsf-fpHI-rerun|rs3|01JX3JH6X86YRTJTRP9HJQZZ83|trained|best_inference_ckpt|normal|--not-preemptible
+
+SamudrACE_piControl_ablation-traindata_80yrs|rs1|01KG96YE0ZPE3QX4QG4A74WRGK|training|best_inference_ckpt|normal|--not-preemptible
