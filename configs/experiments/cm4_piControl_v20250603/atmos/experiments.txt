@@ -1,5 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
 
-ace-samudra-coupled-cm4-tgru8zjd-decoupled|||skip|best_inference_ckpt|high|--not-preemptible||01KFKRB7HC8E92EX6Z7KF232C6
+ace-samudra-coupled-cm4-tgru8zjd-decoupled-rerun|||run_ICx1|best_inference_ckpt|high|--not-preemptible||01KFKRB7HC8E92EX6Z7KF232C6
 
-v2025-06-03-interpolate_true-rerun|rs1|01JXNBJ9607RYD1BCC08G451QY|run_ICx1|best_inference_ckpt|high|--not-preemptible|data_writer.save_monthly_files=false|
+v2025-06-03-interpolate_true-rerun|rs1|01JXNBJ9607RYD1BCC08G451QY|skip|best_inference_ckpt|high|--not-preemptible|data_writer.save_monthly_files=false|

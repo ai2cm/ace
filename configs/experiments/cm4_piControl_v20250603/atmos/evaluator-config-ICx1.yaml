@@ -11,7 +11,7 @@ logging:
 loader:
   start_indices:
     times:
-     - '0311-01-01T00:00:00'
+     - '0311-01-01T06:00:00'
   dataset:
     merge:
     - data_path: /climate-default
