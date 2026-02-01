@@ -3,8 +3,6 @@ from typing import Any
 
 import torch
 
-from fme.core.device import get_device
-
 
 class BatchLabels:
     def __init__(self, tensor: torch.Tensor, names: list[str]):
@@ -152,7 +150,7 @@ class LabelEncoding:
             tensor=torch.tensor(
                 list_data,
                 dtype=torch.float32,
-                device=get_device(),
+                device="cpu",
             ),
             names=self.names,
         )
