@@ -27,6 +27,12 @@ class BatchLabels:
         Returns:
             A new BatchLabels instance on the specified device.
         """
+        device = torch.device(device)
+
+        # already on device → no-op
+        if self.tensor.device == device:
+            return self
+
         return BatchLabels(self.tensor.to(device), self.names)
 
     def __repr__(self) -> str:
