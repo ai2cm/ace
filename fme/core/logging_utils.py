@@ -74,7 +74,6 @@ class LoggingConfig:
             config=config,
             resumable=resumable,
         )
-        log_versions()
         logging.info(f"Current device is {get_device()}")
 
     def _configure_logging_module(self, experiment_dir: str, log_filename: str):
