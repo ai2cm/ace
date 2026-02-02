@@ -121,7 +121,7 @@ stepper:
       builder:
         type: NoiseConditionedSFNO
         config:
-          embed_dim: 384
+          embed_dim: 512
           n_prognostic_channels: 38
           noise_embed_dim: 64
           noise_type: isotropic
