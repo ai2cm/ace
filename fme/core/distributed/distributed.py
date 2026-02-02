@@ -31,13 +31,13 @@ class Distributed:
 
     def __init__(self, force_non_distributed: bool = False):
         if TorchDistributed.is_available() and not force_non_distributed:
-            self._distributed: DistributedBackend = TorchDistributed()
             if get_device().type == "cuda":
                 logger.info(
                     "Setting torch multiprocessing start method to 'spawn' "
                     "for compatibility of CUDA with multiprocessing."
                 )
                 mp.set_start_method("spawn", force=True)
+            self._distributed: DistributedBackend = TorchDistributed()
         else:
             self._distributed = NonDistributed()
         self._seed = 0
