@@ -691,6 +691,7 @@ class XarrayDataset(DatasetABC):
     def _get_variable_metadata(self, ds):
         result = {}
         for name in self._names:
+            print("name", name, "ds", ds)
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
             elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
