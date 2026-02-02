@@ -75,7 +75,8 @@ class LoggingConfig:
         self._configure_logging_module(experiment_dir, log_filename)
         log_versions()
         log_beaker_url()
-        self.configure_wandb(
+        self._configure_wandb(
+            experiment_dir=experiment_dir,
             config=config,
             resumable=resumable,
         )
@@ -112,8 +113,9 @@ class LoggingConfig:
             fh.setFormatter(logging.Formatter(self.log_format))
             logger.addHandler(fh)
 
-    def configure_wandb(
+    def _configure_wandb(
         self,
+        experiment_dir: str,
         config: Mapping[str, Any],
         resumable: bool = True,
         resume: Any = None,
@@ -134,7 +136,6 @@ class LoggingConfig:
         elif env_vars is not None:
             config_copy["environment"] = env_vars
 
-        experiment_dir = config["experiment_dir"]
         if self.wandb_dir_in_experiment_dir:
             wandb_dir = experiment_dir
         else:

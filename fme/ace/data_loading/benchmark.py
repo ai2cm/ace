@@ -5,7 +5,6 @@ It uses a time.sleep() to mock ML training but allows loading real datasets.
 import argparse
 import dataclasses
 import logging
-import os
 import shutil
 import time
 import uuid
@@ -42,13 +41,6 @@ class BenchmarkConfig:
             train=self.train,
             requirements=DataRequirements(self.names, self.n_timesteps),
         )
-
-    def configure_wandb(self, env_vars: dict | None = None, **kwargs):
-        config = to_flat_dict(dataclasses.asdict(self))
-        # our wandb class requires "experiment_dir" to be in config
-        config["experiment_dir"] = TMPDIR
-        os.makedirs(TMPDIR)
-        self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
 
     def configure_logging(self):
         config = to_flat_dict(dataclasses.asdict(self))
