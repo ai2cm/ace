@@ -95,9 +95,9 @@ def test_scale_factor_not_implemented():
 
 def test_sfnonet_output_is_unchanged():
     torch.manual_seed(0)
-    input_channels = 2
-    output_channels = 3
-    n_prognostic_channels = min(input_channels, output_channels)
+    input_channels = 3
+    output_channels = 4
+    n_prognostic_channels = 2
     img_shape = (9, 18)
     n_samples = 4
     conditional_embed_dim_scalar = 8

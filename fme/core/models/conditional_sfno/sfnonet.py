@@ -914,7 +914,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         return x_in, x
 
     def forward(self, x: torch.Tensor, context: Context):
-        x_in = x
+        x_in = x[:, : self.n_prognostic_channels, :, :]
         # save big skip
         if self.big_skip:
             residual = self.residual_filter_up(self.residual_filter_down(x))
