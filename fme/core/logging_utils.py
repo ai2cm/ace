@@ -66,6 +66,12 @@ class LoggingConfig:
         """
         Configure global logging settings, including WandB, and output
         initial logs of the runtime environment.
+
+        Args:
+            experiment_dir: Directory to save logs to.
+            log_filename: Name of the log file.
+            config: Configuration dictionary to log to WandB.
+            resumable: Whether this is a resumable run.
         """
         self._configure_logging_module(experiment_dir, log_filename)
         log_versions()
