@@ -283,7 +283,9 @@ def test_force_positive():
     torch.testing.assert_close(fixed_data["bar"], data["bar"])
 
 
-def _get_corrector_test_input(tensor_shape):
+def _get_corrector_test_input(
+    tensor_shape, requires_grad=False, air_temperature_prefix="air_temperature_"
+):
     """Generate test input that has necessary variables for all correctors."""
     # debugging a bit easier with realistic scales for input variables
     # tuples of (name, mean, std) for each variable
@@ -294,8 +296,8 @@ def _get_corrector_test_input(tensor_shape):
         ("LHTFLsfc", 100, 50),
         ("specific_total_water_0", 0.001, 0.0001),
         ("specific_total_water_1", 0.001, 0.0001),
-        ("air_temperature_0", 300, 10),
-        ("air_temperature_1", 300, 10),
+        (f"{air_temperature_prefix}0", 300, 10),
+        (f"{air_temperature_prefix}1", 300, 10),
         ("DSWRFtoa", 500, 100),
         ("USWRFtoa", 500, 100),
         ("ULWRFtoa", 500, 100),
@@ -309,21 +311,25 @@ def _get_corrector_test_input(tensor_shape):
     forcing_names = ["HGTsfc", "DSWRFtoa"]
     non_forcing_names = [name for name, _, _ in variables if name not in forcing_names]
     input_data = {
-        name: centering + scale * torch.rand(size=tensor_shape)
+        name: centering
+        + scale * torch.rand(size=tensor_shape, requires_grad=requires_grad)
         for name, centering, scale in variables
     }
     gen_data = {
-        name: centering + scale * torch.rand(size=tensor_shape)
+        name: centering
+        + scale * torch.rand(size=tensor_shape, requires_grad=requires_grad)
         for name, centering, scale in variables
         if name in non_forcing_names
     }
     forcing_data = {
-        name: centering + scale * torch.rand(size=tensor_shape)
+        name: centering
+        + scale * torch.rand(size=tensor_shape, requires_grad=requires_grad)
         for name, centering, scale in variables
         if name in forcing_names
     }
     vertical_coord = HybridSigmaPressureCoordinate(
-        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+        ak=torch.asarray([3.0, 1.0, 0.0], requires_grad=requires_grad),
+        bk=torch.asarray([0.0, 0.6, 1.0], requires_grad=requires_grad),
     )
     return input_data, gen_data, forcing_data, vertical_coord
 
@@ -336,15 +342,12 @@ def test__force_conserve_total_energy(negative_pressure: bool):
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
-    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
-        tensor_shape
-    )
+    test_input = _get_corrector_test_input(tensor_shape, requires_grad=True)
+    input_data, gen_data, forcing_data, vertical_coord = test_input
     extra_heating = 10.0
 
     if negative_pressure:
         input_data["PRESsfc"] = -1 * input_data["PRESsfc"]
-
-    correction_expected = not negative_pressure
 
     corrected_gen_data = _force_conserve_total_energy(
         input_data=input_data,
@@ -359,14 +362,9 @@ def test__force_conserve_total_energy(negative_pressure: bool):
     # ensure only temperature is modified
     for name in gen_data:
         if "air_temperature" in name:
-            if correction_expected:
-                assert not torch.allclose(
-                    corrected_gen_data[name], gen_data[name], rtol=1e-6
-                )
-            else:
-                assert torch.allclose(
-                    corrected_gen_data[name], gen_data[name], rtol=1e-6
-                )
+            assert not torch.allclose(
+                corrected_gen_data[name], gen_data[name], rtol=1e-6
+            )
         else:
             torch.testing.assert_close(corrected_gen_data[name], gen_data[name])
 
@@ -383,11 +381,9 @@ def test__force_conserve_total_energy(negative_pressure: bool):
         ops.area_weighted_mean(corrected_gen.net_energy_flux_into_atmosphere)
         + extra_heating
     )
-    if correction_expected:
-        expected_gm_mse = (
-            input_gm_mse + predicted_mse_tendency * timestep.total_seconds()
-        )
-        torch.testing.assert_close(corrected_gen_gm_mse, expected_gm_mse)
+
+    expected_gm_mse = input_gm_mse + predicted_mse_tendency * timestep.total_seconds()
+    torch.testing.assert_close(corrected_gen_gm_mse, expected_gm_mse)
 
     # ensure the temperature correction is constant
     corrected_gen_temperature = corrected_gen_data["air_temperature_1"]
@@ -398,6 +394,13 @@ def test__force_conserve_total_energy(negative_pressure: bool):
         corrected_gen_data["air_temperature_0"] - gen_data["air_temperature_0"]
     )
     torch.testing.assert_close(temperature_correction_0, temperature_1_correction)
+
+    # ensure we can backpropagate through the result without anomalies
+    with torch.autograd.detect_anomaly():
+        # Take the sum to reduce corrected_gen_data to a scalar prior to
+        # backpropagation to avoid the need to provide a gradient argument
+        # to backward.
+        sum(tensor.sum() for tensor in corrected_gen_data.values()).backward()
 
 
 def test__force_conserve_energy_doesnt_clobber():
@@ -424,7 +427,14 @@ def test__force_conserve_energy_doesnt_clobber():
     torch.testing.assert_close(corrected_gen_data["PRESsfc"], gen_data["PRESsfc"])
 
 
-def test_corrector_integration():
+@pytest.mark.parametrize(
+    "air_temperature_prefix",
+    [
+        "air_temperature_",
+        "T_",
+    ],
+)
+def test_corrector_integration(air_temperature_prefix):
     """Ensures that the corrector can be called with all methods active
     but doesn't check results."""
     config = AtmosphereCorrectorConfig(
@@ -435,7 +445,9 @@ def test_corrector_integration():
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
     )
     tensor_shape = (5, 5)
-    test_input = _get_corrector_test_input(tensor_shape)
+    test_input = _get_corrector_test_input(
+        tensor_shape, air_temperature_prefix=air_temperature_prefix
+    )
     input_data, gen_data, forcing_data, vertical_coord = test_input
     ops = LatLonOperations(
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)

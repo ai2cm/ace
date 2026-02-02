@@ -116,6 +116,10 @@ class AtmosphereData:
                 return self._get_prefix(prefix)
         raise KeyError(name)
 
+    def get_all_vertical_level_names(self, standard_name: str) -> list[str]:
+        """Return names of all vertical levels for a given standard name."""
+        return self._stacker.get_all_level_names(standard_name, self.data)
+
     @property
     def air_temperature(self) -> torch.Tensor:
         """Returns all vertical levels of air_temperature, e.g. a tensor of
@@ -364,10 +368,12 @@ def compute_layer_thickness(
     approximate this using specific total water.
     """
     tv = air_temperature * (1 + (RVGAS / RDGAS - 1.0) * specific_total_water)
-    # Enforce min log(p) = 0 so that geopotential energy calculation is finite.
-    # This is equivalent to setting the TOA pressure to 1 Pa if it is less than that.
-    # The ERA5 data has a TOA pressure of 0.0 Pa which causes issues otherwise.
-    dlogp = torch.clamp(torch.log(pressure_at_interface), min=0.0).diff(dim=-1)
+    # Clamp the minimum pressure to 1 Pa to ensure that log(p) is finite and
+    # greater than or equal to 0.0. The ERA5 data has a TOA pressure of 0.0
+    # Pa which causes issues otherwise. It is important to clamp and then take
+    # the log rather than vice versa to ensure that we can backpropagate through
+    # this function in circumstances where clamping is necessary.
+    dlogp = torch.log(torch.clamp(pressure_at_interface, min=1.0)).diff(dim=-1)
     return dlogp * RDGAS * tv / GRAVITY
 
 
