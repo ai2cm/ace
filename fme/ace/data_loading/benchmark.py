@@ -5,6 +5,7 @@ It uses a time.sleep() to mock ML training but allows loading real datasets.
 import argparse
 import dataclasses
 import logging
+import os
 import shutil
 import time
 import uuid
@@ -44,6 +45,7 @@ class BenchmarkConfig:
 
     def configure_logging(self):
         config = to_flat_dict(dataclasses.asdict(self))
+        os.makedirs(TMPDIR, exist_ok=True)
         self.logging.configure_logging(
             TMPDIR, "log.txt", config=config, resumable=False
         )
