@@ -45,7 +45,7 @@ class BenchmarkConfig:
     def configure_logging(self):
         config = to_flat_dict(dataclasses.asdict(self))
         self.logging.configure_logging(
-            "/tmp", "log.txt", config=config, resumable=False
+            TMPDIR, "log.txt", config=config, resumable=False
         )
 
 
