@@ -691,7 +691,6 @@ class XarrayDataset(DatasetABC):
     def _get_variable_metadata(self, ds):
         result = {}
         for name in self._names:
-            print("name", name, "ds", ds)
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
             elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
@@ -730,7 +729,13 @@ class XarrayDataset(DatasetABC):
         del cum_num_timesteps
 
         ds = self._open_file(0)
-        self._get_variable_metadata(ds)
+        try:
+            self._get_variable_metadata(ds)
+        except KeyError:
+            raise ValueError(
+                f"Required variable not found in dataset: {self.full_paths[0]}."
+            )
+        ds.close()
 
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent
