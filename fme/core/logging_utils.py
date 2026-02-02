@@ -6,9 +6,8 @@ import warnings
 from collections.abc import Mapping
 from typing import Any
 
-from torch import get_device
-
 from fme.core.cloud import is_local
+from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
