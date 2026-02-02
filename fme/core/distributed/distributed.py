@@ -2,7 +2,10 @@ import contextlib
 import logging
 from collections.abc import Iterator
 
-import torch.distributed
+import torch
+import torch.multiprocessing as mp
+
+from fme.core.device import get_device
 
 from .base import DistributedBackend
 from .non_distributed import NonDistributed
@@ -29,6 +32,12 @@ class Distributed:
     def __init__(self, force_non_distributed: bool = False):
         if TorchDistributed.is_available() and not force_non_distributed:
             self._distributed: DistributedBackend = TorchDistributed()
+            if get_device().type == "cuda":
+                logger.info(
+                    "Setting torch multiprocessing start method to 'spawn' "
+                    "for compatibility of CUDA with multiprocessing."
+                )
+                mp.set_start_method("spawn", force=True)
         else:
             self._distributed = NonDistributed()
         self._seed = 0
