@@ -3,7 +3,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
-from fme.downscaling.modules.unets import NonDivisibleShapeError
+from fme.downscaling.modules.vendorized.unets import NonDivisibleShapeError
 
 
 def test_diffusion_unet_shapes():
@@ -112,7 +112,7 @@ def test_diffusion_module_has_channels_last_memory_format():
     n_channels = 3
 
     module = DiffusionModuleRegistrySelector(
-        "unet_diffusion_song", {"model_channels": 4}
+        "unet_diffusion_song_v2", {"model_channels": 4}
     ).build(
         n_in_channels=n_channels,
         n_out_channels=n_channels,
@@ -141,7 +141,7 @@ def test_diffusion_module_use_channels_last_flag(use_channels_last):
     n_channels = 3
 
     module = DiffusionModuleRegistrySelector(
-        "unet_diffusion_song",
+        "unet_diffusion_song_v2",
         {"model_channels": 4},
         use_channels_last=use_channels_last,
     ).build(

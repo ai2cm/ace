@@ -97,6 +97,7 @@ class UNetDiffusionSong:
         )
 
 
+@dataclasses.dataclass
 class UNetDiffusionSongv2:
     model_channels: int = 128
     channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 2, 2])
