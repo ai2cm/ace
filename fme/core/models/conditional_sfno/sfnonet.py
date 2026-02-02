@@ -178,6 +178,8 @@ class FourierNeuralOperatorBlock(nn.Module):
         forward_transform,
         inverse_transform,
         embed_dim,
+        n_prognostic_channels: int,
+        include_prognostic: bool,
         img_shape: Tuple[int, int],
         context_config: ContextConfig,
         filter_type="linear",
@@ -212,6 +214,10 @@ class FourierNeuralOperatorBlock(nn.Module):
 
         self.input_shape_loc = img_shape
         self.output_shape_loc = img_shape
+        self.n_prognostic_channels = n_prognostic_channels
+        self.include_prognostic = include_prognostic
+        if include_prognostic:
+            embed_dim = embed_dim + n_prognostic_channels
 
         # norm layer
         self.norm0 = ConditionalLayerNorm(
@@ -308,7 +314,29 @@ class FourierNeuralOperatorBlock(nn.Module):
                 lora_alpha=lora_alpha,
             )
 
-    def forward(self, x, context_embedding):
+        self.prognostic_out_1 = LoRAConv2d(
+            embed_dim,
+            n_prognostic_channels,
+            1,
+            bias=False,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            zero_init=True,
+        )
+
+        self.prognostic_out_2 = LoRAConv2d(
+            embed_dim,
+            n_prognostic_channels,
+            1,
+            bias=False,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            zero_init=True,
+        )
+
+    def forward(self, x_in, x, context_embedding):
+        if self.include_prognostic:
+            x = torch.cat((x_in, x), dim=1)
         x_norm = torch.zeros_like(x)
         x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = self.norm0(
             x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]],
@@ -325,6 +353,8 @@ class FourierNeuralOperatorBlock(nn.Module):
 
         if hasattr(self, "act_layer"):
             x = self.act_layer(x)
+
+        x_out = x_in + self.prognostic_out_1(x)
 
         x_norm = torch.zeros_like(x)
         x_norm[..., : self.output_shape_loc[0], : self.output_shape_loc[1]] = (
@@ -346,8 +376,9 @@ class FourierNeuralOperatorBlock(nn.Module):
                 x = self.outer_skip_conv(x)
             else:
                 x = x + self.outer_skip(residual)
+        x_out = x_out + self.prognostic_out_2(x)
 
-        return x
+        return x_out, x
 
 
 class NoLayerNorm(nn.Module):
@@ -359,6 +390,7 @@ def get_lat_lon_sfnonet(
     params,
     in_chans: int,
     out_chans: int,
+    n_prognostic_channels: int,
     img_shape: Tuple[int, int],
     context_config: ContextConfig = ContextConfig(
         embed_dim_scalar=0,
@@ -399,6 +431,7 @@ def get_lat_lon_sfnonet(
         img_shape=img_shape,
         in_chans=in_chans,
         out_chans=out_chans,
+        n_prognostic_channels=n_prognostic_channels,
         context_config=context_config,
         trans_down=trans_down,
         itrans_up=itrans_up,
@@ -519,6 +552,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         itrans_up: nn.Module,
         trans: nn.Module,
         itrans: nn.Module,
+        n_prognostic_channels: int,
         filter_type: str = "linear",
         operator_type: str = "diagonal",
         scale_factor: int = 1,
@@ -688,6 +722,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             if hasattr(params, "spectral_lora_alpha")
             else spectral_lora_alpha
         )
+        self.n_prognostic_channels = n_prognostic_channels
 
         # no global padding because we removed the horizontal distributed code
         self.padding = (0, 0)
@@ -775,6 +810,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 forward_transform,
                 inverse_transform,
                 self.embed_dim,
+                self.n_prognostic_channels,
+                include_prognostic=False,
                 img_shape=self.img_shape,
                 context_config=context_config,
                 filter_type=block_filter_type,
@@ -827,7 +864,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         decoder_modules.append(
             LoRAConv2d(
                 current_dim,
-                self.out_chans,
+                self.out_chans - self.n_prognostic_channels,
                 1,
                 bias=False,
                 lora_rank=self.lora_rank,
@@ -835,6 +872,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             )
         )
         self.decoder = nn.Sequential(*decoder_modules)
+        self.n_prognostic_channels = n_prognostic_channels
 
         # learned position embedding
         if self.pos_embed:
@@ -855,11 +893,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
     def _init_weights(self, m):
         """Helper routine for weight initialization"""
         if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
-            trunc_normal_(m.weight, std=0.02)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-            if isinstance(m, LoRAConv2d):
-                m.reset_lora_parameters()
+            m.reset_parameters()
+        elif isinstance(m, LoRAConv2d):
+            m.reset_parameters()
         elif isinstance(m, ConditionalLayerNorm):
             m.reset_parameters()
 
@@ -868,16 +904,17 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         """Helper"""
         return {"pos_embed", "cls_token"}
 
-    def _forward_features(self, x: torch.Tensor, context: Context):
+    def _forward_features(self, x_in: torch.Tensor, x: torch.Tensor, context: Context):
         for blk in self.blocks:
             if self.checkpointing >= 3:
-                x = checkpoint(blk, x, context)
+                x = checkpoint(blk, x_in, x, context)
             else:
-                x = blk(x, context)
+                x_in, x = blk(x_in, x, context)
 
-        return x
+        return x_in, x
 
     def forward(self, x: torch.Tensor, context: Context):
+        x_in = x
         # save big skip
         if self.big_skip:
             residual = self.residual_filter_up(self.residual_filter_down(x))
@@ -896,7 +933,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         x = self.pos_drop(x)
 
-        x = self._forward_features(x, context)
+        x_out, x = self._forward_features(x_in, x, context)
 
         if self.big_skip:
             x = torch.cat((x, residual), dim=1)
@@ -907,5 +944,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             x = self.decoder(x)
 
         x = self.filter_output_up(self.filter_output_down(x))
+        x_out = self.filter_output_up(self.filter_output_down(x_out))
+        x = torch.cat((x_out, x), dim=1)
 
         return x

@@ -149,6 +149,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     operator_type: str = "diagonal"
     residual_filter_factor: int = 1
     embed_dim: int = 256
+    n_prognostic_channels: int | None = None
     noise_embed_dim: int = 256
     noise_type: Literal["isotropic", "gaussian"] = "gaussian"
     global_layer_norm: bool = False
@@ -185,10 +186,15 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ):
+        if self.n_prognostic_channels is None:
+            n_prognostic_channels = min(n_in_channels, n_out_channels)
+        else:
+            n_prognostic_channels = self.n_prognostic_channels
         sfno_net = get_lat_lon_sfnonet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
+            n_prognostic_channels=n_prognostic_channels,
             img_shape=dataset_info.img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
