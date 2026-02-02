@@ -39,6 +39,7 @@ train_loader:
   num_data_workers: 4
   prefetch_factor: 2
   dataset:
+    strict: false
     concat:
       # ERA5 data splits
       - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
