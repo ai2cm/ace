@@ -135,7 +135,6 @@ train_loader:
         file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
         engine: zarr
         labels: ["cm4"]
-
       # CM4 random CO2 runs
       - data_path: /climate-default/2025-12-02-CM4-like-AM4-random-CO2
         file_pattern: random-CO2-1xCO2-ic_0001.zarr
@@ -270,6 +269,7 @@ stepper:
         - DLWRFsfc
         - DSWRFsfc
         - USWRFsfc
+        - USWRFtoa
       next_step_forcing_names:
       - DSWRFtoa
       - global_mean_co2
@@ -360,4 +360,5 @@ stepper:
       - DLWRFsfc
       - DSWRFsfc
       - USWRFsfc
+      - USWRFtoa
       - tendency_of_total_water_path_due_to_advection
