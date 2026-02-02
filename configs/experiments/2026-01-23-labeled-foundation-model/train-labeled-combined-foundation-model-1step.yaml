@@ -79,7 +79,6 @@ validation_loader:
   prefetch_factor: 2
   time_buffer: 4
   dataset:
-    strict: false
     concat:
       - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
         labels: ["era5"]
