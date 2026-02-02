@@ -429,6 +429,7 @@ class BatchData:
             )
         data = repeat_interleave_batch_dim(self.data, n_ensemble)
         time = xr.concat([self.time] * n_ensemble, dim="sample")
+        state_data_device = list(self.data.values())[0].device
         if self.labels is None:
             labels = None
         else:
@@ -437,7 +438,7 @@ class BatchData:
                 self.labels.names,
             )
         return self.__class__(
-            data={k: v.to(get_device()) for k, v in data.items()},
+            data={k: v.to(state_data_device) for k, v in data.items()},
             time=time,
             horizontal_dims=self.horizontal_dims,
             labels=labels,
