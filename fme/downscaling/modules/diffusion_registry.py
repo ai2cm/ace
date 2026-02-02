@@ -114,7 +114,7 @@ class UNetDiffusionSongv2:
     decoder_type: Literal["standard", "skip"] = "standard"
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
 
-    use_apex_gn = True
+    use_apex_gn: bool = True
 
     def build(
         self,
