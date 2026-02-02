@@ -97,6 +97,7 @@ class UNetDiffusionSong:
         )
 
 
+@dataclasses.dataclass
 class UNetDiffusionSongv2:
     model_channels: int = 128
     channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 2, 2])
@@ -113,7 +114,7 @@ class UNetDiffusionSongv2:
     decoder_type: Literal["standard", "skip"] = "standard"
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
 
-    use_apex_gn = True
+    use_apex_gn: bool = True
 
     def build(
         self,
