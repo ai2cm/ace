@@ -291,7 +291,7 @@ class BatchData:
                 raise ValueError("label_encoding must be provided if labels are used.")
             labels = None
         else:
-            labels = label_encoding.encode(list(sample_labels))
+            labels = label_encoding.encode(list(sample_labels), device="cpu")
         return BatchData.new_on_cpu(
             data=batch_data,
             time=batch_time,
