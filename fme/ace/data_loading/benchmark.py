@@ -51,14 +51,14 @@ class BenchmarkConfig:
         self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
 
     def configure_logging(self):
-        self.logging.configure_logging("/tmp", "log.txt")
+        config = to_flat_dict(dataclasses.asdict(self))
+        self.logging.configure_logging(
+            "/tmp", "log.txt", config=config, resumable=False
+        )
 
 
 def benchmark(config: BenchmarkConfig):
     config.configure_logging()
-    env_vars = logging_utils.retrieve_env_vars()
-    beaker_url = logging_utils.log_beaker_url()
-    config.configure_wandb(env_vars=env_vars, notes=beaker_url)
     wandb = WandB.get_instance()
 
     with GlobalTimer():
