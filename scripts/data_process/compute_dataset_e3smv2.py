@@ -82,7 +82,7 @@ DROP_VARIABLE_NAMES = {
         "hybm",
     ],
 }
-
+GRAVITY = 9.80665  # m/s^2
 
 def expand_names_by_level(variables: MutableMapping[str, List[str]]) -> List[str]:
     names = []
@@ -308,6 +308,10 @@ def compute_rad_fluxes(
         fluxes[output_name].attrs["units"] = ds[formula[1]].attrs["units"]
     return ds.assign(fluxes)
 
+def sfc_phis_to_hgt(ds):
+    ds["HGTsfc"] = ds["PHIS"] / GRAVITY
+    ds = ds.drop_vars("PHIS")
+    return ds
 
 def construct_lazy_dataset(
     config: DatasetComputationConfig,
@@ -422,6 +426,8 @@ def construct_lazy_dataset(
         "p_i pressure corresponds to the interface at the top of the i'th finite "
         "volume layer, counting down from the top of atmosphere."
     )
+    ds = ds.rename(config.renaming)
+    ds = sfc_phis_to_hgt(ds)
     return ds
 
 
