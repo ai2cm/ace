@@ -52,7 +52,7 @@ run_training() {
 
 base_name="ace2s"
 
-run_training "pretrain-1-step-era5-n512.yaml" "$base_name-1-step-pre-training-era5-only-persistence-init-n512-rs0"
+run_training "pretrain-1-step-era5-n512.yaml" "$base_name-1-step-pre-training-era5-only-persistence-makani-init-n512-rs0"
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # train-x-shield-multi-step-fine-tuning.yaml then uncomment next line
 # run_training "train-x-shield-multi-step-fine-tuning.yaml" "$base_name-multi-step-fine-tuning-x-shield-only-rs0"
