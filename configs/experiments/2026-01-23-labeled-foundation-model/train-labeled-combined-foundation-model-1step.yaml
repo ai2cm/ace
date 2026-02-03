@@ -205,7 +205,6 @@ validation_loader:
         subset:
           start_time: '2010-01-01'
           stop_time: '2012-12-31'
-
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
