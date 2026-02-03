@@ -9,7 +9,7 @@ ema:
 inference:
   n_forward_steps: 10220  # 7-year runs
   forward_steps_in_memory: 40
-  n_ensemble_per_ic: 2
+  n_ensemble_per_ic: 1
   loader:
     start_indices:
       times:

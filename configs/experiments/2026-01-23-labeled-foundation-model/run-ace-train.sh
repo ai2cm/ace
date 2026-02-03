@@ -50,4 +50,4 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-run_training "train-labeled-combined-foundation-model-1step.yaml" "train-combined-foundation-with-era5-1step-n512-e5c5-all-datasets"
+run_training "train-labeled-combined-foundation-model-1step.yaml" "train-combined-foundation-with-era5-1step-n512-e5c5-all-datasets-1-ensemble-inline"
