@@ -283,7 +283,9 @@ def test_force_positive():
     torch.testing.assert_close(fixed_data["bar"], data["bar"])
 
 
-def _get_corrector_test_input(tensor_shape, requires_grad=False):
+def _get_corrector_test_input(
+    tensor_shape, requires_grad=False, air_temperature_prefix="air_temperature_"
+):
     """Generate test input that has necessary variables for all correctors."""
     # debugging a bit easier with realistic scales for input variables
     # tuples of (name, mean, std) for each variable
@@ -294,8 +296,8 @@ def _get_corrector_test_input(tensor_shape, requires_grad=False):
         ("LHTFLsfc", 100, 50),
         ("specific_total_water_0", 0.001, 0.0001),
         ("specific_total_water_1", 0.001, 0.0001),
-        ("air_temperature_0", 300, 10),
-        ("air_temperature_1", 300, 10),
+        (f"{air_temperature_prefix}0", 300, 10),
+        (f"{air_temperature_prefix}1", 300, 10),
         ("DSWRFtoa", 500, 100),
         ("USWRFtoa", 500, 100),
         ("ULWRFtoa", 500, 100),
@@ -425,7 +427,14 @@ def test__force_conserve_energy_doesnt_clobber():
     torch.testing.assert_close(corrected_gen_data["PRESsfc"], gen_data["PRESsfc"])
 
 
-def test_corrector_integration():
+@pytest.mark.parametrize(
+    "air_temperature_prefix",
+    [
+        "air_temperature_",
+        "T_",
+    ],
+)
+def test_corrector_integration(air_temperature_prefix):
     """Ensures that the corrector can be called with all methods active
     but doesn't check results."""
     config = AtmosphereCorrectorConfig(
@@ -436,7 +445,9 @@ def test_corrector_integration():
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
     )
     tensor_shape = (5, 5)
-    test_input = _get_corrector_test_input(tensor_shape)
+    test_input = _get_corrector_test_input(
+        tensor_shape, air_temperature_prefix=air_temperature_prefix
+    )
     input_data, gen_data, forcing_data, vertical_coord = test_input
     ops = LatLonOperations(
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)

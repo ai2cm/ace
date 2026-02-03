@@ -33,6 +33,7 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.dicts import to_flat_dict
@@ -155,7 +156,29 @@ class InferenceConfig:
     Configuration for running inference.
 
     Parameters:
-        experiment_dir: Directory to save results to.
+        experiment_dir: Directory to save results to. This can be a local
+            directory, like ``/results``, or a remote directory prefixed with a
+            protocol recognized by ``fsspec``, like ``gs://bucket/results``.
+
+            .. note::
+                While most types of output can be written to a remote
+                ``experiment_dir``, there are some limitations:
+
+                - To write raw or time-coarsened data, the zarr writer must be
+                  used. See the ``files`` parameter of the
+                  :class:`fme.ace.DataWriterConfig` for more details on how this
+                  can be configured. Note that monthly coarsened data cannot
+                  currently be written to zarr, and hence a remote directory,
+                  since it uses a different code path than uniformly coarsened
+                  data.
+                - Piping logging output to a file in the ``experiment_dir``
+                  is not supported. To silence the warning related to this, set
+                  ``log_to_file`` to ``False`` in the
+                  :class:`fme.ace.LoggingConfig`.
+
+                There are no restrictions on the types of output that can be
+                written to a local ``experiment_dir``.
+
         n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: Configuration for logging.
@@ -274,8 +297,7 @@ def run_inference_from_config(config: InferenceConfig):
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
     with timer.context("initialization"):
-        if not os.path.isdir(config.experiment_dir):
-            os.makedirs(config.experiment_dir, exist_ok=True)
+        makedirs(config.experiment_dir, exist_ok=True)
         config.configure_logging(log_filename="inference_out.log")
         env_vars = logging_utils.retrieve_env_vars()
         beaker_url = logging_utils.log_beaker_url()
