@@ -113,7 +113,7 @@ class UNetDiffusionSongv2:
     encoder_type: Literal["standard", "skip", "residual"] = "standard"
     decoder_type: Literal["standard", "skip"] = "standard"
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
-
+    act: str = "silu"
     use_apex_gn: bool = True
 
     def build(
@@ -145,7 +145,9 @@ class UNetDiffusionSongv2:
             encoder_type=self.encoder_type,
             decoder_type=self.decoder_type,
             resample_filter=self.resample_filter,
+            act=self.act,
             use_apex_gn=self.use_apex_gn,
+            amp_mode=use_amp_bf16,
         )
         module = UNetDiffusionModule(
             EDMPrecond(
