@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128
-#SBATCH -t 06:00:00
+#SBATCH -t 02:00:00
 #SBATCH --output=joblogs/%j.out
 #SBATCH --signal=USR1@60
 #SBATCH --requeue

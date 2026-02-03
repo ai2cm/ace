@@ -18,20 +18,22 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: BATCH_SIZE_VALUE
-  num_data_workers: 4
+  num_data_workers: 2
+  prefetch_factor: 2
   dataset:
     data_path: /pscratch/sd/e/elynnwu/fme-dataset
-    file_pattern: 2025-08-01-sample-E3SMv3-coupled-atm-wcycl1850-r025.zarr
+    file_pattern: 2024-05-29-era5-025deg-8layer-2010-2022.zarr
     engine: zarr
     subset:
       start_time: '2010-01-01'
       stop_time: '2010-12-31'
 validation_loader:
   batch_size: BATCH_SIZE_VALUE
-  num_data_workers: 4
+  num_data_workers: 2
+  prefetch_factor: 2
   dataset:
     data_path: /pscratch/sd/e/elynnwu/fme-dataset
-    file_pattern: 2025-08-01-sample-E3SMv3-coupled-atm-wcycl1850-r025.zarr
+    file_pattern: 2024-05-29-era5-025deg-8layer-2010-2022.zarr
     engine: zarr
     subset:
       start_time: '2011-01-01'
@@ -120,7 +122,6 @@ stepper:
       - sea_ice_fraction
       - DSWRFtoa
       - HGTsfc
-      - global_mean_co2
       - PRESsfc
       - surface_temperature
       - TMP2m
