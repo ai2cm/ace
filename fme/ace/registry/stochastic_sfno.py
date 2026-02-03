@@ -106,6 +106,8 @@ class NoiseConditionedSFNO(torch.nn.Module):
         if self.pos_embed is not None:
             embedding_pos = self.pos_embed.repeat(noise.shape[0], 1, 1, 1)
             if self.label_pos_embed is not None and labels is not None:
+                print("labels.shape:", labels.shape)
+                print("label_pos_embed.shape:", self.label_pos_embed.shape)
                 label_embedding_pos = torch.einsum(
                     "blp, lpxy -> bpxy", labels, self.label_pos_embed
                 )
