@@ -32,6 +32,12 @@ class NonDistributed(DistributedBackend):
         """Total number of processes."""
         return 1
 
+    def get_local_slices(self, crop_shape):
+        return slice(None, None), slice(None, None)
+
+    def get_local_rank(self):
+        return 0
+
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size
 
