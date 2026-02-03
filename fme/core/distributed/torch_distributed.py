@@ -74,6 +74,12 @@ class TorchDistributed(DistributedBackend):
         """Total number of processes."""
         return self.world_size
 
+    def get_local_rank(self) -> int:
+        return self._device_id
+
+    def get_local_slices(self, crop_shape):
+        return slice(None, None), slice(None, None)
+
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size // self.total_ranks
 

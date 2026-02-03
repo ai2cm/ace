@@ -89,6 +89,9 @@ class Distributed:
         """
         return self._distributed.total_ranks
 
+    def get_local_rank(self) -> int:
+        return self._distributed.get_local_rank()
+
     def get_sampler(
         self,
         dataset: torch.utils.data.Dataset,
@@ -120,6 +123,9 @@ class Distributed:
         Modifies the input tensor in-place as a side effect.
         """
         return self._distributed.reduce_mean(tensor)
+
+    def get_local_slices(self, crop_shape):
+        return self._distributed.get_local_slices(crop_shape)
 
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         """
