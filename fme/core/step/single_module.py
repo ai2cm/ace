@@ -21,6 +21,11 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.secondary_decoder import (
+    NoSecondaryDecoder,
+    SecondaryDecoder,
+    SecondaryDecoderConfig,
+)
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -29,6 +34,7 @@ DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
 @StepSelector.register("single_module")
+@StepSelector.register("default")
 @dataclasses.dataclass
 class SingleModuleStepConfig(StepConfigABC):
     """
@@ -39,6 +45,8 @@ class SingleModuleStepConfig(StepConfigABC):
         in_names: Names of input variables.
         out_names: Names of output variables.
         normalization: The normalization configuration.
+        secondary_decoder: Configuration for the secondary decoder that computes
+            additional diagnostic variables from outputs.
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
@@ -49,6 +57,7 @@ class SingleModuleStepConfig(StepConfigABC):
     in_names: list[str]
     out_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
+    secondary_decoder: SecondaryDecoderConfig | None = None
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
@@ -67,6 +76,16 @@ class SingleModuleStepConfig(StepConfigABC):
                 raise ValueError(
                     f"next_step_forcing_name is an output variable: '{name}'"
                 )
+        if self.secondary_decoder is not None:
+            for name in self.secondary_decoder.secondary_diagnostic_names:
+                if name in self.in_names:
+                    raise ValueError(
+                        f"secondary_diagnostic_name is an input variable: '{name}'"
+                    )
+                if name in self.out_names:
+                    raise ValueError(
+                        f"secondary_diagnostic_name is an output variable: '{name}'"
+                    )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -99,7 +118,7 @@ class SingleModuleStepConfig(StepConfigABC):
     @property
     def _normalize_names(self):
         """Names of variables which require normalization. I.e. inputs/outputs."""
-        return list(set(self.in_names).union(self.out_names))
+        return list(set(self.in_names).union(self.output_names))
 
     @property
     def input_names(self) -> list[str]:
@@ -119,11 +138,16 @@ class SingleModuleStepConfig(StepConfigABC):
     @property
     def diagnostic_names(self) -> list[str]:
         """Names of variables which are outputs only."""
-        return list(set(self.out_names).difference(self.in_names))
+        return list(set(self.output_names).difference(self.in_names))
 
     @property
     def output_names(self) -> list[str]:
-        return self.out_names
+        secondary_names = (
+            self.secondary_decoder.secondary_diagnostic_names
+            if self.secondary_decoder is not None
+            else []
+        )
+        return list(set(self.out_names).union(secondary_names))
 
     @property
     def next_step_input_names(self) -> list[str]:
@@ -223,14 +247,25 @@ class SingleModuleStep(StepABC):
             dataset_info=dataset_info,
         )
         self.module = module.to(get_device())
+
+        dist = Distributed.get_instance()
+
+        if config.secondary_decoder is not None:
+            self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
+                config.secondary_decoder.build(
+                    n_in_channels=n_out_channels,
+                ).to(get_device())
+            )
+        else:
+            self.secondary_decoder = NoSecondaryDecoder()
+
         init_weights(self.modules)
         self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
-        dist = Distributed.get_instance()
         self.module = self.module.wrap_module(dist.wrap_module)
-
+        self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
         self._timestep = dataset_info.timestep
 
         self._corrector = corrector
@@ -276,7 +311,9 @@ class SingleModuleStep(StepABC):
         Returns:
             A list of modules being trained.
         """
-        return nn.ModuleList([self.module.torch_module])
+        modules = [self.module.torch_module]
+        modules.extend(self.secondary_decoder.torch_modules)
+        return nn.ModuleList(modules)
 
     def step(
         self,
@@ -300,7 +337,12 @@ class SingleModuleStep(StepABC):
                 input_tensor,
                 labels=args.labels,
             )
-            return self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
+                output_tensor.detach()  # detach avoids changing base outputs
+            )
+            output_dict.update(secondary_output_dict)
+            return output_dict
 
         return step_with_adjustments(
             input=args.input,
@@ -323,6 +365,7 @@ class SingleModuleStep(StepABC):
         """
         state = {
             "module": self.module.get_state(),
+            "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
         return state
 
@@ -338,6 +381,8 @@ class SingleModuleStep(StepABC):
             # for backwards compatibility with old checkpoints
             del module["module.device_buffer"]
         self.module.load_state(module)
+        if "secondary_decoder" in state:
+            self.secondary_decoder.load_module_state(state["secondary_decoder"])
 
 
 def step_with_adjustments(

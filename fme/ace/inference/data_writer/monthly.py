@@ -15,6 +15,7 @@ from fme.ace.inference.data_writer.utils import (
     DIM_INFO_LATLON,
     get_all_names,
 )
+from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "time"
@@ -112,6 +113,8 @@ class MonthlyDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
+        if not is_local(path):
+            raise ValueError("MonthlyDataWriter only supports local file systems.")
         filename = str(Path(path) / f"{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata
