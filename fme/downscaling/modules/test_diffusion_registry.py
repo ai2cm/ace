@@ -127,14 +127,15 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp_bf16):
 
     # Build module with specified use_amp_bf16 value
     module = DiffusionModuleRegistrySelector(
-        "unet_diffusion_song_v2", {"model_channels": 4}
+        type="unet_diffusion_song",
+        config={"model_channels": 4},
+        use_amp_bf16=use_amp_bf16,
     ).build(
         n_in_channels=n_channels,
         n_out_channels=n_channels,
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         sigma_data=1.0,
-        use_amp_bf16=use_amp_bf16,
     )
 
     batch_size = 1
@@ -171,7 +172,7 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp_bf16):
             "Expected no bfloat16 when use_amp_bf16=False, "
             f"but found bfloat16 in captured dtypes {captured_dtypes}."
         )
-        
+
 
 @pytest.mark.parametrize("use_channels_last", [True, False])
 def test_diffusion_module_use_channels_last_flag(use_channels_last):
@@ -183,7 +184,7 @@ def test_diffusion_module_use_channels_last_flag(use_channels_last):
 
     module = DiffusionModuleRegistrySelector(
         "unet_diffusion_song_v2",
-        {"model_channels": 4},
+        {"model_channels": 4, "use_apex_gn": False, "attn_resolutions": []},
         use_channels_last=use_channels_last,
     ).build(
         n_in_channels=n_channels,
