@@ -321,7 +321,6 @@ class FourierNeuralOperatorBlock(nn.Module):
             bias=False,
             lora_rank=lora_rank,
             lora_alpha=lora_alpha,
-            zero_init=True,
         )
 
         self.prognostic_out_2 = LoRAConv2d(
@@ -331,7 +330,6 @@ class FourierNeuralOperatorBlock(nn.Module):
             bias=False,
             lora_rank=lora_rank,
             lora_alpha=lora_alpha,
-            zero_init=True,
         )
 
     def forward(self, x_in, x, context_embedding):
