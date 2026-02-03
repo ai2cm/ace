@@ -1417,6 +1417,8 @@ class SongUNetv2(torch.nn.Module):
         # Set properties recursively on submodules
         self.profile_mode = profile_mode
         self.amp_mode = amp_mode
+        if self.use_apex_gn:
+            self.to(memory_format=torch.channels_last)
 
     # Properties that are recursively set on submodules
     profile_mode = _recursive_property(

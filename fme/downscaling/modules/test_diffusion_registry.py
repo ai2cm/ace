@@ -2,7 +2,10 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.modules.diffusion_registry import (
+    DiffusionModuleRegistrySelector,
+    is_apex_available,
+)
 from fme.downscaling.modules.vendorized.unets import NonDivisibleShapeError
 
 
@@ -174,9 +177,20 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp_bf16):
         )
 
 
-@pytest.mark.parametrize("channels_last", [True, False])
-def test_diffusion_module_channels_last_flag(channels_last):
-    """Test that channels_last flag correctly controls memory format."""
+@pytest.mark.parametrize(
+    "use_apex_gn",
+    [
+        pytest.param(
+            True,
+            marks=pytest.mark.skipif(
+                not is_apex_available(), reason="Apex not available"
+            ),
+        ),
+        False,
+    ],
+)
+def test_songunetv2_channels_last_if_using_apex_gn(use_apex_gn):
+    """Test that use_apex_gn flag correctly controls memory format."""
     downscale_factor = 2
     coarse_shape = (8, 16)
     fine_shape = coarse_shape[0] * downscale_factor, coarse_shape[1] * downscale_factor
@@ -186,9 +200,8 @@ def test_diffusion_module_channels_last_flag(channels_last):
         "unet_diffusion_song_v2",
         {
             "model_channels": 4,
-            "use_apex_gn": False,
+            "use_apex_gn": use_apex_gn,
             "attn_resolutions": [],
-            "channels_last": channels_last,
         },
     ).build(
         n_in_channels=n_channels,
@@ -202,12 +215,12 @@ def test_diffusion_module_channels_last_flag(channels_last):
     for name, param in module.named_parameters():
         if param.ndim == 4:
             is_channels_last = param.is_contiguous(memory_format=torch.channels_last)
-            if channels_last:
+            if use_apex_gn:
                 assert (
                     is_channels_last
                 ), f"Parameter {name} should be channels_last when flag is True"
             else:
-                # When channels_last=False, params should be contiguous (NCHW)
+                # When use_apex_gn=False, params should be contiguous (NCHW)
                 assert (
                     param.is_contiguous()
                 ), f"Parameter {name} should be contiguous when flag is False"
@@ -221,7 +234,7 @@ def test_diffusion_module_channels_last_flag(channels_last):
     output = module(latent, conditioning, noise)
     assert output.shape == (batch_size, n_channels, *fine_shape)
 
-    if channels_last:
+    if use_apex_gn:
         assert output.is_contiguous(memory_format=torch.channels_last)
     else:
         assert output.is_contiguous()

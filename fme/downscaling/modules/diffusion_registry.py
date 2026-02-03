@@ -116,7 +116,6 @@ class UNetDiffusionSongv2:
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
     act: str = "silu"
     use_apex_gn: bool = True
-    channels_last: bool = True
 
     def build(
         self,
@@ -159,7 +158,6 @@ class UNetDiffusionSongv2:
                 unet,
                 sigma_data=sigma_data,
             ),
-            channels_last=self.channels_last,
             use_amp_bf16=use_amp_bf16,
         )
         return module

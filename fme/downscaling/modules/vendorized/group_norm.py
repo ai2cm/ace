@@ -31,6 +31,10 @@ if torch.cuda.is_available():
         pass
 
 
+def is_apex_available() -> bool:
+    return _is_apex_available
+
+
 def _compute_groupnorm_groups(
     num_channels: int,
     num_groups: int = 32,
