@@ -113,13 +113,10 @@ class NoiseConditionedSFNO(torch.nn.Module):
         else:
             embedding_pos = None
 
-        embedding_scalar = torch.zeros(
-            [*x.shape[:-3], 0], device=x.device, dtype=x.dtype
-        )
         return self.conditional_model(
             x,
             Context(
-                embedding_scalar=embedding_scalar,
+                embedding_scalar=None,
                 embedding_pos=embedding_pos,
                 labels=labels,
                 noise=noise,
