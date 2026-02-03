@@ -1,3 +1,5 @@
+import contextlib
+
 import torch
 
 from fme.core.device import get_device
@@ -16,14 +18,26 @@ class UNetDiffusionModule(torch.nn.Module):
 
     Args:
         unet: The U-Net model.
+        use_amp_bf16: use automatic mixed precision casting to bfloat16 in forward pass
     """
 
     def __init__(
         self,
         unet: torch.nn.Module,
+        use_amp_bf16: bool = False,
     ):
         super().__init__()
         self.unet = unet.to(get_device())
+        self.use_amp_bf16 = use_amp_bf16
+
+        if self.use_amp_bf16:
+            if get_device().type == "mps":
+                raise ValueError("MPS does not support bfloat16 autocast.")
+            self._amp_context = torch.amp.autocast(
+                get_device().type, dtype=torch.bfloat16
+            )
+        else:
+            self._amp_context = contextlib.nullcontext()
 
     def forward(
         self,
@@ -39,9 +53,11 @@ class UNetDiffusionModule(torch.nn.Module):
             latent: The latent diffusion variable on the fine grid.
             noise_level: The noise level of each example in the batch.
         """
-        return self.unet(
-            latent.to(get_device()),
-            conditioning.to(get_device()),
-            sigma=noise_level.to(get_device()),
-            class_labels=None,
-        )
+        device = get_device()
+        with self._amp_context:
+            return self.unet(
+                latent.to(device),
+                conditioning.to(device),
+                sigma=noise_level.to(device),
+                class_labels=None,
+            )
