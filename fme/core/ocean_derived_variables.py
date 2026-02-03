@@ -176,3 +176,12 @@ def sea_ice_fraction(
 ) -> torch.Tensor:
     """Compute the sea ice fraction."""
     return data.sea_ice_fraction
+
+
+@register(VariableMetadata("W/m**2", "Surface ocean heat flux"), exists_ok=True)
+def hfds(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Compute the sea ice fraction."""
+    return data.net_downward_surface_heat_flux

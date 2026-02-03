@@ -302,7 +302,7 @@ def _setup(
         "thetao_1",
         "sst",
         "sea_ice_fraction",
-        "hfds",
+        "hfds_total_area",
     ]
 
     # Add masks and idepths for data generation
