@@ -98,7 +98,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         spectral_transform: Type of spherical transform to use.
             Kept for backwards compatibility.
         filter_type: Type of filter to use.
-        operator_type: Type of operator to use.
+        operator_type: Type of operator to use. Only "dhconv" is supported.
         residual_filter_factor: Factor by which to downsample the residual.
         embed_dim: Dimension of the embedding.
         noise_embed_dim: Dimension of the noise embedding.
