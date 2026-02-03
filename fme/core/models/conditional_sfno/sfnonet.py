@@ -97,18 +97,7 @@ class SpectralFilterLayer(nn.Module):
             raise NotImplementedError("LoRA is only supported for linear filter type.")
 
         if filter_type == "non-linear":
-            self.filter = SpectralAttentionS2(
-                forward_transform,
-                inverse_transform,
-                embed_dim,
-                operator_type=operator_type,
-                sparsity_threshold=sparsity_threshold,
-                hidden_size_factor=hidden_size_factor,
-                complex_activation=complex_activation,
-                spectral_layers=spectral_layers,
-                drop_rate=drop_rate,
-                bias=False,
-            )
+            raise NotImplementedError("Non-linear spectral filters are not supported.")
 
         # spectral transform is passed to the module
         elif filter_type == "linear":

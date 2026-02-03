@@ -145,7 +145,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     """
 
     spectral_transform: Literal["sht"] = "sht"
-    filter_type: str = "non-linear"
+    filter_type: Literal["linear"] = "linear"
     operator_type: Literal["dhconv"] = "dhconv"
     residual_filter_factor: int = 1
     embed_dim: int = 256
