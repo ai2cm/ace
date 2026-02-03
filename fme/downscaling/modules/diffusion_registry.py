@@ -18,7 +18,6 @@ class ModuleConfig(Protocol):
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
-        channels_last: bool = False,
         use_amp_bf16: bool = False,
     ) -> torch.nn.Module: ...
 
@@ -34,7 +33,6 @@ class PreBuiltBuilder:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
-        channels_last: bool = False,
         use_amp_bf16: bool = False,
     ) -> torch.nn.Module:
         return self.module
@@ -64,7 +62,6 @@ class UNetDiffusionSong:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
-        channels_last: bool = False,
         use_amp_bf16: bool = False,
     ):
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
@@ -93,7 +90,6 @@ class UNetDiffusionSong:
                 sigma_data=sigma_data,
             ),
             use_amp_bf16=use_amp_bf16,
-            channels_last=False,
         )
 
 
@@ -115,6 +111,7 @@ class UNetDiffusionSongv2:
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
     act: str = "silu"
     use_apex_gn: bool = True
+    channels_last: bool = True
 
     def build(
         self,
@@ -123,7 +120,6 @@ class UNetDiffusionSongv2:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
-        channels_last: bool = True,
         use_amp_bf16: bool = True,
     ):
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
@@ -154,7 +150,7 @@ class UNetDiffusionSongv2:
                 unet,
                 sigma_data=sigma_data,
             ),
-            channels_last=channels_last,
+            channels_last=self.channels_last,
             use_amp_bf16=use_amp_bf16,
         )
         return module
@@ -170,10 +166,6 @@ class DiffusionModuleRegistrySelector:
         config: configuration for the model architecture
         expects_interpolated_input: whether the model expects interpolated input
             to the target resolution
-        channels_last: whether to use channels_last memory format for the model
-            and forward pass inputs. This can provide a speedup on modern
-            NVIDIA GPUs (H100, B200) by optimizing memory layout for Tensor Cores.
-            Only supported for SongUNetv2. Other models will ignore this flag.
         use_amp_bf16: whether to use automatic mixed precision with bfloat16
             during forward pass.
     """
@@ -181,7 +173,6 @@ class DiffusionModuleRegistrySelector:
     type: str
     config: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     expects_interpolated_input: bool | None = None
-    channels_last: bool = False
     use_amp_bf16: bool = False
 
     def __post_init__(self):
@@ -211,7 +202,6 @@ class DiffusionModuleRegistrySelector:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
-            channels_last=self.channels_last,
             use_amp_bf16=self.use_amp_bf16,
         )
 

@@ -184,8 +184,12 @@ def test_diffusion_module_channels_last_flag(channels_last):
 
     module = DiffusionModuleRegistrySelector(
         "unet_diffusion_song_v2",
-        {"model_channels": 4, "use_apex_gn": False, "attn_resolutions": []},
-        channels_last=channels_last,
+        {
+            "model_channels": 4,
+            "use_apex_gn": False,
+            "attn_resolutions": [],
+            "channels_last": channels_last,
+        },
     ).build(
         n_in_channels=n_channels,
         n_out_channels=n_channels,
