@@ -6,7 +6,12 @@ import dacite
 import torch
 
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
-from fme.downscaling.modules.vendorized import EDMPrecond, SongUNet, SongUNetv2
+from fme.downscaling.modules.vendorized import (
+    EDMPrecond,
+    SongUNet,
+    SongUNetv2,
+    is_apex_available,
+)
 
 
 # TODO: Look into why we need to take in coarse and not target shape
@@ -125,6 +130,10 @@ class UNetDiffusionSongv2:
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
         # number of input channels = latents (num desired outputs) + conditioning fields
         n_in_channels_conditioned = n_in_channels + n_out_channels
+
+        if self.use_apex_gn and not is_apex_available():
+            raise ValueError("'apex' is not installed, set `use_apex_gn=False`")
+
         unet = SongUNetv2(
             min(target_height, target_width),
             n_in_channels_conditioned,
