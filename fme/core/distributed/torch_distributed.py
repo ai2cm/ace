@@ -78,7 +78,7 @@ class TorchDistributed(DistributedBackend):
         return self._device_id
 
     def get_local_slices(self, crop_shape):
-        return slice(None, None), slice(None, None)
+        return tuple(slice(None, None) for _ in crop_shape)
 
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size // self.total_ranks
