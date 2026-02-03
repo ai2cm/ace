@@ -126,6 +126,11 @@ class SpectralConvS2(nn.Module):
         assert out_channels % num_groups == 0
         self.num_groups = num_groups
 
+        if in_channels != out_channels:
+            raise NotImplementedError(
+                "Currently only in_channels == out_channels is supported."
+            )
+
         if scale == "auto":
             scale = 1 / ((in_channels / num_groups) * (out_channels / num_groups))
 
