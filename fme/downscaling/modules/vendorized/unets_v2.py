@@ -879,7 +879,9 @@ class UNetBlock(torch.nn.Module):
         else:
             self.attn = None
         # A hook to migrate legacy attention module
-        self.register_load_state_dict_pre_hook(self._migrate_attention_module)
+        # Commented out after vendorizing because we do not attempt to load
+        # legacy checkpoints, this is only used in SongUNetv2
+        #self.register_load_state_dict_pre_hook(self._migrate_attention_module)
 
     def forward(self, x, emb):
         orig = x
