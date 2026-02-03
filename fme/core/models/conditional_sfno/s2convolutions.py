@@ -122,6 +122,11 @@ class SpectralConvS2(nn.Module):
                 "Currently only in_channels == out_channels is supported."
             )
 
+        if in_channels != out_channels:
+            raise NotImplementedError(
+                "Currently only in_channels == out_channels is supported."
+            )
+
         if scale == "auto":
             scale = 1 / (in_channels * out_channels)
 
