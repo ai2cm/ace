@@ -2,7 +2,6 @@ import logging
 import os
 
 import torch.distributed
-from physicsnemo.distributed.utils import compute_split_shapes
 from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
@@ -12,6 +11,12 @@ from fme.core.distributed import comm
 from .base import DistributedBackend
 from .non_distributed import DummyWrapper
 from .torch_distributed import _gather_irregular
+
+try:
+    from physicsnemo import distributed as pnd
+except ImportError:
+    pnd = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +75,11 @@ class ModelTorchDistributed(DistributedBackend):
         local_shape_w = crop_shape[1]
         local_offset_w = crop_offset[1]
         if comm.get_size("h") > 1:
-            shapes_h = compute_split_shapes(crop_shape[0], comm.get_size("h"))
+            shapes_h = pnd.utils.compute_split_shapes(crop_shape[0], comm.get_size("h"))
             local_shape_h = shapes_h[comm.get_rank("h")]
             local_offset_h = crop_offset[0] + sum(shapes_h[: comm.get_rank("h")])
         if comm.get_size("w") > 1:
-            shapes_w = compute_split_shapes(crop_shape[1], comm.get_size("w"))
+            shapes_w = pnd.utils.compute_split_shapes(crop_shape[1], comm.get_size("w"))
             local_shape_w = shapes_w[comm.get_rank("w")]
             local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
         return (
