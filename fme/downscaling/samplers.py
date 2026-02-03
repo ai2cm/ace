@@ -105,7 +105,8 @@ def stochastic_sampler(
         )
 
     # Time step discretization.
-    step_indices = torch.arange(num_steps, dtype=torch.float64, device=latents.device)
+    compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
+    step_indices = torch.arange(num_steps, dtype=compute_dtype, device=latents.device)
     t_steps = (
         sigma_max ** (1 / rho)
         + step_indices
@@ -119,7 +120,7 @@ def stochastic_sampler(
     x_lr = img_lr
 
     # Main sampling loop.
-    x_next = latents.to(torch.float64) * t_steps[0]
+    x_next = latents.to(compute_dtype) * t_steps[0]
     latent_steps = [x_next.to(latents.dtype)]
     for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):  # 0, ..., N-1
         x_cur = x_next
@@ -141,7 +142,7 @@ def stochastic_sampler(
             x_hat_batch,
             x_lr,
             t_hat,
-        ).to(torch.float64)
+        ).to(compute_dtype)
 
         d_cur = (x_hat - denoised) / t_hat
         x_next = x_hat + (t_next - t_hat) * d_cur
@@ -155,7 +156,7 @@ def stochastic_sampler(
                 x_next_batch,
                 x_lr,
                 t_next,
-            ).to(torch.float64)
+            ).to(compute_dtype)
             d_prime = (x_next - denoised) / t_next
             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
         latent_steps.append(x_next.to(latents.dtype))
