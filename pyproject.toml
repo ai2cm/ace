@@ -43,8 +43,14 @@ cache-keys = [
     { file = "requirements-healpix.txt" },
 ]
 
+[tool.pytest.ini_options]
+norecursedirs = ["fme/downscaling/modules/vendorized"]
+
 [tool.ruff]
-exclude = ["fme/ace/models/makani_fcn3/**"]
+exclude = [
+    "fme/ace/models/makani_fcn3/**",
+    "fme/downscaling/modules/vendorized/**",
+]
 
 [tool.ruff.lint]
 select = ["D", "E", "F", "I", "W", "UP"]
@@ -62,12 +68,16 @@ convention = "google"
 split-on-trailing-comma = false
 known-third-party = ["wandb"]
 
+[[tool.mypy.overrides]]
+module = "fme.downscaling.modules.vendorized.*"
+ignore_errors = true
+
 [tool.coverage.run]
 branch = true
 source_pkgs = ["fme"]
 
 [tool.coverage.report]
-omit = ["test_*.py"]
+omit = ["test_*.py", "fme/downscaling/modules/vendorized/*"]
 # Regexes for lines to exclude from consideration
 exclude_also = [
     # Don't complain about missing debug-only code:

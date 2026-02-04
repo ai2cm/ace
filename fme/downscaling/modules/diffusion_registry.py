@@ -1,13 +1,17 @@
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import dacite
 import torch
 
-from fme.downscaling.modules.preconditioners import EDMPrecond
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
-from fme.downscaling.modules.unets import SongUNet
+from fme.downscaling.modules.vendorized import (
+    EDMPrecond,
+    SongUNet,
+    SongUNetv2,
+    is_apex_available,
+)
 
 
 # TODO: Look into why we need to take in coarse and not target shape
@@ -95,6 +99,72 @@ class UNetDiffusionSong:
 
 
 @dataclasses.dataclass
+class UNetDiffusionSongv2:
+    model_channels: int = 128
+    channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 2, 2])
+
+    channel_mult_emb: int = 4
+    num_blocks: int = 4
+    attn_resolutions: list[int] = dataclasses.field(default_factory=lambda: [16])
+    dropout: float = 0.10
+    label_dropout: int = 0
+
+    embedding_type: Literal["fourier", "positional", "zero"] = "positional"
+    channel_mult_noise: int = 1
+    encoder_type: Literal["standard", "skip", "residual"] = "standard"
+    decoder_type: Literal["standard", "skip"] = "standard"
+    resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    act: str = "silu"
+    use_apex_gn: bool = True
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        coarse_shape: tuple[int, int],
+        downscale_factor: int,
+        sigma_data: float,
+        use_amp_bf16: bool = True,
+    ):
+        target_height, target_width = [s * downscale_factor for s in coarse_shape]
+        # number of input channels = latents (num desired outputs) + conditioning fields
+        n_in_channels_conditioned = n_in_channels + n_out_channels
+
+        if self.use_apex_gn and not is_apex_available():
+            raise ValueError("'apex' is not installed, set `use_apex_gn=False`")
+
+        unet = SongUNetv2(
+            min(target_height, target_width),
+            n_in_channels_conditioned,
+            n_out_channels,
+            model_channels=self.model_channels,
+            channel_mult=self.channel_mult,
+            channel_mult_emb=self.channel_mult_emb,
+            num_blocks=self.num_blocks,
+            attn_resolutions=self.attn_resolutions,
+            dropout=self.dropout,
+            label_dropout=self.label_dropout,
+            embedding_type=self.embedding_type,
+            channel_mult_noise=self.channel_mult_noise,
+            encoder_type=self.encoder_type,
+            decoder_type=self.decoder_type,
+            resample_filter=self.resample_filter,
+            act=self.act,
+            use_apex_gn=self.use_apex_gn,
+            amp_mode=use_amp_bf16,
+        )
+        module = UNetDiffusionModule(
+            EDMPrecond(
+                unet,
+                sigma_data=sigma_data,
+            ),
+            use_amp_bf16=use_amp_bf16,
+            channels_last=self.use_apex_gn,
+        )
+        return module
+
+
+@dataclasses.dataclass
 class DiffusionModuleRegistrySelector:
     """
     Model architecture selector for diffusion models.
@@ -104,11 +174,14 @@ class DiffusionModuleRegistrySelector:
         config: configuration for the model architecture
         expects_interpolated_input: whether the model expects interpolated input
             to the target resolution
+        use_amp_bf16: whether to use automatic mixed precision with bfloat16
+            during forward pass.
     """
 
     type: str
     config: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     expects_interpolated_input: bool | None = None
+    use_amp_bf16: bool = False
 
     def __post_init__(self):
         if self.type == "prebuilt" and self.expects_interpolated_input is None:
@@ -126,7 +199,6 @@ class DiffusionModuleRegistrySelector:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
-        use_amp_bf16: bool = False,
     ) -> torch.nn.Module:
         return dacite.from_dict(
             data_class=NET_REGISTRY[self.type],
@@ -138,16 +210,18 @@ class DiffusionModuleRegistrySelector:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
-            use_amp_bf16=use_amp_bf16,
+            use_amp_bf16=self.use_amp_bf16,
         )
 
 
 NET_REGISTRY: Mapping[str, type[ModuleConfig]] = {
     "unet_diffusion_song": UNetDiffusionSong,
+    "unet_diffusion_song_v2": UNetDiffusionSongv2,
     "prebuilt": PreBuiltBuilder,
 }
 
 
 EXPECTS_INTERPOLATED = {
     "unet_diffusion_song": True,
+    "unet_diffusion_song_v2": True,
 }

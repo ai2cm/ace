@@ -18,18 +18,22 @@ class UNetDiffusionModule(torch.nn.Module):
 
     Args:
         unet: The U-Net model.
-        use_amp_bf16: use automatic mixed precision casting to bfloat16 in forward pass
+        use_amp_bf16: use automatic mixed precision casting to bfloat16
+            during forward pass
+        channels_last: whether to use channels last memory format. 
+            Default is False.
     """
 
     def __init__(
         self,
         unet: torch.nn.Module,
         use_amp_bf16: bool = False,
+        channels_last: bool = False,
     ):
         super().__init__()
-        self.unet = unet.to(get_device())
+        self.unet = unet.to(device=get_device())
         self.use_amp_bf16 = use_amp_bf16
-
+        self.channels_last = channels_last
         if self.use_amp_bf16:
             if get_device().type == "mps":
                 raise ValueError("MPS does not support bfloat16 autocast.")
@@ -54,10 +58,16 @@ class UNetDiffusionModule(torch.nn.Module):
             noise_level: The noise level of each example in the batch.
         """
         device = get_device()
+        memory_format = torch.channels_last if self.channels_last else None
+        latent = latent.to(device, memory_format=memory_format)
+        conditioning = conditioning.to(device, memory_format=memory_format)
+        noise_level = noise_level.to(device)
+        
         with self._amp_context:
-            return self.unet(
-                latent.to(device),
-                conditioning.to(device),
-                sigma=noise_level.to(device),
+            result = self.unet(
+                latent,
+                conditioning,
+                sigma=noise_level,
                 class_labels=None,
             )
+        return result
