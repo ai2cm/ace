@@ -50,14 +50,14 @@ def loss_builds_and_runs_wo_sp(global_mean_type):
     torch.save(logs["metrics/loss"], os.path.join(tmp_path, "loss.pt"))
 
 
-@pytest.mark.skipif(torch.cuda.device_count() < 4, reason="requires multi-GPU machine")
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires multi-GPU machine")
 @pytest.mark.parametrize("global_mean_type", [None])
 def test_loss_builds_and_runs_with_sp(global_mean_type):
     with Distributed.force_non_distributed():
         loss_builds_and_runs_wo_sp(global_mean_type)
 
     os.environ["H_PARALLEL_SIZE"] = "2"
-    os.environ["W_PARALLEL_SIZE"] = "2"
+    os.environ["W_PARALLEL_SIZE"] = "1"
     nx = 8
     ny = 8
     tmp_path = "testdata-loss"

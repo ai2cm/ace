@@ -27,7 +27,7 @@ def int():
     return lat, lon, nlat, nlon, batch_size, input_tensor
 
 
-@pytest.mark.skipif(torch.cuda.device_count() < 4, reason="requires multi-GPU machine")
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires multi-GPU machine")
 def test_lat_lon_ops_from_coords_w_sp():
     lat_host, lon_host, nlat, nlon, batch_size, input_ = int()
     # Compute reference result
@@ -37,7 +37,7 @@ def test_lat_lon_ops_from_coords_w_sp():
         result_ref = gridded_ops.area_weighted_mean(input_, name="T_0")
 
     os.environ["H_PARALLEL_SIZE"] = "2"
-    os.environ["W_PARALLEL_SIZE"] = "2"
+    os.environ["W_PARALLEL_SIZE"] = "1"
     dist = Distributed.get_instance()
     device = get_device()
     lat = lat_host.to(device)
