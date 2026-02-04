@@ -98,7 +98,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         spectral_transform: Type of spherical transform to use.
             Kept for backwards compatibility.
         filter_type: Type of filter to use.
-        operator_type: Type of operator to use.
+        operator_type: Type of operator to use. Only "dhconv" is supported.
         residual_filter_factor: Factor by which to downsample the residual.
         embed_dim: Dimension of the embedding.
         noise_embed_dim: Dimension of the noise embedding.
@@ -145,7 +145,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     """
 
     spectral_transform: Literal["sht"] = "sht"
-    filter_type: str = "non-linear"
+    filter_type: Literal["linear", "makani-linear"] = "linear"
     operator_type: Literal["dhconv"] = "dhconv"
     residual_filter_factor: int = 1
     embed_dim: int = 256
