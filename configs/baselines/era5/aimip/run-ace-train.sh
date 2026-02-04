@@ -4,7 +4,7 @@ set -e
 
 JOB_NAME_BASE="ace-aimip-with-small-co2-perturbations"
 JOB_GROUP="ace-aimip-with-small-co2-perturbations"
-CONFIG_FILENAME="ace-train-with-diagnosed-co2-config.yaml"
+CONFIG_FILENAME="ace-train-with-random-perturbed-co2.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
