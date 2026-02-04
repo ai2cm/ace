@@ -159,6 +159,7 @@ class UNetDiffusionSongv2:
                 sigma_data=sigma_data,
             ),
             use_amp_bf16=use_amp_bf16,
+            channels_last=self.use_apex_gn,
         )
         return module
 

@@ -116,7 +116,6 @@ class EDMPrecond(torch.nn.Module):
             c_noise.flatten(),
             class_labels=class_labels,
         )
-
         if (F_x.dtype != dtype) and not _is_autocast_enabled():
             raise ValueError(
                 f"Expected the dtype to be {dtype}, but got {F_x.dtype} instead."
