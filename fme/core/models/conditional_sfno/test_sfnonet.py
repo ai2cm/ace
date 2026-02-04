@@ -101,10 +101,12 @@ def test_sfnonet_output_is_unchanged():
     img_shape = (9, 18)
     n_samples = 4
     conditional_embed_dim_scalar = 8
-    conditional_embed_dim_labels = 0
+    conditional_embed_dim_labels = 4
     conditional_embed_dim_noise = 16
     device = get_device()
-    params = SimpleNamespace(embed_dim=16, num_layers=2)
+    params = SimpleNamespace(
+        embed_dim=16, num_layers=2, filter_type="linear", operator_type="dhconv"
+    )
     model = get_lat_lon_sfnonet(
         params=params,
         img_shape=img_shape,
