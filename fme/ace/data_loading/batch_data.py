@@ -290,6 +290,16 @@ class BatchData:
             labels = None
         else:
             labels = label_encoding.encode(list(sample_labels))
+        for var_name in batch_data:
+            if var_name == "global_mean_co2":
+                print(" batch_data[var_name] value", batch_data[var_name].mean())
+                perturbed_value = (-5 + 10 * torch.rand(1)) * 10**-6
+                print("perturbed_value", perturbed_value)
+                batch_data[var_name] = batch_data[var_name] + perturbed_value
+                print(
+                    "perturbed_value batch_data[var_name] value",
+                    batch_data[var_name].mean(),
+                )
         return BatchData.new_on_cpu(
             data=batch_data,
             time=batch_time,
