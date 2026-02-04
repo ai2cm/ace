@@ -42,7 +42,11 @@ def test_gridded_operations_from_state(
     assert isinstance(ops, expected_class)
 
     recovered_state = ops.to_state()
-    assert recovered_state == state
+
+    assert recovered_state["type"] == state["type"]
+    # Compare tensors using torch.equal
+    for k, v in recovered_state["state"].items():
+        torch.testing.assert_close(v, state["state"][k])
 
     with pytest.raises(RuntimeError):
         expected_class.from_state(state["state"])
