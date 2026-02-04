@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-with-diagnosed-co2-train"
-JOB_GROUP="ace-aimip-with-diagnosed-co2"
+JOB_NAME_BASE="ace-aimip-with-small-co2-perturbations"
+JOB_GROUP="ace-aimip-with-small-co2-perturbations"
 CONFIG_FILENAME="ace-train-with-diagnosed-co2-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
