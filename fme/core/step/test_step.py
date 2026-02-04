@@ -162,6 +162,7 @@ def get_single_module_noise_conditioned_selector(
                             filter_type="linear",
                             filter_num_groups=2,
                             context_pos_embed_dim=2,
+                            pos_embed=False,
                             num_layers=2,
                             local_blocks=[0],
                             affine_norms=True,
