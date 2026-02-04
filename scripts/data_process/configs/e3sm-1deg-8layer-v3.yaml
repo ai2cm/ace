@@ -1,10 +1,10 @@
 runs:
-  2025-04-03-e3smv3-1deg-ramped: 
+  2025-04-03-e3smv3-1deg-ramped: None
 data_output_directory: /pscratch/sd/r/elynnwu/fme-preprocess/zarr/
 stats:
   output_directory: /pscratch/sd/r/elynnwu/fme-dataset/2026-02-03-E3SMv3-AMIP-1970-2020-1deg-8layer
-  start_date: 1970-01-01
-  end_date: 2019-12-31
+  start_date: "1970-01-01"
+  end_date: "2019-12-31"
   data_type: E3SMV2
   beaker_dataset: e3sm-1deg-8layers-stats # this is not used in e3sm data processing
 
@@ -39,8 +39,8 @@ dataset_computation:
     - QREFHT
     - TREFHT
     - U10
-    - V10
   n_split: 200
+  CO2_concentration: 0.0003887
   variable_sources:
     time_invariant:
       - PHIS
@@ -63,7 +63,6 @@ dataset_computation:
       - QREFHT
       - TREFHT
       - U10
-      - V10
     6hourly/1yr:
       - PRECT
       - LHFLX
@@ -78,7 +77,7 @@ dataset_computation:
       - PRECSC
       - PRECSL
       - QFLX
-  renaming::
+  renaming:
     PS: PRESsfc
     LHFLX: LHTFLsfc
     SHFLX: SHTFLsfc
@@ -120,8 +119,7 @@ dataset_computation:
     V_7: northward_wind_7
     QREFHT: Q2m
     TREFHT: TMP2m
-    U10: UGRD10m
-    V10: VGRD10m
+    U10: wind_speed_10m
   standard_names:
     total_frozen_precip_rate: None
     surface_snow_rate: PRECSL

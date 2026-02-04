@@ -84,6 +84,7 @@ DROP_VARIABLE_NAMES = {
 }
 GRAVITY = 9.80665  # m/s^2
 
+
 def expand_names_by_level(variables: MutableMapping[str, List[str]]) -> List[str]:
     names = []
     for var_name, levels in variables.items():
@@ -178,6 +179,7 @@ def open_dataset(
                     datasets[varname] = ds
         del var_paths["time_invariant"]
     for varname, paths in var_paths.items():
+        print(varname)
         var_start = time.time()
         if varname in varnames_3D:
             drop_vars = DROP_VARIABLE_NAMES["3D"]
@@ -186,9 +188,6 @@ def open_dataset(
         datasets[varname] = xr.open_mfdataset(
             paths,
             chunks=chunks,
-            data_vars="minimal",
-            coords="minimal",
-            parallel=True,
         ).drop(drop_vars, errors="ignore")
         logging.info(f"{varname} files opened in {time.time() - var_start:.2f} s...")
     logging.info(f"All files opened in {time.time() - start:.2f} s. Merging...")
@@ -308,10 +307,19 @@ def compute_rad_fluxes(
         fluxes[output_name].attrs["units"] = ds[formula[1]].attrs["units"]
     return ds.assign(fluxes)
 
+
 def sfc_phis_to_hgt(ds):
     ds["HGTsfc"] = ds["PHIS"] / GRAVITY
     ds = ds.drop_vars("PHIS")
     return ds
+
+
+def add_time_invariant_co2_concentration(ds, config):
+    if config.CO2_concentration is not None:
+        co2 = xr.DataArray(config.CO2_concentration, dims=["time"], coords=[ds["time"]])
+        ds["global_mean_co2"] = co2
+    return ds
+
 
 def construct_lazy_dataset(
     config: DatasetComputationConfig,
@@ -426,6 +434,7 @@ def construct_lazy_dataset(
         "p_i pressure corresponds to the interface at the top of the i'th finite "
         "volume layer, counting down from the top of atmosphere."
     )
+    ds = add_time_invariant_co2_concentration(ds, config)
     ds = ds.rename(config.renaming)
     ds = sfc_phis_to_hgt(ds)
     return ds
