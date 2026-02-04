@@ -222,6 +222,12 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
 
+    def __post_init__(self):
+        if self.context_pos_embed_dim > 0 and self.pos_embed:
+            raise ValueError(
+                "context_pos_embed_dim and pos_embed should not both be set"
+            )
+
     def build(
         self,
         n_in_channels: int,
