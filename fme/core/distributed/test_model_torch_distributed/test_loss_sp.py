@@ -108,4 +108,5 @@ def test_loss_builds_and_runs_with_sp(global_mean_type):
     # print("lost", logs["metrics/loss"] )
     # print("loss_serial", loss_serial )
     rel_diff = np.abs(loss_serial - logs["metrics/loss"]) / loss_serial
+    os.environ["H_PARALLEL_SIZE"] = "1"
     assert rel_diff < error_tol
