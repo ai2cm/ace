@@ -48,7 +48,7 @@ from fme.core.weight_ops import strip_leading_module
 from fme.diffusion.loss import WeightedMappingLossConfig
 from fme.diffusion.registry import ModuleSelector
 from fme.downscaling.models import condition_with_noise_for_training
-from fme.downscaling.modules.vendorized.layers import Linear, PositionalEmbedding
+from fme.downscaling.modules.physicsnemo_unets_v1 import Linear, PositionalEmbedding
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
