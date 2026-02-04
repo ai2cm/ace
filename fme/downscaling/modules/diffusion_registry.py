@@ -5,8 +5,8 @@ from typing import Any, Protocol
 import dacite
 import torch
 
-from fme.downscaling.modules.vendorized.preconditioners import EDMPrecond
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
+from fme.downscaling.modules.vendorized.preconditioners import EDMPrecond
 from fme.downscaling.modules.vendorized.unets import SongUNet
 
 
