@@ -47,10 +47,11 @@ def _contract_lora(
     Performs LoRA update contraction.
 
     Args:
-        lora_A: LoRA A matrix of shape (group, in_channels, rank, nlat, 2)
-        lora_B: LoRA B matrix of shape (group, rank, out_channels, nlat, 2)
+
+        lora_A: LoRA A matrix of shape (in_channels, rank, nlat, 2)
+        lora_B: LoRA B matrix of shape (rank, out_channels, nlat, 2)
         x: Complex input tensor of shape
-            (batch_size, group, in_channels, nlat, nlon)
+            (batch_size, in_channels, nlat, nlon)
     """
     lora_A = torch.view_as_complex(lora_A)
     lora_B = torch.view_as_complex(lora_B)
@@ -71,6 +72,22 @@ def _contract_dhconv(
     """
     wc = torch.view_as_complex(weight)
     return torch.einsum("bgixy,giox->bgoxy", xc, wc)
+
+
+@torch.jit.script
+def _contract_dhconv(
+    xc: torch.Tensor, weight: torch.Tensor
+) -> torch.Tensor:  # pragma: no cover
+    """
+    Performs a complex Driscoll-Healy style convolution operation between two tensors
+    'a' and 'b'.
+
+    Args:
+        xc: Complex input tensor of shape (batch_size, in_channels, nlat, nlon)
+        weight: Weight tensor of shape (in_channels, out_channels, nlat, 2)
+    """
+    wc = torch.view_as_complex(weight)
+    return torch.einsum("bixy,iox->boxy", xc, wc)
 
 
 class SpectralConvS2(nn.Module):
@@ -122,6 +139,7 @@ class SpectralConvS2(nn.Module):
             raise NotImplementedError(
                 "Currently only in_channels == out_channels is supported."
             )
+
         assert in_channels % num_groups == 0
         assert out_channels % num_groups == 0
         self.num_groups = num_groups
