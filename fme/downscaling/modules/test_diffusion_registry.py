@@ -3,7 +3,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
-from fme.downscaling.modules.vendorized.unets import NonDivisibleShapeError
+from fme.downscaling.modules.physicsnemo_unets_v1.unets import NonDivisibleShapeError
 
 
 def test_diffusion_unet_shapes():

@@ -5,7 +5,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.testing.regression import validate_tensor_dict
-from fme.downscaling.modules.vendorized.unets import (
+from fme.downscaling.modules.physicsnemo_unets_v1.unets import (
     SongUNet,
     check_level_compatibility,
     validate_shape,

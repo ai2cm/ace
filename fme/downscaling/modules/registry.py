@@ -14,8 +14,8 @@ import dacite
 import torch
 
 from fme.core.device import get_device
+from fme.downscaling.modules.physicsnemo_unets_v1 import SongUNet
 from fme.downscaling.modules.swinir import SwinIR
-from fme.downscaling.modules.vendorized.unets import SongUNet
 
 
 class ModuleConfig(Protocol):
