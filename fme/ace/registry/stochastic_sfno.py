@@ -98,7 +98,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         spectral_transform: Type of spherical transform to use.
             Kept for backwards compatibility.
         filter_type: Type of filter to use.
-        operator_type: Type of operator to use.
+        operator_type: Type of operator to use. Only "dhconv" is supported.
         residual_filter_factor: Factor by which to downsample the residual.
         embed_dim: Dimension of the embedding.
         noise_embed_dim: Dimension of the noise embedding.
@@ -114,8 +114,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         pos_embed: Whether to use a position embedding.
         big_skip: Whether to use a big skip connection in the model.
         rank: Rank of the model.
-        factorization: Factorization to use.
-        separable: Whether to use a separable filter.
+        factorization: Unused, kept for backwards compatibility only.
+        separable: Unused, kept for backwards compatibility only.
         complex_network: Whether to use a complex network.
         complex_activation: Activation function to use.
         spectral_layers: Number of spectral layers in the model.
@@ -134,11 +134,19 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             normalization layers.
         filter_num_groups: Number of groups to use in grouped convolutions
             for the spectral filter.
+        lora_rank: Rank of the LoRA adaptations outside of spectral convolutions.
+            0 (default) disables LoRA.
+        lora_alpha: Strength of the LoRA adaptations outside of spectral convolutions.
+            Defaults to lora_rank.
+        spectral_lora_rank: Rank of the LoRA adaptations for spectral convolutions.
+            0 (default) disables LoRA.
+        spectral_lora_alpha: Strength of the LoRA adaptations for spectral convolutions.
+            Defaults to spectral_lora_rank.
     """
 
     spectral_transform: Literal["sht"] = "sht"
-    filter_type: str = "non-linear"
-    operator_type: str = "diagonal"
+    filter_type: Literal["linear", "makani-linear"] = "linear"
+    operator_type: Literal["dhconv"] = "dhconv"
     residual_filter_factor: int = 1
     embed_dim: int = 256
     noise_embed_dim: int = 256
@@ -152,7 +160,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     pos_embed: bool = True
     big_skip: bool = True
     rank: float = 1.0
-    factorization: str | None = None
+    factorization: None = None
     separable: bool = False
     complex_network: bool = True
     complex_activation: str = "real"
@@ -166,6 +174,21 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     normalize_big_skip: bool = False
     affine_norms: bool = False
     filter_num_groups: int = 1
+    lora_rank: int = 0
+    lora_alpha: float | None = None
+    spectral_lora_rank: int = 0
+    spectral_lora_alpha: float | None = None
+
+    def __post_init__(self):
+        if self.factorization is not None:
+            raise ValueError("The 'factorization' parameter is no longer supported.")
+        if self.separable:
+            raise ValueError("The 'separable' parameter is no longer supported.")
+        if self.operator_type != "dhconv":
+            raise ValueError(
+                "Only 'dhconv' operator_type is supported for "
+                "NoiseConditionedSFNO models."
+            )
 
     def build(
         self,
