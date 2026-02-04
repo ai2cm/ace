@@ -42,6 +42,7 @@ def loss_builds_and_runs_wo_sp(global_mean_type):
     )
     logs = aggregator.get_logs(label="metrics")
     tmp_path = "testdata-loss"
+    os.makedirs(tmp_path, exist_ok=True)
     torch.save(area_weights, os.path.join(tmp_path, "area_weights.pt"))
     torch.save(data_tensor, os.path.join(tmp_path, "example_data.pt"))
     torch.save(x, os.path.join(tmp_path, "x.pt"))
