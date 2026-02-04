@@ -74,22 +74,6 @@ def _contract_dhconv(
     return torch.einsum("bgixy,giox->bgoxy", xc, wc)
 
 
-@torch.jit.script
-def _contract_dhconv(
-    xc: torch.Tensor, weight: torch.Tensor
-) -> torch.Tensor:  # pragma: no cover
-    """
-    Performs a complex Driscoll-Healy style convolution operation between two tensors
-    'a' and 'b'.
-
-    Args:
-        xc: Complex input tensor of shape (batch_size, in_channels, nlat, nlon)
-        weight: Weight tensor of shape (in_channels, out_channels, nlat, 2)
-    """
-    wc = torch.view_as_complex(weight)
-    return torch.einsum("bixy,iox->boxy", xc, wc)
-
-
 class SpectralConvS2(nn.Module):
     """
     Spectral Convolution according to Driscoll & Healy. Designed for convolutions on
