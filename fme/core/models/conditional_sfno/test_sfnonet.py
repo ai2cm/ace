@@ -167,6 +167,7 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
             num_layers=2,
             normalize_big_skip=normalize_big_skip,
             global_layer_norm=True,  # so it uses nn.LayerNorm
+            operator_type="dhconv",
         )
         model = get_lat_lon_sfnonet(
             params=params,
