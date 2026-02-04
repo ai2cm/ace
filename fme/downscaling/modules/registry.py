@@ -15,7 +15,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.downscaling.modules.swinir import SwinIR
-from fme.downscaling.modules.unets import SongUNet
+from fme.downscaling.modules.vendorized.unets import SongUNet
 
 
 class ModuleConfig(Protocol):
