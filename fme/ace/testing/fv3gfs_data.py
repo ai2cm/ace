@@ -60,7 +60,7 @@ class DimSizes:
         raise KeyError(f"Dimension with name '{key}' not found.")
 
 
-def save_nd_netcdf(
+def save_nd_zarr(
     filename,
     dim_sizes: DimSizes,
     variable_names: list[str],
@@ -92,7 +92,7 @@ def save_nd_netcdf(
         for name in variable_names:
             for i in range(dim_sizes.n_time):
                 ds[name].isel(time=i).values[:] = time_varying_values[i]
-    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+    ds.to_zarr(filename)
     if return_ds:
         return ds
     return None
@@ -150,7 +150,7 @@ class FV3GFSData:
                 f"Number of time-varying values ({len(self.time_varying_values)}) "
                 f"must match number of time steps ({self.dim_sizes.n_time})"
             )
-        self._ds: xr.Dataset = save_nd_netcdf(
+        self._ds: xr.Dataset = save_nd_zarr(
             self.data_filename,
             dim_sizes=self.dim_sizes,
             variable_names=self.names,

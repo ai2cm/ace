@@ -4,6 +4,6 @@ from .fv3gfs_data import (
     FV3GFSData,
     MonthlyReferenceData,
     StatsData,
-    save_nd_netcdf,
+    save_nd_zarr,
     save_scalar_netcdf,
 )

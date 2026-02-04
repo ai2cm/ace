@@ -322,6 +322,8 @@ def _open_file_fh_cached(path, **kwargs):
 
 
 def get_raw_paths(path, file_pattern):
+    if "*" not in file_pattern:
+        return [os.path.join(path, file_pattern)]
     fs = _get_fs(path)
     glob_paths = sorted(fs.glob(os.path.join(path, file_pattern)))
     raw_paths = _preserve_protocol(path, glob_paths)

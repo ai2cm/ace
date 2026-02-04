@@ -7,7 +7,7 @@ from write_monthly_data import Config, run
 
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.testing import DimSize, DimSizes
-from fme.ace.testing.fv3gfs_data import save_nd_netcdf
+from fme.ace.testing.fv3gfs_data import save_nd_zarr
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
@@ -21,7 +21,7 @@ def write_ensemble_dataset(
     for i in range(n_members):
         ensemble_dir = path / f"ic_{i:04d}"
         ensemble_dir.mkdir(exist_ok=True)
-        save_nd_netcdf(
+        save_nd_zarr(
             ensemble_dir / "data.nc",
             dim_sizes,
             names,

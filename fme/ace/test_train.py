@@ -4,6 +4,7 @@ import pathlib
 import subprocess
 import tempfile
 import unittest.mock
+import uuid
 from typing import Literal
 
 import dacite
@@ -47,7 +48,7 @@ from fme.ace.stepper.time_length_probabilities import (
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
-    save_nd_netcdf,
+    save_nd_zarr,
     save_scalar_netcdf,
 )
 from fme.ace.train.train import build_trainer, prepare_directory
@@ -224,8 +225,10 @@ def _get_test_yaml_files(
             loader=InferenceDataLoaderConfig(
                 dataset=XarrayDataConfig(
                     data_path=str(valid_data_path),
+                    file_pattern="data.zarr",
                     spatial_dimensions=spatial_dimensions_str,
                     labels=[] if conditional else None,
+                    engine="zarr",
                 ),
                 start_indices=InferenceInitialConditionIndices(
                     first=0,
@@ -247,8 +250,10 @@ def _get_test_yaml_files(
             loader=InferenceDataLoaderConfig(
                 dataset=XarrayDataConfig(
                     data_path=str(valid_data_path),
+                    file_pattern="data.zarr",
                     spatial_dimensions=spatial_dimensions_str,
                     labels=["era5"] if conditional else None,
+                    engine="zarr",
                 ),
                 start_indices=InferenceInitialConditionIndices(
                     first=0,
@@ -299,13 +304,17 @@ def _get_test_yaml_files(
                 concat=[
                     XarrayDataConfig(
                         data_path=str(train_data_path),
+                        file_pattern="data.zarr",
                         labels=["era5"] if conditional else None,
                         spatial_dimensions=spatial_dimensions_str,
+                        engine="zarr",
                     ),
                     XarrayDataConfig(
                         data_path=str(train_data_path),
+                        file_pattern="data.zarr",
                         labels=[] if conditional else None,
                         spatial_dimensions=spatial_dimensions_str,
+                        engine="zarr",
                     ),
                 ],
             ),
@@ -317,8 +326,10 @@ def _get_test_yaml_files(
         validation_loader=DataLoaderConfig(
             dataset=XarrayDataConfig(
                 data_path=str(valid_data_path),
+                file_pattern="data.zarr",
                 spatial_dimensions=spatial_dimensions_str,
                 labels=["era5"] if conditional else None,
+                engine="zarr",
             ),
             batch_size=2,
             num_data_workers=0,
@@ -400,8 +411,10 @@ def _get_test_yaml_files(
         loader=InferenceDataLoaderConfig(
             dataset=XarrayDataConfig(
                 data_path=str(valid_data_path),
+                file_pattern="data.zarr",
                 spatial_dimensions=spatial_dimensions_str,
                 labels=["era5"] if conditional else None,
+                engine="zarr",
             ),
             start_indices=InferenceInitialConditionIndices(
                 first=0,
@@ -490,18 +503,18 @@ def _setup(
     else:
         dim_sizes = get_sizes(n_time=n_time)
 
-    data_dir = path / "data"
+    in_memory_path = pathlib.Path(f"memory://test-{uuid.uuid4()}")
+    data_dir = in_memory_path / "data"
     stats_dir = path / "stats"
     results_dir = path / "results"
-    data_dir.mkdir()
     stats_dir.mkdir()
     results_dir.mkdir()
     on_disk_names = all_variable_names + [mask_name]
     if derived_forcings.insolation is not None:
         if isinstance(derived_forcings.insolation.solar_constant, NameConfig):
             on_disk_names.append(derived_forcings.insolation.solar_constant.name)
-    save_nd_netcdf(
-        data_dir / "data.nc",
+    save_nd_zarr(
+        data_dir / "data.zarr",
         dim_sizes,
         variable_names=on_disk_names,
         timestep_days=timestep_days,

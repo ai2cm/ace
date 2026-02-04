@@ -9,7 +9,7 @@ import torch
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
-    save_nd_netcdf,
+    save_nd_zarr,
     save_scalar_netcdf,
 )
 from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
@@ -198,7 +198,7 @@ def _setup(
     data_dir.mkdir()
     stats_dir.mkdir()
     results_dir.mkdir()
-    save_nd_netcdf(
+    save_nd_zarr(
         data_dir / "data.nc",
         dim_sizes,
         variable_names=all_variable_names + [mask_name],
