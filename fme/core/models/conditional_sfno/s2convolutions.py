@@ -181,10 +181,7 @@ class SpectralConvS2(nn.Module):
 
         assert factorization == "ComplexDense"
         self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
-        if self.operator_type == "dhconv":
-            self.weight.is_shared_mp = ["matmul", "w"]
-        else:
-            self.weight.is_shared_mp = ["matmul"]
+        self.weight.is_shared_mp = ["matmul", "w"]
 
         if lora_rank > 0:
             self.lora_A = nn.Parameter(
