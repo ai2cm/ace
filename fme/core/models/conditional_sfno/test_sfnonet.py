@@ -139,11 +139,15 @@ def test_sfnonet_output_is_unchanged(dtype):
     )
     with torch.no_grad():
         output = model(x.to(dtype), context.to(dtype)).to(torch.float32)
+    if dtype == torch.float32:
+        atol = 1e-5  # torch default for float32
+    else:
+        atol = 1e-4
     validate_tensor(
         output,
         os.path.join(DIR, "testdata/test_sfnonet_output_is_unchanged.pt"),
         rtol=0,
-        atol=1e-4,
+        atol=atol,
     )
 
 
