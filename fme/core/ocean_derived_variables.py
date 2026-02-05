@@ -183,5 +183,5 @@ def hfds(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    """Compute the sea ice fraction."""
+    """Compute the net downward surface heat flux."""
     return data.net_downward_surface_heat_flux

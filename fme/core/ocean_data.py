@@ -22,7 +22,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "ocean_sea_ice_fraction": ["ocean_sea_ice_fraction"],
         "land_fraction": ["land_fraction"],
         "net_downward_surface_heat_flux": ["hfds"],
-        "net_downward_surface_heat_flux_by_total_area": ["hfds_total_area"],
+        "net_downward_surface_heat_flux_total_area": ["hfds_total_area"],
         "geothermal_heat_flux": ["hfgeou"],
         "sea_surface_fraction": ["sea_surface_fraction"],
     }
@@ -174,7 +174,7 @@ class OceanData:
         """Net heat flux downward across the ocean surface (below the sea-ice),
         normalized by total grid cell area.
         """
-        return self._get("net_downward_surface_heat_flux_by_total_area")
+        return self._get("net_downward_surface_heat_flux_total_area")
 
     @property
     def geothermal_heat_flux(self) -> torch.Tensor:
