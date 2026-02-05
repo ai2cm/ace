@@ -152,7 +152,7 @@ def test_sfnonet_output_is_unchanged(dtype):
         embedding_pos=context_embedding_pos,
     )
     with torch.no_grad():
-        output = model(x.to(dtype), context.to(dtype)).to(torch.float32)
+        output = model(x, context)
     if dtype == torch.float32:
         atol = 1e-5  # torch default for float32
     else:

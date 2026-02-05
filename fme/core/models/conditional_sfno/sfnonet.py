@@ -867,6 +867,10 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         return x
 
     def forward(self, x: torch.Tensor, context: Context):
+        source_dtype = x.dtype
+        model_dtype = self.parameters().__next__().dtype
+        x = x.to(model_dtype)
+        context = context.to(model_dtype)
         # save big skip
         if self.big_skip:
             residual = self.residual_filter_up(self.residual_filter_down(x))
@@ -897,4 +901,4 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         x = self.filter_output_up(self.filter_output_down(x))
 
-        return x
+        return x.to(source_dtype)
