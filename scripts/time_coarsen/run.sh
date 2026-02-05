@@ -23,8 +23,8 @@ run_coarsen() {
     --name "$job_name" \
     --description 'Run ACE training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority high \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --non-preemptible \
     --cluster ai2/jupiter \
     --cluster ai2/ceres \
