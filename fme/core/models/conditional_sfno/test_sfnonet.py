@@ -94,7 +94,8 @@ def test_scale_factor_not_implemented():
         ).to(device)
 
 
-def test_sfnonet_output_is_unchanged():
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+def test_sfnonet_output_is_unchanged(dtype):
     torch.manual_seed(0)
     input_channels = 2
     output_channels = 3
@@ -107,17 +108,21 @@ def test_sfnonet_output_is_unchanged():
     params = SimpleNamespace(
         embed_dim=16, num_layers=2, filter_type="linear", operator_type="dhconv"
     )
-    model = get_lat_lon_sfnonet(
-        params=params,
-        img_shape=img_shape,
-        in_chans=input_channels,
-        out_chans=output_channels,
-        context_config=ContextConfig(
-            embed_dim_scalar=conditional_embed_dim_scalar,
-            embed_dim_labels=conditional_embed_dim_labels,
-            embed_dim_noise=conditional_embed_dim_noise,
-        ),
-    ).to(device)
+    model = (
+        get_lat_lon_sfnonet(
+            params=params,
+            img_shape=img_shape,
+            in_chans=input_channels,
+            out_chans=output_channels,
+            context_config=ContextConfig(
+                embed_dim_scalar=conditional_embed_dim_scalar,
+                embed_dim_labels=conditional_embed_dim_labels,
+                embed_dim_noise=conditional_embed_dim_noise,
+            ),
+        )
+        .to(device)
+        .to(dtype)
+    )
     # must initialize on CPU to get the same results on GPU
     x = torch.randn(n_samples, input_channels, *img_shape).to(device)
     context_embedding = torch.randn(n_samples, conditional_embed_dim_scalar).to(device)
@@ -133,10 +138,12 @@ def test_sfnonet_output_is_unchanged():
         noise=context_embedding_noise,
     )
     with torch.no_grad():
-        output = model(x, context)
+        output = model(x.to(dtype), context.to(dtype)).to(torch.float32)
     validate_tensor(
         output,
         os.path.join(DIR, "testdata/test_sfnonet_output_is_unchanged.pt"),
+        rtol=0,
+        atol=1e-4,
     )
 
 

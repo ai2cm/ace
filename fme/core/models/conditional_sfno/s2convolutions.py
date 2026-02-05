@@ -57,20 +57,42 @@ def _contract_lora(
     return torch.einsum("irx,rox,bixy->boxy", lora_A, lora_B, x)
 
 
-@torch.jit.script
 def _contract_dhconv(
-    xc: torch.Tensor, weight: torch.Tensor
+    x: torch.Tensor, w: torch.Tensor
 ) -> torch.Tensor:  # pragma: no cover
     """
     Performs a complex Driscoll-Healy style convolution operation between two tensors
     'a' and 'b'.
 
     Args:
-        xc: Complex input tensor of shape (batch_size, in_channels, nlat, nlon)
-        weight: Weight tensor of shape (in_channels, out_channels, nlat, 2)
+        x: Complex input tensor of shape (batch_size, in_channels, nlat, nlon, 2)
+        w: Complex weight tensor of shape (in_channels, out_channels, nlat, 2)
     """
-    wc = torch.view_as_complex(weight)
-    return torch.einsum("bixy,iox->boxy", xc, wc)
+    xc = torch.view_as_complex(x)
+    wc = torch.view_as_complex(w)
+    return torch.view_as_real(torch.einsum("bixy,iox->boxy", xc, wc))
+
+
+def _contract_dhconv_safe(
+    x: torch.Tensor, w: torch.Tensor
+) -> torch.Tensor:  # pragma: no cover
+    """
+    Performs a complex Driscoll-Healy style convolution operation between two tensors
+    'a' and 'b'.
+
+    Operates safely in lower-precision dtypes by manually handling real and imaginary parts.
+
+    Args:
+        x: Complex input tensor of shape (batch_size, in_channels, nlat, nlon, 2)
+        w: Complex weight tensor of shape (in_channels, out_channels, nlat, 2)
+    """
+    r0 = torch.einsum("bixy,iox->boxy", x[..., 0], w[..., 0])
+    r1 = torch.einsum("bixy,iox->boxy", x[..., 1], w[..., 1])
+    i0 = torch.einsum("bixy,iox->boxy", x[..., 0], w[..., 1])
+    i1 = torch.einsum("bixy,iox->boxy", x[..., 1], w[..., 0])
+    real = r0 - r1
+    imag = i0 + i1
+    return torch.stack([real, imag], dim=-1)
 
 
 class SpectralConvS2(nn.Module):
@@ -207,11 +229,10 @@ class SpectralConvS2(nn.Module):
     def forward(self, x):  # pragma: no cover
         dtype = x.dtype
         residual = x
-        x = x.float()
         B, C, H, W = x.shape
 
         with torch.amp.autocast("cuda", enabled=False):
-            x = self.forward_transform(x.float())
+            x = self.forward_transform(x)
             if self._round_trip_residual:
                 x = x.contiguous()
                 residual = self.inverse_transform(x)
@@ -228,7 +249,11 @@ class SpectralConvS2(nn.Module):
 
         # approach with unpadded weights
         xp = torch.zeros_like(x)
-        xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
+        if dtype == torch.float32:
+            contract = _contract_dhconv
+        else:
+            contract = _contract_dhconv_safe
+        xp[..., : self.modes_lat_local, : self.modes_lon_local] = contract(
             x[..., : self.modes_lat_local, : self.modes_lon_local],
             self.weight,
         )

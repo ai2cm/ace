@@ -22,6 +22,7 @@ import torch.nn as nn
 
 # get spectral transforms from torch_harmonics
 import torch_harmonics as th
+from .sht import RealSHT, InverseRealSHT
 from torch.utils.checkpoint import checkpoint
 
 from .initialization import trunc_normal_
@@ -361,16 +362,16 @@ def get_lat_lon_sfnonet(
     modes_lat = int(h * hard_thresholding_fraction)
     modes_lon = int((w // 2 + 1) * hard_thresholding_fraction)
     data_grid = params.data_grid if hasattr(params, "data_grid") else "equiangular"
-    trans_down = th.RealSHT(
+    trans_down = RealSHT(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
     ).float()
-    itrans_up = th.InverseRealSHT(
+    itrans_up = InverseRealSHT(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
     ).float()
-    trans = th.RealSHT(
+    trans = RealSHT(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
     ).float()
-    itrans = th.InverseRealSHT(
+    itrans = InverseRealSHT(
         h, w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
     ).float()
 
