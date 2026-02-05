@@ -25,7 +25,7 @@ run_coarsen() {
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/climate-titan \
     --priority urgent \
-    --non-preemptible \
+    --not-preemptible \
     --cluster ai2/jupiter \
     --cluster ai2/ceres \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
