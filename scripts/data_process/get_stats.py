@@ -88,11 +88,18 @@ def get_stats(
     debug: bool,
 ):
     # Import dask-related things here to enable testing in environments without dask.
-    import dask
-    import distributed
+    try:
+        import dask
+        import distributed
+
+        client = distributed.Client(n_workers=16)
+    except ImportError as e:
+        # warn and continue
+        logging.warning(f"Could not import dask ({e}), chunking is disabled.")
+        client = None
+        dask = None
 
     initial_time = time.time()
-    client = distributed.Client(n_workers=16)
 
     xr.set_options(keep_attrs=True, display_max_rows=100)
     logging.info(f"Reading data from {input_zarr}")
@@ -100,8 +107,11 @@ def get_stats(
     # Open data with roughly 128 MiB chunks via dask's automatic chunking. This
     # is useful when opening sharded zarr stores with an inner chunk size of 1,
     # which is otherwise inefficient for the type of computation done here.
-    with dask.config.set({"array.chunk-size": "128MiB"}):
-        ds = xr.open_zarr(input_zarr, chunks={"time": "auto"})
+    if dask is not None:
+        with dask.config.set({"array.chunk-size": "128MiB"}):
+            ds = xr.open_zarr(input_zarr, chunks={"time": "auto"})
+    else:
+        ds = xr.open_zarr(input_zarr)
 
     ds = ds.drop_vars(DROP_VARIABLES, errors="ignore")
     ds = ds.sel(time=slice(config.start_date, config.end_date))
@@ -186,7 +196,8 @@ def get_stats(
     total_time = time.time() - initial_time
     logging.info(f"Total time for computing stats: {total_time:0.2f} seconds.")
 
-    client.close()
+    if client is not None:
+        client.close()
     client = None
 
 
