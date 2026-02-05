@@ -21,7 +21,7 @@ run_stats() {
 
   gantry run \
     --name "$job_name" \
-    --description 'Run ACE training' \
+    --description 'Run ACE stats computation' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/climate-titan \
     --priority urgent \
@@ -37,7 +37,7 @@ run_stats() {
     --system-python \
     --install "pip install --no-deps ." \
     "${extra_args[@]}" \
-    -- $SCRIPT_PATH/../data_process/compute_stats.sh --config $CONFIG_PATH
+    -- python $SCRIPT_PATH/../data_process/get_stats.py "$CONFIG_PATH" 0
 }
 
 base_name="time-coarsen-stats"
