@@ -5,8 +5,8 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.testing.regression import validate_tensor_dict
+from fme.downscaling.modules.physicsnemo_unets_v1 import SongUNet
 from fme.downscaling.modules.preconditioners import EDMPrecond
-from fme.downscaling.modules.unets import SongUNet
 
 
 def test_edmprecond_regression():

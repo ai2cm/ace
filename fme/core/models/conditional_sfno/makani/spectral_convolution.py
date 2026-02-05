@@ -130,9 +130,9 @@ class SpectralConv(nn.Module):
         x = x.float()
 
         with amp.autocast(device_type="cuda", enabled=False):
-            x = self.forward_transform(x).contiguous()
+            x = torch.view_as_complex(self.forward_transform(x)).contiguous()
             if self.scale_residual:
-                residual = self.inverse_transform(x)
+                residual = self.inverse_transform(torch.view_as_real(x))
                 residual = residual.to(dtype)
 
         B, C, H, W = x.shape
@@ -143,7 +143,7 @@ class SpectralConv(nn.Module):
         x = xp.reshape(B, self.out_channels, H, W).contiguous()
 
         with amp.autocast(device_type="cuda", enabled=False):
-            x = self.inverse_transform(x)
+            x = self.inverse_transform(torch.view_as_real(x))
 
         if hasattr(self, "bias"):
             x = x + self.bias
