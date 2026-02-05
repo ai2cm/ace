@@ -1,5 +1,7 @@
 import argparse
 import dataclasses
+import logging
+import os
 
 import dacite
 import xarray as xr
@@ -44,6 +46,10 @@ def main(config: Config):
 
 
 def process_path_pair(pair: PathPair, config: Config):
+    logging.info(f"Processing input: {pair.input} to output: {pair.output}")
+    if os.path.exists(pair.output):
+        logging.warning(f"Output path {pair.output} already exists. Skipping.")
+        return
     ds = xr.open_dataset(pair.input)
     constant_names = [
         name
