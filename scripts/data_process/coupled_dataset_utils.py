@@ -344,6 +344,7 @@ class OceanInputFieldsConfig:
 
     sea_surface_fraction_name: str = "sea_surface_fraction"
     sea_surface_temperature_name: str = "sst"
+    hfds_name: str = "hfds"
 
 
 @dataclasses.dataclass
@@ -353,9 +354,12 @@ class DerivedFieldsConfig:
     Attributes:
         ocean_sea_ice_fraction_name: Name of the variable for sea ice concentration
             as a fraction the ocean area in a given grid cell.
+        hfds_total_area_name: Name of the variable for the heat flux into sea water
+            scaled by sea surface fraction.
     """
 
     ocean_sea_ice_fraction_name: str = "ocean_sea_ice_fraction"
+    hfds_total_area_name: str = "hfds_total_area"
 
 
 @dataclasses.dataclass
@@ -607,6 +611,10 @@ def compute_coupled_ocean(
     ifrac_name = input_field_names.atmosphere.sea_ice_fraction_name
     sic_name = input_field_names.derived.ocean_sea_ice_fraction_name
     ts_name = input_field_names.atmosphere.surface_temperature_name
+    hfds_name = input_field_names.ocean.hfds_name
+    sfrac_name = input_field_names.ocean.sea_surface_fraction_name
+
+    hfds_total_area_name = input_field_names.derived.hfds_total_area_name
 
     ds = coupled_sea_ice
     if ts_name in ds.data_vars:
@@ -618,6 +626,13 @@ def compute_coupled_ocean(
     ds[tdim] = _make_serializable_time_coord(
         ds=ocean, tdim=tdim, timedelta=config.timedelta
     )
+
+    sfrac = ds[sfrac_name]
+    ds[hfds_total_area_name] = ocean[hfds_name] * sfrac
+    ds[hfds_total_area_name].attrs = {
+        "long_name": "heat flux into sea water scaled by sea surface fraction",
+        "units": ocean[hfds_name].attrs.get("units", "W/m2"),
+    }
 
     sea_ice_mask = config.compute_sea_ice_mask(ocean[sst_name])
     sea_ice_mask.attrs = {
