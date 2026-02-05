@@ -75,9 +75,7 @@ def process_path_pair(pair: PathPair, config: Config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Time Coarsen Script")
-    parser.add_argument(
-        "config_yaml", type=str, required=True, help="Path to configuration yaml file"
-    )
+    parser.add_argument("config_yaml", type=str, help="Path to configuration yaml file")
     args = parser.parse_args()
     with open(args.config_yaml, "r") as f:
         config_dict = yaml.safe_load(f)
