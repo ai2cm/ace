@@ -29,9 +29,12 @@ class CUDATimer:
     def report(self):
         torch.cuda.synchronize()
         total_times: dict[str, float] = collections.defaultdict(float)
+        counts: dict[str, int] = collections.defaultdict(int)
         for starter, ender, name in zip(self._starters, self._enders, self._names):
             total_times[name] += starter.elapsed_time(ender)
-        return total_times
+            counts[name] += 1
+        avg_times = {name: total / counts[name] for name, total in total_times.items()}
+        return avg_times
 
 
 class NullTimer:

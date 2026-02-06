@@ -134,25 +134,16 @@ class RealSHT(nn.Module):
             # do the Legendre-Gauss quadrature
             x = torch.view_as_real(x)
 
-            # distributed contraction: fork
-            out_shape = list(x.size())
-            out_shape[-3] = self.lmax
-            out_shape[-4] = self.mmax
             # contraction
             weights = self.weights.to(x.device).to(x.dtype)
             with timer.context("forward_transform_quadrature"):
-                # xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
-                # xout[..., 0] = torch.einsum('...mkc,mlk->...mlc', x[..., :self.mmax, :, :, 0], weights)
-                # xout[..., 1] = torch.einsum('...mkc,mlk->...mlc', x[..., :self.mmax, :, :, 1], weights)
-                # rl = torch.einsum('...mlc, mlk->...mkc', x[..., 0], pct )
-                # im = torch.einsum('...mlc, mlk->...mkc', x[..., 1], pct )
-                # xs = torch.stack((rl, im), -1)
-                rl = torch.einsum('...mkc, mlk->...mlc', x[..., :self.mmax, :, :, 0], weights)
-                im = torch.einsum('...mkc, mlk->...mlc', x[..., :self.mmax, :, :, 1], weights)
+                rl = torch.einsum('...mkc, mlk->...mlc', x[..., 0], weights)
+                im = torch.einsum('...mkc, mlk->...mlc', x[..., 1], weights)
                 xout = torch.stack((rl, im), -1)
             x = torch.view_as_complex(xout)
 
         return x
+
 
 class InverseRealSHT(nn.Module):
     """
@@ -218,8 +209,6 @@ class InverseRealSHT(nn.Module):
             x = torch.view_as_real(x).float()
 
             pct = self.pct.to(x.device).to(x.dtype)
-            with timer.context("inverse_transform_xout_allocation"):
-                xs = torch.zeros(x.shape[:-4] + (self.nlon, self.nlat, 2), dtype=x.dtype, device=x.device)
             with timer.context("inverse_transform_quadrature"):
                 rl = torch.einsum('...mlc, mlk->...mkc', x[..., 0], pct )
                 im = torch.einsum('...mlc, mlk->...mkc', x[..., 1], pct )
