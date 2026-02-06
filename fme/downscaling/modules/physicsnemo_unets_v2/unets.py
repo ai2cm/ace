@@ -550,10 +550,6 @@ class SongUNetv2(torch.nn.Module):
     )
 
     def forward(self, x, noise_labels, class_labels, augment_labels=None):
-        validate_shape(
-            x.shape[2:],
-            levels=len(self.channel_mult),
-        )
         batch_size = x.shape[0]
 
         if x.ndim != 4:
