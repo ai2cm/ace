@@ -828,7 +828,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         if self.pos_embed:
             self.pos_embed = get_pos_embed()
 
-        self.apply(self._init_weights)
         if normalize_big_skip:
             self.norm_big_skip = ConditionalLayerNorm(
                 in_chans,
@@ -839,17 +838,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             )
         else:
             self.norm_big_skip = NoLayerNorm()
-
-    def _init_weights(self, m):
-        """Helper routine for weight initialization"""
-        if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
-            trunc_normal_(m.weight, std=0.02)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-            if isinstance(m, LoRAConv2d):
-                m.reset_lora_parameters()
-        elif isinstance(m, ConditionalLayerNorm):
-            m.reset_parameters()
 
     @torch.jit.ignore
     def no_weight_decay(self):  # pragma: no cover
