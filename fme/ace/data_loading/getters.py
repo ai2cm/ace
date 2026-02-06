@@ -139,6 +139,7 @@ def get_inference_data(
     label_override: list[str] | None = None,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
+    n_ensemble: int | None = None,
 ) -> InferenceGriddedData:
     """
     Args:
@@ -155,6 +156,7 @@ def get_inference_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
+        n_ensemble: Number of ensemble members per initial condition.
 
     Returns:
         A data loader for inference with coordinates and metadata.
@@ -166,9 +168,9 @@ def get_inference_data(
         surface_temperature_name=surface_temperature_name,
         ocean_fraction_name=ocean_fraction_name,
         label_override=label_override,
+        n_ensemble=n_ensemble,
     )
     properties = dataset.properties
-
     if config.zarr_engine_used:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
