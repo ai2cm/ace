@@ -8,6 +8,10 @@ checkpoint_path:
   atmosphere:
     timedelta: 6h
     path: /atmos_ckpt.tar
+  ocean_fraction_prediction:
+    land_fraction_name: land_fraction
+    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+    sea_ice_fraction_name: ocean_sea_ice_fraction
 data_writer:
   ocean:
     save_prediction_files: false
