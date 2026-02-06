@@ -1,3 +1,10 @@
+"""
+This file contains vendorized code from physicsnemo.
+
+https://github.com/NVIDIA/physicsnemo/blob/08dc147e194bd181e418735959507d3afc9f3978
+
+Note this is a newer version of the layer modules and SongUNet vendorized in unets.py.
+"""
 # SPDX-FileCopyrightText: Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -31,7 +38,7 @@ if torch.cuda.is_available():
         pass
 
 
-def is_apex_available() -> bool:
+def apex_available() -> bool:
     return _is_apex_available
 
 
