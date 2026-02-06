@@ -15,7 +15,6 @@
 # limitations under the License.
 
 import math
-from functools import partial
 from typing import Any, Callable, List, Optional, Tuple
 
 import torch
@@ -24,7 +23,6 @@ import torch.nn as nn
 # get spectral transforms from torch_harmonics
 import torch_harmonics as th
 from torch.utils.checkpoint import checkpoint
-from typing_extensions import Literal
 
 from .initialization import trunc_normal_
 
@@ -37,7 +35,6 @@ from .layers import (
     Context,
     ContextConfig,
     DropPath,
-    SpectralAttention2d,
 )
 from .lora import LoRAConv2d
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
@@ -100,18 +97,7 @@ class SpectralFilterLayer(nn.Module):
             raise NotImplementedError("LoRA is only supported for linear filter type.")
 
         if filter_type == "non-linear":
-            self.filter = SpectralAttentionS2(
-                forward_transform,
-                inverse_transform,
-                embed_dim,
-                operator_type=operator_type,
-                sparsity_threshold=sparsity_threshold,
-                hidden_size_factor=hidden_size_factor,
-                complex_activation=complex_activation,
-                spectral_layers=spectral_layers,
-                drop_rate=drop_rate,
-                bias=False,
-            )
+            raise NotImplementedError("Non-linear spectral filters are not supported.")
 
         # spectral transform is passed to the module
         elif filter_type == "linear":
@@ -364,6 +350,7 @@ def get_lat_lon_sfnonet(
         embed_dim_scalar=0,
         embed_dim_noise=0,
         embed_dim_labels=0,
+        embed_dim_pos=0,
     ),
 ) -> "SphericalFourierNeuralOperatorNet":
     h, w = img_shape
@@ -529,6 +516,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             embed_dim_scalar=0,
             embed_dim_labels=0,
             embed_dim_noise=0,
+            embed_dim_pos=0,
         ),
         global_layer_norm: bool = False,
         num_layers: int = 12,
