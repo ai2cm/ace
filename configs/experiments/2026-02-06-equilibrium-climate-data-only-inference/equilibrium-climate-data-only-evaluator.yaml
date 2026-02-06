@@ -1,0 +1,43 @@
+checkpoint_path: /ckpt.tar
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+logging:
+  project: ace-som
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+forward_steps_in_memory: 40
+n_forward_steps: 14608
+experiment_dir: /results
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: true
+loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+    file_pattern: 1xCO2-ic_0001.zarr
+    engine: zarr
+  start_indices:
+    times:
+    - '2031-01-01T06:00:00'
+  num_data_workers: 8
+prediction_loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+    file_pattern: 1xCO2-ic_0001.zarr
+    engine: zarr
+  start_indices:
+    times:
+    - '2031-01-01T06:00:00'
+  num_data_workers: 8
+stepper_override:
+  multi_call: null
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+    interpolate: true
+    slab:
+      mixed_layer_depth_name: prescribed_mixed_layer_depth
+      q_flux_name: prescribed_qflux
+  
