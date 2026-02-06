@@ -5,9 +5,9 @@ from typing import Any, Protocol
 import dacite
 import torch
 
+from fme.downscaling.modules.physicsnemo_unets_v1 import SongUNet
 from fme.downscaling.modules.preconditioners import EDMPrecond
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
-from fme.downscaling.modules.unets import SongUNet
 
 
 # TODO: Look into why we need to take in coarse and not target shape
