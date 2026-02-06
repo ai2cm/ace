@@ -46,3 +46,17 @@ committing code: `pre-commit install`.
 
 You can run local tests with `pytest`. As a shortcut for running only faster unit
 tests, use `make test_very_fast` from the root of the repository.
+
+## Internal Development
+
+If you are making changes directly to ai2cm/ace, please follow these internal
+development guidelines.
+
+When making new branches, use the naming convention:
+`<type>/<short-description>`, where `<type>` is one of:
+- feature: Any new functionality in the repository including workflows and scripts but not including configurations. Should be the "default" type if it's unclear which to use.
+- refactor: No changes to features, just code restructuring or simplification.
+- fix: Bug fixes.
+- exp: Branch used for running experiments that is likely not intended to merge with mainline code. Functionality changes in these branches should first be PR'd using a feature branch.
+- config: Changes to baseline and experimental configurations under config/.
+- docs: Documentation changes only.
