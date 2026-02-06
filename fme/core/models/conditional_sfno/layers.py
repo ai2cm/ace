@@ -72,6 +72,27 @@ class Context:
         if self.labels is not None and self.labels.ndim != 2:
             raise ValueError("labels must have 2 dimensions")
 
+    def to(self, device: torch.device) -> "Context":
+        """
+        Move the context to the specified device.
+
+        Args:
+            device: The device to move the context to.
+
+        Returns:
+            The context on the specified device.
+        """
+        return Context(
+            embedding_scalar=self.embedding_scalar.to(device)
+            if self.embedding_scalar is not None
+            else None,
+            embedding_pos=self.embedding_pos.to(device)
+            if self.embedding_pos is not None
+            else None,
+            labels=self.labels.to(device) if self.labels is not None else None,
+            noise=self.noise.to(device) if self.noise is not None else None,
+        )
+
 
 class ChannelLayerNorm(nn.Module):
     """
