@@ -232,11 +232,10 @@ class SpectralConvS2(nn.Module):
 
         with torch.amp.autocast("cuda", enabled=False):
             with timer.context("forward_transform"):
-                x = self.forward_transform(x.float(), timer=timer)
+                x = self.forward_transform(x.float(), timer=timer).contiguous()
             if self._round_trip_residual:
                 with timer.context("round_trip_residual"):
-                    x = x.contiguous()
-                    residual = self.inverse_transform(x)
+                    residual = self.inverse_transform(x).contiguous()
                     residual = residual.to(dtype)
 
         B, W, H, C = x.shape
@@ -265,7 +264,7 @@ class SpectralConvS2(nn.Module):
 
         with torch.amp.autocast("cuda", enabled=False):
             with timer.context("inverse_transform"):
-                x = self.inverse_transform(x, timer=timer)
+                x = self.inverse_transform(x, timer=timer).contiguous()
 
         if hasattr(self, "bias"):
             with timer.context("add_bias"):

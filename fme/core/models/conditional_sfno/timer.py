@@ -17,7 +17,6 @@ class CUDATimer:
         self._starters.append(starter)
         self._enders.append(ender)
         self._names.append(name)
-        torch.cuda.synchronize()
         stream = torch.cuda.current_stream()
         starter.record(stream)
         try:
