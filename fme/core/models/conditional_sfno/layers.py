@@ -164,35 +164,33 @@ class ConditionalLayerNorm(nn.Module):
             self.W_bias_labels = None
         if self.embed_dim_noise > 0:
             # no bias as it is already handled in the non-2d layers
-            self.W_scale_2d = nn.Conv2d(
-                self.embed_dim_noise, self.n_channels, kernel_size=1, bias=False
+            self.W_scale_2d = nn.Linear(
+                self.embed_dim_noise, self.n_channels, bias=False
             )
-            self.W_bias_2d = nn.Conv2d(
-                self.embed_dim_noise, self.n_channels, kernel_size=1, bias=False
+            self.W_bias_2d = nn.Linear(
+                self.embed_dim_noise, self.n_channels, bias=False
             )
         else:
             self.W_scale_2d = None
             self.W_bias_2d = None
         if self.embed_dim_pos > 0:
             # no bias as it is already handled in the non-2d layers
-            self.W_scale_pos = nn.Conv2d(
-                self.embed_dim_pos, self.n_channels, kernel_size=1, bias=False
+            self.W_scale_pos = nn.Linear(
+                self.embed_dim_pos, self.n_channels, bias=False
             )
-            self.W_bias_pos = nn.Conv2d(
-                self.embed_dim_pos, self.n_channels, kernel_size=1, bias=False
-            )
+            self.W_bias_pos = nn.Linear(self.embed_dim_pos, self.n_channels, bias=False)
         else:
             self.W_scale_pos = None
             self.W_bias_pos = None
         if global_layer_norm:
             self.norm = nn.LayerNorm(
-                (self.n_channels, img_shape[0], img_shape[1]),
+                (img_shape[1], img_shape[0], self.n_channels),
                 eps=epsilon,
                 elementwise_affine=elementwise_affine,
             )
         else:
-            self.norm = ChannelLayerNorm(
-                self.n_channels,
+            self.norm = nn.LayerNorm(
+                (self.n_channels,),
                 eps=epsilon,
                 elementwise_affine=elementwise_affine,
             )
@@ -238,11 +236,11 @@ class ConditionalLayerNorm(nn.Module):
 
         Args:
             x: The input tensor to normalize, of shape
-                (batch_size, channels, height, width).
+                (batch_size, width, height, channels).
             context: The context to condition on.
 
         Returns:
-            The normalized tensor, of shape (batch_size, channels, height, width).
+            The normalized tensor, of shape (batch_size, width, height, channels).
         """
         if timer is None:
             timer = NullTimer()
@@ -255,11 +253,13 @@ class ConditionalLayerNorm(nn.Module):
                 if context.embedding_scalar is None:
                     raise ValueError("embedding_scalar must be provided")
                 scale: torch.Tensor = (
-                    self.W_scale(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
+                    self.W_scale(context.embedding_scalar).unsqueeze(-2).unsqueeze(-2)
                 )
             else:
                 scale = torch.ones(
-                    list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
+                    list(x.shape[:-3]) + [1, 1, x.shape[-1]],
+                    device=x.device,
+                    dtype=x.dtype,
                 )
 
             if self.W_scale_2d is not None:
@@ -270,21 +270,23 @@ class ConditionalLayerNorm(nn.Module):
                 if context.embedding_scalar is None:
                     raise ValueError("embedding_scalar must be provided")
                 bias: torch.Tensor = (
-                    self.W_bias(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
+                    self.W_bias(context.embedding_scalar).unsqueeze(-2).unsqueeze(-2)
                 )
             else:
                 bias = torch.zeros(
-                    list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
+                    list(x.shape[:-3]) + [1, 1, x.shape[-1]],
+                    device=x.device,
+                    dtype=x.dtype,
                 )
 
             if self.W_scale_labels is not None:
                 scale = scale + self.W_scale_labels(context.labels).unsqueeze(
-                    -1
-                ).unsqueeze(-1)
+                    -2
+                ).unsqueeze(-2)
             if self.W_bias_labels is not None:
                 bias = bias + self.W_bias_labels(context.labels).unsqueeze(
-                    -1
-                ).unsqueeze(-1)
+                    -2
+                ).unsqueeze(-2)
             if self.W_bias_2d is not None:
                 if context.noise is None:
                     raise ValueError("embedding_2d must be provided")

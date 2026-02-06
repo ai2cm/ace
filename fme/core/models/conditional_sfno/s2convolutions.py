@@ -60,7 +60,6 @@ def _contract_lora(
     return torch.einsum("girx,grox,bgixy->bgoxy", lora_A, lora_B, x)
 
 
-@torch.jit.script
 def _contract_dhconv(
     xc: torch.Tensor, weight: torch.Tensor
 ) -> torch.Tensor:  # pragma: no cover
@@ -73,7 +72,7 @@ def _contract_dhconv(
         weight: Weight tensor of shape (group, in_channels, out_channels, nlat, 2)
     """
     wc = torch.view_as_complex(weight)
-    return torch.einsum("bgixy,giox->bgoxy", xc, wc)
+    return torch.einsum("byxgi,gxoi->byxgo", xc, wc)
 
 
 class SpectralConvS2(nn.Module):
@@ -174,15 +173,17 @@ class SpectralConvS2(nn.Module):
             self.mpad = 0
 
         if scale == "auto":
-            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat_local, 2)
+            scale = math.sqrt(1 / (in_channels)) * torch.ones(
+                self.modes_lat_local, 1, 1, 2
+            )
             # seemingly the first weight is not really complex, so we need to account for that
-            scale[0, :] *= math.sqrt(2.0)
+            scale[0, :, :, :] *= math.sqrt(2.0)
 
         weight_shape = [
             num_groups,
-            in_channels // num_groups,
-            out_channels // num_groups,
             self.modes_lat_local,
+            out_channels // num_groups,
+            in_channels // num_groups,
         ]
 
         assert factorization == "ComplexDense"
@@ -217,7 +218,7 @@ class SpectralConvS2(nn.Module):
             self.lora_scaling = 0.0
 
         if bias:
-            self.bias = nn.Parameter(torch.zeros(1, out_channels, 1, 1))
+            self.bias = nn.Parameter(torch.zeros(1, 1, 1, out_channels))
         self.out_channels = out_channels
 
     def forward(
@@ -231,41 +232,40 @@ class SpectralConvS2(nn.Module):
 
         with torch.amp.autocast("cuda", enabled=False):
             with timer.context("forward_transform"):
-                x = self.forward_transform(x.float())
+                x = self.forward_transform(x.float(), timer=timer)
             if self._round_trip_residual:
                 with timer.context("round_trip_residual"):
                     x = x.contiguous()
                     residual = self.inverse_transform(x)
                     residual = residual.to(dtype)
 
-        B, C, H, W = x.shape
+        B, W, H, C = x.shape
         assert C % self.num_groups == 0
-        with timer.context("group_reshape"):
-            x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
+        x = x.reshape(B, W, H, self.num_groups, C // self.num_groups)
 
         if self.lora_A is not None and self.lora_B is not None:
             with timer.context("lora_update"):
                 lora_update = _contract_lora(
                     self.lora_A,
                     self.lora_B,
-                    x[..., : self.modes_lat_local, : self.modes_lon_local],
+                    x,
                 )
         else:
             lora_update = 0.0
 
         with timer.context("dhconv"):
             xp = torch.zeros_like(x)
-            xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
-                x[..., : self.modes_lat_local, : self.modes_lon_local],
+            xp[:] = _contract_dhconv(
+                x,
                 self.weight,
             )
             xp = xp + self.lora_scaling * lora_update
-            xp = xp.reshape(B, self.out_channels, H, W)
+            xp = xp.reshape(B, W, H, self.out_channels)
             x = xp.contiguous()
 
         with torch.amp.autocast("cuda", enabled=False):
             with timer.context("inverse_transform"):
-                x = self.inverse_transform(x)
+                x = self.inverse_transform(x, timer=timer)
 
         if hasattr(self, "bias"):
             with timer.context("add_bias"):

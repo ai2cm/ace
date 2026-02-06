@@ -301,13 +301,10 @@ class FourierNeuralOperatorBlock(nn.Module):
         if timer is None:
             timer = NullTimer()
         with timer.context("norm0"):
-            x_norm = torch.zeros_like(x)
-            x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = (
-                self.norm0(
-                    x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]],
-                    context_embedding,
-                    timer=timer,
-                )
+            x_norm = self.norm0(
+                x,
+                context_embedding,
+                timer=timer,
             )
         with timer.context("filter"):
             x, residual = self.filter(x_norm, timer=timer)
@@ -325,13 +322,10 @@ class FourierNeuralOperatorBlock(nn.Module):
                 x = self.act_layer(x)
 
         with timer.context("norm1"):
-            x_norm = torch.zeros_like(x)
-            x_norm[..., : self.output_shape_loc[0], : self.output_shape_loc[1]] = (
-                self.norm1(
-                    x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]],
-                    context_embedding,
-                    timer=timer,
-                )
+            x_norm = self.norm1(
+                x,
+                context_embedding,
+                timer=timer,
             )
             x = x_norm
 

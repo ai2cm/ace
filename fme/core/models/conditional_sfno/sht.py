@@ -50,6 +50,7 @@ from torch_harmonics.quadrature import legendre_gauss_weights, lobatto_weights, 
 from torch_harmonics.legendre import _precompute_legpoly
 
 from fme.core.device import get_device
+from fme.core.models.conditional_sfno.timer import CUDATimer, NullTimer
 
 
 class RealSHT(nn.Module):
@@ -106,7 +107,7 @@ class RealSHT(nn.Module):
 
         # combine quadrature weights with the legendre weights
         pct = torch.as_tensor(_precompute_legpoly(self.mmax, self.lmax, tq, norm=self.norm, csphase=self.csphase))
-        weights = torch.einsum('mlk,k->mlk', pct, w)
+        weights = torch.einsum('mlk,k->mlk', pct, w).contiguous()
 
         # remember quadrature weights
         self.weights = weights.float().to(get_device())
@@ -117,30 +118,38 @@ class RealSHT(nn.Module):
         """
         return f'nlat={self.nlat}, nlon={self.nlon},\n lmax={self.lmax}, mmax={self.mmax},\n grid={self.grid}, csphase={self.csphase}'
 
-    def forward(self, x: torch.Tensor):
-
+    def forward(self, x: torch.Tensor, timer: CUDATimer | NullTimer = NullTimer()):
+        # last dims [w, h, c]
         assert(x.shape[-2] == self.nlat)
-        assert(x.shape[-1] == self.nlon)
+        assert(x.shape[-3] == self.nlon)
         with torch.autocast("cuda", enabled=False):
             # rfft and view_as_complex don't support BF16, see https://github.com/pytorch/pytorch/issues/117844
-            x = x.float()
+            if x.dtype != torch.float32:
+                with timer.context("forward_transform_cast_input"):
+                    x = x.float()
 
             # apply real fft in the longitudinal direction
-            x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
-
+            with timer.context("forward_transform_rfft"):
+                x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-3, norm="forward")
             # do the Legendre-Gauss quadrature
             x = torch.view_as_real(x)
 
             # distributed contraction: fork
             out_shape = list(x.size())
             out_shape[-3] = self.lmax
-            out_shape[-2] = self.mmax
-            xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
-
+            out_shape[-4] = self.mmax
             # contraction
             weights = self.weights.to(x.device).to(x.dtype)
-            xout[..., 0] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 0], weights)
-            xout[..., 1] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 1], weights)
+            with timer.context("forward_transform_quadrature"):
+                # xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
+                # xout[..., 0] = torch.einsum('...mkc,mlk->...mlc', x[..., :self.mmax, :, :, 0], weights)
+                # xout[..., 1] = torch.einsum('...mkc,mlk->...mlc', x[..., :self.mmax, :, :, 1], weights)
+                # rl = torch.einsum('...mlc, mlk->...mkc', x[..., 0], pct )
+                # im = torch.einsum('...mlc, mlk->...mkc', x[..., 1], pct )
+                # xs = torch.stack((rl, im), -1)
+                rl = torch.einsum('...mkc, mlk->...mlc', x[..., :self.mmax, :, :, 0], weights)
+                im = torch.einsum('...mkc, mlk->...mlc', x[..., :self.mmax, :, :, 1], weights)
+                xout = torch.stack((rl, im), -1)
             x = torch.view_as_complex(xout)
 
         return x
@@ -198,10 +207,10 @@ class InverseRealSHT(nn.Module):
         """
         return f'nlat={self.nlat}, nlon={self.nlon},\n lmax={self.lmax}, mmax={self.mmax},\n grid={self.grid}, csphase={self.csphase}'
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, timer: CUDATimer | NullTimer = NullTimer()):
 
         assert(x.shape[-2] == self.lmax)
-        assert(x.shape[-1] == self.mmax)
+        assert(x.shape[-3] == self.mmax)
 
         with torch.autocast("cuda", enabled=False):
             # irfft and view_as_complex don't support BF16, see https://github.com/pytorch/pytorch/issues/117844
@@ -209,12 +218,16 @@ class InverseRealSHT(nn.Module):
             x = torch.view_as_real(x).float()
 
             pct = self.pct.to(x.device).to(x.dtype)
-            rl = torch.einsum('...lm, mlk->...km', x[..., 0], pct )
-            im = torch.einsum('...lm, mlk->...km', x[..., 1], pct )
-            xs = torch.stack((rl, im), -1)
+            with timer.context("inverse_transform_xout_allocation"):
+                xs = torch.zeros(x.shape[:-4] + (self.nlon, self.nlat, 2), dtype=x.dtype, device=x.device)
+            with timer.context("inverse_transform_quadrature"):
+                rl = torch.einsum('...mlc, mlk->...mkc', x[..., 0], pct )
+                im = torch.einsum('...mlc, mlk->...mkc', x[..., 1], pct )
+                xs = torch.stack((rl, im), -1)
 
-            # apply the inverse (real) FFT
-            x = torch.view_as_complex(xs)
-            x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
+            with timer.context("inverse_transform_irfft"):
+                # apply the inverse (real) FFT
+                x = torch.view_as_complex(xs)
+                x = torch.fft.irfft(x, n=self.nlon, dim=-3, norm="forward")
 
         return x

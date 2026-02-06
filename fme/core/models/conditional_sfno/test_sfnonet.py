@@ -281,18 +281,18 @@ def test_block_speed():
     conditional_embed_dim_labels = 3
     conditional_embed_dim_pos = 32
     embedding_scalar = None
-    context_embedding_noise = torch.randn(B, conditional_embed_dim_noise, H, L).to(
+    context_embedding_noise = torch.randn(B, L, H, conditional_embed_dim_noise).to(
         device
     )
     context_embedding_labels = torch.randn(B, conditional_embed_dim_labels).to(device)
-    context_embedding_pos = torch.randn(B, conditional_embed_dim_pos, H, L).to(device)
+    context_embedding_pos = torch.randn(B, L, H, conditional_embed_dim_pos).to(device)
     context = Context(
         embedding_scalar=embedding_scalar,
         embedding_pos=context_embedding_pos,
         noise=context_embedding_noise,
         labels=context_embedding_labels,
     )
-    x = torch.randn(B, C, H, L, device=get_device())
+    x = torch.randn(B, L, H, C, device=get_device())
     forward = RealSHT(nlat=H, nlon=L)
     inverse = InverseRealSHT(nlat=H, nlon=L)
     context_config = ContextConfig(
@@ -338,8 +338,14 @@ def test_block_speed():
         grouped_block(x, context)
     grouped = benchmark(call_grouped_block, warmup=0, iters=10)
 
-    print("ungrouped timers: ", timer.report())
-    print("grouped timers: ", grouped_timer.report())
+    print(
+        "ungrouped timers: "
+        + " | ".join(f"{k}: {v:.2f} ms" for k, v in timer.report().items())
+    )
+    print(
+        "grouped timers: "
+        + " | ".join(f"{k}: {v:.2f} ms" for k, v in grouped_timer.report().items())
+    )
 
     assert grouped.ms_per < 2 / G * ungrouped.ms_per, (
         "Expected grouped DHConv to be faster than ungrouped, but got "

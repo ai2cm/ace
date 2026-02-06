@@ -24,7 +24,6 @@ class CUDATimer:
             yield
         finally:
             ender.record(stream)
-            torch.cuda.synchronize()
         return
 
     def report(self):
