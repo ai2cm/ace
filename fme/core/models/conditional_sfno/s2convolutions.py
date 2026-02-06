@@ -22,6 +22,8 @@ import torch.nn as nn
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
 
+from fme.core.models.conditional_sfno.timer import CUDATimer, NullTimer
+
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
 
@@ -218,45 +220,56 @@ class SpectralConvS2(nn.Module):
             self.bias = nn.Parameter(torch.zeros(1, out_channels, 1, 1))
         self.out_channels = out_channels
 
-    def forward(self, x):  # pragma: no cover
+    def forward(
+        self, x, timer: CUDATimer | NullTimer | None = None
+    ):  # pragma: no cover
+        if timer is None:
+            timer = NullTimer()
         dtype = x.dtype
         residual = x
         x = x.float()
 
         with torch.amp.autocast("cuda", enabled=False):
-            x = self.forward_transform(x.float())
+            with timer.context("forward_transform"):
+                x = self.forward_transform(x.float())
             if self._round_trip_residual:
-                x = x.contiguous()
-                residual = self.inverse_transform(x)
-                residual = residual.to(dtype)
+                with timer.context("round_trip_residual"):
+                    x = x.contiguous()
+                    residual = self.inverse_transform(x)
+                    residual = residual.to(dtype)
 
         B, C, H, W = x.shape
         assert C % self.num_groups == 0
-        x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
+        with timer.context("group_reshape"):
+            x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
 
         if self.lora_A is not None and self.lora_B is not None:
-            lora_update = _contract_lora(
-                self.lora_A,
-                self.lora_B,
-                x[..., : self.modes_lat_local, : self.modes_lon_local],
-            )
+            with timer.context("lora_update"):
+                lora_update = _contract_lora(
+                    self.lora_A,
+                    self.lora_B,
+                    x[..., : self.modes_lat_local, : self.modes_lon_local],
+                )
         else:
             lora_update = 0.0
 
-        xp = torch.zeros_like(x)
-        xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
-            x[..., : self.modes_lat_local, : self.modes_lon_local],
-            self.weight,
-        )
-        xp = xp + self.lora_scaling * lora_update
-        xp = xp.reshape(B, self.out_channels, H, W)
-        x = xp.contiguous()
+        with timer.context("dhconv"):
+            xp = torch.zeros_like(x)
+            xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
+                x[..., : self.modes_lat_local, : self.modes_lon_local],
+                self.weight,
+            )
+            xp = xp + self.lora_scaling * lora_update
+            xp = xp.reshape(B, self.out_channels, H, W)
+            x = xp.contiguous()
 
         with torch.amp.autocast("cuda", enabled=False):
-            x = self.inverse_transform(x)
+            with timer.context("inverse_transform"):
+                x = self.inverse_transform(x)
 
         if hasattr(self, "bias"):
-            x = x + self.bias
+            with timer.context("add_bias"):
+                x = x + self.bias
 
         x = x.type(dtype)
 

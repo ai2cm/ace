@@ -24,6 +24,8 @@ import torch.nn as nn
 import torch_harmonics as th
 from torch.utils.checkpoint import checkpoint
 
+from fme.core.models.conditional_sfno.timer import CUDATimer, NullTimer
+
 from .initialization import trunc_normal_
 
 # wrap fft, to unify interface to spectral transforms
@@ -153,8 +155,8 @@ class SpectralFilterLayer(nn.Module):
         else:
             raise (NotImplementedError)
 
-    def forward(self, x):
-        return self.filter(x)
+    def forward(self, x, timer: CUDATimer | None = None):
+        return self.filter(x, timer=timer)
 
 
 class FourierNeuralOperatorBlock(nn.Module):
@@ -295,44 +297,58 @@ class FourierNeuralOperatorBlock(nn.Module):
                 lora_alpha=lora_alpha,
             )
 
-    def forward(self, x, context_embedding):
-        x_norm = torch.zeros_like(x)
-        x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = self.norm0(
-            x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]],
-            context_embedding,
-        )
-        x, residual = self.filter(x_norm)
+    def forward(self, x, context_embedding, timer: CUDATimer | NullTimer | None = None):
+        if timer is None:
+            timer = NullTimer()
+        with timer.context("norm0"):
+            x_norm = torch.zeros_like(x)
+            x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = (
+                self.norm0(
+                    x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]],
+                    context_embedding,
+                    timer=timer,
+                )
+            )
+        with timer.context("filter"):
+            x, residual = self.filter(x_norm, timer=timer)
 
         if hasattr(self, "inner_skip"):
-            if self.concat_skip:
-                x = torch.cat((x, self.inner_skip(residual)), dim=1)
-                x = self.inner_skip_conv(x)
-            else:
-                x = x + self.inner_skip(residual)
+            with timer.context("inner_skip"):
+                if self.concat_skip:
+                    x = torch.cat((x, self.inner_skip(residual)), dim=1)
+                    x = self.inner_skip_conv(x)
+                else:
+                    x = x + self.inner_skip(residual)
 
         if hasattr(self, "act_layer"):
-            x = self.act_layer(x)
+            with timer.context("activation"):
+                x = self.act_layer(x)
 
-        x_norm = torch.zeros_like(x)
-        x_norm[..., : self.output_shape_loc[0], : self.output_shape_loc[1]] = (
-            self.norm1(
-                x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]],
-                context_embedding,
+        with timer.context("norm1"):
+            x_norm = torch.zeros_like(x)
+            x_norm[..., : self.output_shape_loc[0], : self.output_shape_loc[1]] = (
+                self.norm1(
+                    x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]],
+                    context_embedding,
+                    timer=timer,
+                )
             )
-        )
-        x = x_norm
+            x = x_norm
 
         if hasattr(self, "mlp"):
-            x = self.mlp(x)
+            with timer.context("mlp"):
+                x = self.mlp(x)
 
-        x = self.drop_path(x)
+        with timer.context("drop_path"):
+            x = self.drop_path(x)
 
         if hasattr(self, "outer_skip"):
-            if self.concat_skip:
-                x = torch.cat((x, self.outer_skip(residual)), dim=1)
-                x = self.outer_skip_conv(x)
-            else:
-                x = x + self.outer_skip(residual)
+            with timer.context("outer_skip"):
+                if self.concat_skip:
+                    x = torch.cat((x, self.outer_skip(residual)), dim=1)
+                    x = self.outer_skip_conv(x)
+                else:
+                    x = x + self.outer_skip(residual)
 
         return x
 

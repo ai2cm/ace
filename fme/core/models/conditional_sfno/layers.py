@@ -25,6 +25,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 from fme.core.models.conditional_sfno.lora import LoRAConv2d
+from fme.core.models.conditional_sfno.timer import CUDATimer, NullTimer
 
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
@@ -223,7 +224,12 @@ class ConditionalLayerNorm(nn.Module):
             torch.nn.init.constant_(self.W_bias_pos.weight, 0.0)
         # no bias on 2d layers as it is already handled in the non-2d layers
 
-    def forward(self, x: torch.Tensor, context: Context) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        context: Context,
+        timer: CUDATimer | NullTimer | None = None,
+    ) -> torch.Tensor:
         """
         Conditional Layer Normalization
 
@@ -238,56 +244,64 @@ class ConditionalLayerNorm(nn.Module):
         Returns:
             The normalized tensor, of shape (batch_size, channels, height, width).
         """
+        if timer is None:
+            timer = NullTimer()
         if context.labels is None and (
             self.W_scale_labels is not None or self.W_bias_labels is not None
         ):
             raise ValueError("labels must be provided")
-        if self.W_scale is not None:
-            if context.embedding_scalar is None:
-                raise ValueError("embedding_scalar must be provided")
-            scale: torch.Tensor = (
-                self.W_scale(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
-            )
-        else:
-            scale = torch.ones(
-                list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
-            )
+        with timer.context("layer_norm_compute_scaling_and_bias"):
+            if self.W_scale is not None:
+                if context.embedding_scalar is None:
+                    raise ValueError("embedding_scalar must be provided")
+                scale: torch.Tensor = (
+                    self.W_scale(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
+                )
+            else:
+                scale = torch.ones(
+                    list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
+                )
 
-        if self.W_scale_2d is not None:
-            if context.noise is None:
-                raise ValueError("embedding_2d must be provided")
-            scale = scale + self.W_scale_2d(context.noise)
-        if self.W_bias is not None:
-            if context.embedding_scalar is None:
-                raise ValueError("embedding_scalar must be provided")
-            bias: torch.Tensor = (
-                self.W_bias(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
-            )
-        else:
-            bias = torch.zeros(
-                list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
-            )
+            if self.W_scale_2d is not None:
+                if context.noise is None:
+                    raise ValueError("embedding_2d must be provided")
+                scale = scale + self.W_scale_2d(context.noise)
+            if self.W_bias is not None:
+                if context.embedding_scalar is None:
+                    raise ValueError("embedding_scalar must be provided")
+                bias: torch.Tensor = (
+                    self.W_bias(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
+                )
+            else:
+                bias = torch.zeros(
+                    list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
+                )
 
-        if self.W_scale_labels is not None:
-            scale = scale + self.W_scale_labels(context.labels).unsqueeze(-1).unsqueeze(
-                -1
-            )
-        if self.W_bias_labels is not None:
-            bias = bias + self.W_bias_labels(context.labels).unsqueeze(-1).unsqueeze(-1)
-        if self.W_bias_2d is not None:
-            if context.noise is None:
-                raise ValueError("embedding_2d must be provided")
-            bias = bias + self.W_bias_2d(context.noise)
-        if self.W_scale_pos is not None:
-            if context.embedding_pos is None:
-                raise ValueError("embedding_pos must be provided")
-            scale = scale + self.W_scale_pos(context.embedding_pos)
-        if self.W_bias_pos is not None:
-            if context.embedding_pos is None:
-                raise ValueError("embedding_pos must be provided")
-            bias = bias + self.W_bias_pos(context.embedding_pos)
-        x_norm: torch.Tensor = self.norm(x)
-        return x_norm * scale + bias
+            if self.W_scale_labels is not None:
+                scale = scale + self.W_scale_labels(context.labels).unsqueeze(
+                    -1
+                ).unsqueeze(-1)
+            if self.W_bias_labels is not None:
+                bias = bias + self.W_bias_labels(context.labels).unsqueeze(
+                    -1
+                ).unsqueeze(-1)
+            if self.W_bias_2d is not None:
+                if context.noise is None:
+                    raise ValueError("embedding_2d must be provided")
+                bias = bias + self.W_bias_2d(context.noise)
+            if self.W_scale_pos is not None:
+                if context.embedding_pos is None:
+                    raise ValueError("embedding_pos must be provided")
+                scale = scale + self.W_scale_pos(context.embedding_pos)
+            if self.W_bias_pos is not None:
+                if context.embedding_pos is None:
+                    raise ValueError("embedding_pos must be provided")
+                bias = bias + self.W_bias_pos(context.embedding_pos)
+        with timer.context("layer_norm_normalize"):
+            x_norm: torch.Tensor = self.norm(x)
+        with timer.context("layer_norm_apply_scaling_and_bias"):
+            return_value = x_norm * scale + bias
+        return return_value
 
 
 @torch.jit.script

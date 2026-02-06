@@ -1,0 +1,40 @@
+import collections
+import contextlib
+
+import torch
+
+
+class CUDATimer:
+    def __init__(self):
+        self._starters = []
+        self._enders = []
+        self._names = []
+
+    @contextlib.contextmanager
+    def context(self, name: str):
+        starter = torch.cuda.Event(enable_timing=True)
+        ender = torch.cuda.Event(enable_timing=True)
+        self._starters.append(starter)
+        self._enders.append(ender)
+        self._names.append(name)
+        torch.cuda.synchronize()
+        stream = torch.cuda.current_stream()
+        starter.record(stream)
+        try:
+            yield
+        finally:
+            ender.record(stream)
+            torch.cuda.synchronize()
+        return
+
+    def report(self):
+        torch.cuda.synchronize()
+        total_times: dict[str, float] = collections.defaultdict(float)
+        for starter, ender, name in zip(self._starters, self._enders, self._names):
+            total_times[name] += starter.elapsed_time(ender)
+        return total_times
+
+
+class NullTimer:
+    def context(self, name: str) -> contextlib.nullcontext:
+        return contextlib.nullcontext()
