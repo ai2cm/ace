@@ -18,7 +18,6 @@
 import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
@@ -173,9 +172,7 @@ class SpectralConvS2(nn.Module):
             self.mpad = 0
 
         if scale == "auto":
-            scale = math.sqrt(1 / (in_channels / num_groups)) * torch.ones(
-                self.modes_lat_local, 2
-            )
+            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat_local, 2)
             # seemingly the first weight is not really complex, so we need to account for that
             scale[0, :] *= math.sqrt(2.0)
 
