@@ -14,6 +14,38 @@ from .sfnonet import get_lat_lon_sfnonet
 DIR = os.path.abspath(os.path.dirname(__file__))
 
 
+def test_safe_dhconv_is_identical():
+    torch.set_float32_matmul_precision("highest")
+    from .s2convolutions import _contract_dhconv, _contract_dhconv_safe
+
+    device = get_device()
+    dtype = torch.float32
+    B, E, H, W = 10, 384, 180, 90
+    x = torch.randn(B, E, H, W, 2, dtype=dtype, device=device)
+    weight = torch.randn(E, E, H, 2, dtype=dtype, device=device)
+    _contract_dhconv(x, weight)
+    import time
+
+    start = time.time()
+    for _ in range(100):
+        y1 = _contract_dhconv(x, weight)
+    t1 = time.time() - start
+
+    _contract_dhconv_safe(x, weight)
+    start = time.time()
+    for _ in range(100):
+        y2 = _contract_dhconv_safe(x, weight)
+    t2 = time.time() - start
+    torch.testing.assert_close(
+        y1,
+        y2,
+        rtol=0,
+        atol=1e-4,
+    )
+    print(f"dhconv time: {t1}, safe dhconv time: {t2}")
+    assert t1 < t2, "safe dhconv should be slower than regular dhconv"
+
+
 @pytest.mark.parametrize(
     "conditional_embed_dim_scalar, conditional_embed_dim_labels, "
     "conditional_embed_dim_noise, "
