@@ -131,6 +131,7 @@ class RealSHT(nn.Module):
             # apply real fft in the longitudinal direction
             with timer.context("forward_transform_rfft"):
                 x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-3, norm="forward")
+                x = x.contiguous()
             # do the Legendre-Gauss quadrature
             x = torch.view_as_real(x)
 
