@@ -44,7 +44,7 @@ cache-keys = [
 ]
 
 [tool.ruff]
-exclude = ["fme/ace/models/makani_fcn3/**"]
+exclude = ["fme/ace/models/makani_fcn3/**", "fme/downscaling/modules/physicsnemo_unets_v2/**",]
 
 [tool.ruff.lint]
 select = ["D", "E", "F", "I", "W", "UP"]
@@ -76,3 +76,7 @@ exclude_also = [
     # Don't complain about abstract methods, they aren't run:
     "@(abc\\.)?abstractmethod",
     ]
+
+[[tool.mypy.overrides]]
+module = "fme.downscaling.modules.physicsnemo_unets_v2.*"
+ignore_errors = true
