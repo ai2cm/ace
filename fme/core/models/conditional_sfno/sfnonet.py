@@ -115,6 +115,7 @@ class SpectralFilterLayer(nn.Module):
                 filter_residual=filter_residual,
                 lora_rank=lora_rank,
                 lora_alpha=lora_alpha,
+                num_groups=num_groups,
             )
         elif filter_type == "makani-linear":
             self.filter = SpectralConv(
