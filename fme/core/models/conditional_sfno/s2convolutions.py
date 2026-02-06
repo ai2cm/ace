@@ -47,11 +47,13 @@ def _contract_lora(
     Performs LoRA update contraction.
 
     Args:
-
-        lora_A: LoRA A matrix of shape (in_channels, rank, nlat, 2)
-        lora_B: LoRA B matrix of shape (rank, out_channels, nlat, 2)
+        lora_A: LoRA A matrix of shape (group, in_channels, rank, nlat, 2)
+        lora_B: LoRA B matrix of shape (group, rank, out_channels, nlat, 2)
         x: Complex input tensor of shape
-            (batch_size, in_channels, nlat, nlon)
+            (batch_size, group, in_channels, nlat, nlon)
+
+    Returns:
+        Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
     """
     lora_A = torch.view_as_complex(lora_A)
     lora_B = torch.view_as_complex(lora_B)
@@ -69,6 +71,9 @@ def _contract_dhconv(
     Args:
         xc: Complex input tensor of shape (batch_size, group, in_channels, nlat, nlon)
         weight: Weight tensor of shape (group, in_channels, out_channels, nlat, 2)
+
+    Returns:
+        Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
     """
     wc = torch.view_as_complex(weight)
     return torch.einsum("bgixy,giox->bgoxy", xc, wc)
