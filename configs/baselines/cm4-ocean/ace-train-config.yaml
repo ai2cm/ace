@@ -121,6 +121,7 @@ stepper:
           - 1
           - 1
           norm: instance
+          pad: circular_fixed
       normalization:
         network:
           global_means_path: /statsdata/centering.nc
