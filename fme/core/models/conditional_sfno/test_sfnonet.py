@@ -1,3 +1,4 @@
+import dataclasses
 import os
 from types import SimpleNamespace
 
@@ -9,9 +10,89 @@ from fme.core.device import get_device
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
+from .s2convolutions import _contract_dhconv
 from .sfnonet import get_lat_lon_sfnonet
 
 DIR = os.path.abspath(os.path.dirname(__file__))
+
+
+@dataclasses.dataclass
+class BenchmarkResult:
+    ms_total: float
+    ms_per: float
+    max_alloc: int
+    max_reserved: int
+    y_shape: tuple
+    y_dtype: torch.dtype
+
+
+def benchmark(fn, iters=10, warmup=1) -> BenchmarkResult:
+    for _ in range(warmup):
+        fn()
+    torch.cuda.synchronize()
+
+    torch.cuda.reset_peak_memory_stats()
+    starter = torch.cuda.Event(enable_timing=True)
+    ender = torch.cuda.Event(enable_timing=True)
+
+    starter.record()
+    for _ in range(iters):
+        y = fn()
+    ender.record()
+    torch.cuda.synchronize()
+
+    ms = starter.elapsed_time(ender)
+    return BenchmarkResult(
+        ms_total=ms,
+        ms_per=ms / iters,
+        max_alloc=torch.cuda.max_memory_allocated(),
+        max_reserved=torch.cuda.max_memory_reserved(),
+        y_shape=tuple(y.shape),
+        y_dtype=y.dtype,
+    )
+
+
+@pytest.mark.skipif(
+    get_device().type != "cuda",
+    reason=(
+        "This test is only relevant for CUDA since "
+        "it's testing speed of DHConv groups on GPU."
+    ),
+)  # noqa: E501
+def test_contract_dhconv_groups_are_faster():
+    B = 2
+    C = 512
+    H = 180
+    L = 360
+    G = 8
+    x = torch.randn(B, 1, C, H, L, dtype=torch.complex64, device=get_device())
+    w = torch.randn(1, C, C, H, 2, dtype=torch.float32, device=get_device())
+
+    def contract_ungrouped():
+        return _contract_dhconv(x, w)
+
+    ungrouped_result = benchmark(contract_ungrouped)
+
+    x_grouped = x.reshape(B, G, C // G, H, L)
+    w_grouped = torch.randn(
+        G, C // G, C // G, H, 2, dtype=torch.float32, device=get_device()
+    )
+
+    def contract_grouped():
+        return _contract_dhconv(x_grouped, w_grouped)
+
+    grouped_result = benchmark(contract_grouped)
+
+    assert grouped_result.ms_per < 2 / G * ungrouped_result.ms_per, (
+        "Expected grouped DHConv to be faster than ungrouped, but got "
+        f"{grouped_result.ms_per:.6f} seconds for grouped and "
+        f"{ungrouped_result.ms_per:.6f} seconds for ungrouped."
+    )
+    assert grouped_result.max_alloc < ungrouped_result.max_alloc, (
+        "Expected grouped DHConv to use less memory than ungrouped, but got "
+        f"{grouped_result.max_alloc/1024/1024:.2f} MB for grouped and "
+        f"{ungrouped_result.max_alloc/1024/1024:.2f} MB for ungrouped."
+    )
 
 
 @pytest.mark.parametrize(
