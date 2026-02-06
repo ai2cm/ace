@@ -306,6 +306,10 @@ shield_amip_c96_idealized_0p1_heating_ensemble_dataset:
 xshield_amip_dataset_and_stats:
 	./compute_dataset.sh --config configs/X-SHiELD-AMIP-1deg-$(LAYERS)-11yr.yaml
 
+.PHONY: shield_c96_ramped_climSST_random_CO2_ensemble_dataset
+shield_c96_ramped_climSST_random_CO2_ensemble_dataset:
+       ./compute_dataset.sh --config configs/shield-ramped-climSST-random-CO2-ensemble-c96-1deg-$(LAYERS).yaml
+
 .PHONY: build_atmosphere_processing_image
 build_atmosphere_processing_image:
 	docker build -f atmosphere.Dockerfile -t $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION) .
