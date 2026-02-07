@@ -23,6 +23,7 @@ coupled_datasets:
         - PRATEsfc
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
+        - total_frozen_precipitation_rate
   coupled_sea_ice:
     window_avg:
       window_timedelta: 120h
