@@ -1,0 +1,6 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+1pct_nosmooth_0256to0350-hfds_total_area|rs0|train|high|a100+h100|4|400GiB|3||seed=0
+1pct_nosmooth_0256to0350-hfds_total_area|rs1|train|high|a100+h100|4|400GiB|3||seed=1
+1pct_nosmooth_0256to0350-hfds_total_area|rs2|train|high|a100+h100|4|400GiB|3||seed=2
+1pct_nosmooth_0256to0350-hfds_total_area|rs3|train|high|a100+h100|4|400GiB|3||seed=3
