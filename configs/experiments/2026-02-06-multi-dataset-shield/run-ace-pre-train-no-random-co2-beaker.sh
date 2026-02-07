@@ -24,6 +24,7 @@ do
         --priority urgent \
         --preemptible \
         --cluster ai2/jupiter \
+        --env WANDB_NAME=$job_name \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_JOB_TYPE=training \
         --env WANDB_RUN_GROUP=$WANDB_GROUP \
