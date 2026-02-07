@@ -18,6 +18,7 @@ FME_VENV=$($URSA_CONDA_DIR/make-venv.sh $COMMIT $SCRATCH/fme-env $SCRATCH | tail
 
 CONFIG_FILENAME="one-step-pre-train-config-full-ursa.yaml"
 CONFIG_PATH=$SCRIPT_DIR/$CONFIG_FILENAME
+WANDB_USERNAME=spencerc_ai2
 export WANDB_RUN_GROUP=ace-shield
 for seed in 0 1 2 3
 do
