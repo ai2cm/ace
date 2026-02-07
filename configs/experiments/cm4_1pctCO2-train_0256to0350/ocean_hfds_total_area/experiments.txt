@@ -1,0 +1,2 @@
+
+1pct_nosmooth_0256to0350-hfds_total_area|rs0|01KGV4C6VYERR1A2TFBBHX0191|training|best_inference_ckpt|normal|--not-preemptible
