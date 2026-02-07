@@ -5,6 +5,7 @@ from collections.abc import Iterator
 import torch.distributed
 
 from .base import DistributedBackend
+from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
 from .torch_distributed import TorchDistributed
 
@@ -27,8 +28,10 @@ class Distributed:
     """
 
     def __init__(self, force_non_distributed: bool = False):
-        if TorchDistributed.is_available() and not force_non_distributed:
-            self._distributed: DistributedBackend = TorchDistributed()
+        if ModelTorchDistributed.is_available() and not force_non_distributed:
+            self._distributed: DistributedBackend = ModelTorchDistributed()
+        elif TorchDistributed.is_available() and not force_non_distributed:
+            self._distributed = TorchDistributed()
         else:
             self._distributed = NonDistributed()
         self._seed = 0
@@ -86,6 +89,9 @@ class Distributed:
         """
         return self._distributed.total_ranks
 
+    def get_local_rank(self) -> int:
+        return self._distributed.get_local_rank()
+
     def get_sampler(
         self,
         dataset: torch.utils.data.Dataset,
@@ -117,6 +123,9 @@ class Distributed:
         Modifies the input tensor in-place as a side effect.
         """
         return self._distributed.reduce_mean(tensor)
+
+    def get_local_slices(self, crop_shape):
+        return self._distributed.get_local_slices(crop_shape)
 
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         """
