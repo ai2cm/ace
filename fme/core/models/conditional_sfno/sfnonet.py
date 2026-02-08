@@ -22,6 +22,7 @@ import torch.nn as nn
 
 # get spectral transforms from torch_harmonics
 import torch_harmonics as th
+from .sht import RealSHT, InverseRealSHT
 from torch.utils.checkpoint import checkpoint
 
 from .initialization import trunc_normal_
@@ -362,16 +363,16 @@ def get_lat_lon_sfnonet(
     modes_lat = int(h * hard_thresholding_fraction)
     modes_lon = int((w // 2 + 1) * hard_thresholding_fraction)
     data_grid = params.data_grid if hasattr(params, "data_grid") else "equiangular"
-    trans_down = th.RealSHT(
+    trans_down = RealSHT(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
     ).float()
-    itrans_up = th.InverseRealSHT(
+    itrans_up = InverseRealSHT(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
     ).float()
-    trans = th.RealSHT(
+    trans = RealSHT(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
     ).float()
-    itrans = th.InverseRealSHT(
+    itrans = InverseRealSHT(
         h, w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
     ).float()
 
@@ -854,6 +855,10 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         return x
 
     def forward(self, x: torch.Tensor, context: Context):
+        source_dtype = x.dtype
+        model_dtype = self.parameters().__next__().dtype
+        x = x.to(model_dtype)
+        context = context.to(model_dtype)
         # save big skip
         if self.big_skip:
             residual = self.residual_filter_up(self.residual_filter_down(x))
@@ -884,4 +889,4 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         x = self.filter_output_up(self.filter_output_down(x))
 
-        return x
+        return x.to(source_dtype)
