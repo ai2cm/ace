@@ -5,9 +5,15 @@ import torch
 _benchmark_memory_started = False
 
 
-class MemoryBenchmarkResult(NamedTuple):
+class MemoryResult(NamedTuple):
     max_alloc: int
     max_reserved: int
+
+    def combine(self, other: "MemoryResult") -> "MemoryResult":
+        return MemoryResult(
+            max_alloc=max(self.max_alloc, other.max_alloc),
+            max_reserved=max(self.max_reserved, other.max_reserved),
+        )
 
 
 class MemoryBenchmark:
@@ -46,7 +52,7 @@ class MemoryBenchmark:
         return False  # Don't suppress exceptions
 
     @property
-    def result(self) -> MemoryBenchmarkResult:
+    def result(self) -> MemoryResult:
         if self._started:
             raise RuntimeError(
                 "MemoryBenchmark is still running. "
@@ -57,9 +63,7 @@ class MemoryBenchmark:
                 "MemoryBenchmark has not been run yet. "
                 "Please enter and exit the context before getting results."
             )
-        return MemoryBenchmarkResult(
-            max_alloc=self._max_alloc, max_reserved=self._max_reserved
-        )
+        return MemoryResult(max_alloc=self._max_alloc, max_reserved=self._max_reserved)
 
 
 def benchmark_memory() -> MemoryBenchmark:

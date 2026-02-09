@@ -7,9 +7,34 @@ import torch
 
 
 @dataclasses.dataclass
-class TimerReport:
+class TimerResult:
     avg_time: float
-    children: dict[str, "TimerReport"]
+    children: dict[str, "TimerResult"]
+    _total_results_combined: int = (
+        1  # Used for averaging results when combining multiple TimerResults
+    )
+
+    def combine(self, other: "TimerResult") -> "TimerResult":
+        # raise if children aren't the same
+        if set(self.children.keys()) != set(other.children.keys()):
+            raise ValueError(
+                "Cannot combine TimerResults with different children, "
+                f"got {set(self.children.keys())} and {set(other.children.keys())}."
+            )
+        new_avg_time = (
+            self.avg_time * self._total_results_combined
+            + other.avg_time * other._total_results_combined
+        ) / (self._total_results_combined + other._total_results_combined)
+        new_children = {
+            name: self.children[name].combine(other.children[name])
+            for name in self.children.keys()
+        }
+        return TimerResult(
+            avg_time=new_avg_time,
+            children=new_children,
+            _total_results_combined=self._total_results_combined
+            + other._total_results_combined,
+        )
 
 
 class Timer(Protocol):
@@ -31,8 +56,8 @@ class NullTimer:
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
         return False
 
-    def report(self) -> TimerReport:
-        return TimerReport(avg_time=0.0, children={})
+    def report(self) -> TimerResult:
+        return TimerResult(avg_time=0.0, children={})
 
 
 _: Timer = NullTimer()
@@ -125,12 +150,12 @@ class CUDATimer:
         )
         return total_time / len(self._global_event_pairs)
 
-    def _child_reports(self) -> dict[str, TimerReport]:
-        return {name: child.report() for name, child in self._children.items()}
+    def _child_reports(self) -> dict[str, TimerResult]:
+        return {name: child.result() for name, child in self._children.items()}
 
-    def report(self) -> TimerReport:
+    def result(self) -> TimerResult:
         torch.cuda.synchronize()
-        return TimerReport(
+        return TimerResult(
             avg_time=self._avg_global_time,
             children=self._child_reports(),
         )
