@@ -653,3 +653,72 @@ def test_input_output_names_secondary_decoder_conflict(conflict: str):
             ),
         )
     assert f"secondary_diagnostic_name is an {conflict} variable:" in str(err.value)
+
+
+def test_prescribed_prognostic_names_must_be_in_out_names():
+    """SingleModuleStepConfig raises when prescribed_prognostic_name is not in out_names
+    ."""
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b", "c"],
+    )
+    with pytest.raises(ValueError) as err:
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="SphericalFourierNeuralOperatorNet",
+                config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+            ),
+            in_names=["a", "b"],
+            out_names=["a"],
+            normalization=normalization,
+            prescribed_prognostic_names=["c"],
+        )
+    assert "prescribed_prognostic_name" in str(err.value)
+    assert "out_names" in str(err.value)
+    assert "c" in str(err.value)
+
+
+def test_step_with_prescribed_prognostic_overwrites_output():
+    """Step output is overwritten for prescribed_prognostic_names from
+    next_step_input_data."""
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                prescribed_prognostic_names=["diagnostic_main"],
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 2
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    prescribed_value = torch.full(
+        (n_samples,) + img_shape, 42.0, device=fme.get_device()
+    )
+    next_step_input_data["diagnostic_main"] = prescribed_value
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+        wrapper=lambda x: x,
+    )
+    torch.testing.assert_close(output["diagnostic_main"], prescribed_value)

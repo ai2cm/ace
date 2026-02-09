@@ -31,6 +31,7 @@ from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, Valu
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
     EpochNotProvidedError,
+    SingleModuleStepperConfig,
     Stepper,
     StepperConfig,
     StepperOverrideConfig,
@@ -1205,6 +1206,144 @@ def test_predict_with_forcing(n_ensemble):
         torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
     xr.testing.assert_equal(output.time, forcing_data.time[:, 1:])
     assert new_input_state.time.equals(output.time[:, -1:])
+
+
+def test_predict_with_prescribed_prognostic():
+    """Prescribed prognostic "a" is overwritten from forcing at each step."""
+    stepper = _get_stepper(
+        ["a", "b"],
+        ["a"],
+        module_name="ChannelSum",
+        prescribed_prognostic_names=["a"],
+    )
+    n_steps = 3
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["a", "b"])
+    output, _ = stepper.predict(input_data, forcing_data)
+    # Output "a" should be the forcing value at each step, not the model prediction.
+    assert output.data["a"].size(dim=1) == n_steps
+    # Forcing has shape [batch, n_ic + n_steps, ...];
+    # output steps use indices 1..n_steps.
+    expected_a = forcing_data.data["a"][:, 1 : n_steps + 1]
+    torch.testing.assert_close(output.data["a"], expected_a)
+
+
+def test_prescribed_prognostic_config_validation_raises():
+    """SingleModuleStepperConfig raises when prescribed_prognostic_name is not in
+    out_names."""
+    with pytest.raises(ValueError) as err:
+        SingleModuleStepperConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": torch.nn.Identity()}
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
+            prescribed_prognostic_names=["b"],
+        )
+    assert "prescribed_prognostic_name" in str(err.value)
+    assert "out_names" in str(err.value)
+
+
+def test_predict_with_prescribed_prognostic_multiple_variables():
+    """Multiple prescribed prognostics are overwritten from forcing."""
+    # Use AddOne (2 in -> 2 out) so we can prescribe both "a" and "b".
+    stepper = _get_stepper(
+        ["a", "b"],
+        ["a", "b"],
+        module_name="AddOne",
+        prescribed_prognostic_names=["a", "b"],
+    )
+    n_steps = 2
+    n_samples = 3
+    index = xr.date_range("2000", freq="6h", periods=n_steps + 1, use_cftime=True)
+    forcing_time = xr.DataArray(np.stack(n_samples * [index]), dims=["sample", "time"])
+    input_time = forcing_time.isel(time=[0])
+    # Initial condition must include all prognostics (a, b).
+    input_data = BatchData.new_on_device(
+        data={
+            "a": torch.rand(n_samples, 1, 5, 5).to(DEVICE),
+            "b": torch.rand(n_samples, 1, 5, 5).to(DEVICE),
+        },
+        time=input_time,
+        labels=None,
+    ).get_start(prognostic_names=["a", "b"], n_ic_timesteps=1)
+    forcing_data = BatchData.new_on_device(
+        data={
+            "a": torch.rand(3, n_steps + 1, 5, 5).to(DEVICE),
+            "b": torch.rand(3, n_steps + 1, 5, 5).to(DEVICE),
+        },
+        time=forcing_time,
+        labels=None,
+    )
+    output, _ = stepper.predict(input_data, forcing_data)
+    expected_a = forcing_data.data["a"][:, 1 : n_steps + 1]
+    expected_b = forcing_data.data["b"][:, 1 : n_steps + 1]
+    torch.testing.assert_close(output.data["a"], expected_a)
+    torch.testing.assert_close(output.data["b"], expected_b)
+
+
+def test_predict_with_prescribed_prognostic_and_ocean():
+    """Prescribed overwrite happens after ocean; both can be used together."""
+    # Ocean prescribes "a" over mask; we also prescribe "b" from forcing everywhere.
+    stepper = _get_stepper(
+        ["a", "mask"],
+        ["a", "b"],
+        module_name="AddOne",
+        ocean_config=OceanConfig("a", "mask"),
+        prescribed_prognostic_names=["b"],
+    )
+    n_steps = 2
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=["a", "b", "mask"]
+    )
+    # Where mask==1, ocean overwrites "a" with forcing "a"; "b" is always overwritten.
+    output, _ = stepper.predict(input_data, forcing_data)
+    expected_b = forcing_data.data["b"][:, 1 : n_steps + 1]
+    torch.testing.assert_close(output.data["b"], expected_b)
+    # "a" should be prescribed by ocean where mask==1
+    # (same as test_predict_with_ocean logic)
+    for n in range(n_steps):
+        previous_a = (
+            input_data.as_batch_data().data["a"][:, 0]
+            if n == 0
+            else output.data["a"][:, n - 1]
+        )
+        expected_a_n = torch.where(
+            torch.round(forcing_data.data["mask"][:, n + 1]).to(int) == 1,
+            forcing_data.data["a"][:, n + 1],
+            previous_a + 1,
+        )
+        torch.testing.assert_close(output.data["a"][:, n], expected_a_n)
+
+
+def test_get_forcing_window_data_requirements_includes_prescribed_names():
+    """Forcing window data requirements include prescribed_prognostic_names."""
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"a": 0.0, "b": 0.0},
+                            stds={"a": 1.0, "b": 1.0},
+                        ),
+                    ),
+                    prescribed_prognostic_names=["a"],
+                )
+            ),
+        ),
+        loss=StepLossConfig(type="MSE"),
+        derived_forcings=DerivedForcingsConfig(),
+    )
+    requirements = config.get_forcing_window_data_requirements(n_forward_steps=5)
+    assert "a" in requirements.names
+    assert "b" in requirements.names
 
 
 def test_predict_with_ocean():

@@ -100,6 +100,8 @@ class SingleModuleStepperConfig:
         loss: The loss configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
+        prescribed_prognostic_names: Prognostic variable names to overwrite from
+            forcing data at each step during inference (e.g. air_temperature_7).
         loss_normalization: The normalization configuration for the loss.
         residual_normalization: Optional alternative to configure loss normalization.
             If provided, it will be used for all *prognostic* variables in loss scaling.
@@ -123,6 +125,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     loss_normalization: NormalizationConfig | None = None
     residual_normalization: NormalizationConfig | None = None
     multi_call: MultiCallConfig | None = None
@@ -130,6 +133,12 @@ class SingleModuleStepperConfig:
     residual_prediction: bool = False
 
     def __post_init__(self):
+        for name in self.prescribed_prognostic_names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
         for name in self.next_step_forcing_names:
             if name not in self.in_names:
                 raise ValueError(
@@ -300,6 +309,7 @@ class SingleModuleStepperConfig:
             ocean=self.ocean,
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
+            prescribed_prognostic_names=self.prescribed_prognostic_names,
             residual_prediction=self.residual_prediction,
         )
 

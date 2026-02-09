@@ -50,6 +50,8 @@ class SingleModuleStepConfig(StepConfigABC):
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
+        prescribed_prognostic_names: Prognostic variable names to overwrite from
+            forcing data at each step (e.g. for inference with observed values).
         residual_prediction: Whether to use residual prediction.
     """
 
@@ -63,10 +65,17 @@ class SingleModuleStepConfig(StepConfigABC):
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        for name in self.prescribed_prognostic_names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
         for name in self.next_step_forcing_names:
             if name not in self.in_names:
                 raise ValueError(
@@ -153,9 +162,11 @@ class SingleModuleStepConfig(StepConfigABC):
     def next_step_input_names(self) -> list[str]:
         """Names of variables provided in next_step_input_data."""
         input_only_names = set(self.input_names).difference(self.output_names)
-        if self.ocean is None:
-            return list(input_only_names)
-        return list(input_only_names.union(self.ocean.forcing_names))
+        result = set(input_only_names)
+        if self.ocean is not None:
+            result = result.union(self.ocean.forcing_names)
+        result = result.union(self.prescribed_prognostic_names)
+        return list(result)
 
     @property
     def loss_names(self) -> list[str]:
@@ -353,6 +364,7 @@ class SingleModuleStep(StepABC):
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
+            prescribed_prognostic_names=self._config.prescribed_prognostic_names,
         )
 
     def get_regularizer_loss(self):
@@ -394,6 +406,7 @@ def step_with_adjustments(
     ocean: Ocean | None,
     residual_prediction: bool,
     prognostic_names: list[str],
+    prescribed_prognostic_names: list[str] | None = None,
 ) -> TensorDict:
     """
     Step the model forward one timestep given input data.
@@ -413,10 +426,14 @@ def step_with_adjustments(
         ocean: The ocean model to use.
         residual_prediction: Whether to use residual prediction.
         prognostic_names: Names of prognostic variables.
+        prescribed_prognostic_names: Prognostic names to overwrite from
+            next_step_input_data after the ocean step (e.g. for inference).
 
     Returns:
         The denormalized output data at the next time step.
     """
+    if prescribed_prognostic_names is None:
+        prescribed_prognostic_names = []
     input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
@@ -426,4 +443,7 @@ def step_with_adjustments(
         output = corrector(input, output, next_step_input_data)
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
+    for name in prescribed_prognostic_names:
+        if name in next_step_input_data:
+            output = {**output, name: next_step_input_data[name]}
     return output
