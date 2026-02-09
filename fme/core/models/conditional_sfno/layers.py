@@ -248,7 +248,7 @@ class ConditionalLayerNorm(nn.Module):
             self.W_scale_labels is not None or self.W_bias_labels is not None
         ):
             raise ValueError("labels must be provided")
-        with timer.context("compute_scaling_and_bias"):
+        with timer.child("compute_scaling_and_bias"):
             if self.W_scale is not None:
                 if context.embedding_scalar is None:
                     raise ValueError("embedding_scalar must be provided")
@@ -295,9 +295,9 @@ class ConditionalLayerNorm(nn.Module):
                 if context.embedding_pos is None:
                     raise ValueError("embedding_pos must be provided")
                 bias = bias + self.W_bias_pos(context.embedding_pos)
-        with timer.context("normalize"):
+        with timer.child("normalize"):
             x_norm: torch.Tensor = self.norm(x)
-        with timer.context("apply_scaling_and_bias"):
+        with timer.child("apply_scaling_and_bias"):
             return_value = x_norm * scale + bias
         return return_value
 

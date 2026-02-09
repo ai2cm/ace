@@ -298,20 +298,19 @@ class FourierNeuralOperatorBlock(nn.Module):
             )
 
     def forward(self, x, context_embedding, timer: Timer = NullTimer()):
-        with timer.context("norm0"):
+        with timer.child("norm0") as norm0_timer:
             x_norm = torch.zeros_like(x)
             x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = (
                 self.norm0(
                     x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]],
                     context_embedding,
-                    timer=timer.child("norm0"),
+                    timer=norm0_timer,
                 )
             )
-        with timer.context("filter"):
-            x, residual = self.filter(x_norm, timer=timer.child("filter"))
-
+        with timer.child("filter") as filter_timer:
+            x, residual = self.filter(x_norm, timer=filter_timer)
         if hasattr(self, "inner_skip"):
-            with timer.context("inner_skip"):
+            with timer.child("inner_skip"):
                 if self.concat_skip:
                     x = torch.cat((x, self.inner_skip(residual)), dim=1)
                     x = self.inner_skip_conv(x)
@@ -319,29 +318,29 @@ class FourierNeuralOperatorBlock(nn.Module):
                     x = x + self.inner_skip(residual)
 
         if hasattr(self, "act_layer"):
-            with timer.context("activation"):
+            with timer.child("activation"):
                 x = self.act_layer(x)
 
-        with timer.context("norm1"):
+        with timer.child("norm1") as norm1_timer:
             x_norm = torch.zeros_like(x)
             x_norm[..., : self.output_shape_loc[0], : self.output_shape_loc[1]] = (
                 self.norm1(
                     x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]],
                     context_embedding,
-                    timer=timer.child("norm1"),
+                    timer=norm1_timer,
                 )
             )
             x = x_norm
 
         if hasattr(self, "mlp"):
-            with timer.context("mlp"):
+            with timer.child("mlp"):
                 x = self.mlp(x)
 
-        with timer.context("drop_path"):
+        with timer.child("drop_path"):
             x = self.drop_path(x)
 
         if hasattr(self, "outer_skip"):
-            with timer.context("outer_skip"):
+            with timer.child("outer_skip"):
                 if self.concat_skip:
                     x = torch.cat((x, self.outer_skip(residual)), dim=1)
                     x = self.outer_skip_conv(x)

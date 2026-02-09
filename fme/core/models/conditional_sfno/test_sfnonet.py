@@ -333,10 +333,12 @@ def test_block_speed():
 
     for _ in range(1):
         block(x, context)
-    ungrouped = benchmark(call_block, warmup=0, iters=5)
+    with timer:
+        ungrouped = benchmark(call_block, warmup=0, iters=5)
     for _ in range(1):
         grouped_block(x, context)
-    grouped = benchmark(call_grouped_block, warmup=0, iters=5)
+    with grouped_timer:
+        grouped = benchmark(call_grouped_block, warmup=0, iters=5)
 
     print("ungrouped timers: ", timer.report())
     print("grouped timers: ", grouped_timer.report())

@@ -231,21 +231,21 @@ class SpectralConvS2(nn.Module):
         x = x.float()
 
         with torch.amp.autocast("cuda", enabled=False):
-            with timer.context("forward_transform"):
+            with timer.child("forward_transform"):
                 x = self.forward_transform(x.float())
             if self._round_trip_residual:
-                with timer.context("round_trip_residual"):
+                with timer.child("round_trip_residual"):
                     x = x.contiguous()
                     residual = self.inverse_transform(x)
                     residual = residual.to(dtype)
 
         B, C, H, W = x.shape
         assert C % self.num_groups == 0
-        with timer.context("group_reshape"):
+        with timer.child("group_reshape"):
             x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
 
         if self.lora_A is not None and self.lora_B is not None:
-            with timer.context("lora_update"):
+            with timer.child("lora_update"):
                 lora_update = _contract_lora(
                     self.lora_A,
                     self.lora_B,
@@ -254,7 +254,7 @@ class SpectralConvS2(nn.Module):
         else:
             lora_update = 0.0
 
-        with timer.context("dhconv"):
+        with timer.child("dhconv"):
             xp = torch.zeros_like(x)
             xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
                 x[..., : self.modes_lat_local, : self.modes_lon_local],
@@ -265,11 +265,11 @@ class SpectralConvS2(nn.Module):
             x = xp.contiguous()
 
         with torch.amp.autocast("cuda", enabled=False):
-            with timer.context("inverse_transform"):
+            with timer.child("inverse_transform"):
                 x = self.inverse_transform(x)
 
         if hasattr(self, "bias"):
-            with timer.context("add_bias"):
+            with timer.child("add_bias"):
                 x = x + self.bias
 
         x = x.type(dtype)

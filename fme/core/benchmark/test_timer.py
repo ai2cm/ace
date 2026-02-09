@@ -24,19 +24,13 @@ def test_new_if_available(is_available: bool):
 )
 def test_timer_with_child():
     timer = CUDATimer()
-    # get cuda to wait
-    with timer.context("parent"):
+    with timer:
+        # get cuda to wait
         torch.cuda._sleep(100_000)
-        child_timer = timer.child("child")
-        with child_timer.context("child_time"):
+        with timer.child("child"):
             torch.cuda._sleep(100_000)
     report = timer.report()
-    assert "parent" in report.average_time_seconds
     assert "child" in report.children
-    assert "child_time" in report.children["child"].average_time_seconds
     # parent time should include the child time, so it should be
     # at least 2x the child time (since we sleep for the same amount of time in both)
-    assert (
-        report.average_time_seconds["parent"]
-        >= 2.0 * report.children["child"].average_time_seconds["child_time"]
-    )
+    assert report.avg_time >= 2.0 * report.children["child"].avg_time

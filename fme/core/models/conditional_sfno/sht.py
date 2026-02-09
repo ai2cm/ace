@@ -123,14 +123,14 @@ class RealSHT(nn.Module):
         assert(x.shape[-2] == self.nlat)
         assert(x.shape[-1] == self.nlon)
         with torch.autocast("cuda", enabled=False):
-            with timer.context("rfft"):
+            with timer.child("rfft"):
                 # rfft and view_as_complex don't support BF16, see https://github.com/pytorch/pytorch/issues/117844
                 x = x.float()
 
                 # apply real fft in the longitudinal direction
                 x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
 
-            with timer.context("contraction"):
+            with timer.child("contraction"):
                 # do the Legendre-Gauss quadrature
                 x = torch.view_as_real(x)
 
@@ -207,7 +207,7 @@ class InverseRealSHT(nn.Module):
         assert(x.shape[-1] == self.mmax)
 
         with torch.autocast("cuda", enabled=False):
-            with timer.context("contraction"):
+            with timer.child("contraction"):
                 # irfft and view_as_complex don't support BF16, see https://github.com/pytorch/pytorch/issues/117844
                 # Evaluate associated Legendre functions on the output nodes
                 x = torch.view_as_real(x).float()
@@ -219,7 +219,7 @@ class InverseRealSHT(nn.Module):
 
                 # apply the inverse (real) FFT
                 x = torch.view_as_complex(xs)
-            with timer.context("irfft"):
+            with timer.child("irfft"):
                 x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
 
         return x
