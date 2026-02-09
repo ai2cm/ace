@@ -24,10 +24,6 @@ stepper_override:
   prescribed_prognostic_names:
     - PRESsfc
     - surface_temperature
-    - TMP2m
-    - Q2m
-    - UGRD10m
-    - VGRD10m
     - air_temperature_0
     - air_temperature_1
     - air_temperature_2
