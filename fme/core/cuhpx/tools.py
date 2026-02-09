@@ -14,9 +14,9 @@
 # limitations under the License.
 
 import os
+from importlib.resources import files
 
 import numpy as np
-import pkg_resources
 import torch
 
 DATAPATH = None
@@ -27,7 +27,7 @@ def get_datapath():
     if DATAPATH is None:
         # Using pkg_resources to ensure the path is correctly resolved
         # for installed packages
-        DATAPATH = pkg_resources.resource_filename("fme", "core/cuhpx/data")
+        DATAPATH = str(files("fme").joinpath("core/cuhpx/data"))
     return DATAPATH
 
 
