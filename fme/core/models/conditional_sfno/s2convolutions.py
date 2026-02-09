@@ -22,7 +22,7 @@ import torch.nn as nn
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
 
-from fme.core.models.conditional_sfno.timer import CUDATimer, NullTimer
+from fme.core.benchmark.timer import NullTimer, Timer
 
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
@@ -220,11 +220,7 @@ class SpectralConvS2(nn.Module):
             self.bias = nn.Parameter(torch.zeros(1, out_channels, 1, 1))
         self.out_channels = out_channels
 
-    def forward(
-        self, x, timer: CUDATimer | NullTimer | None = None
-    ):  # pragma: no cover
-        if timer is None:
-            timer = NullTimer()
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         residual = x
         x = x.float()

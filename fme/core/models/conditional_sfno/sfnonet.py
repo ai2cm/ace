@@ -24,7 +24,7 @@ import torch.nn as nn
 import torch_harmonics as th
 from torch.utils.checkpoint import checkpoint
 
-from fme.core.models.conditional_sfno.timer import CUDATimer, NullTimer
+from fme.core.benchmark.timer import Timer, NullTimer
 
 from .initialization import trunc_normal_
 
@@ -155,7 +155,7 @@ class SpectralFilterLayer(nn.Module):
         else:
             raise (NotImplementedError)
 
-    def forward(self, x, timer: CUDATimer | None = None):
+    def forward(self, x, timer: Timer = NullTimer()):
         return self.filter(x, timer=timer)
 
 
@@ -297,20 +297,18 @@ class FourierNeuralOperatorBlock(nn.Module):
                 lora_alpha=lora_alpha,
             )
 
-    def forward(self, x, context_embedding, timer: CUDATimer | NullTimer | None = None):
-        if timer is None:
-            timer = NullTimer()
+    def forward(self, x, context_embedding, timer: Timer = NullTimer()):
         with timer.context("norm0"):
             x_norm = torch.zeros_like(x)
             x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = (
                 self.norm0(
                     x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]],
                     context_embedding,
-                    timer=timer,
+                    timer=timer.child("norm0"),
                 )
             )
         with timer.context("filter"):
-            x, residual = self.filter(x_norm, timer=timer)
+            x, residual = self.filter(x_norm, timer=timer.child("filter"))
 
         if hasattr(self, "inner_skip"):
             with timer.context("inner_skip"):
@@ -330,7 +328,7 @@ class FourierNeuralOperatorBlock(nn.Module):
                 self.norm1(
                     x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]],
                     context_embedding,
-                    timer=timer,
+                    timer=timer.child("norm1"),
                 )
             )
             x = x_norm

@@ -24,8 +24,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+from fme.core.benchmark.timer import Timer, NullTimer
 from fme.core.models.conditional_sfno.lora import LoRAConv2d
-from fme.core.models.conditional_sfno.timer import CUDATimer, NullTimer
 
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
@@ -228,7 +228,7 @@ class ConditionalLayerNorm(nn.Module):
         self,
         x: torch.Tensor,
         context: Context,
-        timer: CUDATimer | NullTimer | None = None,
+        timer: Timer = NullTimer(),
     ) -> torch.Tensor:
         """
         Conditional Layer Normalization
@@ -244,13 +244,11 @@ class ConditionalLayerNorm(nn.Module):
         Returns:
             The normalized tensor, of shape (batch_size, channels, height, width).
         """
-        if timer is None:
-            timer = NullTimer()
         if context.labels is None and (
             self.W_scale_labels is not None or self.W_bias_labels is not None
         ):
             raise ValueError("labels must be provided")
-        with timer.context("layer_norm_compute_scaling_and_bias"):
+        with timer.context("compute_scaling_and_bias"):
             if self.W_scale is not None:
                 if context.embedding_scalar is None:
                     raise ValueError("embedding_scalar must be provided")
@@ -297,9 +295,9 @@ class ConditionalLayerNorm(nn.Module):
                 if context.embedding_pos is None:
                     raise ValueError("embedding_pos must be provided")
                 bias = bias + self.W_bias_pos(context.embedding_pos)
-        with timer.context("layer_norm_normalize"):
+        with timer.context("normalize"):
             x_norm: torch.Tensor = self.norm(x)
-        with timer.context("layer_norm_apply_scaling_and_bias"):
+        with timer.context("apply_scaling_and_bias"):
             return_value = x_norm * scale + bias
         return return_value
 

@@ -19,6 +19,8 @@ import torch
 import torch.nn as nn
 from torch import amp
 
+from fme.core.benchmark.timer import NullTimer, Timer
+
 # import convenience functions for factorized tensors
 from .factorizations import get_contract_fun
 
@@ -124,30 +126,34 @@ class SpectralConv(nn.Module):
         if bias:
             self.bias = nn.Parameter(torch.zeros(1, self.out_channels, 1, 1))
 
-    def forward(self, x):
-        dtype = x.dtype
-        residual = x
-        x = x.float()
+    def forward(self, x, timer: Timer = NullTimer()):
+        with timer.context("spectral_conv_forward"):
+            dtype = x.dtype
+            residual = x
+            x = x.float()
 
-        with amp.autocast(device_type="cuda", enabled=False):
-            x = self.forward_transform(x).contiguous()
-            if self.scale_residual:
-                residual = self.inverse_transform(x)
-                residual = residual.to(dtype)
+            with amp.autocast(device_type="cuda", enabled=False):
+                x = self.forward_transform(x).contiguous()
+                if self.scale_residual:
+                    residual = self.inverse_transform(x)
+                    residual = residual.to(dtype)
 
-        B, C, H, W = x.shape
-        x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
-        xp = self._contract(
-            x, self.weight, separable=self.separable, operator_type=self.operator_type
-        )
-        x = xp.reshape(B, self.out_channels, H, W).contiguous()
+            B, C, H, W = x.shape
+            x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
+            xp = self._contract(
+                x,
+                self.weight,
+                separable=self.separable,
+                operator_type=self.operator_type,
+            )
+            x = xp.reshape(B, self.out_channels, H, W).contiguous()
 
-        with amp.autocast(device_type="cuda", enabled=False):
-            x = self.inverse_transform(x)
+            with amp.autocast(device_type="cuda", enabled=False):
+                x = self.inverse_transform(x)
 
-        if hasattr(self, "bias"):
-            x = x + self.bias
+            if hasattr(self, "bias"):
+                x = x + self.bias
 
-        x = x.to(dtype=dtype)
+            x = x.to(dtype=dtype)
 
         return x, residual

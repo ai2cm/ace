@@ -24,6 +24,9 @@ class NullTimer:
     def child(self, name: str) -> "Self":
         return self
 
+    def report(self) -> TimerReport:
+        return TimerReport(average_time_seconds={}, children={})
+
 
 _: Timer = NullTimer()
 del _
@@ -41,7 +44,7 @@ class CUDATimer:
         )
 
     @classmethod
-    def new_if_available(cls) -> "CUDATimer" | NullTimer:
+    def new_if_available(cls) -> "CUDATimer | NullTimer":
         if torch.cuda.is_available():
             return cls()
         else:
