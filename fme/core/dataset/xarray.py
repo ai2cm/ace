@@ -1097,15 +1097,8 @@ def get_xarray_datasets(
         datasets.append(dataset)
         if properties is None:
             properties = new_properties
-        elif not strict:
-            try:
-                properties.update(new_properties)
-            except ValueError as e:
-                warnings.warn(
-                    f"Metadata for each ensemble member are not the same: {e}"
-                )
         else:
-            properties.update(new_properties)
+            properties.update(new_properties, strict=strict)
     if properties is None:
         raise ValueError("At least one dataset must be provided.")
 
