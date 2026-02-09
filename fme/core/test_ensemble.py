@@ -23,7 +23,9 @@ def test_crps(n_ensemble: int, alpha: float):
 
     Scoring rules that are proper are proven to have the lowest
     expected score if the predicted distribution equals the
-    underlying distribution of the target variable.
+    underlying distribution of the target variable. Note that
+    the assumptions in this test are only valid for values of
+    alpha near 1.
     """
     torch.manual_seed(0)
     nx = 1

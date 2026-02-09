@@ -914,7 +914,7 @@ def _create_copy_weights_after_batch_config(
     with open(path_to_train_config_yaml) as config_file:
         config_data = yaml.safe_load(config_file)
         config_data["stepper"]["parameter_init"] = {"weights_path": path_to_checkpoint}
-        config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": []}]
+        config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": None}]
         config_data["experiment_dir"] = experiment_dir
         with tempfile.NamedTemporaryFile(
             mode="w", delete=False, suffix=".yaml"
