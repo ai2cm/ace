@@ -1,8 +1,8 @@
 
-1pct_nosmooth_0256to0350-hfds_total_area|rs0|01KGV4C6VYERR1A2TFBBHX0191|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_total_area|rs0|01KGV4C6VYERR1A2TFBBHX0191|run_ICx1|best_inference_ckpt|high|--not-preemptible
 
 1pct_nosmooth_0256to0350-hfds_total_area|rs1|01KGV4CPZMASED08PFP7C98EH8|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-hfds_total_area|rs2|01KGV4D692MEGRTAQT2P8109PZ|training|best_inference_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_total_area|rs3|01KGV4DN6T217MQF10K4P2R6D2|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_total_area|rs3|01KGV4DN6T217MQF10K4P2R6D2|run_ICx1|best_inference_ckpt|high|--not-preemptible
