@@ -20,7 +20,7 @@ class ConditionalSFNOBuilder(ModuleConfig):
 
     spectral_transform: str = "sht"
     filter_type: str = "linear"
-    operator_type: str = "diagonal"
+    operator_type: Literal["dhconv"] = "dhconv"
     scale_factor: int = 1
     embed_dim: int = 256
     num_layers: int = 12

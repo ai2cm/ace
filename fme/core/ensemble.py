@@ -30,13 +30,12 @@ def get_crps(
     if n_ens == 1:
         internal_term = torch.zeros_like(target_term)
     else:
-        # Pairwise |X_i - X_j|
-        # Shape: [batch, n_ens, n_ens, ...]
-        diffs = torch.abs(gen.unsqueeze(2) - gen.unsqueeze(1))
-
-        # Keep only unique pairs i < j
+        # Indices for unique pairs i < j
         idx = torch.triu_indices(n_ens, n_ens, offset=1, device=gen.device)
-        pairwise = diffs[:, idx[0], idx[1], ...]
+        i, j = idx[0], idx[1]  # [n_pairs]
+
+        # Only materialize the needed pairs: [B, n_pairs, ...]
+        pairwise = (gen[:, i, ...] - gen[:, j, ...]).abs()
 
         # Mean over pairs
         internal_term = -0.5 * pairwise.mean(dim=1)

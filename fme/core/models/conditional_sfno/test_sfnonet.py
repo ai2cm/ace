@@ -22,7 +22,7 @@ DIR = os.path.abspath(os.path.dirname(__file__))
         (0, 0, 0, 0, 1),
         (16, 8, 0, 0, 1),
         (16, 0, 16, 0, 1),
-        (16, 0, 16, 16, 1),
+        (16, 15, 14, 13, 1),
         (0, 0, 0, 16, 1),
         (0, 0, 16, 0, 1),
         (16, 0, 0, 0, 4),
@@ -182,6 +182,7 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
             num_layers=2,
             normalize_big_skip=normalize_big_skip,
             global_layer_norm=True,  # so it uses nn.LayerNorm
+            operator_type="dhconv",
         )
         model = get_lat_lon_sfnonet(
             params=params,

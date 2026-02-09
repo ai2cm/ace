@@ -50,6 +50,8 @@ class Context:
     Parameters:
         embedding_scalar: The scalar embedding to condition on. The
             last dimension is the channel dimension.
+        embedding_pos: The positional embedding to condition on. The last
+            three dimensions are (channels, height, width).
         labels: The labels to condition on, of shape (batch_size, n_labels).
         noise: The 2D noise embedding to condition on. The last
             three dimensions are (channels, height, width).

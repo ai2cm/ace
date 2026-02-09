@@ -200,6 +200,9 @@ class BatchData:
         n_ensemble: int = 1,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
+        if labels is not None:
+            if labels.tensor.device != torch.device("cpu"):
+                raise ValueError(f"labels must be on cpu, got {labels.tensor.device}")
         kwargs = cls._get_kwargs(horizontal_dims)
         if isinstance(labels, list):
             warnings.warn(
