@@ -11,9 +11,9 @@ netcdf4
 numpy
 omegaconf>=2.1.0
 pandas
-pkg_resources
 plotly
 s3fs
+setuptools
 tensorly
 tensorly-torch
 torch-harmonics==0.8.0  # pinned since we use private API
