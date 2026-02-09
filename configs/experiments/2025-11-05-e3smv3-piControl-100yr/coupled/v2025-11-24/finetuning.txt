@@ -3,4 +3,5 @@ ft_fto-v1124-sfno-m351zi95-rv0ike6m||||best_inference_ckpt|skip|high||8|800GiB|2
 ft_fto-v1124-pesvhsm3-vw7bwz18||||best_inference_ckpt|skip|high||8|800GiB|2||optimization.lr=0.0001|01KED7JK9TTDPQJXY5NTWANHY6
 ft_fto-v1124-pesvhsm3-vw7bwz18-ckpt-0010||||best_inference_ckpt_0010|skip|high||8|800GiB|2||optimization.lr=0.0001|01KED7JK9TTDPQJXY5NTWANHY6
 ft_fto-v1124-pesvhsm3-vw7bwz18-lr-1e-5||||best_inference_ckpt|skip|high||8|800GiB|2||optimization.lr=0.00001|01KED7JK9TTDPQJXY5NTWANHY6
-ft_fto-v1124-pesvhsm3-rv0ike6m||||best_inference_ckpt|train|high||8|800GiB|2||optimization.lr=0.0001|01KF256T3E4KW67A1YZXV45BDF
+ft_fto-v1124-pesvhsm3-rv0ike6m||||best_inference_ckpt|skip|high||8|800GiB|2||optimization.lr=0.0001|01KF256T3E4KW67A1YZXV45BDF
+ft_fto-v1124-phuetnpl-rv0ike6m||||best_inference_ckpt|train|high||8|800GiB|2||optimization.lr=0.0001|01KG08VYKWMSX3VBY6D52JY8EM

@@ -434,6 +434,9 @@ stepper:
           corrector:
             conserve_dry_air: true
             moisture_budget_correction: advection_and_precipitation
+            total_energy_budget_correction:
+              method: constant_temperature
+              constant_unaccounted_heating: 0.89
             force_positive_names:
               - specific_total_water_0
               - specific_total_water_1

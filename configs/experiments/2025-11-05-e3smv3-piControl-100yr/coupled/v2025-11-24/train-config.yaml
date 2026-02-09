@@ -400,22 +400,8 @@ stepper:
           - frozen:
               include:
                 - '*'
-      n_ensemble: 2
-      train_n_forward_steps:
-        outcomes:
-          - steps: 1
-            probability: 0.6
-          - steps: 2
-            probability: 0.2
-          - steps: 4
-            probability: 0.1
-          - steps: 12
-            probability: 0.05
-          - steps: 20
-            probability: 0.05
-      optimize_last_step_only: true
       loss:
-        type: EnsembleLoss
+        type: MSE
         weights:
           T_0: 0.5
           T_1: 0.5
@@ -431,19 +417,14 @@ stepper:
           FSDS: 2
           top_of_atmos_upward_shortwave_flux: 2
           tendency_of_total_water_path_due_to_advection: 0.5
-        kwargs:
-          crps_weight: 0.9
-          energy_score_weight: 0.1
       step:
         type: single_module
         config:
-          residual_prediction: false
           builder:
             type: NoiseConditionedSFNO
             config:
-              embed_dim: 512
-              noise_embed_dim: 64
-              noise_type: isotropic
+              embed_dim: 384
+              noise_embed_dim: 0
               filter_type: linear
               use_mlp: true
               num_layers: 8
@@ -455,15 +436,20 @@ stepper:
             network:
               global_means_path: /atmos_stats/centering.nc
               global_stds_path: /atmos_stats/scaling-full-field.nc
+              fill_nans_on_normalize: false
             residual:
               global_means_path: /atmos_stats/centering.nc
               global_stds_path: /atmos_stats/scaling-residual.nc
           ocean:
             surface_temperature_name: TS
             ocean_fraction_name: ocean_fraction
+            interpolate: true
           corrector:
             conserve_dry_air: true
             moisture_budget_correction: advection_and_precipitation
+            total_energy_budget_correction:
+              method: constant_temperature
+              constant_unaccounted_heating: 0.89
             force_positive_names:
               - specific_total_water_0
               - specific_total_water_1
