@@ -1,0 +1,238 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/claude-code/main/schema/settings-schema.json",
+  "description": "ACE project settings - auto-approve read/write, quality hooks enabled, dangerous commands blocked",
+
+  "permissions": {
+    "mode": "auto",
+    "autoApprove": {
+      "tools": ["Read", "Glob", "Grep", "Edit", "Write"],
+      "patterns": [
+        "Read:**",
+        "Glob:**",
+        "Grep:**",
+        "Edit:**/*.py",
+        "Edit:**/*.yaml",
+        "Edit:**/*.yml",
+        "Edit:**/*.toml",
+        "Edit:**/*.md",
+        "Write:**/*.py",
+        "Write:**/*.yaml",
+        "Write:**/*.yml",
+        "Write:**/*.toml",
+        "Write:**/*.md",
+        "Bash:gh pr view*",
+        "Bash:gh pr list*",
+        "Bash:gh pr diff*",
+        "Bash:gh pr checks*",
+        "Bash:gh issue view*",
+        "Bash:gh issue list*",
+        "Bash:gh repo view*",
+        "Bash:gh api */repos/*/pulls/*/comments*",
+        "Bash:gh api */repos/*/pulls/*/reviews*",
+        "Bash:gh api */repos/*/commits/*",
+        "Bash:git status*",
+        "Bash:git diff*",
+        "Bash:git log*",
+        "Bash:git show*"
+      ]
+    },
+    "requireApproval": {
+      "tools": ["Bash"],
+      "patterns": [
+        "Bash:*rm -rf*",
+        "Bash:*rm -fr*",
+        "Bash:rm * -rf*",
+        "Bash:rm * -fr*",
+        "Bash:*sudo rm*",
+        "Bash:git push --force*",
+        "Bash:git push -f*",
+        "Bash:git reset --hard*",
+        "Bash:git clean -fd*",
+        "Bash:git clean -f*",
+        "Bash:git branch -D*",
+        "Bash:*deploy*",
+        "Bash:*docker system prune*",
+        "Bash:*docker volume rm*",
+        "Bash:*docker container rm*",
+        "Bash:*podman system prune*",
+        "Bash:*pip uninstall*",
+        "Bash:*conda remove*",
+        "Bash:*apt remove*",
+        "Bash:*yum remove*",
+        "Bash:*dnf remove*",
+        "Bash:*chmod -R*",
+        "Bash:*chown -R*",
+        "Bash:*dd if=*",
+        "Bash:*mkfs*",
+        "Bash:*fdisk*",
+        "Bash:*parted*",
+        "Bash:*>/dev/sd*",
+        "Bash:*curl * | bash*",
+        "Bash:*curl * | sh*",
+        "Bash:*wget * | bash*",
+        "Bash:*wget * | sh*",
+        "Bash:gh pr merge*",
+        "Bash:gh pr close*",
+        "Bash:gh pr comment*",
+        "Bash:gh pr review*",
+        "Bash:gh pr edit*",
+        "Bash:gh pr ready*",
+        "Bash:gh issue create*",
+        "Bash:gh issue close*",
+        "Bash:gh issue comment*",
+        "Bash:gh issue edit*",
+        "Bash:gh repo delete*",
+        "Bash:gh repo create*",
+        "Bash:gh release create*",
+        "Bash:gh release delete*"
+      ]
+    }
+  },
+
+  "hooks": {
+    "onWrite": {
+      "enabled": true,
+      "commands": [
+        {
+          "name": "ruff-format",
+          "description": "Format Python files with ruff",
+          "command": "ruff format {file}",
+          "filePattern": "**/*.py",
+          "excludePatterns": [
+            "**/fme/ace/models/makani_fcn3/**",
+            "**/fme/downscaling/modules/physicsnemo_unets_v2/**",
+            "**/fme/core/cuhpx/**"
+          ],
+          "continueOnError": false
+        },
+        {
+          "name": "mypy-check",
+          "description": "Type check Python files with mypy",
+          "command": "mypy {file}",
+          "filePattern": "**/*.py",
+          "excludePatterns": [
+            "**/fme/ace/models/makani_fcn3/**",
+            "**/fme/downscaling/modules/physicsnemo_unets_v2/**",
+            "**/fme/core/cuhpx/**",
+            "**/test_*.py"
+          ],
+          "continueOnError": true
+        }
+      ]
+    },
+
+    "onEdit": {
+      "enabled": true,
+      "commands": [
+        {
+          "name": "ruff-format",
+          "description": "Format Python files with ruff",
+          "command": "ruff format {file}",
+          "filePattern": "**/*.py",
+          "excludePatterns": [
+            "**/fme/ace/models/makani_fcn3/**",
+            "**/fme/downscaling/modules/physicsnemo_unets_v2/**",
+            "**/fme/core/cuhpx/**"
+          ],
+          "continueOnError": false
+        },
+        {
+          "name": "mypy-check",
+          "description": "Type check Python files with mypy",
+          "command": "mypy {file}",
+          "filePattern": "**/*.py",
+          "excludePatterns": [
+            "**/fme/ace/models/makani_fcn3/**",
+            "**/fme/downscaling/modules/physicsnemo_unets_v2/**",
+            "**/fme/core/cuhpx/**",
+            "**/test_*.py"
+          ],
+          "continueOnError": true
+        }
+      ]
+    },
+
+    "afterFileChange": {
+      "enabled": true,
+      "commands": [
+        {
+          "name": "pre-commit",
+          "description": "Run pre-commit hooks on changed files",
+          "command": "pre-commit run --files {files}",
+          "runOnce": true,
+          "continueOnError": false
+        },
+        {
+          "name": "very-fast-tests",
+          "description": "Run very fast tests after code changes",
+          "command": "make test_very_fast",
+          "runOnce": true,
+          "debounceMs": 2000,
+          "continueOnError": true
+        }
+      ]
+    },
+
+    "beforeCommit": {
+      "enabled": true,
+      "commands": [
+        {
+          "name": "pre-commit-all",
+          "description": "Run pre-commit on all staged files",
+          "command": "pre-commit run",
+          "continueOnError": false
+        }
+      ]
+    }
+  },
+
+  "customCommands": {
+    "test-fast": {
+      "command": "make test_fast",
+      "description": "Run fast test suite (<60s tests)"
+    },
+    "test-full": {
+      "command": "make test",
+      "description": "Run full test suite (all tests)"
+    },
+    "test-cov": {
+      "command": "make test_cov",
+      "description": "Run tests with coverage report"
+    },
+    "lint": {
+      "command": "ruff check . --fix && mypy fme/",
+      "description": "Lint and type check all code"
+    },
+    "format": {
+      "command": "ruff format .",
+      "description": "Format all Python files"
+    },
+    "build-docker": {
+      "command": "make build_docker_image",
+      "description": "Build Docker production image"
+    },
+    "build-docs": {
+      "command": "cd docs && make html",
+      "description": "Build Sphinx documentation"
+    }
+  },
+
+  "ignorePatterns": [
+    "**/__pycache__/**",
+    "**/.pytest_cache/**",
+    "**/.mypy_cache/**",
+    "**/.ruff_cache/**",
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/*.egg-info/**",
+    "**/fme/ace/models/makani_fcn3/**",
+    "**/fme/downscaling/modules/physicsnemo_unets_v2/**",
+    "**/fme/core/cuhpx/**"
+  ],
+
+  "telemetry": {
+    "enabled": true
+  }
+}
