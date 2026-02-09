@@ -17,8 +17,6 @@ class CRPSExperiment:
 @pytest.mark.parametrize("alpha", [1.0, 0.95])
 def test_crps(n_ensemble: int, alpha: float):
     """
-    TODO this test doesnt really work only worked because
-    alpha was hard coded to 0.95 in ensemble.py
     Test that get_crps is a proper scoring rule.
 
     Scoring rules that are proper are proven to have the lowest
