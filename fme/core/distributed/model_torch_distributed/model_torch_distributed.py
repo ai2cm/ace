@@ -6,11 +6,10 @@ from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
 from fme.core.device import using_gpu
-from fme.core.distributed import comm
-
-from .base import DistributedBackend
-from .non_distributed import DummyWrapper
-from .torch_distributed import _gather_irregular
+from fme.core.distributed.base import DistributedBackend
+from fme.core.distributed.model_torch_distributed import comm
+from fme.core.distributed.non_distributed import DummyWrapper
+from fme.core.distributed.torch_distributed import _gather_irregular
 
 try:
     from physicsnemo import distributed as pnd

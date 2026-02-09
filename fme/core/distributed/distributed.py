@@ -5,7 +5,7 @@ from collections.abc import Iterator
 import torch.distributed
 
 from .base import DistributedBackend
-from .model_torch_distributed import ModelTorchDistributed
+from .model_torch_distributed.model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
 from .torch_distributed import TorchDistributed
 

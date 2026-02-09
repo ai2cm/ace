@@ -6,6 +6,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+from model_torch_distributed import ModelTorchDistributed
 
 
 @pytest.mark.parametrize(
@@ -53,8 +54,6 @@ def test_is_available(
     clear_env = h_parallel is None and w_parallel is None
 
     with patch.dict(os.environ, env_dict, clear=clear_env):
-        from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
-
         result = ModelTorchDistributed.is_available()
 
     assert result is expected
