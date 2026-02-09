@@ -73,7 +73,7 @@ class EventPair:
                 "Both record_start and record_end must be called "
                 "before elapsed_time_seconds can be called."
             )
-        return self.start.elapsed_time(self.end)
+        return self.start.elapsed_time(self.end) / 1000.0
 
 
 class CUDATimer:

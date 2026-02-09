@@ -57,3 +57,6 @@ class Registry(Generic[T]):
     def get(self, type_name: str, config: Mapping[str, Any]) -> T:
         cls = self._types[type_name]
         return cls.from_state(config)
+
+    def get_all(self) -> dict[str, type[T]]:
+        return self._types.copy()
