@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Generator, Iterable
 from typing import Any, Literal
 
 import dacite
@@ -21,6 +21,7 @@ from fme.ace.stepper import (
     stack_list_of_tensor_dicts,
 )
 from fme.ace.stepper.parameter_init import (
+    ParameterInitializationConfig,
     StepperWeightsAndHistory,
     Weights,
     WeightsAndHistoryLoader,
@@ -30,9 +31,9 @@ from fme.ace.stepper.single_module import (
     load_weights_and_history as load_uncoupled_weights_and_history,
 )
 from fme.core.dataset_info import DatasetInfo
-from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OceanData
 from fme.core.optimization import NullOptimization
@@ -63,14 +64,10 @@ class ComponentConfig:
         timedelta: An ISO 8601 Duration string specifying the size of this component's
             stepper step.
         stepper: The single module stepper configuration for this component.
-        loss_contributions: The loss contributions configuration for this component.
     """
 
     timedelta: str
     stepper: StepperConfig
-    loss_contributions: LossContributionsConfig = dataclasses.field(
-        default_factory=lambda: LossContributionsConfig()
-    )
 
 
 @dataclasses.dataclass
@@ -604,25 +601,6 @@ class CoupledStepperConfig:
             dataset_info=dataset_info,
         )
 
-    def get_ocean_loss(
-        self,
-        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
-        time_dim: int,
-    ) -> StepLossABC:
-        return self.ocean.loss_contributions.build(loss_obj, time_dim)
-
-    def get_atmosphere_loss(
-        self,
-        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
-        time_dim: int,
-    ) -> StepLossABC:
-        return self.atmosphere.loss_contributions.build(loss_obj, time_dim)
-
-    def get_loss(
-        self, ocean_loss: StepLossABC, atmosphere_loss: StepLossABC
-    ) -> "CoupledStepperTrainLoss":
-        return CoupledStepperTrainLoss(ocean_loss, atmosphere_loss)
-
     def get_state(self):
         return dataclasses.asdict(self)
 
@@ -642,6 +620,9 @@ class CoupledStepperConfig:
         state_copy = state.copy()
         if "sst_mask_name" in state_copy:
             del state_copy["sst_mask_name"]
+        for component_key in ["ocean", "atmosphere"]:
+            if "loss_contributions" in state_copy[component_key]:
+                del state_copy[component_key]["loss_contributions"]
         return state_copy
 
 
@@ -777,6 +758,12 @@ class ComponentStepPrediction(StepPredictionABC):
         )
 
 
+@dataclasses.dataclass
+class CoupledTensorDict:
+    ocean: TensorDict
+    atmosphere: TensorDict
+
+
 class CoupledStepperTrainLoss:
     def __init__(
         self,
@@ -787,6 +774,13 @@ class CoupledStepperTrainLoss:
             "ocean": ocean_loss,
             "atmosphere": atmosphere_loss,
         }
+
+    @property
+    def effective_loss_scaling(self) -> CoupledTensorDict:
+        return CoupledTensorDict(
+            ocean=self._loss_objs["ocean"].effective_loss_scaling,
+            atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
+        )
 
     def __call__(
         self,
@@ -799,15 +793,7 @@ class CoupledStepperTrainLoss:
         return None
 
 
-class CoupledStepper(
-    TrainStepperABC[
-        CoupledPrognosticState,
-        CoupledBatchData,
-        CoupledBatchData,
-        CoupledPairedData,
-        CoupledTrainOutput,
-    ],
-):
+class CoupledStepper:
     TIME_DIM = 1
 
     def __init__(
@@ -832,22 +818,6 @@ class CoupledStepper(
         self._config = config
         self._dataset_info = dataset_info
         self._ocean_mask_provider = dataset_info.ocean_mask_provider
-
-        ocean_loss = self._config.get_ocean_loss(
-            self.ocean.loss_obj,
-            ocean.TIME_DIM,
-        )
-        atmos_loss = self._config.get_atmosphere_loss(
-            self.atmosphere.loss_obj,
-            atmosphere.TIME_DIM,
-        )
-        self._loss = self._config.get_loss(ocean_loss, atmos_loss)
-
-        _: PredictFunction[  # for type checking
-            CoupledPrognosticState,
-            CoupledBatchData,
-            CoupledPairedData,
-        ] = self.predict_paired
 
     @property
     def modules(self) -> nn.ModuleList:
@@ -1319,12 +1289,182 @@ class CoupledStepper(
             ),
         )
 
+    def update_training_history(self, training_job: TrainingJob) -> None:
+        """
+        Update the stepper's history of training jobs.
+
+        Args:
+            training_job: The training job to add to the history.
+        """
+        self.ocean.update_training_history(training_job)
+        self.atmosphere.update_training_history(training_job)
+
+    @classmethod
+    def from_state(cls, state) -> "CoupledStepper":
+        ocean = Stepper.from_state(state["ocean_state"])
+        atmosphere = Stepper.from_state(state["atmosphere_state"])
+        config = CoupledStepperConfig.from_state(state["config"])
+        if "dataset_info" in state:
+            dataset_info = CoupledDatasetInfo.from_state(state["dataset_info"])
+        else:
+            # NOTE: this is included for backwards compatibility
+            dataset_info = CoupledDatasetInfo(
+                ocean=ocean.training_dataset_info,
+                atmosphere=atmosphere.training_dataset_info,
+            )
+        return cls(
+            config=config,
+            ocean=ocean,
+            atmosphere=atmosphere,
+            dataset_info=dataset_info,
+        )
+
+
+def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
+    logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
+    checkpoint = torch.load(
+        checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
+    stepper = CoupledStepper.from_state(checkpoint["stepper"])
+
+    return stepper
+
+
+@dataclasses.dataclass
+class ComponentTrainingConfig:
+    loss: StepLossConfig
+    loss_contributions: LossContributionsConfig = dataclasses.field(
+        default_factory=lambda: LossContributionsConfig()
+    )
+    parameter_init: ParameterInitializationConfig = dataclasses.field(
+        default_factory=lambda: ParameterInitializationConfig()
+    )
+
+
+@dataclasses.dataclass
+class CoupledTrainStepperConfig:
+    """
+    Configuration for training-specific aspects of a coupled stepper.
+
+    Parameters:
+        ocean: The configuration for the ocean component.
+        atmosphere: The configuration for the atmosphere component.
+    """
+
+    ocean: ComponentTrainingConfig
+    atmosphere: ComponentTrainingConfig
+
+    def get_train_stepper(self, stepper: CoupledStepper) -> "CoupledTrainStepper":
+        """
+        Build a CoupledTrainStepper from this configuration and a CoupledStepper.
+
+        Args:
+            stepper: The underlying coupled stepper for inference operations.
+
+        Returns:
+            A CoupledTrainStepper wrapping the given stepper with training
+            functionality.
+        """
+        ocean_step_loss = stepper.ocean.build_loss(self.ocean.loss)
+        atmos_step_loss = stepper.atmosphere.build_loss(self.atmosphere.loss)
+        ocean_loss = self.ocean.loss_contributions.build(
+            ocean_step_loss, stepper.ocean.TIME_DIM
+        )
+        atmos_loss = self.atmosphere.loss_contributions.build(
+            atmos_step_loss, stepper.atmosphere.TIME_DIM
+        )
+        loss = CoupledStepperTrainLoss(ocean_loss, atmos_loss)
+        return CoupledTrainStepper(
+            stepper=stepper,
+            loss=loss,
+        )
+
+
+class CoupledTrainStepper(
+    TrainStepperABC[
+        CoupledPrognosticState,
+        CoupledBatchData,
+        CoupledBatchData,
+        CoupledPairedData,
+        CoupledTrainOutput,
+    ],
+):
+    """
+    Wrapper around CoupledStepper that adds training functionality.
+
+    This class composes a CoupledStepper (for inference) with training-specific
+    loss configuration and implements the train_on_batch method.
+    """
+
+    def __init__(
+        self,
+        stepper: CoupledStepper,
+        loss: CoupledStepperTrainLoss,
+    ):
+        """
+        Args:
+            stepper: The underlying coupled stepper for inference operations.
+            loss: The coupled loss object for computing per-component losses.
+        """
+        self._stepper = stepper
+        self._loss = loss
+
+    @property
+    def ocean(self) -> Stepper:
+        return self._stepper.ocean
+
+    @property
+    def atmosphere(self) -> Stepper:
+        return self._stepper.atmosphere
+
+    @property
+    def effective_loss_scaling(self) -> CoupledTensorDict:
+        return self._loss.effective_loss_scaling
+
+    @property
+    def modules(self) -> nn.ModuleList:
+        return self._stepper.modules
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self._stepper.n_ic_timesteps
+
+    @property
+    def n_inner_steps(self) -> int:
+        """Number of atmosphere steps per ocean step."""
+        return self._stepper.n_inner_steps
+
+    def predict_paired(
+        self,
+        initial_condition: CoupledPrognosticState,
+        forcing: CoupledBatchData,
+        compute_derived_variables: bool = False,
+    ) -> tuple[CoupledPairedData, CoupledPrognosticState]:
+        return self._stepper.predict_paired(
+            initial_condition, forcing, compute_derived_variables
+        )
+
+    def set_train(self):
+        self._stepper.set_train()
+
+    def set_eval(self):
+        self._stepper.set_eval()
+
+    def get_state(self) -> dict[str, Any]:
+        return self._stepper.get_state()
+
+    def load_state(self, state: dict[str, Any]):
+        self._stepper.load_state(state)
+
+    def update_training_history(self, training_job: TrainingJob) -> None:
+        self._stepper.update_training_history(training_job)
+
     def train_on_batch(
         self,
         data: CoupledBatchData,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
-    ):
+    ) -> CoupledTrainOutput:
         """
         Args:
             data: The coupled batch data, consisting of separate batches for ocean and
@@ -1357,7 +1497,7 @@ class CoupledStepper(
         metrics = ComponentStepMetrics()
         optimization.set_mode(self.modules)
         with optimization.autocast():
-            output_generator = self.get_prediction_generator(
+            output_generator = self._stepper.get_prediction_generator(
                 input_data,
                 data,
                 optimization,
@@ -1390,7 +1530,7 @@ class CoupledStepper(
         loss = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
 
-        gen_data = self._process_prediction_generator_list(output_list, data)
+        gen_data = self._stepper._process_prediction_generator_list(output_list, data)
         ocean_stepped = TrainOutput(
             metrics=metrics.get_ocean_metrics(),
             gen_data=add_ensemble_dim(dict(gen_data.ocean_data.data)),
@@ -1431,43 +1571,3 @@ class CoupledStepper(
             stepped = stepped.compute_derived_variables()
 
         return stepped
-
-    def update_training_history(self, training_job: TrainingJob) -> None:
-        """
-        Update the stepper's history of training jobs.
-
-        Args:
-            training_job: The training job to add to the history.
-        """
-        self.ocean.update_training_history(training_job)
-        self.atmosphere.update_training_history(training_job)
-
-    @classmethod
-    def from_state(cls, state) -> "CoupledStepper":
-        ocean = Stepper.from_state(state["ocean_state"])
-        atmosphere = Stepper.from_state(state["atmosphere_state"])
-        config = CoupledStepperConfig.from_state(state["config"])
-        if "dataset_info" in state:
-            dataset_info = CoupledDatasetInfo.from_state(state["dataset_info"])
-        else:
-            # NOTE: this is included for backwards compatibility
-            dataset_info = CoupledDatasetInfo(
-                ocean=ocean.training_dataset_info,
-                atmosphere=atmosphere.training_dataset_info,
-            )
-        return cls(
-            config=config,
-            ocean=ocean,
-            atmosphere=atmosphere,
-            dataset_info=dataset_info,
-        )
-
-
-def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
-    logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
-    stepper = CoupledStepper.from_state(checkpoint["stepper"])
-
-    return stepper

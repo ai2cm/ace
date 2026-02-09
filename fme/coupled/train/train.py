@@ -58,8 +58,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         n_timesteps_atmosphere=n_timesteps_atmosphere,
         ocean_normalize=stepper.ocean.normalizer.normalize,
         atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
-        ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
-        atmosphere_loss_scaling=stepper.atmosphere.effective_loss_scaling,
+        ocean_loss_scaling=stepper.effective_loss_scaling.ocean,
+        atmosphere_loss_scaling=stepper.effective_loss_scaling.atmosphere,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )

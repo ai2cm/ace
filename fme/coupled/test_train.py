@@ -74,8 +74,6 @@ stepper:
     sea_ice_fraction_name_in_atmosphere: {atmos_sea_ice_frac_name}
   ocean:
     timedelta: 2D
-    loss_contributions:
-      weight: {loss_ocean_weight}
     stepper:
       loss:
         type: MSE
@@ -109,8 +107,6 @@ stepper:
           out_names: {ocean_out_names}
   atmosphere:
     timedelta: 1D
-    loss_contributions:
-      n_steps: {loss_atmos_n_steps}
     stepper:
       loss:
         type: MSE
@@ -135,6 +131,17 @@ stepper:
             type: "atmosphere_corrector"
             config:
               conserve_dry_air: true
+train_stepper:
+  ocean:
+    loss:
+      type: MSE
+    loss_contributions:
+      weight: {loss_ocean_weight}
+  atmosphere:
+    loss:
+      type: MSE
+    loss_contributions:
+      n_steps: {loss_atmos_n_steps}
 """
 
 _INFERENCE_CONFIG_TEMPLATE = """
