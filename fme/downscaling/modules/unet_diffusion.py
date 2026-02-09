@@ -20,8 +20,9 @@ class UNetDiffusionModule(torch.nn.Module):
         unet: The U-Net model.
         use_amp_bf16: use automatic mixed precision casting to bfloat16 in forward pass
         channels_last: Convert input tensors to channels last format.
-            Conversion should only be used for UNet modules compatible with Apex GroupNorm, e.g., `SongUNetv2`.
-            Defaults to False for backwards compatibility.
+            Conversion should only be used for UNet modules compatible with
+            Apex GroupNorm, e.g., `SongUNetv2`. Defaults to False for backwards
+            compatibility.
     """
 
     def __init__(
