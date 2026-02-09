@@ -31,6 +31,7 @@ from fme.ace.stepper.single_module import (
     load_weights_and_history as load_uncoupled_weights_and_history,
 )
 from fme.core.dataset_info import DatasetInfo
+from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.loss import StepLossConfig
@@ -52,6 +53,7 @@ from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
 )
+from fme.coupled.typing_ import CoupledTensorDict
 
 
 @dataclasses.dataclass
@@ -758,12 +760,6 @@ class ComponentStepPrediction(StepPredictionABC):
         )
 
 
-@dataclasses.dataclass
-class CoupledTensorDict:
-    ocean: TensorDict
-    atmosphere: TensorDict
-
-
 class CoupledStepperTrainLoss:
     def __init__(
         self,
@@ -818,6 +814,12 @@ class CoupledStepper:
         self._config = config
         self._dataset_info = dataset_info
         self._ocean_mask_provider = dataset_info.ocean_mask_provider
+
+        _: PredictFunction[  # for type checking
+            CoupledPrognosticState,
+            CoupledBatchData,
+            CoupledPairedData,
+        ] = self.predict_paired
 
     @property
     def modules(self) -> nn.ModuleList:
