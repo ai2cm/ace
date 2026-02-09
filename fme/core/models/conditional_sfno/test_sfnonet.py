@@ -1,3 +1,4 @@
+import dataclasses
 import os
 from types import SimpleNamespace
 
@@ -9,7 +10,9 @@ from fme.core.device import get_device
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
-from .sfnonet import get_lat_lon_sfnonet
+from .sfnonet import FourierNeuralOperatorBlock, get_lat_lon_sfnonet
+from .sht import InverseRealSHT, RealSHT
+from .timer import CUDATimer
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -221,3 +224,130 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
         assert not torch.isnan(output).any()
     else:
         assert torch.isnan(output).any()
+
+
+@dataclasses.dataclass
+class BenchmarkResult:
+    ms_total: float
+    ms_per: float
+    max_alloc: int
+    max_reserved: int
+    y_shape: tuple
+    y_dtype: torch.dtype
+
+
+def benchmark(fn, iters=10, warmup=1) -> BenchmarkResult:
+    for _ in range(warmup):
+        fn()
+    torch.cuda.synchronize()
+
+    torch.cuda.reset_peak_memory_stats()
+    starter = torch.cuda.Event(enable_timing=True)
+    ender = torch.cuda.Event(enable_timing=True)
+
+    starter.record()
+    for _ in range(iters):
+        y = fn()
+    ender.record()
+    torch.cuda.synchronize()
+
+    ms = starter.elapsed_time(ender)
+    return BenchmarkResult(
+        ms_total=ms,
+        ms_per=ms / iters,
+        max_alloc=torch.cuda.max_memory_allocated(),
+        max_reserved=torch.cuda.max_memory_reserved(),
+        y_shape=tuple(y.shape),
+        y_dtype=y.dtype,
+    )
+
+
+@pytest.mark.skipif(
+    get_device().type != "cuda",
+    reason=(
+        "This test is only relevant for CUDA since "
+        "it's testing speed of SFNO blocks on GPU."
+    ),
+)  # noqa: E501
+def test_block_speed():
+    B = 2
+    C = 512
+    H = 180
+    L = 360
+    G = 8
+    device = get_device()
+    conditional_embed_dim_scalar = 0
+    conditional_embed_dim_noise = 64
+    conditional_embed_dim_labels = 3
+    conditional_embed_dim_pos = 32
+    embedding_scalar = None
+    context_embedding_noise = torch.randn(B, conditional_embed_dim_noise, H, L).to(
+        device
+    )
+    context_embedding_labels = torch.randn(B, conditional_embed_dim_labels).to(device)
+    context_embedding_pos = torch.randn(B, conditional_embed_dim_pos, H, L).to(device)
+    context = Context(
+        embedding_scalar=embedding_scalar,
+        embedding_pos=context_embedding_pos,
+        noise=context_embedding_noise,
+        labels=context_embedding_labels,
+    )
+    x = torch.randn(B, C, H, L, device=get_device())
+    forward = RealSHT(nlat=H, nlon=L)
+    inverse = InverseRealSHT(nlat=H, nlon=L)
+    context_config = ContextConfig(
+        embed_dim_scalar=conditional_embed_dim_scalar,
+        embed_dim_noise=conditional_embed_dim_noise,
+        embed_dim_labels=conditional_embed_dim_labels,
+        embed_dim_pos=conditional_embed_dim_pos,
+    )
+    block = FourierNeuralOperatorBlock(
+        forward_transform=forward,
+        inverse_transform=inverse,
+        embed_dim=C,
+        img_shape=(H, L),
+        filter_type="linear",
+        operator_type="dhconv",
+        use_mlp=True,
+        context_config=context_config,
+    ).to(device)
+    timer = CUDATimer()
+    grouped_block = FourierNeuralOperatorBlock(
+        forward_transform=forward,
+        inverse_transform=inverse,
+        embed_dim=C,
+        img_shape=(H, L),
+        filter_type="linear",
+        operator_type="dhconv",
+        use_mlp=True,
+        context_config=context_config,
+        filter_num_groups=G,
+    ).to(device)
+    grouped_timer = CUDATimer()
+
+    def call_block():
+        return block(x, context, timer=timer)
+
+    def call_grouped_block():
+        return grouped_block(x, context, timer=grouped_timer)
+
+    for _ in range(10):
+        block(x, context)
+    ungrouped = benchmark(call_block, warmup=0, iters=10)
+    for _ in range(10):
+        grouped_block(x, context)
+    grouped = benchmark(call_grouped_block, warmup=0, iters=10)
+
+    print("ungrouped timers: ", timer.report())
+    print("grouped timers: ", grouped_timer.report())
+
+    assert grouped.ms_per < 2 / G * ungrouped.ms_per, (
+        "Expected grouped DHConv to be faster than ungrouped, but got "
+        f"{grouped.ms_per:.6f} ms for grouped and "
+        f"{ungrouped.ms_per:.6f} ms for ungrouped."
+    )
+    assert grouped.max_alloc < ungrouped.max_alloc, (
+        "Expected grouped DHConv to use less memory than ungrouped, but got "
+        f"{grouped.max_alloc/1024/1024:.2f} MB for grouped and "
+        f"{ungrouped.max_alloc/1024/1024:.2f} MB for ungrouped."
+    )
