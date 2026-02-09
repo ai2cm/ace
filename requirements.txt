@@ -11,6 +11,7 @@ netcdf4
 numpy
 omegaconf>=2.1.0
 pandas
+pkg_resources
 plotly
 s3fs
 tensorly
