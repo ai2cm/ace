@@ -5,8 +5,8 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.testing.regression import validate_tensor_dict
-from fme.downscaling.modules.unets import (
-    SongUNet,
+from fme.downscaling.modules.physicsnemo_unets_v2.unets import (
+    SongUNetv2,
     check_level_compatibility,
     validate_shape,
 )
@@ -54,7 +54,7 @@ def test_songunet_regression():
 
     torch.manual_seed(0)
 
-    model = SongUNet(
+    model = SongUNetv2(
         img_resolution=16,
         in_channels=3,
         out_channels=3,
@@ -63,6 +63,7 @@ def test_songunet_regression():
         num_blocks=1,
         attn_resolutions=[],
         dropout=0.0,
+        use_apex_gn=False,
     ).to(device)
     model.eval()
 
