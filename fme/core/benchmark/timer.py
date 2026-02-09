@@ -67,13 +67,13 @@ class EventPair:
         self.end.record(self._stream)
         self._end_recorded = True
 
-    def elapsed_time_seconds(self) -> float:
+    def elapsed_time_ms(self) -> float:
         if not self._start_recorded or not self._end_recorded:
             raise RuntimeError(
                 "Both record_start and record_end must be called "
-                "before elapsed_time_seconds can be called."
+                "before elapsed_time_ms can be called."
             )
-        return self.start.elapsed_time(self.end) / 1000.0
+        return self.start.elapsed_time(self.end)
 
 
 class CUDATimer:
@@ -123,7 +123,7 @@ class CUDATimer:
                 "CUDATimer report cannot be generated before entering the timer."
             )
         total_time = sum(
-            event_pair.elapsed_time_seconds() for event_pair in self._event_pairs
+            event_pair.elapsed_time_ms() for event_pair in self._event_pairs
         )
         return total_time / len(self._event_pairs)
 
