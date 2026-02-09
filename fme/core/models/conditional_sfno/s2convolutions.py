@@ -15,6 +15,7 @@
 # limitations under the License.
 
 # import FactorizedTensor from tensorly for tensorized operations
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -127,9 +128,6 @@ class SpectralConvS2(nn.Module):
                 "Currently only in_channels == out_channels is supported."
             )
 
-        if scale == "auto":
-            scale = 1 / (in_channels * out_channels)
-
         self.forward_transform = forward_transform
         self.inverse_transform = inverse_transform
 
@@ -168,6 +166,11 @@ class SpectralConvS2(nn.Module):
             self.lpad = 0
             self.mpad = 0
 
+        if scale == "auto":
+            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat_local, 2)
+            # seemingly the first weight is not really complex, so we need to account for that
+            scale[0, :] *= math.sqrt(2.0)
+
         weight_shape = [in_channels, out_channels, self.modes_lat_local]
 
         assert factorization == "ComplexDense"
@@ -202,7 +205,7 @@ class SpectralConvS2(nn.Module):
             self.lora_scaling = 0.0
 
         if bias:
-            self.bias = nn.Parameter(scale * torch.zeros(1, out_channels, 1, 1))
+            self.bias = nn.Parameter(torch.zeros(1, out_channels, 1, 1))
 
     def forward(self, x):  # pragma: no cover
         dtype = x.dtype
