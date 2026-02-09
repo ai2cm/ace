@@ -8,33 +8,9 @@ import torch
 
 @dataclasses.dataclass
 class TimerResult:
+    total_runs: int
     avg_time: float
     children: dict[str, "TimerResult"]
-    _total_results_combined: int = (
-        1  # Used for averaging results when combining multiple TimerResults
-    )
-
-    def combine(self, other: "TimerResult") -> "TimerResult":
-        # raise if children aren't the same
-        if set(self.children.keys()) != set(other.children.keys()):
-            raise ValueError(
-                "Cannot combine TimerResults with different children, "
-                f"got {set(self.children.keys())} and {set(other.children.keys())}."
-            )
-        new_avg_time = (
-            self.avg_time * self._total_results_combined
-            + other.avg_time * other._total_results_combined
-        ) / (self._total_results_combined + other._total_results_combined)
-        new_children = {
-            name: self.children[name].combine(other.children[name])
-            for name in self.children.keys()
-        }
-        return TimerResult(
-            avg_time=new_avg_time,
-            children=new_children,
-            _total_results_combined=self._total_results_combined
-            + other._total_results_combined,
-        )
 
 
 class Timer(Protocol):
@@ -57,7 +33,7 @@ class NullTimer:
         return False
 
     def report(self) -> TimerResult:
-        return TimerResult(avg_time=0.0, children={})
+        return TimerResult(total_runs=0, avg_time=0.0, children={})
 
 
 _: Timer = NullTimer()
@@ -107,8 +83,9 @@ class CUDATimer:
         self._children: collections.defaultdict[str, CUDATimer] = (
             collections.defaultdict(CUDATimer)
         )
-        self._global_event_pairs: list[EventPair] = []
+        self._event_pairs: list[EventPair] = []
         self._entered = False
+        self._result: TimerResult | None = None
 
     @classmethod
     def new_if_available(cls) -> "CUDATimer | NullTimer":
@@ -121,14 +98,14 @@ class CUDATimer:
         if self._entered:
             raise RuntimeError("CUDATimer is already entered.")
         self._entered = True
-        self._global_event_pairs.append(EventPair())
-        self._global_event_pairs[-1].record_start()
+        self._event_pairs.append(EventPair())
+        self._event_pairs[-1].record_start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if not self._global_event_pairs:
+        if not self._event_pairs:
             raise RuntimeError("CUDATimer context was not properly entered.")
-        self._global_event_pairs[-1].record_end()
+        self._event_pairs[-1].record_end()
         self._entered = False
         return False
 
@@ -140,25 +117,29 @@ class CUDATimer:
         return self._children[name]
 
     @property
-    def _avg_global_time(self) -> float:
-        if len(self._global_event_pairs) == 0:
+    def _avg_time(self) -> float:
+        if len(self._event_pairs) == 0:
             raise RuntimeError(
                 "CUDATimer report cannot be generated before entering the timer."
             )
         total_time = sum(
-            event_pair.elapsed_time_seconds() for event_pair in self._global_event_pairs
+            event_pair.elapsed_time_seconds() for event_pair in self._event_pairs
         )
-        return total_time / len(self._global_event_pairs)
+        return total_time / len(self._event_pairs)
 
     def _child_reports(self) -> dict[str, TimerResult]:
-        return {name: child.result() for name, child in self._children.items()}
+        return {name: child.result for name, child in self._children.items()}
 
+    @property
     def result(self) -> TimerResult:
-        torch.cuda.synchronize()
-        return TimerResult(
-            avg_time=self._avg_global_time,
-            children=self._child_reports(),
-        )
+        if self._result is None:
+            torch.cuda.synchronize()
+            self._result = TimerResult(
+                total_runs=len(self._event_pairs),
+                avg_time=self._avg_time,
+                children=self._child_reports(),
+            )
+        return self._result
 
 
 __: Timer = CUDATimer()

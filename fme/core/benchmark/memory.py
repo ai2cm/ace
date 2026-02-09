@@ -9,12 +9,6 @@ class MemoryResult(NamedTuple):
     max_alloc: int
     max_reserved: int
 
-    def combine(self, other: "MemoryResult") -> "MemoryResult":
-        return MemoryResult(
-            max_alloc=max(self.max_alloc, other.max_alloc),
-            max_reserved=max(self.max_reserved, other.max_reserved),
-        )
-
 
 class MemoryBenchmark:
     def __init__(self):

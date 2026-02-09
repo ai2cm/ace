@@ -6,7 +6,8 @@ import pytest
 import torch
 from torch import nn
 
-from fme.core.benchmark.timer import CUDATimer
+from fme.core.benchmark.benchmark import BenchmarkFn, run_benchmark
+from fme.core.benchmark.timer import Timer
 from fme.core.device import get_device
 from fme.core.testing.regression import validate_tensor
 
@@ -262,6 +263,62 @@ def benchmark(fn, iters=10, warmup=1) -> BenchmarkResult:
     )
 
 
+def run_block(filter_num_groups: int) -> BenchmarkFn:
+    def _run_block(timer: Timer) -> None:
+        with timer.child("setup_inputs"):
+            B = 2
+            C = 512
+            H = 180
+            L = 360
+            G = filter_num_groups
+            device = get_device()
+            conditional_embed_dim_scalar = 0
+            conditional_embed_dim_noise = 64
+            conditional_embed_dim_labels = 3
+            conditional_embed_dim_pos = 32
+            embedding_scalar = None
+            context_embedding_noise = torch.randn(
+                B, conditional_embed_dim_noise, H, L
+            ).to(device)
+            context_embedding_labels = torch.randn(B, conditional_embed_dim_labels).to(
+                device
+            )
+            context_embedding_pos = torch.randn(B, conditional_embed_dim_pos, H, L).to(
+                device
+            )
+            context = Context(
+                embedding_scalar=embedding_scalar,
+                embedding_pos=context_embedding_pos,
+                noise=context_embedding_noise,
+                labels=context_embedding_labels,
+            )
+            x = torch.randn(B, C, H, L, device=get_device())
+            forward = RealSHT(nlat=H, nlon=L)
+            inverse = InverseRealSHT(nlat=H, nlon=L)
+            context_config = ContextConfig(
+                embed_dim_scalar=conditional_embed_dim_scalar,
+                embed_dim_noise=conditional_embed_dim_noise,
+                embed_dim_labels=conditional_embed_dim_labels,
+                embed_dim_pos=conditional_embed_dim_pos,
+            )
+        with timer.child("setup_block"):
+            block = FourierNeuralOperatorBlock(
+                forward_transform=forward,
+                inverse_transform=inverse,
+                embed_dim=C,
+                img_shape=(H, L),
+                filter_type="linear",
+                operator_type="dhconv",
+                use_mlp=True,
+                context_config=context_config,
+                filter_num_groups=G,
+            ).to(device)
+        with timer.child("call_block") as child_timer:
+            block(x, context, timer=child_timer)
+
+    return _run_block
+
+
 @pytest.mark.skipif(
     get_device().type != "cuda",
     reason=(
@@ -270,81 +327,15 @@ def benchmark(fn, iters=10, warmup=1) -> BenchmarkResult:
     ),
 )  # noqa: E501
 def test_block_speed():
-    B = 2
-    C = 512
-    H = 180
-    L = 360
-    G = 8
-    device = get_device()
-    conditional_embed_dim_scalar = 0
-    conditional_embed_dim_noise = 64
-    conditional_embed_dim_labels = 3
-    conditional_embed_dim_pos = 32
-    embedding_scalar = None
-    context_embedding_noise = torch.randn(B, conditional_embed_dim_noise, H, L).to(
-        device
-    )
-    context_embedding_labels = torch.randn(B, conditional_embed_dim_labels).to(device)
-    context_embedding_pos = torch.randn(B, conditional_embed_dim_pos, H, L).to(device)
-    context = Context(
-        embedding_scalar=embedding_scalar,
-        embedding_pos=context_embedding_pos,
-        noise=context_embedding_noise,
-        labels=context_embedding_labels,
-    )
-    x = torch.randn(B, C, H, L, device=get_device())
-    forward = RealSHT(nlat=H, nlon=L)
-    inverse = InverseRealSHT(nlat=H, nlon=L)
-    context_config = ContextConfig(
-        embed_dim_scalar=conditional_embed_dim_scalar,
-        embed_dim_noise=conditional_embed_dim_noise,
-        embed_dim_labels=conditional_embed_dim_labels,
-        embed_dim_pos=conditional_embed_dim_pos,
-    )
-    block = FourierNeuralOperatorBlock(
-        forward_transform=forward,
-        inverse_transform=inverse,
-        embed_dim=C,
-        img_shape=(H, L),
-        filter_type="linear",
-        operator_type="dhconv",
-        use_mlp=True,
-        context_config=context_config,
-    ).to(device)
-    timer = CUDATimer()
-    grouped_block = FourierNeuralOperatorBlock(
-        forward_transform=forward,
-        inverse_transform=inverse,
-        embed_dim=C,
-        img_shape=(H, L),
-        filter_type="linear",
-        operator_type="dhconv",
-        use_mlp=True,
-        context_config=context_config,
-        filter_num_groups=G,
-    ).to(device)
-    grouped_timer = CUDATimer()
-
-    def call_block():
-        return block(x, context, timer=timer)
-
-    def call_grouped_block():
-        return grouped_block(x, context, timer=grouped_timer)
-
-    for _ in range(1):
-        block(x, context)
-    with timer:
-        ungrouped = benchmark(call_block, warmup=0, iters=5)
-    for _ in range(1):
-        grouped_block(x, context)
-    with grouped_timer:
-        grouped = benchmark(call_grouped_block, warmup=0, iters=5)
-
-    print("ungrouped timers: ", timer.report())
-    print("grouped timers: ", grouped_timer.report())
-
-    assert grouped.ms_per < ungrouped.ms_per, (
+    ungrouped = run_benchmark(run_block(filter_num_groups=1), iters=5, warmup=1)
+    grouped = run_benchmark(run_block(filter_num_groups=8), iters=5, warmup=1)
+    assert grouped.timer.avg_time < ungrouped.timer.avg_time, (
         "Expected grouped DHConv to be faster than ungrouped, but got "
-        f"{grouped.ms_per:.6f} ms for grouped and "
-        f"{ungrouped.ms_per:.6f} ms for ungrouped."
+        f"{grouped.timer.avg_time:.6f} ms for grouped and "
+        f"{ungrouped.timer.avg_time:.6f} ms for ungrouped."
+    )
+    assert grouped.memory.max_alloc < ungrouped.memory.max_alloc, (
+        "Expected grouped DHConv to use less memory than ungrouped, but got "
+        f"{grouped.memory.max_alloc / 1e6:.2f} MB for grouped and "
+        f"{ungrouped.memory.max_alloc / 1e6:.2f} MB for ungrouped."
     )

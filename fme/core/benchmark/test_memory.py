@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from fme.core.benchmark.memory import MemoryResult, benchmark_memory
+from fme.core.benchmark.memory import benchmark_memory
 
 
 def test_cannot_nest_benchmark():
@@ -24,11 +24,3 @@ def test_larger_array_uses_larger_memory():
         _ = torch.randn(200, 200, device="cuda")
 
     assert bm2.result.max_alloc > bm1.result.max_alloc
-
-
-def test_memory_benchmark_combine():
-    result1 = MemoryResult(max_alloc=100, max_reserved=200)
-    result2 = MemoryResult(max_alloc=150, max_reserved=180)
-    combined = result1.combine(result2)
-    assert combined.max_alloc == 150
-    assert combined.max_reserved == 200
