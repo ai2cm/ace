@@ -6,9 +6,8 @@ import pytest
 import torch
 from torch import nn
 
-from fme.core.benchmark.benchmark import run_benchmark
 from fme.core.device import get_device
-from fme.core.models.conditional_sfno.benchmark import run_block
+from fme.core.models.conditional_sfno.benchmark import get_block_benchmark
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
@@ -270,8 +269,10 @@ def benchmark(fn, iters=10, warmup=1) -> BenchmarkResult:
     ),
 )  # noqa: E501
 def test_block_speed():
-    ungrouped = run_benchmark(run_block(filter_num_groups=1), iters=5, warmup=1)
-    grouped = run_benchmark(run_block(filter_num_groups=8), iters=5, warmup=1)
+    ungrouped = get_block_benchmark(filter_num_groups=1).run_benchmark(
+        iters=5, warmup=1
+    )
+    grouped = get_block_benchmark(filter_num_groups=8).run_benchmark(iters=5, warmup=1)
     assert grouped.timer.avg_time < ungrouped.timer.avg_time, (
         "Expected grouped DHConv to be faster than ungrouped, but got "
         f"{grouped.timer.avg_time:.6f} ms for grouped and "

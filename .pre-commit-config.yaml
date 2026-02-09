@@ -13,7 +13,6 @@ repos:
       exclude: |
         (?x)^(
         fme/ace/aggregator/inference/testdata/.*-regression\.pt |
-        fme/core/benchmark/testdata/.*\.pt
         )$
     - id: trailing-whitespace
     - id: file-contents-sorter

@@ -1,6 +1,8 @@
+from typing import Self
+
 import torch
 
-from fme.core.benchmark.benchmark import BenchmarkFn, register_benchmark
+from fme.core.benchmark.benchmark import BenchmarkABC, register_benchmark
 from fme.core.benchmark.timer import Timer
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
@@ -9,19 +11,55 @@ from fme.core.models.conditional_sfno.sht import InverseRealSHT, RealSHT
 from fme.core.typing_ import TensorDict
 
 
-def run_block(filter_num_groups: int) -> BenchmarkFn:
-    def _run_block(timer: Timer) -> TensorDict:
-        with timer.child("setup_inputs"):
+def get_block_benchmark(filter_num_groups: int) -> type[BenchmarkABC]:
+    class BlockBenchmark(BenchmarkABC):
+        def __init__(
+            self, block: FourierNeuralOperatorBlock, x: torch.Tensor, context: Context
+        ):
+            self.block = block
+            self.x = x
+            self.context = context
+
+        def run_instance(self, timer: Timer) -> TensorDict:
+            result = self.block(self.x, self.context, timer=timer)
+            return {"output": result.detach()}
+
+        @classmethod
+        def new(cls) -> Self:
             B = 2
             C = 512
             H = 180
             L = 360
             G = filter_num_groups
-            device = get_device()
-            conditional_embed_dim_scalar = 0
             conditional_embed_dim_noise = 64
             conditional_embed_dim_labels = 3
             conditional_embed_dim_pos = 32
+            return cls._new_with_params(
+                B=B,
+                C=C,
+                H=H,
+                L=L,
+                G=G,
+                conditional_embed_dim_noise=conditional_embed_dim_noise,
+                conditional_embed_dim_labels=conditional_embed_dim_labels,
+                conditional_embed_dim_pos=conditional_embed_dim_pos,
+            )
+
+        @classmethod
+        def _new_with_params(
+            cls,
+            B: int,
+            C: int,
+            H: int,
+            L: int,
+            G: int,
+            conditional_embed_dim_noise: int,
+            conditional_embed_dim_labels: int,
+            conditional_embed_dim_pos: int,
+        ) -> Self:
+            G = filter_num_groups
+            device = get_device()
+            conditional_embed_dim_scalar = 0
             embedding_scalar = None
             context_embedding_noise = torch.randn(
                 B, conditional_embed_dim_noise, H, L
@@ -47,7 +85,6 @@ def run_block(filter_num_groups: int) -> BenchmarkFn:
                 embed_dim_labels=conditional_embed_dim_labels,
                 embed_dim_pos=conditional_embed_dim_pos,
             )
-        with timer.child("setup_block"):
             block = FourierNeuralOperatorBlock(
                 forward_transform=forward,
                 inverse_transform=inverse,
@@ -59,12 +96,31 @@ def run_block(filter_num_groups: int) -> BenchmarkFn:
                 context_config=context_config,
                 filter_num_groups=G,
             ).to(device)
-        with timer.child("call_block") as child_timer:
-            result = block(x, context, timer=child_timer)
-        return {"output": result[0].detach(), "residual": result[1].detach()}
+            return cls(block=block, x=x, context=context)
 
-    return _run_block
+        @classmethod
+        def new_for_regression(cls):
+            B = 1
+            C = 16
+            H = 9
+            L = 18
+            G = 2
+            conditional_embed_dim_noise = 4
+            conditional_embed_dim_labels = 3
+            conditional_embed_dim_pos = 2
+            return cls._new_with_params(
+                B=B,
+                C=C,
+                H=H,
+                L=L,
+                G=G,
+                conditional_embed_dim_noise=conditional_embed_dim_noise,
+                conditional_embed_dim_labels=conditional_embed_dim_labels,
+                conditional_embed_dim_pos=conditional_embed_dim_pos,
+            )
+
+    return BlockBenchmark
 
 
-register_benchmark("csfno_block")(run_block(filter_num_groups=1))
-register_benchmark("csfno_block_8_groups")(run_block(filter_num_groups=8))
+register_benchmark("csfno_block")(get_block_benchmark(filter_num_groups=1))
+register_benchmark("csfno_block_8_groups")(get_block_benchmark(filter_num_groups=8))

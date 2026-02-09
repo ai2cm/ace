@@ -2,7 +2,7 @@ import argparse
 
 import torch
 
-from fme.core.benchmark.benchmark import get_benchmarks, run_benchmark
+from fme.core.benchmark.benchmark import get_benchmarks
 
 
 def main(names: list[str] | None, iters: int):
@@ -23,9 +23,9 @@ def main(names: list[str] | None, iters: int):
     else:
         benchmarks_to_run = benchmarks
 
-    for name, fn in benchmarks_to_run.items():
+    for name, cls in benchmarks_to_run.items():
         print(f"Running benchmark: {name}")
-        result = run_benchmark(fn, iters=iters)
+        result = cls.run_benchmark(iters=iters)
         print(f"  Result: {result}")
 
 
