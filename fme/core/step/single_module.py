@@ -184,6 +184,16 @@ class SingleModuleStepConfig(StepConfigABC):
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+        for name in names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
+        self.prescribed_prognostic_names = names
+
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()

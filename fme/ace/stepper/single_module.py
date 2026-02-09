@@ -723,6 +723,10 @@ class StepperConfig:
     def get_ocean(self) -> OceanConfig | None:
         return self.step.get_ocean()
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+        self.step.replace_prescribed_prognostic_names(names)
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -972,6 +976,21 @@ class Stepper:
             ocean: The new ocean model configuration or None.
         """
         self._config.replace_ocean(ocean)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+            apply_parameter_init=False,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
+
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """
+        Replace prescribed prognostic names (e.g. when loading from checkpoint).
+
+        Args:
+            names: The new list of prescribed prognostic variable names.
+        """
+        self._config.replace_prescribed_prognostic_names(names)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
             apply_parameter_init=False,
@@ -1736,11 +1755,14 @@ class StepperOverrideConfig:
             serialized stepper.
         derived_forcings: Derived forcings configuration to override that used in
             producing a serialized stepper.
+        prescribed_prognostic_names: List of prognostic variable names to overwrite
+            from forcing at each step during inference (e.g. ["air_temperature_7"]).
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
+    prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
 
 
 def load_stepper_config(
@@ -1802,4 +1824,13 @@ def load_stepper(
             "derived_forcings configuration."
         )
         stepper.replace_derived_forcings(override_config.derived_forcings)
+
+    if override_config.prescribed_prognostic_names != "keep":
+        logging.info(
+            "Overriding prescribed_prognostic_names with %s.",
+            override_config.prescribed_prognostic_names,
+        )
+        stepper.replace_prescribed_prognostic_names(
+            override_config.prescribed_prognostic_names
+        )
     return stepper
