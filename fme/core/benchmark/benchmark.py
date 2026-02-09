@@ -93,7 +93,7 @@ class BenchmarkResult:
         ax.set_ylim(0, root_total)
         ax.set_xticks([0.5, 1.5])
         ax.set_xticklabels(["Level 1", "Level 2"])
-        ax.set_ylabel("Total time (ms)")
+        ax.set_ylabel("Total time")
         ax.set_yticks([])
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
