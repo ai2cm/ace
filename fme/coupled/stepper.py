@@ -1322,16 +1322,6 @@ class CoupledStepper:
         )
 
 
-def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
-    logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
-    stepper = CoupledStepper.from_state(checkpoint["stepper"])
-
-    return stepper
-
-
 @dataclasses.dataclass
 class ComponentTrainingConfig:
     loss: StepLossConfig
@@ -1573,3 +1563,13 @@ class CoupledTrainStepper(
             stepped = stepped.compute_derived_variables()
 
         return stepped
+
+
+def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
+    logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
+    checkpoint = torch.load(
+        checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
+    stepper = CoupledStepper.from_state(checkpoint["stepper"])
+
+    return stepper
