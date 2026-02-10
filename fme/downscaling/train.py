@@ -453,7 +453,7 @@ class TrainerConfig:
         # to get normalized static inputs from a model config field
         full_topography = get_normalized_topography(
             get_raw_paths(
-                self.train_data.fine[0].data_path, self.train_data.fine[0].file_pattern
+                self.train_data.fine[0].merge[0].data_path, self.train_data.fine[0].merge[0].file_pattern
             )[0]
         )
         downscaling_model = self.model.build(
