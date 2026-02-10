@@ -20,7 +20,7 @@ from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.generics.data import SizedMap
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.data.patching import Patch, get_patches
-from fme.downscaling.data.topography import Topography
+from fme.downscaling.data.topography import StaticInput
 from fme.downscaling.data.utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,
@@ -318,7 +318,7 @@ class GriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
-    topography: Topography | None
+    topography: StaticInput | None
 
     @property
     def loader(self) -> DataLoader[BatchItem]:
@@ -344,7 +344,7 @@ class GriddedData:
 
     def get_generator(
         self,
-    ) -> Iterator[tuple["BatchData", Topography | None]]:
+    ) -> Iterator[tuple["BatchData", StaticInput | None]]:
         for batch in self.loader:
             yield (batch, self.topography)
 
@@ -354,7 +354,7 @@ class GriddedData:
         overlap: int = 0,
         drop_partial_patches: bool = True,
         random_offset: bool = False,
-    ) -> Iterator[tuple["BatchData", Topography | None]]:
+    ) -> Iterator[tuple["BatchData", StaticInput | None]]:
         patched_generator = patched_batch_gen_from_loader(
             loader=self.loader,
             topography=self.topography,
@@ -367,7 +367,7 @@ class GriddedData:
         )
 
         return cast(
-            Iterator[tuple[BatchData, Topography | None]],
+            Iterator[tuple[BatchData, StaticInput | None]],
             patched_generator,
         )
 
@@ -380,7 +380,7 @@ class PairedGriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
-    topography: Topography | None
+    topography: StaticInput | None
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:
@@ -391,7 +391,7 @@ class PairedGriddedData:
 
     def get_generator(
         self,
-    ) -> Iterator[tuple["PairedBatchData", Topography | None]]:
+    ) -> Iterator[tuple["PairedBatchData", StaticInput | None]]:
         for batch in self.loader:
             yield (batch, self.topography)
 
@@ -402,7 +402,7 @@ class PairedGriddedData:
         drop_partial_patches: bool = True,
         random_offset: bool = False,
         shuffle: bool = False,
-    ) -> Iterator[tuple["PairedBatchData", Topography | None]]:
+    ) -> Iterator[tuple["PairedBatchData", StaticInput | None]]:
         patched_generator = patched_batch_gen_from_paired_loader(
             self.loader,
             self.topography,
@@ -415,7 +415,7 @@ class PairedGriddedData:
             shuffle=shuffle,
         )
         return cast(
-            Iterator[tuple[PairedBatchData, Topography | None]],
+            Iterator[tuple[PairedBatchData, StaticInput | None]],
             patched_generator,
         )
 
@@ -722,7 +722,7 @@ def _get_paired_patches(
 
 def patched_batch_gen_from_loader(
     loader: DataLoader[BatchItem],
-    topography: Topography | None,
+    topography: StaticInput | None,
     coarse_yx_extent: tuple[int, int],
     coarse_yx_patch_extent: tuple[int, int],
     downscale_factor: int | None,
@@ -730,7 +730,7 @@ def patched_batch_gen_from_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
-) -> Iterator[tuple[BatchData, Topography | None]]:
+) -> Iterator[tuple[BatchData, StaticInput | None]]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
             coarse_yx_extent=coarse_yx_extent,
@@ -759,7 +759,7 @@ def patched_batch_gen_from_loader(
 
 def patched_batch_gen_from_paired_loader(
     loader: DataLoader[PairedBatchItem],
-    topography: Topography | None,
+    topography: StaticInput | None,
     coarse_yx_extent: tuple[int, int],
     coarse_yx_patch_extent: tuple[int, int],
     downscale_factor: int,
@@ -767,7 +767,7 @@ def patched_batch_gen_from_paired_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
-) -> Iterator[tuple[PairedBatchData, Topography | None]]:
+) -> Iterator[tuple[PairedBatchData, StaticInput | None]]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
             coarse_yx_extent=coarse_yx_extent,

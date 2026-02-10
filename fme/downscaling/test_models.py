@@ -10,7 +10,7 @@ from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.downscaling.data import Topography
+from fme.downscaling.data import StaticInput
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -150,7 +150,7 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
         [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
     if use_fine_topography:
-        topography = Topography(
+        topography = StaticInput(
             torch.ones(*fine_shape, device=get_device()),
             LatLonCoordinates(
                 lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
@@ -306,7 +306,7 @@ def test_DiffusionModel_generate_on_batch_no_target():
     coarse_batch = get_mock_batch(
         [batch_size, *coarse_shape], topography_scale_factor=downscale_factor
     )
-    topography = Topography(
+    topography = StaticInput(
         torch.rand(*fine_shape, device=get_device()),
         LatLonCoordinates(lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])),
     )
@@ -344,7 +344,7 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
             [batch_size, *alternative_input_shape],
             topography_scale_factor=downscale_factor,
         )
-        topography = Topography(
+        topography = StaticInput(
             torch.rand(*fine_shape, device=get_device()),
             LatLonCoordinates(torch.ones(fine_shape[0]), torch.ones(fine_shape[1])),
         )

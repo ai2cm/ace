@@ -22,8 +22,8 @@ from fme.downscaling.data.datasets import (
     PairedGriddedData,
 )
 from fme.downscaling.data.topography import (
+    StaticInput,
     StaticInputs,
-    Topography,
     get_normalized_topography,
     get_topography_downscale_factor,
 )
@@ -182,7 +182,7 @@ class DataLoaderConfig:
         coarse_coords: LatLonCoordinates,
         requires_topography: bool,
         static_inputs_from_checkpoint: StaticInputs | None = None,
-    ) -> Topography | None:
+    ) -> StaticInput | None:
         if requires_topography is False:
             return None
         if static_inputs_from_checkpoint is not None:

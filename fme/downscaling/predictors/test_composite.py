@@ -6,7 +6,7 @@ import xarray as xr
 from fme.core.device import get_device
 from fme.core.packer import Packer
 from fme.downscaling.aggregators.shape_helpers import upsample_tensor
-from fme.downscaling.data import BatchData, PairedBatchData, Topography
+from fme.downscaling.data import BatchData, PairedBatchData, StaticInput
 from fme.downscaling.data.patching import get_patches
 from fme.downscaling.data.utils import BatchedLatLonCoordinates
 from fme.downscaling.models import ModelOutputs
@@ -51,7 +51,7 @@ class DummyModel:
         self.out_packer = Packer(["x"])
 
     def generate_on_batch(
-        self, batch: PairedBatchData, topography: Topography | None, n_samples=1
+        self, batch: PairedBatchData, topography: StaticInput | None, n_samples=1
     ):
         prediction_data = {
             k: v.unsqueeze(1).expand(-1, n_samples, -1, -1)
@@ -62,7 +62,7 @@ class DummyModel:
         )
 
     def generate_on_batch_no_target(
-        self, batch: BatchData, topography: Topography | None, n_samples=1
+        self, batch: BatchData, topography: StaticInput | None, n_samples=1
     ):
         prediction_data = {
             k: upsample_tensor(
@@ -133,7 +133,7 @@ def test_SpatialCompositePredictor_generate_on_batch(patch_size_coarse):
     paired_batch_data = get_paired_test_data(
         *coarse_extent, downscale_factor=downscale_factor, batch_size=batch_size
     )
-    topography = Topography(
+    topography = StaticInput(
         torch.randn(
             coarse_extent[0] * downscale_factor, coarse_extent[1] * downscale_factor
         ),
@@ -169,7 +169,7 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
     paired_batch_data = get_paired_test_data(
         *coarse_extent, downscale_factor=downscale_factor, batch_size=batch_size
     )
-    topography = Topography(
+    topography = StaticInput(
         torch.randn(
             coarse_extent[0] * downscale_factor, coarse_extent[1] * downscale_factor
         ),

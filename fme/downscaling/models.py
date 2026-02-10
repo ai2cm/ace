@@ -16,8 +16,8 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import (
     BatchData,
     PairedBatchData,
+    StaticInput,
     StaticInputs,
-    Topography,
     get_normalized_topography,
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
@@ -317,7 +317,7 @@ class DiffusionModel:
         )
 
     def _get_input_from_coarse(
-        self, coarse: TensorMapping, topography: Topography | None
+        self, coarse: TensorMapping, topography: StaticInput | None
     ) -> torch.Tensor:
         inputs = filter_tensor_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
@@ -347,7 +347,7 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
+        topography: StaticInput | None,
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
@@ -449,7 +449,7 @@ class DiffusionModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        topography: Topography | None,
+        topography: StaticInput | None,
         n_samples: int = 1,
     ) -> TensorDict:
         generated, _, _ = self.generate(batch.data, topography, n_samples)
@@ -459,7 +459,7 @@ class DiffusionModel:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
+        topography: StaticInput | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
@@ -612,7 +612,7 @@ class CheckpointModelConfig:
     def out_names(self):
         return self._checkpoint["model"]["config"]["out_names"]
 
-    def get_topography(self) -> Topography | None:
+    def get_topography(self) -> StaticInput | None:
         if self.data_requirements.use_fine_topography:
             if self.fine_topography_path is None:
                 raise ValueError(

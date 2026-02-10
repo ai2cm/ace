@@ -20,7 +20,7 @@ def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
 
 # TODO: rename to StaticInput, make _apply_patch public
 @dataclasses.dataclass
-class Topography:
+class StaticInput:
     data: torch.Tensor
     coords: LatLonCoordinates
 
@@ -47,14 +47,14 @@ class Topography:
         self,
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
-    ) -> "Topography":
+    ) -> "StaticInput":
         lat_slice = _range_to_slice(self.coords.lat, lat_interval)
         lon_slice = _range_to_slice(self.coords.lon, lon_interval)
         return self._latlon_index_slice(lat_slice=lat_slice, lon_slice=lon_slice)
 
-    def to_device(self) -> "Topography":
+    def to_device(self) -> "StaticInput":
         device = get_device()
-        return Topography(
+        return StaticInput(
             data=self.data.to(device),
             coords=LatLonCoordinates(
                 lat=self.coords.lat.to(device),
@@ -71,13 +71,13 @@ class Topography:
         self,
         lat_slice: slice,
         lon_slice: slice,
-    ) -> "Topography":
+    ) -> "StaticInput":
         sliced_data = self.data[lat_slice, lon_slice]
         sliced_latlon = LatLonCoordinates(
             lat=self.coords.lat[lat_slice],
             lon=self.coords.lon[lon_slice],
         )
-        return Topography(
+        return StaticInput(
             data=sliced_data,
             coords=sliced_latlon,
         )
@@ -85,7 +85,7 @@ class Topography:
     def generate_from_patches(
         self,
         patches: list[Patch],
-    ) -> Generator["Topography", None, None]:
+    ) -> Generator["StaticInput", None, None]:
         for patch in patches:
             yield self._apply_patch(patch)
 
@@ -116,7 +116,7 @@ def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
 
     topography_normalized = (topography - topography.mean()) / topography.std()
 
-    return Topography(
+    return StaticInput(
         data=torch.tensor(topography_normalized.values, dtype=torch.float32),
         coords=coords,
     )
@@ -151,7 +151,7 @@ def get_topography_downscale_factor(
 
 @dataclasses.dataclass
 class StaticInputs:
-    fields: list[Topography]
+    fields: list[StaticInput]
 
     def __post_init__(self):
         for i, field in enumerate(self.fields[1:]):
@@ -215,7 +215,7 @@ class StaticInputs:
     def from_state(cls, state: dict) -> "StaticInputs":
         return cls(
             fields=[
-                Topography(
+                StaticInput(
                     data=field_state["data"],
                     coords=LatLonCoordinates(
                         lat=field_state["coords"]["lat"],

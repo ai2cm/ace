@@ -10,7 +10,7 @@ from fme.core.cli import prepare_directory
 from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig, Topography
+from ..data import DataLoaderConfig, StaticInput
 from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import (
     CascadePredictor,
@@ -56,7 +56,7 @@ class Downscaler:
 
     def _get_generation_model(
         self,
-        topography: Topography,
+        topography: StaticInput,
         output: DownscalingOutput,
     ) -> DiffusionModel | PatchPredictor | CascadePredictor:
         """
@@ -111,7 +111,7 @@ class Downscaler:
         total_batches = len(output.data.loader)
 
         loaded_item: LoadedSliceWorkItem
-        topography: Topography
+        topography: StaticInput
         for i, (loaded_item, topography) in enumerate(output.data.get_generator()):
             if writer is None:
                 writer = output.get_writer(

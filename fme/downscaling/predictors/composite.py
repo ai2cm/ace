@@ -3,7 +3,7 @@ import dataclasses
 import torch
 
 from fme.core.typing_ import TensorDict
-from fme.downscaling.data import BatchData, PairedBatchData, Topography, scale_tuple
+from fme.downscaling.data import BatchData, PairedBatchData, StaticInput, scale_tuple
 from fme.downscaling.data.patching import Patch, get_patches
 from fme.downscaling.data.utils import null_generator
 from fme.downscaling.models import DiffusionModel, ModelOutputs
@@ -106,7 +106,7 @@ class PatchPredictor:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
+        topography: StaticInput | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         predictions = []
@@ -145,7 +145,7 @@ class PatchPredictor:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        topography: Topography | None,
+        topography: StaticInput | None,
         n_samples: int = 1,
     ) -> TensorDict:
         coarse_yx_extent = batch.horizontal_shape

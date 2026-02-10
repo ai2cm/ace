@@ -12,7 +12,7 @@ from fme.downscaling.data import (
     BatchData,
     ClosedInterval,
     PairedBatchData,
-    Topography,
+    StaticInput,
     adjust_fine_coord_range,
     scale_tuple,
 )
@@ -47,7 +47,7 @@ class CascadePredictorConfig:
             self._models = [cfg.build() for cfg in self.cascade_model_checkpoints]
         return self._models
 
-    def get_topographies(self) -> list[Topography | None]:
+    def get_topographies(self) -> list[StaticInput | None]:
         topographies = []
         for ckpt in self.cascade_model_checkpoints:
             topographies.append(ckpt.get_topography())
@@ -92,7 +92,7 @@ def _restore_batch_and_sample_dims(data: TensorMapping, n_samples: int):
 
 class CascadePredictor:
     def __init__(
-        self, models: list[DiffusionModel], topographies: list[Topography | None]
+        self, models: list[DiffusionModel], topographies: list[StaticInput | None]
     ):
         self.models = models
         self._topographies = topographies
@@ -124,7 +124,7 @@ class CascadePredictor:
         self,
         coarse: TensorMapping,
         n_samples: int,
-        topographies=list[Topography | None],
+        topographies=list[StaticInput | None],
     ):
         current_coarse = coarse
         for i, (model, fine_topography) in enumerate(zip(self.models, topographies)):
@@ -150,7 +150,7 @@ class CascadePredictor:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        topography: Topography | None,
+        topography: StaticInput | None,
         n_samples: int = 1,
     ) -> TensorDict:
         topographies = self._get_subset_topographies(
@@ -163,7 +163,7 @@ class CascadePredictor:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
+        topography: StaticInput | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         topographies = self._get_subset_topographies(
@@ -185,7 +185,7 @@ class CascadePredictor:
     def _get_subset_topographies(
         self,
         coarse_coords: LatLonCoordinates,
-    ) -> Sequence[Topography | None]:
+    ) -> Sequence[StaticInput | None]:
         # Intermediate topographies are loaded as full range and need to be subset
         # to the matching lat/lon range for each batch.
         # TODO: Will eventually move subsetting into checkpoint model.
