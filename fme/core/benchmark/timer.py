@@ -167,5 +167,5 @@ class CUDATimer:
         return self._result
 
 
-__: Timer = CUDATimer()
+__: type[Timer] = CUDATimer
 del __
