@@ -1,4 +1,3 @@
-import dataclasses
 import os
 from types import SimpleNamespace
 
@@ -223,42 +222,6 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
         assert not torch.isnan(output).any()
     else:
         assert torch.isnan(output).any()
-
-
-@dataclasses.dataclass
-class BenchmarkResult:
-    ms_total: float
-    ms_per: float
-    max_alloc: int
-    max_reserved: int
-    y_shape: tuple
-    y_dtype: torch.dtype
-
-
-def benchmark(fn, iters=10, warmup=1) -> BenchmarkResult:
-    for _ in range(warmup):
-        fn()
-    torch.cuda.synchronize()
-
-    torch.cuda.reset_peak_memory_stats()
-    starter = torch.cuda.Event(enable_timing=True)
-    ender = torch.cuda.Event(enable_timing=True)
-
-    starter.record()
-    for _ in range(iters):
-        y = fn()
-    ender.record()
-    torch.cuda.synchronize()
-
-    ms = starter.elapsed_time(ender)
-    return BenchmarkResult(
-        ms_total=ms,
-        ms_per=ms / iters,
-        max_alloc=torch.cuda.max_memory_allocated(),
-        max_reserved=torch.cuda.max_memory_reserved(),
-        y_shape=tuple(y.shape),
-        y_dtype=y.dtype,
-    )
 
 
 @pytest.mark.skipif(
