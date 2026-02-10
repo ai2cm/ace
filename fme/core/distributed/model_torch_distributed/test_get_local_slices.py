@@ -2,10 +2,10 @@ import os
 
 import pytest
 import torch
-from utils import gather_helper_conv
 
 from fme.core.distributed import Distributed
 from fme.core.distributed.model_torch_distributed import comm
+from fme.core.distributed.model_torch_distributed.utils import gather_helper_conv
 
 
 @pytest.mark.parametrize(
