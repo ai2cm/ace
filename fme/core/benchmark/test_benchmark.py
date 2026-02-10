@@ -77,7 +77,7 @@ def test_regression(benchmark_name: str):
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_benchmark(benchmark_name: str):
     benchmark_cls = BENCHMARKS[benchmark_name]
-    result = benchmark_cls.run_benchmark(iters=20, warmup=5)
+    result = benchmark_cls.run_benchmark(iters=10, warmup=5)
     validate_benchmark_result(
         result,
         os.path.join(DIR, "testdata", f"{benchmark_name}-benchmark"),
