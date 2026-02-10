@@ -1,3 +1,4 @@
+import dataclasses
 import os
 from types import SimpleNamespace
 
@@ -6,6 +7,7 @@ import torch
 from torch import nn
 
 from fme.core.device import get_device
+from fme.core.models.conditional_sfno.benchmark import get_block_benchmark
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
@@ -221,3 +223,63 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
         assert not torch.isnan(output).any()
     else:
         assert torch.isnan(output).any()
+
+
+@dataclasses.dataclass
+class BenchmarkResult:
+    ms_total: float
+    ms_per: float
+    max_alloc: int
+    max_reserved: int
+    y_shape: tuple
+    y_dtype: torch.dtype
+
+
+def benchmark(fn, iters=10, warmup=1) -> BenchmarkResult:
+    for _ in range(warmup):
+        fn()
+    torch.cuda.synchronize()
+
+    torch.cuda.reset_peak_memory_stats()
+    starter = torch.cuda.Event(enable_timing=True)
+    ender = torch.cuda.Event(enable_timing=True)
+
+    starter.record()
+    for _ in range(iters):
+        y = fn()
+    ender.record()
+    torch.cuda.synchronize()
+
+    ms = starter.elapsed_time(ender)
+    return BenchmarkResult(
+        ms_total=ms,
+        ms_per=ms / iters,
+        max_alloc=torch.cuda.max_memory_allocated(),
+        max_reserved=torch.cuda.max_memory_reserved(),
+        y_shape=tuple(y.shape),
+        y_dtype=y.dtype,
+    )
+
+
+@pytest.mark.skipif(
+    get_device().type != "cuda",
+    reason=(
+        "This test is only relevant for CUDA since "
+        "it's testing speed of SFNO blocks on GPU."
+    ),
+)  # noqa: E501
+def test_block_speed():
+    ungrouped = get_block_benchmark(filter_num_groups=1).run_benchmark(
+        iters=5, warmup=1
+    )
+    grouped = get_block_benchmark(filter_num_groups=8).run_benchmark(iters=5, warmup=1)
+    assert grouped.timer.avg_time < ungrouped.timer.avg_time, (
+        "Expected grouped DHConv to be faster than ungrouped, but got "
+        f"{grouped.timer.avg_time:.6f} ms for grouped and "
+        f"{ungrouped.timer.avg_time:.6f} ms for ungrouped."
+    )
+    assert grouped.memory.max_alloc < ungrouped.memory.max_alloc, (
+        "Expected grouped DHConv to use less memory than ungrouped, but got "
+        f"{grouped.memory.max_alloc / 1e6:.2f} MB for grouped and "
+        f"{ungrouped.memory.max_alloc / 1e6:.2f} MB for ungrouped."
+    )
