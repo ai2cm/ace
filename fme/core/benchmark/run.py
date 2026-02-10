@@ -29,19 +29,19 @@ def get_device_name() -> str:
         return "CPU"
 
 
-def main(names: list[str] | None, iters: int, child: str | None = None) -> None:
+def main(name: str | None, iters: int, child: str | None = None) -> None:
     RESULTS_PATH.mkdir(exist_ok=True)
     device_name = get_device_name()
 
     print(f"Running benchmarks on device: {device_name}")
     benchmarks = get_benchmarks()
-    if names is not None:
-        if any(name not in benchmarks for name in names):
-            print("Some specified benchmarks not found. Available benchmarks:")
-            for name in benchmarks:
-                print(f"  - {name}")
+    if name is not None:
+        if name not in benchmarks:
+            print(f"Specified benchmark {name} not found. Available benchmarks:")
+            for benchmark_name in benchmarks:
+                print(f"  - {benchmark_name}")
             return
-        benchmarks_to_run = {name: benchmarks[name] for name in names}
+        benchmarks_to_run = {name: benchmarks[name]}
     else:
         benchmarks_to_run = benchmarks
 
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(
-        names=[args.name] if args.name else None,
+        name=args.name,
         iters=args.iters,
         child=args.child,
     )
