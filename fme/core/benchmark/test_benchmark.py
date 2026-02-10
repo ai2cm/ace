@@ -14,6 +14,7 @@ del fme
 DIR = os.path.abspath(os.path.dirname(__file__))
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_run_benchmark():
     def benchmark_fn(timer):
         torch.cuda._sleep(100_000_000)
@@ -58,6 +59,7 @@ def validate_benchmark_result(
 
 
 @pytest.mark.parametrize("benchmark_name", BENCHMARKS.keys())
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_regression(benchmark_name: str):
     benchmark_cls = BENCHMARKS[benchmark_name]
     regression_result = benchmark_cls.run_regression()
@@ -71,8 +73,8 @@ def test_regression(benchmark_name: str):
     )
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 @pytest.mark.parametrize("benchmark_name", BENCHMARKS.keys())
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_benchmark(benchmark_name: str):
     benchmark_cls = BENCHMARKS[benchmark_name]
     result = benchmark_cls.run_benchmark(iters=20, warmup=5)
