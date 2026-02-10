@@ -124,8 +124,8 @@ class Distributed:
         """
         return self._distributed.reduce_mean(tensor)
 
-    def get_local_slices(self, crop_shape):
-        return self._distributed.get_local_slices(crop_shape)
+    def get_local_slices(self, tensor_shape):
+        return self._distributed.get_local_slices(tensor_shape)
 
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         """
