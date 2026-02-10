@@ -73,9 +73,8 @@ def get_benchmark_label(name):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run registered benchmarks.")
     parser.add_argument(
-        "benchmark",
+        "--name",
         type=str,
-        nargs="?",
         default=None,
         help=(
             "Name of the benchmark to run. If not provided, "
@@ -101,7 +100,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(
-        names=[args.benchmark] if args.benchmark else None,
+        names=[args.name] if args.name else None,
         iters=args.iters,
         child=args.child,
     )
