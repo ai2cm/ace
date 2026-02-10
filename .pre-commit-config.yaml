@@ -12,7 +12,7 @@ repos:
       args: [--maxkb=250]
       exclude: |
         (?x)^(
-        fme/ace/aggregator/inference/testdata/.*-regression.pt
+        fme/ace/aggregator/inference/testdata/.*-regression\.pt |
         )$
     - id: trailing-whitespace
     - id: file-contents-sorter
