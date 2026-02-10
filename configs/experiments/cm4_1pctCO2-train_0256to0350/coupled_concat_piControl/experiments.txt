@@ -2,3 +2,5 @@
 fto-1pctCO2_0256to0350-piControl_0151to0190-correct_budgets-d0zgdwek_mb4prsz7|rs0|01KH2E4CK5CJM2PCSPRW9C4DH9|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-1pctCO2_0256to0350-piControl_0151to0190-correct_budgets-d0zgdwek_mb4prsz7|rs0|01KH2EKMBJK75B3J5FF09SD29H|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-1pctCO2_0256to0350-piControl_0151to0190-correct_budgets-d0zgdwek_mb4prsz7|rs0|01KH2F952QKJWFN13EADZDEJZA|training|best_inference_ckpt|normal|--not-preemptible
