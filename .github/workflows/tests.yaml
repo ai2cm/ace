@@ -127,11 +127,13 @@ jobs:
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
             python3 fme/core/benchmark/update_benchmarks.py
       - name: Commit and push if changed
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
           if ! git diff --quiet; then
             git add -A
             git commit -m "chore: auto-update generated files [auto-bench]"
-            git push
+            git push origin "HEAD:${BRANCH}"
             exit 1  # fail the job
           else
             echo "No changes"
