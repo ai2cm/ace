@@ -20,6 +20,7 @@ def test_cannot_get_result_before_end():
             bm.result
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_ensure_cannot_restart():
     assert (
         not memory._benchmark_memory_started
