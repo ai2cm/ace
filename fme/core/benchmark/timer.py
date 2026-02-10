@@ -1,5 +1,4 @@
 import collections
-import contextlib
 import dataclasses
 from typing import Literal, Protocol, Self
 
@@ -8,15 +7,13 @@ import torch
 
 @dataclasses.dataclass
 class TimerResult:
-    total_runs: int
+    count: int
     avg_time: float
     children: dict[str, "TimerResult"]
 
     def assert_close(self, other: "TimerResult", rtol=0.02, children_rtol=0.02) -> None:
-        if self.total_runs != other.total_runs:
-            raise AssertionError(
-                f"total_runs differ: {self.total_runs} vs {other.total_runs}"
-            )
+        if self.count != other.count:
+            raise AssertionError(f"count differ: {self.count} vs {other.count}")
         if not torch.isclose(
             torch.tensor(self.avg_time), torch.tensor(other.avg_time), rtol=rtol
         ):
@@ -45,9 +42,6 @@ class Timer(Protocol):
 
 
 class NullTimer:
-    def context(self, name: str) -> contextlib.nullcontext:
-        return contextlib.nullcontext()
-
     def child(self, name: str) -> "Self":
         return self
 
@@ -56,9 +50,6 @@ class NullTimer:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
         return False
-
-    def report(self) -> TimerResult:
-        return TimerResult(total_runs=0, avg_time=0.0, children={})
 
 
 _: Timer = NullTimer()
@@ -160,7 +151,7 @@ class CUDATimer:
         if self._result is None:
             torch.cuda.synchronize()
             self._result = TimerResult(
-                total_runs=len(self._event_pairs),
+                count=len(self._event_pairs),
                 avg_time=self._avg_time,
                 children=self._child_reports(),
             )

@@ -38,14 +38,14 @@ def test_timer_with_child():
 
 
 def _create_parent_result(avg_time: float) -> TimerResult:
-    return TimerResult(total_runs=2, avg_time=avg_time, children={})
+    return TimerResult(count=2, avg_time=avg_time, children={})
 
 
 def _create_child_result(avg_time: float) -> TimerResult:
     return TimerResult(
-        total_runs=2,
+        count=2,
         avg_time=1.0,
-        children={"child": TimerResult(total_runs=2, avg_time=avg_time, children={})},
+        children={"child": TimerResult(count=2, avg_time=avg_time, children={})},
     )
 
 
@@ -76,10 +76,10 @@ def test_assert_close(
         result2.assert_close(result1, rtol=rtol)
 
 
-def test_assert_close_different_total_runs():
-    # different total runs should raise regardless of rtol
-    result1 = TimerResult(total_runs=100, avg_time=100.0, children={})
-    result2 = TimerResult(total_runs=101, avg_time=100.0, children={})
+def test_assert_close_different_count():
+    # different count should raise regardless of rtol
+    result1 = TimerResult(count=100, avg_time=100.0, children={})
+    result2 = TimerResult(count=101, avg_time=100.0, children={})
     with pytest.raises(AssertionError):
         result2.assert_close(result1, rtol=0.5)
 
@@ -87,14 +87,14 @@ def test_assert_close_different_total_runs():
 def test_assert_close_children_rtol():
     # test that children_rtol is used for child comparisons
     result1 = TimerResult(
-        total_runs=2,
+        count=2,
         avg_time=100.0,
-        children={"child": TimerResult(total_runs=2, avg_time=100.0, children={})},
+        children={"child": TimerResult(count=2, avg_time=100.0, children={})},
     )
     result2 = TimerResult(
-        total_runs=2,
+        count=2,
         avg_time=110.0,
-        children={"child": TimerResult(total_runs=2, avg_time=103.0, children={})},
+        children={"child": TimerResult(count=2, avg_time=103.0, children={})},
     )
     result2.assert_close(result1, rtol=0.2, children_rtol=0.05)
 
@@ -102,13 +102,14 @@ def test_assert_close_children_rtol():
 def test_assert_close_children_rtol_raises():
     # test that children_rtol is used for child comparisons
     result1 = TimerResult(
-        total_runs=2,
+        count=2,
         avg_time=100.0,
-        children={"child": TimerResult(total_runs=2, avg_time=100.0, children={})},
+        children={"child": TimerResult(count=2, avg_time=100.0, children={})},
     )
     result2 = TimerResult(
-        total_runs=2,
+        count=2,
         avg_time=110.0,
-        children={"child": TimerResult(total_runs=2, avg_time=103.0, children={})},
+        children={"child": TimerResult(count=2, avg_time=103.0, children={})},
     )
-    result2.assert_close(result1, rtol=0.5, children_rtol=0.2)
+    with pytest.raises(AssertionError):
+        result2.assert_close(result1, rtol=0.05, children_rtol=0.2)
