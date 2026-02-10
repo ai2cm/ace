@@ -67,24 +67,8 @@ class ModelTorchDistributed(DistributedBackend):
     def get_local_rank(self) -> int:
         return self._device_id
 
-    def get_local_slices(self, crop_shape):
-        crop_offset = (0, 0)
-        local_shape_h = crop_shape[0]
-        local_offset_h = crop_offset[0]
-        local_shape_w = crop_shape[1]
-        local_offset_w = crop_offset[1]
-        if comm.get_size("h") > 1:
-            shapes_h = pnd.utils.compute_split_shapes(crop_shape[0], comm.get_size("h"))
-            local_shape_h = shapes_h[comm.get_rank("h")]
-            local_offset_h = crop_offset[0] + sum(shapes_h[: comm.get_rank("h")])
-        if comm.get_size("w") > 1:
-            shapes_w = pnd.utils.compute_split_shapes(crop_shape[1], comm.get_size("w"))
-            local_shape_w = shapes_w[comm.get_rank("w")]
-            local_offset_w = crop_offset[1] + sum(shapes_w[: comm.get_rank("w")])
-        return (
-            slice(local_offset_h, local_offset_h + local_shape_h),
-            slice(local_offset_w, local_offset_w + local_shape_w),
-        )
+    def get_local_slices(self, tensor_shape):
+        return _get_local_slices(tensor_shape)
 
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size // comm.get_size("data")
@@ -158,3 +142,23 @@ def _spatial_parallelism_enabled() -> bool:
         return True
     else:
         return False
+
+
+def _get_local_slices(tensor_shape):
+    tensor_offset = (0, 0)
+    local_shape_h = tensor_shape[0]
+    local_offset_h = tensor_offset[0]
+    local_shape_w = tensor_shape[1]
+    local_offset_w = tensor_offset[1]
+    if comm.get_size("h") > 1:
+        shapes_h = pnd.utils.compute_split_shapes(tensor_shape[0], comm.get_size("h"))
+        local_shape_h = shapes_h[comm.get_rank("h")]
+        local_offset_h = tensor_offset[0] + sum(shapes_h[: comm.get_rank("h")])
+    if comm.get_size("w") > 1:
+        shapes_w = pnd.utils.compute_split_shapes(tensor_shape[1], comm.get_size("w"))
+        local_shape_w = shapes_w[comm.get_rank("w")]
+        local_offset_w = tensor_offset[1] + sum(shapes_w[: comm.get_rank("w")])
+    return (
+        slice(local_offset_h, local_offset_h + local_shape_h),
+        slice(local_offset_w, local_offset_w + local_shape_w),
+    )
