@@ -4,6 +4,7 @@ import torch
 from fme.core.benchmark.memory import benchmark_memory
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_cannot_nest_benchmark():
     with benchmark_memory():
         with pytest.raises(RuntimeError, match="benchmark_memory cannot be nested"):
@@ -11,12 +12,14 @@ def test_cannot_nest_benchmark():
                 pass
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_cannot_get_result_before_end():
     with benchmark_memory() as bm:
         with pytest.raises(RuntimeError, match="MemoryBenchmark is still running"):
             bm.result
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_larger_array_uses_larger_memory():
     with benchmark_memory() as bm1:
         _ = torch.randn(100, 100, device="cuda")
