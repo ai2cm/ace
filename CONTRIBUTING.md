@@ -59,4 +59,5 @@ When making new branches, use the naming convention:
 - fix: Bug fixes.
 - exp: Branch used for running experiments that is likely not intended to merge with mainline code. Functionality changes in these branches should first be PR'd using a feature branch.
 - config: Changes to baseline and experimental configurations under config/.
+- scripts: Changes isolated to a single script under scripts/ and subject to less rigorous review than changes to core code.
 - docs: Documentation changes only.
