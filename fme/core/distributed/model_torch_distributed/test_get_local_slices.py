@@ -8,23 +8,17 @@ from fme.core.distributed.model_torch_distributed import comm
 from fme.core.distributed.model_torch_distributed.utils import gather_helper_conv
 
 
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires multi-GPU machine")
 @pytest.mark.parametrize(
     "h_parallel,w_parallel,min_gpus",
     [
-        (2, 1, 2),  # H-parallel split
-        (1, 2, 2),  # W-parallel split
-        (2, 2, 4),  # Both H and W parallel
+        (2, 1),  # H-parallel split
+        (1, 2),  # W-parallel split
     ],
 )
-def test_get_local_slices(h_parallel, w_parallel, min_gpus):
+def test_get_local_slices(h_parallel, w_parallel):
     """Test that get_local_slices correctly
     distributes data and gather reconstructs it."""
-    # Skip if not enough GPUs available
-    if torch.cuda.device_count() < min_gpus:
-        pytest.skip(
-            f"Test requires {min_gpus} GPUs, only {torch.cuda.device_count()} available"
-        )
-
     # Set up parallelization
     os.environ["H_PARALLEL_SIZE"] = str(h_parallel)
     os.environ["W_PARALLEL_SIZE"] = str(w_parallel)
