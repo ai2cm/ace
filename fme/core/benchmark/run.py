@@ -15,10 +15,30 @@ _GIT_COMMIT: str | None = None
 def get_git_commit() -> str:
     global _GIT_COMMIT
     if _GIT_COMMIT is None:
-        args = ["git", "rev-parse", "--short", "HEAD"]
-        _GIT_COMMIT = (
-            subprocess.check_output(args, stderr=subprocess.DEVNULL).decode().strip()
+        commit = (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
         )
+
+        # Non-empty output means repo is dirty
+        dirty = (
+            subprocess.check_output(
+                ["git", "status", "--porcelain"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+
+        if dirty:
+            commit = f"{commit}-dirty"
+
+        _GIT_COMMIT = commit
+
     return _GIT_COMMIT
 
 
