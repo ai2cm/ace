@@ -9,7 +9,6 @@ from fme.core.device import using_gpu
 from fme.core.distributed.base import DistributedBackend
 from fme.core.distributed.model_torch_distributed import comm
 from fme.core.distributed.non_distributed import DummyWrapper
-from fme.core.distributed.torch_distributed import _gather_irregular
 
 try:
     from physicsnemo import distributed as pnd
@@ -90,20 +89,10 @@ class ModelTorchDistributed(DistributedBackend):
         return tensor
 
     def gather(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
-        gather_list: list[torch.Tensor] | None = None
-        if self.rank == 0:
-            gather_list = [tensor] + [
-                torch.empty_like(tensor) for _ in range(self.world_size - 1)
-            ]
-        torch.distributed.gather(tensor, gather_list)
-        return gather_list
+        raise NotImplementedError()
 
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
-        return _gather_irregular(
-            tensor,
-            self.reduce_max,
-            self.gather,
-        )
+        raise NotImplementedError()
 
     @property
     def _device_ids(self) -> list[int] | None:
