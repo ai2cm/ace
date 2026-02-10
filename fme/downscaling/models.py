@@ -15,6 +15,7 @@ from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import (
     BatchData,
+    LatLonCoordinates,
     PairedBatchData,
     StaticInputs,
     Topography,
@@ -211,6 +212,7 @@ def _separate_interleaved_samples(tensor: torch.Tensor, n_samples: int) -> torch
     return tensor.reshape(n_batch, n_samples, *tensor.shape[1:])
 
 
+
 @dataclasses.dataclass
 class ConditionedTarget:
     """
@@ -316,6 +318,19 @@ class DiffusionModel:
             coarse_shape[1] * self.downscale_factor,
         )
 
+    def _get_static_input_for_batch(
+        self, coarse_latlon: LatLonCoordinates
+    ) -> Topography | None:
+        """Get the subset topography for a batch from internal static inputs."""
+        if not self.config.use_fine_topography or self.static_inputs is None:
+            return None
+        topo = self.static_inputs.get_topography_for_coarse_coords(
+            coarse_latlon, self.downscale_factor
+        )
+        if topo is not None:
+            topo = topo.to_device()
+        return topo
+
     def _get_input_from_coarse(
         self, coarse: TensorMapping, topography: Topography | None
     ) -> torch.Tensor:
@@ -347,10 +362,12 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
-        optimizer: Optimization | NullOptimization,
+        optimization: Optimization | NullOptimization | None = None,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
+        topography = self._get_static_input_for_batch(
+            batch.coarse.latlon_coordinates[0]
+        )
         coarse, fine = batch.coarse.data, batch.fine.data
         inputs_norm = self._get_input_from_coarse(coarse, topography)
         targets_norm = self.out_packer.pack(
@@ -379,8 +396,8 @@ class DiffusionModel:
         loss = torch.mean(
             conditioned_target.weight * self.loss(denoised_norm, targets_norm)
         )
-        optimizer.accumulate_loss(loss)
-        optimizer.step_weights()
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
 
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
@@ -449,9 +466,11 @@ class DiffusionModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        topography: Topography | None,
         n_samples: int = 1,
     ) -> TensorDict:
+        topography = self._get_static_input_for_batch(
+            batch.latlon_coordinates[0]
+        )
         generated, _, _ = self.generate(batch.data, topography, n_samples)
         return generated
 
@@ -459,9 +478,11 @@ class DiffusionModel:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
+        topography = self._get_static_input_for_batch(
+            batch.coarse.latlon_coordinates[0]
+        )
         coarse, fine = batch.coarse.data, batch.fine.data
         generated, generated_norm, latent_steps = self.generate(
             coarse, topography, n_samples
@@ -578,6 +599,10 @@ class CheckpointModelConfig:
             static_inputs = StaticInputs.from_state(
                 self._checkpoint["model"]["static_inputs"]
             )
+        elif self.fine_topography_path is not None:
+            # Fallback for old checkpoints without serialized static_inputs
+            topo = get_normalized_topography(self.fine_topography_path)
+            static_inputs = StaticInputs([topo])
         else:
             static_inputs = None
         model = _CheckpointModelConfigSelector.from_state(

@@ -14,7 +14,6 @@ from fme.core.logging_utils import LoggingConfig
 from fme.downscaling.data import (
     LatLonCoordinates,
     StaticInputs,
-    Topography,
     get_normalized_topography,
 )
 from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
@@ -62,12 +61,6 @@ def mock_output_target():
     return target
 
 
-def get_topography(shape=(16, 16)):
-    data = torch.randn(shape)
-    coords = LatLonCoordinates(lat=torch.arange(shape[0]), lon=torch.arange(shape[1]))
-    return Topography(data=data, coords=coords)
-
-
 # Tests for Downscaler initialization
 
 
@@ -92,7 +85,6 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
     Test _get_generation_model returns model unchanged when shapes match exactly.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_topography(shape=(16, 16))
 
     downscaler = Downscaler(
         model=mock_model,
@@ -100,23 +92,22 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
     )
 
     result = downscaler._get_generation_model(
-        topography=topo,
+        fine_shape=(16, 16),
         output=mock_output_target,
     )
 
     assert result is mock_model
 
 
-@pytest.mark.parametrize("topo_shape", [(8, 16), (16, 8), (8, 8)])
+@pytest.mark.parametrize("fine_shape", [(8, 16), (16, 8), (8, 8)])
 def test_get_generation_model_raises_when_domain_too_small(
-    mock_model, mock_output_target, topo_shape
+    mock_model, mock_output_target, fine_shape
 ):
     """
     Test _get_generation_model raises ValueError when domain is
     smaller than model.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_topography(shape=topo_shape)
 
     downscaler = Downscaler(
         model=mock_model,
@@ -125,7 +116,7 @@ def test_get_generation_model_raises_when_domain_too_small(
 
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
-            topography=topo,
+            fine_shape=fine_shape,
             output=mock_output_target,
         )
 
@@ -138,7 +129,6 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
     large domains with patching.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_topography(shape=(32, 32))  # Larger than model
 
     patch_config = PatchPredictionConfig(
         divide_generation=True,
@@ -152,7 +142,7 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
     )
 
     model = downscaler._get_generation_model(
-        topography=topo,
+        fine_shape=(32, 32),
         output=mock_output_target,
     )
 
@@ -168,7 +158,6 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
     not configured.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_topography(shape=(32, 32))  # Larger than model
     mock_output_target.patch = PatchPredictionConfig(divide_generation=False)
 
     downscaler = Downscaler(
@@ -178,7 +167,7 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
 
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
-            topography=topo,
+            fine_shape=(32, 32),
             output=mock_output_target,
         )
 
@@ -194,10 +183,14 @@ def test_run_target_generation_skips_padding_items(
     mock_work_item.n_ens = 4
     mock_work_item.batch = MagicMock()
 
-    mock_topo = get_topography(shape=(16, 16))
+    mock_fine_coords = LatLonCoordinates(
+        lat=torch.arange(16, dtype=torch.float32),
+        lon=torch.arange(16, dtype=torch.float32),
+    )
 
     mock_gridded_data = SliceWorkItemGriddedData(
-        [mock_work_item], {}, [0], torch.float32, (1, 4, 16, 16), mock_topo
+        [mock_work_item], {}, [0], torch.float32, (1, 4, 16, 16),
+        mock_fine_coords, (16, 16),
     )
     mock_output_target.data = mock_gridded_data
     mock_model.fine_shape = (16, 16)

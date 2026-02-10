@@ -1,6 +1,5 @@
 import dataclasses
 import math
-from collections.abc import Sequence
 
 import torch
 
@@ -8,22 +7,11 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.tensors import unfold_ensemble_dim
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import (
-    BatchData,
-    ClosedInterval,
-    PairedBatchData,
-    Topography,
-    adjust_fine_coord_range,
-    scale_tuple,
-)
+from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, ModelOutputs
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
-
-
-def _closed_interval_from_coord(coord: torch.Tensor) -> ClosedInterval:
-    return ClosedInterval(start=coord.min().item(), stop=coord.max().item())
 
 
 @dataclasses.dataclass
@@ -47,12 +35,6 @@ class CascadePredictorConfig:
             self._models = [cfg.build() for cfg in self.cascade_model_checkpoints]
         return self._models
 
-    def get_topographies(self) -> list[Topography | None]:
-        topographies = []
-        for ckpt in self.cascade_model_checkpoints:
-            topographies.append(ckpt.get_topography())
-        return topographies
-
     def build(self):
         for m in range(len(self.models) - 1):
             output_shape = scale_tuple(
@@ -67,9 +49,7 @@ class CascadePredictorConfig:
                     f"input shape {input_shape_next_step} of model at step {m+1}. "
                 )
 
-        return CascadePredictor(
-            models=self.models, topographies=self.get_topographies()
-        )
+        return CascadePredictor(models=self.models)
 
     @property
     def data_requirements(self) -> DataRequirements:
@@ -92,10 +72,9 @@ def _restore_batch_and_sample_dims(data: TensorMapping, n_samples: int):
 
 class CascadePredictor:
     def __init__(
-        self, models: list[DiffusionModel], topographies: list[Topography | None]
+        self, models: list[DiffusionModel]
     ):
         self.models = models
-        self._topographies = topographies
         self.out_packer = self.models[-1].out_packer
         self.normalizer = FineResCoarseResPair(
             coarse=self.models[0].normalizer.coarse,
@@ -124,8 +103,9 @@ class CascadePredictor:
         self,
         coarse: TensorMapping,
         n_samples: int,
-        topographies=list[Topography | None],
+        topographies: list[torch.Tensor | None],
     ):
+        """Low-level generate that accepts pre-resolved topography tensors."""
         current_coarse = coarse
         for i, (model, fine_topography) in enumerate(zip(self.models, topographies)):
             sample_data = next(iter(current_coarse.values()))
@@ -133,10 +113,9 @@ class CascadePredictor:
             # n_samples are generated for the first step, and subsequent models
             # generate 1 sample
             n_samples_cascade_step = n_samples if i == 0 else 1
-            _fine_topography = fine_topography.data
 
             generated, generated_norm, latent_steps = model.generate(
-                current_coarse, _fine_topography, n_samples_cascade_step
+                current_coarse, fine_topography, n_samples_cascade_step
             )
             generated = {
                 k: v.reshape(batch_size * n_samples_cascade_step, *v.shape[-2:])
@@ -146,16 +125,29 @@ class CascadePredictor:
         generated = _restore_batch_and_sample_dims(generated, n_samples)
         return generated, generated_norm, latent_steps
 
+    def _resolve_topographies(
+        self,
+        coarse_coords: LatLonCoordinates,
+    ) -> list[torch.Tensor | None]:
+        """Resolve topography tensors for each model from internal state."""
+        topographies = []
+        for model in self.models:
+            topo = model._get_static_input_for_batch(coarse_coords)
+            if topo is not None:
+                topographies.append(topo.data)
+                # Update coarse_coords to be the fine coords for next step
+                coarse_coords = topo.coords
+            else:
+                topographies.append(None)
+        return topographies
+
     @torch.no_grad()
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        topography: Topography | None,
         n_samples: int = 1,
     ) -> TensorDict:
-        topographies = self._get_subset_topographies(
-            coarse_coords=batch.latlon_coordinates[0]
-        )
+        topographies = self._resolve_topographies(batch.latlon_coordinates[0])
         generated, _, _ = self.generate(batch.data, n_samples, topographies)
         return generated
 
@@ -163,12 +155,9 @@ class CascadePredictor:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
-        topographies = self._get_subset_topographies(
-            coarse_coords=batch.coarse.latlon_coordinates[0]
-        )
+        topographies = self._resolve_topographies(batch.coarse.latlon_coordinates[0])
         generated, _, latent_steps = self.generate(
             batch.coarse.data, n_samples, topographies
         )
@@ -181,40 +170,3 @@ class CascadePredictor:
             loss=torch.tensor(float("inf"), device=get_device()),
             latent_steps=latent_steps,
         )
-
-    def _get_subset_topographies(
-        self,
-        coarse_coords: LatLonCoordinates,
-    ) -> Sequence[Topography | None]:
-        # Intermediate topographies are loaded as full range and need to be subset
-        # to the matching lat/lon range for each batch.
-        # TODO: Will eventually move subsetting into checkpoint model.
-        subset_topographies = []
-        _coarse_coords = coarse_coords
-        lat_range = _closed_interval_from_coord(_coarse_coords.lat)
-        lon_range = _closed_interval_from_coord(_coarse_coords.lon)
-
-        for i, full_intermediate_topography in enumerate(self._topographies):
-            if full_intermediate_topography is not None:
-                _adjusted_lat_range = adjust_fine_coord_range(
-                    lat_range,
-                    _coarse_coords.lat,
-                    full_intermediate_topography.coords.lat,
-                    downscale_factor=self.models[i].downscale_factor,
-                )
-                _adjusted_lon_range = adjust_fine_coord_range(
-                    lon_range,
-                    _coarse_coords.lon,
-                    full_intermediate_topography.coords.lon,
-                    downscale_factor=self.models[i].downscale_factor,
-                )
-                subset_interm_topo = full_intermediate_topography.subset_latlon(
-                    lat_interval=_adjusted_lat_range, lon_interval=_adjusted_lon_range
-                )
-                _coarse_coords = subset_interm_topo.coords
-                lat_range = _closed_interval_from_coord(_coarse_coords.lat)
-                lon_range = _closed_interval_from_coord(_coarse_coords.lon)
-            else:
-                subset_interm_topo = None
-            subset_topographies.append(subset_interm_topo)
-        return subset_topographies

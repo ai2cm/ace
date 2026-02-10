@@ -12,7 +12,13 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict
-from fme.downscaling.data import BatchData, PairedBatchData, Topography
+from fme.downscaling.data import (
+    BatchData,
+    LatLonCoordinates,
+    PairedBatchData,
+    StaticInputs,
+    Topography,
+)
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.models import ModelOutputs, PairedNormalizationConfig
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -42,6 +48,7 @@ class DeterministicModelConfig:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         rename: dict[str, str] | None = None,
+        static_inputs: StaticInputs | None = None,
     ) -> "DeterministicModel":
         invert_rename = {v: k for k, v in (rename or {}).items()}
         orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
@@ -66,6 +73,7 @@ class DeterministicModelConfig:
             coarse_shape,
             downscale_factor,
             self,
+            static_inputs=static_inputs,
         )
 
     def get_state(self) -> Mapping[str, Any]:
@@ -97,6 +105,7 @@ class DeterministicModel:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         config: DeterministicModelConfig,
+        static_inputs: StaticInputs | None = None,
     ) -> None:
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
@@ -109,6 +118,7 @@ class DeterministicModel:
         self.config = config
         self.null_optimization = NullOptimization()
         self._channel_axis = -3
+        self.static_inputs = static_inputs
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -118,22 +128,39 @@ class DeterministicModel:
         """
         return torch.nn.ModuleList([self.module])
 
+    def _get_static_input_for_batch(
+        self, coarse_latlon: LatLonCoordinates
+    ) -> Topography | None:
+        """Get the subset topography for a batch from internal static inputs."""
+        if not self.config.use_fine_topography or self.static_inputs is None:
+            return None
+        topo = self.static_inputs.get_topography_for_coarse_coords(
+            coarse_latlon, self.downscale_factor
+        )
+        if topo is not None:
+            topo = topo.to_device()
+        return topo
+
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
-        optimization: Optimization | NullOptimization,
+        optimization: Optimization | NullOptimization | None = None,
     ) -> ModelOutputs:
+        topography = self._get_static_input_for_batch(
+            batch.coarse.latlon_coordinates[0]
+        )
         return self._run_on_batch(batch, topography, optimization)
 
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         if n_samples != 1:
             raise ValueError("n_samples must be 1 for deterministic models")
+        topography = self._get_static_input_for_batch(
+            batch.coarse.latlon_coordinates[0]
+        )
         result = self._run_on_batch(batch, topography, self.null_optimization)
         for k, v in result.prediction.items():
             result.prediction[k] = v.unsqueeze(1)  # insert sample dimension
@@ -144,7 +171,6 @@ class DeterministicModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        topography: Topography | None,
         n_samples: int = 1,
     ) -> TensorDict:
         raise NotImplementedError(
@@ -196,11 +222,17 @@ class DeterministicModel:
         )
 
     def get_state(self) -> Mapping[str, Any]:
+        if self.static_inputs is not None:
+            static_inputs_state = self.static_inputs.to_state()
+        else:
+            static_inputs_state = None
+
         return {
             "config": self.config.get_state(),
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
+            "static_inputs": static_inputs_state,
         }
 
     @classmethod
@@ -209,9 +241,16 @@ class DeterministicModel:
         state: Mapping[str, Any],
     ) -> "DeterministicModel":
         config = DeterministicModelConfig.from_state(state["config"])
+        static_inputs_state = state.get("static_inputs")
+        static_inputs = (
+            StaticInputs.from_state(static_inputs_state)
+            if static_inputs_state is not None
+            else None
+        )
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
+            static_inputs=static_inputs,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model

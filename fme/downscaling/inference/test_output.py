@@ -102,7 +102,9 @@ def test_event_config_build_creates_output_target_with_single_time(
         lon_extent=ClosedInterval(2.0, 6.0),
     )
 
-    output_target = config.build(loader_config, requirements, patch_config)
+    output_target = config.build(
+        loader_config, requirements, patch_config, downscale_factor=2
+    )
 
     # Verify OutputTarget was created
     assert isinstance(output_target, DownscalingOutput)
@@ -131,7 +133,9 @@ def test_region_config_build_creates_output_target_with_time_range(
         save_vars=["var0", "var1"],
     )
 
-    output_target = config.build(loader_config, requirements, patch_config)
+    output_target = config.build(
+        loader_config, requirements, patch_config, downscale_factor=2
+    )
 
     # Verify OutputTarget was created
     assert isinstance(output_target, DownscalingOutput)

@@ -143,6 +143,13 @@ def test_predictor_runs(static_inputs_on_model, tmp_path, very_fast_only: bool):
         predictor_config["data"]["topography"] = None
         with open(predictor_config_path, "w") as f:
             yaml.dump(predictor_config, f)
+    else:
+        # Model gets topography from fine_topography_path on checkpoint config
+        predictor_config["model"]["fine_topography_path"] = predictor_config["data"][
+            "topography"
+        ]
+        with open(predictor_config_path, "w") as f:
+            yaml.dump(predictor_config, f)
 
     torch.save(
         {
@@ -184,6 +191,12 @@ def test_predictor_renaming(
     os.makedirs(
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
     )
+    # Model needs fine_topography_path to load topography as static_inputs
+    predictor_config["model"]["fine_topography_path"] = predictor_config["data"][
+        "topography"
+    ]
+    with open(predictor_config_path, "w") as f:
+        yaml.dump(predictor_config, f)
     torch.save(
         {
             "model": model.get_state(),

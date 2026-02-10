@@ -10,7 +10,7 @@ from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.downscaling.data import Topography
+from fme.downscaling.data import StaticInputs, Topography
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -56,10 +56,25 @@ class DummyModule(torch.nn.Module):
         return x
 
 
+def _make_batched_coords(shape):
+    """Create BatchedLatLonCoordinates-like mock with real coordinate tensors."""
+    batch_size, ny, nx = shape[0], shape[-2], shape[-1]
+    lat = torch.arange(ny, dtype=torch.float32).unsqueeze(0).expand(batch_size, -1)
+    lon = torch.arange(nx, dtype=torch.float32).unsqueeze(0).expand(batch_size, -1)
+    coords = MagicMock()
+    coords.lat = lat
+    coords.lon = lon
+    coords.__getitem__ = lambda self_, i: LatLonCoordinates(
+        lat=lat[i], lon=lon[i]
+    )
+    return coords
+
+
 # returns paired batch data mock
 def get_mock_batch(shape, topography_scale_factor: int = 1):
     batch = MagicMock()
     batch.data = {"x": torch.ones(*shape, device=get_device())}
+    batch.latlon_coordinates = _make_batched_coords(shape)
     return batch
 
 
@@ -105,6 +120,7 @@ def _get_diffusion_model(
     downscale_factor,
     predict_residual=True,
     use_fine_topography=True,
+    static_inputs=None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -127,7 +143,7 @@ def _get_diffusion_model(
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
-    ).build(coarse_shape, downscale_factor)
+    ).build(coarse_shape, downscale_factor, static_inputs=static_inputs)
 
 
 @pytest.mark.parametrize("predict_residual", [True, False])
@@ -135,11 +151,27 @@ def _get_diffusion_model(
 def test_diffusion_model_train_and_generate(predict_residual, use_fine_topography):
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
+
+    if use_fine_topography:
+        # Fine coords interleaved between coarse arange coords
+        # Coarse: [0, 1, ..., N-1], Fine: [-0.25, 0.25, 0.75, ..., N-0.75]
+        ds = 2  # downscale_factor
+        fine_lat = (torch.arange(fine_shape[0], dtype=torch.float32) + 0.5) / ds - 0.5
+        fine_lon = (torch.arange(fine_shape[1], dtype=torch.float32) + 0.5) / ds - 0.5
+        topo = Topography(
+            torch.ones(*fine_shape, device=get_device()),
+            LatLonCoordinates(lat=fine_lat, lon=fine_lon),
+        )
+        static_inputs = StaticInputs([topo])
+    else:
+        static_inputs = None
+
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=2,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
+        static_inputs=static_inputs,
     )
 
     assert model._get_fine_shape(coarse_shape) == fine_shape
@@ -149,22 +181,13 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
     batch = get_mock_paired_batch(
         [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
-    if use_fine_topography:
-        topography = Topography(
-            torch.ones(*fine_shape, device=get_device()),
-            LatLonCoordinates(
-                lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
-            ),
-        )
-    else:
-        topography = None
     optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
-    train_outputs = model.train_on_batch(batch, topography, optimization)
+    train_outputs = model.train_on_batch(batch, optimization=optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
 
     n_generated_samples = 2
     generated_outputs = [
-        model.generate_on_batch(batch, topography) for _ in range(n_generated_samples)
+        model.generate_on_batch(batch) for _ in range(n_generated_samples)
     ]
 
     for generated_output in generated_outputs:
@@ -282,37 +305,44 @@ def test_model_error_cases():
         [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
 
-    # missing fine topography when model requires it
-    batch.fine.topography = None
+    # missing fine topography when model requires it (no static_inputs set)
     with pytest.raises(ValueError):
-        model.generate_on_batch(batch, topography=None)
+        model.generate_on_batch(batch)
+
+
+def _make_fine_coords(coarse_n, downscale_factor):
+    """Create fine-res coords interleaved between coarse arange coords."""
+    fine_n = coarse_n * downscale_factor
+    return (torch.arange(fine_n, dtype=torch.float32) + 0.5) / downscale_factor - 0.5
 
 
 def test_DiffusionModel_generate_on_batch_no_target():
     fine_shape = (32, 32)
     coarse_shape = (16, 16)
     downscale_factor = 2
+    topo = Topography(
+        torch.rand(*fine_shape, device=get_device()),
+        LatLonCoordinates(
+            lat=_make_fine_coords(coarse_shape[0], downscale_factor),
+            lon=_make_fine_coords(coarse_shape[1], downscale_factor),
+        ),
+    )
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         predict_residual=True,
         use_fine_topography=True,
+        static_inputs=StaticInputs([topo]),
     )
 
     batch_size = 2
-
     n_generated_samples = 2
 
     coarse_batch = get_mock_batch(
         [batch_size, *coarse_shape], topography_scale_factor=downscale_factor
     )
-    topography = Topography(
-        torch.rand(*fine_shape, device=get_device()),
-        LatLonCoordinates(lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])),
-    )
     samples = model.generate_on_batch_no_target(
         coarse_batch,
-        topography=topography,
         n_samples=n_generated_samples,
     )
 
@@ -329,27 +359,31 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
 
     coarse_shape = (16, 16)
     downscale_factor = 2
-    model = _get_diffusion_model(
-        coarse_shape=coarse_shape,
-        downscale_factor=downscale_factor,
-        predict_residual=True,
-        use_fine_topography=True,
-    )
     n_ensemble = 2
     batch_size = 2
 
     for alternative_input_shape in [(8, 8), (32, 32)]:
         fine_shape = tuple(dim * downscale_factor for dim in alternative_input_shape)
+        topo = Topography(
+            torch.rand(*fine_shape, device=get_device()),
+            LatLonCoordinates(
+                lat=_make_fine_coords(alternative_input_shape[0], downscale_factor),
+                lon=_make_fine_coords(alternative_input_shape[1], downscale_factor),
+            ),
+        )
+        model = _get_diffusion_model(
+            coarse_shape=coarse_shape,
+            downscale_factor=downscale_factor,
+            predict_residual=True,
+            use_fine_topography=True,
+            static_inputs=StaticInputs([topo]),
+        )
         coarse_batch = get_mock_batch(
             [batch_size, *alternative_input_shape],
             topography_scale_factor=downscale_factor,
         )
-        topography = Topography(
-            torch.rand(*fine_shape, device=get_device()),
-            LatLonCoordinates(torch.ones(fine_shape[0]), torch.ones(fine_shape[1])),
-        )
         samples = model.generate_on_batch_no_target(
-            coarse_batch, n_samples=n_ensemble, topography=topography
+            coarse_batch, n_samples=n_ensemble
         )
 
         assert samples["x"].shape == (

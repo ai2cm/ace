@@ -139,3 +139,104 @@ def test_StaticInputs_serialize():
     static_inputs_reconstructed = StaticInputs.from_state(state)
     assert static_inputs_reconstructed[0].data.equal(static_inputs[0].data)
     assert static_inputs_reconstructed[1].data.equal(static_inputs[1].data)
+
+
+def test_StaticInputs_subset_for_coarse_coords():
+    """Test that subset_for_coarse_coords correctly subsets to fine coords."""
+    # Create fine-resolution static inputs (8x8)
+    fine_data = torch.arange(64).reshape(8, 8).float()
+    fine_coords = LatLonCoordinates(
+        lat=torch.linspace(-45, 45, 8), lon=torch.linspace(-90, 90, 8)
+    )
+    topography = Topography(data=fine_data, coords=fine_coords)
+    land_frac = Topography(data=fine_data * -1.0, coords=fine_coords)
+    static_inputs = StaticInputs([topography, land_frac])
+
+    # Create coarse coordinates (4x4) that cover a subset of the domain
+    # We'll subset to the middle 2x2 coarse points
+    coarse_lat = torch.linspace(-45, 45, 4)
+    coarse_lon = torch.linspace(-90, 90, 4)
+    # Select middle 2x2: indices 1:3 for both dimensions
+    coarse_coords = LatLonCoordinates(lat=coarse_lat[1:3], lon=coarse_lon[1:3])
+
+    downscale_factor = 2
+
+    # Subset the static inputs
+    subset = static_inputs.subset_for_coarse_coords(coarse_coords, downscale_factor)
+
+    # With downscale_factor=2, we expect the subset to cover 4x4 fine points
+    # (2 coarse points * 2 downscale factor = 4 fine points per dimension)
+    assert subset.shape == (4, 4)
+    assert len(subset.fields) == 2
+
+    # Verify all fields were subset
+    for i, field in enumerate(subset.fields):
+        assert field.shape == (4, 4)
+        # Verify coordinates are subset appropriately
+        assert len(field.coords.lat) == 4
+        assert len(field.coords.lon) == 4
+
+
+def test_StaticInputs_subset_for_coarse_coords_full_domain():
+    """Test subset_for_coarse_coords with downscale_factor=1 (no actual downscaling)."""
+    # Create static inputs
+    data = torch.arange(16).reshape(4, 4).float()
+    coords = LatLonCoordinates(
+        lat=torch.linspace(0, 9, 4), lon=torch.linspace(0, 9, 4)
+    )
+    topography = Topography(data=data, coords=coords)
+    static_inputs = StaticInputs([topography])
+
+    # Use the same coordinates as coarse coords with downscale_factor=1
+    subset = static_inputs.subset_for_coarse_coords(coords, downscale_factor=1)
+
+    # Should get back the same data
+    assert subset.shape == (4, 4)
+    assert torch.equal(subset.fields[0].data, data)
+    assert torch.equal(subset.fields[0].coords.lat, coords.lat)
+    assert torch.equal(subset.fields[0].coords.lon, coords.lon)
+
+
+def test_StaticInputs_get_topography_for_coarse_coords():
+    """Test that get_topography_for_coarse_coords returns the first field."""
+    # Create fine-resolution static inputs (8x8)
+    fine_data = torch.arange(64).reshape(8, 8).float()
+    fine_coords = LatLonCoordinates(
+        lat=torch.linspace(-45, 45, 8), lon=torch.linspace(-90, 90, 8)
+    )
+    topography = Topography(data=fine_data, coords=fine_coords)
+    land_frac = Topography(data=fine_data * -1.0, coords=fine_coords)
+    static_inputs = StaticInputs([topography, land_frac])
+
+    # Create coarse coordinates
+    coarse_lat = torch.linspace(-45, 45, 4)
+    coarse_lon = torch.linspace(-90, 90, 4)
+    coarse_coords = LatLonCoordinates(lat=coarse_lat[1:3], lon=coarse_lon[1:3])
+
+    downscale_factor = 2
+
+    # Get topography
+    result = static_inputs.get_topography_for_coarse_coords(
+        coarse_coords, downscale_factor
+    )
+
+    # Should return a Topography object (the first field)
+    assert isinstance(result, Topography)
+    assert result.shape == (4, 4)
+
+
+def test_StaticInputs_get_topography_for_coarse_coords_empty():
+    """Test get_topography_for_coarse_coords returns None for empty."""
+    # Create empty StaticInputs
+    static_inputs = StaticInputs([])
+
+    # Create some coarse coordinates
+    coarse_coords = LatLonCoordinates(
+        lat=torch.tensor([0.0, 1.0]), lon=torch.tensor([0.0, 1.0])
+    )
+
+    # Should return None
+    result = static_inputs.get_topography_for_coarse_coords(
+        coarse_coords, downscale_factor=2
+    )
+    assert result is None

@@ -16,7 +16,6 @@ from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggreg
 from fme.downscaling.data import (
     PairedDataLoaderConfig,
     PairedGriddedData,
-    StaticInputs,
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
@@ -62,11 +61,11 @@ class Evaluator:
         else:
             batch_generator = self.data.get_generator()
 
-        for i, (batch, topography) in enumerate(batch_generator):
+        for i, batch in enumerate(batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 outputs = self.model.generate_on_batch(
-                    batch, topography, n_samples=self.n_samples
+                    batch, n_samples=self.n_samples
                 )
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
@@ -113,7 +112,7 @@ class EventEvaluator:
 
     def run(self):
         logging.info(f"Running {self.event_name} event evaluation")
-        batch, topography = next(iter(self.data.get_generator()))
+        batch = next(iter(self.data.get_generator()))
         sample_agg = PairedSampleAggregator(
             target=batch[0].fine.data,
             coarse=batch[0].coarse.data,
@@ -132,7 +131,7 @@ class EventEvaluator:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch(
-                batch, topography, n_samples=end_idx - start_idx
+                batch, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs.prediction)
 
@@ -158,7 +157,6 @@ class PairedEventConfig(EventConfig):
         self,
         base_data_config: PairedDataLoaderConfig,
         requirements: DataRequirements,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> PairedGriddedData:
         enforce_lat_bounds(self.lat_extent)
         time_slice = self._time_selection_slice
@@ -179,7 +177,6 @@ class PairedEventConfig(EventConfig):
         return event_data_config.build(
             train=False,
             requirements=requirements,
-            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
         )
 
 
@@ -210,7 +207,6 @@ class EvaluatorConfig:
         dataset = self.data.build(
             train=False,
             requirements=self.model.data_requirements,
-            static_inputs_from_checkpoint=model.static_inputs,
         )
         evaluator_model: DiffusionModel | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:

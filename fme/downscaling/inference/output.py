@@ -17,7 +17,6 @@ from ..data import (
     ClosedInterval,
     DataLoaderConfig,
     LatLonCoordinates,
-    StaticInputs,
     enforce_lat_bounds,
 )
 from ..data.config import XarrayEnsembleDataConfig
@@ -36,6 +35,19 @@ def _identity_collate(batch):
     Must be a module-level function (not lambda) to be picklable for multiprocessing.
     """
     return batch[0]
+
+
+def _downscale_coord(coord: torch.Tensor, downscale_factor: int) -> torch.Tensor:
+    """Compute fine-resolution coordinates from coarse coordinates."""
+    if len(coord.shape) != 1:
+        raise ValueError("coord tensor to downscale must be 1d")
+    spacing = coord[1] - coord[0]
+    first_edge = coord[0] - spacing / 2
+    last_edge = coord[-1] + spacing / 2
+    step = spacing / downscale_factor
+    new_edges = torch.arange(first_edge, last_edge + step / 2, step)
+    coord_new = (new_edges[:-1] + new_edges[1:]) / 2
+    return coord_new.to(device=coord.device, dtype=coord.dtype)
 
 
 class DownscalingOutput:
@@ -152,6 +164,7 @@ class DownscalingOutputConfig(ABC):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
+        downscale_factor: int,
     ) -> DownscalingOutput:
         """
         Build an OutputTarget from this configuration.
@@ -160,6 +173,7 @@ class DownscalingOutputConfig(ABC):
             loader_config: Base data loader configuration to modify
             requirements: Model's data requirements (variable names, etc.)
             patch: Default patch prediction configuration
+            downscale_factor: Downscaling factor from the model
         """
         pass
 
@@ -215,8 +229,8 @@ class DownscalingOutputConfig(ABC):
         self,
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
+        downscale_factor: int,
         dist: Distributed | None = None,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> SliceWorkItemGriddedData:
         xr_dataset, properties = loader_config.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
@@ -227,14 +241,15 @@ class DownscalingOutputConfig(ABC):
                 "Downscaling data loader only supports datasets with latlon coords."
             )
         dataset = loader_config.build_batchitem_dataset(xr_dataset, properties)
-        topography = loader_config.build_topography(
-            coords,
-            requires_topography=requirements.use_fine_topography,
-            # TODO: update to support full list of static inputs
-            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+
+        # Compute fine-resolution coordinates from coarse
+        subset_dataset = dataset  # BatchItemDatasetAdapter
+        coarse_coords = subset_dataset._coordinates
+        fine_coords = LatLonCoordinates(
+            lat=_downscale_coord(coarse_coords.lat, downscale_factor),
+            lon=_downscale_coord(coarse_coords.lon, downscale_factor),
         )
-        if topography is None:
-            raise ValueError("Topography is required for downscaling generation.")
+        fine_shape = (len(fine_coords.lat), len(fine_coords.lon))
 
         work_items = get_work_items(
             n_times=len(dataset),
@@ -242,14 +257,12 @@ class DownscalingOutputConfig(ABC):
             max_samples_per_gpu=self.max_samples_per_gpu,
         )
 
-        # defer topography device placement until after batch generation
         slice_dataset = SliceItemDataset(
             slice_items=work_items,
             dataset=dataset,
-            spatial_shape=topography.shape,
+            spatial_shape=fine_shape,
         )
 
-        # each SliceItemDataset work item loads its own full batch, so batch_size=1
         dist = dist or Distributed.get_instance()
         loader = DataLoader(
             slice_dataset,
@@ -273,7 +286,8 @@ class DownscalingOutputConfig(ABC):
             all_times=xr_dataset.sample_start_times,
             dtype=slice_dataset.dtype,
             max_output_shape=slice_dataset.max_output_shape,
-            topography=topography,
+            fine_coords=fine_coords,
+            fine_shape=fine_shape,
         )
 
     def _build(
@@ -285,7 +299,7 @@ class DownscalingOutputConfig(ABC):
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
         coarse: list[XarrayDataConfig],
-        static_inputs_from_checkpoint: StaticInputs | None = None,
+        downscale_factor: int,
     ) -> DownscalingOutput:
         updated_loader_config = self._replace_loader_config(
             time,
@@ -298,7 +312,7 @@ class DownscalingOutputConfig(ABC):
         gridded_data = self._build_gridded_data(
             updated_loader_config,
             requirements,
-            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+            downscale_factor=downscale_factor,
         )
 
         if self.zarr_chunks is None:
@@ -385,7 +399,7 @@ class EventConfig(DownscalingOutputConfig):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
+        downscale_factor: int,
     ) -> DownscalingOutput:
         # Convert single time to TimeSlice
         time: Slice | TimeSlice
@@ -408,7 +422,7 @@ class EventConfig(DownscalingOutputConfig):
             requirements=requirements,
             patch=patch,
             coarse=coarse,
-            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+            downscale_factor=downscale_factor,
         )
 
 
@@ -468,7 +482,7 @@ class TimeRangeConfig(DownscalingOutputConfig):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
+        downscale_factor: int,
     ) -> DownscalingOutput:
         coarse = self._single_xarray_config(loader_config.coarse)
         return self._build(
@@ -479,5 +493,5 @@ class TimeRangeConfig(DownscalingOutputConfig):
             requirements=requirements,
             patch=patch,
             coarse=coarse,
-            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+            downscale_factor=downscale_factor,
         )

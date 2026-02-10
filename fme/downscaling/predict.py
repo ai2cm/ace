@@ -21,7 +21,6 @@ from fme.downscaling.data import (
     ClosedInterval,
     DataLoaderConfig,
     GriddedData,
-    StaticInputs,
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
@@ -94,7 +93,6 @@ class EventConfig:
         self,
         base_data_config: DataLoaderConfig,
         requirements: DataRequirements,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
         enforce_lat_bounds(self.lat_extent)
         event_coarse = dataclasses.replace(
@@ -111,7 +109,6 @@ class EventConfig:
         )
         return event_data_config.build(
             requirements=requirements,
-            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
         )
 
 
@@ -153,7 +150,7 @@ class EventDownscaler:
 
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
-        batch, topography = next(iter(self.data.get_generator()))
+        batch = next(iter(self.data.get_generator()))
         coarse_coords = batch[0].latlon_coordinates
         fine_coords = LatLonCoordinates(
             lat=_downscale_coord(coarse_coords.lat, self.model.downscale_factor),
@@ -176,7 +173,7 @@ class EventDownscaler:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch_no_target(
-                batch, topography=topography, n_samples=end_idx - start_idx
+                batch, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs)
         to_log = sample_agg.get_wandb()
@@ -247,22 +244,22 @@ class Downscaler:
 
     @property
     def _fine_latlon_coordinates(self) -> LatLonCoordinates | None:
-        if self.data.topography is not None:
-            return self.data.topography.coords
-        else:
-            return None
+        coarse_coords = self.data.latlon_coordinates
+        return LatLonCoordinates(
+            lat=_downscale_coord(coarse_coords.lat, self.model.downscale_factor),
+            lon=_downscale_coord(coarse_coords.lon, self.model.downscale_factor),
+        )
 
     def run(self):
         aggregator = NoTargetAggregator(
             downscale_factor=self.model.downscale_factor,
             latlon_coordinates=self._fine_latlon_coordinates,
         )
-        for i, (batch, topography) in enumerate(self.batch_generator):
+        for i, batch in enumerate(self.batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 prediction = self.generation_model.generate_on_batch_no_target(
                     batch=batch,
-                    topography=topography,
                     n_samples=self.n_samples,
                 )
                 logging.info("Recording diagnostics to aggregator")
@@ -308,7 +305,6 @@ class DownscalerConfig:
         model = self.model.build()
         dataset = self.data.build(
             requirements=self.model.data_requirements,
-            static_inputs_from_checkpoint=model.static_inputs,
         )
         downscaler = Downscaler(
             data=dataset,
@@ -322,7 +318,6 @@ class DownscalerConfig:
             event_dataset = event_config.get_gridded_data(
                 base_data_config=self.data,
                 requirements=self.model.data_requirements,
-                static_inputs_from_checkpoint=model.static_inputs,
             )
             event_downscalers.append(
                 EventDownscaler(

@@ -7,11 +7,15 @@ import xarray as xr
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.downscaling.data.patching import Patch
-from fme.downscaling.data.utils import ClosedInterval
+from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 
 
 def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
-    mask = (coords >= range.start) & (coords <= range.stop)
+    # Ensure all tensors are on the same device for comparison
+    coords = coords.cpu()
+    start = range.start.cpu() if torch.is_tensor(range.start) else range.start
+    stop = range.stop.cpu() if torch.is_tensor(range.stop) else range.stop
+    mask = (coords >= start) & (coords <= stop)
     indices = mask.nonzero(as_tuple=True)[0]
     if indices.numel() == 0:
         return slice(0, 0)
@@ -193,6 +197,63 @@ class StaticInputs:
                 field.subset_latlon(lat_interval, lon_interval) for field in self.fields
             ]
         )
+
+    def subset_for_coarse_coords(
+        self, coarse_coords: LatLonCoordinates, downscale_factor: int
+    ) -> "StaticInputs":
+        """
+        Subset the StaticInputs to the fine-resolution region that corresponds
+        to the given coarse coordinates.
+
+        Args:
+            coarse_coords: Coarse-resolution coordinates to subset to.
+            downscale_factor: The downscaling factor between coarse and fine grids.
+
+        Returns:
+            A new StaticInputs subset to the fine-resolution region.
+        """
+        lat_interval = ClosedInterval(
+            start=coarse_coords.lat.min().item(), stop=coarse_coords.lat.max().item()
+        )
+        lon_interval = ClosedInterval(
+            start=coarse_coords.lon.min().item(), stop=coarse_coords.lon.max().item()
+        )
+
+        device = coarse_coords.lat.device
+        fine_lat_interval = adjust_fine_coord_range(
+            lat_interval,
+            full_coarse_coord=coarse_coords.lat,
+            full_fine_coord=self.coords.lat.to(device),
+            downscale_factor=downscale_factor,
+        )
+        fine_lon_interval = adjust_fine_coord_range(
+            lon_interval,
+            full_coarse_coord=coarse_coords.lon,
+            full_fine_coord=self.coords.lon.to(device),
+            downscale_factor=downscale_factor,
+        )
+
+        return self.subset_latlon(fine_lat_interval, fine_lon_interval)
+
+    def get_topography_for_coarse_coords(
+        self, coarse_coords: LatLonCoordinates, downscale_factor: int
+    ) -> "Topography | None":
+        """
+        Convenience method that returns the first field as a Topography object
+        after subsetting, or None if there are no fields.
+
+        Args:
+            coarse_coords: Coarse-resolution coordinates to subset to.
+            downscale_factor: The downscaling factor between coarse and fine grids.
+
+        Returns:
+            The first field as a Topography object after subsetting, or None if
+            there are no fields.
+        """
+        if len(self.fields) == 0:
+            return None
+        subset = self.subset_for_coarse_coords(coarse_coords, downscale_factor)
+        return subset.fields[0]
 
     def to_device(self) -> "StaticInputs":
         return StaticInputs(fields=[field.to_device() for field in self.fields])

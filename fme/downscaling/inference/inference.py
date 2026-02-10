@@ -10,7 +10,7 @@ from fme.core.cli import prepare_directory
 from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig, Topography
+from ..data import DataLoaderConfig
 from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import (
     CascadePredictor,
@@ -56,7 +56,7 @@ class Downscaler:
 
     def _get_generation_model(
         self,
-        topography: Topography,
+        fine_shape: tuple[int, int],
         output: DownscalingOutput,
     ) -> DiffusionModel | PatchPredictor | CascadePredictor:
         """
@@ -67,7 +67,7 @@ class Downscaler:
         generations.
         """
         model_patch_shape = self.model.fine_shape
-        actual_shape = tuple(topography.data.shape)
+        actual_shape = fine_shape
 
         if model_patch_shape == actual_shape:
             # short circuit, no patching necessary
@@ -79,7 +79,7 @@ class Downscaler:
             # we don't support generating regions smaller than the model patch size
             raise ValueError(
                 f"Model coarse shape {model_patch_shape} is larger than "
-                f"actual topography shape {actual_shape} for output {output.name}."
+                f"actual fine shape {actual_shape} for output {output.name}."
             )
         elif output.patch.needs_patch_predictor:
             # Use a patch predictor
@@ -98,29 +98,27 @@ class Downscaler:
             )
 
     def _on_device_generator(self, loader):
-        for loaded_item, topography in loader:
-            yield loaded_item.to_device(), topography.to_device()
+        for loaded_item in loader:
+            yield loaded_item.to_device()
 
     def run_output_generation(self, output: DownscalingOutput):
         """Execute the generation loop for this output."""
         logging.info(f"Generating downscaled outputs for output: {output.name}")
 
-        # initialize writer and model in loop for coord info
-        model = None
-        writer = None
+        model = self._get_generation_model(
+            fine_shape=output.data.fine_shape, output=output
+        )
+        writer = output.get_writer(
+            latlon_coords=output.data.fine_coords,
+            output_dir=self.output_dir,
+        )
+        # Use output data dtype for store initialization
+        writer.initialize_store(torch.zeros(1, dtype=output.data.dtype).numpy().dtype)
         total_batches = len(output.data.loader)
 
         loaded_item: LoadedSliceWorkItem
-        topography: Topography
-        for i, (loaded_item, topography) in enumerate(output.data.get_generator()):
-            if writer is None:
-                writer = output.get_writer(
-                    latlon_coords=topography.coords,
-                    output_dir=self.output_dir,
-                )
-                writer.initialize_store(topography.data.cpu().numpy().dtype)
-            if model is None:
-                model = self._get_generation_model(topography=topography, output=output)
+        for i, loaded_item in enumerate(output.data.get_generator()):
+            loaded_item = loaded_item.to_device()
 
             logging.info(
                 f"[{output.name}] Batch {i+1}/{total_batches}, "
@@ -128,7 +126,7 @@ class Downscaler:
             )
 
             output_data = model.generate_on_batch_no_target(
-                loaded_item.batch, topography=topography, n_samples=loaded_item.n_ens
+                loaded_item.batch, n_samples=loaded_item.n_ens
             )
             output_np = {key: value.cpu().numpy() for key, value in output_data.items()}
             insert_slices = loaded_item.dim_insert_slices
@@ -242,7 +240,7 @@ class InferenceConfig:
                 loader_config=self.data,
                 requirements=self.model.data_requirements,
                 patch=self.patch,
-                static_inputs_from_checkpoint=model.static_inputs,
+                downscale_factor=model.downscale_factor,
             )
             for output_cfg in self.outputs
         ]
