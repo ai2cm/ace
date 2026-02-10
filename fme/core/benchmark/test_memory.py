@@ -50,6 +50,7 @@ def test_larger_array_uses_larger_memory():
         (100, 103, 0.02, True),  # outside 2%
         (100, 102, 0.02, False),  # exactly 2% is considered inside
         (10000, 10201, 0.02, True),  # more than 2% is considered outside
+        (10201, 10000, 0.02, False),  # it's 2% of first value, so this is inside
         (100, 102, 0.03, False),  # exactly 2% is within 3%
     ],
 )
