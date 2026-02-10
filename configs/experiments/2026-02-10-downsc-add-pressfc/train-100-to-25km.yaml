@@ -86,7 +86,7 @@ train_data:
   #   stop:  16 #246.0
   strict_ensemble: false
 validation_data:
-  batch_size: 128
+  batch_size: 64
   num_data_workers: 4
   fine:
   - merge:
@@ -96,14 +96,14 @@ validation_data:
       subset:
         start_time: '2023-01-01T00:00:00'
         stop_time: '2024-01-01T00:00:00'
-        step: 59
+        step: 29
     - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
       file_pattern: instantaneous_surface_and_sea_level_pressure_25km.zarr
       engine: zarr
       subset:
         start_time: '2023-01-01T00:00:00'
         stop_time: '2024-01-01T00:00:00'
-        step: 59
+        step: 29
   coarse:
   - merge:
     - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -122,7 +122,7 @@ validation_data:
         step: 59
   lat_extent:
     start: -20.0
-    stop: 20.0  
+    stop: 20.0
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16

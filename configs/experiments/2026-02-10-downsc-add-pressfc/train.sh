@@ -16,14 +16,11 @@ wandb_group=""
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8 # TODO: change to 8 after testing
+N_GPUS=4 # TODO: change to 8 after testing
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-#PREVIOUS_RESULTS_DATASET="01JVWF4YGVNV0V2GBG927SC7XJ"
-#--dataset $PREVIOUS_RESULTS_DATASET:/previous_results \
-#IMAGE with B200 pytorch installed
-IMAGE=01JWJ96JMF89D812JS159VF37N
+IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 
 gantry run \
     --name $JOB_NAME \
