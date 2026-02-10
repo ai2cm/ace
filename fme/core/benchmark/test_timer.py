@@ -111,4 +111,5 @@ def test_assert_close_children_rtol_raises():
         avg_time=110.0,
         children={"child": TimerResult(count=2, avg_time=103.0, children={})},
     )
-    result2.assert_close(result1, rtol=0.5, children_rtol=0.2)
+    with pytest.raises(AssertionError):
+        result2.assert_close(result1, rtol=0.05, children_rtol=0.2)
