@@ -1,13 +1,35 @@
-from typing import Literal, NamedTuple
+import dataclasses
+from typing import Literal
 
 import torch
 
 _benchmark_memory_started = False
 
 
-class MemoryResult(NamedTuple):
+@dataclasses.dataclass
+class MemoryResult:
     max_alloc: int
     max_reserved: int
+
+    def assert_close(self, other: "MemoryResult", rtol=0.02) -> None:
+        if not torch.isclose(
+            torch.tensor(self.max_alloc, dtype=torch.float64),
+            torch.tensor(other.max_alloc, dtype=torch.float64),
+            rtol=rtol,
+        ):
+            raise AssertionError(
+                f"max_alloc differs: {self.max_alloc} vs "
+                f"{other.max_alloc} given rtol={rtol}"
+            )
+        if not torch.isclose(
+            torch.tensor(self.max_reserved, dtype=torch.float64),
+            torch.tensor(other.max_reserved, dtype=torch.float64),
+            rtol=rtol,
+        ):
+            raise AssertionError(
+                f"max_reserved differs: {self.max_reserved} vs "
+                f"{other.max_reserved} given rtol={rtol}"
+            )
 
 
 class MemoryBenchmark:

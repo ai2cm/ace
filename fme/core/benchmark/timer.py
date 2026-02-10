@@ -12,6 +12,31 @@ class TimerResult:
     avg_time: float
     children: dict[str, "TimerResult"]
 
+    def assert_close(self, other: "TimerResult", rtol=0.02, children_rtol=0.02) -> None:
+        if self.total_runs != other.total_runs:
+            raise AssertionError(
+                f"total_runs differ: {self.total_runs} vs {other.total_runs}"
+            )
+        if not torch.isclose(
+            torch.tensor(self.avg_time), torch.tensor(other.avg_time), rtol=rtol
+        ):
+            raise AssertionError(
+                f"avg_time differ: {self.avg_time} vs "
+                f"{other.avg_time} given rtol={rtol}"
+            )
+        if self.children.keys() != other.children.keys():
+            raise AssertionError(
+                f"children keys differ: {self.children.keys()} vs "
+                f"{other.children.keys()}"
+            )
+        for key in self.children.keys():
+            try:
+                self.children[key].assert_close(
+                    other.children[key], rtol=children_rtol, children_rtol=children_rtol
+                )
+            except AssertionError as e:
+                raise AssertionError(f"child '{key}' differ: {e}") from e
+
 
 class Timer(Protocol):
     def child(self, name: str) -> Self: ...

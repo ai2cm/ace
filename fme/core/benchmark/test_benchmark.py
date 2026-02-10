@@ -1,10 +1,12 @@
+import json
 import os
 
 import pytest
 import torch
 
 import fme  # to trigger registration of benchmarks
-from fme.core.benchmark.benchmark import BenchmarkABC, get_benchmarks
+from fme.core.benchmark.benchmark import BenchmarkABC, BenchmarkResult, get_benchmarks
+from fme.core.benchmark.run import get_benchmark_label
 from fme.core.testing.regression import validate_tensor_dict
 
 del fme
@@ -36,6 +38,24 @@ def test_benchmarks_are_not_empty():
 BENCHMARKS = get_benchmarks()
 
 
+def validate_benchmark_result(
+    x: BenchmarkResult, filename_root: str, name: str, **assert_close_kwargs
+):
+    json_filename = f"{filename_root}.json"
+    if not os.path.exists(json_filename):
+        with open(json_filename, "w") as f:
+            json.dump(x.asdict(), f, indent=4)
+        png_filename = f"{filename_root}.png"
+        label = get_benchmark_label(name)
+        x.to_png(png_filename, label=label)
+        pytest.fail(f"Regression file {json_filename} did not exist, so it was created")
+    else:
+        with open(json_filename) as f:
+            d = json.load(f)
+        y = BenchmarkResult.from_dict(d)
+        x.assert_close(y, **assert_close_kwargs)
+
+
 @pytest.mark.parametrize("benchmark_name", BENCHMARKS.keys())
 def test_regression(benchmark_name: str):
     benchmark_cls = BENCHMARKS[benchmark_name]
@@ -47,4 +67,17 @@ def test_regression(benchmark_name: str):
     validate_tensor_dict(
         regression_result,
         os.path.join(DIR, "testdata", f"{benchmark_name}-regression.pt"),
+    )
+
+
+@pytest.mark.parametrize("benchmark_name", BENCHMARKS.keys())
+def test_benchmark(benchmark_name: str):
+    benchmark_cls = BENCHMARKS[benchmark_name]
+    result = benchmark_cls.run_benchmark(iters=20, warmup=5)
+    validate_benchmark_result(
+        result,
+        os.path.join(DIR, "testdata", f"{benchmark_name}-benchmark"),
+        name=benchmark_name,
+        rtol=0.02,
+        children_rtol=0.05,  # looser tolerance on sub-timers
     )

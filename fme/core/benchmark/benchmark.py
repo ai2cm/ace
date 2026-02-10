@@ -4,6 +4,7 @@ import pathlib
 from collections.abc import Callable
 from typing import Self, TypeVar
 
+import dacite
 import matplotlib.pyplot as plt
 import torch
 
@@ -20,17 +21,36 @@ class BenchmarkResult:
     def __repr__(self) -> str:
         return f"BenchmarkResult(memory={self.memory}, timer={self.timer})"
 
+    def asdict(self) -> dict:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BenchmarkResult":
+        return dacite.from_dict(cls, d, config=dacite.Config(strict=True))
+
+    def assert_close(
+        self, other: "BenchmarkResult", rtol=0.02, children_rtol=0.02
+    ) -> None:
+        try:
+            self.timer.assert_close(other.timer, rtol=rtol, children_rtol=children_rtol)
+        except AssertionError as e:
+            raise AssertionError(f"Timer results differ: {e}") from e
+        try:
+            self.memory.assert_close(other.memory, rtol=rtol)
+        except AssertionError as e:
+            raise AssertionError(f"Memory results differ: {e}") from e
+
     def to_png(
         self, path: str | pathlib.Path, label: str, child: str | None = None
     ) -> None:
         # note this function was generated with AI
-        def total_time(t: TimerResult) -> float:
-            return float(t.avg_time) * float(t.total_runs)
+        def avg_time(t: TimerResult) -> float:
+            return float(t.avg_time)
 
         def self_time(t: TimerResult) -> float:
-            t_total = total_time(t)
-            c_total = sum(total_time(c) for c in t.children.values())
-            return max(t_total - c_total, 0.0)
+            t_avg = avg_time(t)
+            c_avg = sum(avg_time(c) for c in t.children.values())
+            return max(t_avg - c_avg, 0.0)
 
         def fmt_time(ms: float) -> str:
             if ms >= 1000.0:
@@ -46,7 +66,7 @@ class BenchmarkResult:
 
         def sorted_children(t: TimerResult) -> list[tuple[str, TimerResult]]:
             return sorted(
-                t.children.items(), key=lambda kv: total_time(kv[1]), reverse=True
+                t.children.items(), key=lambda kv: avg_time(kv[1]), reverse=True
             )
 
         def blend_with_white(
@@ -65,12 +85,12 @@ class BenchmarkResult:
                 if part not in root.children:
                     raise ValueError(f"Child '{child}' not found in timer results.")
                 root = root.children[part]
-        root_total = total_time(root)
+        root_avg = avg_time(root)
 
         max_alloc_mb = self.memory.max_alloc / (1024.0 * 1024.0)
 
         fig = plt.figure(figsize=(8, 6), constrained_layout=True)
-        if root_total <= 0.0:
+        if root_avg <= 0.0:
             fig.suptitle(
                 f"Benchmark for {label}\ntotal=0.00s, max_alloc={max_alloc_mb:.1f} MB",
                 fontsize=14,
@@ -83,17 +103,17 @@ class BenchmarkResult:
             return
 
         fig.suptitle(
-            f"Benchmark for {label}\ntotal={fmt_time(root_total)}, "
+            f"Benchmark for {label}\ntotal={fmt_time(root_avg)}, "
             f"max_alloc={max_alloc_mb:.1f} MB",
             fontsize=14,
         )
 
         ax = fig.add_subplot(1, 1, 1)
         ax.set_xlim(0, 2)
-        ax.set_ylim(0, root_total)
+        ax.set_ylim(0, root_avg)
         ax.set_xticks([0.5, 1.5])
         ax.set_xticklabels(["Level 1", "Level 2"])
-        ax.set_ylabel("Total time")
+        ax.set_ylabel("Avg time")
         ax.set_yticks([])
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -109,7 +129,7 @@ class BenchmarkResult:
         lvl1_segments: list[tuple[str, float, tuple[float, float, float, float]]] = []
         for n1, t1 in lvl1:
             base = cmap(lvl1_index[n1] % cmap.N)
-            lvl1_segments.append((n1, total_time(t1), base))
+            lvl1_segments.append((n1, avg_time(t1), base))
         r_self = self_time(root)
         if r_self > 0.0:
             lvl1_segments.append(("", r_self, gray))
@@ -133,7 +153,7 @@ class BenchmarkResult:
                     edgecolor="white",
                     linewidth=1.0,
                 )
-                frac = sec / root_total
+                frac = sec / root_avg
                 if label_ok(name, sec, frac):
                     ax.text(
                         x_center,
@@ -146,10 +166,10 @@ class BenchmarkResult:
                         clip_on=True,
                     )
                 y += sec
-            if y < root_total:
+            if y < root_avg:
                 ax.bar(
                     x_center,
-                    root_total - y,
+                    root_avg - y,
                     bottom=y,
                     width=width,
                     align="center",
@@ -175,9 +195,7 @@ class BenchmarkResult:
                 # First child is closest to parent; later children are lighter.
                 lighten = 0.10 + (0.55 * (i / max(k - 1, 1)))
                 rgb = blend_with_white(parent_rgb, lighten)
-                lvl2_segments.append(
-                    (n2, total_time(t2), (rgb[0], rgb[1], rgb[2], 1.0))
-                )
+                lvl2_segments.append((n2, avg_time(t2), (rgb[0], rgb[1], rgb[2], 1.0)))
 
             s1 = self_time(t1)
             if s1 > 0.0:

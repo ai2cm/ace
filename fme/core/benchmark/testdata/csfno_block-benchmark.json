@@ -1,0 +1,95 @@
+{
+    "memory": {
+        "max_alloc": 4503010304,
+        "max_reserved": 5408555008
+    },
+    "timer": {
+        "total_runs": 20,
+        "avg_time": 348.38758850097656,
+        "children": {
+            "norm0": {
+                "total_runs": 20,
+                "avg_time": 40.18562126159668,
+                "children": {
+                    "compute_scaling_and_bias": {
+                        "total_runs": 20,
+                        "avg_time": 22.71953125,
+                        "children": {}
+                    },
+                    "normalize": {
+                        "total_runs": 20,
+                        "avg_time": 6.488763213157654,
+                        "children": {}
+                    },
+                    "apply_scaling_and_bias": {
+                        "total_runs": 20,
+                        "avg_time": 6.465991997718811,
+                        "children": {}
+                    }
+                }
+            },
+            "filter": {
+                "total_runs": 20,
+                "avg_time": 177.78052139282227,
+                "children": {
+                    "forward_transform": {
+                        "total_runs": 20,
+                        "avg_time": 57.807065391540526,
+                        "children": {}
+                    },
+                    "dhconv": {
+                        "total_runs": 20,
+                        "avg_time": 63.70498561859131,
+                        "children": {}
+                    },
+                    "inverse_transform": {
+                        "total_runs": 20,
+                        "avg_time": 54.06139698028564,
+                        "children": {}
+                    },
+                    "add_bias": {
+                        "total_runs": 20,
+                        "avg_time": 2.1950639963150023,
+                        "children": {}
+                    }
+                }
+            },
+            "inner_skip": {
+                "total_runs": 20,
+                "avg_time": 17.283601570129395,
+                "children": {}
+            },
+            "activation": {
+                "total_runs": 20,
+                "avg_time": 2.2509984374046326,
+                "children": {}
+            },
+            "norm1": {
+                "total_runs": 20,
+                "avg_time": 39.386068725585936,
+                "children": {
+                    "compute_scaling_and_bias": {
+                        "total_runs": 20,
+                        "avg_time": 21.905953788757323,
+                        "children": {}
+                    },
+                    "normalize": {
+                        "total_runs": 20,
+                        "avg_time": 6.469172859191895,
+                        "children": {}
+                    },
+                    "apply_scaling_and_bias": {
+                        "total_runs": 20,
+                        "avg_time": 6.498768067359924,
+                        "children": {}
+                    }
+                }
+            },
+            "mlp": {
+                "total_runs": 20,
+                "avg_time": 71.47947769165039,
+                "children": {}
+            }
+        }
+    }
+}

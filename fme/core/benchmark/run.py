@@ -61,6 +61,14 @@ def main(names: list[str] | None, iters: int, child: str | None = None) -> None:
         print(f"  Result: {result}")
 
 
+def get_benchmark_label(name):
+    if torch.cuda.is_available():
+        device_name = torch.cuda.get_device_properties(0).name
+    else:
+        device_name = "CPU"
+    return f"{name} on {device_name} at commit {get_git_commit()}"
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run registered benchmarks.")
     parser.add_argument(

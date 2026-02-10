@@ -336,8 +336,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             with timer.child("mlp"):
                 x = self.mlp(x)
 
-        with timer.child("drop_path"):
-            x = self.drop_path(x)
+        x = self.drop_path(x)
 
         if hasattr(self, "outer_skip"):
             with timer.child("outer_skip"):
