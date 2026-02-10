@@ -5,7 +5,9 @@ from torch.utils.data import DataLoader, Dataset, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.dataset.concat import XarrayConcat, get_dataset
+from fme.core.dataset.concat import ConcatDatasetConfig, XarrayConcat, get_dataset
+from fme.core.dataset.dataset import DatasetABC
+from fme.core.dataset.merged import MergeDatasetConfig, get_merged_datasets
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
@@ -316,9 +318,10 @@ class PairedDataLoaderConfig:
     coordinates, and that the scale factors are equal.
 
     Args:
-        fine: The fine dataset configuration.
-        coarse: The coarse dataset configuration. XarrayEnsembleDataConfig
-            is supported to load multiple ensemble members.
+        fine: The fine dataset configuration. May be a sequence of
+            XarrayDataConfig or MergeDatasetConfig.
+        coarse: The coarse dataset configuration. May be a sequence of
+            XarrayDataConfig, XarrayEnsembleDataConfig, or MergeDatasetConfig.
         batch_size: The batch size to use for the dataloader.
         num_data_workers: The number of data workers to use for the dataloader.
             (For multi-GPU runtime, it's the number of workers per GPU.)
@@ -346,8 +349,8 @@ class PairedDataLoaderConfig:
             If false, pad with extra samples to make ranks have the same size batches.
     """
 
-    fine: Sequence[XarrayDataConfig]
-    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
+    fine: Sequence[XarrayDataConfig | MergeDatasetConfig]
+    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig | MergeDatasetConfig]
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
@@ -365,6 +368,57 @@ class PairedDataLoaderConfig:
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
 
+    def _build_from_config_sequence(
+        self,
+        configs: Sequence[
+            XarrayDataConfig | XarrayEnsembleDataConfig | MergeDatasetConfig
+        ],
+        names: Sequence[str],
+        n_timesteps: IntSchedule,
+    ) -> tuple[XarrayConcat, DatasetProperties]:
+        """Build XarrayConcat and properties from a mix of xarray and merge configs."""
+        expanded: list[XarrayDataConfig | MergeDatasetConfig] = []
+        for c in configs:
+            if isinstance(c, XarrayEnsembleDataConfig):
+                expanded.extend(c.expand())
+            else:
+                expanded.append(c)
+        xarray_configs = [c for c in expanded if isinstance(c, XarrayDataConfig)]
+        merge_configs = [c for c in expanded if isinstance(c, MergeDatasetConfig)]
+        datasets: list[DatasetABC] = []
+        properties: DatasetProperties | None = None
+        if xarray_configs:
+            ds, prop = get_dataset(
+                xarray_configs,
+                names,
+                n_timesteps,
+                strict=self.strict_ensemble,
+            )
+            datasets.append(ds)
+            properties = prop
+        for c in merge_configs:
+            merged_ds, prop = get_merged_datasets(c, names, n_timesteps)
+            datasets.append(merged_ds)
+            if properties is None:
+                properties = prop
+            else:
+                properties.update(prop, strict=self.strict_ensemble)
+        if properties is None:
+            raise ValueError("At least one dataset must be provided.")
+        return XarrayConcat(datasets, strict=self.strict_ensemble), properties
+
+    def _first_data_config(
+        self,
+        config: XarrayDataConfig | MergeDatasetConfig,
+    ) -> XarrayDataConfig:
+        """Return the first XarrayDataConfig for data_path/file_pattern lookup."""
+        if isinstance(config, XarrayDataConfig):
+            return config
+        first = config.merge[0]
+        if isinstance(first, ConcatDatasetConfig):
+            return first.concat[0]
+        return first
+
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
 
@@ -373,21 +427,35 @@ class PairedDataLoaderConfig:
         if self.num_data_workers == 0:
             return None
         for config in self.fine:
-            if config.engine == "zarr":
+            if getattr(config, "engine", None) == "zarr" or getattr(
+                config, "zarr_engine_used", False
+            ):
                 mp_context = "forkserver"
-        for config in self.coarse_full_config:
-            if config.engine == "zarr":
-                mp_context = "forkserver"
+                break
+        if mp_context is None:
+            for coarse_config in self.coarse:
+                if isinstance(coarse_config, XarrayEnsembleDataConfig):
+                    if coarse_config.data_config.engine == "zarr":
+                        mp_context = "forkserver"
+                        break
+                elif getattr(coarse_config, "engine", None) == "zarr" or getattr(
+                    coarse_config, "zarr_engine_used", False
+                ):
+                    mp_context = "forkserver"
+                    break
         return mp_context
 
     @property
-    def coarse_full_config(self) -> Sequence[XarrayDataConfig]:
-        # Expands the coarse dataset configs so that any XarrayEnsembleDataConfig
-        # is converted to the equivalent sequence of XarrayDataConfig.
-        coarse_configs = []
+    def coarse_full_config(
+        self,
+    ) -> Sequence[XarrayDataConfig | MergeDatasetConfig]:
+        """Expands XarrayEnsembleDataConfig to XarrayDataConfig;
+        other configs unchanged.
+        """
+        coarse_configs: list[XarrayDataConfig | MergeDatasetConfig] = []
         for config in self.coarse:
             if isinstance(config, XarrayEnsembleDataConfig):
-                coarse_configs += config.expand()
+                coarse_configs.extend(config.expand())
             else:
                 coarse_configs.append(config)
         return coarse_configs
@@ -409,18 +477,17 @@ class PairedDataLoaderConfig:
             dist = Distributed.get_instance()
 
         # Load initial datasets
-        dataset_fine, properties_fine = get_dataset(
+        n_timesteps = IntSchedule.from_constant(requirements.n_timesteps)
+        dataset_fine, properties_fine = self._build_from_config_sequence(
             self.fine,
             requirements.fine_names,
-            IntSchedule.from_constant(requirements.n_timesteps),
-            strict=self.strict_ensemble,
+            n_timesteps,
         )
 
-        dataset_coarse, properties_coarse = get_dataset(
-            self.coarse_full_config,
+        dataset_coarse, properties_coarse = self._build_from_config_sequence(
+            self.coarse,
             requirements.coarse_names,
-            IntSchedule.from_constant(requirements.n_timesteps),
-            strict=self.strict_ensemble,
+            n_timesteps,
         )
 
         # Ensure that bounds for subselecting on latlon grids return fine grid data
@@ -462,12 +529,14 @@ class PairedDataLoaderConfig:
                 # TODO: change to use full static inputs list
                 fine_topography = static_inputs_from_checkpoint[0]
             elif self.topography is None:
-                data_path = self.fine[0].data_path
-                file_pattern = self.fine[0].file_pattern
-                raw_paths = get_raw_paths(data_path, file_pattern)
+                first_config = self._first_data_config(self.fine[0])
+                raw_paths = get_raw_paths(
+                    first_config.data_path, first_config.file_pattern
+                )
                 if len(raw_paths) == 0:
                     raise ValueError(
-                        f"No files found matching '{data_path}/{file_pattern}'."
+                        f"No files found matching "
+                        f"'{first_config.data_path}/{first_config.file_pattern}'."
                     )
                 fine_topography = get_normalized_topography(raw_paths[0])
             else:
