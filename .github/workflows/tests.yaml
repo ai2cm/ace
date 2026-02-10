@@ -71,6 +71,10 @@ jobs:
         with:
           path: ${{ env.pythonLocation }}
           key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('requirements-healpix.txt') }}-${{ hashFiles('constraints.txt') }}
+      - uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ env.CURRENT_WEEK }}-.venv-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('requirements-healpix.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
