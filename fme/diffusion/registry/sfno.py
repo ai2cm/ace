@@ -1,8 +1,11 @@
 import dataclasses
 from typing import Literal
 
-from fme.core.models.conditional_sfno.sfnonet import ContextConfig, get_lat_lon_sfnonet
-from fme.core.models.conditional_sfno.sfnonet import (
+from fme.core.models.conditional_sfno_v1.sfnonet import (
+    ContextConfig,
+    get_lat_lon_sfnonet,
+)
+from fme.core.models.conditional_sfno_v1.sfnonet import (
     SphericalFourierNeuralOperatorNet as ConditionalSFNO,
 )
 

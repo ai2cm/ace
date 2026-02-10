@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from fme.core.models.conditional_sfno.lora import LoRAConv2d
+from fme.core.models.conditional_sfno_v0.lora import LoRAConv2d
 
 
 def test_lora_conv2d_load_conv2d_checkpoint():

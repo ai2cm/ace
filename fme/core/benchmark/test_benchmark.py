@@ -21,9 +21,9 @@ def test_run_benchmark():
     benchmark = BenchmarkABC.new_from_fn(benchmark_fn)
 
     first_result = benchmark.run_benchmark(iters=15, warmup=1)
-    assert first_result.timer.total_runs == 15
+    assert first_result.timer.count == 15
     second_result = benchmark.run_benchmark(iters=20, warmup=1)
-    assert second_result.timer.total_runs == 20
+    assert second_result.timer.count == 20
     torch.testing.assert_close(
         first_result.timer.avg_time, second_result.timer.avg_time, rtol=0.2, atol=0
     )

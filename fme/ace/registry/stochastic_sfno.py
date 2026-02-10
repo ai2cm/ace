@@ -7,12 +7,12 @@ import torch
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
-from fme.core.models.conditional_sfno.sfnonet import (
+from fme.core.models.conditional_sfno_v0.sfnonet import (
     Context,
     ContextConfig,
     get_lat_lon_sfnonet,
 )
-from fme.core.models.conditional_sfno.sfnonet import (
+from fme.core.models.conditional_sfno_v0.sfnonet import (
     SphericalFourierNeuralOperatorNet as ConditionalSFNO,
 )
 

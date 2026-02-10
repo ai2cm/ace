@@ -34,7 +34,7 @@ from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
-from fme.core.models.conditional_sfno.layers import Context
+from fme.core.models.conditional_sfno_v0.layers import Context
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
