@@ -328,7 +328,7 @@ class LocalConvS2(nn.Module):
                 scale * torch.randn(1, out_channels, *self.output_dims)
             )
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         x = x.float()
         B, C, H, W = x.shape
@@ -511,7 +511,7 @@ class SpectralAttentionS2(nn.Module):
 
         return x
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         residual = x
         x = x.to(torch.float32)
@@ -634,7 +634,7 @@ class RealSpectralAttentionS2(nn.Module):
 
         return x
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         x = x.to(torch.float32)
 

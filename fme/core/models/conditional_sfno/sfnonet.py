@@ -64,7 +64,7 @@ class DiscreteContinuousConvS2(nn.Module):
         super().__init__()
         self.conv = th.DiscreteContinuousConvS2(*args, **kwargs)
 
-    def forward(self, x):
+    def forward(self, x, timer: Timer = NullTimer()):
         return self.conv(x), x
 
 
