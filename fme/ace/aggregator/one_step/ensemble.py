@@ -84,7 +84,7 @@ class EnsembleMeanRMSEMetric(ReducedMetric):
 
     def record(self, target: torch.Tensor, gen: torch.Tensor):
         ensemble_mean = gen.mean(dim=1, keepdim=True)  # mean over ensemble dimension
-        rmse = ((ensemble_mean - target) ** 2).mean(dim=(0, 1, 2))  # batch, 1, time
+        rmse = ((ensemble_mean - target) ** 2).mean(dim=(0, 1, 2)).sqrt()
         if self._total_rmse is None:
             self._total_rmse = rmse
         else:
