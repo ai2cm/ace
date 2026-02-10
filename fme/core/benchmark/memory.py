@@ -34,7 +34,6 @@ class MemoryResult:
 
 class MemoryBenchmark:
     def __init__(self):
-        self._started = False
         self._ended = False
 
     def __enter__(self) -> "MemoryBenchmark":
@@ -43,25 +42,26 @@ class MemoryBenchmark:
             raise RuntimeError(
                 "benchmark_memory cannot be nested due to its use of globals"
             )
-        _benchmark_memory_started = True
-        if self._started:
-            raise RuntimeError(
-                "MemoryBenchmark cannot be nested due to its use of globals"
-            )
-        if self._ended:
-            raise RuntimeError("MemoryBenchmark cannot be reused after it has ended.")
-        self._started = True
-        torch.cuda.synchronize()
-        torch.cuda.reset_peak_memory_stats()
-        self._max_alloc = 0
-        self._max_reserved = 0
+        try:
+            if self._ended:
+                raise RuntimeError(
+                    "MemoryBenchmark cannot be reused after it has ended."
+                )
+            _benchmark_memory_started = True
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+            self._max_alloc = 0
+            self._max_reserved = 0
+        except Exception as e:
+            # Reset the global state if an exception occurs
+            _benchmark_memory_started = False
+            raise e
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
         torch.cuda.synchronize()
         global _benchmark_memory_started
         _benchmark_memory_started = False
-        self._started = False
         self._ended = True
         self._max_alloc = torch.cuda.max_memory_allocated()
         self._max_reserved = torch.cuda.max_memory_reserved()
@@ -69,7 +69,7 @@ class MemoryBenchmark:
 
     @property
     def result(self) -> MemoryResult:
-        if self._started:
+        if _benchmark_memory_started:
             raise RuntimeError(
                 "MemoryBenchmark is still running. "
                 "Please exit the context before getting results."
