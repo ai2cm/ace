@@ -22,12 +22,16 @@ def get_git_commit() -> str:
     return _GIT_COMMIT
 
 
+def get_device_name() -> str:
+    if torch.cuda.is_available():
+        return torch.cuda.get_device_properties(0).name
+    else:
+        return "CPU"
+
+
 def main(names: list[str] | None, iters: int, child: str | None = None) -> None:
     RESULTS_PATH.mkdir(exist_ok=True)
-    if torch.cuda.is_available():
-        device_name = torch.cuda.get_device_properties(0).name
-    else:
-        device_name = "CPU"
+    device_name = get_device_name()
 
     print(f"Running benchmarks on device: {device_name}")
     benchmarks = get_benchmarks()
@@ -62,10 +66,7 @@ def main(names: list[str] | None, iters: int, child: str | None = None) -> None:
 
 
 def get_benchmark_label(name):
-    if torch.cuda.is_available():
-        device_name = torch.cuda.get_device_properties(0).name
-    else:
-        device_name = "CPU"
+    device_name = get_device_name()
     return f"{name} on {device_name} at commit {get_git_commit()}"
 
 

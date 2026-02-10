@@ -1,93 +1,93 @@
 {
     "memory": {
-        "max_alloc": 4503010304,
+        "max_alloc": 4221467648,
         "max_reserved": 5408555008
     },
     "timer": {
         "total_runs": 20,
-        "avg_time": 348.38758850097656,
+        "avg_time": 303.2896362304688,
         "children": {
             "norm0": {
                 "total_runs": 20,
-                "avg_time": 40.18562126159668,
+                "avg_time": 40.277296447753905,
                 "children": {
                     "compute_scaling_and_bias": {
                         "total_runs": 20,
-                        "avg_time": 22.71953125,
+                        "avg_time": 22.8371280670166,
                         "children": {}
                     },
                     "normalize": {
                         "total_runs": 20,
-                        "avg_time": 6.488763213157654,
+                        "avg_time": 6.474422407150269,
                         "children": {}
                     },
                     "apply_scaling_and_bias": {
                         "total_runs": 20,
-                        "avg_time": 6.465991997718811,
+                        "avg_time": 6.457521557807922,
                         "children": {}
                     }
                 }
             },
             "filter": {
                 "total_runs": 20,
-                "avg_time": 177.78052139282227,
+                "avg_time": 131.42147903442384,
                 "children": {
                     "forward_transform": {
                         "total_runs": 20,
-                        "avg_time": 57.807065391540526,
+                        "avg_time": 57.8722318649292,
                         "children": {}
                     },
                     "dhconv": {
                         "total_runs": 20,
-                        "avg_time": 63.70498561859131,
+                        "avg_time": 17.979475116729738,
                         "children": {}
                     },
                     "inverse_transform": {
                         "total_runs": 20,
-                        "avg_time": 54.06139698028564,
+                        "avg_time": 53.35887336730957,
                         "children": {}
                     },
                     "add_bias": {
                         "total_runs": 20,
-                        "avg_time": 2.1950639963150023,
+                        "avg_time": 2.1993008136749266,
                         "children": {}
                     }
                 }
             },
             "inner_skip": {
                 "total_runs": 20,
-                "avg_time": 17.283601570129395,
+                "avg_time": 17.290244483947752,
                 "children": {}
             },
             "activation": {
                 "total_runs": 20,
-                "avg_time": 2.2509984374046326,
+                "avg_time": 2.2486671924591066,
                 "children": {}
             },
             "norm1": {
                 "total_runs": 20,
-                "avg_time": 39.386068725585936,
+                "avg_time": 39.56943225860596,
                 "children": {
                     "compute_scaling_and_bias": {
                         "total_runs": 20,
-                        "avg_time": 21.905953788757323,
+                        "avg_time": 22.051700592041016,
                         "children": {}
                     },
                     "normalize": {
                         "total_runs": 20,
-                        "avg_time": 6.469172859191895,
+                        "avg_time": 6.472691226005554,
                         "children": {}
                     },
                     "apply_scaling_and_bias": {
                         "total_runs": 20,
-                        "avg_time": 6.498768067359924,
+                        "avg_time": 6.534172797203064,
                         "children": {}
                     }
                 }
             },
             "mlp": {
                 "total_runs": 20,
-                "avg_time": 71.47947769165039,
+                "avg_time": 72.46284484863281,
                 "children": {}
             }
         }

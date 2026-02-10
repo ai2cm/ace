@@ -6,7 +6,7 @@ import torch
 
 import fme  # to trigger registration of benchmarks
 from fme.core.benchmark.benchmark import BenchmarkABC, BenchmarkResult, get_benchmarks
-from fme.core.benchmark.run import get_benchmark_label
+from fme.core.benchmark.run import get_benchmark_label, get_device_name
 from fme.core.testing.regression import validate_tensor_dict
 
 del fme
@@ -41,11 +41,12 @@ BENCHMARKS = get_benchmarks()
 def validate_benchmark_result(
     x: BenchmarkResult, filename_root: str, name: str, **assert_close_kwargs
 ):
-    json_filename = f"{filename_root}.json"
+    device_name = get_device_name().replace(" ", "_").replace("/", "_").lower()
+    json_filename = f"{filename_root}-{device_name}.json"
     if not os.path.exists(json_filename):
         with open(json_filename, "w") as f:
             json.dump(x.asdict(), f, indent=4)
-        png_filename = f"{filename_root}.png"
+        png_filename = f"{filename_root}-{device_name}.png"
         label = get_benchmark_label(name)
         x.to_png(png_filename, label=label)
         pytest.fail(f"Regression file {json_filename} did not exist, so it was created")
@@ -70,6 +71,7 @@ def test_regression(benchmark_name: str):
     )
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 @pytest.mark.parametrize("benchmark_name", BENCHMARKS.keys())
 def test_benchmark(benchmark_name: str):
     benchmark_cls = BENCHMARKS[benchmark_name]
