@@ -87,3 +87,52 @@ jobs:
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
             python3 fme/require_gpu.py
             make test
+  gpu-benchmark:
+    if: github.ref_name != 'main' && !contains(github.event.head_commit.message || '', '[auto-bench]')
+    # These steps run on our self-hosted k8s GPU runners. See below for setup notes
+    # https://github.com/ai2cm/long-lived-infrastructure#installing-the-github-actions-runner-controller
+    runs-on: arc-runner-set
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Set up git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Set environment variables
+        run: |
+          echo "CURRENT_WEEK=$(date +'%Y-%U')" >> $GITHUB_ENV
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.pythonLocation }}
+          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('requirements-healpix.txt') }}-${{ hashFiles('constraints.txt') }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make git build-essential
+          python -m pip install uv
+          # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
+          uv venv --python 3.11
+          uv pip install -c constraints.txt -e .[dev]
+          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
+      - name: Run benchmarks
+        run: |
+            source .venv/bin/activate
+            export PATH=/usr/local/nvidia/bin:${PATH}
+            export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+            python3 fme/core/benchmark/update_benchmarks.py
+      - name: Commit and push if changed
+        run: |
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "chore: auto-update generated files [auto-bench]"
+            git push
+            exit 1  # fail the job
+          else
+            echo "No changes"
+          fi
