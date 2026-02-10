@@ -54,7 +54,7 @@ from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
 )
-from fme.coupled.typing_ import CoupledTensorDict
+from fme.coupled.typing_ import CoupledTensorMapping
 
 
 @dataclasses.dataclass
@@ -760,8 +760,8 @@ class CoupledStepperTrainLoss:
         }
 
     @property
-    def effective_loss_scaling(self) -> CoupledTensorDict:
-        return CoupledTensorDict(
+    def effective_loss_scaling(self) -> CoupledTensorMapping:
+        return CoupledTensorMapping(
             ocean=self._loss_objs["ocean"].effective_loss_scaling,
             atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
         )
@@ -1438,7 +1438,7 @@ class CoupledTrainStepper(
         return self._stepper.atmosphere
 
     @property
-    def effective_loss_scaling(self) -> CoupledTensorDict:
+    def effective_loss_scaling(self) -> CoupledTensorMapping:
         return self._loss.effective_loss_scaling
 
     @property

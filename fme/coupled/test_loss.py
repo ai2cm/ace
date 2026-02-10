@@ -63,7 +63,7 @@ class _StepLoss(StepLossABC):
 
     @property
     def effective_loss_scaling(self):
-        raise NotImplementedError
+        raise NotImplementedError()
 
     def step_is_optimized(self, step: int) -> bool:
         return step < 2
@@ -159,7 +159,7 @@ def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
     # test LossContributionsConfig with n_steps = 0
     atmos_loss_config = LossContributionsConfig()
     atmosphere_loss = atmos_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, side_effect=lambda *_, **__: torch.tensor(5.25)),
+        loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(5.25)),
         time_dim=1,
     )
     ocean_loss_config = LossContributionsConfig(**ocean_config_kwargs)

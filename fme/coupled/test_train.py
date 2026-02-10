@@ -66,6 +66,17 @@ optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: Adam
+train_stepper:
+  ocean:
+    loss:
+      type: MSE
+    loss_contributions:
+      weight: {loss_ocean_weight}
+  atmosphere:
+    loss:
+      type: MSE
+    loss_contributions:
+      n_steps: {loss_atmos_n_steps}
 stepper:
   sst_name: {ocean_sfc_temp_name}
   ocean_fraction_prediction:
@@ -75,8 +86,6 @@ stepper:
   ocean:
     timedelta: 2D
     stepper:
-      loss:
-        type: MSE
       input_masking:
         mask_value: 0
         fill_value: 0.0
@@ -108,8 +117,6 @@ stepper:
   atmosphere:
     timedelta: 1D
     stepper:
-      loss:
-        type: MSE
       step:
         type: single_module
         config:
@@ -131,17 +138,6 @@ stepper:
             type: "atmosphere_corrector"
             config:
               conserve_dry_air: true
-train_stepper:
-  ocean:
-    loss:
-      type: MSE
-    loss_contributions:
-      weight: {loss_ocean_weight}
-  atmosphere:
-    loss:
-      type: MSE
-    loss_contributions:
-      n_steps: {loss_atmos_n_steps}
 """
 
 _INFERENCE_CONFIG_TEMPLATE = """
