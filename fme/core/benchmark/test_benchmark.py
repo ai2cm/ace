@@ -7,6 +7,7 @@ import torch
 import fme  # to trigger registration of benchmarks
 from fme.core.benchmark.benchmark import BenchmarkABC, BenchmarkResult, get_benchmarks
 from fme.core.benchmark.run import get_benchmark_label, get_device_name
+from fme.core.rand import set_seed
 from fme.core.testing.regression import validate_tensor_dict
 
 del fme
@@ -61,6 +62,7 @@ def validate_benchmark_result(
 @pytest.mark.parametrize("benchmark_name", BENCHMARKS.keys())
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_regression(benchmark_name: str):
+    set_seed(0)
     benchmark_cls = BENCHMARKS[benchmark_name]
     regression_result = benchmark_cls.run_regression()
     if regression_result is None:
@@ -76,6 +78,7 @@ def test_regression(benchmark_name: str):
 @pytest.mark.parametrize("benchmark_name", BENCHMARKS.keys())
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_benchmark(benchmark_name: str):
+    set_seed(0)
     benchmark_cls = BENCHMARKS[benchmark_name]
     result = benchmark_cls.run_benchmark(iters=10, warmup=5)
     validate_benchmark_result(
