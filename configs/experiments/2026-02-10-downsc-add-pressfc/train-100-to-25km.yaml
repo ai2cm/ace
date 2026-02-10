@@ -47,8 +47,8 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 160
-  batch_size: 256
+  sample_with_replacement: 320
+  batch_size: 160
   num_data_workers: 2
   fine:
   - merge:
