@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from fme.core.benchmark.memory import benchmark_memory
+from fme.core.benchmark.memory import MemoryResult, benchmark_memory
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
@@ -27,3 +27,30 @@ def test_larger_array_uses_larger_memory():
         _ = torch.randn(200, 200, device="cuda")
 
     assert bm2.result.max_alloc > bm1.result.max_alloc
+
+
+@pytest.mark.parametrize(
+    "v1, v2, rtol, expect_raise",
+    [
+        (100, 101, 0.02, False),  # within 2%
+        (100, 103, 0.02, True),  # outside 2%
+        (100, 102, 0.02, False),  # exactly 2% is considered inside
+        (10000, 10201, 0.02, True),  # more than 2% is considered outside
+        (100, 102, 0.03, False),  # exactly 2% is within 3%
+    ],
+)
+@pytest.mark.parametrize("reserved", [False, True])
+def test_assert_close(
+    v1: int, v2: int, rtol: float, reserved: bool, expect_raise: bool
+):
+    if reserved:
+        result1 = MemoryResult(max_alloc=0, max_reserved=v1)
+        result2 = MemoryResult(max_alloc=0, max_reserved=v2)
+    else:
+        result1 = MemoryResult(max_alloc=v1, max_reserved=0)
+        result2 = MemoryResult(max_alloc=v2, max_reserved=0)
+    if expect_raise:
+        with pytest.raises(AssertionError):
+            result2.assert_close(result1, rtol=rtol)
+    else:
+        result2.assert_close(result1, rtol=rtol)
