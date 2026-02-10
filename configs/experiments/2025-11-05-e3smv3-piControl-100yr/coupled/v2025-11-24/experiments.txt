@@ -28,5 +28,3 @@ ft_fto-v1124-phuetnpl-rv0ike6m||01KG2SZMN4S170VE28DE86WGQ5|done|best_inference_c
 fto-v1124-phuetnpl-rv0ike6m-0421-0461||01KG08VYB96RT8NEF9ZCR39V2R|done|best_inference_ckpt|high|--not-preemptible
 
 ft_fto-v1124-phuetnpl-rv0ike6m-0421-0461||01KG2SZMN4S170VE28DE86WGQ5|done|best_inference_ckpt|high|--not-preemptible
-
-ft_fto-v1124-phuetnpl-rv0ike6m-q0-mean-downweighted||01KH28PCS0W39RNMJPJEBTXBH1|run_ICx1-40yr|best_inference_ckpt|high|--not-preemptible||01KH2N62NESNM9509299BR3XBM
