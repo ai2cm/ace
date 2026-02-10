@@ -32,8 +32,8 @@ class NonDistributed(DistributedBackend):
         """Total number of processes."""
         return 1
 
-    def get_local_slices(self, crop_shape):
-        return tuple(slice(None, None) for _ in crop_shape)
+    def get_local_slices(self, tensor_shape):
+        return tuple(slice(None, None) for _ in tensor_shape)
 
     def get_local_rank(self):
         return 0
