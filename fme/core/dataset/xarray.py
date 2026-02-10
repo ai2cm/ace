@@ -19,7 +19,6 @@ import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
-from fme.core.distributed import Distributed
 from fme.core.coordinates import (
     DepthCoordinate,
     HorizontalCoordinates,
@@ -31,6 +30,7 @@ from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
+from fme.core.distributed import Distributed
 from fme.core.mask_provider import MaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
@@ -44,7 +44,6 @@ from .utils import (
     load_series_data,
     load_series_data_zarr_async,
 )
-
 
 SLICE_NONE = slice(None)
 GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD = 12
@@ -825,7 +824,16 @@ class XarrayDataset(DatasetABC):
         output_file_idx, output_local_idx = _get_file_local_index(
             time_slice.stop - 1, self.start_indices
         )
-
+        if self._dist.spatial_parallelism:
+            local_spatial_slices = self._dist.get_local_slices(
+                self._shape_excluding_time_after_selection
+            )
+            local_shape = []
+            for sl in local_spatial_slices:
+                local_shape.append(sl.stop - sl.start)
+        else:
+            local_spatial_slices = None
+            local_shape = self._shape_excluding_time_after_selection
         # get the sequence of observations
         arrays: dict[str, list[torch.Tensor]] = {}
         idxs = range(input_file_idx, output_file_idx + 1)
@@ -840,7 +848,7 @@ class XarrayDataset(DatasetABC):
                 )
 
             n_steps = stop - start + 1
-            shape = [n_steps] + self._shape_excluding_time_after_selection
+            shape = [n_steps] + local_shape
             total_steps += n_steps
             if self.engine == "zarr":
                 tensor_dict = load_series_data_zarr_async(
@@ -852,6 +860,7 @@ class XarrayDataset(DatasetABC):
                     final_shape=shape,
                     fill_nans=self.fill_nans,
                     nontime_selection=self._isel_tuple,
+                    spatial_slices=local_spatial_slices,
                 )
             else:
                 ds = self._open_file(file_idx)
@@ -860,21 +869,20 @@ class XarrayDataset(DatasetABC):
                 tensor_dict = load_series_data(
                     idx=start,
                     n_steps=n_steps,
-                    ds=ds, #ds_local,
+                    ds=ds,  # ds_local,
                     names=self._time_dependent_names,
                     final_dims=self.dims,
-                    final_shape=shape, #shape_local,
+                    final_shape=shape,  # shape_local,
                     fill_nans=self.fill_nans,
                 )
                 # ds_local.close()
                 # del ds_local
                 ds.close()
                 del ds
-                #CHECK: DO I also need to del ds
-            tensor_dict_local=self._dist.get_local_tensor_dict(tensor_dict, self._shape_excluding_time_after_selection)
+                # CHECK: DO I also need to del ds
 
             for n in self._time_dependent_names:
-                arrays.setdefault(n, []).append(tensor_dict_local[n])
+                arrays.setdefault(n, []).append(tensor_dict[n])
                 # arrays.setdefault(n, []).append(tensor_dict[n])
 
         tensors: TensorDict = {}
@@ -886,27 +894,36 @@ class XarrayDataset(DatasetABC):
         if len(self._time_invariant_names) > 0:
             ds = self._open_file(idxs[0])
             ds = ds.isel(**self.isel)
-            shape = [total_steps] + self._shape_excluding_time_after_selection
-            # ds_local, shape_local = self._dist.dataset_reshape(ds, self.dims, shape)
+
+            if self._dist.spatial_parallelism and local_spatial_slices is not None:
+                spatial_dim_names = self.dims[-2:]
+                h_slice, w_slice = local_spatial_slices
+                ds = ds.isel(
+                    **{spatial_dim_names[0]: h_slice, spatial_dim_names[1]: w_slice}
+                )
+                local_ti_shape = [total_steps] + local_shape
+            else:
+                local_ti_shape = [
+                    total_steps
+                ] + self._shape_excluding_time_after_selection
 
             for name in self._time_invariant_names:
                 variable = ds[name].variable
                 if self.fill_nans is not None:
                     variable = variable.fillna(self.fill_nans.value)
-                tensor_globar = as_broadcasted_tensor(variable, self.dims, shape)
-                if len(shape) == 3:
-                  tensors[name]=tensor_globar[:,*self._dist.get_local_slices(self._shape_excluding_time_after_selection)]
-                else:
-                  tensors[name] = tensor_globar
-            # ds_local.close()
-            # del ds_local
-            #CHECK: DO I also need to del ds
+                tensors[name] = as_broadcasted_tensor(
+                    variable, self.dims, local_ti_shape
+                )
+
             ds.close()
             del ds
 
         # load static derived variables
         for name in self._static_derived_names:
             tensor = self._static_derived_data[name]
+            if self._dist.spatial_parallelism and local_spatial_slices is not None:
+                h_slice, w_slice = local_spatial_slices
+                tensor = tensor[h_slice, w_slice]
             horizontal_dims = [1] * tensor.ndim
             tensors[name] = tensor.repeat((total_steps, *horizontal_dims))
 

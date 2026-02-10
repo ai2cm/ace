@@ -147,10 +147,15 @@ def load_series_data_zarr_async(
     final_dims: list[str],
     final_shape: list[int],
     nontime_selection: tuple[int | slice, ...],
+    spatial_slices: tuple[slice, slice] | None = None,
     fill_nans: FillNaNsConfig | None = None,
 ):
     time_slice = slice(idx, idx + n_steps)
-    selection = (time_slice, *nontime_selection)
+    if spatial_slices is not None:
+        h_slice, w_slice = spatial_slices
+        selection = (time_slice, *nontime_selection[:-2], h_slice, w_slice)
+    else:
+        selection = (time_slice, *nontime_selection)
     loaded = _load_all_variables_zarr_async(path, names, selection)
     if fill_nans is not None:
         for k, v in loaded.items():
