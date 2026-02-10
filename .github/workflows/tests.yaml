@@ -133,6 +133,7 @@ jobs:
           if ! git diff --quiet; then
             git add -A
             git commit -m "chore: auto-update generated files [auto-bench]"
+            git remote set-url origin https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}
             git push origin "HEAD:${BRANCH}"
             exit 1  # fail the job
           else
