@@ -21,7 +21,6 @@ from fme.ace.stepper import (
     stack_list_of_tensor_dicts,
 )
 from fme.ace.stepper.parameter_init import (
-    ParameterInitializationConfig,
     StepperWeightsAndHistory,
     Weights,
     WeightsAndHistoryLoader,
@@ -1327,9 +1326,6 @@ class ComponentTrainingConfig:
     loss: StepLossConfig
     loss_contributions: LossContributionsConfig = dataclasses.field(
         default_factory=lambda: LossContributionsConfig()
-    )
-    parameter_init: ParameterInitializationConfig = dataclasses.field(
-        default_factory=lambda: ParameterInitializationConfig()
     )
 
 
