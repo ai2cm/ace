@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from fme.core.benchmark import memory
 from fme.core.benchmark.memory import MemoryResult, benchmark_memory
 
 
@@ -17,6 +18,19 @@ def test_cannot_get_result_before_end():
     with benchmark_memory() as bm:
         with pytest.raises(RuntimeError, match="MemoryBenchmark is still running"):
             bm.result
+
+
+def test_ensure_cannot_restart():
+    assert (
+        not memory._benchmark_memory_started
+    ), "Global state should be reset before test"
+    with benchmark_memory() as bm:
+        pass
+    with pytest.raises(RuntimeError, match="cannot be reused after it has ended"):
+        bm.__enter__()  # Attempt to restart after it has ended
+    assert (
+        not memory._benchmark_memory_started
+    ), "Global state should be reset after test"
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
