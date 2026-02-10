@@ -10,7 +10,7 @@ from fme.core.distributed.model_torch_distributed.utils import gather_helper_con
 
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires multi-GPU machine")
 @pytest.mark.parametrize(
-    "h_parallel,w_parallel,min_gpus",
+    "h_parallel,w_parallel",
     [
         (2, 1),  # H-parallel split
         (1, 2),  # W-parallel split
