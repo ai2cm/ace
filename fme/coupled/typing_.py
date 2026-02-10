@@ -1,9 +1,9 @@
 import dataclasses
 
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorMapping
 
 
 @dataclasses.dataclass
-class CoupledTensorDict:
-    ocean: TensorDict
-    atmosphere: TensorDict
+class CoupledTensorMapping:
+    ocean: TensorMapping
+    atmosphere: TensorMapping
