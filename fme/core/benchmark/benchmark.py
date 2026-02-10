@@ -2,7 +2,7 @@ import abc
 import dataclasses
 import pathlib
 from collections.abc import Callable
-from typing import Self, TypeVar
+from typing import Self
 
 import dacite
 import matplotlib.pyplot as plt
@@ -206,9 +206,6 @@ class BenchmarkResult:
         fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.98))
         fig.savefig(path, dpi=200, bbox_inches="tight")
         plt.close(fig)
-
-
-T = TypeVar("T")
 
 
 class BenchmarkABC(abc.ABC):
