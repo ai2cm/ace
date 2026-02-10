@@ -55,6 +55,7 @@ train_loader:
   batch_size: 16
   num_data_workers: 2
   prefetch_factor: 2
+  strict_ensemble: false
   dataset:
     - ocean:
         merge:
