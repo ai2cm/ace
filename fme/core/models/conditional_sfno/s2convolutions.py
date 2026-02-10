@@ -243,6 +243,10 @@ class SpectralConvS2(nn.Module):
         assert C % self.num_groups == 0
         x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
 
+        B, C, H, W = x.shape
+        assert C % self.num_groups == 0
+        x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
+
         if self.lora_A is not None and self.lora_B is not None:
             with timer.child("lora_update"):
                 lora_update = _contract_lora(
