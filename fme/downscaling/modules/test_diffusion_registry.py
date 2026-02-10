@@ -3,6 +3,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.modules.physicsnemo_unets_v2.group_norm import apex_available
 from fme.downscaling.modules.utils import NonDivisibleShapeError
 
 
@@ -171,3 +172,64 @@ def test_UNetDiffusionModule_use_amp_precision(use_amp_bf16):
             "Expected no bfloat16 when use_amp_bf16=False, "
             f"but found bfloat16 in captured dtypes {captured_dtypes}."
         )
+
+
+@pytest.mark.parametrize(
+    "use_apex_gn",
+    [
+        pytest.param(
+            True,
+            marks=pytest.mark.skipif(not apex_available(), reason="Apex not available"),
+        ),
+        False,
+    ],
+)
+def test_songunetv2_channels_last_if_using_apex_gn(use_apex_gn):
+    """Test that use_apex_gn flag correctly controls memory format."""
+    downscale_factor = 2
+    coarse_shape = (8, 16)
+    fine_shape = coarse_shape[0] * downscale_factor, coarse_shape[1] * downscale_factor
+    n_channels = 3
+
+    module = DiffusionModuleRegistrySelector(
+        "unet_diffusion_song_v2",
+        {
+            "model_channels": 4,
+            "use_apex_gn": use_apex_gn,
+            "attn_resolutions": [],
+        },
+    ).build(
+        n_in_channels=n_channels,
+        n_out_channels=n_channels,
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        sigma_data=1.0,
+    )
+
+    # Check that model parameters match expected memory format
+    for name, param in module.named_parameters():
+        if param.ndim == 4:
+            is_channels_last = param.is_contiguous(memory_format=torch.channels_last)
+            if use_apex_gn:
+                assert (
+                    is_channels_last
+                ), f"Parameter {name} should be channels_last when flag is True"
+            else:
+                # When use_apex_gn=False, params should be contiguous (NCHW)
+                assert (
+                    param.is_contiguous()
+                ), f"Parameter {name} should be contiguous when flag is False"
+
+    # Test forward pass works with both settings
+    batch_size = 1
+    conditioning = torch.randn(batch_size, n_channels, *fine_shape)
+    latent = torch.randn(batch_size, n_channels, *fine_shape)
+    noise = torch.randn(batch_size, 1, 1, 1)
+
+    output = module(latent, conditioning, noise)
+    assert output.shape == (batch_size, n_channels, *fine_shape)
+
+    if use_apex_gn:
+        assert output.is_contiguous(memory_format=torch.channels_last)
+    else:
+        assert output.is_contiguous()
