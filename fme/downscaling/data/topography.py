@@ -164,13 +164,6 @@ class StaticInputs:
         return self.fields[index]
 
     @property
-    def input_tensors(self) -> list[torch.Tensor]:
-        if len(self.fields) > 0:
-            return [field.data for field in self.fields]
-        else:
-            return torch.tensor([])
-
-    @property
     def coords(self) -> LatLonCoordinates:
         if len(self.fields) == 0:
             raise ValueError("No fields in StaticInputs to get coordinates from.")
