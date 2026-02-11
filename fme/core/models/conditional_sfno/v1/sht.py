@@ -205,6 +205,10 @@ class InverseRealSHT(nn.Module):
         assert(x.shape[-2] == self.lmax)
         assert(x.shape[-1] == self.mmax)
 
+        with timer.child("permute"):
+            x = x.permute(0, 1, 3, 2).contiguous()  # (B, C, H, W) -> (B, C, W, H)
+            x = x.contiguous()
+
         with torch.autocast("cuda", enabled=False):
             with timer.child("contraction"):
                 # irfft and view_as_complex don't support BF16, see https://github.com/pytorch/pytorch/issues/117844
@@ -212,8 +216,8 @@ class InverseRealSHT(nn.Module):
                 x = torch.view_as_real(x).float()
 
                 pct = self.pct.to(x.device).to(x.dtype)
-                rl = torch.einsum('...lm, mlk->...km', x[..., 0], pct )
-                im = torch.einsum('...lm, mlk->...km', x[..., 1], pct )
+                rl = torch.einsum('...ml, mlk->...km', x[..., 0], pct )
+                im = torch.einsum('...ml, mlk->...km', x[..., 1], pct )
                 xs = torch.stack((rl, im), -1)
 
                 # apply the inverse (real) FFT
