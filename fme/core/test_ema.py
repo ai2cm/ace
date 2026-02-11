@@ -9,7 +9,7 @@ from fme.core.ema import EMATracker
 class ExampleModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.weight = nn.Parameter(torch.randn(10)).to(get_device())
+        self.weight = nn.Parameter(torch.randn(10, device=get_device()))
 
     def forward(self, x):
         return self.weight * x
