@@ -64,10 +64,8 @@ class BenchmarkResult:
                 return False
             return frac_of_root >= 0.05
 
-        def sorted_children(t: TimerResult) -> list[tuple[str, TimerResult]]:
-            return sorted(
-                t.children.items(), key=lambda kv: avg_time(kv[1]), reverse=True
-            )
+        def ordered_children(t: TimerResult) -> list[tuple[str, TimerResult]]:
+            return list(t.children.items())  # maintain dict order (insertion order)
 
         def blend_with_white(
             rgb: tuple[float, float, float], amount: float
@@ -121,7 +119,7 @@ class BenchmarkResult:
         gray = (0.85, 0.85, 0.85, 1.0)
         cmap = plt.get_cmap("tab20")
 
-        lvl1 = sorted_children(root)
+        lvl1 = ordered_children(root)
         lvl1_names = [n for n, _ in lvl1]
         lvl1_index = {n: i for i, n in enumerate(lvl1_names)}
 
@@ -188,7 +186,7 @@ class BenchmarkResult:
             parent_rgba = cmap(lvl1_index[n1] % cmap.N)
             parent_rgb = (parent_rgba[0], parent_rgba[1], parent_rgba[2])
 
-            children = sorted_children(t1)
+            children = ordered_children(t1)
             k = len(children)
             for i, (n2, t2) in enumerate(children):
                 # Same “type” of color as parent: lighten progressively per child.
