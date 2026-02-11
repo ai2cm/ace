@@ -10,7 +10,7 @@ from fme.core.cli import prepare_directory
 from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig, StaticInput
+from ..data import DataLoaderConfig, StaticInputs
 from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import (
     CascadePredictor,
@@ -56,7 +56,7 @@ class Downscaler:
 
     def _get_generation_model(
         self,
-        topography: StaticInput,
+        static_inputs: StaticInputs,
         output: DownscalingOutput,
     ) -> DiffusionModel | PatchPredictor | CascadePredictor:
         """
@@ -67,7 +67,7 @@ class Downscaler:
         generations.
         """
         model_patch_shape = self.model.fine_shape
-        actual_shape = tuple(topography.data.shape)
+        actual_shape = tuple(static_inputs.shape)
 
         if model_patch_shape == actual_shape:
             # short circuit, no patching necessary
@@ -111,16 +111,20 @@ class Downscaler:
         total_batches = len(output.data.loader)
 
         loaded_item: LoadedSliceWorkItem
-        topography: StaticInput
-        for i, (loaded_item, topography) in enumerate(output.data.get_generator()):
+        static_inputs: StaticInputs
+        for i, (loaded_item, static_inputs) in enumerate(output.data.get_generator()):
             if writer is None:
                 writer = output.get_writer(
-                    latlon_coords=topography.coords,
+                    latlon_coords=static_inputs.coords,
                     output_dir=self.output_dir,
                 )
-                writer.initialize_store(topography.data.cpu().numpy().dtype)
+                writer.initialize_store(
+                    static_inputs.fields[0].data.cpu().numpy().dtype
+                )
             if model is None:
-                model = self._get_generation_model(topography=topography, output=output)
+                model = self._get_generation_model(
+                    static_inputs=static_inputs, output=output
+                )
 
             logging.info(
                 f"[{output.name}] Batch {i+1}/{total_batches}, "
@@ -128,7 +132,9 @@ class Downscaler:
             )
 
             output_data = model.generate_on_batch_no_target(
-                loaded_item.batch, topography=topography, n_samples=loaded_item.n_ens
+                loaded_item.batch,
+                static_inputs=static_inputs,
+                n_samples=loaded_item.n_ens,
             )
             output_np = {key: value.cpu().numpy() for key, value in output_data.items()}
             insert_slices = loaded_item.dim_insert_slices

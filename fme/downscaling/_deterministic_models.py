@@ -12,7 +12,7 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict
-from fme.downscaling.data import BatchData, PairedBatchData, StaticInput
+from fme.downscaling.data import BatchData, PairedBatchData, _StaticInput
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.models import ModelOutputs, PairedNormalizationConfig
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -121,7 +121,7 @@ class DeterministicModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        topography: StaticInput | None,
+        topography: _StaticInput | None,
         optimization: Optimization | NullOptimization,
     ) -> ModelOutputs:
         return self._run_on_batch(batch, topography, optimization)
@@ -129,7 +129,7 @@ class DeterministicModel:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        topography: StaticInput | None,
+        topography: _StaticInput | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         if n_samples != 1:
@@ -144,7 +144,7 @@ class DeterministicModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        topography: StaticInput | None,
+        topography: _StaticInput | None,
         n_samples: int = 1,
     ) -> TensorDict:
         raise NotImplementedError(
@@ -154,7 +154,7 @@ class DeterministicModel:
     def _run_on_batch(
         self,
         batch: PairedBatchData,
-        topography: StaticInput | None,
+        topography: _StaticInput | None,
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
