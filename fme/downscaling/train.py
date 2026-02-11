@@ -184,11 +184,11 @@ class Trainer:
             self.train_data, random_offset=True, shuffle=True
         )
         outputs = None
-        for i, (batch, topography) in enumerate(train_batch_generator):
+        for i, (batch, static_inputs) in enumerate(train_batch_generator):
             self.num_batches_seen += 1
             if i % 10 == 0:
                 logging.info(f"Training on batch {i+1}")
-            outputs = self.model.train_on_batch(batch, topography, self.optimization)
+            outputs = self.model.train_on_batch(batch, static_inputs, self.optimization)
             self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -260,9 +260,9 @@ class Trainer:
             validation_batch_generator = self._get_batch_generator(
                 self.validation_data, random_offset=False, shuffle=False
             )
-            for batch, topography in validation_batch_generator:
+            for batch, static_inputs in validation_batch_generator:
                 outputs = self.model.train_on_batch(
-                    batch, topography, self.null_optimization
+                    batch, static_inputs, self.null_optimization
                 )
                 validation_aggregator.record_batch(
                     outputs=outputs,
@@ -271,7 +271,7 @@ class Trainer:
                 )
                 generated_outputs = self.model.generate_on_batch(
                     batch,
-                    topography=topography,
+                    static_inputs=static_inputs,
                     n_samples=self.config.generate_n_samples,
                 )
                 # Add sample dimension to coarse values for generation comparison

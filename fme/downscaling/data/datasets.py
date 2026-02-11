@@ -746,7 +746,7 @@ def patched_batch_gen_from_loader(
     if static_inputs is not None:
         if fine_patches is None:
             raise ValueError(
-                "Static inputs provided but downscale_factor is None, cannot "
+                "Topography provided but downscale_factor is None, cannot "
                 "generate fine patches."
             )
         static_inputs_patches = static_inputs.generate_from_patches(fine_patches)
