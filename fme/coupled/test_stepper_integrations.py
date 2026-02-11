@@ -7,10 +7,12 @@ import torch
 import fme
 from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import NullVerticalCoordinate
+from fme.core.loss import StepLossConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.registry.module import ModuleSelector
 
 from .data_loading.data_typing import CoupledVerticalCoordinate
+from .stepper import ComponentTrainingConfig, CoupledTrainStepperConfig
 from .test_stepper import (
     CoupledDatasetInfoBuilder,
     get_stepper_and_batch,
@@ -52,6 +54,12 @@ def test_stepper_gradient_accumulation_integration():
         ),
     )
 
+    train_stepper_config = CoupledTrainStepperConfig(
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+    )
+    train_stepper = train_stepper_config.get_train_stepper(coupler)
+
     assert len(coupler.atmosphere.modules) == 1
     assert len(coupler.ocean.modules) == 1
 
@@ -86,7 +94,7 @@ def test_stepper_gradient_accumulation_integration():
     optim = OptimizationConfig(use_gradient_accumulation=False).build(
         coupler.modules, 1
     )
-    _ = coupler.train_on_batch(
+    _ = train_stepper.train_on_batch(
         data=coupled_data.data,
         optimization=optim,
     )
@@ -118,7 +126,7 @@ def test_stepper_gradient_accumulation_integration():
     # with gradient accumulation, atmos steps detached
     optim = OptimizationConfig(use_gradient_accumulation=True).build(coupler.modules, 1)
 
-    _ = coupler.train_on_batch(
+    _ = train_stepper.train_on_batch(
         data=coupled_data.data,
         optimization=optim,
     )
