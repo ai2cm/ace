@@ -144,6 +144,15 @@ class TorchDistributed(DistributedBackend):
         logger.debug(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()
 
+    def comm_get_size(self, key: str):
+        return 1
+
+    def comm_get_group(self, key: str):
+        return 1
+
+    def comm_get_rank(self, key: str):
+        return 0
+
 
 def _gather_irregular(
     tensor: torch.Tensor,

@@ -68,3 +68,12 @@ class NonDistributed(DistributedBackend):
 
     def shutdown(self):
         return
+
+    def comm_get_size(self, key: str):
+        return 1
+
+    def comm_get_group(self, key: str):
+        return 1
+
+    def comm_get_rank(self, key: str):
+        return 0

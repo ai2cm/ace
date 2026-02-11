@@ -72,9 +72,11 @@ class ModelTorchDistributed(DistributedBackend):
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size // comm.get_size("data")
 
-    def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None:
-        torch.distributed.all_reduce(tensor)
-        return tensor / self.total_ranks
+    def reduce_mean(self, tensor: torch.Tensor, group="data") -> torch.Tensor | None:
+        torch.distributed.all_reduce(
+            tensor, group=comm.get_group(group), op=torch.distributed.ReduceOp.AVG
+        )
+        return tensor
 
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor | None:
         torch.distributed.all_reduce(tensor)
@@ -87,6 +89,15 @@ class ModelTorchDistributed(DistributedBackend):
     def reduce_max(self, tensor: torch.Tensor) -> torch.Tensor | None:
         torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX)
         return tensor
+
+    def comm_get_size(self, key: str):
+        return comm.get_size(key)
+
+    def comm_get_group(self, key: str):
+        return comm.get_group(key)
+
+    def comm_get_rank(self, key: str):
+        return comm.get_rank(key)
 
     def gather(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
         raise NotImplementedError()

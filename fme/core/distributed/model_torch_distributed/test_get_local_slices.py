@@ -4,7 +4,6 @@ import pytest
 import torch
 
 from fme.core.distributed import Distributed
-from fme.core.distributed.model_torch_distributed import comm
 from fme.core.distributed.model_torch_distributed.utils import gather_helper_conv
 
 
@@ -34,8 +33,8 @@ def test_get_local_slices(h_parallel, w_parallel):
 
     # Get distributed instance and communication groups
     dist = Distributed.get_instance()
-    w_group = comm.get_group("w")
-    h_group = comm.get_group("h")
+    w_group = dist.comm_get_group("w")
+    h_group = dist.comm_get_group("h")
 
     # Get local slice of data
     this_shape = (nlat, nlot)

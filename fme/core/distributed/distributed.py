@@ -230,5 +230,14 @@ class Distributed:
     def shutdown(self):
         return self._distributed.shutdown()
 
+    def comm_get_size(self, key: str):
+        return self._distributed.comm_get_size(key)
+
+    def comm_get_group(self, key: str):
+        return self._distributed.comm_get_group(key)
+
+    def comm_get_rank(self, key: str):
+        return self._distributed.comm_get_rank(key)
+
 
 singleton: Distributed | None = None
