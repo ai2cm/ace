@@ -1,22 +1,9 @@
-import os
-
-os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # required for determinism
-
 import gc
 import signal
 from unittest import mock
 
 import pytest
 import torch
-
-from fme.core.rand import set_seed
-
-
-@pytest.fixture(autouse=True, scope="session")
-def deterministic_pytorch():
-    torch.use_deterministic_algorithms(True)
-    torch.backends.cudnn.benchmark = False
-    set_seed(0)
 
 
 def pytest_addoption(parser):
