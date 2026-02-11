@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import torch
 
 from fme.core.device import get_device
@@ -7,6 +8,7 @@ from fme.core.distributed import Distributed
 from fme.core.distributed.model_torch_distributed.utils import gather_helper_conv
 
 
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires multi-GPU machine")
 def test_reduce_mean_spatial_parallelism():
     # Set up spatial parallelism
     os.environ["H_PARALLEL_SIZE"] = "1"  # Split batch
@@ -65,7 +67,4 @@ def test_reduce_mean_spatial_parallelism():
     print("\nresult_fullshape:", result_full.shape)  # torch.Size([2, 2])
     print("result_full :\n", result_full)
 
-    assert torch.equal(
-        result_full.to("cpu"), expected_mean.to("cpu")
-    ), f"Rank {rank} (west): Expected {expected_mean.to("cpu")}, \
-    got {expected_mean.to("cpu")}"
+    assert torch.equal(result_full.to("cpu"), expected_mean.to("cpu"))

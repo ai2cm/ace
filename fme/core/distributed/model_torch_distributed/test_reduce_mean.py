@@ -8,6 +8,7 @@ from fme.core.distributed import Distributed
 from fme.core.distributed.model_torch_distributed.utils import gather_helper_conv
 
 
+@pytest.mark.skipif(torch.cuda.device_count() < 4, reason="requires multi-GPU machine")
 @pytest.mark.parametrize(
     "n_batch,n_lat,n_lon,h_parallel,w_parallel",
     [
