@@ -13,7 +13,6 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dataset.xarray import get_raw_paths
 from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -407,6 +406,7 @@ class TrainerConfig:
     experiment_dir: str
     save_checkpoints: bool
     logging: LoggingConfig
+    static_inputs: dict[str, str] | None = None
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
@@ -434,11 +434,23 @@ class TrainerConfig:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
+        static_inputs_fields = self.static_inputs or {}
+        static_inputs = StaticInputs(
+            fields=[
+                get_normalized_topography(path, topography_name=key)
+                for key, path in static_inputs_fields.items()
+            ]
+        )
+
         train_data: PairedGriddedData = self.train_data.build(
-            train=True, requirements=self.model.data_requirements
+            train=True,
+            requirements=self.model.data_requirements,
+            static_inputs_from_checkpoint=static_inputs,
         )
         validation_data: PairedGriddedData = self.validation_data.build(
-            train=False, requirements=self.model.data_requirements
+            train=False,
+            requirements=self.model.data_requirements,
+            static_inputs_from_checkpoint=static_inputs,
         )
         if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:
             model_coarse_shape = (
@@ -448,18 +460,10 @@ class TrainerConfig:
         else:
             model_coarse_shape = train_data.coarse_shape
 
-        # load full spatial range of topography to save with model
-        # TODO: this will be replaced in the future with a more general call
-        # to get normalized static inputs from a model config field
-        full_topography = get_normalized_topography(
-            get_raw_paths(
-                self.train_data.fine[0].data_path, self.train_data.fine[0].file_pattern
-            )[0]
-        )
         downscaling_model = self.model.build(
             model_coarse_shape,
             train_data.downscale_factor,
-            static_inputs=StaticInputs([full_topography]),
+            static_inputs=static_inputs,
         )
 
         optimization = self.optimization.build(
