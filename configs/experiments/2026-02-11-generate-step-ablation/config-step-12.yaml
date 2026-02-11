@@ -1,0 +1,49 @@
+experiment_dir: /results
+n_samples: 4
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+  model_updates:
+    num_diffusion_generation_steps: 12
+data:
+  topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  coarse:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 100km.zarr
+    subset:
+      start_time: 2023-01-01T00:00
+      step: 29
+  fine:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 3km.zarr
+    subset:
+      start_time: 2023-01-01T00:00
+      step: 29
+  lat_extent:
+    start: -30.0
+    stop: 30.0
+  batch_size: 8
+  num_data_workers: 2
+  strict_ensemble: false
+events:
+- name: WPacific_hurricane_landfall_china_20230510
+  date: 2023-05-10T12:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 104
+    stop: 120
+  save_generated_samples: true
+  n_samples: 32
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
