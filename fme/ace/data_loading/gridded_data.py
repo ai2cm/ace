@@ -137,9 +137,13 @@ class GriddedData(GriddedDataABC[BatchData]):
 def get_initial_condition(
     loader: DataLoader[BatchData],
     requirements: PrognosticStateDataRequirements,
+    n_ensemble_per_ic: int = 1,
 ) -> PrognosticState:
     for batch in loader:
-        return batch.to_device().get_start(
+        batch = batch.to_device()
+        if n_ensemble_per_ic > 1:
+            batch = batch.broadcast_ensemble(n_ensemble_per_ic)
+        return batch.get_start(
             prognostic_names=requirements.names,
             n_ic_timesteps=requirements.n_timesteps,
         )
@@ -158,6 +162,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         loader: DataLoader[BatchData],
         initial_condition: PrognosticState | PrognosticStateDataRequirements,
         properties: DatasetProperties,
+        n_ensemble_per_ic: int = 1,
     ):
         """
         Args:
@@ -168,6 +173,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
                 batch of data. Data can be on any device.
             properties: Batch-constant properties for the dataset, such as variable
                 metadata and coordinate information. Data can be on any device.
+            n_ensemble_per_ic: Number of ensemble members per initial condition.
 
         Note:
             While input data can be on any device, all data exposed from this class
@@ -175,10 +181,11 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         """
         self._loader = loader
         self._properties = properties.to_device()
+        self._n_ensemble_per_ic = n_ensemble_per_ic
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
             self._initial_condition: PrognosticState = get_initial_condition(
-                loader, initial_condition
+                loader, initial_condition, n_ensemble_per_ic=n_ensemble_per_ic
             )
         else:
             self._initial_condition = initial_condition.to_device()
@@ -186,7 +193,11 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
 
     @property
     def loader(self) -> DataLoader[BatchData]:
+        n_ensemble = self._n_ensemble_per_ic
+
         def on_device(batch: BatchData) -> BatchData:
+            if n_ensemble > 1:
+                batch = batch.broadcast_ensemble(n_ensemble)
             return batch.to_device()
 
         return SizedMap(on_device, self._loader)

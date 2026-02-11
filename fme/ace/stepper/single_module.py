@@ -1153,13 +1153,20 @@ class Stepper:
         if compute_derived_forcings:
             forcing = self.forcing_deriver(forcing)
 
-        if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
-            forcing = forcing.broadcast_ensemble(
-                n_ensemble=initial_condition.as_batch_data().n_ensemble
-            )
+        ic_batch_data = initial_condition.as_batch_data()
+        n_ensemble_ic = ic_batch_data.n_ensemble
+        n_ic_with_ensemble = next(iter(ic_batch_data.data.values())).shape[0]
+        n_ic_only = n_ic_with_ensemble // n_ensemble_ic
+        if forcing.data:
+            forcing_n_samples = next(iter(forcing.data.values())).shape[0]
+            if (
+                forcing.n_ensemble == 1
+                and n_ensemble_ic > 1
+                and forcing_n_samples == n_ic_only
+            ):
+                forcing = forcing.broadcast_ensemble(n_ensemble=n_ensemble_ic)
 
         with timer.context("forward_prediction"):
-            ic_batch_data = initial_condition.as_batch_data()
             forcing_data = forcing.subset_names(forcing_names)
             if ic_batch_data.n_timesteps != self.n_ic_timesteps:
                 raise ValueError(

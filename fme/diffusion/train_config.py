@@ -199,6 +199,7 @@ class TrainBuilders:
             total_forward_steps=self.config.inference_n_forward_steps,
             window_requirements=self._get_evaluation_window_data_requirements(),
             initial_condition=self._get_initial_condition_data_requirements(),
+            n_ensemble_per_ic=self.config.inference.n_ensemble_per_ic,
         )
 
     def get_optimization(self, modules: torch.nn.ModuleList) -> Optimization:

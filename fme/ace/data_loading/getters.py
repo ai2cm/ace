@@ -139,6 +139,7 @@ def get_inference_data(
     label_override: list[str] | None = None,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
+    n_ensemble_per_ic: int = 1,
 ) -> InferenceGriddedData:
     """
     Args:
@@ -155,6 +156,7 @@ def get_inference_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
+        n_ensemble_per_ic: Number of ensemble members per initial condition.
 
     Returns:
         A data loader for inference with coordinates and metadata.
@@ -194,6 +196,7 @@ def get_inference_data(
         loader=loader,
         initial_condition=initial_condition,
         properties=properties,
+        n_ensemble_per_ic=n_ensemble_per_ic,
     )
 
     return gridded_data

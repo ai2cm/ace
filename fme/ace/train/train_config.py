@@ -52,10 +52,12 @@ class WeatherEvaluationConfig:
         epochs: epochs on which to run weather evaluation. By default runs
             weather evaluation every epoch.
         aggregator: configuration of weather evaluation aggregator.
+        n_ensemble_per_ic: number of ensemble members per initial condition.
     """
 
     loader: InferenceDataLoaderConfig
     n_forward_steps: int = 2
+    n_ensemble_per_ic: int = 1
     forward_steps_in_memory: int = 2
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
@@ -96,6 +98,7 @@ class WeatherEvaluationConfig:
             total_forward_steps=self.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition,
+            n_ensemble_per_ic=self.n_ensemble_per_ic,
         )
 
 
@@ -109,11 +112,13 @@ class InlineInferenceConfig:
             re-reading data from disk
         epochs: epochs on which to run inference. By default runs inference every epoch.
         aggregator: configuration of inline inference aggregator.
+        n_ensemble_per_ic: number of ensemble members per initial condition.
     """
 
     loader: InferenceDataLoaderConfig
     n_forward_steps: int = 2
     forward_steps_in_memory: int = 2
+    n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
@@ -153,6 +158,7 @@ class InlineInferenceConfig:
             total_forward_steps=self.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition,
+            n_ensemble_per_ic=self.n_ensemble_per_ic,
         )
 
 

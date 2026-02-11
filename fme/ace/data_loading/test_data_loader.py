@@ -495,6 +495,55 @@ def test_inference_data_loader(tmp_path):
     assert initial_condition.data["foo"].shape == (batch_size, 1, 16, 32)
 
 
+def test_inference_data_loader_n_ensemble_per_ic(tmp_path):
+    """With n_ensemble_per_ic > 1, initial condition and batches are broadcast."""
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    batch_size = 2
+    n_ensemble_per_ic = 3
+    step = 7
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(
+            data_path=tmp_path,
+            n_repeats=1,
+        ),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=batch_size, interval=step
+        ),
+    )
+    n_forward_steps_in_memory = 3
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=n_forward_steps_in_memory + 1,
+    )
+    initial_condition_requirements = PrognosticStateDataRequirements(
+        names=["foo"],
+        n_timesteps=1,
+    )
+    data = get_inference_data(
+        config,
+        total_forward_steps=6,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
+        n_ensemble_per_ic=n_ensemble_per_ic,
+    )
+    ic_batch = data.initial_condition.as_batch_data()
+    assert ic_batch.n_ensemble == n_ensemble_per_ic
+    assert ic_batch.data["foo"].shape == (
+        batch_size * n_ensemble_per_ic,
+        1,
+        16,
+        32,
+    )
+    batch_data = next(iter(data.loader))
+    assert batch_data.n_ensemble == n_ensemble_per_ic
+    assert batch_data.data["foo"].shape == (
+        batch_size * n_ensemble_per_ic,
+        n_forward_steps_in_memory + 1,
+        16,
+        32,
+    )
+
+
 @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
 def calendar(request):
     """

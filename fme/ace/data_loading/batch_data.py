@@ -168,6 +168,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels.to(device) if self.labels is not None else None,
+            n_ensemble=self.n_ensemble,
         )
 
     def to_cpu(self) -> "BatchData":
@@ -177,6 +178,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     @classmethod
@@ -327,6 +329,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            # n_ensemble=self.n_ensemble,
         )
 
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
@@ -341,6 +344,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            # n_ensemble=self.n_ensemble,
         )
 
     def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
@@ -353,6 +357,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def get_start(
@@ -389,6 +394,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def prepend(self: SelfType, initial_condition: PrognosticState) -> SelfType:
@@ -411,6 +417,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
