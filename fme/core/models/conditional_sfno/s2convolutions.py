@@ -22,6 +22,8 @@ import torch.nn as nn
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
 
+from fme.core.benchmark.timer import NullTimer, Timer
+
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
 
@@ -223,45 +225,51 @@ class SpectralConvS2(nn.Module):
             self.bias = nn.Parameter(torch.zeros(1, out_channels, 1, 1))
         self.out_channels = out_channels
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         residual = x
         x = x.float()
 
         with torch.amp.autocast("cuda", enabled=False):
-            x = self.forward_transform(x.float())
+            with timer.child("forward_transform"):
+                x = self.forward_transform(x.float())
             if self._round_trip_residual:
-                x = x.contiguous()
-                residual = self.inverse_transform(x)
-                residual = residual.to(dtype)
+                with timer.child("round_trip_residual"):
+                    x = x.contiguous()
+                    residual = self.inverse_transform(x)
+                    residual = residual.to(dtype)
 
         B, C, H, W = x.shape
         assert C % self.num_groups == 0
         x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
 
         if self.lora_A is not None and self.lora_B is not None:
-            lora_update = _contract_lora(
-                self.lora_A,
-                self.lora_B,
-                x[..., : self.modes_lat_local, : self.modes_lon_local],
-            )
+            with timer.child("lora_update"):
+                lora_update = _contract_lora(
+                    self.lora_A,
+                    self.lora_B,
+                    x[..., : self.modes_lat_local, : self.modes_lon_local],
+                )
         else:
             lora_update = 0.0
 
-        xp = torch.zeros_like(x)
-        xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
-            x[..., : self.modes_lat_local, : self.modes_lon_local],
-            self.weight,
-        )
-        xp = xp + self.lora_scaling * lora_update
-        xp = xp.reshape(B, self.out_channels, H, W)
-        x = xp.contiguous()
+        with timer.child("dhconv"):
+            xp = torch.zeros_like(x)
+            xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
+                x[..., : self.modes_lat_local, : self.modes_lon_local],
+                self.weight,
+            )
+            xp = xp + self.lora_scaling * lora_update
+            xp = xp.reshape(B, self.out_channels, H, W)
+            x = xp.contiguous()
 
         with torch.amp.autocast("cuda", enabled=False):
-            x = self.inverse_transform(x)
+            with timer.child("inverse_transform"):
+                x = self.inverse_transform(x)
 
         if hasattr(self, "bias"):
-            x = x + self.bias
+            with timer.child("add_bias"):
+                x = x + self.bias
 
         x = x.type(dtype)
 
@@ -320,7 +328,7 @@ class LocalConvS2(nn.Module):
                 scale * torch.randn(1, out_channels, *self.output_dims)
             )
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         x = x.float()
         B, C, H, W = x.shape
@@ -503,7 +511,7 @@ class SpectralAttentionS2(nn.Module):
 
         return x
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         residual = x
         x = x.to(torch.float32)
@@ -626,7 +634,7 @@ class RealSpectralAttentionS2(nn.Module):
 
         return x
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         x = x.to(torch.float32)
 
