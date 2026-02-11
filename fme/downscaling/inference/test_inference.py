@@ -13,8 +13,8 @@ from fme.core.dataset.time import TimeSlice
 from fme.core.logging_utils import LoggingConfig
 from fme.downscaling.data import (
     LatLonCoordinates,
+    StaticInput,
     StaticInputs,
-    _StaticInput,
     get_normalized_topography,
 )
 from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
@@ -65,7 +65,7 @@ def mock_output_target():
 def get_static_inputs(shape=(16, 16)):
     data = torch.randn(shape)
     coords = LatLonCoordinates(lat=torch.arange(shape[0]), lon=torch.arange(shape[1]))
-    return StaticInputs([_StaticInput(data=data, coords=coords)])
+    return StaticInputs([StaticInput(data=data, coords=coords)])
 
 
 # Tests for Downscaler initialization

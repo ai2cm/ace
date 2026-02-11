@@ -10,7 +10,7 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
-from fme.downscaling.data import StaticInputs, _StaticInput
+from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
@@ -126,7 +126,7 @@ def test_predictor_runs(static_inputs_on_model, tmp_path, very_fast_only: bool):
         topo_data = fine_data["HGTsfc"]
         model.static_inputs = StaticInputs(
             [
-                _StaticInput(
+                StaticInput(
                     data=torch.randn(topo_data.shape[-2:]),
                     coords=LatLonCoordinates(
                         lat=torch.tensor(topo_data.lat.values),

@@ -5,7 +5,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.downscaling.data import StaticInputs, _StaticInput
+from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.predictors.cascade import CascadePredictor
@@ -61,7 +61,7 @@ def test_CascadePredictor_generate(downscale_factors):
         static_inputs_list.append(
             StaticInputs(
                 fields=[
-                    _StaticInput(
+                    StaticInput(
                         data=torch.randn(
                             input_n_cells * downscale_factor,
                             input_n_cells * downscale_factor,
@@ -118,7 +118,7 @@ def test_CascadePredictor__subset_topographies():
         static_inputs_list.append(
             StaticInputs(
                 fields=[
-                    _StaticInput(
+                    StaticInput(
                         data=torch.randn(
                             input_n_cells * downscale_factor,
                             input_n_cells * downscale_factor,

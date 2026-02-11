@@ -3,7 +3,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.downscaling.data import PairedBatchData, StaticInputs, _StaticInput
+from fme.downscaling.data import PairedBatchData, StaticInput, StaticInputs
 from fme.downscaling.data.datasets import patched_batch_gen_from_paired_loader
 from fme.downscaling.data.patching import (
     _divide_into_slices,
@@ -121,7 +121,7 @@ def test_paired_patches_with_random_offset_consistent(overlap):
         device=get_device(),
     )
     topography = StaticInputs(
-        fields=[_StaticInput(data=topography_data, coords=full_fine_coords[0])]
+        fields=[StaticInput(data=topography_data, coords=full_fine_coords[0])]
     )
     y_offsets = []
     x_offsets = []
@@ -184,7 +184,7 @@ def test_paired_patches_shuffle(shuffle):
     )
     fine_coords = next(iter(loader)).fine.latlon_coordinates[0]
     static_inputs = StaticInputs(
-        fields=[_StaticInput(data=topography_data, coords=fine_coords)]
+        fields=[StaticInput(data=topography_data, coords=fine_coords)]
     )
 
     generator0 = patched_batch_gen_from_paired_loader(

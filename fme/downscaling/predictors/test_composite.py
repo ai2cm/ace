@@ -6,7 +6,7 @@ import xarray as xr
 from fme.core.device import get_device
 from fme.core.packer import Packer
 from fme.downscaling.aggregators.shape_helpers import upsample_tensor
-from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs, _StaticInput
+from fme.downscaling.data import BatchData, PairedBatchData, StaticInput, StaticInputs
 from fme.downscaling.data.patching import get_patches
 from fme.downscaling.data.utils import BatchedLatLonCoordinates
 from fme.downscaling.models import ModelOutputs
@@ -135,7 +135,7 @@ def test_SpatialCompositePredictor_generate_on_batch(patch_size_coarse):
     )
     static_inputs = StaticInputs(
         fields=[
-            _StaticInput(
+            StaticInput(
                 data=torch.randn(
                     coarse_extent[0] * downscale_factor,
                     coarse_extent[1] * downscale_factor,
@@ -176,7 +176,7 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
     )
     static_inputs = StaticInputs(
         fields=[
-            _StaticInput(
+            StaticInput(
                 data=torch.randn(
                     coarse_extent[0] * downscale_factor,
                     coarse_extent[1] * downscale_factor,

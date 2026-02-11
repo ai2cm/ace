@@ -82,7 +82,7 @@ def test_Topography_generate_from_patches():
     assert torch.equal(generated_patches[1].data, torch.tensor([[2], [6]]))
 
 
-def test_StaticInputs_generate_from_patches():
+def testStaticInputs_generate_from_patches():
     output_slice = _HorizontalSlice(y=slice(None), x=slice(None))
     patches = [
         Patch(
@@ -124,7 +124,7 @@ def test_StaticInputs_generate_from_patches():
     assert torch.equal(generated_patches[1][1].data, expected_topography_patch_1 * -1.0)
 
 
-def test_StaticInputs_serialize():
+def testStaticInputs_serialize():
     data = torch.arange(16).reshape(4, 4)
     topography = StaticInput(
         data,

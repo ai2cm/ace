@@ -10,7 +10,7 @@ from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.downscaling.data import StaticInputs, _StaticInput
+from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -152,7 +152,7 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
     if use_fine_topography:
         static_inputs = StaticInputs(
             fields=[
-                _StaticInput(
+                StaticInput(
                     torch.ones(*fine_shape, device=get_device()),
                     LatLonCoordinates(
                         lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
@@ -313,7 +313,7 @@ def test_DiffusionModel_generate_on_batch_no_target():
     )
     static_inputs = StaticInputs(
         fields=[
-            _StaticInput(
+            StaticInput(
                 torch.rand(*fine_shape, device=get_device()),
                 LatLonCoordinates(
                     lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
@@ -357,7 +357,7 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
         )
         static_inputs = StaticInputs(
             fields=[
-                _StaticInput(
+                StaticInput(
                     torch.rand(*fine_shape, device=get_device()),
                     LatLonCoordinates(
                         torch.ones(fine_shape[0]), torch.ones(fine_shape[1])
