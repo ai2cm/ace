@@ -445,12 +445,12 @@ class TrainerConfig:
         train_data: PairedGriddedData = self.train_data.build(
             train=True,
             requirements=self.model.data_requirements,
-            static_inputs_from_checkpoint=static_inputs,
+            static_inputs=static_inputs,
         )
         validation_data: PairedGriddedData = self.validation_data.build(
             train=False,
             requirements=self.model.data_requirements,
-            static_inputs_from_checkpoint=static_inputs,
+            static_inputs=static_inputs,
         )
         if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:
             model_coarse_shape = (
