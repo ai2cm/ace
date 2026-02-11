@@ -3,8 +3,16 @@
 Fetch netCDF event files from a beaker dataset and generate histogram plots
 comparing ensemble predictions against targets for each variable.
 
+This will work for saved event outputs from `fme.downscaling.evaluator`
+from a beaker experiment.  It downloads the experiment files to a temporary
+directory and then parses the filenames for <event_name>_YYYYMMDD.nc to look
+for single-event outputs.
+
 Usage:
     python plot_beaker_histograms.py <beaker_dataset_id> [--output-dir <path>]
+
+Requires:
+    beaker CLI to be installed and authenticated (https://github.com/allenai/beaker).
 """
 
 import argparse
@@ -17,6 +25,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+# Matching for <event_name>_YYYYMMDD.nc
 _EVENT_FILE_RE = re.compile(r"(.+)_(\d{8})\.nc$")
 
 
@@ -44,17 +53,15 @@ def fetch_beaker_dataset(dataset_id: str, target_dir: str) -> None:
     )
 
 
-def find_event_files(directory: str) -> list[Path]:
-    """Find netCDF files matching the event naming pattern: *_<date>.nc"""
-    return sorted(
-        p for p in Path(directory).glob("*.nc") if _EVENT_FILE_RE.match(p.name)
-    )
-
-
-def extract_event_name(filepath: Path) -> str:
-    """Extract event name from filename (everything before the date portion)."""
-    match = _EVENT_FILE_RE.match(filepath.name)
-    return match.group(1) if match else filepath.stem
+def find_event_files(directory: str) -> dict[str, Path]:
+    """Find netCDF files matching the event naming pattern, keyed by event name."""
+    event_files = {}
+    for p in sorted(Path(directory).glob("*.nc")):
+        # extract event name
+        matched = _EVENT_FILE_RE.match(p.name)
+        if matched:
+            event_files[matched.group(1)] = p
+    return event_files
 
 
 def detect_variable_pairs(ds: xr.Dataset) -> list[str]:
@@ -71,11 +78,9 @@ def plot_histogram_lines(
     key_prefix: str,
     title_prefix: str,
     save_path: Path,
-) -> Path:
+) -> None:
     """
     Plot histogram comparing ensemble predictions against target.
-
-    Ported from notebook cell eb8c884c with modifications to save figure.
     """
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -91,6 +96,14 @@ def plot_histogram_lines(
     bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
     sample_data = predicted_data.values
+    if sample_data.ndim != 3:
+        raise ValueError(
+            f"Expected predicted data to be 3D (samples, lat, lon), "
+            f"got shape {sample_data.shape}"
+        )
+
+    # Calculate the tail percentile values for each generated sample
+    # and generate a 95% confidence interval
     lower_bounds = np.percentile(sample_data, 0.01, axis=(1, 2))
     upper_bounds = np.percentile(sample_data, 99.99, axis=(1, 2))
     lower_bound_2p5 = np.percentile(lower_bounds, 2.5)
@@ -102,6 +115,10 @@ def plot_histogram_lines(
     target_lower_0p01_percentile = np.percentile(target_data.values, 0.01)
     target_upper_99p99_percentile = np.percentile(target_data.values, 99.99)
     counts, _ = np.histogram(target_data.values, bins=bin_edges)
+
+    # Pre-compute y-axis limits so fill_betweenx spans exactly the plot area
+    ylim_min = 0.1
+    ylim_max = 10 ** (np.log10(np.max(counts)) + 1)
 
     # Calculate histogram for each predicted sample
     all_counts = []
@@ -137,19 +154,20 @@ def plot_histogram_lines(
         label="Target 99.99%",
     )
     ax.fill_betweenx(
-        [1e-5, 1e10],
+        [ylim_min, ylim_max],
         upper_bound_2p5,
         upper_bound_97p5,
         color="gray",
         alpha=0.2,
-        label="Pred Percentile (95% CI)",
+        label="Pred upper tail 95% CI",
     )
     ax.fill_betweenx(
-        [1e-5, 1e10],
+        [ylim_min, ylim_max],
         lower_bound_2p5,
         lower_bound_97p5,
         color="gray",
         alpha=0.2,
+        label="Pred lower tail 95% CI",
     )
 
     avg_counts = np.mean(all_counts, axis=0)
@@ -165,7 +183,7 @@ def plot_histogram_lines(
     ax.set_xlabel(var_label)
     ax.set_ylabel("Count")
     ax.set_yscale("log")
-    ax.set_ylim(0.1, 10 ** (np.log10(np.max(counts)) + 1))
+    ax.set_ylim(ylim_min, ylim_max)
     ax.grid(which="major", linestyle="--", linewidth=0.5, alpha=0.5)
     ax.set_title(f"{title_prefix} distribution: {var_label}")
     ax.legend()
@@ -173,8 +191,6 @@ def plot_histogram_lines(
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-
-    return save_path
 
 
 def main():
@@ -194,8 +210,7 @@ def main():
 
         print(f"Found {len(event_files)} event file(s)")
 
-        for nc_file in event_files:
-            event_name = extract_event_name(nc_file)
+        for event_name, nc_file in event_files.items():
             output_event_dir = output_dir / beaker_id / event_name
 
             print(f"Processing: {nc_file.name} -> {output_event_dir}")
