@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import torch
 
+from fme.core.device import get_device
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -148,6 +149,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
     ):
         self._modules = torch.nn.ModuleList([torch.nn.Linear(1, 1, bias=False)])
         self._modules[0].weight.data.fill_(0.0)
+        self._modules = self._modules.to(get_device())
         if state is not None:
             self._state = state
         else:
@@ -1173,6 +1175,6 @@ def test_ema_state_preserved_after_resume(tmp_path: str):
     assert int(resumed_ema_state["num_updates"]) == expected_num_updates
     for key in ema_state["ema_params"]:
         torch.testing.assert_close(
-            resumed_ema_state["ema_params"][key].cpu(),
+            resumed_ema_state["ema_params"][key],
             ema_state["ema_params"][key],
         )
