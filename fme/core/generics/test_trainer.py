@@ -1173,6 +1173,6 @@ def test_ema_state_preserved_after_resume(tmp_path: str):
     assert int(resumed_ema_state["num_updates"]) == expected_num_updates
     for key in ema_state["ema_params"]:
         torch.testing.assert_close(
-            resumed_ema_state["ema_params"][key],
+            resumed_ema_state["ema_params"][key].cpu(),
             ema_state["ema_params"][key],
         )
