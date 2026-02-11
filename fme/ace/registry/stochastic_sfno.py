@@ -4,6 +4,7 @@ from typing import Literal
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
 from fme.core.models.conditional_sfno.v0.stochastic_sfno import build as build_v0
+from fme.core.models.conditional_sfno.v1.stochastic_sfno import build as build_v1
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
@@ -69,7 +70,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             Defaults to spectral_lora_rank.
     """
 
-    version: Literal["v0", "latest"] = "v0"
+    version: Literal["v0", "v1", "latest"] = "v0"
     spectral_transform: Literal["sht"] = "sht"
     filter_type: Literal["linear", "makani-linear"] = "linear"
     operator_type: Literal["dhconv"] = "dhconv"
@@ -122,6 +123,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             )
         if self.version == "latest":
             # must replace as eventual newer versions break backwards compatibility
+            # v1 is not stable yet, keep using v0 as default for now
             self.version = "v0"
 
     def build(
@@ -132,6 +134,13 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     ):
         if self.version == "v0":
             return build_v0(
+                self,
+                n_in_channels=n_in_channels,
+                n_out_channels=n_out_channels,
+                dataset_info=dataset_info,
+            )
+        elif self.version == "v1":
+            return build_v1(
                 self,
                 n_in_channels=n_in_channels,
                 n_out_channels=n_out_channels,

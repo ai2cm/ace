@@ -156,6 +156,7 @@ def get_single_module_noise_conditioned_selector(
                     type="NoiseConditionedSFNO",
                     config=dataclasses.asdict(
                         NoiseConditionedSFNOBuilder(
+                            version="v1",
                             embed_dim=4,
                             noise_embed_dim=4,
                             noise_type="isotropic",
