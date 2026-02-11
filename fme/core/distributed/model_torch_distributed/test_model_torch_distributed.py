@@ -1,7 +1,3 @@
-"""
-Note: AI was used to generate these unit tests."
-"""
-
 import os
 from unittest.mock import patch
 
