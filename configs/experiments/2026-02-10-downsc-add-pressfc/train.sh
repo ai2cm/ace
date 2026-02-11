@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-25km-prate-winds-pressfc"
-CONFIG_FILENAME="train-100-to-25km.yaml"
+JOB_NAME="xshield-downscaling-100km-to-25km-prate-winds-pressfc-pstd-1.1"
+CONFIG_FILENAME="train-100-to-25km-update-noise.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
