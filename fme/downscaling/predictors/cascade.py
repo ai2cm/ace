@@ -47,7 +47,7 @@ class CascadePredictorConfig:
         return self._models
 
     def get_static_inputs(self) -> list[StaticInputs | None]:
-        return [ckpt.static_inputs for ckpt in self.cascade_model_checkpoints]
+        return [model.static_inputs for model in self.models]
 
     def build(self):
         for m in range(len(self.models) - 1):

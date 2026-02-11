@@ -13,13 +13,7 @@ from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import (
-    BatchData,
-    PairedBatchData,
-    StaticInputs,
-    _StaticInput,
-    get_normalized_topography,
-)
+from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
@@ -615,24 +609,3 @@ class CheckpointModelConfig:
     @property
     def out_names(self):
         return self._checkpoint["model"]["config"]["out_names"]
-
-    # TODO: can deprecate directly loading from dataset by using the saved static
-    # inputs in the checkpoint
-    @property
-    def static_inputs(self) -> StaticInputs | None:
-        """Return static inputs for this model, loading from path if configured."""
-        topo = self.get_topography()
-        if topo is None:
-            return None
-        return StaticInputs(fields=[topo])
-
-    def get_topography(self) -> _StaticInput | None:
-        if self.data_requirements.use_fine_topography:
-            if self.fine_topography_path is None:
-                raise ValueError(
-                    "Topography path must be provided for model configured "
-                    "to use fine topography."
-                )
-            return get_normalized_topography(self.fine_topography_path).to_device()
-        else:
-            return None
