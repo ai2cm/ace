@@ -1,5 +1,3 @@
-import os
-
 import pytest
 import torch
 
@@ -15,12 +13,13 @@ from fme.core.distributed.model_torch_distributed.utils import gather_helper_con
         (1, 2),  # W-parallel split
     ],
 )
-def test_get_local_slices(h_parallel, w_parallel):
+def test_get_local_slices(h_parallel, w_parallel, monkeypatch):
     """Test that get_local_slices correctly
     distributes data and gather reconstructs it."""
-    # Set up parallelization
-    os.environ["H_PARALLEL_SIZE"] = str(h_parallel)
-    os.environ["W_PARALLEL_SIZE"] = str(w_parallel)
+
+    # Set up parallelization using monkeypatch
+    monkeypatch.setenv("H_PARALLEL_SIZE", str(h_parallel))
+    monkeypatch.setenv("W_PARALLEL_SIZE", str(w_parallel))
 
     # Define tensor dimensions
     nsamples = 4
@@ -52,10 +51,6 @@ def test_get_local_slices(h_parallel, w_parallel):
 
     # Move back to CPU for comparison
     tensor_data_full_cpu = tensor_data_full.to("cpu")
-
-    # Clean up environment variables
-    os.environ.pop("H_PARALLEL_SIZE", None)
-    os.environ.pop("W_PARALLEL_SIZE", None)
 
     # Verify reconstruction matches original
     assert torch.equal(
