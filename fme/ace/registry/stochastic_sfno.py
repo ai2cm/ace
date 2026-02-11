@@ -69,7 +69,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             Defaults to spectral_lora_rank.
     """
 
-    version: Literal["v0"] = "v0"
+    version: Literal["v0", "latest"] = "v0"
     spectral_transform: Literal["sht"] = "sht"
     filter_type: Literal["linear", "makani-linear"] = "linear"
     operator_type: Literal["dhconv"] = "dhconv"
@@ -120,6 +120,9 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 "Only 'dhconv' operator_type is supported for "
                 "NoiseConditionedSFNO models."
             )
+        if self.version == "latest":
+            # must replace as eventual newer versions break backwards compatibility
+            self.version = "v0"
 
     def build(
         self,
