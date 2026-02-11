@@ -78,7 +78,7 @@ def _contract_dhconv(
         Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
     """
     wc = torch.view_as_complex(weight)
-    return torch.einsum("bgixy,giox->bgoxy", xc, wc)
+    return torch.einsum("bgixy,gxoi->bgoxy", xc, wc)
 
 
 class SpectralConvS2(nn.Module):
@@ -179,15 +179,17 @@ class SpectralConvS2(nn.Module):
             self.mpad = 0
 
         if scale == "auto":
-            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat_local, 2)
+            scale = math.sqrt(1 / (in_channels)) * torch.ones(
+                self.modes_lat_local, 1, 1, 2
+            )
             # seemingly the first weight is not really complex, so we need to account for that
-            scale[0, :] *= math.sqrt(2.0)
+            scale[0, :, :, :] *= math.sqrt(2.0)
 
         weight_shape = [
             num_groups,
-            in_channels // num_groups,
-            out_channels // num_groups,
             self.modes_lat_local,
+            out_channels // num_groups,
+            in_channels // num_groups,
         ]
 
         assert factorization == "ComplexDense"
