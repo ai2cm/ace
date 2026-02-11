@@ -131,7 +131,7 @@ class RealSHT(nn.Module):
                 x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
 
             with timer.child("permute"):
-                x = x.permute(0, 1, 3, 2).contiguous()  # (B, C, H, W) -> (B, C, W, H)
+                x = x.transpose(-1, -2).contiguous()  # (B, C, H, W) -> (B, C, W, H)
                 x = x.contiguous()
 
             with timer.child("contraction"):
@@ -140,8 +140,8 @@ class RealSHT(nn.Module):
 
                 # contraction
                 weights = self.weights.to(x.device).to(x.dtype)
-                rl = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, 0], weights)
-                im = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, 1], weights)
+                rl = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, :, 0], weights)
+                im = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, :, 1], weights)
                 xout = torch.stack((rl, im), -1)
                 x = torch.view_as_complex(xout)
 
