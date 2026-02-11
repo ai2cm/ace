@@ -21,11 +21,10 @@ from typing import Tuple
 import torch
 import torch.fft
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 from fme.core.benchmark.timer import Timer, NullTimer
-from fme.core.models.conditional_sfno.lora import LoRAConv2d
+from .lora import LoRAConv2d
 
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd

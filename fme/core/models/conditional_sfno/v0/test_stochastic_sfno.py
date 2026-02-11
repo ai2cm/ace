@@ -4,12 +4,9 @@ import pytest
 import torch
 from torch_harmonics import InverseRealSHT
 
-from fme.ace.registry.stochastic_sfno import (
-    Context,
-    NoiseConditionedSFNO,
-    isotropic_noise,
-)
 from fme.core.device import get_device
+
+from .stochastic_sfno import Context, NoiseConditionedSFNO, isotropic_noise
 
 
 @pytest.mark.parametrize("nlat, nlon", [(8, 16), (64, 128)])

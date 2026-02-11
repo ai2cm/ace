@@ -5,9 +5,8 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.models.conditional_sfno.s2convolutions import SpectralConvS2
 
-from .s2convolutions import _contract_dhconv
+from .s2convolutions import SpectralConvS2, _contract_dhconv
 
 
 @dataclasses.dataclass

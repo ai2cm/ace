@@ -42,7 +42,7 @@ from fme.ace.registry.hpx import (
 from fme.ace.registry.land_net import LandNetBuilder
 from fme.ace.registry.m2lines import FloeNetBuilder, SamudraBuilder
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
-from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.stepper import DerivedForcingsConfig, StepperOverrideConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.parameter_init import (
