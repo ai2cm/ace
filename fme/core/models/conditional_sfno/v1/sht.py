@@ -130,20 +130,19 @@ class RealSHT(nn.Module):
                 # apply real fft in the longitudinal direction
                 x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
 
+            with timer.child("permute"):
+                x = x.permute(0, 1, 3, 2).contiguous()  # (B, C, H, W) -> (B, C, W, H)
+                x = x.contiguous()
+
             with timer.child("contraction"):
                 # do the Legendre-Gauss quadrature
                 x = torch.view_as_real(x)
 
-                # distributed contraction: fork
-                out_shape = list(x.size())
-                out_shape[-3] = self.lmax
-                out_shape[-2] = self.mmax
-                xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
-
                 # contraction
                 weights = self.weights.to(x.device).to(x.dtype)
-                xout[..., 0] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 0], weights)
-                xout[..., 1] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 1], weights)
+                rl = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, 0], weights)
+                im = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, 1], weights)
+                xout = torch.stack((rl, im), -1)
                 x = torch.view_as_complex(xout)
 
         return x
