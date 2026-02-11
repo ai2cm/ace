@@ -72,7 +72,7 @@ class ModelTorchDistributed(DistributedBackend):
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size // comm.get_size("data")
 
-    def reduce_mean(self, tensor: torch.Tensor, group="data") -> torch.Tensor | None:
+    def reduce_mean(self, tensor: torch.Tensor, group=None) -> torch.Tensor | None:
         torch.distributed.all_reduce(
             tensor, group=comm.get_group(group), op=torch.distributed.ReduceOp.AVG
         )

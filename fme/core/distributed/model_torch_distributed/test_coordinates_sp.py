@@ -1,4 +1,4 @@
-import os
+import logging
 
 import pytest
 import torch
@@ -8,9 +8,20 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.mask_provider import MaskProvider
 
+logger = logging.getLogger(__name__)
+
 
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires multi-GPU machine")
-def test_lat_lon_ops_from_coords_w_sp():
+@pytest.mark.parametrize(
+    "h_parallel,w_parallel",
+    [
+        (2, 1),  # H-parallel split
+        (1, 2),  # W-parallel split
+    ],
+)
+def test_lat_lon_ops_from_coords_w_spatial_parallelism(
+    h_parallel, w_parallel, monkeypatch
+):
     # Define the sizes
     torch.manual_seed(42)
     batch_size = 4  # Example batch size
@@ -25,14 +36,8 @@ def test_lat_lon_ops_from_coords_w_sp():
 
     input_tensor = torch.rand(batch_size, nlat, nlon)
 
-    # Compute reference result
-    with Distributed.force_non_distributed():
-        coords = LatLonCoordinates(lat=lat_host, lon=lon_host)
-        gridded_ops = coords.get_gridded_operations(mask_provider=MaskProvider())
-        result_reference = gridded_ops.area_weighted_mean(input_tensor, name="T_0")
-
-    os.environ["H_PARALLEL_SIZE"] = "2"
-    os.environ["W_PARALLEL_SIZE"] = "1"
+    monkeypatch.setenv("H_PARALLEL_SIZE", str(h_parallel))
+    monkeypatch.setenv("W_PARALLEL_SIZE", str(w_parallel))
     dist = Distributed.get_instance()
     device = get_device()
     lat = lat_host.to(device)
@@ -45,6 +50,11 @@ def test_lat_lon_ops_from_coords_w_sp():
     input_local = input_local_host.to(device)
     result_local = gridded_ops.area_weighted_mean(input_local, name="T_0")
     result = dist.reduce_mean(result_local)
+
+    # Compute reference result
+    with Distributed.force_non_distributed():
+        coords = LatLonCoordinates(lat=lat_host, lon=lon_host)
+        gridded_ops = coords.get_gridded_operations(mask_provider=MaskProvider())
+        result_reference = gridded_ops.area_weighted_mean(input_tensor, name="T_0")
+
     torch.testing.assert_close(result.to("cpu"), result_reference)
-    # Set H_PARALLEL_SIZE back to 1.
-    os.environ["H_PARALLEL_SIZE"] = "1"

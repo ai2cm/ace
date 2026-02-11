@@ -41,7 +41,7 @@ class NonDistributed(DistributedBackend):
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size
 
-    def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor:
+    def reduce_mean(self, tensor: torch.Tensor, group=None) -> torch.Tensor:
         # reduction is across processes, so no-op here
         return tensor
 

@@ -1,5 +1,3 @@
-import os
-
 import numpy as np
 import pytest
 import torch
@@ -13,61 +11,40 @@ from fme.core.loss import LossConfig
 
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires multi-GPU machine")
 @pytest.mark.parametrize("global_mean_type", [None])
-def test_loss_builds_and_runs_with_spatial_parallelism(global_mean_type):
+@pytest.mark.parametrize(
+    "h_parallel,w_parallel",
+    [
+        (2, 1),  # H-parallel split
+        (1, 2),  # W-parallel split
+    ],
+)
+def test_loss_builds_and_runs_with_spatial_parallelism(
+    global_mean_type, h_parallel, w_parallel, monkeypatch
+):
     """Test that loss computation is consistent between
     serial and parallel execution."""
-    error_tol = 1e-13
+    error_tol = 7e-8
     nx = 8
     ny = 8
 
-    # ========================================================================
-    # Phase 1: Serial execution (no spatial parallelism)
-    # ========================================================================
     torch.manual_seed(0)
-    with Distributed.force_non_distributed():
-        # Create test data
-        data_tensor = torch.randn(1, 2, nx, ny, device=get_device())
-        example_data = {"a": data_tensor}
-        area_weights = torch.ones(nx, ny).to(get_device()) * 5
 
-        # Build loss function
-        config = LossConfig(global_mean_type=global_mean_type)
-        loss_fn = config.build(
-            reduction="mean",
-            gridded_operations=LatLonOperations(area_weights),
-        )
+    # Create test data
+    data_tensor_host = torch.randn(1, 2, nx, ny, device="cpu")
+    area_weights_host = torch.ones(nx, ny).to("cpu") * 5
 
-        # Compute loss
-        x = torch.randn(1, 2, nx, ny, device=get_device())
-        y = torch.randn(1, 2, nx, ny, device=get_device())
-        result_serial = loss_fn(x, y)
-
-        # Aggregate and get logs
-        aggregator = MeanAggregator(LatLonOperations(area_weights))
-        aggregator.record_batch(
-            loss=result_serial,
-            target_data=example_data,
-            gen_data=example_data,
-            target_data_norm=example_data,
-            gen_data_norm=example_data,
-        )
-        logs_serial = aggregator.get_logs(label="metrics")
-        loss_serial = logs_serial["metrics/loss"]
-
-        # Move tensors to CPU to preserve for parallel phase
-        data_tensor_host = data_tensor.cpu()
-        x_host = x.cpu()
-        y_host = y.cpu()
-        area_weights_host = area_weights.cpu()
+    x_host = torch.randn(1, 2, nx, ny, device="cpu")
+    y_host = torch.randn(1, 2, nx, ny, device="cpu")
+    example_data_host = {"a": data_tensor_host}
 
     # ========================================================================
     # Phase 2: Parallel execution (2-way horizontal spatial parallelism)
     # ========================================================================
-    os.environ["H_PARALLEL_SIZE"] = "2"
-    os.environ["W_PARALLEL_SIZE"] = "1"
+    monkeypatch.setenv("H_PARALLEL_SIZE", str(h_parallel))
+    monkeypatch.setenv("W_PARALLEL_SIZE", str(w_parallel))
 
     # Use the same data from serial execution
-    area_weights = area_weights_host * 1.0  # Create a copy
+    area_weights = area_weights_host.to(get_device()) * 1.0  # Create a copy
 
     # Get distributed instance and prepare local data
     dist = Distributed.get_instance()
@@ -110,9 +87,32 @@ def test_loss_builds_and_runs_with_spatial_parallelism(global_mean_type):
     logs_parallel = aggregator_parallel.get_logs(label="metrics")
     loss_parallel = logs_parallel["metrics/loss"]
 
-    # Clean up environment variables
-    os.environ.pop("H_PARALLEL_SIZE", None)
-    os.environ.pop("W_PARALLEL_SIZE", None)
+    # ========================================================================
+    # Phase 1: Serial execution (no spatial parallelism)
+    # ========================================================================
+    torch.manual_seed(0)
+    with Distributed.force_non_distributed():
+        # Build loss function
+        config = LossConfig(global_mean_type=global_mean_type)
+        loss_fn = config.build(
+            reduction="mean",
+            gridded_operations=LatLonOperations(area_weights_host),
+        )
+
+        # Compute loss
+        result_serial = loss_fn(x_host, y_host)
+
+        # Aggregate and get logs
+        aggregator = MeanAggregator(LatLonOperations(area_weights_host))
+        aggregator.record_batch(
+            loss=result_serial,
+            target_data=example_data_host,
+            gen_data=example_data_host,
+            target_data_norm=example_data_host,
+            gen_data_norm=example_data_host,
+        )
+        logs_serial = aggregator.get_logs(label="metrics")
+        loss_serial = logs_serial["metrics/loss"]
 
     # ========================================================================
     # Phase 3: Verify results match

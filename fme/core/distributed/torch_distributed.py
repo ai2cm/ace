@@ -83,7 +83,7 @@ class TorchDistributed(DistributedBackend):
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size // self.total_ranks
 
-    def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None:
+    def reduce_mean(self, tensor: torch.Tensor, group=None) -> torch.Tensor | None:
         torch.distributed.all_reduce(tensor)
         return tensor / self.total_ranks
 

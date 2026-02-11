@@ -1,4 +1,4 @@
-import os
+import logging
 
 import pytest
 import torch
@@ -6,6 +6,8 @@ import torch
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.distributed.model_torch_distributed.utils import gather_helper_conv
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.mark.skipif(torch.cuda.device_count() < 4, reason="requires multi-GPU machine")
@@ -16,24 +18,24 @@ from fme.core.distributed.model_torch_distributed.utils import gather_helper_con
         (2, 2, 4, 2, 2),
     ],
 )
-def test_reduce_mean_spatial_parallelism(n_batch, n_lat, n_lon, h_parallel, w_parallel):
+def test_reduce_mean_spatial_parallelism(
+    n_batch, n_lat, n_lon, h_parallel, w_parallel, monkeypatch
+):
     """
     Test reduce_mean with spatial parallelism using random tensors.
-
     Parameters:
     - n_batch: Number of samples in batch dimension
     - n_lat: Number of latitude points
     - n_lon: Number of longitude points
-    - h_parallel: Split size for batch dimension (H_PARALLEL_SIZE)
+    - h_parallel: Split size for latitude dimension (H_PARALLEL_SIZE)
     - w_parallel: Split size for longitude dimension (W_PARALLEL_SIZE)
-    - seed: Random seed for reproducibility
 
     The test verifies that reduce_mean correctly averages across the batch dimension
     when using spatial parallelism.
     """
     # Set up spatial parallelism
-    os.environ["H_PARALLEL_SIZE"] = str(h_parallel)
-    os.environ["W_PARALLEL_SIZE"] = str(w_parallel)
+    monkeypatch.setenv("H_PARALLEL_SIZE", str(h_parallel))
+    monkeypatch.setenv("W_PARALLEL_SIZE", str(w_parallel))
 
     dist = Distributed.get_instance()
     device = get_device()
@@ -43,20 +45,19 @@ def test_reduce_mean_spatial_parallelism(n_batch, n_lat, n_lon, h_parallel, w_pa
     # Create full tensor with random values
     # Use fixed seed for reproducibility across all ranks
     torch.manual_seed(0)
-
     full_tensor = torch.randn((n_batch, n_lat, n_lon))
 
     if rank == 0:
-        print(f"\n{'='*60}")
-        print(f"Test configuration:")
-        print(f"  Batch size: {n_batch}")
-        print(f"  Lat size: {n_lat}")
-        print(f"  Lon size: {n_lon}")
-        print(f"  H_PARALLEL_SIZE: {h_parallel}")
-        print(f"  W_PARALLEL_SIZE: {w_parallel}")
-        print(f"{'='*60}\n")
-        print(f"Full tensor shape: {full_tensor.shape}")
-        print(f"Full tensor:\n{full_tensor}")
+        logger.debug(f"\n{'='*60}")
+        logger.debug(f"Test configuration:")
+        logger.debug(f"  Batch size: {n_batch}")
+        logger.debug(f"  Lat size: {n_lat}")
+        logger.debug(f"  Lon size: {n_lon}")
+        logger.debug(f"  H_PARALLEL_SIZE: {h_parallel}")
+        logger.debug(f"  W_PARALLEL_SIZE: {w_parallel}")
+        logger.debug(f"{'='*60}\n")
+        logger.debug(f"Full tensor shape: {full_tensor.shape}")
+        logger.debug(f"Full tensor:\n{full_tensor}")
 
     # Get local slice for this rank
     local_slices = dist.get_local_slices((n_lat, n_lon))
@@ -73,18 +74,19 @@ def test_reduce_mean_spatial_parallelism(n_batch, n_lat, n_lon, h_parallel, w_pa
 
     dist.barrier()
 
-    print(f"\nRank {rank}:")
-    print(f"  Batch ranks: {batch_ranks}")
-    print(f"  Batch slice: {batch_slice}")
-    print(f"  Local slices (lat, lon): {local_slices}")
-    print(f"  Local tensor shape: {local_tensor.shape}")
-    print(f"  Local tensor:\n{local_tensor}")
+    logger.debug(f"\nRank {rank}:")
+    logger.debug(f"  Batch ranks: {batch_ranks}")
+    logger.debug(f"  Batch slice: {batch_slice}")
+    logger.debug(f"  Local slices (lat, lon): {local_slices}")
+    logger.debug(f"  Local tensor shape: {local_tensor.shape}")
+    logger.debug(f"  Local tensor:\n{local_tensor}")
 
     # Reduce mean across batch dimension
-    result = dist.reduce_mean(local_tensor)
+    # NOTE: here we pass "data" as group name.
+    result = dist.reduce_mean(local_tensor, group="data")
 
-    print(f"  Result after reduce_mean shape: {result.shape}")
-    print(f"  Result after reduce_mean:\n{result}")
+    logger.debug(f"  Result after reduce_mean shape: {result.shape}")
+    logger.debug(f"  Result after reduce_mean:\n{result}")
 
     # Gather results from all ranks
     w_group = dist.comm_get_group("w")
@@ -97,20 +99,16 @@ def test_reduce_mean_spatial_parallelism(n_batch, n_lat, n_lon, h_parallel, w_pa
     expected_mean = torch.mean(full_tensor, dim=0, keepdim=True)
 
     if rank == 0:
-        print(f"\n{'='*60}")
-        print(f"Expected mean shape: {expected_mean.shape}")
-        print(f"Expected mean:\n{expected_mean}")
-        print(f"\nGathered result shape: {result_full.shape}")
-        print(f"Gathered result:\n{result_full}")
-        print(f"{'='*60}\n")
+        logger.debug(f"\n{'='*60}")
+        logger.debug(f"Expected mean shape: {expected_mean.shape}")
+        logger.debug(f"Expected mean:\n{expected_mean}")
+        logger.debug(f"\nGathered result shape: {result_full.shape}")
+        logger.debug(f"Gathered result:\n{result_full}")
+        logger.debug(f"{'='*60}\n")
 
     # Verify correctness
     result_cpu = result_full.to("cpu")
     expected_cpu = expected_mean.to("cpu")
-
-    # Clean up environment variables
-    os.environ.pop("H_PARALLEL_SIZE", None)
-    os.environ.pop("W_PARALLEL_SIZE", None)
 
     # Use torch.allclose for floating point comparison
     assert torch.allclose(

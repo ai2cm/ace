@@ -113,7 +113,7 @@ class Distributed:
         """
         return self._distributed.local_batch_size(batch_size)
 
-    def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor:
+    def reduce_mean(self, tensor: torch.Tensor, group=None) -> torch.Tensor:
         """
         Reduce a tensor representing a mean across all processes.
 
@@ -122,7 +122,7 @@ class Distributed:
 
         Modifies the input tensor in-place as a side effect.
         """
-        return self._distributed.reduce_mean(tensor)
+        return self._distributed.reduce_mean(tensor, group)
 
     def get_local_slices(self, tensor_shape):
         return self._distributed.get_local_slices(tensor_shape)
