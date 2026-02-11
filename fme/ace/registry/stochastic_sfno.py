@@ -135,6 +135,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     Noise is provided as conditioning input to conditional layer normalization.
 
     Attributes:
+        version: Version of the model.
         spectral_transform: Type of spherical transform to use.
             Kept for backwards compatibility.
         filter_type: Type of filter to use.
@@ -186,6 +187,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             Defaults to spectral_lora_rank.
     """
 
+    version: Literal["v0"] = "v0"
     spectral_transform: Literal["sht"] = "sht"
     filter_type: Literal["linear", "makani-linear"] = "linear"
     operator_type: Literal["dhconv"] = "dhconv"
