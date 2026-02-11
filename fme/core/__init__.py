@@ -22,6 +22,7 @@ __all__ = [
     "weighted_mean",
     "weighted_mean_bias",
     "weighted_nanmean",
+    "weighted_sum",
     "root_mean_squared_error",
     "get_device",
     "using_gpu",

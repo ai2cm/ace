@@ -1,3 +1,1 @@
-from . import benchmark as _  # to trigger registrations
-
-del _
+from . import benchmark
