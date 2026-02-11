@@ -38,7 +38,7 @@ from .layers import (
     ContextConfig,
     DropPath,
 )
-from .lora import LoRAConv2d
+from .lora import LoRAConv2d, LoRALinear
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
 from .makani.spectral_convolution import SpectralConv
 
@@ -334,7 +334,9 @@ class FourierNeuralOperatorBlock(nn.Module):
 
         if hasattr(self, "mlp"):
             with timer.child("mlp"):
+                x = x.permute(0, 2, 3, 1)  # (B, H, L, C)
                 x = self.mlp(x)
+                x = x.permute(0, 3, 1, 2)  # (B, C, H, L)
 
         x = self.drop_path(x)
 

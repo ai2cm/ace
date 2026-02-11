@@ -139,3 +139,31 @@ class LoRAConv2d(nn.Conv2d):
         return (
             y + self.lora_up(self.lora_down(self.lora_dropout(x))) * self.lora_scaling
         )
+
+
+class LoRALinear(nn.Module):
+    """
+    Drop-in nn.Linear with optional LoRA.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+        *,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
+        lora_dropout: float = 0.0,
+    ) -> None:
+        if lora_rank > 0:
+            raise NotImplementedError("LoRALinear not implemented yet")
+        super().__init__()
+        self.linear = nn.Linear(
+            in_channels, out_channels, bias=bias, device=device, dtype=dtype
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.linear(x)
