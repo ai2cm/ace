@@ -1,5 +1,6 @@
 [![Docs](https://readthedocs.org/projects/ai2-climate-emulator/badge/?version=latest)](https://ai2-climate-emulator.readthedocs.io/en/latest/)
 [![PyPI](https://img.shields.io/pypi/v/fme.svg)](https://pypi.org/project/fme/)
+[![Model checkpoints](https://img.shields.io/badge/%F0%9F%A4%97%20HF-Models-yellow)](https://huggingface.co/collections/allenai/ace)
 
 <img src="ACE-logo.png" alt="Logo for the ACE Project" style="width: auto; height: 50px;">
 
