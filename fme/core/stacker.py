@@ -36,6 +36,8 @@ class Stacker:
     def __init__(
         self,
         prefix_map: Mapping[str, list[str]] | None = None,
+        *,
+        require_contiguous_zero_based: bool = True,
     ):
         """
         Args:
@@ -43,8 +45,12 @@ class Stacker:
                 set of "standard" names (e.g., "surface_pressure" or "air_temperature")
                 and lists of possible names or prefix variants (e.g., ["PRESsfc", "PS"]
                 or ["air_temperature_", "T_"]) found in the data.
+            require_contiguous_zero_based: If True (default), level indices for each
+                3D variable must be exactly 0, 1, ..., N-1 with no gaps. If False,
+                any set of level indices is allowed (e.g. 1..7 without level 0).
         """
         self._prefix_map: Mapping[str, list[str]] | None = prefix_map
+        self._require_contiguous_zero_based = require_contiguous_zero_based
 
     def infer_prefix_map(self, names: Iterable[str]):
         """
@@ -150,11 +156,23 @@ class Stacker:
                 )
             levels.append(int(match.group(1)))
 
-        for i, level in enumerate(sorted(levels)):
-            if i != level:
-                raise ValueError(f"Missing level {i} in {prefix} levels {levels}.")
+        if self._require_contiguous_zero_based:
+            for i, level in enumerate(sorted(levels)):
+                if i != level:
+                    raise ValueError(
+                        f"Missing level {i} in {prefix} levels {sorted(levels)}."
+                    )
 
         if len(names) == 0:
             raise KeyError(prefix)
 
-        return sorted(names, key=lambda name: levels[names.index(name)])
+        level_by_name: dict[str, int] = {}
+        for name in names:
+            match = self.LEVEL_PATTERN.search(name)
+            if match is None:
+                raise ValueError(
+                    f"Invalid field name {name}, is a prefix variable "
+                    "but does not end in _{number}."
+                )
+            level_by_name[name] = int(match.group(1))
+        return sorted(names, key=lambda name: level_by_name[name])

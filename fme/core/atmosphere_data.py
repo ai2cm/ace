@@ -68,6 +68,8 @@ class AtmosphereData:
         atmosphere_data: TensorMapping,
         vertical_coordinate: HasAtmosphereVerticalIntegral | None = None,
         atmosphere_field_name_prefixes: Mapping[str, list[str]] | None = None,
+        *,
+        require_contiguous_zero_based_levels: bool = True,
     ):
         """
         Initializes the instance based on the provided data and prefixes.
@@ -81,13 +83,19 @@ class AtmosphereData:
                 or "air_temperature") and lists of possible names or prefix variants
                 (e.g., ["PRESsfc", "PS"] or ["air_temperature_", "T_"]) found in the
                 data.
+            require_contiguous_zero_based_levels: If True (default), 3D variables must
+                have level indices 0, 1, ..., N-1. If False, any set of level indices
+                is allowed (e.g. air_temperature_1..7 without level 0).
         """
         if atmosphere_field_name_prefixes is None:
             atmosphere_field_name_prefixes = ATMOSPHERE_FIELD_NAME_PREFIXES.copy()
         self._data = dict(atmosphere_data)
         self._prefix_map = atmosphere_field_name_prefixes
         self._vertical_coordinate = vertical_coordinate
-        self._stacker = Stacker(atmosphere_field_name_prefixes)
+        self._stacker = Stacker(
+            atmosphere_field_name_prefixes,
+            require_contiguous_zero_based=require_contiguous_zero_based_levels,
+        )
 
     @property
     def data(self) -> TensorDict:
