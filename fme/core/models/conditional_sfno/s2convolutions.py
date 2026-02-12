@@ -246,14 +246,15 @@ class SpectralConvS2(nn.Module):
 
         weight = state_dict[key]
 
-        if weight.shape == (
+        ungrouped_shape = (
             module.in_channels,
             module.out_channels,
             module.modes_lat_local,
-        ):
-            state_dict[key] = weight.view(
-                1, module.in_channels, module.out_channels, module.modes_lat_local
-            )
+            2,
+        )
+
+        if weight.shape == ungrouped_shape:
+            state_dict[key] = weight.view(1, *ungrouped_shape)
 
     def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
