@@ -15,9 +15,7 @@
 > - If you have no local work to preserve: delete your local clone and re-clone the repository
 > - If you have local branches or commits: follow the detailed migration steps in [MIGRATION.md](MIGRATION.md)
 
-Ai2 Climate Emulator (ACE) is a fast machine learning model that simulates global atmospheric variability in a changing climate over time scales ranging from hours to centuries.
-
-
+Ai2 Climate Emulator (ACE) is a fast machine learning model that simulates global atmospheric variability in a changing climate over time scales ranging from hours to centuries. This repository contains the `fme` python package which can be used to train, run and evaluate weather and climate AI models such as ACE. It also contains the data processing scripts and model configurations used in recent papers published by the Ai2 Climate Modeling group.
 
 ## Installation
 
