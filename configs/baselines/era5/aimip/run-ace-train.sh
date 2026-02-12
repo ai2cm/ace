@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-with-small-co2-perturbations"
-JOB_GROUP="ace-aimip-with-small-co2-perturbations"
+JOB_NAME_BASE="ace-aimip-with-out-level0"
+JOB_GROUP="ace-aimip-with-out-level0"
 CONFIG_FILENAME="ace-train-with-no-stratosphere.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
