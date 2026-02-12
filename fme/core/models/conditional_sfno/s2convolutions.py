@@ -227,7 +227,7 @@ class SpectralConvS2(nn.Module):
         self.out_channels = out_channels
 
         # rewrite old checkpoints on load
-        self._register_load_state_dict_pre_hook(self._pre_load_hook, with_module=True)
+        self.register_load_state_dict_pre_hook(self._pre_load_hook)
 
     @staticmethod
     def _pre_load_hook(
