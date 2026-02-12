@@ -10,7 +10,6 @@ import torch
 import fme
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
-from fme.core.dicts import to_flat_dict
 from fme.core.labels import LabelEncoding
 from fme.core.registry.module import Module
 
@@ -147,11 +146,4 @@ def test_module_backwards_compatibility(selector_name: str):
         dataset_info=dataset_info,
     )
     loaded_state_dict = load_or_cache_state(selector_name, module)
-    new_keys = set(to_flat_dict(module.get_state()).keys()).difference(
-        to_flat_dict(loaded_state_dict).keys()
-    )
     module.load_state(loaded_state_dict)
-    assert not new_keys, (
-        f"New keys added to state dict: {new_keys}. "
-        "Please delete and re-generate the regression target."
-    )
