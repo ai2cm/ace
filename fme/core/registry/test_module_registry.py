@@ -11,6 +11,7 @@ import fme
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import LabelEncoding
+from fme.core.rand import set_seed
 from fme.core.registry.module import Module
 
 from .module import CONDITIONAL_BUILDERS, ModuleConfig, ModuleSelector
@@ -79,48 +80,7 @@ def test_module_selector_raises_with_bad_config():
         ModuleSelector(type="mock", config={"non_existent_key": 1})
 
 
-def get_noise_conditioned_sfno_module_selector() -> ModuleSelector:
-    return ModuleSelector(
-        type="NoiseConditionedSFNO",
-        config={
-            "embed_dim": 8,
-            "noise_embed_dim": 4,
-            "noise_type": "isotropic",
-            "filter_type": "linear",
-            "use_mlp": True,
-            "num_layers": 4,
-            "operator_type": "dhconv",
-            "affine_norms": True,
-            "spectral_transform": "sht",
-        },
-    )
-
-
-def load_or_cache_state(selector_name: str, module: Module) -> dict[str, torch.Tensor]:
-    state_dict_path = DATA_DIR / f"{selector_name}_state_dict.pt"
-    if state_dict_path.exists():
-        return torch.load(state_dict_path)
-    else:
-        state_dict = module.get_state()
-        torch.save(state_dict, state_dict_path)
-        raise RuntimeError(
-            f"State dict for {selector_name} not found. "
-            f"Created a new one at {state_dict_path}. "
-            "Please commit it to the repo and run the test again."
-        )
-
-
-SELECTORS = {
-    "NoiseConditionedSFNO": get_noise_conditioned_sfno_module_selector(),
-}
-
-
-@pytest.mark.parametrize(
-    "selector_name",
-    SELECTORS.keys(),
-)
-def test_module_backwards_compatibility(selector_name: str):
-    torch.manual_seed(0)
+def get_noise_conditioned_sfno_module() -> Module:
     img_shape = (9, 18)
     n_in_channels = 5
     n_out_channels = 6
@@ -140,10 +100,92 @@ def test_module_backwards_compatibility(selector_name: str):
         timestep=timestep,
         all_labels=all_labels,
     )
-    module = SELECTORS[selector_name].build(
+    selector = ModuleSelector(
+        type="NoiseConditionedSFNO",
+        config={
+            "embed_dim": 8,
+            "noise_embed_dim": 4,
+            "noise_type": "isotropic",
+            "filter_type": "linear",
+            "use_mlp": True,
+            "num_layers": 4,
+            "operator_type": "dhconv",
+            "affine_norms": True,
+            "spectral_transform": "sht",
+        },
+    )
+    module = selector.build(
         n_in_channels=n_in_channels,
         n_out_channels=n_out_channels,
         dataset_info=dataset_info,
     )
-    loaded_state_dict = load_or_cache_state(selector_name, module)
+    return module
+
+
+def load_state(selector_name: str) -> dict[str, torch.Tensor]:
+    state_dict_path = DATA_DIR / f"{selector_name}_state_dict.pt"
+    if not state_dict_path.exists():
+        raise RuntimeError(
+            f"State dict for {selector_name} not found at {state_dict_path}. "
+            "Please make sure the checkpoint exists and is committed to the repo."
+        )
+    return torch.load(state_dict_path)
+
+
+def load_or_cache_state(selector_name: str, module: Module) -> dict[str, torch.Tensor]:
+    state_dict_path = DATA_DIR / f"{selector_name}_state_dict.pt"
+    if state_dict_path.exists():
+        return torch.load(state_dict_path)
+    else:
+        state_dict = module.get_state()
+        torch.save(state_dict, state_dict_path)
+        raise RuntimeError(
+            f"State dict for {selector_name} not found. "
+            f"Created a new one at {state_dict_path}. "
+            "Please commit it to the repo and run the test again."
+        )
+
+
+FROZEN_BUILDERS = {}
+
+
+@pytest.mark.parametrize(
+    "selector_name",
+    FROZEN_BUILDERS.keys(),
+)
+def test_frozen_module_backwards_compatibility(selector_name: str):
+    """
+    Backwards compatibility for frozen releases from specific commits.
+    """
+    set_seed(0)
+    module = FROZEN_BUILDERS[selector_name]()
+    loaded_state_dict = load_state(selector_name)
     module.load_state(loaded_state_dict)
+
+
+LATEST_BUILDERS = {
+    "NoiseConditionedSFNO": get_noise_conditioned_sfno_module,
+}
+
+
+@pytest.mark.parametrize(
+    "selector_name",
+    LATEST_BUILDERS.keys(),
+)
+def test_latest_module_backwards_compatibility(selector_name: str):
+    """
+    Backwards compatibility for the latest module implementations.
+
+    Should be kept up-to-date with the latest code changes.
+    """
+    set_seed(0)
+    module = LATEST_BUILDERS[selector_name]()
+    loaded_state_dict = load_or_cache_state(selector_name, module)
+    new_keys = set(module.get_state().keys()).difference(loaded_state_dict.keys())
+    module.load_state(loaded_state_dict)
+    assert not new_keys, (
+        f"New keys {new_keys} were added to the state dict of {selector_name}, "
+        "which need to be added to the checkpoint to maintain comaptibility. "
+        "Please delete and regenerate the checkpoint to include these new keys, "
+        "and commit the updated checkpoint to the repo."
+    )
