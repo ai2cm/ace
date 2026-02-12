@@ -227,10 +227,10 @@ class SpectralConvS2(nn.Module):
         self.out_channels = out_channels
 
         # rewrite old checkpoints on load
-        self.register_load_state_dict_pre_hook(self._pre_load_hook)
+        self.register_load_state_dict_pre_hook(self._add_singleton_group_dim)
 
     @staticmethod
-    def _pre_load_hook(
+    def _add_singleton_group_dim(
         module: "SpectralConvS2",
         state_dict: dict[str, torch.Tensor],
         prefix: str,
