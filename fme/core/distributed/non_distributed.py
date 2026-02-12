@@ -28,9 +28,17 @@ class NonDistributed(DistributedBackend):
         return 0
 
     @property
+    def data_parallel_rank(self) -> int:
+        return self.rank  # no model parallelism
+
+    @property
     def total_ranks(self) -> int:
         """Total number of processes."""
         return 1
+
+    @property
+    def total_data_parallel_ranks(self) -> int:
+        return self.total_ranks  # no model parallelism
 
     def get_local_slices(self, tensor_shape, rank: int):
         return tuple(slice(None, None) for _ in tensor_shape)

@@ -18,9 +18,23 @@ class DistributedBackend(ABC):
 
     @property
     @abstractmethod
+    def data_parallel_rank(self) -> int: ...
+
+    @property
+    @abstractmethod
     def total_ranks(self) -> int:
         """Total number of processes."""
         ...
+
+    @property
+    @abstractmethod
+    def total_data_parallel_ranks(self) -> int:
+        """
+        Total number of rank splits along the data parallel dimension.
+
+        For example, 8 ranks using 2 ranks of model parallelism would have
+        only 4 ranks of data paralellism.
+        """
 
     @abstractmethod
     def local_batch_size(self, batch_size: int) -> int: ...

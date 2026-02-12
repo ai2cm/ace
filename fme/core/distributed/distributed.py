@@ -80,6 +80,25 @@ class Distributed:
         return self._distributed.rank
 
     @property
+    def data_parallel_rank(self) -> int:
+        """
+        Get the data parallel rank of this process.
+
+        In the context of distributed learning, this is the "batch"
+        rank of this process.
+        """
+        return self._distributed.data_parallel_rank
+
+    @property
+    def total_data_parallel_ranks(self) -> int:
+        """
+        Get the total number of data parallel ranks.
+
+        This is the number of parallel splits along the "batch" dimension.
+        """
+        return self._distributed.total_data_parallel_ranks
+
+    @property
     def world_size(self) -> int:
         """
         Get the total number of processes.
