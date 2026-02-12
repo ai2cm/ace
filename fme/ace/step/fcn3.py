@@ -343,7 +343,7 @@ class FCN3StepConfig(StepConfigABC):
         )
 
     def load(self):
-        self.normalization.load(names=self._normalize_names)
+        self.normalization.load()
 
 
 class FCN3Step(StepABC):

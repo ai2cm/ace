@@ -63,11 +63,7 @@ stepper:
   loss:
     type: MSE
     weights:
-      air_temperature_0: 0.5
       air_temperature_1: 0.5
-      eastward_wind_0: 0.5
-      northward_wind_0: 0.5
-      specific_total_water_0: 0.5
       specific_total_water_1: 0.25
       specific_total_water_2: 0.5
       PRATEsfc: 0.5
@@ -106,7 +102,6 @@ stepper:
         conserve_dry_air: true
         moisture_budget_correction: advection_and_precipitation
         force_positive_names:
-        - specific_total_water_0
         - specific_total_water_1
         - specific_total_water_2
         - specific_total_water_3
@@ -132,7 +127,6 @@ stepper:
       - global_mean_co2
       - PRESsfc
       - surface_temperature
-      - air_temperature_0
       - air_temperature_1
       - air_temperature_2
       - air_temperature_3
@@ -140,7 +134,6 @@ stepper:
       - air_temperature_5
       - air_temperature_6
       - air_temperature_7
-      - specific_total_water_0
       - specific_total_water_1
       - specific_total_water_2
       - specific_total_water_3
@@ -148,7 +141,6 @@ stepper:
       - specific_total_water_5
       - specific_total_water_6
       - specific_total_water_7
-      - eastward_wind_0
       - eastward_wind_1
       - eastward_wind_2
       - eastward_wind_3
@@ -156,7 +148,6 @@ stepper:
       - eastward_wind_5
       - eastward_wind_6
       - eastward_wind_7
-      - northward_wind_0
       - northward_wind_1
       - northward_wind_2
       - northward_wind_3
@@ -167,7 +158,6 @@ stepper:
       out_names:
       - PRESsfc
       - surface_temperature
-      - air_temperature_0
       - air_temperature_1
       - air_temperature_2
       - air_temperature_3
@@ -175,7 +165,6 @@ stepper:
       - air_temperature_5
       - air_temperature_6
       - air_temperature_7
-      - specific_total_water_0
       - specific_total_water_1
       - specific_total_water_2
       - specific_total_water_3
@@ -183,7 +172,6 @@ stepper:
       - specific_total_water_5
       - specific_total_water_6
       - specific_total_water_7
-      - eastward_wind_0
       - eastward_wind_1
       - eastward_wind_2
       - eastward_wind_3
@@ -191,7 +179,6 @@ stepper:
       - eastward_wind_5
       - eastward_wind_6
       - eastward_wind_7
-      - northward_wind_0
       - northward_wind_1
       - northward_wind_2
       - northward_wind_3
