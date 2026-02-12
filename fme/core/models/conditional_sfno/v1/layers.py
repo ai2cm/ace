@@ -21,11 +21,10 @@ from typing import Tuple
 import torch
 import torch.fft
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 from fme.core.benchmark.timer import Timer, NullTimer
-from fme.core.models.conditional_sfno.lora import LoRAConv2d
+from .lora import LoRAConv2d, LoRALinear
 
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
@@ -392,19 +391,17 @@ class MLP(nn.Module):
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
 
-        fc1 = LoRAConv2d(
+        fc1 = LoRALinear(
             in_features,
             hidden_features,
-            1,
             bias=True,
             lora_rank=lora_rank,
             lora_alpha=lora_alpha,
         )
         act = act_layer()
-        fc2 = LoRAConv2d(
+        fc2 = LoRALinear(
             hidden_features,
             out_features,
-            1,
             bias=output_bias,
             lora_rank=lora_rank,
             lora_alpha=lora_alpha,
