@@ -4,7 +4,7 @@ set -e
 
 JOB_NAME_BASE="ace-aimip-with-small-co2-perturbations"
 JOB_GROUP="ace-aimip-with-small-co2-perturbations"
-CONFIG_FILENAME="ace-train-with-random-perturbed-co2.yaml"
+CONFIG_FILENAME="ace-train-with-no-stratosphere.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
@@ -25,7 +25,7 @@ launch_job () {
     gantry run \
         --name $JOB_NAME \
         --task-name $JOB_NAME \
-        --description 'Run ACE2-ERA5 training on AIMIP period where CO2 is diagnosed by ACE' \
+        --description 'Run ACE2-ERA5 training on AIMIP with out level 0' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/climate-titan \
         --priority urgent \
