@@ -249,7 +249,7 @@ class Trainer:
         self._end_of_epoch_callback = end_of_epoch_callback
         self._no_optimization = NullOptimization()
         self._aggregator_builder = aggregator_builder
-        self._ema = build_ema(stepper.modules)
+        self._ema = build_ema(stepper.modules)  # build before restore_checkpoint
 
         resuming = os.path.isfile(self.paths.latest_checkpoint_path)
         if resuming:
