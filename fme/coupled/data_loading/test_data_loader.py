@@ -40,7 +40,11 @@ from fme.coupled.data_loading.data_typing import (
 )
 from fme.coupled.requirements import CoupledDataRequirements
 
-from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
+from .config import (
+    CoupledConcatDatasetConfig,
+    CoupledDataLoaderConfig,
+    CoupledDatasetConfig,
+)
 from .getters import get_forcing_data, get_gridded_data
 from .inference import (
     CoupledForcingDataLoaderConfig,
@@ -373,18 +377,20 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
         atmos_data_subset = Slice()
 
     config = CoupledDataLoaderConfig(
-        dataset=[
-            CoupledDatasetConfig(
-                ocean=XarrayDataConfig(
-                    data_path=ics[i].ocean.data_dir,
-                ),
-                atmosphere=XarrayDataConfig(
-                    data_path=ics[i].atmosphere.data_dir,
-                    subset=atmos_data_subset,
-                ),
-            )
-            for i in range(n_ics)
-        ],
+        dataset=CoupledConcatDatasetConfig(
+            concat=[
+                CoupledDatasetConfig(
+                    ocean=XarrayDataConfig(
+                        data_path=ics[i].ocean.data_dir,
+                    ),
+                    atmosphere=XarrayDataConfig(
+                        data_path=ics[i].atmosphere.data_dir,
+                        subset=atmos_data_subset,
+                    ),
+                )
+                for i in range(n_ics)
+            ]
+        ),
         batch_size=1,
         num_data_workers=0,
         strict_ensemble=True,
@@ -449,18 +455,20 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
 
 def test_zarr_engine_used_true():
     config = CoupledDataLoaderConfig(
-        dataset=[
-            CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
-                atmosphere=XarrayDataConfig(
-                    data_path="atmos", file_pattern="data.zarr", engine="zarr"
+        dataset=CoupledConcatDatasetConfig(
+            concat=[
+                CoupledDatasetConfig(
+                    ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                    atmosphere=XarrayDataConfig(
+                        data_path="atmos", file_pattern="data.zarr", engine="zarr"
+                    ),
                 ),
-            ),
-            CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
-                atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
-            ),
-        ],
+                CoupledDatasetConfig(
+                    ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                    atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+                ),
+            ]
+        ),
         batch_size=1,
     )
     assert config.zarr_engine_used
@@ -468,12 +476,10 @@ def test_zarr_engine_used_true():
 
 def test_zarr_engine_used_false():
     config = CoupledDataLoaderConfig(
-        dataset=[
-            CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
-                atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
-            )
-        ],
+        dataset=CoupledDatasetConfig(
+            ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+            atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+        ),
         batch_size=1,
     )
     assert not config.zarr_engine_used
@@ -566,12 +572,10 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
 
     # test CoupledDataLoaderConfig
     config = CoupledDataLoaderConfig(
-        dataset=[
-            CoupledDatasetConfig(
-                ocean=ocean_config,
-                atmosphere=atmos_config,
-            )
-        ],
+        dataset=CoupledDatasetConfig(
+            ocean=ocean_config,
+            atmosphere=atmos_config,
+        ),
         batch_size=1,
         num_data_workers=0,
     )
