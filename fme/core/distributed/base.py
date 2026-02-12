@@ -26,6 +26,9 @@ class DistributedBackend(ABC):
     def local_batch_size(self, batch_size: int) -> int: ...
 
     @abstractmethod
+    def get_local_slices(self, tensor_shape, rank: int): ...
+
+    @abstractmethod
     def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None: ...
 
     @abstractmethod

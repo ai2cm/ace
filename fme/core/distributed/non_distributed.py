@@ -32,6 +32,9 @@ class NonDistributed(DistributedBackend):
         """Total number of processes."""
         return 1
 
+    def get_local_slices(self, tensor_shape, rank: int):
+        return tuple(slice(None, None) for _ in tensor_shape)
+
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size
 

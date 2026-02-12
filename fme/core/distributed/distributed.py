@@ -118,6 +118,11 @@ class Distributed:
         """
         return self._distributed.reduce_mean(tensor)
 
+    def get_local_slices(self, tensor_shape, rank: int | None = None):
+        if rank is None:
+            rank = self._distributed.rank
+        return self._distributed.get_local_slices(tensor_shape, rank=rank)
+
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         Reduce a tensor representing a sum across all processes.
