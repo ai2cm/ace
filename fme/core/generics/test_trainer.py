@@ -1154,7 +1154,7 @@ def test_ema_state_preserved_after_resume(tmp_path: str):
         max_epochs=1,
         n_train_batches=n_train_batches,
         stepper_module_values=np.array([1.0]),
-        checkpoint_save_epochs=Slice(start=0, stop=0),
+        checkpoint_save_epochs=Slice(start=0, stop=0),  # disable "best" checkpoints
     )
     trainer.train()
 
