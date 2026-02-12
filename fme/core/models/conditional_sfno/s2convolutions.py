@@ -183,21 +183,12 @@ class SpectralConvS2(nn.Module):
             # seemingly the first weight is not really complex, so we need to account for that
             scale[0, :] *= math.sqrt(2.0)
 
-        if num_groups == 1:
-            # for backwards compatibility with existing checkpoints,
-            # we keep the weight shape the same when num_groups=1
-            weight_shape = [
-                in_channels,
-                out_channels,
-                self.modes_lat_local,
-            ]
-        else:
-            weight_shape = [
-                num_groups,
-                in_channels // num_groups,
-                out_channels // num_groups,
-                self.modes_lat_local,
-            ]
+        weight_shape = [
+            num_groups,
+            in_channels // num_groups,
+            out_channels // num_groups,
+            self.modes_lat_local,
+        ]
 
         assert factorization == "ComplexDense"
         self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
@@ -232,7 +223,37 @@ class SpectralConvS2(nn.Module):
 
         if bias:
             self.bias = nn.Parameter(torch.zeros(1, out_channels, 1, 1))
+        self.in_channels = in_channels
         self.out_channels = out_channels
+
+        # rewrite old checkpoints on load
+        self._register_load_state_dict_pre_hook(self._pre_load_hook, with_module=True)
+
+    @staticmethod
+    def _pre_load_hook(
+        module: "SpectralConvS2",
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict,
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        key = prefix + "weight"
+        if key not in state_dict:
+            return
+
+        weight = state_dict[key]
+
+        if weight.ndim == 3 and weight.shape == (
+            module.in_channels,
+            module.out_channels,
+            module.modes_lat_local,
+        ):
+            state_dict[key] = weight.view(
+                1, module.in_channels, module.out_channels, module.modes_lat_local
+            )
 
     def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
@@ -263,14 +284,10 @@ class SpectralConvS2(nn.Module):
             lora_update = 0.0
 
         with timer.child("dhconv"):
-            if self.num_groups == 1:
-                weight = self.weight[None, ...]  # expand group dim
-            else:
-                weight = self.weight
             xp = torch.zeros_like(x)
             xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
                 x[..., : self.modes_lat_local, : self.modes_lon_local],
-                weight,
+                self.weight,
             )
             xp = xp + self.lora_scaling * lora_update
             xp = xp.reshape(B, self.out_channels, H, W)
