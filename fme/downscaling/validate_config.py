@@ -55,9 +55,5 @@ if __name__ == "__main__":
 
     with open(args.config_file) as f:
         config_dict = yaml.safe_load(f)
-
-    try:
         validate_config(config_dict, CONFIG_CLASSES[args.config_type])
         print("Configuration is valid.")
-    except dacite.DaciteError as e:
-        print(f"Configuration validation failed: {e}")
