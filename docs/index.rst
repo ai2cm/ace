@@ -33,9 +33,3 @@ Why use **fme**?
    modules
    steps
    api
-
-Indices and tables
-==================
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
