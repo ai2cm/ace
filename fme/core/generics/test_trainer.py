@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import torch
 
+from fme.core.device import get_device
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -148,6 +149,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
     ):
         self._modules = torch.nn.ModuleList([torch.nn.Linear(1, 1, bias=False)])
         self._modules[0].weight.data.fill_(0.0)
+        self._modules = self._modules.to(get_device())
         if state is not None:
             self._state = state
         else:
@@ -1142,3 +1144,37 @@ def test_no_checkpoints_saved_when_disabled(tmp_path: str):
     for epoch in range(1, max_epochs + 1):
         assert not os.path.exists(paths.epoch_checkpoint_path(epoch))
         assert not os.path.exists(paths.ema_epoch_checkpoint_path(epoch))
+
+
+def test_ema_state_preserved_after_resume(tmp_path: str):
+    """EMA num_updates and ema_params must survive a checkpoint save/restore cycle."""
+    n_train_batches = 4
+    _, trainer = get_trainer(
+        tmp_path,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([1.0]),
+        checkpoint_save_epochs=Slice(start=0, stop=0),  # disable "best" checkpoints
+    )
+    trainer.train()
+
+    ema_state = trainer._ema.get_state()
+    expected_num_updates = n_train_batches
+    assert int(ema_state["num_updates"]) == expected_num_updates
+
+    # Build a new trainer that resumes from the same checkpoint directory.
+    _, resumed_trainer = get_trainer(
+        tmp_path,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([1.0]),
+        checkpoint_save_epochs=Slice(start=0, stop=0),
+    )
+
+    resumed_ema_state = resumed_trainer._ema.get_state()
+    assert int(resumed_ema_state["num_updates"]) == expected_num_updates
+    for key in ema_state["ema_params"]:
+        torch.testing.assert_close(
+            resumed_ema_state["ema_params"][key],
+            ema_state["ema_params"][key],
+        )
