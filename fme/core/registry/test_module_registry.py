@@ -146,7 +146,9 @@ def load_or_cache_state(selector_name: str, module: Module) -> dict[str, torch.T
         )
 
 
-FROZEN_BUILDERS = {}
+FROZEN_BUILDERS = {
+    "dbc2925_ncsfno": get_noise_conditioned_sfno_module,
+}
 
 
 @pytest.mark.parametrize(
