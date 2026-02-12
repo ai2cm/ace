@@ -6,6 +6,8 @@ https://github.com/NVIDIA/physicsnemo/blob/327d9928abc17983ad7aa3df94da9566c197c
 # fmt: off
 # flake8: noqa
 
+import contextlib
+
 # SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -57,6 +59,9 @@ class EDMPrecond(torch.nn.Module):
         Execute the underlying model at FP16 precision?, by default False.
     sigma_data : float
         Expected standard deviation of the training data, by default 0.5.
+    use_amp_bf16 : bool
+        Use automatic mixed precision (bfloat16) for the UNet forward pass only,
+        after sigma and c values are computed and added to x. By default False.
 
     Note
     ----
@@ -71,12 +76,23 @@ class EDMPrecond(torch.nn.Module):
         label_dim=0,
         use_fp16=False,
         sigma_data=0.5,
+        use_amp_bf16=False,
     ):
         super().__init__()
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
         self.sigma_data = sigma_data
         self.model = model
+        self.use_amp_bf16 = use_amp_bf16
+        if self.use_amp_bf16:
+            device = get_device()
+            if device.type == "mps":
+                raise ValueError("MPS does not support bfloat16 autocast.")
+            self._amp_context = torch.amp.autocast(
+                device.type, dtype=torch.bfloat16
+            )
+        else:
+            self._amp_context = contextlib.nullcontext()
 
     def forward(
         self,
@@ -111,13 +127,15 @@ class EDMPrecond(torch.nn.Module):
         if condition is not None:
             arg = torch.cat([arg, condition], dim=1)
 
-        F_x = self.model(
-            arg.to(dtype),
-            c_noise.flatten(),
-            class_labels=class_labels,
-        )
+        model_input_dtype = dtype if not self.use_amp_bf16 else torch.float32
+        with self._amp_context:
+            F_x = self.model(
+                arg.to(model_input_dtype),
+                c_noise.flatten(),
+                class_labels=class_labels,
+            )
 
-        if (F_x.dtype != dtype) and not _is_autocast_enabled():
+        if not self.use_amp_bf16 and (F_x.dtype != dtype) and not _is_autocast_enabled():
             raise ValueError(
                 f"Expected the dtype to be {dtype}, but got {F_x.dtype} instead."
             )

@@ -99,7 +99,7 @@ class DiffusionModelConfig:
         num_diffusion_generation_steps: Number of diffusion generation steps
         use_fine_topography: Whether to use fine topography in the model.
         use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
-            UNetDiffusionModule.
+            UNet forward pass within EDMPrecond (after sigma and c values are computed).
     """
 
     module: DiffusionModuleRegistrySelector
