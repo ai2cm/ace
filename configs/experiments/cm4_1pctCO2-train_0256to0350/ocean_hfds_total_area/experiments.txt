@@ -10,3 +10,5 @@
 ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs0|01KH20ABJSVBBS28GFBPRHAQC5|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs3|01KH20ATM7CWGCPGYAW5TMSNWW|training|best_inference_ckpt|normal|--not-preemptible
+
+resume-1pct_nosmooth_0256to0350-hfds_total_area|rs0|01KH88KJ008NHVE7J6B96YKQSB|training|best_inference_ckpt|normal|--not-preemptible
