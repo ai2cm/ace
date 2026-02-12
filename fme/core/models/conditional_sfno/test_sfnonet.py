@@ -6,6 +6,7 @@ import torch
 from torch import nn
 
 from fme.core.device import get_device
+from fme.core.models.conditional_sfno.benchmark import get_block_benchmark
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
@@ -221,3 +222,27 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
         assert not torch.isnan(output).any()
     else:
         assert torch.isnan(output).any()
+
+
+@pytest.mark.skipif(
+    get_device().type != "cuda",
+    reason=(
+        "This test is only relevant for CUDA since "
+        "it's testing speed of SFNO blocks on GPU."
+    ),
+)  # noqa: E501
+def test_block_speed():
+    ungrouped = get_block_benchmark(filter_num_groups=1).run_benchmark(
+        iters=5, warmup=1
+    )
+    grouped = get_block_benchmark(filter_num_groups=8).run_benchmark(iters=5, warmup=1)
+    assert grouped.timer.avg_time < ungrouped.timer.avg_time, (
+        "Expected grouped DHConv to be faster than ungrouped, but got "
+        f"{grouped.timer.avg_time:.6f} ms for grouped and "
+        f"{ungrouped.timer.avg_time:.6f} ms for ungrouped."
+    )
+    assert grouped.memory.max_alloc < ungrouped.memory.max_alloc, (
+        "Expected grouped DHConv to use less memory than ungrouped, but got "
+        f"{grouped.memory.max_alloc / 1e6:.2f} MB for grouped and "
+        f"{ungrouped.memory.max_alloc / 1e6:.2f} MB for ungrouped."
+    )
