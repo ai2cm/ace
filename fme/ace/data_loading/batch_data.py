@@ -198,6 +198,9 @@ class BatchData:
         n_ensemble: int = 1,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
+        if labels is not None:
+            if labels.tensor.device != torch.device("cpu"):
+                raise ValueError(f"labels must be on cpu, got {labels.tensor.device}")
         kwargs = cls._get_kwargs(horizontal_dims)
         if isinstance(labels, list):
             warnings.warn(
@@ -289,11 +292,7 @@ class BatchData:
                 raise ValueError("label_encoding must be provided if labels are used.")
             labels = None
         else:
-            labels = label_encoding.encode(list(sample_labels))
-        for var_name in batch_data:
-            if var_name == "global_mean_co2":
-                perturbed_value = (-5 + 10 * torch.rand(1)) * 10**-6
-                batch_data[var_name] = batch_data[var_name] + perturbed_value
+            labels = label_encoding.encode(list(sample_labels), device="cpu")
         return BatchData.new_on_cpu(
             data=batch_data,
             time=batch_time,
