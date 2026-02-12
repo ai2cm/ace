@@ -329,7 +329,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
-            # n_ensemble=self.n_ensemble,
+            n_ensemble=self.n_ensemble,
         )
 
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
@@ -344,7 +344,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
-            # n_ensemble=self.n_ensemble,
+            n_ensemble=self.n_ensemble,
         )
 
     def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
