@@ -210,6 +210,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         surface_temperature_name: str | None = None,
         ocean_fraction_name: str | None = None,
         label_encoding: LabelEncoding | None = None,
+        n_ensemble: int | None = None,
     ):
         """
         Parameters:
@@ -247,6 +248,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         self._surface_temperature_name = surface_temperature_name
         self._ocean_fraction_name = ocean_fraction_name
         self._n_initial_conditions = config.n_initial_conditions
+        self._n_ensemble = n_ensemble if n_ensemble is not None else 1
         if isinstance(config.start_indices, TimestampList):
             self._start_indices = config.start_indices.as_indices(
                 self._dataset.all_times
@@ -335,7 +337,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                 updated_data[key] = value.expand_as(result.data[key])
             result.data = {**result.data, **updated_data}
         assert result.time.shape[0] == self._n_initial_conditions // dist.world_size
-        return result
+        return result.broadcast_ensemble(n_ensemble=self._n_ensemble)
 
     def __len__(self) -> int:
         # The ceil is necessary so if the last batch is smaller

@@ -11,10 +11,12 @@ class PrognosticStateDataRequirements:
     Parameters:
         names: Names of prognostic variables.
         n_timesteps: Number of consecutive timesteps that must be stored.
+        n_ensembles: Number of IC ensemble members that must be stored.
     """
 
     names: list[str]
     n_timesteps: int
+    n_ensemble: int | None = None
 
 
 @dataclasses.dataclass
