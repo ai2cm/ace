@@ -233,7 +233,8 @@ class SeparateRadiationStepConfig(StepConfigABC):
         return self.ocean
 
     def load(self):
-        self.normalization.load()
+        normalize_names = list(set(self.input_names + self.output_names))
+        self.normalization.load(names=normalize_names)
 
 
 class SeparateRadiationStep(StepABC):

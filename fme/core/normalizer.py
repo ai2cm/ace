@@ -57,23 +57,31 @@ class NormalizationConfig:
                 "or explicit means and stds."
             )
 
-    def load(self):
+    def load(self, names: Iterable[str] | None = None):
         """
         Load the normalization configuration from the netCDF files.
 
         Updates the configuration so it no longer requires external files.
+        When names is provided, only those variables are loaded from the stats
+        files; this avoids pulling in level-0 (or other) variables that are not
+        in the step config (e.g. when training without air_temperature_0).
+
+        Args:
+            names: If provided, only load means/stds for these variables.
+                If None, load all scalar variables from the files (legacy).
         """
         if self.global_means_path is not None and self.global_stds_path is not None:
             # convert to explicit means and stds so if the object is stored
             # and reloaded, we no longer need the netCDF files
+            names_list = list(names) if names is not None else None
             means = load_dict_from_netcdf(
                 self.global_means_path,
-                names=None,
+                names=names_list,
                 defaults={"x": 0.0, "y": 0.0, "z": 0.0},
             )
             stds = load_dict_from_netcdf(
                 self.global_stds_path,
-                names=None,
+                names=names_list,
                 defaults={"x": 1.0, "y": 1.0, "z": 1.0},
             )
             self.means = means
@@ -329,9 +337,12 @@ class NetworkAndLossNormalizationConfig:
         else:
             return self.network.build(names=names)
 
-    def load(self):
-        self.network.load()
+    def load(self, names: Iterable[str] | None = None):
+        """Load normalization from files. If names is provided, only those variables
+        are loaded.
+        """
+        self.network.load(names=names)
         if self.loss is not None:
-            self.loss.load()
+            self.loss.load(names=names)
         if self.residual is not None:
-            self.residual.load()
+            self.residual.load(names=names)

@@ -222,7 +222,8 @@ class SingleModuleStepConfig(StepConfigABC):
         )
 
     def load(self):
-        self.normalization.load()
+        # Use same names as get_network_normalizer so loaded means/stds match.
+        self.normalization.load(names=self._normalize_names)
 
 
 class SingleModuleStep(StepABC):
