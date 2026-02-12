@@ -246,7 +246,7 @@ class SpectralConvS2(nn.Module):
 
         weight = state_dict[key]
 
-        if weight.ndim == 3 and weight.shape == (
+        if weight.shape == (
             module.in_channels,
             module.out_channels,
             module.modes_lat_local,
