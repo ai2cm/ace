@@ -168,6 +168,20 @@ class Distributed:
         """
         return self._distributed.gather(tensor)
 
+    def gather_global(self, tensor: torch.Tensor, global_shape) -> torch.Tensor | None:
+        gathered = self.gather(tensor)
+        if self.is_root():
+            if gathered is None:
+                raise RuntimeError("expected non-none gathered on root rank")
+            gathered_global = torch.zeros(
+                *global_shape, dtype=tensor.dtype, device=tensor.device
+            )
+            for i, local in enumerate(gathered):
+                gathered_global[self.get_local_slices(global_shape, i)] = local
+            return gathered_global
+        else:
+            return None
+
     def gather_irregular(
         self,
         tensor: torch.Tensor,
