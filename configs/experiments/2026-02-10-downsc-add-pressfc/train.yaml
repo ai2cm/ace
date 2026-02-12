@@ -1,3 +1,6 @@
+static_inputs:
+  HGTsfc:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  land_fraction: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
 model:
   use_amp_bf16: true
   out_names:
