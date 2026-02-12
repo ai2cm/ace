@@ -249,6 +249,7 @@ class Trainer:
         self._end_of_epoch_callback = end_of_epoch_callback
         self._no_optimization = NullOptimization()
         self._aggregator_builder = aggregator_builder
+        self._ema = build_ema(stepper.modules)  # build before restore_checkpoint
 
         resuming = os.path.isfile(self.paths.latest_checkpoint_path)
         if resuming:
@@ -262,7 +263,6 @@ class Trainer:
         logging.info(f"Number of trainable model parameters: {n_params}")
 
         self._inference_data = inference_data
-        self._ema = build_ema(stepper.modules)
         self._do_gc_collect = do_gc_collect
         self._in_ema_context = False
         self._started_training = False
