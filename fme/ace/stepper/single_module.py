@@ -490,22 +490,27 @@ class StepperConfig:
     """
     Configuration for a stepper.
 
+    The following fields are training concerns transferred to TrainStepperConfig
+    via get_train_stepper_config() and are not used directly by get_stepper():
+    ``loss``, ``optimize_last_step_only``, ``n_ensemble``,
+    ``parameter_init``, ``train_n_forward_steps``.
+
     Parameters:
         step: The step configuration.
-        loss: The loss configuration.
+        loss: The loss configuration. Training only.
         optimize_last_step_only: Whether to optimize only the last step.
+            Training only.
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
-            the default is 1. Must be 2 for EnsembleLoss to be valid.
-        parameter_init: The parameter initialization configuration. This is a
-            training concern and is transferred to TrainStepperConfig via
-            get_train_stepper_config(). It is not used directly by get_stepper().
+            the default is 1. Must be 2 for EnsembleLoss to be valid. Training only.
+        parameter_init: The parameter initialization configuration.
+            Training only.
         input_masking: Config for masking step inputs.
         train_n_forward_steps: The number of timesteps to train on and associated
             sampling probabilities. By default, the stepper will train on the full
             number of timesteps present in the training dataset samples. Values must
             be less than or equal to the number of timesteps present
-            in the training dataset samples.
+            in the training dataset samples. Training only.
         derived_forcings: Configuration for deriving forcing variables.
     """
 

@@ -232,7 +232,6 @@ class CoupledStepperConfig:
             ocean fraction to replace the ocean fraction variable specified in the
             atmosphere's OceanConfig. If the atmosphere uses the ocean fraction as
             an ML forcing, the generated ocean fraction is also passed as an input.
-        parameter_init: The parameter initialization configuration.
 
     """
 
