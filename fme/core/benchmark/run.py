@@ -53,8 +53,10 @@ def get_device_name() -> str:
         return "CPU"
 
 
-def main(name: str | None, iters: int, child: str | None = None) -> int:
-    RESULTS_PATH.mkdir(exist_ok=True)
+def main(
+    name: str | None, iters: int, output_dir: pathlib.Path, child: str | None = None
+) -> int:
+    output_dir.mkdir(exist_ok=True)
     device_name = get_device_name()
 
     logging.info(f"Running benchmarks on device: {device_name}")
@@ -77,25 +79,28 @@ def main(name: str | None, iters: int, child: str | None = None) -> int:
         safe_name = name.replace("/", "_").replace(".", "_").lower()
         safe_device_name = device_name.replace(" ", "_").replace("/", "_").lower()
         return (
-            RESULTS_PATH
+            output_dir
             / f"{safe_name}_{safe_device_name}_{get_git_commit()}.{extension}"
         )
 
     for name, cls in benchmarks_to_run.items():
         logging.info(f"Running benchmark: {name}")
         result = cls.run_benchmark(iters=iters)
-        result.to_png(get_filename(name, "png"), label=get_label(name))
+        png_filename = get_filename(name, "png")
+        logging.info(f"Saving result image to {png_filename}")
+        result.to_png(png_filename, label=get_label(name))
+        result_data = json.dumps(dataclasses.asdict(result), indent=2)
+        logging.info(f"Result: {result_data}")
+        with open(get_filename(name, "json"), "w") as f:
+            logging.info(f"Saving result json to {f.name}")
+            f.write(result_data)
         if child is not None:
             child_name = f"{name}.{child}"
             child_label = get_label(child_name)
-            logging.info(f"Generating report for child timer: {child_label}")
-            result.to_png(
-                get_filename(child_name, "png"), label=child_label, child=child
-            )
-        result_data = json.dumps(dataclasses.asdict(result), indent=2)
-        with open(get_filename(name, "json"), "w") as f:
-            f.write(result_data)
-        logging.info(f"Result: {result_data}")
+            logging.info(f"Generating benchmark result for child timer: {child_label}")
+            png_filename = get_filename(child_name, "png")
+            logging.info(f"Saving child result image to {png_filename}")
+            result.to_png(png_filename, label=child_label, child=child)
     return 0
 
 
@@ -134,12 +139,26 @@ if __name__ == "__main__":
         default=10,
         help="Number of iterations to run each benchmark for.",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help=(
+            "Directory to save benchmark results in. If not provided, "
+            "results will be saved in a 'results' directory next to this script."
+        ),
+    )
     args = parser.parse_args()
+    if args.output_dir is not None:
+        output_dir = pathlib.Path(args.output_dir)
+    else:
+        output_dir = RESULTS_PATH
 
     sys.exit(
         main(
             name=args.name,
             iters=args.iters,
             child=args.child,
+            output_dir=output_dir,
         )
     )
