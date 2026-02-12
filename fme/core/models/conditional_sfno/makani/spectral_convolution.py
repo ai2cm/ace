@@ -19,8 +19,6 @@ import torch
 import torch.nn as nn
 from torch import amp
 
-from fme.core.benchmark.timer import NullTimer, Timer
-
 # import convenience functions for factorized tensors
 from .factorizations import get_contract_fun
 
@@ -126,7 +124,7 @@ class SpectralConv(nn.Module):
         if bias:
             self.bias = nn.Parameter(torch.zeros(1, self.out_channels, 1, 1))
 
-    def forward(self, x, timer: Timer = NullTimer()):
+    def forward(self, x):
         dtype = x.dtype
         residual = x
         x = x.float()
@@ -140,10 +138,7 @@ class SpectralConv(nn.Module):
         B, C, H, W = x.shape
         x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
         xp = self._contract(
-            x,
-            self.weight,
-            separable=self.separable,
-            operator_type=self.operator_type,
+            x, self.weight, separable=self.separable, operator_type=self.operator_type
         )
         x = xp.reshape(B, self.out_channels, H, W).contiguous()
 
