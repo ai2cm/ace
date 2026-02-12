@@ -132,6 +132,36 @@ optimization:
       - type: ConstantLR
         step_each_iteration: true
     milestones: [2000]
+train_stepper:
+  ocean:
+    loss:
+      type: MSE
+  atmosphere:
+    loss:
+      type: MSE
+      weights:
+        air_temperature_0: 0.5
+        air_temperature_1: 0.5
+        eastward_wind_0: 0.5
+        northward_wind_0: 0.5
+        specific_total_water_0: 0.5
+        specific_total_water_1: 0.25
+        specific_total_water_2: 0.5
+        PRATEsfc: 0.5
+        h500: 10
+        TMP850: 5
+        Q2m: 10
+        TMP2m: 10
+        UGRD10m: 2.5
+        VGRD10m: 2.5
+        DLWRFsfc: 2
+        ULWRFsfc: 5
+        USWRFsfc: 2
+        DSWRFsfc: 2
+        USWRFtoa: 2
+        tendency_of_total_water_path_due_to_advection: 0.5
+    loss_contributions:
+      n_steps: 0
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
@@ -144,8 +174,6 @@ stepper:
         weights_path: /ocean_ckpt.tar
   atmosphere:
     timedelta: 6h
-    loss_contributions:
-      n_steps: 0
     stepper:
       parameter_init:
         weights_path: /atmos_ckpt.tar
