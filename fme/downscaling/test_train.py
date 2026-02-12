@@ -86,6 +86,9 @@ def _create_config_dict(
 
     experiment_dir = tmp_path / "output"
     experiment_dir.mkdir()
+    config["static_inputs"] = {
+        "HGTsfc": str(train_paths.fine) + "/data.nc",
+    }
     config["train_data"]["fine"] = [{"data_path": str(train_paths.fine)}]
     config["train_data"]["coarse"] = [{"data_path": str(train_paths.coarse)}]
     config["validation_data"]["fine"] = [

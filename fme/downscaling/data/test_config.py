@@ -1,6 +1,7 @@
 import dataclasses
 
 import pytest
+import torch
 
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.downscaling.data.config import (
@@ -8,7 +9,8 @@ from fme.downscaling.data.config import (
     PairedDataLoaderConfig,
     XarrayEnsembleDataConfig,
 )
-from fme.downscaling.data.utils import ClosedInterval
+from fme.downscaling.data.topography import StaticInput, StaticInputs
+from fme.downscaling.data.utils import ClosedInterval, LatLonCoordinates
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.test_utils import data_paths_helper
 
@@ -63,7 +65,15 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
         lat_extent=ClosedInterval(1, 4),
         lon_extent=ClosedInterval(0, 3),
     )
-    data = data_config.build(requirements=requirements)
+    static_inputs = StaticInputs(
+        fields=[
+            StaticInput(
+                data=torch.ones((8, 8)),
+                coords=LatLonCoordinates(lat=torch.ones(8), lon=torch.ones(8)),
+            )
+        ]
+    )
+    data = data_config.build(requirements=requirements, static_inputs=static_inputs)
     batch = next(iter(data.loader))
     # lat/lon midpoints are on (0.5, 1.5, ...)
     assert batch.data["var0"].shape == (2, 3, 3)

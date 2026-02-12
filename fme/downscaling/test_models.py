@@ -10,7 +10,7 @@ from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.downscaling.data import Topography
+from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -150,21 +150,26 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
         [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
     if use_fine_topography:
-        topography = Topography(
-            torch.ones(*fine_shape, device=get_device()),
-            LatLonCoordinates(
-                lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
-            ),
+        static_inputs = StaticInputs(
+            fields=[
+                StaticInput(
+                    torch.ones(*fine_shape, device=get_device()),
+                    LatLonCoordinates(
+                        lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
+                    ),
+                )
+            ]
         )
     else:
-        topography = None
+        static_inputs = None
     optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
-    train_outputs = model.train_on_batch(batch, topography, optimization)
+    train_outputs = model.train_on_batch(batch, static_inputs, optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
 
     n_generated_samples = 2
     generated_outputs = [
-        model.generate_on_batch(batch, topography) for _ in range(n_generated_samples)
+        model.generate_on_batch(batch, static_inputs)
+        for _ in range(n_generated_samples)
     ]
 
     for generated_output in generated_outputs:
@@ -285,7 +290,7 @@ def test_model_error_cases():
     # missing fine topography when model requires it
     batch.fine.topography = None
     with pytest.raises(ValueError):
-        model.generate_on_batch(batch, topography=None)
+        model.generate_on_batch(batch, static_inputs=None)
 
 
 def test_DiffusionModel_generate_on_batch_no_target():
@@ -306,13 +311,19 @@ def test_DiffusionModel_generate_on_batch_no_target():
     coarse_batch = get_mock_batch(
         [batch_size, *coarse_shape], topography_scale_factor=downscale_factor
     )
-    topography = Topography(
-        torch.rand(*fine_shape, device=get_device()),
-        LatLonCoordinates(lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])),
+    static_inputs = StaticInputs(
+        fields=[
+            StaticInput(
+                torch.rand(*fine_shape, device=get_device()),
+                LatLonCoordinates(
+                    lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
+                ),
+            )
+        ]
     )
     samples = model.generate_on_batch_no_target(
         coarse_batch,
-        topography=topography,
+        static_inputs=static_inputs,
         n_samples=n_generated_samples,
     )
 
@@ -344,12 +355,18 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
             [batch_size, *alternative_input_shape],
             topography_scale_factor=downscale_factor,
         )
-        topography = Topography(
-            torch.rand(*fine_shape, device=get_device()),
-            LatLonCoordinates(torch.ones(fine_shape[0]), torch.ones(fine_shape[1])),
+        static_inputs = StaticInputs(
+            fields=[
+                StaticInput(
+                    torch.rand(*fine_shape, device=get_device()),
+                    LatLonCoordinates(
+                        torch.ones(fine_shape[0]), torch.ones(fine_shape[1])
+                    ),
+                )
+            ]
         )
         samples = model.generate_on_batch_no_target(
-            coarse_batch, n_samples=n_ensemble, topography=topography
+            coarse_batch, n_samples=n_ensemble, static_inputs=static_inputs
         )
 
         assert samples["x"].shape == (
