@@ -53,6 +53,9 @@ create_environment:
 test:
 	pytest --durations 40 .
 
+test_parallel:
+	torchrun --nproc-per-node 2 -m pytest ./fme/core/distributed/parallel_tests
+
 # --cov must come  after pytest args to use the sources defined by config
 test_cov:
 	pytest --durations 40 --cov --cov-report=term-missing:skip-covered --cov-config=pyproject.toml .
