@@ -10,7 +10,7 @@ Why use **fme**?
   with a range of architectures (SFNO, GNNs, UNets) and applications (atmosphere modeling,
   ocean modeling, downscaling).
 - Built by climate modelers for climate modelers! We follow similar configuration and
-  evaluation practices as traditional climate models, making it easy for climate modelers
+  evaluation practices as traditional climate models, making **fme** intuitive
   to adopt and use.
 - Flexible data loading and writing capabilities. **fme** supports netCDF and zarr,
   as well as streaming directly from/to cloud object storage. At inference time, reductions
