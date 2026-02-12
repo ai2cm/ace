@@ -19,8 +19,8 @@ from .stepper import (
 )
 from .test_stepper import (
     CoupledDatasetInfoBuilder,
-    get_stepper_and_batch,
     get_stepper_config,
+    get_train_stepper_and_batch,
 )
 
 DEVICE = fme.get_device()
@@ -41,7 +41,7 @@ def test_stepper_gradient_accumulation_integration():
     atmos_in_names = ["a_prog1", "a_prog2", "a_sfc_temp", "ocean_frac", "o_prog"]
     atmos_out_names = ["a_prog1", "a_prog2", "a_sfc_temp", "a_diag1", "a_diag2"]
 
-    _, coupled_data, config, dataset_info = get_stepper_and_batch(
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -57,12 +57,6 @@ def test_stepper_gradient_accumulation_integration():
             type="prebuilt", config={"module": AddBias()}
         ),
     )
-
-    train_stepper_config = CoupledTrainStepperConfig(
-        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-    )
-    train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     coupler = train_stepper._stepper
 
     assert len(coupler.atmosphere.modules) == 1

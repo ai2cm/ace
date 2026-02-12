@@ -1037,6 +1037,34 @@ def get_stepper_and_batch(
     return coupler, coupled_data, config, dataset_info
 
 
+def get_train_stepper_and_batch(
+    train_stepper_config: CoupledTrainStepperConfig | None = None,
+    **kwargs,
+):
+    """Build a CoupledTrainStepper and batch data for testing.
+
+    Wraps get_stepper_and_batch to additionally construct a
+    CoupledTrainStepperConfig (defaulting to MSE loss for both components)
+    and return the resulting CoupledTrainStepper.
+
+    Args:
+        train_stepper_config: Optional custom train stepper config. If None,
+            uses a default config with MSE loss for both ocean and atmosphere.
+        **kwargs: Forwarded to get_stepper_and_batch.
+
+    Returns:
+        Tuple of (train_stepper, coupled_data, config, dataset_info).
+    """
+    _, coupled_data, config, dataset_info = get_stepper_and_batch(**kwargs)
+    if train_stepper_config is None:
+        train_stepper_config = CoupledTrainStepperConfig(
+            ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+            atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        )
+    train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
+    return train_stepper, coupled_data, config, dataset_info
+
+
 @pytest.mark.parametrize(
     "ocean_fraction_prediction, sea_ice_frac_is_ocean_prog",
     [
@@ -1434,7 +1462,7 @@ def test_train_on_batch_with_derived_variables():
         "surface_temperature",
     ]
     atmos_out_names = atmos_prog_names + ["LHFLX"]
-    _, coupled_data, config, dataset_info = get_stepper_and_batch(
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_prog_names + ["ocean_fraction"],
@@ -1443,11 +1471,6 @@ def test_train_on_batch_with_derived_variables():
         n_forward_times_atmosphere=2,
         n_samples=3,
     )
-    train_stepper_config = CoupledTrainStepperConfig(
-        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-    )
-    train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     output = train_stepper.train_on_batch(
         data=coupled_data.data,
         optimization=NullOptimization(),
