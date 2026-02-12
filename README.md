@@ -17,12 +17,7 @@
 
 Ai2 Climate Emulator (ACE) is a fast machine learning model that simulates global atmospheric variability in a changing climate over time scales ranging from hours to centuries.
 
-This repo contains code accompanying five papers describing ACE models:
-- "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([link](https://arxiv.org/abs/2310.02074))
-- "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000136))
-- "ACE2: Accurately learning subseasonal to decadal atmospheric variability and forced responses" ([link](https://www.nature.com/articles/s41612-025-01090-0))
-- "ACE2-SOM: Coupling an ML Atmospheric Emulator to a Slab Ocean and Learning the Sensitivity of Climate to Changed CO<sub>2</sub>" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000575))
-- "Applying the ACE2 Emulator to SST Green's Functions for the E3SMv3 Global Atmosphere Model" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2025JH000774))
+
 
 ## Installation
 
@@ -37,6 +32,19 @@ See complete documentation [here](https://ai2-climate-emulator.readthedocs.io/en
 ## Model checkpoints
 
 Pretrained model checkpoints are available in the [ACE Hugging Face](https://huggingface.co/collections/allenai/ace-67327d822f0f0d8e0e5e6ca4) collection.
+
+## Papers
+
+The following papers presented models trained using code in this repository.
+
+- "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([link](https://arxiv.org/abs/2310.02074))
+- "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000136))
+- "ACE2: Accurately learning subseasonal to decadal atmospheric variability and forced responses" ([link](https://www.nature.com/articles/s41612-025-01090-0))
+- "ACE2-SOM: Coupling an ML Atmospheric Emulator to a Slab Ocean and Learning the Sensitivity of Climate to Changed CO<sub>2</sub>" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000575))
+- "Applying the ACE2 Emulator to SST Green's Functions for the E3SMv3 Global Atmosphere Model" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2025JH000774))
+- "SamudrACE: Fast and Accurate Coupled Climate Modeling with 3D Ocean and Atmosphere Emulators" ([link](https://arxiv.org/abs/2509.12490))
+- "HiRO-ACE: Fast and skillful AI emulation and downscaling trained on a 3 km global storm-resolving model" ([link](https://arxiv.org/abs/2512.18224))
+
 
 ## Available datasets
 Two versions of the complete dataset described in [arxiv:2310.02074](https://arxiv.org/abs/2310.02074)
