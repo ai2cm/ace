@@ -1,0 +1,12 @@
+{
+  "memory": {
+    "max_alloc": 1631949824,
+    "max_reserved": 1920991232
+  },
+  "timer": {
+    "count": 10,
+    "avg_time": 73.77409286499024,
+    "children": {}
+  },
+  "cpu_time": 737.9209995269775
+}
