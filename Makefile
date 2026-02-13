@@ -52,20 +52,20 @@ create_environment:
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -r analysis-deps.txt
 
 test:
-	pytest --durations 40 .
+	pytest -n 4 --durations 40 .
 
 test_parallel:
 	torchrun --nproc-per-node $(NPROC) -m pytest ./fme/core/distributed/parallel_tests
 
 # --cov must come  after pytest args to use the sources defined by config
 test_cov:
-	pytest --durations 40 --cov --cov-report=term-missing:skip-covered --cov-config=pyproject.toml .
+	pytest -n 4 --durations 40 --cov --cov-report=term-missing:skip-covered --cov-config=pyproject.toml .
 
 test_fast:
-	pytest --durations 40 --fast .
+	pytest -n 4 --durations 40 --fast .
 
 test_very_fast:
-	pytest --durations 40 --very-fast .
+	pytest -n 4 --durations 40 --very-fast .
 
 # For maintainer use only
 # requires fme[deploy] to be installed
