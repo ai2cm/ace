@@ -161,7 +161,7 @@ class ModuleSelector:
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
-    ) -> nn.Module:
+    ) -> Module:
         """
         Build a nn.Module given information about the input and output channels
         and the dataset.
