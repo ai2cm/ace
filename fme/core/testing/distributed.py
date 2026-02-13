@@ -14,6 +14,9 @@ class MockDistributed:
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size
 
+    def get_local_slices(self, tensor_shape):
+        return tuple(slice(None, None) for _ in tensor_shape)
+
     def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor:
         tensor.fill_(self.fill_value)
         self.reduce_called = True

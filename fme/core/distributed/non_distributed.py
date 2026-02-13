@@ -32,10 +32,16 @@ class NonDistributed(DistributedBackend):
         """Total number of processes."""
         return 1
 
+    def get_local_slices(self, tensor_shape):
+        return tuple(slice(None, None) for _ in tensor_shape)
+
+    def get_local_rank(self):
+        return 0
+
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size
 
-    def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor:
+    def reduce_mean(self, tensor: torch.Tensor, group=None) -> torch.Tensor:
         # reduction is across processes, so no-op here
         return tensor
 
@@ -62,3 +68,12 @@ class NonDistributed(DistributedBackend):
 
     def shutdown(self):
         return
+
+    def comm_get_size(self, key: str):
+        return 1
+
+    def comm_get_group(self, key: str):
+        return 1
+
+    def comm_get_rank(self, key: str):
+        return 0
