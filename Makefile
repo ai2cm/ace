@@ -65,7 +65,7 @@ test_fast:
 	pytest -n 4 --durations 40 --fast .
 
 test_very_fast:
-	pytest -n 4 --durations 40 --very-fast .
+	pytest --durations 40 --very-fast .
 
 # For maintainer use only
 # requires fme[deploy] to be installed
