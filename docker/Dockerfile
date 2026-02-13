@@ -19,8 +19,9 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
 
 ENV FORCE_CUDA_EXTENSION=1
 # install python deps
-COPY requirements.txt /tmp/requirements.txt
-RUN python3 -m pip install -r /tmp/requirements.txt
+RUN pip install uv
+COPY pyproject.toml /tmp/pyproject.toml
+RUN uv pip install -r /tmp/pyproject.toml --all-extras --system
 COPY requirements-healpix.txt /tmp/requirements-healpix.txt
 RUN python3 -m pip install --no-build-isolation -r /tmp/requirements-healpix.txt
 
