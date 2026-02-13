@@ -101,7 +101,7 @@ class SingleModuleStepperConfig:
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
         prescribed_prognostic_names: Prognostic variable names to overwrite from
-            forcing data at each step during inference (e.g. air_temperature_7).
+            forcing data at each step during inference.
         loss_normalization: The normalization configuration for the loss.
         residual_normalization: Optional alternative to configure loss normalization.
             If provided, it will be used for all *prognostic* variables in loss scaling.
@@ -724,7 +724,12 @@ class StepperConfig:
         return self.step.get_ocean()
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
-        """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint).
+
+        Used for inference / evaluation where the trained ckpt does not contain
+        prescribed_prognostic_names and we need to overwrite
+        prescribed_prognostic_names.
+        """
         self.step.replace_prescribed_prognostic_names(names)
 
     def replace_multi_call(
@@ -1756,7 +1761,7 @@ class StepperOverrideConfig:
         derived_forcings: Derived forcings configuration to override that used in
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
-            from forcing at each step during inference (e.g. ["air_temperature_7"]).
+            from forcing at each step during inference.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
