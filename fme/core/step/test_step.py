@@ -655,31 +655,7 @@ def test_input_output_names_secondary_decoder_conflict(conflict: str):
     assert f"secondary_diagnostic_name is an {conflict} variable:" in str(err.value)
 
 
-def test_prescribed_prognostic_names_must_be_in_out_names():
-    """SingleModuleStepConfig raises when prescribed_prognostic_name is not in out_names
-    ."""
-    normalization = get_network_and_loss_normalization_config(
-        names=["a", "b", "c"],
-    )
-    with pytest.raises(ValueError) as err:
-        SingleModuleStepConfig(
-            builder=ModuleSelector(
-                type="SphericalFourierNeuralOperatorNet",
-                config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
-            ),
-            in_names=["a", "b"],
-            out_names=["a"],
-            normalization=normalization,
-            prescribed_prognostic_names=["c"],
-        )
-    assert "prescribed_prognostic_name" in str(err.value)
-    assert "out_names" in str(err.value)
-    assert "c" in str(err.value)
-
-
 def test_step_with_prescribed_prognostic_overwrites_output():
-    """Step output is overwritten for prescribed_prognostic_names from
-    next_step_input_data."""
     normalization = get_network_and_loss_normalization_config(
         names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
     )

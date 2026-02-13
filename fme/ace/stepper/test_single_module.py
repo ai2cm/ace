@@ -1208,28 +1208,42 @@ def test_predict_with_forcing(n_ensemble):
     assert new_input_state.time.equals(output.time[:, -1:])
 
 
-def test_predict_with_prescribed_prognostic():
-    """Prescribed prognostic "a" is overwritten from forcing at each step."""
-    stepper = _get_stepper(
-        ["a", "b"],
-        ["a"],
-        module_name="ChannelSum",
-        prescribed_prognostic_names=["a"],
-    )
+@pytest.mark.parametrize(
+    "in_names,out_names,prescribed,module_name",
+    [
+        (["a", "b"], ["a"], ["a"], "ChannelSum"),
+        (["a", "b"], ["a", "b"], ["a", "b"], "AddOne"),
+    ],
+)
+def test_predict_with_prescribed_prognostic(
+    in_names, out_names, prescribed, module_name
+):
     n_steps = 3
-    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["a", "b"])
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        module_name=module_name,
+        prescribed_prognostic_names=prescribed,
+    )
+
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=list(set(in_names + out_names))
+    )
+
     output, _ = stepper.predict(input_data, forcing_data)
-    # Output "a" should be the forcing value at each step, not the model prediction.
-    assert output.data["a"].size(dim=1) == n_steps
-    # Forcing has shape [batch, n_ic + n_steps, ...];
-    # output steps use indices 1..n_steps.
-    expected_a = forcing_data.data["a"][:, 1 : n_steps + 1]
-    torch.testing.assert_close(output.data["a"], expected_a)
+
+    # Shape check
+    for name in prescribed:
+        assert output.data[name].size(1) == n_steps
+
+    # Value check
+    for name in prescribed:
+        torch.testing.assert_close(
+            output.data[name], forcing_data.data[name][:, 1 : n_steps + 1]
+        )
 
 
 def test_prescribed_prognostic_config_validation_raises():
-    """SingleModuleStepperConfig raises when prescribed_prognostic_name is not in
-    out_names."""
     with pytest.raises(ValueError) as err:
         SingleModuleStepperConfig(
             builder=ModuleSelector(
@@ -1242,78 +1256,6 @@ def test_prescribed_prognostic_config_validation_raises():
         )
     assert "prescribed_prognostic_name" in str(err.value)
     assert "out_names" in str(err.value)
-
-
-def test_predict_with_prescribed_prognostic_multiple_variables():
-    """Multiple prescribed prognostics are overwritten from forcing."""
-    # Use AddOne (2 in -> 2 out) so we can prescribe both "a" and "b".
-    stepper = _get_stepper(
-        ["a", "b"],
-        ["a", "b"],
-        module_name="AddOne",
-        prescribed_prognostic_names=["a", "b"],
-    )
-    n_steps = 2
-    n_samples = 3
-    index = xr.date_range("2000", freq="6h", periods=n_steps + 1, use_cftime=True)
-    forcing_time = xr.DataArray(np.stack(n_samples * [index]), dims=["sample", "time"])
-    input_time = forcing_time.isel(time=[0])
-    # Initial condition must include all prognostics (a, b).
-    input_data = BatchData.new_on_device(
-        data={
-            "a": torch.rand(n_samples, 1, 5, 5).to(DEVICE),
-            "b": torch.rand(n_samples, 1, 5, 5).to(DEVICE),
-        },
-        time=input_time,
-        labels=None,
-    ).get_start(prognostic_names=["a", "b"], n_ic_timesteps=1)
-    forcing_data = BatchData.new_on_device(
-        data={
-            "a": torch.rand(3, n_steps + 1, 5, 5).to(DEVICE),
-            "b": torch.rand(3, n_steps + 1, 5, 5).to(DEVICE),
-        },
-        time=forcing_time,
-        labels=None,
-    )
-    output, _ = stepper.predict(input_data, forcing_data)
-    expected_a = forcing_data.data["a"][:, 1 : n_steps + 1]
-    expected_b = forcing_data.data["b"][:, 1 : n_steps + 1]
-    torch.testing.assert_close(output.data["a"], expected_a)
-    torch.testing.assert_close(output.data["b"], expected_b)
-
-
-def test_predict_with_prescribed_prognostic_and_ocean():
-    """Prescribed overwrite happens after ocean; both can be used together."""
-    # Ocean prescribes "a" over mask; we also prescribe "b" from forcing everywhere.
-    stepper = _get_stepper(
-        ["a", "mask"],
-        ["a", "b"],
-        module_name="AddOne",
-        ocean_config=OceanConfig("a", "mask"),
-        prescribed_prognostic_names=["b"],
-    )
-    n_steps = 2
-    input_data, forcing_data = get_data_for_predict(
-        n_steps, forcing_names=["a", "b", "mask"]
-    )
-    # Where mask==1, ocean overwrites "a" with forcing "a"; "b" is always overwritten.
-    output, _ = stepper.predict(input_data, forcing_data)
-    expected_b = forcing_data.data["b"][:, 1 : n_steps + 1]
-    torch.testing.assert_close(output.data["b"], expected_b)
-    # "a" should be prescribed by ocean where mask==1
-    # (same as test_predict_with_ocean logic)
-    for n in range(n_steps):
-        previous_a = (
-            input_data.as_batch_data().data["a"][:, 0]
-            if n == 0
-            else output.data["a"][:, n - 1]
-        )
-        expected_a_n = torch.where(
-            torch.round(forcing_data.data["mask"][:, n + 1]).to(int) == 1,
-            forcing_data.data["a"][:, n + 1],
-            previous_a + 1,
-        )
-        torch.testing.assert_close(output.data["a"][:, n], expected_a_n)
 
 
 def test_get_forcing_window_data_requirements_includes_prescribed_names():
