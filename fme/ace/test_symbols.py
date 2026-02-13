@@ -1,5 +1,10 @@
+import pytest
+
 from fme import ace
 from fme.ace import InferenceConfig, InferenceEvaluatorConfig, TrainConfig
+from fme.ace.data_loading.perturbation import PerturbationSelector
+from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.step import StepSelector
 
 IMPORTED_SYMBOLS = ace.__all__
 
@@ -69,3 +74,29 @@ def test_inference_config_nested_dataclass_symbols_are_imported():
     finally:
         CHECKED_SYMBOLS.clear()
         MISSING_SYMBOLS.clear()
+
+
+WHITELISTED_SYMBOLS = [  # used only for testing, not in __all__
+    "PreBuiltBuilder",
+    "MockModuleBuilder",
+    "MockStepConfig",
+]
+
+
+@pytest.mark.parametrize(
+    "config_registry_class",
+    [
+        CorrectorSelector,
+        ModuleSelector,
+        StepSelector,
+        PerturbationSelector,
+    ],
+)
+def test_registry_symbols_are_imported(config_registry_class):
+    registered_config_names = config_registry_class.get_available_types()
+    for registered_config_name in registered_config_names:
+        registered_config = config_registry_class.registry._types[
+            registered_config_name
+        ]
+        if registered_config.__name__ not in WHITELISTED_SYMBOLS:
+            assert registered_config.__name__ in IMPORTED_SYMBOLS
