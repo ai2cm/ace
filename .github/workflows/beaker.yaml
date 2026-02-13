@@ -57,6 +57,7 @@ jobs:
             --cluster ai2/ceres-cirrascale \
             --cluster ai2/neptune \
             --cluster ai2/rhea \
+            --cluster ai2/prometheus \
             --env WANDB_NAME=${{ env.JOB_NAME }} \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset ${{ env.BEAKER_CHECKPOINT_TEST_DATASET }}:/test-data \

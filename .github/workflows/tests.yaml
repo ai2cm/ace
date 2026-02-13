@@ -34,6 +34,7 @@ jobs:
         run: |
           source .venv/bin/activate
           make test_cov
+          make test_parallel
   cpu-very-fast-no-healpix:
     runs-on: ubuntu-latest
     steps:
@@ -91,3 +92,4 @@ jobs:
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
             python3 fme/require_gpu.py
             make test
+            make test_parallel
