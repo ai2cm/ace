@@ -18,9 +18,7 @@ def test_gather_tensor_from_local_slices():
         torch.arange(np.prod(global_shape), device=get_device()).reshape(global_shape)
         + 1
     )
-    x_local = x_global[
-        dist.get_local_slices(global_shape, dist.rank, data_parallel_dim=0)
-    ]
+    x_local = x_global[dist.get_local_slices(global_shape, data_parallel_dim=0)]
     gathered = dist.gather_global(
         x_local, global_shape=global_shape, data_parallel_dim=0
     )
@@ -46,11 +44,13 @@ def test_local_slices_subdivide_domain():
         total_size % dist.world_size == 0
     ), "total_size is not divisible by total ranks"
     expected_slice_size = total_size // dist.world_size
+    local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
+    gathered_local_slices = dist.gather_object(local_slices)
+    assert gathered_local_slices is not None
     for i in range(dist.world_size):
-        local_slices = dist.get_local_slices(global_shape, i, data_parallel_dim=0)
         # the slices should be of the minimum size required
-        assert x_global[local_slices].nelement() == expected_slice_size
-        x_global[local_slices] = 1
+        assert x_global[gathered_local_slices[i]].nelement() == expected_slice_size
+        x_global[gathered_local_slices[i]] = 1
     torch.testing.assert_close(
         x_global, torch.ones_like(x_global)
     )  # the entire domain should get selected
@@ -69,7 +69,7 @@ def test_reduce_mean_from_multiple_ranks():
     # each global/model domain is a reshaped arange, with a different constant offset
     # depending on the batch/data parallel index/rank.
     x_global_ranked = x_global_base + dist.data_parallel_rank
-    x_local_ranked = x_global_ranked[dist.get_local_slices(global_shape, dist.rank)]
+    x_local_ranked = x_global_ranked[dist.get_local_slices(global_shape)]
     x_local_reduced = dist.reduce_mean(x_local_ranked)
 
     # we expect the offsets to average out, giving the arange map plus an average offset
@@ -82,6 +82,6 @@ def test_reduce_mean_from_multiple_ranks():
     )
     # check the sub-domain we have on the local rank against this expectation
     x_local_reduced_expected = x_global_mean_expected[
-        dist.get_local_slices(global_shape, dist.rank)
+        dist.get_local_slices(global_shape)
     ]
     torch.testing.assert_close(x_local_reduced, x_local_reduced_expected)

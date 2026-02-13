@@ -1,6 +1,7 @@
 import contextlib
 import logging
 from collections.abc import Iterator
+from typing import TypeVar
 
 import torch.distributed
 
@@ -9,6 +10,8 @@ from .non_distributed import NonDistributed
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 class Distributed:
@@ -140,7 +143,6 @@ class Distributed:
     def get_local_slices(
         self,
         tensor_shape,
-        rank: int | None = None,
         data_parallel_dim: int | None = None,
     ):
         """
@@ -149,7 +151,6 @@ class Distributed:
         Args:
             tensor_shape: the shape of the global tensor, which may or may not contain
                 a data parallel (batch) dimension.
-            rank: the rank to retrieve the slice for, defaults to the current rank.
             data_parallel_dim: the index of the data parallel dimension, if it exists.
                 by default, assumes the tensor does not have a data parallel dimension.
         """
@@ -161,10 +162,8 @@ class Distributed:
                 f"ranks, got global shape {tensor_shape} with "
                 f"{self.total_data_parallel_ranks} data parallel ranks"
             )
-        if rank is None:
-            rank = self._distributed.rank
         return self._distributed.get_local_slices(
-            tensor_shape, rank=rank, data_parallel_dim=data_parallel_dim
+            tensor_shape, data_parallel_dim=data_parallel_dim
         )
 
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
@@ -194,9 +193,20 @@ class Distributed:
         """
         return self._distributed.reduce_max(tensor)
 
-    def gather(
-        self, tensor: torch.Tensor, gather_list: list[torch.Tensor] | None = None
-    ) -> list[torch.Tensor] | None:
+    def gather_object(self, obj: object) -> list[object] | None:
+        """
+        Gather a picklable object from all processes to the root process.
+
+        Args:
+            obj: The object to gather.
+
+        Returns:
+            A list of objects, where the i-th element is the object
+                from the i-th process.
+        """
+        return self._distributed.gather_object(obj)
+
+    def gather(self, tensor: T, gather_list: list[T] | None = None) -> list[T] | None:
         """
         Gather a tensor from all processes to the root process.
 
@@ -234,19 +244,19 @@ class Distributed:
                 f"ranks, got global_shape {global_shape} with "
                 f"{self.total_data_parallel_ranks} data parallel ranks"
             )
+        local_slices = self.get_local_slices(
+            global_shape, data_parallel_dim=data_parallel_dim
+        )
+        gathered_local_slices = self.gather_object(local_slices)
         if self.is_root():
+            if gathered_local_slices is None:
+                raise RuntimeError("gather_object returned None on root process")
             gathered_global = torch.zeros(
                 *global_shape, dtype=tensor.dtype, device=tensor.device
             )
             gather_list = []
             for i in range(self.total_data_parallel_ranks):
-                gather_list.append(
-                    gathered_global[
-                        self.get_local_slices(
-                            global_shape, i, data_parallel_dim=data_parallel_dim
-                        )
-                    ]
-                )
+                gather_list.append(gathered_global[gathered_local_slices[i]])
         else:
             gather_list = None
             gathered_global = None

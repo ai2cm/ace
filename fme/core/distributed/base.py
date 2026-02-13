@@ -40,9 +40,7 @@ class DistributedBackend(ABC):
     def local_batch_size(self, batch_size: int) -> int: ...
 
     @abstractmethod
-    def get_local_slices(
-        self, tensor_shape, rank: int, data_parallel_dim: int | None
-    ): ...
+    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None): ...
 
     @abstractmethod
     def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None: ...
@@ -78,6 +76,9 @@ class DistributedBackend(ABC):
                 from the i-th process.
         """
         ...
+
+    @abstractmethod
+    def gather_object(self, obj: object) -> list[object] | None: ...
 
     @abstractmethod
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
