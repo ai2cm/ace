@@ -51,7 +51,9 @@ def test_local_slices_subdivide_domain():
         # the slices should be of the minimum size required
         assert x_global[local_slices].nelement() == expected_slice_size
         x_global[local_slices] = 1
-    torch.testing.assert_close(x_global, 1)  # the entire domain should get selected
+    torch.testing.assert_close(
+        x_global, torch.ones_like(x_global)
+    )  # the entire domain should get selected
 
 
 def test_reduce_mean_from_multiple_ranks():

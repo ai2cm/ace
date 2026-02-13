@@ -153,7 +153,9 @@ class Distributed:
             data_parallel_dim: the index of the data parallel dimension, if it exists.
                 by default, assumes the tensor does not have a data parallel dimension.
         """
-        if tensor_shape[data_parallel_dim] % self.total_data_parallel_ranks != 0:
+        if data_parallel_dim is not None and (
+            tensor_shape[data_parallel_dim] % self.total_data_parallel_ranks != 0
+        ):
             raise ValueError(
                 "expected global data parallel dim to be divisible by data parallel "
                 f"ranks, got global shape {tensor_shape} with "

@@ -83,7 +83,19 @@ class TorchDistributed(DistributedBackend):
         return self.total_ranks  # no model parallelism
 
     def get_local_slices(self, tensor_shape, rank: int, data_parallel_dim: int | None):
-        return tuple(slice(None, None) for _ in tensor_shape)
+        return_list = [slice(None, None) for _ in tensor_shape]
+        if data_parallel_dim is not None:
+            if tensor_shape[data_parallel_dim] % self.total_data_parallel_ranks != 0:
+                raise ValueError(
+                    "expected global data parallel dim to be divisible by data "
+                    f"parallel ranks, got global shape {tensor_shape} with "
+                    f"{self.total_data_parallel_ranks} data parallel ranks"
+                )
+            per_rank = tensor_shape[data_parallel_dim] // self.total_data_parallel_ranks
+            return_list[data_parallel_dim] = slice(
+                rank * per_rank, (rank + 1) * per_rank
+            )
+        return tuple(return_list)
 
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size // self.total_ranks
