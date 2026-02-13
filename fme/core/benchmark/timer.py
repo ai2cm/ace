@@ -11,6 +11,16 @@ class TimerResult:
     avg_time: float
     children: dict[str, "TimerResult"]
 
+    def get_logs(self, max_depth: int) -> dict[str, float]:
+        logs = {
+            "avg_time": self.avg_time,
+        }
+        if max_depth > 0:
+            for child_name, child in self.children.items():
+                for log_name, value in child.get_logs(max_depth=max_depth - 1).items():
+                    logs[f"{child_name}/{log_name}"] = value
+        return logs
+
     def assert_close(self, other: "TimerResult", rtol=0.02, children_rtol=0.02) -> None:
         if self.count != other.count:
             raise AssertionError(f"count differ: {self.count} vs {other.count}")
