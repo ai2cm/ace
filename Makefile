@@ -5,6 +5,7 @@ ENVIRONMENT_NAME ?= fme
 USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 DEPLOY_TARGET ?= pypi
 BEAKER_WORKSPACE = ai2/ace
+NPROC ?= 2
 
 ifeq ($(shell uname), Linux)
 	CONDA_PACKAGES=gxx_linux-64 pip
@@ -52,6 +53,9 @@ create_environment:
 
 test:
 	pytest --durations 40 .
+
+test_parallel:
+	torchrun --nproc-per-node $(NPROC) -m pytest ./fme/core/distributed/parallel_tests
 
 # --cov must come  after pytest args to use the sources defined by config
 test_cov:
