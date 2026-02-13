@@ -22,7 +22,7 @@ train_loader:
   prefetch_factor: 2
   dataset:
     data_path: /pscratch/sd/e/elynnwu/fme-dataset
-    file_pattern: 2024-05-29-era5-025deg-8layer-2010-2022.zarr
+    file_pattern: 2026-02-23-rechunk-ERA5-025deg-8layer-2010-2011.zarr
     engine: zarr
     subset:
       start_time: '2010-01-01'
@@ -33,7 +33,7 @@ validation_loader:
   prefetch_factor: 2
   dataset:
     data_path: /pscratch/sd/e/elynnwu/fme-dataset
-    file_pattern: 2024-05-29-era5-025deg-8layer-2010-2022.zarr
+    file_pattern: 2026-02-23-rechunk-ERA5-025deg-8layer-2010-2011.zarr
     engine: zarr
     subset:
       start_time: '2011-01-01'
