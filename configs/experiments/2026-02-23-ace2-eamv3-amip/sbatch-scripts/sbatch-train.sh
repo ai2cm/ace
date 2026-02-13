@@ -1,6 +1,6 @@
 #!/bin/bash -l
 
-#SBATCH -A m4492_g
+#SBATCH -A e3sm
 #SBATCH -q regular
 #SBATCH -C gpu
 #SBATCH -J train-fme
