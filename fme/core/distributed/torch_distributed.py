@@ -82,7 +82,7 @@ class TorchDistributed(DistributedBackend):
     def total_data_parallel_ranks(self) -> int:
         return self.total_ranks  # no model parallelism
 
-    def get_local_slices(self, tensor_shape, rank: int):
+    def get_local_slices(self, tensor_shape, rank: int, data_parallel_dim: int | None):
         return tuple(slice(None, None) for _ in tensor_shape)
 
     def local_batch_size(self, batch_size: int) -> int:
@@ -104,9 +104,10 @@ class TorchDistributed(DistributedBackend):
         torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX)
         return tensor
 
-    def gather(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
-        gather_list: list[torch.Tensor] | None = None
-        if self.rank == 0:
+    def gather(
+        self, tensor: torch.Tensor, gather_list: list[torch.Tensor] | None = None
+    ) -> list[torch.Tensor] | None:
+        if gather_list is None and self.rank == 0:
             gather_list = [tensor] + [
                 torch.empty_like(tensor) for _ in range(self.world_size - 1)
             ]

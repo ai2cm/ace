@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from fme.core import get_device
@@ -12,20 +13,45 @@ def test_gather_tensor_from_local_slices():
     "batch" parallelism in this test.
     """
     dist = Distributed.get_instance()
-    global_shape = (4, 4)
+    global_shape = (2, 4, 4)
     x_global = (
-        torch.arange(global_shape[0] * global_shape[1], device=get_device()).reshape(
-            global_shape
-        )
+        torch.arange(np.prod(global_shape), device=get_device()).reshape(global_shape)
         + 1
     )
-    x_local = x_global[dist.get_local_slices(global_shape, dist.rank)]
-    gathered = dist.gather_global(x_local, global_shape=global_shape)
+    x_local = x_global[
+        dist.get_local_slices(global_shape, dist.rank, data_parallel_dim=0)
+    ]
+    gathered = dist.gather_global(
+        x_local, global_shape=global_shape, data_parallel_dim=0
+    )
     if dist.is_root():
         assert gathered is not None
         torch.testing.assert_close(gathered, x_global)
     else:
         assert gathered is None
+
+
+def test_local_slices_subdivide_domain():
+    """
+    Only tests get_local_slices and gather.
+
+    Because the global data is the same on each rank, there is no coverage of
+    "batch" parallelism in this test.
+    """
+    dist = Distributed.get_instance()
+    global_shape = (2, 4, 4)
+    x_global = torch.zeros(global_shape, device=get_device())
+    total_size = np.prod(global_shape)
+    assert (
+        total_size % dist.world_size == 0
+    ), "total_size is not divisible by total ranks"
+    expected_slice_size = total_size // dist.world_size
+    for i in range(dist.world_size):
+        local_slices = dist.get_local_slices(global_shape, i, data_parallel_dim=0)
+        # the slices should be of the minimum size required
+        assert x_global[local_slices].nelement() == expected_slice_size
+        x_global[local_slices] = 1
+    torch.testing.assert_close(x_global, 1)  # the entire domain should get selected
 
 
 def test_reduce_mean_from_multiple_ranks():

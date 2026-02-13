@@ -40,7 +40,9 @@ class DistributedBackend(ABC):
     def local_batch_size(self, batch_size: int) -> int: ...
 
     @abstractmethod
-    def get_local_slices(self, tensor_shape, rank: int): ...
+    def get_local_slices(
+        self, tensor_shape, rank: int, data_parallel_dim: int | None
+    ): ...
 
     @abstractmethod
     def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None: ...
@@ -55,7 +57,9 @@ class DistributedBackend(ABC):
     def reduce_max(self, tensor: torch.Tensor) -> torch.Tensor | None: ...
 
     @abstractmethod
-    def gather(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
+    def gather(
+        self, tensor: torch.Tensor, gather_list: list[torch.Tensor] | None
+    ) -> list[torch.Tensor] | None:
         """
         Gather a tensor from all processes to the root process.
 
@@ -66,6 +70,8 @@ class DistributedBackend(ABC):
 
         Args:
             tensor: The tensor to gather.
+            gather_list: A list of tensor buffers to gather into,
+                one for each rank.
 
         Returns:
             A list of tensors, where the i-th element is the tensor
