@@ -122,7 +122,6 @@ class RealSHT(nn.Module):
         return f'nlat={self.nlat}, nlon={self.nlon},\n lmax={self.lmax}, mmax={self.mmax},\n grid={self.grid}, csphase={self.csphase}'
 
     def forward(self, x: torch.Tensor):
-
         assert(x.shape[-2] == self.nlat)
         assert(x.shape[-1] == self.nlon)
         with torch.autocast("cuda", enabled=False):
@@ -132,6 +131,7 @@ class RealSHT(nn.Module):
             # apply real fft in the longitudinal direction
             x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
 
+            x = x.transpose(-2, -1).contiguous()
             # do the Legendre-Gauss quadrature
             x = torch.view_as_real(x)
 
@@ -143,8 +143,8 @@ class RealSHT(nn.Module):
 
             # contraction
             weights = self.weights.to(x.device).to(x.dtype)
-            xout[..., 0] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 0], weights)
-            xout[..., 1] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 1], weights)
+            xout[..., 0] = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, :, 0], weights)
+            xout[..., 1] = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, :, 1], weights)
             x = torch.view_as_complex(xout)
 
         return x
@@ -208,13 +208,14 @@ class InverseRealSHT(nn.Module):
         assert(x.shape[-1] == self.mmax)
 
         with torch.autocast("cuda", enabled=False):
+            x = x.transpose(-1, -2).contiguous()
             # irfft and view_as_complex don't support BF16, see https://github.com/pytorch/pytorch/issues/117844
             # Evaluate associated Legendre functions on the output nodes
             x = torch.view_as_real(x).float()
 
             pct = self.pct.to(x.device).to(x.dtype)
-            rl = torch.einsum('...lm, mlk->...km', x[..., 0], pct )
-            im = torch.einsum('...lm, mlk->...km', x[..., 1], pct )
+            rl = torch.einsum('...ml, mlk->...km', x[..., 0], pct )
+            im = torch.einsum('...ml, mlk->...km', x[..., 1], pct )
             xs = torch.stack((rl, im), -1)
 
             # apply the inverse (real) FFT
