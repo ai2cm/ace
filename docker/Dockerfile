@@ -21,7 +21,7 @@ ENV FORCE_CUDA_EXTENSION=1
 # install python deps
 RUN pip install uv
 COPY pyproject.toml /tmp/pyproject.toml
-RUN uv pip install -r /tmp/pyproject.toml --extra graphcast
+RUN uv pip install --system -r /tmp/pyproject.toml --extra graphcast
 COPY requirements-healpix.txt /tmp/requirements-healpix.txt
 RUN python3 -m pip install --no-build-isolation -r /tmp/requirements-healpix.txt
 
