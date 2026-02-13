@@ -179,7 +179,6 @@ def open_dataset(
                     datasets[varname] = ds
         del var_paths["time_invariant"]
     for varname, paths in var_paths.items():
-        print(varname)
         var_start = time.time()
         if varname in varnames_3D:
             drop_vars = DROP_VARIABLE_NAMES["3D"]
