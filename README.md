@@ -8,7 +8,7 @@
 
 > **⚠️ IMPORTANT MIGRATION NOTICE**
 >
-> This repository has recently undergone a **breaking history change** on the `main` branch as part of our transition to open development. If you have an existing clone from before this migration, you will need to take action.
+> This repository had a **breaking history change** on the `main` branch in December 2025 as part of our transition to open development. If you have an existing clone from before this migration, you will need to take action.
 >
 > **See [MIGRATION.md](MIGRATION.md) for complete instructions.**
 >
