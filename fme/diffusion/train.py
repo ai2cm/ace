@@ -109,6 +109,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         normalize=stepper.normalizer.normalize,
         output_dir=config.output_dir,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+        n_ensemble_per_ic=config.inference.n_ensemble_per_ic,
     )
     end_of_batch_ops = builder.get_end_of_batch_ops(
         modules=stepper.modules, base_weights=stepper.get_base_weights()
@@ -151,6 +152,7 @@ class AggregatorBuilder(
         loss_scaling: dict[str, torch.Tensor] | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
+        n_ensemble_per_ic: int = 1,
     ):
         self.train_config = train_config
         self.inference_config = inference_config
@@ -164,6 +166,7 @@ class AggregatorBuilder(
         self.channel_mean_names = channel_mean_names
         self.normalize = normalize
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
+        self.n_ensemble_per_ic = n_ensemble_per_ic
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator(
@@ -191,6 +194,7 @@ class AggregatorBuilder(
             normalize=self.normalize,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "inference"),
+            n_ensemble_per_ic=self.n_ensemble_per_ic,
         )
 
 
