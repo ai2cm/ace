@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from fme.core.constants import DENSITY_OF_WATER_CM4, SPECIFIC_HEAT_OF_WATER_CM4
-from fme.core.coordinates import DepthCoordinate
+from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.ocean_data import OceanData
 from fme.core.ocean_derived_variables import (
     _compute_ocean_derived_variable,
@@ -150,4 +150,34 @@ def test_metadata_registry():
     assert (
         metadata["ocean_heat_content"].long_name
         == "Column-integrated ocean heat content"
+    )
+
+
+def test_sea_ice_thickness_derived_variable():
+    """Test recovering sea ice thickness (HI) from sea ice volume."""
+    n_lat, n_lon = 4, 8
+    horizontal_coordinates = LatLonCoordinates(
+        lat=torch.linspace(-60, 60, n_lat),
+        lon=torch.linspace(0, 360, n_lon + 1)[:-1],  # avoid wrapping
+    )
+    cell_area = horizontal_coordinates.cell_area_m2
+
+    # Create test data: known thickness and fraction, compute volume from them
+    thickness_in_m = torch.tensor(2.0)
+    sea_ice_frac = torch.full((1, 1, n_lat, n_lon), 0.6)
+    expected_volume = thickness_in_m * cell_area * sea_ice_frac / 1e9
+
+    fake_data = {
+        "sea_ice_volume": expected_volume,
+        "sea_ice_fraction": sea_ice_frac,
+    }
+
+    ocean_data = OceanData(fake_data, cell_area_provider=horizontal_coordinates)
+
+    recovered_thickness = ocean_data.sea_ice_thickness
+    expected_thickness = torch.full_like(expected_volume, thickness_in_m)
+    torch.testing.assert_close(
+        recovered_thickness,
+        expected_thickness,
+        msg="Recovered sea ice thickness should match original",
     )
