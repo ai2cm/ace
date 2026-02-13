@@ -63,7 +63,7 @@ class NonDistributed(DistributedBackend):
         self, tensor: torch.Tensor, gather_list: list[torch.Tensor] | None
     ) -> list[torch.Tensor] | None:
         if gather_list is not None:
-            if len(gather_list) != 0:
+            if len(gather_list) != 1:
                 raise ValueError(
                     f"expected 1 element in gather_list, got {len(gather_list)}"
                 )
