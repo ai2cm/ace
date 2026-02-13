@@ -33,7 +33,7 @@ Pretrained model checkpoints are available in the [ACE Hugging Face](https://hug
 
 ## Papers
 
-The following papers presented models trained using code in this repository.
+The following papers described models trained using code in this repository.
 
 - "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([link](https://arxiv.org/abs/2310.02074))
 - "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000136))
