@@ -18,10 +18,11 @@
 import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
+
+from fme.core.benchmark.timer import NullTimer, Timer
 
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
@@ -48,14 +49,17 @@ def _contract_lora(
     Performs LoRA update contraction.
 
     Args:
-        lora_A: LoRA A matrix of shape (in_channels, rank, nlat, 2)
-        lora_B: LoRA B matrix of shape (rank, out_channels, nlat, 2)
+        lora_A: LoRA A matrix of shape (group, in_channels, rank, nlat, 2)
+        lora_B: LoRA B matrix of shape (group, rank, out_channels, nlat, 2)
         x: Complex input tensor of shape
-            (batch_size, in_channels, nlat, nlon)
+            (batch_size, group, in_channels, nlat, nlon)
+
+    Returns:
+        Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
     """
     lora_A = torch.view_as_complex(lora_A)
     lora_B = torch.view_as_complex(lora_B)
-    return torch.einsum("irx,rox,bixy->boxy", lora_A, lora_B, x)
+    return torch.einsum("girx,grox,bgixy->bgoxy", lora_A, lora_B, x)
 
 
 @torch.jit.script
@@ -67,11 +71,14 @@ def _contract_dhconv(
     'a' and 'b'.
 
     Args:
-        xc: Complex input tensor of shape (batch_size, in_channels, nlat, nlon)
-        weight: Weight tensor of shape (in_channels, out_channels, nlat, 2)
+        xc: Complex input tensor of shape (batch_size, group, in_channels, nlat, nlon)
+        weight: Weight tensor of shape (group, in_channels, out_channels, nlat, 2)
+
+    Returns:
+        Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
     """
     wc = torch.view_as_complex(weight)
-    return torch.einsum("bixy,iox->boxy", xc, wc)
+    return torch.einsum("bgixy,giox->bgoxy", xc, wc)
 
 
 class SpectralConvS2(nn.Module):
@@ -88,6 +95,7 @@ class SpectralConvS2(nn.Module):
         inverse_transform,
         in_channels,
         out_channels,
+        num_groups: int = 1,
         scale="auto",
         operator_type="diagonal",
         rank=0.2,
@@ -122,6 +130,10 @@ class SpectralConvS2(nn.Module):
             raise NotImplementedError(
                 "Currently only in_channels == out_channels is supported."
             )
+
+        assert in_channels % num_groups == 0
+        assert out_channels % num_groups == 0
+        self.num_groups = num_groups
 
         if in_channels != out_channels:
             raise NotImplementedError(
@@ -171,31 +183,36 @@ class SpectralConvS2(nn.Module):
             # seemingly the first weight is not really complex, so we need to account for that
             scale[0, :] *= math.sqrt(2.0)
 
-        weight_shape = [in_channels, out_channels, self.modes_lat_local]
+        weight_shape = [
+            num_groups,
+            in_channels // num_groups,
+            out_channels // num_groups,
+            self.modes_lat_local,
+        ]
 
         assert factorization == "ComplexDense"
         self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
         self.weight.is_shared_mp = ["matmul", "w"]
 
         if lora_rank > 0:
-            if self.weight.shape != (
-                in_channels,
-                out_channels,
-                self.modes_lat_local,
-                2,
-            ):
-                raise NotImplementedError(
-                    "LoRA is only implemented for dhconv with unpadded weights."
-                )
-            if use_tensorly:
-                raise NotImplementedError(
-                    "LoRA is not implemented for tensorly factorized weights."
-                )
             self.lora_A = nn.Parameter(
-                scale * torch.randn(in_channels, lora_rank, self.modes_lat_local, 2)
+                scale
+                * torch.randn(
+                    num_groups,
+                    in_channels // num_groups,
+                    lora_rank,
+                    self.modes_lat_local,
+                    2,
+                )
             )
             self.lora_B = nn.Parameter(
-                torch.zeros(lora_rank, out_channels, self.modes_lat_local, 2)
+                torch.zeros(
+                    num_groups,
+                    lora_rank,
+                    out_channels // num_groups,
+                    self.modes_lat_local,
+                    2,
+                )
             )
             self.lora_alpha = lora_alpha if lora_alpha is not None else lora_rank
             self.lora_scaling = self.lora_alpha / lora_rank
@@ -206,43 +223,84 @@ class SpectralConvS2(nn.Module):
 
         if bias:
             self.bias = nn.Parameter(torch.zeros(1, out_channels, 1, 1))
+        self.in_channels = in_channels
+        self.out_channels = out_channels
 
-    def forward(self, x):  # pragma: no cover
+        # rewrite old checkpoints on load
+        self.register_load_state_dict_pre_hook(self._add_singleton_group_dim)
+
+    @staticmethod
+    def _add_singleton_group_dim(
+        module: "SpectralConvS2",
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict,
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        key = prefix + "weight"
+        if key not in state_dict:
+            return
+
+        weight = state_dict[key]
+
+        ungrouped_shape = (
+            module.in_channels,
+            module.out_channels,
+            module.modes_lat_local,
+            2,
+        )
+
+        if weight.shape == ungrouped_shape:
+            state_dict[key] = weight.view(1, *ungrouped_shape)
+
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         residual = x
         x = x.float()
-        B, C, H, W = x.shape
 
         with torch.amp.autocast("cuda", enabled=False):
-            x = self.forward_transform(x.float())
+            with timer.child("forward_transform"):
+                x = self.forward_transform(x.float())
             if self._round_trip_residual:
-                x = x.contiguous()
-                residual = self.inverse_transform(x)
-                residual = residual.to(dtype)
+                with timer.child("round_trip_residual"):
+                    x = x.contiguous()
+                    residual = self.inverse_transform(x)
+                    residual = residual.to(dtype)
+
+        B, C, H, W = x.shape
+        assert C % self.num_groups == 0
+        x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
 
         if self.lora_A is not None and self.lora_B is not None:
-            lora_update = _contract_lora(
-                self.lora_A,
-                self.lora_B,
-                x[..., : self.modes_lat_local, : self.modes_lon_local],
-            )
+            with timer.child("lora_update"):
+                lora_update = _contract_lora(
+                    self.lora_A,
+                    self.lora_B,
+                    x[..., : self.modes_lat_local, : self.modes_lon_local],
+                )
         else:
             lora_update = 0.0
 
-        # approach with unpadded weights
-        xp = torch.zeros_like(x)
-        xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
-            x[..., : self.modes_lat_local, : self.modes_lon_local],
-            self.weight,
-        )
-        xp = xp + self.lora_scaling * lora_update
-        x = xp.contiguous()
+        with timer.child("dhconv"):
+            xp = torch.zeros_like(x)
+            xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
+                x[..., : self.modes_lat_local, : self.modes_lon_local],
+                self.weight,
+            )
+            xp = xp + self.lora_scaling * lora_update
+            xp = xp.reshape(B, self.out_channels, H, W)
+            x = xp.contiguous()
 
         with torch.amp.autocast("cuda", enabled=False):
-            x = self.inverse_transform(x)
+            with timer.child("inverse_transform"):
+                x = self.inverse_transform(x)
 
         if hasattr(self, "bias"):
-            x = x + self.bias
+            with timer.child("add_bias"):
+                x = x + self.bias
 
         x = x.type(dtype)
 
@@ -301,7 +359,7 @@ class LocalConvS2(nn.Module):
                 scale * torch.randn(1, out_channels, *self.output_dims)
             )
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         x = x.float()
         B, C, H, W = x.shape
@@ -484,7 +542,7 @@ class SpectralAttentionS2(nn.Module):
 
         return x
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         residual = x
         x = x.to(torch.float32)
@@ -607,7 +665,7 @@ class RealSpectralAttentionS2(nn.Module):
 
         return x
 
-    def forward(self, x):  # pragma: no cover
+    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         x = x.to(torch.float32)
 
