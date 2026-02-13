@@ -93,3 +93,11 @@ jobs:
             python3 fme/require_gpu.py
             make test
             make test_parallel
+      - name: Run GPU benchmarks
+        env:
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+        run: |
+            source .venv/bin/activate
+            export PATH=/usr/local/nvidia/bin:${PATH}
+            export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+            python3 -m fme.core.benchmark.run --wandb-project ai2cm/fme-core-benchmarks-ci
