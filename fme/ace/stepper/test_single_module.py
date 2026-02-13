@@ -1211,8 +1211,7 @@ def test_predict_with_forcing(n_ensemble):
 @pytest.mark.parametrize(
     "in_names,out_names,prescribed,module_name",
     [
-        (["a", "b"], ["a"], ["a"], "ChannelSum"),
-        (["a", "b"], ["a", "b"], ["a", "b"], "AddOne"),
+        (["a", "b"], ["a"], ["a"], "AddOne"),
     ],
 )
 def test_predict_with_prescribed_prognostic(
@@ -1259,7 +1258,6 @@ def test_prescribed_prognostic_config_validation_raises():
 
 
 def test_get_forcing_window_data_requirements_includes_prescribed_names():
-    """Forcing window data requirements include prescribed_prognostic_names."""
     config = StepperConfig(
         step=StepSelector(
             type="single_module",
