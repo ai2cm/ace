@@ -17,7 +17,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "sea_surface_height_above_geoid": ["zos"],
         "sea_surface_temperature": ["sst"],
         "sea_ice_fraction": ["sea_ice_fraction"],
-        "sea_ice_thickness": ["sea_ice_thickness"],
+        "sea_ice_thickness": ["HI"],
         "sea_ice_volume": ["sea_ice_volume"],
         "ocean_sea_ice_fraction": ["ocean_sea_ice_fraction"],
         "land_fraction": ["land_fraction"],
@@ -50,6 +50,13 @@ class HasOceanDepthIntegral(Protocol):
     def to(self, device: str) -> "HasOceanDepthIntegral": ...
 
 
+class HasCellAreaInMetersSquared(Protocol):
+    """Protocol for objects that can provide cell areas in square meters."""
+
+    @property
+    def cell_area_m2(self) -> torch.Tensor: ...
+
+
 class OceanData:
     """Container for ocean data for accessing variables and providing
     torch.Tensor views on data with multiple depth levels.
@@ -60,6 +67,7 @@ class OceanData:
         ocean_data: TensorMapping,
         depth_coordinate: HasOceanDepthIntegral | None = None,
         ocean_field_name_prefixes: Mapping[str, list[str]] = OCEAN_FIELD_NAME_PREFIXES,
+        cell_area_provider: HasCellAreaInMetersSquared | None = None,
     ):
         """
         Initializes the instance based on the provided data and prefixes.
@@ -72,11 +80,15 @@ class OceanData:
                 "potential_temperature" or "salinity") and lists of possible
                 names or prefix variants (e.g., ["thetao_"] or
                 ["zos"]) found in the data.
+            cell_area_provider: An object providing cell areas in square meters
+                via the ``cell_area_m2`` property. Used by derived variables
+                that need cell area information (e.g. sea ice thickness).
         """
         self._data = dict(ocean_data)
         self._prefix_map = ocean_field_name_prefixes
         self._depth_coordinate = depth_coordinate
         self._stacker = Stacker(ocean_field_name_prefixes)
+        self._cell_area_provider = cell_area_provider
 
     @property
     def data(self) -> TensorDict:
@@ -216,3 +228,32 @@ class OceanData:
         fraction and land fraction.
         """
         return 1 - self.land_fraction - self.sea_ice_fraction
+
+    @property
+    def cell_area_m2(self) -> torch.Tensor:
+        """Returns cell areas in square meters.
+
+        Raises:
+            ValueError: If a cell area provider was not provided.
+        """
+        if self._cell_area_provider is None:
+            raise ValueError(
+                "A cell area provider must be provided to access cell area information."
+            )
+        return self._cell_area_provider.cell_area_m2
+
+    @property
+    def sea_ice_thickness(self) -> torch.Tensor:
+        """Returns the sea ice thickness."""
+        try:
+            return self._get("sea_ice_thickness")
+        except KeyError:
+            sea_ice_vol = self.sea_ice_volume
+            sea_ice_frac = self.sea_ice_fraction
+            cell_area = self.cell_area_m2
+            return sea_ice_vol * 1e9 / (cell_area * sea_ice_frac)
+
+    @property
+    def sea_ice_volume(self) -> torch.Tensor:
+        """Returns the sea ice volume."""
+        return self._get("sea_ice_volume")

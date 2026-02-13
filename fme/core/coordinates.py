@@ -16,7 +16,7 @@ except ImportError:
     e2ghpx = None
 
 from fme.core import metrics
-from fme.core.constants import GRAVITY
+from fme.core.constants import EARTH_RADIUS, GRAVITY
 from fme.core.corrector.atmosphere import AtmosphereCorrector, AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrector, IceCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
@@ -74,22 +74,35 @@ class OceanDeriveFn(DeriveFnABC):
         self,
         depth_coordinate: "OptionalDepthCoordinate",
         timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
     ):
         self.depth_coordinate = depth_coordinate.to(
             "cpu"
         )  # must be on cpu for multiprocessing fork context
         self.timestep = timestep
+        # must be on cpu for multiprocessing fork context
+        self.horizontal_coordinates = (
+            horizontal_coordinates.to("cpu")
+            if horizontal_coordinates is not None
+            else None
+        )
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.depth_coordinate, NullVerticalCoordinate):
             depth_coord: DepthCoordinate | None = None
         else:
             depth_coord = self.depth_coordinate.to(get_device())
+        cell_area_provider = (
+            self.horizontal_coordinates.to(get_device())
+            if self.horizontal_coordinates is not None
+            else None
+        )
         return compute_ocean_derived_quantities(
             dict(data),
             depth_coordinate=depth_coord,
             timestep=self.timestep,
             forcing_data=dict(forcing_data),
+            cell_area_provider=cell_area_provider,
         )
 
 
@@ -130,7 +143,11 @@ class VerticalCoordinate(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+    def build_derive_function(
+        self,
+        timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
+    ) -> DeriveFnABC:
         pass
 
     @property
@@ -217,7 +234,11 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
             timestep=timestep,
         )
 
-    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+    def build_derive_function(
+        self,
+        timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
+    ) -> DeriveFnABC:
         return AtmosphericDeriveFn(self, timestep)
 
     def get_ak(self) -> torch.Tensor:
@@ -392,8 +413,12 @@ class DepthCoordinate(VerticalCoordinate):
             timestep=timestep,
         )
 
-    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
-        return OceanDeriveFn(self, timestep)
+    def build_derive_function(
+        self,
+        timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
+    ) -> DeriveFnABC:
+        return OceanDeriveFn(self, timestep, horizontal_coordinates)
 
     def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
         """
@@ -540,7 +565,11 @@ class NullVerticalCoordinate(VerticalCoordinate):
                 "Must be either 'atmosphere_corrector' or 'ocean_corrector'."
             )
 
-    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+    def build_derive_function(
+        self,
+        timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
+    ) -> DeriveFnABC:
         return NullDeriveFn()
 
     def to(self, device: str) -> "NullVerticalCoordinate":
@@ -653,6 +682,12 @@ class HorizontalCoordinates(abc.ABC):
     def shape(self) -> tuple[int, ...]:
         pass
 
+    @property
+    @abc.abstractmethod
+    def cell_area_m2(self) -> torch.Tensor:
+        """Cell areas in meters squared."""
+        pass
+
     @abc.abstractmethod
     def to_state(self) -> TensorMapping:
         pass
@@ -695,6 +730,33 @@ class LatLonCoordinates(HorizontalCoordinates):
         if self._area_weights is None:
             self._area_weights = metrics.spherical_area_weights(self.lat, len(self.lon))
         return self._area_weights
+
+    @property
+    def cell_area_m2(self) -> torch.Tensor:
+        """Compute cell areas in meters squared for a regular lat-lon grid.
+
+        Uses latitude boundaries at midpoints between cell centers (clamped
+        to the poles) and assumes uniform longitude spacing.
+        """
+        lat_rad = torch.deg2rad(self.lat)
+        half_pi = torch.tensor(torch.pi / 2, dtype=lat_rad.dtype, device=lat_rad.device)
+
+        # latitude boundaries at midpoints, clamped to poles
+        lat_bounds = torch.empty(
+            len(lat_rad) + 1, dtype=lat_rad.dtype, device=lat_rad.device
+        )
+        lat_bounds[1:-1] = (lat_rad[:-1] + lat_rad[1:]) / 2
+        lat_bounds[0] = torch.clamp(
+            lat_rad[0] - (lat_bounds[1] - lat_rad[0]), min=-half_pi
+        )
+        lat_bounds[-1] = torch.clamp(
+            lat_rad[-1] + (lat_rad[-1] - lat_bounds[-2]), max=half_pi
+        )
+
+        dlon = 2 * torch.pi / len(self.lon)
+        sin_diff = torch.abs(torch.sin(lat_bounds[1:]) - torch.sin(lat_bounds[:-1]))
+        area_per_lat = EARTH_RADIUS**2 * sin_diff * dlon
+        return area_per_lat.unsqueeze(-1).expand(-1, len(self.lon))
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
@@ -851,6 +913,18 @@ class HEALPixCoordinates(HorizontalCoordinates):
     @property
     def area_weights(self) -> Literal[None]:
         return None
+
+    @property
+    def cell_area_m2(self) -> torch.Tensor:
+        """Compute cell areas in meters squared for a HEALPix grid.
+
+        All HEALPix cells have equal area: 4*pi*R^2 / (12 * nside^2).
+        """
+        npix = 12 * self.nside**2
+        area = 4 * torch.pi * EARTH_RADIUS**2 / npix
+        return torch.full(
+            self.shape, area, dtype=self.face.dtype, device=self.face.device
+        )
 
     def get_gridded_operations(
         self, mask_provider: MaskProviderABC = NullMaskProvider
