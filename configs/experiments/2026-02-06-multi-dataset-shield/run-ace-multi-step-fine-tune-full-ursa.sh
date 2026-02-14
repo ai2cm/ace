@@ -39,7 +39,7 @@ do
         stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature \
         stepper.step.config.corrector.total_energy_budget_correction.constant_unaccounted_heating=1.13 \
     "
-    wandb_name=ace-shield-multi-step-fine-tune-energy-conservingfull-rs${seed}
+    wandb_name=ace-shield-multi-step-fine-tune-energy-conserving-full-rs${seed}
     conda run --prefix $FME_VENV \
 	    python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
     $TRAIN_SUBMISSION_SCRIPT \

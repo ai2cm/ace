@@ -36,7 +36,7 @@ inference:
         - "2051-07-28T12:00:00"
         - "2052-01-01T00:00:00"
     dataset:
-      data_path: /climate-default/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+      data_path: /scratch4/GFDL/gfdlhires/Spencer.Clark/data/public/SHiELD-SOM-C96
       file_pattern: concatenated-1xCO2-2xCO2-4xCO2-ic_0003.zarr
       engine: zarr
     num_data_workers: 1
