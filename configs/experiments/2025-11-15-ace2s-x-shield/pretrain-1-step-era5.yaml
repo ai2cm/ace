@@ -11,7 +11,7 @@ inference:
     start: 0
   n_forward_steps: 7300
   forward_steps_in_memory: 40
-  n_ensemble_per_ic: 3
+  # n_ensemble_per_ic: 1
   loader:
     start_indices:
       times:
