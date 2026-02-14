@@ -1,0 +1,28 @@
+experiment_dir: /results
+n_forward_steps: 64652
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '1978-09-30T18:00:00'
+  dataset:
+    data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+  num_data_workers: 16
+aggregator:
+  log_zonal_mean_images: false
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+stepper_override:
+  prescribed_prognostic_names:
+    - air_temperature_1
+    - specific_total_water_1
+    - eastward_wind_1
+    - northward_wind_1

@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="ace-aimip-inference-no-level0-vars"
+JOB_NAME="ace-aimip-inference-no-level0-vars-override-level1"
 JOB_GROUP="ace-aimip"
 EXISTING_RESULTS_DATASET="01KHC64RQ0M3HNW7HMKHDFNR75"  # this contains the checkpoint to use for inference
-CONFIG_FILENAME="ace-evaluator-config-no-override.yaml"
+CONFIG_FILENAME="ace-evaluator-config-override-level1.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
