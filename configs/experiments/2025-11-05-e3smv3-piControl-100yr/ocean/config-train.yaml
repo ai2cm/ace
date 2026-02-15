@@ -6,19 +6,19 @@ ema:
 max_epochs: 150
 n_forward_steps: 4
 inference:
-  n_forward_steps: 730
+  n_forward_steps: 876
   forward_steps_in_memory: 20
   loader:
     start_indices:
       times:
-      - '0421-01-03T12:00:00'
-      - '0431-01-03T12:00:00'
-      - '0441-01-03T12:00:00'
-      - '0451-01-03T12:00:00'
+      - '0401-01-03T12:00:00'
+      - '0413-01-03T12:00:00'
+      - '0425-01-03T12:00:00'
+      - '0437-01-03T12:00:00'
+      - '0449-01-03T12:00:00'
       - '0461-01-03T12:00:00'
-      - '0471-01-03T12:00:00'
-      - '0481-01-03T12:00:00'
-      - '0489-12-04T12:00:00'
+      - '0473-01-03T12:00:00'
+      - '0484-01-03T12:00:00'
     dataset:
       merge:
       - data_path: /pscratch/sd/e/elynnwu/fme-dataset
@@ -46,14 +46,14 @@ train_loader:
       file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
       engine: zarr
       subset:
-        start_time: '0421-01-03'
-        stop_time: '0499-12-29'
+        start_time: '0401-01-03'
+        stop_time: '0496-01-01'
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
       file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
       engine: zarr
       subset:
-        start_time: '0421-01-03'
-        stop_time: '0499-12-29'
+        start_time: '0401-01-03'
+        stop_time: '0496-01-01'
 validation_loader:
   batch_size: 16
   num_data_workers: 4
@@ -64,14 +64,14 @@ validation_loader:
       file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
       engine: zarr
       subset:
-        start_time: '0402-01-01'
-        stop_time: '0407-01-01'
+        start_time: '0496-01-01'
+        stop_time: '0499-12-31'
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
       file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
       engine: zarr
       subset:
-        start_time: '0402-01-01'
-        stop_time: '0407-01-01'
+        start_time: '0496-01-01'
+        stop_time: '0499-12-31'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false

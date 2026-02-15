@@ -3,10 +3,10 @@
 set -x
 
 # wandb config
-export WANDB_NAME=PM-v1124-Samudra-piControl-100yr-no-smooth-baseline-sst-loss-simple-ckpt-train-rs3
+export WANDB_NAME=PM-v1124-Samudra-piControl-100yr-train-95yr-rs2
 export WANDB_RUN_GROUP=v1124-no-smoothing
 
-export COMMIT=2da926245
+export COMMIT=$(git rev-parse --short HEAD)
 
 export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset
 export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-11-24-E3SMv3-piControl-100yr-coupled-stats/ocean

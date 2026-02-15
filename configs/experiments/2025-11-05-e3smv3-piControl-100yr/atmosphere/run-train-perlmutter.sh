@@ -6,7 +6,7 @@ set -x
 export WANDB_NAME=PM-v1110-ACE-E3SMv3-piControl-100yr-train-rs2
 export WANDB_RUN_GROUP=v1110
 
-export COMMIT=a88b7e1fd
+export COMMIT=ef25799d
 
 export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset
 export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-11-10-E3SMv3-piControl-100yr-coupled-stats/uncoupled_atmosphere_new

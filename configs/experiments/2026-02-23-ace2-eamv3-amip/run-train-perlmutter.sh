@@ -3,7 +3,7 @@
 set -x
 
 # wandb config
-export WANDB_NAME=PM-ACE2-EAMv3-AMIP-train-rs1
+export WANDB_NAME=PM-ACE2-EAMv3-AMIP-train-rs2
 export WANDB_RUN_GROUP=v3-AMIP-fixed-CO2-2010
 
 export COMMIT=$(git rev-parse --short HEAD)
