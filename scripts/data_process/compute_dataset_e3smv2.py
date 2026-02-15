@@ -82,6 +82,7 @@ DROP_VARIABLE_NAMES = {
         "hybm",
     ],
 }
+GRAVITY = 9.80665  # m/s^2
 
 
 def expand_names_by_level(variables: MutableMapping[str, List[str]]) -> List[str]:
@@ -186,9 +187,6 @@ def open_dataset(
         datasets[varname] = xr.open_mfdataset(
             paths,
             chunks=chunks,
-            data_vars="minimal",
-            coords="minimal",
-            parallel=True,
         ).drop(drop_vars, errors="ignore")
         logging.info(f"{varname} files opened in {time.time() - var_start:.2f} s...")
     logging.info(f"All files opened in {time.time() - start:.2f} s. Merging...")
@@ -309,6 +307,19 @@ def compute_rad_fluxes(
     return ds.assign(fluxes)
 
 
+def sfc_phis_to_hgt(ds):
+    ds["HGTsfc"] = ds["PHIS"] / GRAVITY
+    ds = ds.drop_vars("PHIS")
+    return ds
+
+
+def add_time_invariant_co2_concentration(ds, config):
+    if config.CO2_concentration is not None:
+        co2 = xr.DataArray(config.CO2_concentration, dims=["time"], coords=[ds["time"]])
+        ds["global_mean_co2"] = co2
+    return ds
+
+
 def construct_lazy_dataset(
     config: DatasetComputationConfig,
     dataset_dirs: MutableMapping[str, str],
@@ -422,6 +433,9 @@ def construct_lazy_dataset(
         "p_i pressure corresponds to the interface at the top of the i'th finite "
         "volume layer, counting down from the top of atmosphere."
     )
+    ds = add_time_invariant_co2_concentration(ds, config)
+    ds = ds.rename(config.renaming)
+    ds = sfc_phis_to_hgt(ds)
     return ds
 
 

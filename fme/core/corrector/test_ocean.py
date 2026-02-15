@@ -166,13 +166,14 @@ def test_sea_ice_thickness_correction():
 
 
 @pytest.mark.parametrize(
-    "hfds_in_gen_data",
+    "hfds_type",
     [
-        pytest.param(False, id="hfds_in_input"),
-        pytest.param(True, id="hfds_in_gen"),
+        pytest.param("input", id="hfds_in_input"),
+        pytest.param("gen", id="hfds_in_gen"),
+        pytest.param("total_area", id="hfds_total_area_in_gen"),
     ],
 )
-def test_ocean_heat_content_correction(hfds_in_gen_data):
+def test_ocean_heat_content_correction(hfds_type):
     config = OceanCorrectorConfig(
         ocean_heat_content_correction=OceanHeatContentBudgetConfig(
             method="scaled_temperature",
@@ -196,6 +197,8 @@ def test_ocean_heat_content_correction(hfds_in_gen_data):
     idepth = torch.tensor([2.5, 10, 20])
     depth_coordinate = DepthCoordinate(idepth, mask)
 
+    sea_surface_fraction = mask[:, :, :, 0]
+
     input_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon),
         "thetao_1": torch.ones(nsamples, nlat, nlon),
@@ -206,13 +209,23 @@ def test_ocean_heat_content_correction(hfds_in_gen_data):
         "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
         "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
     }
-    if hfds_in_gen_data:
+    if hfds_type == "gen":
         gen_data_dict["hfds"] = torch.ones(nsamples, nlat, nlon)
+    elif hfds_type == "total_area":
+        # hfds_total_area is already weighted by sea_surface_fraction also
+        # include hfds with a different value to verify hfds_total_area takes
+        # priority
+        gen_data_dict["hfds"] = (
+            torch.ones(nsamples, nlat, nlon) * 100
+        )  # should be ignored
+        gen_data_dict["hfds_total_area"] = (
+            torch.ones(nsamples, nlat, nlon) * sea_surface_fraction
+        )
     else:
         input_data_dict["hfds"] = torch.ones(nsamples, nlat, nlon)
     forcing_data_dict = {
         "hfgeou": torch.ones(nsamples, nlat, nlon),
-        "sea_surface_fraction": mask[:, :, :, 0],
+        "sea_surface_fraction": sea_surface_fraction,
     }
     input_data = OceanData(input_data_dict, depth_coordinate)
     gen_data = OceanData(gen_data_dict, depth_coordinate)

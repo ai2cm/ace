@@ -34,6 +34,7 @@ jobs:
         run: |
           source .venv/bin/activate
           make test_cov
+          make test_parallel
   cpu-very-fast-no-healpix:
     runs-on: ubuntu-latest
     steps:
@@ -71,13 +72,17 @@ jobs:
         with:
           path: ${{ env.pythonLocation }}
           key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('requirements-healpix.txt') }}-${{ hashFiles('constraints.txt') }}
+      - uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ env.CURRENT_WEEK }}-.venv-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}-${{ hashFiles('requirements-healpix.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y make git build-essential
           python -m pip install uv
           # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
-          uv venv --python 3.11
+          if [ ! -d ".venv" ]; then uv venv --python 3.11; fi
           uv pip install -c constraints.txt -e .[dev]
           uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
       - name: Run CUDA check and pytest
@@ -87,3 +92,4 @@ jobs:
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
             python3 fme/require_gpu.py
             make test
+            make test_parallel
