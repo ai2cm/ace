@@ -15,3 +15,5 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 1pct_nosmooth_0256to0350-ocean_extra|rs0|01KHGZ02HYR1FKVR57VB40B2M3|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-ocean_extra|rs1|01KHGZ0FDFR59YV9FJRWSGZ44Z|training|best_inference_ckpt|normal|--not-preemptible
+
+1pct_nosmooth_0256to0350-ocean_extra|rs0|01KHJB41R1GEHTRQ8MXHF7NS3M|training|best_inference_ckpt|normal|--not-preemptible
