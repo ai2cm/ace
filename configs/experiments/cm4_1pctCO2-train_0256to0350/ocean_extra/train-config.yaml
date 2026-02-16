@@ -28,7 +28,7 @@ inference:
       - data_path: /climate-default
         file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
         engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator:
     log_histograms: false
 logging:
@@ -39,7 +39,7 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 16
+  num_data_workers: 8
   dataset:
     merge:
     - data_path: /climate-default
@@ -149,7 +149,11 @@ stepper:
             sea_ice_fraction_name: ocean_sea_ice_fraction
             land_fraction_name: land_fraction
             remove_negative_ocean_fraction: false
-            sea_ice_thickness_name: sea_ice_volume
+            zero_where_ice_free_names:
+            - sea_ice_volume
+            - sfdsi
+            - UI
+            - VI
       next_step_forcing_names:
       - DLWRFsfc
       - DSWRFsfc
