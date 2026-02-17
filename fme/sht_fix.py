@@ -42,6 +42,7 @@ the torch harmonics sht.py file [*].
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+from typing import Self
 import torch
 import torch.nn as nn
 import torch.fft
@@ -50,7 +51,10 @@ from torch_harmonics.quadrature import legendre_gauss_weights, lobatto_weights, 
 from torch_harmonics.legendre import _precompute_legpoly
 import torch_harmonics
 
+from fme.core.benchmark.timer import Timer
 from fme.core.device import get_device
+from fme.core.benchmark.benchmark import BenchmarkABC, register_benchmark
+from fme.core.typing_ import TensorDict
 
 class RealSHT(nn.Module):
     """
@@ -221,3 +225,101 @@ class InverseRealSHT(nn.Module):
 
 torch_harmonics.RealSHT = RealSHT
 torch_harmonics.InverseRealSHT = InverseRealSHT
+
+
+@register_benchmark("RealSHT")
+class RealSHTBenchmark(BenchmarkABC):
+
+    def __init__(self, sht: RealSHT, x: torch.Tensor):
+        self.sht = sht
+        self.x = x
+
+    @classmethod
+    def new(cls: type[Self]) -> Self:
+        """
+        Initialize any state needed for the benchmark.
+        This will be called once before the benchmark is run.
+        """
+        return cls.new_from_shape(batch_size=1024, nlat=180, nlon=360)
+
+    @classmethod
+    def new_for_regression(cls: type[Self]) -> Self | None:
+        """
+        Initialize any state needed for regression testing.
+        This will be called once before regression tests are run.
+
+        If regression testing is not needed, this can return None,
+        and regression testing will not be run.
+
+        This exists as a separate method from new so that it can
+        use small data sizes more conducive to storing regression targets in git.
+        """
+        return cls.new_from_shape(batch_size=1, nlat=9, nlon=18)
+
+    @classmethod
+    def new_from_shape(cls: type[Self], batch_size: int, nlat: int, nlon: int) -> Self:
+        device = get_device()
+        sht = RealSHT(nlat, nlon).to(device)
+        x = torch.randn(batch_size, nlat, nlon, device=device)
+        return cls(sht, x)
+
+    def run_instance(self: Self, timer: Timer) -> TensorDict:
+        """
+        Run the benchmark. This will be called multiple times,
+        and should return a TensorDict of results.
+
+        This must not mutate any state on self, since the same instance may be
+        used across multiple iterations.
+        """
+        result = self.sht(self.x)
+        return {"output": result}
+
+
+@register_benchmark("InverseRealSHT")
+class InverseRealSHTBenchmark(BenchmarkABC):
+
+    def __init__(self, isht: InverseRealSHT, x_hat: torch.Tensor):
+        self.isht = isht
+        self.x_hat = x_hat
+
+    @classmethod
+    def new(cls: type[Self]) -> Self:
+        """
+        Initialize any state needed for the benchmark.
+        This will be called once before the benchmark is run.
+        """
+        return cls.new_from_shape(batch_size=1024, nlat=180, nlon=360)
+
+    @classmethod
+    def new_for_regression(cls: type[Self]) -> Self | None:
+        """
+        Initialize any state needed for regression testing.
+        This will be called once before regression tests are run.
+
+        If regression testing is not needed, this can return None,
+        and regression testing will not be run.
+
+        This exists as a separate method from new so that it can
+        use small data sizes more conducive to storing regression targets in git.
+        """
+        return cls.new_from_shape(batch_size=1, nlat=9, nlon=18)
+
+    @classmethod
+    def new_from_shape(cls: type[Self], batch_size: int, nlat: int, nlon: int) -> Self:
+        device = get_device()
+        sht = RealSHT(nlat, nlon).to(device)
+        x = torch.randn(batch_size, nlat, nlon, device=device)
+        x_hat = sht(x)
+        isht = InverseRealSHT(nlat, nlon).to(device)
+        return cls(isht, x_hat)
+
+    def run_instance(self: Self, timer: Timer) -> TensorDict:
+        """
+        Run the benchmark. This will be called multiple times,
+        and should return a TensorDict of results.
+
+        This must not mutate any state on self, since the same instance may be
+        used across multiple iterations.
+        """
+        result = self.isht(self.x_hat)
+        return {"output": result}
