@@ -504,6 +504,14 @@ class PairedDataLoaderConfig:
                 "Downscaling data loader only supports datasets with latlon coords."
             )
 
+        # Check that timestamps on datasets are aligned
+        if not dataset_fine.sample_start_times.equals(
+            dataset_coarse.sample_start_times
+        ):
+            raise ValueError(
+                "Fine and coarse datasets must have the same sample start times."
+            )
+
         # n_timesteps is hardcoded to 1 for downscaling, so the sample_start_times
         # are the full time range for the dataset
         if dataset_fine.sample_n_times != 1:
