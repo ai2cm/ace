@@ -39,6 +39,7 @@ for name in "${!MODELS[@]}"; do
         initial_condition.start_indices.times=[1979-01-01T06:00:00] \
         initial_condition.path=${AMIP_DATA_ROOT}/${ENSEMBLE_ID}.zarr \
         initial_condition.engine=zarr \
+        forcing_loader.dataset.file_pattern=${ENSEMBLE_ID}.zarr \
         logging.log_to_file=false \
     "
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_override
@@ -48,6 +49,7 @@ for name in "${!MODELS[@]}"; do
         initial_condition.start_indices.times=[1980-01-01T00:00:00] \
         initial_condition.path=${SPIN_UP_EXPERIMENT_DIR}/restart.nc \
         initial_condition.engine=netcdf4 \
+        forcing_loader.dataset.file_pattern=${ENSEMBLE_ID}.zarr \
     "
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $main_override
 
