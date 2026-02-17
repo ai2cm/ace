@@ -2,6 +2,7 @@ import dataclasses
 
 import pytest
 
+from fme.core.dataset.merged import MergeDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.downscaling.data.config import (
     DataLoaderConfig,
@@ -135,3 +136,37 @@ def test_paired_config_raise_error_on_invalid_lat_extent():
             lat_extent=ClosedInterval(-90, 90),
             lon_extent=ClosedInterval(0, 3),
         )
+
+
+def test_PairedDataLoaderConfig_includes_merge(tmp_path):
+    paths = data_paths_helper(tmp_path, num_timesteps=4)
+    requirements = DataRequirements(
+        fine_names=["var0"],
+        coarse_names=["var0"],
+        n_timesteps=1,
+        use_fine_topography=True,
+    )
+    fine_configs: list[XarrayDataConfig | MergeDatasetConfig] = [
+        XarrayDataConfig(paths.fine),
+        MergeDatasetConfig(merge=[XarrayDataConfig(paths.fine)]),
+    ]
+    coarse_configs: list[XarrayDataConfig | MergeDatasetConfig] = [
+        XarrayDataConfig(paths.coarse),
+        MergeDatasetConfig(merge=[XarrayDataConfig(paths.coarse)]),
+    ]
+    data_config = PairedDataLoaderConfig(
+        fine=fine_configs,
+        coarse=coarse_configs,
+        batch_size=2,
+        num_data_workers=0,
+        strict_ensemble=False,
+        topography=f"{paths.fine}/data.nc",
+        lat_extent=ClosedInterval(1, 4),
+        lon_extent=ClosedInterval(0, 3),
+    )
+    data = data_config.build(requirements=requirements, train=True)
+    # XarrayDataConfig + MergeDatasetConfig each contribute 4 timesteps = 8 total
+    assert len(data.loader) == 4  # 8 samples / batch_size 2
+    batch = next(iter(data.loader))
+    assert batch.coarse.data["var0"].shape == (2, 3, 3)
+    assert batch.fine.data["var0"].shape == (2, 6, 6)
