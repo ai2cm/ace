@@ -41,9 +41,9 @@ model:
   num_diffusion_generation_steps: 18
   churn: 0.0
   p_mean: -1.2
-  p_std: 1.8
+  p_std: 2.0
   predict_residual: true
-  sigma_max: 200.0
+  sigma_max: 150.0
   sigma_min: 0.002
   use_fine_topography: true
 optimization:
