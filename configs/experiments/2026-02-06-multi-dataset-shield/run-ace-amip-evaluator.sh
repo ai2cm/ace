@@ -4,7 +4,7 @@ set -e
 
 DATE="2026-02-17"
 ENSEMBLE_ID="ic_0002"
-CONFIG_FILENAME="ace-abrupt-4xCO2-evaluator-config.yaml"
+CONFIG_FILENAME="ace-amip-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
