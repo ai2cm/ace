@@ -22,3 +22,9 @@ forcing_loader:
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
+stepper_override:
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+    interpolate: true
+    slab: null

@@ -17,7 +17,8 @@ CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 declare -A MODELS=( \
-    [stochastic-ff-ec-eii-0]="01KATCK2231JP93DMJ09DY75AM" \
+    # [stochastic-ff-ec-eii-0]="01KATCK2231JP93DMJ09DY75AM" \
+    [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
 )
 
 SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
