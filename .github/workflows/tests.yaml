@@ -12,11 +12,11 @@ jobs:
   cpu:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - name: Set environment variables
         run: |
           echo "CURRENT_WEEK=$(date +'%Y-%U')" >> $GITHUB_ENV
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - uses: actions/cache@v4
@@ -38,11 +38,11 @@ jobs:
   cpu-very-fast-no-healpix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - name: Set environment variables
         run: |
           echo "CURRENT_WEEK=$(date +'%Y-%U')" >> $GITHUB_ENV
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - uses: actions/cache@v4
@@ -61,11 +61,11 @@ jobs:
     # https://github.com/ai2cm/long-lived-infrastructure#installing-the-github-actions-runner-controller
     runs-on: arc-runner-set
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - name: Set environment variables
         run: |
           echo "CURRENT_WEEK=$(date +'%Y-%U')" >> $GITHUB_ENV
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - uses: actions/cache@v4
