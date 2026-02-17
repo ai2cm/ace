@@ -86,7 +86,7 @@ class EDMPrecond(torch.nn.Module):
         class_labels=None,
         force_fp32=False,
     ):
-        with torch.amp.autocast(device_type="cuda", enabled=False):
+        with torch.amp.autocast(device_type=get_device().type, enabled=False):
             x = x.to(torch.float32)
             sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
             class_labels = (
