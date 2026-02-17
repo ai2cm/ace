@@ -129,7 +129,11 @@ def test_keyerror_when_missing_specific_total_water_layer(missing_water_layer: b
             )
         return data
 
-    atmos_data = AtmosphereData(_get_data(missing_water_layer))
+    # When missing level 0, pass True to test strict behavior (ValueError)
+    atmos_data = AtmosphereData(
+        _get_data(missing_water_layer),
+        require_contiguous_zero_based_levels=True if missing_water_layer else None,
+    )
 
     if not missing_water_layer:
         assert atmos_data.specific_total_water is not None
@@ -143,6 +147,19 @@ def test_keyerror_when_missing_specific_total_water_layer(missing_water_layer: b
     else:
         with pytest.raises(ValueError):
             _ = atmos_data.specific_total_water
+
+
+def test_atmosphere_data_auto_allows_non_zero_based_levels():
+    """
+    With default (None), data with only level 1 (no level 0) stacks without raising.
+    """
+    data = {
+        "PRESsfc": torch.rand(2, 3, 4, 8),
+        "specific_total_water_1": torch.rand(2, 3, 4, 8),
+    }
+    atmos_data = AtmosphereData(data)  # default: auto-detect
+    out = atmos_data.specific_total_water
+    assert out.shape == (2, 3, 4, 8, 1)
 
 
 @pytest.mark.parametrize("has_frozen_precipitation", [False, True])

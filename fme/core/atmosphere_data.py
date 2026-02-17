@@ -1,3 +1,4 @@
+import re
 from collections.abc import Mapping
 from typing import Protocol
 
@@ -14,6 +15,32 @@ from fme.core.constants import (
 )
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
+
+# Pattern for trailing _N (level index) on 3D variable names
+_LEVEL_INDEX_PATTERN = re.compile(r"_(\d+)$")
+
+
+def _data_has_non_zero_based_levels(
+    data: TensorMapping,
+    prefix_map: Mapping[str, list[str]],
+) -> bool:
+    """
+    Return True if any 3D variable in data has level indices that don't start at 0.
+    """
+    for _standard_name, prefixes in prefix_map.items():
+        for prefix in prefixes:
+            if prefix in data:
+                continue  # 2D variable, skip
+            levels = []
+            for name in data:
+                if name.startswith(prefix):
+                    match = _LEVEL_INDEX_PATTERN.search(name)
+                    if match is not None:
+                        levels.append(int(match.group(1)))
+            if levels and min(levels) > 0:
+                return True
+    return False
+
 
 ATMOSPHERE_FIELD_NAME_PREFIXES = {
     "specific_total_water": ["specific_total_water_"],
@@ -68,6 +95,8 @@ class AtmosphereData:
         atmosphere_data: TensorMapping,
         vertical_coordinate: HasAtmosphereVerticalIntegral | None = None,
         atmosphere_field_name_prefixes: Mapping[str, list[str]] | None = None,
+        *,
+        require_contiguous_zero_based_levels: bool | None = None,
     ):
         """
         Initializes the instance based on the provided data and prefixes.
@@ -81,13 +110,26 @@ class AtmosphereData:
                 or "air_temperature") and lists of possible names or prefix variants
                 (e.g., ["PRESsfc", "PS"] or ["air_temperature_", "T_"]) found in the
                 data.
+            require_contiguous_zero_based_levels: If True, 3D variables must have
+                level indices 0, 1, ..., N-1. If False, any set of level indices is
+                allowed (e.g. air_temperature_1..7 without level 0). If None (default),
+                behavior is auto-detected from data: when any 3D variable has levels
+                that don't start at 0, relaxed mode is used.
         """
         if atmosphere_field_name_prefixes is None:
             atmosphere_field_name_prefixes = ATMOSPHERE_FIELD_NAME_PREFIXES.copy()
         self._data = dict(atmosphere_data)
         self._prefix_map = atmosphere_field_name_prefixes
         self._vertical_coordinate = vertical_coordinate
-        self._stacker = Stacker(atmosphere_field_name_prefixes)
+        if require_contiguous_zero_based_levels is None:
+            # Auto-detect no-level-0 data (e.g. no-stratosphere) so corrector works
+            require_contiguous_zero_based_levels = not _data_has_non_zero_based_levels(
+                self._data, atmosphere_field_name_prefixes
+            )
+        self._stacker = Stacker(
+            atmosphere_field_name_prefixes,
+            require_contiguous_zero_based=require_contiguous_zero_based_levels,
+        )
 
     @property
     def data(self) -> TensorDict:

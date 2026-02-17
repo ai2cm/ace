@@ -168,6 +168,7 @@ class FCN3StepConfig(StepConfigABC):
     surface_prognostic_names: list[str]
     surface_diagnostic_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
+    atmosphere_level_indices: list[int] | None = None
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
@@ -183,12 +184,23 @@ class FCN3StepConfig(StepConfigABC):
                     f"next_step_forcing_name '{name}' not in forcing_names: "
                     f"{self.forcing_names}"
                 )
+        level_indices: list[int]
+        if self.atmosphere_level_indices is not None:
+            if len(self.atmosphere_level_indices) != self.atmosphere_levels:
+                raise ValueError(
+                    f"atmosphere_level_indices length "
+                    f"({len(self.atmosphere_level_indices)}) "
+                    f"must equal atmosphere_levels ({self.atmosphere_levels})."
+                )
+            level_indices = self.atmosphere_level_indices
+        else:
+            level_indices = list(range(self.atmosphere_levels))
         atmosphere_out_names = []
         atmosphere_in_names = []
         # the FCN3 model expects atmosphere "channels" to be the faster dimension
         # so that they can be encoded together, meaning we must replicate that
         # ordering here.
-        for i in range(self.atmosphere_levels):
+        for i in level_indices:
             for name in self.atmosphere_prognostic_names:
                 atmosphere_in_names.append(f"{name}_{i}")
                 atmosphere_out_names.append(f"{name}_{i}")
@@ -271,7 +283,8 @@ class FCN3StepConfig(StepConfigABC):
     @property
     def next_step_input_names(self) -> list[str]:
         """Names of variables provided in next_step_input_data."""
-        result = set(self.input_names).difference(self.output_names)
+        input_only_names = set(self.input_names).difference(self.output_names)
+        result = set(input_only_names)
         if self.ocean is not None:
             result = result.union(self.ocean.forcing_names)
         result = result.union(self.prescribed_prognostic_names)

@@ -36,6 +36,7 @@ from fme.core.dataset.xarray import (
     _get_raw_times,
     _get_timestep,
     _get_vertical_coordinate,
+    _infer_atmosphere_level_indices_from_names,
     _repeat_and_increment_time,
     get_xarray_dataset,
 )
@@ -973,12 +974,54 @@ def test__get_vertical_coordinate_null():
     assert vertical_coordinate == NullVerticalCoordinate()
 
 
+def test__infer_atmosphere_level_indices_from_names():
+    assert _infer_atmosphere_level_indices_from_names(["air_temperature_1"]) == [1]
+    assert _infer_atmosphere_level_indices_from_names(
+        ["air_temperature_7", "air_temperature_1", "specific_total_water_3"]
+    ) == [1, 3, 7]
+    assert (
+        _infer_atmosphere_level_indices_from_names(["PRESsfc", "surface_temperature"])
+        is None
+    )
+    assert _infer_atmosphere_level_indices_from_names([]) is None
+
+
 def test__get_vertical_coordinate_hybrid_sigma_pressure():
     data = xr.Dataset({"ak_0": 1.0, "bk_0": 0.5, "ak_1": 2.0, "bk_1": 1.5})
     vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
     assert isinstance(vertical_coordinate, HybridSigmaPressureCoordinate)
     assert vertical_coordinate.ak[0] == 1.0
     assert vertical_coordinate.bk[0] == 0.5
+
+
+def test__get_vertical_coordinate_drops_ak0_bk0_when_level_indices_omit_zero():
+    """When atmosphere_level_indices is [1, 2], only interfaces 1..3 are kept;
+    ak_0/bk_0 are dropped."""
+    data = xr.Dataset(
+        {
+            "ak_0": 0.0,
+            "bk_0": 0.0,
+            "ak_1": 1.0,
+            "bk_1": 0.1,
+            "ak_2": 2.0,
+            "bk_2": 0.2,
+            "ak_3": 3.0,
+            "bk_3": 0.3,
+        }
+    )
+    vertical_coordinate = _get_vertical_coordinate(
+        data, dtype=None, atmosphere_level_indices=[1, 2]
+    )
+    assert isinstance(vertical_coordinate, HybridSigmaPressureCoordinate)
+    # Interfaces for layers 1 and 2 are 1, 2, 3 (ak_0/bk_0 dropped)
+    assert len(vertical_coordinate.ak) == 3
+    assert len(vertical_coordinate.bk) == 3
+    assert vertical_coordinate.ak[0] == 1.0
+    assert vertical_coordinate.ak[1] == 2.0
+    assert vertical_coordinate.ak[2] == 3.0
+    assert vertical_coordinate.bk[0] == 0.1
+    assert vertical_coordinate.bk[1] == 0.2
+    assert vertical_coordinate.bk[2] == 0.3
 
 
 def test__get_vertical_coordinate_depth_no_mask():
