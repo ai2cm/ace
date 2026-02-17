@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_forward_steps: 61364
+n_forward_steps: PLACEHOLDER
 forward_steps_in_memory: 50
 checkpoint_path: /ckpt.tar
 logging:
@@ -8,8 +8,6 @@ logging:
   log_to_file: true
   project: ace-shield
   entity: ai2cm
-aggregator:
-  log_zonal_mean_images: false
 initial_condition:
   start_indices:
     times:
