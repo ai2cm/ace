@@ -69,14 +69,13 @@ class EDMPrecond(torch.nn.Module):
         self,
         model,
         label_dim=0,
-        use_fp16=False,
         sigma_data=0.5,
     ):
         super().__init__()
         self.label_dim = label_dim
-        self.use_fp16 = use_fp16
         self.sigma_data = sigma_data
         self.model = model
+        self._dtype = torch.float32
 
     def forward(
         self,
@@ -96,11 +95,6 @@ class EDMPrecond(torch.nn.Module):
                 if class_labels is None
                 else class_labels.to(torch.float32).reshape(-1, self.label_dim)
             )
-            dtype = (
-                torch.float16
-                if (self.use_fp16 and not force_fp32 and x.device.type == "cuda")
-                else torch.float32
-            )
 
             c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
             c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
@@ -113,14 +107,14 @@ class EDMPrecond(torch.nn.Module):
                 arg = torch.cat([arg, condition], dim=1)
 
         F_x = self.model(
-            arg.to(dtype),
+            arg.to(self._dtype),
             c_noise.flatten(),
             class_labels=class_labels,
         )
 
-        if (F_x.dtype != dtype) and not _is_autocast_enabled():
+        if (F_x.dtype != self._dtype) and not _is_autocast_enabled():
             raise ValueError(
-                f"Expected the dtype to be {dtype}, but got {F_x.dtype} instead."
+                f"Expected the dtype to be {self._dtype}, but got {F_x.dtype} instead."
             )
         with torch.amp.autocast(device_type=get_device().type, enabled=False):
             D_x = c_skip * x + c_out * F_x.to(torch.float32)
