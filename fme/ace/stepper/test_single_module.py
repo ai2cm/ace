@@ -1411,11 +1411,12 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     stepper_from_state = Stepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
-        assert stepper.loss_obj._normalizer.means == {
+        loss = stepper.build_loss(StepLossConfig())
+        assert loss._normalizer.means == {
             **residual_means,
             "diagnostic": full_field_means["diagnostic"],
         }
-        assert stepper.loss_obj._normalizer.stds == {
+        assert loss._normalizer.stds == {
             **residual_stds,
             "diagnostic": full_field_stds["diagnostic"],
         }

@@ -842,20 +842,6 @@ class Stepper:
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
 
-        def get_loss_obj() -> StepLoss:
-            loss_normalizer = step.get_loss_normalizer()
-            if config.loss is None:
-                raise ValueError("Loss is not configured")
-            return config.loss.build(
-                dataset_info.gridded_operations,
-                out_names=config.loss_names,
-                channel_dim=self.CHANNEL_DIM,
-                normalizer=loss_normalizer,
-            )
-
-        self._get_loss_obj = get_loss_obj
-        self._loss_obj: StepLoss | None = None
-
         self._parameter_initializer.apply_weights(
             step.modules,
         )
@@ -882,11 +868,24 @@ class Stepper:
         self._dataset_info = dataset_info
         self.forcing_deriver = config.derived_forcings.build(dataset_info)
 
-    @property
-    def loss_obj(self) -> StepLoss:
-        if self._loss_obj is None:
-            self._loss_obj = self._get_loss_obj()
-        return self._loss_obj
+    def build_loss(self, loss_config: StepLossConfig) -> StepLoss:
+        """Build a StepLoss from the given config using this stepper's normalizer
+        and dataset info.
+
+        Args:
+            loss_config: The loss configuration to build from.
+
+        Returns:
+            A StepLoss built using this stepper's loss normalizer, gridded
+            operations, loss variable names, and channel dimension.
+        """
+        loss_normalizer = self._step_obj.get_loss_normalizer()
+        return loss_config.build(
+            self._dataset_info.gridded_operations,
+            out_names=self.loss_names,
+            channel_dim=self.CHANNEL_DIM,
+            normalizer=loss_normalizer,
+        )
 
     @property
     def config(self) -> StepperConfig:
@@ -946,15 +945,6 @@ class Stepper:
         """
         if base_training_history is not None:
             self._training_history.extend(base_training_history)
-
-    @property
-    def effective_loss_scaling(self) -> TensorDict:
-        """
-        Effective loss scalings used to normalize outputs before computing loss.
-        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
-        where loss_scaling_i = loss_normalizer_std_i / weight_i.
-        """
-        return self.loss_obj.effective_loss_scaling
 
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         """
@@ -1506,7 +1496,7 @@ class TrainStepper(
 
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
-        self._loss_obj = self._stepper.loss_obj
+        self._loss_obj = self._stepper.build_loss(config.loss)
 
     def train_on_batch(
         self,
@@ -1694,7 +1684,7 @@ class TrainStepper(
         y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
         where loss_scaling_i = loss_normalizer_std_i / weight_i.
         """
-        return self._stepper.effective_loss_scaling
+        return self._loss_obj.effective_loss_scaling
 
     def _init_for_epoch(self, epoch: int | None):
         if (

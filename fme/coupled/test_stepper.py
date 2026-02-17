@@ -44,10 +44,12 @@ from .data_loading.data_typing import (
 )
 from .stepper import (
     ComponentConfig,
+    ComponentTrainingConfig,
     CoupledOceanFractionConfig,
     CoupledParameterInitConfig,
     CoupledStepper,
     CoupledStepperConfig,
+    CoupledTrainStepperConfig,
 )
 
 NZ = 3  # number of vertical interface levels in mock data from get_data
@@ -1501,7 +1503,12 @@ def test_train_on_batch_with_derived_variables():
         n_forward_times_atmosphere=2,
         n_samples=3,
     )
-    output = coupler.train_on_batch(
+    train_stepper_config = CoupledTrainStepperConfig(
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+    )
+    train_stepper = train_stepper_config.get_train_stepper(coupler)
+    output = train_stepper.train_on_batch(
         data=coupled_data.data,
         optimization=NullOptimization(),
         compute_derived_variables=True,
@@ -1588,11 +1595,15 @@ def test_reloaded_stepper_gives_same_prediction():
         n_forward_times_atmosphere=4,
         n_samples=1,
     )
-    first_result = stepper.train_on_batch(
+    train_stepper_config = CoupledTrainStepperConfig(
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+    )
+    first_result = train_stepper_config.get_train_stepper(stepper).train_on_batch(
         data=data.data,
         optimization=NullOptimization(),
     )
-    second_result = new_stepper.train_on_batch(
+    second_result = train_stepper_config.get_train_stepper(new_stepper).train_on_batch(
         data=data.data,
         optimization=NullOptimization(),
     )
