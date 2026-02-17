@@ -51,6 +51,7 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cov",
+    "pytest-xdist",
 ]
 docs = [
     "furo==2024.04.27",
