@@ -1,6 +1,6 @@
 #!/bin/bash -l
 
-#SBATCH -A m4492_g
+#SBATCH -A e3sm
 #SBATCH -q regular
 #SBATCH -C gpu
 #SBATCH -J train-fme
@@ -31,7 +31,7 @@ conda activate $FME_VENV
 
 # env variables
 export WANDB_JOB_TYPE=training
-export WANDB_NOTES="PM: $FME_IMAGE, results: $FME_OUTPUT_DIR"
+export WANDB_NOTES="PM: $COMMIT, results: $FME_OUTPUT_DIR"
 set +x  # don't print API key to logs
 export WANDB_API_KEY=$(cat ~/.config/wandb/api)
 set -x

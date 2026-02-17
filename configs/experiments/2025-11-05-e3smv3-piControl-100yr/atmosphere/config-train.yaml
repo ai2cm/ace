@@ -6,36 +6,36 @@ ema:
 max_epochs: 30
 n_forward_steps: 2
 inference:
-  n_forward_steps: 7300
+  n_forward_steps: 8760
   forward_steps_in_memory: 40
   loader:
     start_indices:
       times:
-      - '0421-01-01T06:00:00'
-      - '0426-01-01T06:00:00'
-      - '0431-01-01T06:00:00'
-      - '0436-01-01T06:00:00'
-      - '0441-01-01T06:00:00'
-      - '0446-01-01T06:00:00'
-      - '0451-01-01T06:00:00'
-      - '0456-01-01T06:00:00'
-      - '0461-01-01T06:00:00'
-      - '0466-01-01T06:00:00'
-      - '0471-01-01T06:00:00'
-      - '0476-01-01T06:00:00'
-      - '0481-01-01T06:00:00'
-      - '0486-01-01T06:00:00'
-      - '0491-01-01T06:00:00'
-      - '0494-01-01T06:00:00'
+      - '0401-01-03T12:00:00'
+      - '0407-01-03T12:00:00'
+      - '0413-01-03T12:00:00'
+      - '0419-01-03T12:00:00'
+      - '0425-01-03T12:00:00'
+      - '0431-01-03T12:00:00'
+      - '0437-01-03T12:00:00'
+      - '0443-01-03T12:00:00'
+      - '0449-01-03T12:00:00'
+      - '0455-01-03T12:00:00'
+      - '0461-01-03T12:00:00'
+      - '0467-01-03T12:00:00'
+      - '0473-01-03T12:00:00'
+      - '0479-01-03T12:00:00'
+      - '0484-01-03T12:00:00'
+      - '0490-01-03T12:00:00'
     dataset:
       merge:
-      - data_path: FME_TRAIN_DIR
-        file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+        file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
         engine: zarr
-      - data_path: FME_TRAIN_DIR
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
         file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
         engine: zarr
-    num_data_workers: 1
+    num_data_workers: 4
   aggregator:
     log_histograms: true
 logging:
@@ -51,41 +51,41 @@ train_loader:
   prefetch_factor: 2
   dataset:
     merge:
-    - data_path: FME_TRAIN_DIR
-      file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+      file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
       engine: zarr
       subset:
-        start_time: '0421-01-01T06:00:00'
-        stop_time: '0499-12-31T18:00:00'
-    - data_path: FME_TRAIN_DIR
+        start_time: '0401-01-01T06:00:00'
+        stop_time: '0496-01-01T00:00:00'
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
       file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
       engine: zarr
       subset:
-        start_time: '0421-01-01T06:00:00'
-        stop_time: '0499-12-31T18:00:00'
+        start_time: '0401-01-01T06:00:00'
+        stop_time: '0496-01-01T00:00:00'
 validation_loader:
   batch_size: 32
-  num_data_workers: 1
+  num_data_workers: 4
   time_buffer: 10
   prefetch_factor: 2
   dataset:
     merge:
-    - data_path: FME_TRAIN_DIR
-      file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+      file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
       engine: zarr
       subset:
-        start_time: '0402-01-01T06:00:00'
-        stop_time: '0407-01-01T06:00:00'
-    - data_path: FME_TRAIN_DIR
+        start_time: '0496-01-01T06:00:00'
+        stop_time: '0499-12-31T18:00:00'
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
       file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
       engine: zarr
       subset:
-        start_time: '0402-01-01T06:00:00'
-        stop_time: '0407-01-01T06:00:00'
+        start_time: '0496-01-01T06:00:00'
+        stop_time: '0499-12-31T18:00:00'
 optimization:
+  use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  use_gradient_accumulation: true
   optimizer_type: AdamW
   kwargs:
     fused: true
@@ -98,7 +98,7 @@ stepper:
       T_1: 0.5
       U_0: 0.5
       V_0: 0.5
-      specific_total_water_0: 0.5
+      specific_total_water_0: 0.25
       specific_total_water_1: 0.25
       specific_total_water_2: 0.5
       surface_precipitation_rate: 2
@@ -138,6 +138,9 @@ stepper:
       corrector:
         conserve_dry_air: true
         moisture_budget_correction: advection_and_precipitation
+        total_energy_budget_correction:
+          method: constant_temperature
+          constant_unaccounted_heating: 0.89
         force_positive_names:
         - specific_total_water_0
         - specific_total_water_1
