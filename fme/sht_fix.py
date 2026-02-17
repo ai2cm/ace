@@ -228,7 +228,7 @@ torch_harmonics.RealSHT = RealSHT
 torch_harmonics.InverseRealSHT = InverseRealSHT
 
 
-@register_benchmark("RealSHT")
+@register_benchmark("sht")
 class RealSHTBenchmark(BenchmarkABC):
 
     def __init__(self, sht: RealSHT, x: torch.Tensor):
@@ -276,7 +276,7 @@ class RealSHTBenchmark(BenchmarkABC):
         return {"output": result}
 
 
-@register_benchmark("InverseRealSHT")
+@register_benchmark("inverse_sht")
 class InverseRealSHTBenchmark(BenchmarkABC):
 
     def __init__(self, isht: InverseRealSHT, x_hat: torch.Tensor):
