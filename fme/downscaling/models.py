@@ -496,9 +496,15 @@ class DiffusionModel:
         state: Mapping[str, Any],
     ) -> "DiffusionModel":
         config = DiffusionModelConfig.from_state(state["config"])
+        # backwards compatibility for models before static inputs serialization
+        if "static_inputs" in state:
+            static_inputs = StaticInputs.from_state(state["static_inputs"])
+        else:
+            static_inputs = None
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
+            static_inputs=static_inputs,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
