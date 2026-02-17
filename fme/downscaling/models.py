@@ -142,8 +142,8 @@ class DiffusionModelConfig:
         n_in_channels = len(self.in_names)
         # fine topography is already normalized and at fine scale, so needs
         # some special handling for now
-        if self.use_fine_topography:
-            n_in_channels += 1
+        if static_inputs is not None:
+            n_in_channels += len(static_inputs.fields)
 
         module = self.module.build(
             n_in_channels=n_in_channels,
