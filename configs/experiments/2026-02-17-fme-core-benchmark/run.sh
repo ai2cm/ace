@@ -17,7 +17,7 @@ gantry run \
   --name "$JOB_NAME" \
   --description 'Run ACE training' \
   --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-  --workspace ai2/ace \
+  --workspace ai2/climate-titan \
   --priority urgent \
   --preemptible \
   --cluster ai2/titan \
