@@ -439,8 +439,11 @@ class BatchData:
                 torch.repeat_interleave(self.labels.tensor, n_ensemble, dim=0),
                 self.labels.names,
             )
+        # Keep tensors on the same device as input. Do not move to get_device() here:
+        # from a DataLoader worker (e.g. InferenceDataset with n_ensemble > 1), data
+        # must stay on CPU so the loader can pin_memory() and transfer to GPU later.
         return self.__class__(
-            data={k: v.to(get_device()) for k, v in data.items()},
+            data=data,
             time=time,
             horizontal_dims=self.horizontal_dims,
             labels=labels,
