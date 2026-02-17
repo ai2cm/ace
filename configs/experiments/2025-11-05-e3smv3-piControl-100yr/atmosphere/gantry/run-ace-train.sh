@@ -47,7 +47,7 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --name "${JOB_NAME}" \
           --description "${DESCRIPTION}" \
           --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-          --workspace ai2/ace \
+          --workspace ai2/climate-titan \
           --priority $PRIORITY \
           --preemptible \
           --retries 3 \
