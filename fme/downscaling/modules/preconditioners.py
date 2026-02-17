@@ -118,4 +118,4 @@ class EDMPrecond(torch.nn.Module):
             )
         with torch.amp.autocast(device_type=get_device().type, enabled=False):
             D_x = c_skip * x + c_out * F_x.to(torch.float32)
-            return D_x
+        return D_x
