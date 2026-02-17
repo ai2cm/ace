@@ -11,10 +11,10 @@ N_GPUS=1
 
 cd "$REPO_ROOT"
 
-local job_name="fme-core-benchmarks"
+JOB_NAME="fme-core-benchmarks"
 
 gantry run \
-  --name "$job_name" \
+  --name "$JOB_NAME" \
   --description 'Run ACE training' \
   --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
   --workspace ai2/ace \
