@@ -40,7 +40,7 @@ for name in "${!MODELS[@]}"; do
         initial_condition.path=${AMIP_DATA_ROOT}/${ENSEMBLE_ID}.zarr \
         initial_condition.engine=zarr \
         forcing_loader.dataset.file_pattern=${ENSEMBLE_ID}.zarr \
-        logging.log_to_file=false \
+        logging.log_to_wandb=false \
     "
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_override
     main_override="\
