@@ -34,7 +34,7 @@ for name in "${!MODELS[@]}"; do
     existing_results_dataset=${MODELS[$name]}
 
     spin_up_override="\
-        experiment_dir=${SPIN_UP_EXPERIMENT_DIR}
+        experiment_dir=${SPIN_UP_EXPERIMENT_DIR} \
         n_forward_steps=${SPIN_UP_N_FORWARD_STEPS} \
         initial_condition.start_indices.times=[1979-01-01T06:00:00] \
         initial_condition.path=${AMIP_DATA_ROOT}/${ENSEMBLE_ID}.zarr \
