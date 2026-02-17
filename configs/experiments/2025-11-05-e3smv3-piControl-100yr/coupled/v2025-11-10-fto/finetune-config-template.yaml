@@ -1,0 +1,144 @@
+experiment_dir: /results
+save_checkpoint: true
+save_best_inference_epoch_checkpoints: false
+checkpoint_every_n_batches: 100
+log_train_every_n_batches: 10
+validate_using_ema: true
+evaluate_before_training: false
+ema:
+  decay: 0.999
+max_epochs: 20
+n_coupled_steps: 4
+inference:
+  n_coupled_steps: 730
+  coupled_steps_in_memory: 8
+  loader:
+    num_data_workers: 1
+    dataset:
+      ocean:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+          engine: zarr
+      atmosphere:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+          engine: zarr
+    start_indices:
+      times:
+      - '0421-01-03T12:00:00'
+      - '0431-01-03T12:00:00'
+      - '0441-01-03T12:00:00'
+      - '0451-01-03T12:00:00'
+      - '0461-01-03T12:00:00'
+      - '0471-01-03T12:00:00'
+      - '0481-01-03T12:00:00'
+      - '0488-12-04T12:00:00'
+  aggregator:
+    log_zonal_mean_images: false
+    log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-e3smv3
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 2
+  prefetch_factor: 2
+  dataset:
+    - ocean:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0421-01-03T12:00:00'
+            stop_time: '0499-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+          engine: zarr
+          subset:
+            start_time: '0421-01-03T12:00:00'
+            stop_time: '0499-12-29T12:00:00'
+      atmosphere:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+          engine: zarr
+          subset:
+            start_time: '0421-01-03T12:00:00'
+            stop_time: '0499-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+          engine: zarr
+          subset:
+            start_time: '0421-01-03T12:00:00'
+            stop_time: '0499-12-29T12:00:00'
+validation_loader:
+  batch_size: 16
+  num_data_workers: 2
+  prefetch_factor: 2
+  dataset:
+    - ocean:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0402-01-03T12:00:00'
+            stop_time: '0407-01-03T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SM-piControl-ocean-ice-19-levs-spatial-filter-scale-4.zarr
+          engine: zarr
+          subset:
+            start_time: '0402-01-03T12:00:00'
+            stop_time: '0407-01-03T12:00:00'
+      atmosphere:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-11-10-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+          engine: zarr
+          subset:
+            start_time: '0402-01-03T12:00:00'
+            stop_time: '0407-01-03T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+          engine: zarr
+          subset:
+            start_time: '0402-01-03T12:00:00'
+            stop_time: '0407-01-03T12:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: true
+  lr: 0.00001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper:
+  parameter_init:
+    checkpoint_path: /ckpt.tar
+  ocean:
+    timedelta: 5D
+    loss_contributions:
+      n_steps: 4
+      weight: 1.0
+    stepper:
+      parameter_init:
+        weights_path: null # required
+  atmosphere:
+    timedelta: 6h
+    loss_contributions:
+      n_steps: 2
+    stepper:
+      parameter_init:
+        weights_path: null # required
