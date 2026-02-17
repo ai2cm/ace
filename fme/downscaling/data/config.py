@@ -87,6 +87,44 @@ class XarrayEnsembleDataConfig:
         return configs
 
 
+def build_from_config_sequence(
+    configs: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig | MergeDatasetConfig],
+    names: Sequence[str],
+    n_timesteps: IntSchedule,
+    strict_ensemble: bool,
+) -> tuple[XarrayConcat, DatasetProperties]:
+    """Build XarrayConcat and properties from a mix of xarray and merge configs."""
+    expanded: list[XarrayDataConfig | MergeDatasetConfig] = []
+    for config in configs:
+        if isinstance(config, XarrayEnsembleDataConfig):
+            expanded.extend(config.expand())
+        else:
+            expanded.append(config)
+    xarray_configs = [c for c in expanded if isinstance(c, XarrayDataConfig)]
+    merge_configs = [c for c in expanded if isinstance(c, MergeDatasetConfig)]
+    datasets: list[DatasetABC] = []
+    properties: DatasetProperties | None = None
+    if xarray_configs:
+        ds, prop = get_dataset(
+            xarray_configs,
+            names,
+            n_timesteps,
+            strict=strict_ensemble,
+        )
+        datasets.append(ds)
+        properties = prop
+    for config in merge_configs:
+        merged_ds, prop = get_merged_datasets(config, names, n_timesteps)
+        datasets.append(merged_ds)
+        if properties is None:
+            properties = prop
+        else:
+            properties.update(prop, strict=strict_ensemble)
+    if properties is None:
+        raise ValueError("At least one dataset must be provided.")
+    return XarrayConcat(datasets, strict=strict_ensemble), properties
+
+
 @dataclasses.dataclass
 class DataLoaderConfig:
     """
@@ -99,7 +137,8 @@ class DataLoaderConfig:
     the data, e.g. when fine topography is loaded as an input.
 
     Args:
-        coarse: The dataset configuration.
+        coarse: The dataset configuration. May be a sequence of
+            XarrayDataConfig, XarrayEnsembleDataConfig, or MergeDatasetConfig.
         batch_size: The batch size to use for the dataloader.
         num_data_workers: The number of data workers to use for the dataloader.
             (For multi-GPU runtime, it's the number of workers per GPU.)
@@ -125,7 +164,7 @@ class DataLoaderConfig:
             If false, pad with extra samples to make ranks have the same size batches.
     """
 
-    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
+    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig | MergeDatasetConfig]
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
@@ -143,10 +182,8 @@ class DataLoaderConfig:
         enforce_lat_bounds(self.lat_extent)
 
     @property
-    def full_config(self) -> Sequence[XarrayDataConfig]:
-        # Expands any XarrayEnsembleDataConfig so it is converted
-        # to the equivalent sequence of XarrayDataConfig.
-        all_configs = []
+    def full_config(self) -> Sequence[XarrayDataConfig | MergeDatasetConfig]:
+        all_configs: list[XarrayDataConfig | MergeDatasetConfig] = []
         for config in self.coarse:
             if isinstance(config, XarrayEnsembleDataConfig):
                 all_configs += config.expand()
@@ -160,8 +197,13 @@ class DataLoaderConfig:
         if self.num_data_workers == 0:
             return None
         for config in self.full_config:
-            if config.engine == "zarr":
+            if isinstance(config, XarrayDataConfig):
+                if config.engine == "zarr":
+                    context = "forkserver"
+                    break
+            elif getattr(config, "zarr_engine_used", False):
                 context = "forkserver"
+                break
         return context
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
@@ -172,11 +214,11 @@ class DataLoaderConfig:
         names: list[str],
         n_timesteps: int,
     ) -> tuple[XarrayConcat, DatasetProperties]:
-        return get_dataset(
-            self.full_config,
-            names,
-            IntSchedule.from_constant(n_timesteps),
-            strict=self.strict_ensemble,
+        return build_from_config_sequence(
+            configs=self.coarse,
+            names=names,
+            n_timesteps=IntSchedule.from_constant(n_timesteps),
+            strict_ensemble=self.strict_ensemble,
         )
 
     def build_topography(
@@ -368,45 +410,6 @@ class PairedDataLoaderConfig:
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
 
-    def _build_from_config_sequence(
-        self,
-        configs: Sequence[
-            XarrayDataConfig | XarrayEnsembleDataConfig | MergeDatasetConfig
-        ],
-        names: Sequence[str],
-        n_timesteps: IntSchedule,
-    ) -> tuple[XarrayConcat, DatasetProperties]:
-        """Build XarrayConcat and properties from a mix of xarray and merge configs."""
-        expanded: list[XarrayDataConfig | MergeDatasetConfig] = []
-        for c in configs:
-            if isinstance(c, XarrayEnsembleDataConfig):
-                expanded.extend(c.expand())
-            else:
-                expanded.append(c)
-        xarray_configs = [c for c in expanded if isinstance(c, XarrayDataConfig)]
-        merge_configs = [c for c in expanded if isinstance(c, MergeDatasetConfig)]
-        datasets: list[DatasetABC] = []
-        properties: DatasetProperties | None = None
-        if xarray_configs:
-            ds, prop = get_dataset(
-                xarray_configs,
-                names,
-                n_timesteps,
-                strict=self.strict_ensemble,
-            )
-            datasets.append(ds)
-            properties = prop
-        for c in merge_configs:
-            merged_ds, prop = get_merged_datasets(c, names, n_timesteps)
-            datasets.append(merged_ds)
-            if properties is None:
-                properties = prop
-            else:
-                properties.update(prop, strict=self.strict_ensemble)
-        if properties is None:
-            raise ValueError("At least one dataset must be provided.")
-        return XarrayConcat(datasets, strict=self.strict_ensemble), properties
-
     def _first_data_config(
         self,
         config: XarrayDataConfig | MergeDatasetConfig,
@@ -478,16 +481,18 @@ class PairedDataLoaderConfig:
 
         # Load initial datasets
         n_timesteps = IntSchedule.from_constant(requirements.n_timesteps)
-        dataset_fine, properties_fine = self._build_from_config_sequence(
-            self.fine,
-            requirements.fine_names,
-            n_timesteps,
+        dataset_fine, properties_fine = build_from_config_sequence(
+            configs=self.fine,
+            names=requirements.fine_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
         )
 
-        dataset_coarse, properties_coarse = self._build_from_config_sequence(
-            self.coarse,
-            requirements.coarse_names,
-            n_timesteps,
+        dataset_coarse, properties_coarse = build_from_config_sequence(
+            configs=self.coarse,
+            names=requirements.coarse_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
         )
 
         # Ensure that bounds for subselecting on latlon grids return fine grid data

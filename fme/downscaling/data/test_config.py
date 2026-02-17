@@ -112,6 +112,35 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
     assert len(data.loader) == n_sample
 
 
+def test_DataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
+    """Test DataLoaderConfig with coarse as [XarrayDataConfig, MergeDatasetConfig]."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    paths = data_paths_helper(tmp_path, num_timesteps=4)
+    requirements = DataRequirements(
+        fine_names=[],
+        coarse_names=["var0"],
+        n_timesteps=1,
+        use_fine_topography=True,
+    )
+    coarse_configs: list[XarrayDataConfig | MergeDatasetConfig] = [
+        XarrayDataConfig(paths.coarse),
+        MergeDatasetConfig(merge=[XarrayDataConfig(paths.coarse)]),
+    ]
+    data_config = DataLoaderConfig(
+        coarse=coarse_configs,
+        batch_size=2,
+        num_data_workers=0,
+        strict_ensemble=False,
+        topography=f"{paths.fine}/data.nc",
+        lat_extent=ClosedInterval(1, 4),
+        lon_extent=ClosedInterval(0, 3),
+    )
+    data = data_config.build(requirements=requirements)
+    # XarrayDataConfig + MergeDatasetConfig each contribute 4 timesteps = 8 total
+    assert len(data.loader) == 4  # 8 samples / batch_size 2
+
+
 def test_config_raise_error_on_invalid_lat_extent():
     with pytest.raises(ValueError):
         DataLoaderConfig(
