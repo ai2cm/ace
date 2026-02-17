@@ -456,4 +456,8 @@ def step_with_adjustments(
     for name in prescribed_prognostic_names:
         if name in next_step_input_data:
             output = {**output, name: next_step_input_data[name]}
+        else:
+            raise ValueError(
+                f"prescribed_prognostic_name '{name}' not in next_step_input_data"
+            )
     return output
