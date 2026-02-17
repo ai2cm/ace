@@ -18,8 +18,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: BATCH_SIZE_VALUE
-  num_data_workers: 2
-  prefetch_factor: 2
+  num_data_workers: 1
+  prefetch_factor: 1
   dataset:
     data_path: /pscratch/sd/e/elynnwu/fme-dataset
     file_pattern: 2026-02-23-rechunk-ERA5-025deg-8layer-2010-2011.zarr
@@ -29,8 +29,8 @@ train_loader:
       stop_time: '2010-12-31'
 validation_loader:
   batch_size: BATCH_SIZE_VALUE
-  num_data_workers: 2
-  prefetch_factor: 2
+  num_data_workers: 1
+  prefetch_factor: 1
   dataset:
     data_path: /pscratch/sd/e/elynnwu/fme-dataset
     file_pattern: 2026-02-23-rechunk-ERA5-025deg-8layer-2010-2011.zarr
