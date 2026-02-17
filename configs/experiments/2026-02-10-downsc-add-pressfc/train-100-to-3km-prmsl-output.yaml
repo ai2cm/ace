@@ -53,8 +53,8 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 160
-  batch_size: 16
+  sample_with_replacement: 320
+  batch_size: 32
   num_data_workers: 2
   fine:
   - merge:
@@ -92,7 +92,7 @@ train_data:
   #   stop:  16 #246.0
   strict_ensemble: false
 validation_data:
-  batch_size: 16
+  batch_size: 32
   num_data_workers: 4
   fine:
   - merge:
@@ -132,12 +132,12 @@ validation_data:
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 200
+max_epochs: 300
 validate_interval: 10
 experiment_dir: /results #/climate-default/home/annak/scratch/2026-02-10-downsc-add-pressfc/3km_bf16
 save_checkpoints: false
 logging:
-  project:  annak-downscaling
+  project: multivariate-downscaling
   entity: ai2cm
   log_to_wandb: true
 generate_n_samples: 2
