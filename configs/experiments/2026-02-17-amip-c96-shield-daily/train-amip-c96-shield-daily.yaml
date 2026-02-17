@@ -116,11 +116,11 @@ stepper:
           filter_num_groups: 4
       normalization:
         network:
-          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats/centering.nc
-          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats/scaling-full-field.nc
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats/centering.nc
-          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats/scaling-residual.nc
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
