@@ -46,14 +46,17 @@ def test_local_slices_subdivide_domain():
     expected_slice_size = total_size // dist.world_size
     local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
     gathered_local_slices = dist.gather_object(local_slices)
-    assert gathered_local_slices is not None
-    for i in range(dist.world_size):
-        # the slices should be of the minimum size required
-        assert x_global[gathered_local_slices[i]].nelement() == expected_slice_size
-        x_global[gathered_local_slices[i]] = 1
-    torch.testing.assert_close(
-        x_global, torch.ones_like(x_global)
-    )  # the entire domain should get selected
+    if dist.is_root():
+        assert gathered_local_slices is not None
+        for i in range(dist.world_size):
+            # the slices should be of the minimum size required
+            assert x_global[gathered_local_slices[i]].nelement() == expected_slice_size
+            x_global[gathered_local_slices[i]] = 1
+        torch.testing.assert_close(
+            x_global, torch.ones_like(x_global)
+        )  # the entire domain should get selected
+    else:
+        assert gathered_local_slices is None
 
 
 def test_reduce_mean_from_multiple_ranks():
