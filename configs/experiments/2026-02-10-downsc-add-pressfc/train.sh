@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-prate-winds-prmsl-bs52"
+JOB_NAME="xshield-downscaling-100km-to-3km-prate-winds-prmsl-bs48"
 CONFIG_FILENAME="train-100-to-3km-prmsl-output.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
