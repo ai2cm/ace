@@ -138,7 +138,9 @@ def test_paired_config_raise_error_on_invalid_lat_extent():
         )
 
 
-def test_PairedDataLoaderConfig_includes_merge(tmp_path):
+def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     paths = data_paths_helper(tmp_path, num_timesteps=4)
     requirements = DataRequirements(
         fine_names=["var0"],
