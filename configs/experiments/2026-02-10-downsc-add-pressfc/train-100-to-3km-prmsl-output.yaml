@@ -54,7 +54,7 @@ ema:
 validate_using_ema: true
 train_data:
   sample_with_replacement: 320
-  batch_size: 64
+  batch_size: 52
   num_data_workers: 2
   fine:
   - merge:
