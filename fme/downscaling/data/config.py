@@ -616,10 +616,10 @@ class PairedDataLoaderConfig:
             dataset_coarse_subset.variable_metadata
         )
         assert all(
-            dataset_fine_subset.variable_metadata[key]
-            == dataset_coarse_subset.variable_metadata[key]
+            dataset_fine_subset.variable_metadata[key].units
+            == dataset_coarse_subset.variable_metadata[key].units
             for key in common_metadata_keys
-        ), "Metadata for variables common to coarse and fine datasets must match."
+        ), "Units for variables common to coarse and fine datasets must match."
         variable_metadata = {
             **dataset_fine_subset.variable_metadata,
             **dataset_coarse_subset.variable_metadata,
