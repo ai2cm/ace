@@ -1431,7 +1431,7 @@ class TrainStepperConfig:
             return self.train_n_forward_steps
         return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
 
-    def get_parameter_initializer(
+    def _get_parameter_initializer(
         self,
         load_weights_and_history_fn: WeightsAndHistoryLoader = load_weights_and_history,
     ) -> ParameterInitializer:
@@ -1472,7 +1472,7 @@ class TrainStepperConfig:
             A TrainStepper wrapping the built stepper with training
             functionality.
         """
-        parameter_initializer = self.get_parameter_initializer(
+        parameter_initializer = self._get_parameter_initializer(
             load_weights_and_history_fn
         )
         stepper = stepper_config.get_stepper(
