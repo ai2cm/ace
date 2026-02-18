@@ -67,7 +67,7 @@ for model in "${!MODELS[@]}"; do
 
         for initial_condition in "${!INITIAL_CONDITIONS[@]}"; do
             spin_up_initial_condition_time="${INITIAL_CONDITIONS[$initial_condition]}"
-            spin_up_n_forward_steps="$((SPIN_UP_MAXIMUM_N_FORWARD_STEPS - initial_condition - 1))"
+            spin_up_n_forward_steps="$((SPIN_UP_MAXIMUM_N_FORWARD_STEPS - initial_condition + 1))"
             spin_up_log_to_wandb=false  # Disable logging to wandb in spin up case.
 
             job_name=2026-02-18-$model-$climate-ic$initial_condition
