@@ -19,7 +19,7 @@ REFERENCE_MODEL="01KHGDAMB2BDZQS8JFF65A2YDR"
 for ensemble_id in "ic_0001" "ic_0002"; do
     override="loader.dataset.file_pattern=${ensemble_id}.zarr prediction_loader.dataset.file_pattern=${ensemble_id}.zarr"
     python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH --override $override
-    job_name="${DATE}-amip-data-only-${ensemble_id}-evaluator"
+    job_name="${DATE}-amip-${ensemble_id}-data-only-evaluator"
     gantry run \
         --name $job_name \
         --description 'Run ACE AMIP data-only evaluator' \
