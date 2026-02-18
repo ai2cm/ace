@@ -2,6 +2,13 @@ checkpoint_path: /ckpt.tar
 data_writer:
   save_monthly_files: false
   save_prediction_files: false
+  files:
+    - label: daily
+      names: [PRATEsfc]
+      time_coarsen:
+        coarsen_factor: 4
+      format:
+        name: zarr
 logging:
   project: ace-shield
   log_to_screen: true

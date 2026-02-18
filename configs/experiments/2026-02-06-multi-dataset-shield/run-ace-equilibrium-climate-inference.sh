@@ -49,13 +49,14 @@ declare -A MODELS=( \
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
+GCS_ROOT="gs://vcm-ml-scratch/spencerc/2026-02-18-ace-equilibrium-climate-inference"
 SPIN_UP_MAXIMUM_N_FORWARD_STEPS=1460
-SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
+# SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
 
 MAIN_INITIAL_CONDITION_TIME="2031-01-01T06:00:00"
-MAIN_INITIAL_CONDITION_PATH="/results/spin-up/restart.nc"
+# MAIN_INITIAL_CONDITION_PATH="/results/spin-up/restart.nc"
 MAIN_N_FORWARD_STEPS=14604
-MAIN_EXPERIMENT_DIR="/results/main"
+# MAIN_EXPERIMENT_DIR="/results/main"
 
 for model in "${!MODELS[@]}"; do
     dataset_id="${MODELS[$model]}"
@@ -71,20 +72,24 @@ for model in "${!MODELS[@]}"; do
             spin_up_log_to_wandb=false  # Disable logging to wandb in spin up case.
 
             job_name=2026-02-18-$model-$climate-ic$initial_condition
+            spin_up_experiment_dir="$GCS_ROOT/$model-$climate-ic$initial_condition/spin-up"
             spin_up_overrides="\
-                experiment_dir=$SPIN_UP_EXPERIMENT_DIR \
+                experiment_dir=$spin_up_experiment_dir \
                 forcing_loader.dataset.data_path=$spin_up_forcing_path \
                 initial_condition.path=$spin_up_initial_condition_path \
                 initial_condition.start_indices.times=[$spin_up_initial_condition_time] \
                 n_forward_steps=$spin_up_n_forward_steps \
                 logging.log_to_wandb=$spin_up_log_to_wandb \
+                data_writer.files=[] \
             "
+            main_experiment_dir="$GCS_ROOT/$model-$climate-ic$initial_condition/main"
+            main_initial_condition_path="$spin_up_experiment_dir/restart.nc"
             main_overrides="\
-                experiment_dir=$MAIN_EXPERIMENT_DIR \
+                experiment_dir=$main_experiment_dir \
                 forcing_loader.dataset.data_path=$MAIN_FORCING_ROOT \
                 forcing_loader.dataset.engine=zarr \
                 forcing_loader.dataset.file_pattern=$main_forcing_path \
-                initial_condition.path=$MAIN_INITIAL_CONDITION_PATH \
+                initial_condition.path=$main_initial_condition_path \
                 initial_condition.start_indices.times=[$MAIN_INITIAL_CONDITION_TIME] \
                 n_forward_steps=$MAIN_N_FORWARD_STEPS \
             "
