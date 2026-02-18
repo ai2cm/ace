@@ -497,8 +497,8 @@ class DiffusionModel:
     ) -> "DiffusionModel":
         config = DiffusionModelConfig.from_state(state["config"])
         # backwards compatibility for models before static inputs serialization
-        if "static_inputs" in state:
-            static_inputs = StaticInputs.from_state(state["static_inputs"])
+        if state.get("static_inputs") is not None:
+            static_inputs = StaticInputs.from_state(state["static_inputs"]).to_device()
         else:
             static_inputs = None
         model = config.build(

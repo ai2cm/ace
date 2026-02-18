@@ -18,7 +18,7 @@ def _latlon_coords_on_ngrid(n: int, edges=(0, 100)):
     return LatLonCoordinates(lat=midpoints, lon=midpoints)
 
 
-def _get_diffusion_model(coarse_shape, downscale_factor):
+def _get_diffusion_model(coarse_shape, downscale_factor, static_inputs=None):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -40,7 +40,11 @@ def _get_diffusion_model(coarse_shape, downscale_factor):
         num_diffusion_generation_steps=3,
         predict_residual=True,
         use_fine_topography=True,
-    ).build(coarse_shape=coarse_shape, downscale_factor=downscale_factor)
+    ).build(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        static_inputs=static_inputs,
+    )
 
 
 @pytest.mark.parametrize("downscale_factors", [[2, 4], [2, 3, 4]])
@@ -52,12 +56,6 @@ def test_CascadePredictor_generate(downscale_factors):
     input_n_cells = nside_coarse
 
     for downscale_factor in downscale_factors:
-        models.append(
-            _get_diffusion_model(
-                coarse_shape=(input_n_cells, input_n_cells),
-                downscale_factor=downscale_factor,
-            )
-        )
         static_inputs_list.append(
             StaticInputs(
                 fields=[
@@ -75,7 +73,13 @@ def test_CascadePredictor_generate(downscale_factors):
             )
         )
         input_n_cells *= downscale_factor
-
+        models.append(
+            _get_diffusion_model(
+                coarse_shape=(input_n_cells, input_n_cells),
+                downscale_factor=downscale_factor,
+                static_inputs=static_inputs_list[-1],
+            )
+        )
     cascade_predictor = CascadePredictor(
         models=models, static_inputs=static_inputs_list
     )
