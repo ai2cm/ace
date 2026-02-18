@@ -19,6 +19,8 @@ from compute_dataset import DatasetComputationConfig, DatasetConfig
 class DatasetAppendConfig:
     variable_sources: Mapping[str, Sequence[str]]
     renaming: Mapping[str, str] = dataclasses.field(default_factory=dict)
+    start_date: str | None = None
+    end_date: str | None = None
 
     @classmethod
     def from_file(cls, path: str) -> "DatasetAppendConfig":
@@ -67,11 +69,19 @@ def get_variables_to_append(
     output_ds = xr.open_zarr(append_store)
     for variable in ds_temp.keys():
         if variable in output_ds:
-            logging.info(
-                f"Variable {variable} already exists in {append_store}, skipping."
-            )
-            continue
-        ds[variable] = ds_temp[variable]
+            if variable in append_config.renaming:
+                logging.warning(
+                    f"Variable {variable} already exists in {append_store} and "
+                    f"is being renamed to {append_config.renaming[variable]}."
+                )
+            else:
+                logging.info(
+                    f"Variable {variable} already exists in {append_store}, skipping."
+                )
+                continue
+        ds[variable] = ds_temp[variable].sel(
+            time=slice(append_config.start_date, append_config.end_date)
+        )
     return ds
 
 
