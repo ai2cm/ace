@@ -9,7 +9,7 @@ CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8
+N_GPUS=4
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -21,9 +21,9 @@ STATS_DATA=elynn/2025-11-24-E3SMv3-piControl-100yr-coupled-stats
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=2
+N_RANDOM_SEED_RUNS=3
 
-for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
+for RS in $(seq 3 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
     if [ $RS -gt 1 ]; then
         # only log validation maps for the first random seed
@@ -51,8 +51,7 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --priority $PRIORITY \
           --preemptible \
           --retries 3 \
-          --cluster ai2/ceres \
-          --cluster ai2/jupiter \
+          --cluster ai2/titan \
           --weka climate-default:/climate-default \
           --env WANDB_USERNAME=$WANDB_USERNAME \
           --env WANDB_NAME="${JOB_NAME}" \
