@@ -30,13 +30,13 @@ MAIN_N_FORWARD_STEPS=59904
 AMIP_DATA_ROOT="/climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset"
 
 for name in "${!MODELS[@]}"; do
-    job_name="${DATE}-${name}-amip-${ENSEMBLE_ID}-ensemble-inference"
+    job_name="${DATE}-${name}-amip-ensemble-inference"
     existing_results_dataset=${MODELS[$name]}
 
     spin_up_override="\
         experiment_dir=${SPIN_UP_EXPERIMENT_DIR} \
         n_forward_steps=${SPIN_UP_N_FORWARD_STEPS} \
-        initial_condition.start_indices.times=[1979-01-01T06:00:00,1979-01-01T06:00:00] \
+        initial_condition.start_indices.times=[1979-01-01T06:00:00,1979-01-01T06:00:00,1979-01-01T06:00:00,1979-01-01T06:00:00,1979-01-01T06:00:00] \
         initial_condition.path=${AMIP_DATA_ROOT}/${ENSEMBLE_ID}.zarr \
         initial_condition.engine=zarr \
         forcing_loader.dataset.file_pattern=${ENSEMBLE_ID}.zarr \
