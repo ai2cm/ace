@@ -1,6 +1,6 @@
-experiment_dir: /results
-n_forward_steps: 102267
-forward_steps_in_memory: 50
+experiment_dir: gs://vcm-ml-scratch/spencerc/2026-02-18-ace-2pctCO2-evaluator-test
+n_forward_steps: 32
+forward_steps_in_memory: 32
 checkpoint_path: /ckpt.tar
 logging:
   log_to_screen: true
@@ -22,3 +22,9 @@ loader:
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
+  files:
+    - label: daily
+      names: [PRATEsfc]
+      time_coarsen:
+        coarsen_factor: 4
+

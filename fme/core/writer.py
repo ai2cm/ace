@@ -1,3 +1,4 @@
+import copy
 import logging
 from collections.abc import Mapping
 from typing import Literal
@@ -79,6 +80,50 @@ def _insert_into_zarr(
         zarr_array[insert_slices_tuple] = var_data
 
 
+def _update_coordinate_attributes(
+    vars: list[str],
+    dim_names: tuple,
+    nondim_coords: dict[str, xr.DataArray] | None,
+    array_attributes: dict[str, dict[str, str]] | None,
+    group_attributes: dict[str, str] | None,
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """
+    Update the coordinate attributes of the array and group attributes.
+    """
+    result_array_attributes = copy.deepcopy(array_attributes or {})
+    result_group_attributes = copy.deepcopy(group_attributes or {})
+
+    written_coords = set()
+    for var in vars:
+        associated_nondim_coords = [
+            name
+            for name, da in (nondim_coords or {}).items()
+            if set(da.dims).issubset(dim_names)
+        ]
+        result_array_attributes.setdefault(var, {})
+        result_array_attributes[var]["coordinates"] = " ".join(associated_nondim_coords)
+        written_coords.update(associated_nondim_coords)
+
+    global_coords = set(nondim_coords or {}).difference(written_coords)
+    if len(global_coords) > 0:
+        result_group_attributes["coordinates"] = " ".join(sorted(global_coords))
+
+    return result_array_attributes, result_group_attributes
+
+
+def _infer_time_attributes(times, time_units, time_calendar):
+    attributes = {}
+    if isinstance(times[0], cftime.datetime):
+        attributes["units"] = DATETIME_ENCODING_UNITS
+    else:
+        attributes["units"] = time_units
+
+    if time_calendar:
+        attributes["calendar"] = time_calendar
+
+    return attributes
+
+
 def _initialize_zarr(
     path: str,
     vars: list[str],
@@ -98,8 +143,10 @@ def _initialize_zarr(
     """
     Initialize a Zarr group with the specified dimensions and chunk sizes.
     """
-    root = zarr.open_group(path, mode=mode)
-    root.update_attributes(group_attributes or {})
+    array_attributes, group_attributes = _update_coordinate_attributes(
+        vars, dim_names, nondim_coords, array_attributes, group_attributes
+    )
+    root = zarr.open_group(path, mode=mode, attributes=group_attributes)
     chunks_tuple = tuple(
         [chunks.get(dim, dim_sizes[d]) for d, dim in enumerate(dim_names)]
     )
@@ -116,22 +163,18 @@ def _initialize_zarr(
     coords = coords.copy()
     if "time" in coords:
         times = coords.pop("time")
+        attributes = _infer_time_attributes(times, time_units, time_calendar)
         time_ds = root.create_array(
             name="time",
             shape=(len(times),),
             dtype="int64",
             dimension_names=["time"],
+            attributes=attributes,
         )
         if isinstance(times[0], cftime.datetime):
             time_coord_values = _encode_cftime_times(times, calendar=time_calendar)
-            time_ds.attrs["units"] = DATETIME_ENCODING_UNITS
         else:
             time_coord_values = times
-            time_ds.attrs["units"] = time_units
-
-        if time_calendar:
-            time_ds.attrs["calendar"] = time_calendar
-
         time_ds[:] = time_coord_values
 
     for key, values in coords.items():
@@ -147,42 +190,21 @@ def _initialize_zarr(
                 shape=da.shape,
                 dtype=da.dtype,
                 dimension_names=list(da.dims),
+                attributes=da.attrs,
             )
             nondim_coord_ds[:] = da.values
-            nondim_coord_ds.attrs.update(da.attrs)
 
-    array_attributes = array_attributes or {}
-
-    written_coords = set()
     for var in vars:
-        var_ds = root.create_array(
+        attributes = array_attributes.get(var, {})
+        root.create_array(
             name=var,
             shape=dim_sizes,
             chunks=chunks_tuple,
             shards=shards_tuple,
             dtype=dtype,
             dimension_names=dim_names,
-            attributes=array_attributes.get(var, {}),
+            attributes=attributes,
         )
-        # Following xarray, only associate non-dimension coordinates
-        # with a variable if the non-dimension coordinate's dimensions
-        # are a subset of those of the variable:
-        # https://github.com/pydata/xarray/blob/64704605a4912946d2835e54baa2905b8b4396a9/xarray/conventions.py#L670-L685
-        associated_nondim_coords = [
-            name
-            for name, da in (nondim_coords or {}).items()
-            if set(da.dims).issubset(dim_names)
-        ]
-        written_coords.update(associated_nondim_coords)
-        var_ds.attrs["coordinates"] = " ".join(associated_nondim_coords)
-    # Set a global "coordinates" attribute consisting of the non-dimension
-    # coordinate names that were not appended to any variable-specific
-    # "coordinates" attribute. This follows xarray's custom convention
-    # for indicating this:
-    # https://github.com/pydata/xarray/blob/64704605a4912946d2835e54baa2905b8b4396a9/xarray/conventions.py#L689-L740
-    global_coords = set(nondim_coords or {}).difference(written_coords)
-    if len(global_coords) > 0:
-        root.attrs["coordinates"] = " ".join(sorted(global_coords))
     zarr.consolidate_metadata(root.store)
 
 
