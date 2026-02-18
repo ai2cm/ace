@@ -166,6 +166,20 @@ def test_dataset_info_round_trip(dataset_info: DatasetInfo):
             id="mask_provider_equal",
         ),
         pytest.param(
+            DatasetInfo(
+                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)})
+            ),
+            DatasetInfo(
+                mask_provider=MaskProvider(
+                    masks={
+                        "mask_0": torch.ones(10, 10),
+                        "mask_1": torch.ones(10, 10),
+                    }
+                )
+            ),
+            id="mask_provider_subset",
+        ),
+        pytest.param(
             DatasetInfo(mask_provider=MaskProvider()),
             DatasetInfo(),
             id="mask_provider_missing_from_second",
@@ -240,6 +254,21 @@ def test_assert_compatible_with_compatible_dataset_info(a: DatasetInfo, b: Datas
             ),
             ["mask_provider"],
             id="mask_provider_masks_differ",
+        ),
+        pytest.param(
+            DatasetInfo(
+                mask_provider=MaskProvider(
+                    masks={
+                        "mask_0": torch.ones(10, 10),
+                        "mask_1": torch.ones(10, 10),
+                    }
+                )
+            ),
+            DatasetInfo(
+                mask_provider=MaskProvider(masks={"mask_0": torch.zeros(10, 10)})
+            ),
+            ["mask_provider"],
+            id="mask_provider_not_subset",
         ),
         pytest.param(
             DatasetInfo(timestep=datetime.timedelta(hours=1)),

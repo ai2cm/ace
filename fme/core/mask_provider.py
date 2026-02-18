@@ -163,6 +163,18 @@ class MaskProvider(MaskProviderABC):
             + ",\n    ]\n)"
         )
 
+    def is_compatible_with(self, other):
+        if not isinstance(other, MaskProvider):
+            return False
+        if not self.masks.keys() <= other.masks.keys():
+            return False
+        for name, mask in self.masks.items():
+            try:
+                torch.testing.assert_close(mask, other.masks[name])
+            except AssertionError:
+                return False
+        return True
+
     def to_state(self) -> dict[str, Any]:
         return {"masks": self.masks}
 
