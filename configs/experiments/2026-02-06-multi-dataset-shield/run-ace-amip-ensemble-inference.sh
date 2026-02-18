@@ -18,9 +18,9 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 declare -A MODELS=( \
     [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
-    # [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
-    # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
-    # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
+    [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
+    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
 )
 
 SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
