@@ -90,9 +90,10 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-stepper:
+train_stepper:
   loss:
     type: MSE
+stepper:
   input_masking:
     mask_value: 0
     fill_value: 0.0
