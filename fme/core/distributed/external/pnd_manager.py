@@ -1,4 +1,14 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023 - 2026 NVIDIA CORPORATION & AFFILIATES.
+"""Vendored PhysicsNeMo distributed (pnd) manager.
+
+Based on the following file:
+https://github.com/NVIDIA/physicsnemo/blob/62adbe43da94615b3843dbee866bd7af8939bc91/physicsnemo/distributed/manager.py
+
+We make some edits (formatting, removal of version checks and decorators,
+and removal of unused functions) to fit the current needs of FME.
+We also require a minimum of torch 2.4.0 for FME as a result.
+"""
+
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -16,46 +26,21 @@
 
 import atexit
 import os
-import queue
-import warnings
-from typing import Optional, Tuple
 from warnings import warn
 
 import numpy as np
 import torch
 import torch.distributed as dist
 
-from pnc_core import check_version_spec, require_version_spec
-from pnd_config import ProcessGroupConfig, ProcessGroupNode
-
-# warnings.simplefilter("default", DeprecationWarning)
-
-
-class PhysicsNeMoUndefinedGroupError(Exception):
-    """Exception for querying an undefined process group using the PhysicsNeMo DistributedManager"""
-
-    def __init__(self, name: str):
-        """
-
-        Parameters
-        ----------
-        name : str
-            Name of the process group being queried.
-
-        """
-        message = (
-            f"Cannot query process group '{name}' before it is explicitly created."
-        )
-        super().__init__(message)
-
 
 class PhysicsNeMoUninitializedDistributedManagerWarning(Warning):
-    """Warning to indicate usage of an uninitialized DistributedManager"""
+    """Warning to indicate usage of an uninitialized DistributedManager."""
 
     def __init__(self):
         message = (
             "A DistributedManager object is being instantiated before "
-            + "this singleton class has been initialized. Instantiating a manager before "
+            + "this singleton class has been initialized. "
+            + "Instantiating a manager before "
             + "initialization can lead to unexpected results where processes fail "
             + "to communicate. Initialize the distributed manager via "
             + "DistributedManager.initialize() before instantiating."
@@ -63,19 +48,19 @@ class PhysicsNeMoUninitializedDistributedManagerWarning(Warning):
         super().__init__(message)
 
 
-class DistributedManager(object):
+class DistributedManager:
     """Distributed Manager for setting up distributed training environment.
 
-    This is a singleton that creates a persistance class instance for storing parallel
-    environment information through out the life time of the program. This should be
+    This is a singleton that creates a persistence class instance for storing parallel
+    environment information throughout the lifetime of the program. This should be
     used to help set up Distributed Data Parallel and parallel datapipes.
 
-    Note
+    Note:
     ----
     One should call `DistributedManager.initialize()` prior to constructing a manager
     object
 
-    Example
+    Example:
     -------
     >>> DistributedManager.initialize()
     >>> manager = DistributedManager()
@@ -85,10 +70,24 @@ class DistributedManager(object):
     1
     """
 
-    _shared_state = {}
+    _shared_state: dict[str, bool] = {}
+
+    # Instance attribute type declarations. Attributes are shared across all
+    # instances via ``obj.__dict__ = cls._shared_state`` in ``__new__``.
+    _rank: int
+    _world_size: int
+    _local_rank: int
+    _distributed: bool
+    _device: torch.device
+    _cuda: bool
+    _initialization_method: str
+    _is_initialized: bool
+    _global_mesh: "torch.distributed.DeviceMesh | None"
+    _mesh_dims: "dict[str, int]"
+    _mesh_groups: "dict[int, dist.ProcessGroup]"
 
     def __new__(cls):
-        obj = super(DistributedManager, cls).__new__(cls)
+        obj = super().__new__(cls)
         obj.__dict__ = cls._shared_state
 
         # Set the defaults
@@ -104,18 +103,8 @@ class DistributedManager(object):
             obj._device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         if not hasattr(obj, "_cuda"):
             obj._cuda = torch.cuda.is_available()
-        if not hasattr(obj, "_broadcast_buffers"):
-            obj._broadcast_buffers = False
-        if not hasattr(obj, "_find_unused_parameters"):
-            obj._find_unused_parameters = False
         if not hasattr(obj, "_initialization_method"):
             obj._initialization_method = "None"
-        if not hasattr(obj, "_groups"):
-            obj._groups = {}
-        if not hasattr(obj, "_group_ranks"):
-            obj._group_ranks = {}
-        if not hasattr(obj, "_group_names"):
-            obj._group_names = {}
         if not hasattr(obj, "_is_initialized"):
             obj._is_initialized = False
         if not hasattr(obj, "_global_mesh"):
@@ -132,158 +121,33 @@ class DistributedManager(object):
 
     @property
     def rank(self):
-        """Process rank"""
+        """Process rank."""
         return self._rank
 
     @property
     def local_rank(self):
-        """Process rank on local machine"""
+        """Process rank on local machine."""
         return self._local_rank
 
     @property
     def world_size(self):
-        """Number of processes in distributed environment"""
+        """Number of processes in distributed environment."""
         return self._world_size
 
     @property
     def device(self):
-        """Process device"""
+        """Process device."""
         return self._device
 
     @property
     def distributed(self):
-        """Distributed environment"""
+        """Distributed environment."""
         return self._distributed
 
     @property
     def cuda(self):
-        """If cuda is available"""
+        """If cuda is available."""
         return self._cuda
-
-    @property
-    def mesh_dims(self):
-        """Mesh Dimensions as dictionary (axis name : size)"""
-        return self._mesh_dims
-
-    @property
-    def group_names(self):
-        """
-        Returns a list of all named process groups created
-        """
-        return self._groups.keys()
-
-    @property
-    def global_mesh(self):
-        """
-        Returns the global mesh.  If it's not initialized, it will be created when this is called.
-        """
-
-        # Properties don't mesh with decorators.  So in this function, I call the check manually:
-        check_version_spec("torch", "2.4", hard_fail=True)
-
-        if self._global_mesh is None:
-            # Fully flat mesh (1D) by default:
-            self.initialize_mesh(mesh_shape=(-1,), mesh_dim_names=("world",))
-
-        return self._global_mesh
-
-    @require_version_spec("torch", "2.4")
-    def mesh_names(self):
-        """
-        Return mesh axis names
-        """
-        return self._mesh_dims.keys()
-
-    @require_version_spec("torch", "2.4")
-    def mesh_sizes(self):
-        """
-        Return mesh axis sizes
-        """
-        return self._mesh_dims.values()
-
-    def group(self, name=None):
-        """
-        Returns a process group with the given name
-        If name is None, group is also None indicating the default process group
-        If named group does not exist, PhysicsNeMoUndefinedGroupError exception is raised
-        """
-        if name in self._groups.keys():
-            return self._groups[name]
-        elif name is None:
-            return None
-        else:
-            raise PhysicsNeMoUndefinedGroupError(name)
-
-    @require_version_spec("torch", "2.4")
-    def mesh(self, name=None):
-        """
-        Return a device_mesh with the given name.
-        Does not initialize.  If the mesh is not created
-        already, will raise and error
-
-        Parameters
-        ----------
-        name : str, optional
-            Name of desired mesh, by default None
-        """
-
-        if name in self._global_mesh.axis_names:
-            return self._global_mesh[name]
-        elif name is None:
-            return self._global_mesh
-        else:
-            raise PhysicsNeMoUndefinedGroupError(f"Mesh axis {name} not defined")
-
-    def group_size(self, name=None):
-        """
-        Returns the size of named process group
-        """
-        if name is None:
-            return self._world_size
-        group = self.group(name)
-        return dist.get_world_size(group=group)
-
-    def group_rank(self, name=None):
-        """
-        Returns the rank in named process group
-        """
-        if name is None:
-            return self._rank
-        group = self.group(name)
-        return dist.get_rank(group=group)
-
-    def group_name(self, group=None):
-        """
-        Returns the name of process group
-        """
-        if group is None:
-            return None
-        return self._group_names[group]
-
-    @property
-    def broadcast_buffers(self):
-        """broadcast_buffers in PyTorch DDP"""
-        return self._broadcast_buffers
-
-    @broadcast_buffers.setter
-    def broadcast_buffers(self, broadcast: bool):
-        """Setter for broadcast_buffers"""
-        self._broadcast_buffers = broadcast
-
-    @property
-    def find_unused_parameters(self):
-        """find_unused_parameters in PyTorch DDP"""
-        return self._find_unused_parameters
-
-    @find_unused_parameters.setter
-    def find_unused_parameters(self, find_params: bool):
-        """Setter for find_unused_parameters"""
-        if find_params:
-            warn(
-                "Setting `find_unused_parameters` in DDP to true, "
-                "use only if necessary."
-            )
-        self._find_unused_parameters = find_params
 
     def __str__(self):
         output = (
@@ -294,26 +158,31 @@ class DistributedManager(object):
 
     @classmethod
     def is_initialized(cls) -> bool:
-        """If manager singleton has been initialized"""
+        """If manager singleton has been initialized."""
         return cls._shared_state.get("_is_initialized", False)
 
     @staticmethod
     def get_available_backend():
-        """Get communication backend"""
-        if torch.cuda.is_available() and torch.distributed.is_nccl_available():
+        """Get communication backend."""
+        force_cpu = os.environ.get("FME_FORCE_CPU", "0") == "1"
+        if (
+            not force_cpu
+            and torch.cuda.is_available()
+            and torch.distributed.is_nccl_available()
+        ):
             return "nccl"
         else:
             return "gloo"
 
     @staticmethod
     def initialize_env():
-        """Setup method using generic initialization"""
-        rank = int(os.environ.get("RANK"))
-        world_size = int(os.environ.get("WORLD_SIZE"))
+        """Setup method using generic initialization."""
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
         if "LOCAL_RANK" in os.environ:
-            local_rank = os.environ.get("LOCAL_RANK")
-            if local_rank is not None:
-                local_rank = int(local_rank)
+            local_rank_str = os.environ.get("LOCAL_RANK")
+            if local_rank_str is not None:
+                local_rank = int(local_rank_str)
             else:
                 local_rank = rank % torch.cuda.device_count()
 
@@ -335,10 +204,10 @@ class DistributedManager(object):
 
     @staticmethod
     def initialize_open_mpi(addr, port):
-        """Setup method using OpenMPI initialization"""
-        rank = int(os.environ.get("OMPI_COMM_WORLD_RANK"))
-        world_size = int(os.environ.get("OMPI_COMM_WORLD_SIZE"))
-        local_rank = int(os.environ.get("OMPI_COMM_WORLD_LOCAL_RANK"))
+        """Setup method using OpenMPI initialization."""
+        rank = int(os.environ["OMPI_COMM_WORLD_RANK"])
+        world_size = int(os.environ["OMPI_COMM_WORLD_SIZE"])
+        local_rank = int(os.environ["OMPI_COMM_WORLD_LOCAL_RANK"])
 
         DistributedManager.setup(
             rank=rank,
@@ -352,10 +221,10 @@ class DistributedManager(object):
 
     @staticmethod
     def initialize_slurm(port):
-        """Setup method using SLURM initialization"""
-        rank = int(os.environ.get("SLURM_PROCID"))
-        world_size = int(os.environ.get("SLURM_NPROCS"))
-        local_rank = int(os.environ.get("SLURM_LOCALID"))
+        """Setup method using SLURM initialization."""
+        rank = int(os.environ["SLURM_PROCID"])
+        world_size = int(os.environ["SLURM_NPROCS"])
+        local_rank = int(os.environ["SLURM_LOCALID"])
         addr = os.environ.get("SLURM_LAUNCH_NODE_IPADDR")
 
         DistributedManager.setup(
@@ -370,8 +239,7 @@ class DistributedManager(object):
 
     @staticmethod
     def initialize():
-        """
-        Initialize distributed manager
+        """Initialize the distributed manager.
 
         Current supported initialization methods are:
             `ENV`: PyTorch environment variable initialization
@@ -383,10 +251,11 @@ class DistributedManager(object):
                 Uses `OMPI_COMM_WORLD_RANK`, `OMPI_COMM_WORLD_SIZE` and
                 `OMPI_COMM_WORLD_LOCAL_RANK` environment variables.
 
-        Initialization by default is done using the first valid method in the order
-        listed above. Initialization method can also be explicitly controlled using the
-        `PHYSICSNEMO_DISTRIBUTED_INITIALIZATION_METHOD` environment variable and setting it
-        to one of the options above.
+        Initialization by default is done using the first valid method in the
+        order listed above. Initialization method can also be explicitly
+        controlled using the
+        `PHYSICSNEMO_DISTRIBUTED_INITIALIZATION_METHOD` environment variable
+        and setting it to one of the options above.
         """
         if DistributedManager.is_initialized():
             warn("Distributed manager is already initialized")
@@ -413,7 +282,8 @@ class DistributedManager(object):
                     DistributedManager.initialize_open_mpi(addr, port)
                 else:
                     warn(
-                        "Could not initialize using ENV, SLURM or OPENMPI methods. Assuming this is a single process job"
+                        "Could not initialize using ENV, SLURM or OPENMPI "
+                        "methods. Assuming this is a single process job"
                     )
                     DistributedManager._shared_state["_is_initialized"] = True
         elif initialization_method == "ENV":
@@ -434,9 +304,8 @@ class DistributedManager(object):
         # Set per rank numpy random seed for data sampling
         np.random.seed(seed=DistributedManager().rank)
 
-    @require_version_spec("torch", "2.4")
     def initialize_mesh(
-        self, mesh_shape: Tuple[int, ...], mesh_dim_names: Tuple[str, ...]
+        self, mesh_shape: tuple[int, ...], mesh_dim_names: tuple[str, ...]
     ) -> "torch.distributed.DeviceMesh":
         """
         Initialize a global device mesh over the entire distributed job.
@@ -454,19 +323,18 @@ class DistributedManager(object):
         mesh_dim_names : Tuple[str, ...]
             Names for each mesh dimension. Must match length of mesh_shape.
 
-        Returns
+        Returns:
         -------
         torch.distributed.DeviceMesh
             The initialized device mesh
 
-        Raises
+        Raises:
         ------
         RuntimeError
             If mesh dimensions are invalid or don't match world size
         AssertionError
             If distributed environment is not available
         """
-
         manager = DistributedManager()
         if not manager.distributed:
             raise AssertionError(
@@ -495,10 +363,7 @@ class DistributedManager(object):
         # Allow one shape to be -1
         if -1 in mesh_shape:
             residual_shape = int(self.world_size / (-1 * total_mesh_shape))
-
-            # Replace -1 with the computed size:
-            mesh_shape = [residual_shape if m == -1 else m for m in mesh_shape]
-            # Recompute total shape:
+            mesh_shape = tuple(residual_shape if m == -1 else m for m in mesh_shape)
             total_mesh_shape = np.prod(mesh_shape)
 
         if total_mesh_shape != self.world_size:
@@ -509,8 +374,10 @@ class DistributedManager(object):
             )
 
         # Actually create the mesh:
+        force_cpu = os.environ.get("FME_FORCE_CPU", "0") == "1"
+        device_type = "cuda" if (self.cuda and not force_cpu) else "cpu"
         self._global_mesh = dist.init_device_mesh(
-            "cuda" if self.cuda else "cpu",
+            device_type,
             mesh_shape,
             mesh_dim_names=mesh_dim_names,
         )
@@ -520,8 +387,6 @@ class DistributedManager(object):
 
         return self._global_mesh
 
-    # Device mesh available in torch 2.4 or higher
-    @require_version_spec("torch", "2.4")
     def get_mesh_group(self, mesh: "dist.DeviceMesh") -> dist.ProcessGroup:
         """
         Get the process group for a given mesh.
@@ -530,12 +395,11 @@ class DistributedManager(object):
 
         We hash the mesh and use that as the key.
         """
-
         key = hash(mesh)
 
         # Initialize a cache for the groups
         if not hasattr(self, "_mesh_groups"):
-            self._mesh_groups = {}
+            self._mesh_groups: dict[int, dist.ProcessGroup] = {}
 
         if key in self._mesh_groups.keys():
             return self._mesh_groups[key]
@@ -563,7 +427,7 @@ class DistributedManager(object):
         backend="nccl",
         method="env",
     ):
-        """Set up PyTorch distributed process group and update manager attributes"""
+        """Set up PyTorch distributed process group and update manager attributes."""
         os.environ["MASTER_ADDR"] = addr
         os.environ["MASTER_PORT"] = str(port)
 
@@ -580,28 +444,39 @@ class DistributedManager(object):
             else:
                 manager._local_rank = local_rank
 
+        force_cpu = os.environ.get("FME_FORCE_CPU", "0") == "1"
         manager._device = torch.device(
-            f"cuda:{manager.local_rank}" if torch.cuda.is_available() else "cpu"
+            f"cuda:{manager.local_rank}"
+            if (torch.cuda.is_available() and not force_cpu)
+            else "cpu"
         )
 
         if manager._distributed:
-            # Setup distributed process group
-            try:
-                dist.init_process_group(
-                    backend,
-                    rank=manager.rank,
-                    world_size=manager.world_size,
-                    device_id=manager.device,
-                )
-            except TypeError:
-                # device_id only introduced in PyTorch 2.3
+            # Setup distributed process group.
+            # device_id (introduced in PyTorch 2.3) only accepts CUDA devices.
+            if manager.device.type == "cuda":
+                try:
+                    dist.init_process_group(
+                        backend,
+                        rank=manager.rank,
+                        world_size=manager.world_size,
+                        device_id=manager.device,
+                    )
+                except TypeError:
+                    # device_id only introduced in PyTorch 2.3
+                    dist.init_process_group(
+                        backend,
+                        rank=manager.rank,
+                        world_size=manager.world_size,
+                    )
+            else:
                 dist.init_process_group(
                     backend,
                     rank=manager.rank,
                     world_size=manager.world_size,
                 )
 
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and os.environ.get("FME_FORCE_CPU", "0") != "1":
             # Set device for this process and empty cache to optimize memory usage
             torch.cuda.set_device(manager.device)
             torch.cuda.device(manager.device)
@@ -609,204 +484,16 @@ class DistributedManager(object):
 
         manager._initialization_method = method
 
-    @staticmethod
-    def create_process_subgroup(
-        name: str, size: int, group_name: Optional[str] = None, verbose: bool = False
-    ):  # pragma: no cover
-        """
-        Create a process subgroup of a parent process group. This must be a collective
-        call by all processes participating in this application.
-
-        Parameters
-        ----------
-        name : str
-            Name of the process subgroup to be created.
-
-        size : int
-            Size of the process subgroup to be created. This must be an integer factor of
-            the parent group's size.
-
-        group_name : Optional[str]
-            Name of the parent process group, optional. If None, the default process group
-            will be used. Default None.
-
-        verbose : bool
-            Print out ranks of each created process group, default False.
-
-        """
-        manager = DistributedManager()
-        if not manager.distributed:
-            raise AssertionError(
-                "torch.distributed is unavailable. "
-                "Check pytorch build to ensure the distributed package is available. "
-                "If building PyTorch from source, set `USE_DISTRIBUTED=1` "
-                "to enable the distributed package"
-            )
-
-        if name in manager._groups:
-            raise AssertionError(f"Group with name {name} already exists")
-
-        # Get parent group's params
-        group = manager._groups[group_name] if group_name else None
-        group_size = dist.get_world_size(group=group)
-        num_groups = manager.world_size // group_size
-
-        # Get number of sub-groups per parent group
-        if group_size % size != 0:
-            raise AssertionError(
-                f"Cannot divide group size {group_size} evenly into subgroups of"
-                f" size {size}"
-            )
-        num_subgroups = group_size // size
-
-        # Create all the sub-groups
-        # Note: all ranks in the job need to create all sub-groups in
-        # the same order even if a rank is not part of a sub-group
-        manager._group_ranks[name] = []
-        for g in range(num_groups):
-            for i in range(num_subgroups):
-                # Get global ranks that are part of this sub-group
-                start = i * size
-                end = start + size
-                if group_name:
-                    ranks = manager._group_ranks[group_name][g][start:end]
-                else:
-                    ranks = list(range(start, end))
-                # Create sub-group and keep track of ranks
-                tmp_group = dist.new_group(ranks=ranks)
-                manager._group_ranks[name].append(ranks)
-                if manager.rank in ranks:
-                    # Set group in manager only if this rank is part of the group
-                    manager._groups[name] = tmp_group
-                    manager._group_names[tmp_group] = name
-
-        if verbose and manager.rank == 0:
-            print(f"Process group '{name}':")
-            for grp in manager._group_ranks[name]:
-                print("    ", grp)
-
-    @staticmethod
-    def create_orthogonal_process_group(
-        orthogonal_group_name: str, group_name: str, verbose: bool = False
-    ):  # pragma: no cover
-        """
-        Create a process group that is orthogonal to the specified process group.
-
-        Parameters
-        ----------
-        orthogonal_group_name : str
-            Name of the orthogonal process group to be created.
-
-        group_name : str
-            Name of the existing process group.
-
-        verbose : bool
-            Print out ranks of each created process group, default False.
-
-        """
-        manager = DistributedManager()
-        if not manager.distributed:
-            raise AssertionError(
-                "torch.distributed is unavailable. "
-                "Check pytorch build to ensure the distributed package is available. "
-                "If building PyTorch from source, set `USE_DISTRIBUTED=1` "
-                "to enable the distributed package"
-            )
-
-        if group_name not in manager._groups:
-            raise ValueError(f"Group with name {group_name} does not exist")
-        if orthogonal_group_name in manager._groups:
-            raise ValueError(f"Group with name {orthogonal_group_name} already exists")
-
-        group_ranks = manager._group_ranks[group_name]
-        orthogonal_ranks = [list(i) for i in zip(*group_ranks)]
-
-        for ranks in orthogonal_ranks:
-            tmp_group = dist.new_group(ranks=ranks)
-            if manager.rank in ranks:
-                # Set group in manager only if this rank is part of the group
-                manager._groups[orthogonal_group_name] = tmp_group
-                manager._group_names[tmp_group] = orthogonal_group_name
-
-        manager._group_ranks[orthogonal_group_name] = orthogonal_ranks
-
-        if verbose and manager.rank == 0:
-            print(f"Process group '{orthogonal_group_name}':")
-            for grp in manager._group_ranks[orthogonal_group_name]:
-                print("    ", grp)
-
-    @staticmethod
-    def create_group_from_node(
-        node: ProcessGroupNode,
-        parent: Optional[str] = None,
-        verbose: bool = False,
-    ):  # pragma: no cover
-        if node.size is None:
-            raise AssertionError(
-                "Cannot create groups from a ProcessGroupNode that is not fully"
-                " populated. Ensure that config.set_leaf_group_sizes is called first"
-                " with `update_parent_sizes = True`"
-            )
-
-        DistributedManager.create_process_subgroup(
-            node.name, node.size, group_name=parent, verbose=verbose
-        )
-        # Create orthogonal process group
-        orthogonal_group = f"__orthogonal_to_{node.name}"
-        DistributedManager.create_orthogonal_process_group(
-            orthogonal_group, node.name, verbose=verbose
-        )
-        return orthogonal_group
-
-    @staticmethod
-    def create_groups_from_config(
-        config: ProcessGroupConfig, verbose: bool = False
-    ):  # pragma: no cover
-        if torch.__version__ > "2.4":
-            warnings.warn(
-                "DistributedManager.create_groups_from_config is no longer the most simple "
-                "way to organize process groups.  Please switch to DeviceMesh, "
-                "and DistributedManager.initialize_mesh",
-                category=DeprecationWarning,
-                stacklevel=2,
-            )
-
-        # Traverse process group tree in breadth first order
-        # to create nested process groups
-        q = queue.Queue()
-        q.put(config.root_id)
-        DistributedManager.create_group_from_node(config.root)
-
-        while not q.empty():
-            node_id = q.get()
-            if verbose:
-                print(f"Node ID: {node_id}")
-
-            children = config.tree.children(node_id)
-            if verbose:
-                print(f"  Children: {children}")
-
-            parent_group = node_id
-            for child in children:
-                # Create child group and replace parent group by orthogonal group so
-                # that each child forms an independent block of processes
-                parent_group = DistributedManager.create_group_from_node(
-                    child.data,
-                    parent=parent_group,
-                )
-
-                # Add child ids to the queue
-                q.put(child.identifier)
-
     @atexit.register
     @staticmethod
     def cleanup(barrier: bool = False):
-        """Clean up distributed group and singleton
+        """Clean up distributed group and singleton.
 
         Parameters
         ----------
         barrier : bool, optional
-            Whether to use a global barrier before destroying the process group, by default False
+            Whether to use a global barrier before destroying the
+            process group, by default False.
         """
         # Destroying group.WORLD is enough for all process groups to get destroyed
         if (
@@ -816,7 +503,8 @@ class DistributedManager(object):
             and DistributedManager._shared_state["_distributed"]
         ):
             if barrier:
-                if torch.cuda.is_available():
+                force_cpu = os.environ.get("FME_FORCE_CPU", "0") == "1"
+                if torch.cuda.is_available() and not force_cpu:
                     dist.barrier(device_ids=[DistributedManager().local_rank])
                 else:
                     dist.barrier()
