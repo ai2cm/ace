@@ -14,7 +14,7 @@ def test_run():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = pathlib.Path(tmpdir)
         main(
-            name="csfno_block",  # just one for speed
+            benchmark_name="csfno_block",  # just one for speed
             iters=1,
             output_dir=output_dir,
             child=None,
