@@ -1,4 +1,5 @@
-experiment_dir: FME_OUTPUT_DIR
+experiment_dir: /results
+resume_results: /resume_results
 save_checkpoint: true
 validate_using_ema: true
 ema:
@@ -6,34 +7,28 @@ ema:
 max_epochs: 30
 n_forward_steps: 2
 inference:
-  n_forward_steps: 7300
+  n_forward_steps: 17520
   forward_steps_in_memory: 40
   loader:
     start_indices:
-      list:
-        - 3650
-        - 7300
-        - 10950
-        - 14600
-        - 18250
-        - 21900
-        - 25550
-        - 29200
-        - 32850
-        - 36500
-        - 40150
-        - 43800
-        - 47450
-        - 51100
-        - 54750
-        - 58400
+      times:
+      - '0401-01-03T12:00:00'
+      - '0413-01-03T12:00:00'
+      - '0425-01-03T12:00:00'
+      - '0437-01-03T12:00:00'
+      - '0449-01-03T12:00:00'
+      - '0461-01-03T12:00:00'
+      - '0473-01-03T12:00:00'
+      - '0484-01-03T12:00:00'
     dataset:
       merge:
-      - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-04-01-e3smv3-1deg-AMIP-1970-2020
-      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-        file_pattern: 2026-02-03-e3smv3-1deg-AMIP-1970-2020-sfc-wind-stress-fixed.zarr
+      - data_path: /climate-default
+        file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
         engine: zarr
-    num_data_workers: 2
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+        engine: zarr
+    num_data_workers: 4
   aggregator:
     log_histograms: true
 logging:
@@ -49,10 +44,18 @@ train_loader:
   prefetch_factor: 2
   dataset:
     merge:
-    - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-04-01-e3smv3-1deg-AMIP-1970-2020
-    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2026-02-03-e3smv3-1deg-AMIP-1970-2020-sfc-wind-stress-fixed.zarr
+    - data_path: /climate-default
+      file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
       engine: zarr
+      subset:
+        start_time: '0401-01-01T06:00:00'
+        stop_time: '0496-01-01T00:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+      engine: zarr
+      subset:
+        start_time: '0401-01-01T06:00:00'
+        stop_time: '0496-01-01T00:00:00'
 validation_loader:
   batch_size: 32
   num_data_workers: 4
@@ -60,20 +63,22 @@ validation_loader:
   prefetch_factor: 2
   dataset:
     merge:
-    - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-04-01-e3smv3-1deg-AMIP-1970-2020
-      subset:
-        start_time: '1994-01-01'
-        stop_time: '1995-12-31'
-    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2026-02-03-e3smv3-1deg-AMIP-1970-2020-sfc-wind-stress-fixed.zarr
+    - data_path: /climate-default
+      file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
       engine: zarr
       subset:
-        start_time: '1994-01-01'
-        stop_time: '1995-12-31'
+        start_time: '0496-01-01T06:00:00'
+        stop_time: '0499-12-31T18:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+      engine: zarr
+      subset:
+        start_time: '0496-01-01T06:00:00'
+        stop_time: '0499-12-31T18:00:00'
 optimization:
+  use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  use_gradient_accumulation: true
   optimizer_type: AdamW
   kwargs:
     fused: true
@@ -86,7 +91,7 @@ stepper:
       T_1: 0.5
       U_0: 0.5
       V_0: 0.5
-      specific_total_water_0: 0.5
+      specific_total_water_0: 0.25
       specific_total_water_1: 0.25
       specific_total_water_2: 0.5
       surface_precipitation_rate: 2
@@ -113,12 +118,12 @@ stepper:
           spectral_transform: sht
       normalization:
         network:
-          global_means_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-02-03-e3smv3-1deg-AMIP-1970-2020-stats/centering.nc
-          global_stds_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-02-03-e3smv3-1deg-AMIP-1970-2020-stats/scaling-full-field.nc
+          global_means_path: /statsdata/uncoupled_atmosphere/centering.nc
+          global_stds_path: /statsdata/uncoupled_atmosphere/scaling-full-field.nc
           fill_nans_on_normalize: false
         residual:
-          global_means_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-02-03-e3smv3-1deg-AMIP-1970-2020-stats/centering.nc
-          global_stds_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-02-03-e3smv3-1deg-AMIP-1970-2020-stats/scaling-residual.nc
+          global_means_path: /statsdata/uncoupled_atmosphere/centering.nc
+          global_stds_path: /statsdata/uncoupled_atmosphere/scaling-residual.nc
       ocean:
         surface_temperature_name: TS
         ocean_fraction_name: ocean_fraction
@@ -126,6 +131,9 @@ stepper:
       corrector:
         conserve_dry_air: true
         moisture_budget_correction: advection_and_precipitation
+        total_energy_budget_correction:
+          method: constant_temperature
+          constant_unaccounted_heating: 0.89
         force_positive_names:
         - specific_total_water_0
         - specific_total_water_1
@@ -145,9 +153,9 @@ stepper:
       next_step_forcing_names:
       - SOLIN
       in_names:
-      - LANDFRAC
-      - OCNFRAC
-      - ICEFRAC
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
       - PHIS
       - SOLIN
       - PS
