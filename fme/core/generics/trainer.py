@@ -452,9 +452,42 @@ class Trainer:
         self._started_training = True
         current_time = time.time()
         metrics_aggregator = MetricsAggregator()
-        for batch in epoch_data:
-            with GlobalTimer():
-                stepped = self.stepper.train_on_batch(batch, self.optimization)
+        for batch_idx, batch in enumerate(epoch_data):
+            time_arr = getattr(batch, "time", None)
+            batch_sample_dates = None
+            if time_arr is not None and hasattr(time_arr, "isel"):
+                # Log all sample start dates in this batch to help isolate bad data
+                try:
+                    first_times = time_arr.isel(time=0)
+                    batch_sample_dates = list(first_times.values)
+                    n_samples = len(batch_sample_dates)
+                    if n_samples <= 5:
+                        logging.info(
+                            f"Step {self.num_batches_seen + 1} (batch {batch_idx}): "
+                            f"sample dates = {batch_sample_dates}"
+                        )
+                    else:
+                        logging.info(
+                            f"Step {self.num_batches_seen + 1} (batch {batch_idx}): "
+                            f"sample dates = [{batch_sample_dates[0]} ... "
+                            f"{batch_sample_dates[-1]}] ({n_samples} samples)"
+                        )
+                except Exception:
+                    batch_sample_dates = [time_arr.isel(sample=0, time=0).values]
+                    logging.info(
+                        f"Step {self.num_batches_seen + 1} (batch {batch_idx}): "
+                        f"first sample date = {batch_sample_dates[0]}"
+                    )
+            try:
+                with GlobalTimer():
+                    stepped = self.stepper.train_on_batch(batch, self.optimization)
+            except Exception:
+                logging.error(
+                    f"Training failed at step {self.num_batches_seen + 1} "
+                    f"(batch index {batch_idx} in epoch). Batch sample dates: "
+                    f"{batch_sample_dates if batch_sample_dates is not None else 'N/A'}"
+                )
+                raise
             self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
             # Step scheduler per-iteration if configured to do so
