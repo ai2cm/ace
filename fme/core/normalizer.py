@@ -243,9 +243,7 @@ def load_dict_from_netcdf(
         defaults: Dictionary of default values for each variable, if not found
             in the netCDF file.
     """
-    with fsspec.open(path, "rb") as f:
-        ds = xr.load_dataset(f, mask_and_scale=False)
-
+    ds = xr.open_dataset(path, mask_and_scale=False)
     result = {}
     if names is None:
         names = set(ds.variables.keys()).union(defaults.keys())
