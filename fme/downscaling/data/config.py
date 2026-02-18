@@ -5,9 +5,9 @@ from torch.utils.data import DataLoader, Dataset, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.dataset.concat import ConcatDatasetConfig, XarrayConcat, get_dataset
+from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.dataset import DatasetABC
-from fme.core.dataset.merged import MergeDatasetConfig, get_merged_datasets
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig, get_merged_datasets
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
@@ -88,20 +88,22 @@ class XarrayEnsembleDataConfig:
 
 
 def build_from_config_sequence(
-    configs: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig | MergeDatasetConfig],
+    configs: Sequence[
+        XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
+    ],
     names: Sequence[str],
     n_timesteps: IntSchedule,
     strict_ensemble: bool,
 ) -> tuple[XarrayConcat, DatasetProperties]:
     """Build XarrayConcat and properties from a mix of xarray and merge configs."""
-    expanded: list[XarrayDataConfig | MergeDatasetConfig] = []
+    expanded: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = []
     for config in configs:
         if isinstance(config, XarrayEnsembleDataConfig):
             expanded.extend(config.expand())
         else:
             expanded.append(config)
     xarray_configs = [c for c in expanded if isinstance(c, XarrayDataConfig)]
-    merge_configs = [c for c in expanded if isinstance(c, MergeDatasetConfig)]
+    merge_configs = [c for c in expanded if isinstance(c, MergeNoConcatDatasetConfig)]
     datasets: list[DatasetABC] = []
     properties: DatasetProperties | None = None
     if xarray_configs:
@@ -138,7 +140,8 @@ class DataLoaderConfig:
 
     Args:
         coarse: The dataset configuration. May be a sequence of
-            XarrayDataConfig, XarrayEnsembleDataConfig, or MergeDatasetConfig.
+            XarrayDataConfig, XarrayEnsembleDataConfig, or
+            MergeNoConcatDatasetConfig.
         batch_size: The batch size to use for the dataloader.
         num_data_workers: The number of data workers to use for the dataloader.
             (For multi-GPU runtime, it's the number of workers per GPU.)
@@ -164,7 +167,9 @@ class DataLoaderConfig:
             If false, pad with extra samples to make ranks have the same size batches.
     """
 
-    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig | MergeDatasetConfig]
+    coarse: Sequence[
+        XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
+    ]
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
@@ -182,8 +187,8 @@ class DataLoaderConfig:
         enforce_lat_bounds(self.lat_extent)
 
     @property
-    def full_config(self) -> Sequence[XarrayDataConfig | MergeDatasetConfig]:
-        all_configs: list[XarrayDataConfig | MergeDatasetConfig] = []
+    def full_config(self) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+        all_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = []
         for config in self.coarse:
             if isinstance(config, XarrayEnsembleDataConfig):
                 all_configs += config.expand()
@@ -361,9 +366,10 @@ class PairedDataLoaderConfig:
 
     Args:
         fine: The fine dataset configuration. May be a sequence of
-            XarrayDataConfig or MergeDatasetConfig.
+            XarrayDataConfig or MergeNoConcatDatasetConfig.
         coarse: The coarse dataset configuration. May be a sequence of
-            XarrayDataConfig, XarrayEnsembleDataConfig, or MergeDatasetConfig.
+            XarrayDataConfig, XarrayEnsembleDataConfig, or
+            MergeNoConcatDatasetConfig.
         batch_size: The batch size to use for the dataloader.
         num_data_workers: The number of data workers to use for the dataloader.
             (For multi-GPU runtime, it's the number of workers per GPU.)
@@ -391,8 +397,10 @@ class PairedDataLoaderConfig:
             If false, pad with extra samples to make ranks have the same size batches.
     """
 
-    fine: Sequence[XarrayDataConfig | MergeDatasetConfig]
-    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig | MergeDatasetConfig]
+    fine: Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]
+    coarse: Sequence[
+        XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
+    ]
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
@@ -412,15 +420,12 @@ class PairedDataLoaderConfig:
 
     def _first_data_config(
         self,
-        config: XarrayDataConfig | MergeDatasetConfig,
+        config: XarrayDataConfig | MergeNoConcatDatasetConfig,
     ) -> XarrayDataConfig:
         """Return the first XarrayDataConfig for data_path/file_pattern lookup."""
         if isinstance(config, XarrayDataConfig):
             return config
-        first = config.merge[0]
-        if isinstance(first, ConcatDatasetConfig):
-            return first.concat[0]
-        return first
+        return config.merge[0]
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
@@ -451,11 +456,11 @@ class PairedDataLoaderConfig:
     @property
     def coarse_full_config(
         self,
-    ) -> Sequence[XarrayDataConfig | MergeDatasetConfig]:
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
         """Expands XarrayEnsembleDataConfig to XarrayDataConfig;
         other configs unchanged.
         """
-        coarse_configs: list[XarrayDataConfig | MergeDatasetConfig] = []
+        coarse_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = []
         for config in self.coarse:
             if isinstance(config, XarrayEnsembleDataConfig):
                 coarse_configs.extend(config.expand())

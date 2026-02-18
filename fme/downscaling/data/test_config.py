@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from fme.core.dataset.merged import MergeDatasetConfig
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.downscaling.data.config import (
     DataLoaderConfig,
@@ -113,7 +113,8 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
 
 
 def test_DataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
-    """Test DataLoaderConfig with coarse as [XarrayDataConfig, MergeDatasetConfig]."""
+    """Test DataLoaderConfig with coarse as
+    [XarrayDataConfig, MergeNoConcatDatasetConfig]."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
     paths = data_paths_helper(tmp_path, num_timesteps=4)
@@ -123,9 +124,9 @@ def test_DataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         n_timesteps=1,
         use_fine_topography=True,
     )
-    coarse_configs: list[XarrayDataConfig | MergeDatasetConfig] = [
+    coarse_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = [
         XarrayDataConfig(paths.coarse),
-        MergeDatasetConfig(merge=[XarrayDataConfig(paths.coarse)]),
+        MergeNoConcatDatasetConfig(merge=[XarrayDataConfig(paths.coarse)]),
     ]
     data_config = DataLoaderConfig(
         coarse=coarse_configs,
@@ -137,7 +138,8 @@ def test_DataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         lon_extent=ClosedInterval(0, 3),
     )
     data = data_config.build(requirements=requirements)
-    # XarrayDataConfig + MergeDatasetConfig each contribute 4 timesteps = 8 total
+    # XarrayDataConfig + MergeNoConcatDatasetConfig each
+    # contribute 4 timesteps = 8 total
     assert len(data.loader) == 4  # 8 samples / batch_size 2
 
 
@@ -177,13 +179,13 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         n_timesteps=1,
         use_fine_topography=True,
     )
-    fine_configs: list[XarrayDataConfig | MergeDatasetConfig] = [
+    fine_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = [
         XarrayDataConfig(paths.fine),
-        MergeDatasetConfig(merge=[XarrayDataConfig(paths.fine)]),
+        MergeNoConcatDatasetConfig(merge=[XarrayDataConfig(paths.fine)]),
     ]
-    coarse_configs: list[XarrayDataConfig | MergeDatasetConfig] = [
+    coarse_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = [
         XarrayDataConfig(paths.coarse),
-        MergeDatasetConfig(merge=[XarrayDataConfig(paths.coarse)]),
+        MergeNoConcatDatasetConfig(merge=[XarrayDataConfig(paths.coarse)]),
     ]
     data_config = PairedDataLoaderConfig(
         fine=fine_configs,
@@ -196,7 +198,8 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         lon_extent=ClosedInterval(0, 3),
     )
     data = data_config.build(requirements=requirements, train=True)
-    # XarrayDataConfig + MergeDatasetConfig each contribute 4 timesteps = 8 total
+    # XarrayDataConfig + MergeNoConcatDatasetConfig each contribute
+    # 4 timesteps = 8 total
     assert len(data.loader) == 4  # 8 samples / batch_size 2
     batch = next(iter(data.loader))
     assert batch.coarse.data["var0"].shape == (2, 3, 3)
