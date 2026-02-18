@@ -111,6 +111,7 @@ for model in "${!MODELS[@]}"; do
                 --env WANDB_RUN_GROUP= \
                 --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
                 --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+                --dataset-secret google-credentials:/tmp/google_application_credentials.json \
                 --dataset $dataset_id:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
                 --gpus 1 \
                 --shared-memory 20GiB \
