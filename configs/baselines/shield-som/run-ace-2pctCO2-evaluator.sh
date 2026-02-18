@@ -11,7 +11,7 @@ BEAKER_USERNAME=spencerc_ai2
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 EXISTING_RESULTS_DATASET="01J4BR6J5AW32ZDQ77VZ60P4KT"  # this contains the checkpoint to use for inference
-CHECKPOINT_PATH=/training_checkpoints/best_inference_ckpt.tar
+CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
