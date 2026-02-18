@@ -978,7 +978,6 @@ class Stepper:
         self._config.replace_prescribed_prognostic_names(names)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
-            apply_parameter_init=False,
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
