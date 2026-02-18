@@ -52,3 +52,6 @@ BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs|1|01KHA8X7G6VNQDQTW11AFBSP1E|train
 BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs|2|01KHA8XBCJZEC9T7Y9ZTVEXMTN|training|best_inference_ckpt
 BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs|2|01KHA8XBCJZEC9T7Y9ZTVEXMTN|training|best_ckpt
 BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs|2|01KHA8XBCJZEC9T7Y9ZTVEXMTN|training|ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-debug-print-time|1|01KHSAENDJ10D494QGJ3W6744G|training|best_inference_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-debug-print-time|1|01KHSAENDJ10D494QGJ3W6744G|training|best_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-debug-print-time|1|01KHSAENDJ10D494QGJ3W6744G|training|ckpt
