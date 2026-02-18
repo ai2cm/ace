@@ -150,6 +150,10 @@ class ModuleSelector:
             )
         self._instance = self.registry.get(self.type, self.config)
 
+    @property
+    def module_config(self) -> ModuleConfig:
+        return self._instance
+
     @classmethod
     def register(
         cls, type_name: str
