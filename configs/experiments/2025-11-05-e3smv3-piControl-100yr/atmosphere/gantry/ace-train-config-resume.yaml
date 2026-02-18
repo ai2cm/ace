@@ -1,5 +1,6 @@
 experiment_dir: /results
-resume_results: /resume_results
+resume_results:
+  existing_dir: /resume_results
 save_checkpoint: true
 validate_using_ema: true
 ema:
