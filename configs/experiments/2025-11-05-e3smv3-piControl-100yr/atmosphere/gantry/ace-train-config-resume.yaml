@@ -49,13 +49,13 @@ train_loader:
       file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
       engine: zarr
       subset:
-        start_time: '0401-01-01T06:00:00'
+        start_time: '0401-01-03T12:00:00'
         stop_time: '0496-01-01T00:00:00'
     - data_path: /climate-default
       file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
       engine: zarr
       subset:
-        start_time: '0401-01-01T06:00:00'
+        start_time: '0401-01-03T12:00:00'
         stop_time: '0496-01-01T00:00:00'
 validation_loader:
   batch_size: 32
