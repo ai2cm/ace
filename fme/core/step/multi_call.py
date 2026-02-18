@@ -194,6 +194,9 @@ class MultiCallStepConfig(StepConfigABC):
     def get_ocean(self) -> OceanConfig | None:
         return self.wrapped_step.get_ocean()
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        self.wrapped_step.replace_prescribed_prognostic_names(names)
+
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         self.config = multi_call
 
