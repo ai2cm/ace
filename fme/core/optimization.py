@@ -10,6 +10,7 @@ import torch
 from torch import nn
 
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -216,6 +217,9 @@ class Optimization(OptimizationABC):
     def _validate_loss(self, loss: torch.Tensor):
         with torch.no_grad():
             if torch.isnan(loss):
+                dist = Distributed.get_instance()
+                if dist.is_distributed():
+                    dist.shutdown()
                 raise ValueError("Loss is NaN-valued during training.")
 
 
