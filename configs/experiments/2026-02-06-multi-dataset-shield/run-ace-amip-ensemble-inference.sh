@@ -46,7 +46,7 @@ for name in "${!MODELS[@]}"; do
     main_override="\
         experiment_dir=${MAIN_EXPERIMENT_DIR} \
         n_forward_steps=${MAIN_N_FORWARD_STEPS} \
-        initial_condition.start_indices.times=[1980-01-01T00:00:00,1980-01-01T00:00:00] \
+        initial_condition.start_indices=null \
         initial_condition.path=${SPIN_UP_EXPERIMENT_DIR}/restart.nc \
         initial_condition.engine=netcdf4 \
         forcing_loader.dataset.file_pattern=${ENSEMBLE_ID}.zarr \
