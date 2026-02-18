@@ -1,14 +1,17 @@
+group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
 
-1pct_nosmooth_0256to0350-hfds_total_area|rs0|01KGV4C6VYERR1A2TFBBHX0191|run_ICx1|best_inference_ckpt|high|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_total_area|rs0|01KGV4C6VYERR1A2TFBBHX0191|trained|best_inference_ckpt|high|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_total_area|rs1|01KGV4CPZMASED08PFP7C98EH8|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_total_area|rs1|01KGV4CPZMASED08PFP7C98EH8|run_ICx1|best_inference_ckpt|high|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_total_area|rs2|01KGV4D692MEGRTAQT2P8109PZ|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_total_area|rs2|01KGV4D692MEGRTAQT2P8109PZ|run_ICx1|best_inference_ckpt|high|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_total_area|rs3|01KGV4DN6T217MQF10K4P2R6D2|run_ICx1|best_inference_ckpt|high|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_total_area|rs3|01KGV4DN6T217MQF10K4P2R6D2|trained|best_inference_ckpt|high|--not-preemptible
 
-ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs0|01KH20ABJSVBBS28GFBPRHAQC5|training|best_inference_ckpt|normal|--not-preemptible
+ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs0|01KH20ABJSVBBS28GFBPRHAQC5|run_ICx1|best_inference_ckpt|high|--not-preemptible
 
-ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs3|01KH20ATM7CWGCPGYAW5TMSNWW|training|best_inference_ckpt|normal|--not-preemptible
+ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs3|01KH20ATM7CWGCPGYAW5TMSNWW|run_ICx1|best_inference_ckpt|high|--not-preemptible
 
-resume-1pct_nosmooth_0256to0350-hfds_total_area|rs0|01KH88KJ008NHVE7J6B96YKQSB|training|best_inference_ckpt|normal|--not-preemptible
+resume-1pct_nosmooth_0256to0350-hfds_total_area|rs0|01KH88KJ008NHVE7J6B96YKQSB|training|best_inference_ckpt|high|--not-preemptible
+
+resume-1pct_nosmooth_0256to0350-hfds_total_area|rs0-ep209||run_ICx1|best_inference_ckpt|high|--not-preemptible||01KHCM6YATXDTZMNENMEB30V4Z
