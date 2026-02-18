@@ -48,5 +48,5 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-run_training "train-amip-c96-shield-daily.yaml" "train-amip-c96-shield-daily"
+# run_training "train-amip-c96-shield-daily.yaml" "train-amip-c96-shield-daily"
 run_training "train-amip-c96-shield.yaml" "train-amip-c96-shield"

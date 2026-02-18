@@ -1,4 +1,3 @@
-# arg: --dataset andrep/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats:/statsdata
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
@@ -20,11 +19,13 @@ inference:
         - '1993-07-01T00:00:00'
         - '1994-10-01T00:00:00'
     dataset:
-      data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
+      data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset
+      file_pattern: ic_0002.zarr
+      engine: zarr
     num_data_workers: 8
   aggregator:
     log_histograms: true
-    time_mean_reference_data: /statsdata/time-mean.nc
+    time_mean_reference_data: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -37,12 +38,17 @@ train_loader:
   prefetch_factor: 4
   dataset:
     concat:
-    concat:
-      - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0001
-      - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
+        engine: zarr
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset
+        file_pattern: ic_0002.zarr
+        engine: zarr
         subset:
           stop_time: '1985-12-31'
-      - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset
+        file_pattern: ic_0002.zarr
+        engine: zarr
         subset:
           start_time: '2011-01-01'
 validation_loader:
@@ -51,7 +57,9 @@ validation_loader:
   prefetch_factor: 4
   dataset:
     concat:
-      - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset
+        file_pattern: ic_0002.zarr
+        engine: zarr
         subset:
           start_time: '1996-01-01'
           stop_time: '2000-12-31'
@@ -108,11 +116,11 @@ stepper:
           filter_num_groups: 4
       normalization:
         network:
-          global_means_path: /statsdata/centering.nc
-          global_stds_path: /statsdata/scaling-full-field.nc
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/scaling-full-field.nc
         residual:
-          global_means_path: /statsdata/centering.nc
-          global_stds_path: /statsdata/scaling-residual.nc
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
