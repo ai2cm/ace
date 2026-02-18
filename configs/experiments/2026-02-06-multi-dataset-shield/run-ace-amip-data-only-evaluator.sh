@@ -28,6 +28,7 @@ for ensemble_id in "ic_0001" "ic_0002"; do
         --priority high \
         --not-preemptible \
         --cluster ai2/jupiter \
+        --cluster ai2/saturn \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
         --env WANDB_JOB_TYPE=inference \
