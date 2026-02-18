@@ -50,7 +50,6 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --workspace ai2/ace \
           --priority $PRIORITY \
           --preemptible \
-          --retries 3 \
           --cluster ai2/ceres \
           --cluster ai2/jupiter \
           --weka climate-default:/climate-default \
