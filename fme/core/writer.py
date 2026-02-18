@@ -205,7 +205,7 @@ def _initialize_zarr(
             dimension_names=dim_names,
             attributes=attributes,
         )
-    zarr.consolidate_metadata(root.store)
+    # zarr.consolidate_metadata(root.store)
 
 
 def _resolve_data_vars(
