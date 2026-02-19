@@ -163,21 +163,24 @@ def test_sea_ice_thickness_derived_variable():
     cell_area = horizontal_coordinates.cell_area_m2
 
     # Create test data: known thickness and fraction, compute volume from them
-    thickness_in_m = torch.tensor(2.0)
+    thickness_in_m = torch.full((1, 1, n_lat, n_lon), 2.0)
+    thickness_in_m[:, :, 1, 1] = float("nan")
     sea_ice_frac = torch.full((1, 1, n_lat, n_lon), 0.6)
+    sea_surface_frac = torch.full((1, 1, n_lat, n_lon), 1.0)
     expected_volume = thickness_in_m * cell_area * sea_ice_frac / 1e9
 
     fake_data = {
         "sea_ice_volume": expected_volume,
         "sea_ice_fraction": sea_ice_frac,
+        "sea_surface_fraction": sea_surface_frac,
     }
 
     ocean_data = OceanData(fake_data, cell_area_provider=horizontal_coordinates)
 
     recovered_thickness = ocean_data.sea_ice_thickness
-    expected_thickness = torch.full_like(expected_volume, thickness_in_m)
     torch.testing.assert_close(
         recovered_thickness,
-        expected_thickness,
+        thickness_in_m,
+        equal_nan=True,
         msg="Recovered sea ice thickness should match original",
     )

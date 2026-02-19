@@ -1,3 +1,4 @@
+import math
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Protocol
@@ -250,8 +251,23 @@ class OceanData:
         except KeyError:
             sea_ice_vol = self.sea_ice_volume
             sea_ice_frac = self.sea_ice_fraction
+            sea_surface_frac = self.sea_surface_fraction
             cell_area = self.cell_area_m2
-            return sea_ice_vol * 1e9 / (cell_area * sea_ice_frac)
+            return torch.where(
+                torch.isnan(sea_ice_vol),
+                float("nan"),
+                torch.nan_to_num(
+                    10
+                    * torch.exp(
+                        8 * math.log(10)
+                        + torch.log(sea_surface_frac)
+                        + torch.log(sea_ice_vol)
+                        - torch.log(cell_area)
+                        - torch.log(sea_ice_frac)
+                    )
+                ),
+            )
+            return
 
     @property
     def sea_ice_volume(self) -> torch.Tensor:
