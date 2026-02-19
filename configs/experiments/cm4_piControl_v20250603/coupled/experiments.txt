@@ -1,5 +1,8 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace|cluster
 
-fto-v2025-06-03-mnsf-fpHI-pta_interpT--1y8prir2-rerun_H100||01JY7H5WR8EXJMA7BRJZWM2JKY|run_ICx1|best_inference_ckpt|high|--not-preemptible||||h100
+fto-v2025-06-03-mnsf-fpHI-pta_interpT--1y8prir2-rerun_H100||01JY7H5WR8EXJMA7BRJZWM2JKY|skip|best_inference_ckpt|high|--not-preemptible||||h100
 
-ft-1y8prir2-20ep-cosine_annealing-rerun_H100||01JZHQJXBGRW367AXKJFG1BCR0|run_ICx1|best_inference_ckpt|high|--not-preemptible||||h100
+ft-1y8prir2-20ep-cosine_annealing-rerun||01JZHQJXBGRW367AXKJFG1BCR0|run_ICx1_03110106|best_inference_ckpt|high|--not-preemptible||||
+ft-1y8prir2-20ep-cosine_annealing-rerun||01JZHQJXBGRW367AXKJFG1BCR0|run_ICx1_03110111|best_inference_ckpt|high|--not-preemptible||||
+ft-1y8prir2-20ep-cosine_annealing-rerun||01JZHQJXBGRW367AXKJFG1BCR0|run_ICx1_03110116|best_inference_ckpt|high|--not-preemptible||||
+ft-1y8prir2-20ep-cosine_annealing-rerun||01JZHQJXBGRW367AXKJFG1BCR0|run_ICx1_03110121|best_inference_ckpt|high|--not-preemptible||||
