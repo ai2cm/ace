@@ -15,7 +15,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-python -m fme.coupled.validate_config --config_type inference $CONFIG_PATH
+python -m fme.coupled.validate_config --config_type evaluator $CONFIG_PATH
 
 gantry run \
     --name $JOB_NAME \
