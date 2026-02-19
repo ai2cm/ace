@@ -249,25 +249,28 @@ class OceanData:
         try:
             return self._get("sea_ice_thickness")
         except KeyError:
+            sfrac = self.sea_surface_fraction
             sea_ice_vol = self.sea_ice_volume
-            sea_ice_frac = self.sea_ice_fraction
-            sea_surface_frac = self.sea_surface_fraction
+            try:
+                # more accurate for CM4; see compute_coupled_sea_ice
+                # in scripts/data_process/coupled_dataset_utils.py
+                sea_ice_frac = self.ocean_sea_ice_fraction * sfrac
+            except KeyError:
+                sea_ice_frac = self.sea_ice_fraction
+                sea_ice_vol = sea_ice_vol * sfrac
             cell_area = self.cell_area_m2
             return torch.where(
                 torch.isnan(sea_ice_vol),
                 float("nan"),
                 torch.nan_to_num(
-                    10
-                    * torch.exp(
-                        8 * math.log(10)
-                        + torch.log(sea_surface_frac)
+                    torch.exp(
+                        9 * math.log(10)
                         + torch.log(sea_ice_vol)
                         - torch.log(cell_area)
                         - torch.log(sea_ice_frac)
                     )
                 ),
             )
-            return
 
     @property
     def sea_ice_volume(self) -> torch.Tensor:
