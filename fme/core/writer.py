@@ -1,9 +1,12 @@
 import logging
+import os
+import tempfile
 from collections.abc import Mapping
 from typing import Literal
 
 import cftime
 import fsspec
+import fsspec.generic
 import numpy as np
 import xarray as xr
 import zarr
@@ -282,6 +285,11 @@ class ZarrWriter:
 
         if mode == "a" or mode == "r+":
             self._store_initialized = True if self._path_exists() else False
+        elif mode == "w-" and self._path_exists():
+            raise FileExistsError(
+                f"Path {self._path!r} already exists and cannot be overwritten "
+                f"since {mode!r}."
+            )
         else:
             self._store_initialized = False
 
@@ -365,22 +373,28 @@ class ZarrWriter:
                     "data_vars must be provided either to ZarrWriter or to "
                     "initialize()"
                 )
-            _initialize_zarr(
-                path=self._path,
-                vars=data_vars,
-                dim_sizes=dim_sizes,
-                chunks=self._chunks,
-                shards=self._shards,
-                coords=self._coords,
-                dim_names=self._dims,
-                dtype=data_dtype,
-                time_units=self._time_units,
-                time_calendar=self._time_calendar,
-                nondim_coords=self._nondim_coords,
-                array_attributes=self._array_attributes,
-                group_attributes=self._group_attributes,
-                mode=self._mode,
-            )
+            # Initialize zarr store locally in a temporary directory and then
+            # immediately rsync it to the remote path. This avoids the need for
+            # users to have delete access to the remote path.
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = os.path.join(temp_dir, "temp.zarr")
+                _initialize_zarr(
+                    path=temp_path,
+                    vars=data_vars,
+                    dim_sizes=dim_sizes,
+                    chunks=self._chunks,
+                    shards=self._shards,
+                    coords=self._coords,
+                    dim_names=self._dims,
+                    dtype=data_dtype,
+                    time_units=self._time_units,
+                    time_calendar=self._time_calendar,
+                    nondim_coords=self._nondim_coords,
+                    array_attributes=self._array_attributes,
+                    group_attributes=self._group_attributes,
+                    mode=self._mode,
+                )
+                fsspec.generic.rsync(temp_path, self._path)
             self._store_initialized = True
             self._dist.barrier()
         else:

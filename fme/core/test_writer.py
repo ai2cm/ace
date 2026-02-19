@@ -391,7 +391,14 @@ def test_ZarrWriter_already_initialized(tmp_path):
         chunks={"time": 2},
     )
 
+    def _mock_initialize_zarr(**kwargs):
+        # The logic of initialize_store requires _initialize_zarr to at least
+        # create a dummy directory at the path, so we mock that aspect here.
+        os.makedirs(kwargs["path"])
+
     with patch("fme.core.writer._initialize_zarr") as mock_initialize:
+        mock_initialize.side_effect = _mock_initialize_zarr
+
         # Initialize the store for the first time
         writer.initialize_store(data_dtype="f4", data_vars=["var"])
 
@@ -443,3 +450,12 @@ def test_ZarrWriter_initialize_error_when_no_data_vars(tmp_path):
 
     with pytest.raises(ValueError, match="data_vars must be provided"):
         writer_no_vars.initialize_store(data_dtype="f4")
+
+
+def test_ZarrWriter_raises_FileExistsError_when_path_exists_and_mode_w_minus(tmp_path):
+    """ZarrWriter raises FileExistsError if path exists and mode is 'w-'."""
+    path = os.path.join(tmp_path, "test.zarr")
+    os.makedirs(path)
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        _create_writer(path=path, n_times=4, chunks={"time": 2}, mode="w-")
