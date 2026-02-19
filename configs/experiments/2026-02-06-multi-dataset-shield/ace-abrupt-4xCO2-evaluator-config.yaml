@@ -1,0 +1,34 @@
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+logging:
+  project: ace-shield
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  entity: ai2cm
+forward_steps_in_memory: 40
+n_forward_steps: 14604
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: true
+loader:
+  dataset:
+    data_path: /climate-default/2025-03-28-vertically-resolved-1deg-c96-shield-som-abrupt-co2-increase-fme-dataset
+    file_pattern: abrupt-4xCO2.zarr
+    engine: zarr
+  start_indices:
+    times:
+    - "2020-01-01T06:00:00"
+  num_data_workers: 8
+stepper_override:
+  multi_call: null
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+    interpolate: true
+    slab:
+      mixed_layer_depth_name: prescribed_mixed_layer_depth
+      q_flux_name: prescribed_qflux
