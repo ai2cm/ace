@@ -15,6 +15,10 @@ beaker dataset fetch ${EXISTING_RESULTS_OCEAN_DATASET} --prefix config.yaml
 mv ./config.yaml ./ocean-config.yaml
 sed -i 's/statsdata/ocean_stats/g' ./ocean-config.yaml
 
+# Remove training-specific fields from loaded stepper configs
+yq -i 'del(.stepper.loss, .stepper.optimize_last_step_only, .stepper.n_ensemble, .stepper.parameter_init, .stepper.train_n_forward_step)' ./ocean-config.yaml
+yq -i 'del(.stepper.loss, .stepper.optimize_last_step_only, .stepper.n_ensemble, .stepper.parameter_init, .stepper.train_n_forward_step)' ./atmos-config.yaml
+
 # try to get sea_ice_fraction_name from step config
 SIC_NAME=$(yq '.stepper.step.config.corrector.config.sea_ice_fraction_correction.sea_ice_fraction_name' ./ocean-config.yaml)
 
