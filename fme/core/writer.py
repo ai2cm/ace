@@ -288,7 +288,7 @@ class ZarrWriter:
         elif mode == "w-" and self._path_exists():
             raise FileExistsError(
                 f"Path {self._path!r} already exists and cannot be overwritten "
-                f"since {mode!r}."
+                f"since mode is {mode!r}."
             )
         else:
             self._store_initialized = False
@@ -374,8 +374,8 @@ class ZarrWriter:
                     "initialize()"
                 )
             # Initialize zarr store locally in a temporary directory and then
-            # immediately rsync it to the remote path. This avoids the need for
-            # users to have delete access to the remote path.
+            # immediately rsync it to the final path. This avoids the need for
+            # users to have delete access on the destination filesystem.
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = os.path.join(temp_dir, "temp.zarr")
                 _initialize_zarr(
