@@ -390,7 +390,7 @@ class ZarrWriter:
                     "initialize()"
                 )
             with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = os.path.join(temp_dir, os.path.basename(self._path))
+                temp_path = os.path.join(temp_dir, "temp.zarr")
                 _initialize_zarr(
                     path=temp_path,
                     vars=data_vars,
@@ -408,7 +408,7 @@ class ZarrWriter:
                     mode=self._mode,
                 )
                 fs, *_ = fsspec.get_fs_token_paths(self._path)
-                fs.copy(temp_path, f"{os.path.dirname(self._path)}/", recursive=True)
+                fs.copy(temp_path, self._path, recursive=True)
             self._store_initialized = True
             self._dist.barrier()
         else:
