@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="ace-2pctCO2-evaluator-test"  # recommended but not required to change this
+JOB_NAME="ace-2pctCO2-evaluator-test-2"  # recommended but not required to change this
 CONFIG_FILENAME="ace-2pctCO2-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

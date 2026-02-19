@@ -1,4 +1,4 @@
-experiment_dir: gs://vcm-ml-scratch/spencerc/2026-02-18-ace-2pctCO2-evaluator-test
+experiment_dir: gs://vcm-ml-scratch/spencerc/2026-02-19-ace-2pctCO2-evaluator-test
 n_forward_steps: 32
 forward_steps_in_memory: 20
 checkpoint_path: /ckpt.tar

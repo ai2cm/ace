@@ -1,5 +1,7 @@
 import copy
 import logging
+import os
+import tempfile
 from collections.abc import Mapping
 from typing import Literal
 
@@ -205,7 +207,7 @@ def _initialize_zarr(
             dimension_names=dim_names,
             attributes=attributes,
         )
-    # zarr.consolidate_metadata(root.store)
+    zarr.consolidate_metadata(root.store)
 
 
 def _resolve_data_vars(
@@ -387,22 +389,26 @@ class ZarrWriter:
                     "data_vars must be provided either to ZarrWriter or to "
                     "initialize()"
                 )
-            _initialize_zarr(
-                path=self._path,
-                vars=data_vars,
-                dim_sizes=dim_sizes,
-                chunks=self._chunks,
-                shards=self._shards,
-                coords=self._coords,
-                dim_names=self._dims,
-                dtype=data_dtype,
-                time_units=self._time_units,
-                time_calendar=self._time_calendar,
-                nondim_coords=self._nondim_coords,
-                array_attributes=self._array_attributes,
-                group_attributes=self._group_attributes,
-                mode=self._mode,
-            )
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = os.path.join(temp_dir, "temp.zarr")
+                _initialize_zarr(
+                    path=temp_path,
+                    vars=data_vars,
+                    dim_sizes=dim_sizes,
+                    chunks=self._chunks,
+                    shards=self._shards,
+                    coords=self._coords,
+                    dim_names=self._dims,
+                    dtype=data_dtype,
+                    time_units=self._time_units,
+                    time_calendar=self._time_calendar,
+                    nondim_coords=self._nondim_coords,
+                    array_attributes=self._array_attributes,
+                    group_attributes=self._group_attributes,
+                    mode=self._mode,
+                )
+                fs, *_ = fsspec.get_fs_token_paths(self._path)
+                fs.copy(temp_path, self._path)
             self._store_initialized = True
             self._dist.barrier()
         else:
