@@ -152,6 +152,8 @@ def main(
 
     ds = ds.rename(append_config.renaming)
 
+    ds = ds.chunk(outer_chunks=dataset_config.chunking.get_chunks(standard_names))
+
     logging.info(f"Append dataset size is {ds.nbytes / 1e9} GB")
     if debug:
         with xr.set_options(display_max_rows=500):
