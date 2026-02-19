@@ -12,7 +12,11 @@ import xarray as xr
 import yaml
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from compute_dataset import DatasetComputationConfig, DatasetConfig
+from compute_dataset import (
+    DatasetComputationConfig,
+    DatasetConfig,
+    clear_compressors_encoding,
+)
 
 
 @dataclasses.dataclass
@@ -85,6 +89,44 @@ def get_variables_to_append(
     return ds
 
 
+def get_merged_ds(
+    run_directory: str,
+    append_store: str,
+    dataset_config: DatasetComputationConfig,
+    append_config: DatasetAppendConfig,
+) -> xr.Dataset:
+    urls = get_dataset_urls(append_config, run_directory)
+
+    ds_temp = open_datasets(append_config, urls)
+
+    ds = xr.Dataset()
+
+    output_ds = xr.open_zarr(append_store)
+    output_ds = output_ds.assign_coords(
+        latitude=ds_temp.latitude,
+        longitude=ds_temp.longitude,
+    )
+
+    for variable in ds_temp.keys():
+        ds[variable] = ds_temp[variable].sel(
+            time=slice(append_config.start_date, append_config.end_date)
+        )
+    for variable in output_ds.data_vars:
+        if variable == "surface_temperature":
+            ds["sea_surface_temperature"] = output_ds[variable].sel(
+                time=slice(append_config.start_date, append_config.end_date)
+            )
+        else:
+            if variable not in ds:
+                if output_ds[variable].dims == ("time", "latitude", "longitude"):
+                    ds[variable] = output_ds[variable].sel(
+                        time=slice(append_config.start_date, append_config.end_date)
+                    )
+                else:
+                    ds[variable] = output_ds[variable]
+    return ds
+
+
 @click.command()
 @click.option("--dataset-config", help="Path to dataset configuration YAML file.")
 @click.option("--append-config", help="Path to append configuration YAML file.")
@@ -96,16 +138,24 @@ def get_variables_to_append(
     "--append-store", help="Path to an existing zarr store that will be appended."
 )
 @click.option("--debug", is_flag=True, help="Print metadata instead of writing output.")
+@click.option(
+    "--override-store-name",
+    required=False,
+    help="Override the location of where to save the store",
+)
 def main(
     dataset_config,
     append_config,
     run_directory,
     append_store,
     debug,
+    override_store_name,
 ):
+    import distributed
     import xpartition  # noqa: F401
 
     logging.basicConfig(level=logging.INFO)
+    distributed.Client(n_workers=16)
 
     dataset_config = DatasetConfig.from_file(dataset_config).dataset_computation
     append_config = DatasetAppendConfig.from_file(append_config)
@@ -117,7 +167,7 @@ def main(
 
     standard_names = dataset_config.standard_names
 
-    ds = get_variables_to_append(
+    ds = get_merged_ds(
         run_directory,
         append_store,
         dataset_config,
@@ -152,14 +202,24 @@ def main(
 
     ds = ds.rename(append_config.renaming)
 
-    ds = ds.chunk(outer_chunks=dataset_config.chunking.get_chunks(standard_names))
+    ds = clear_compressors_encoding(ds)
 
     logging.info(f"Append dataset size is {ds.nbytes / 1e9} GB")
     if debug:
         with xr.set_options(display_max_rows=500):
             logging.info(ds)
     else:
-        ds.partition.initialize_store(append_store, inner_chunks=inner_chunks, mode="a")
+        ds = ds.chunk({"time": 1, "latitude": -1, "longitude": -1})
+        if override_store_name is not None:
+            append_store = override_store_name
+            ds.partition.initialize_store(append_store, inner_chunks=inner_chunks)
+        else:
+            ds.partition.initialize_store(
+                append_store, inner_chunks=inner_chunks, mode="a"
+            )
+        logging.info(
+            f"Appending dataset to {append_store} with inner chunks {inner_chunks}"
+        )
         for i in range(dataset_config.n_split):
             segment_number = f"{i + 1} / {dataset_config.n_split}"
             logging.info(f"Writing segment {segment_number}")
