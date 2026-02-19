@@ -100,6 +100,8 @@ class SingleModuleStepperConfig:
         loss: The loss configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
+        prescribed_prognostic_names: Prognostic variable names to overwrite from
+            forcing data at each step during inference.
         loss_normalization: The normalization configuration for the loss.
         residual_normalization: Optional alternative to configure loss normalization.
             If provided, it will be used for all *prognostic* variables in loss scaling.
@@ -123,6 +125,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     loss_normalization: NormalizationConfig | None = None
     residual_normalization: NormalizationConfig | None = None
     multi_call: MultiCallConfig | None = None
@@ -130,6 +133,12 @@ class SingleModuleStepperConfig:
     residual_prediction: bool = False
 
     def __post_init__(self):
+        for name in self.prescribed_prognostic_names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
         for name in self.next_step_forcing_names:
             if name not in self.in_names:
                 raise ValueError(
@@ -300,6 +309,7 @@ class SingleModuleStepperConfig:
             ocean=self.ocean,
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
+            prescribed_prognostic_names=self.prescribed_prognostic_names,
             residual_prediction=self.residual_prediction,
         )
 
@@ -715,6 +725,15 @@ class StepperConfig:
     def get_ocean(self) -> OceanConfig | None:
         return self.step.get_ocean()
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint).
+
+        Used for inference / evaluation where the trained ckpt does not contain
+        prescribed_prognostic_names and we need to overwrite
+        prescribed_prognostic_names.
+        """
+        self.step.replace_prescribed_prognostic_names(names)
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -825,20 +844,6 @@ class Stepper:
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
 
-        def get_loss_obj() -> StepLoss:
-            loss_normalizer = step.get_loss_normalizer()
-            if config.loss is None:
-                raise ValueError("Loss is not configured")
-            return config.loss.build(
-                dataset_info.gridded_operations,
-                out_names=config.loss_names,
-                channel_dim=self.CHANNEL_DIM,
-                normalizer=loss_normalizer,
-            )
-
-        self._get_loss_obj = get_loss_obj
-        self._loss_obj: StepLoss | None = None
-
         self._parameter_initializer.apply_weights(
             step.modules,
         )
@@ -865,11 +870,24 @@ class Stepper:
         self._dataset_info = dataset_info
         self.forcing_deriver = config.derived_forcings.build(dataset_info)
 
-    @property
-    def loss_obj(self) -> StepLoss:
-        if self._loss_obj is None:
-            self._loss_obj = self._get_loss_obj()
-        return self._loss_obj
+    def build_loss(self, loss_config: StepLossConfig) -> StepLoss:
+        """Build a StepLoss from the given config using this stepper's normalizer
+        and dataset info.
+
+        Args:
+            loss_config: The loss configuration to build from.
+
+        Returns:
+            A StepLoss built using this stepper's loss normalizer, gridded
+            operations, loss variable names, and channel dimension.
+        """
+        loss_normalizer = self._step_obj.get_loss_normalizer()
+        return loss_config.build(
+            self._dataset_info.gridded_operations,
+            out_names=self.loss_names,
+            channel_dim=self.CHANNEL_DIM,
+            normalizer=loss_normalizer,
+        )
 
     @property
     def config(self) -> StepperConfig:
@@ -930,15 +948,6 @@ class Stepper:
         if base_training_history is not None:
             self._training_history.extend(base_training_history)
 
-    @property
-    def effective_loss_scaling(self) -> TensorDict:
-        """
-        Effective loss scalings used to normalize outputs before computing loss.
-        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
-        where loss_scaling_i = loss_normalizer_std_i / weight_i.
-        """
-        return self.loss_obj.effective_loss_scaling
-
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         """
         Replace the MultiCall object with a new one. Note this is only
@@ -964,6 +973,21 @@ class Stepper:
             ocean: The new ocean model configuration or None.
         """
         self._config.replace_ocean(ocean)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+            apply_parameter_init=False,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
+
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """
+        Replace prescribed prognostic names (e.g. when loading from checkpoint).
+
+        Args:
+            names: The new list of prescribed prognostic variable names.
+        """
+        self._config.replace_prescribed_prognostic_names(names)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
             apply_parameter_init=False,
@@ -1475,7 +1499,7 @@ class TrainStepper(
 
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
-        self._loss_obj = self._stepper.loss_obj
+        self._loss_obj = self._stepper.build_loss(config.loss)
 
     def train_on_batch(
         self,
@@ -1663,7 +1687,7 @@ class TrainStepper(
         y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
         where loss_scaling_i = loss_normalizer_std_i / weight_i.
         """
-        return self._stepper.effective_loss_scaling
+        return self._loss_obj.effective_loss_scaling
 
     def _init_for_epoch(self, epoch: int | None):
         if (
@@ -1729,11 +1753,14 @@ class StepperOverrideConfig:
             serialized stepper.
         derived_forcings: Derived forcings configuration to override that used in
             producing a serialized stepper.
+        prescribed_prognostic_names: List of prognostic variable names to overwrite
+            from forcing at each step during inference.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
+    prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
 
 
 def load_stepper_config(
@@ -1795,4 +1822,13 @@ def load_stepper(
             "derived_forcings configuration."
         )
         stepper.replace_derived_forcings(override_config.derived_forcings)
+
+    if override_config.prescribed_prognostic_names != "keep":
+        logging.info(
+            "Overriding prescribed_prognostic_names with %s.",
+            override_config.prescribed_prognostic_names,
+        )
+        stepper.replace_prescribed_prognostic_names(
+            override_config.prescribed_prognostic_names
+        )
     return stepper
