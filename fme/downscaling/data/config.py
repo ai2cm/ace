@@ -5,9 +5,9 @@ from torch.utils.data import DataLoader, Dataset, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.dataset.concat import XarrayConcat, get_dataset
+from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.dataset import DatasetABC
-from fme.core.dataset.merged import MergeNoConcatDatasetConfig, get_merged_datasets
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
@@ -86,6 +86,10 @@ class XarrayEnsembleDataConfig:
             )
         return configs
 
+    @property
+    def zarr_engine_used(self) -> bool:
+        return self.data_config.zarr_engine_used
+
 
 def build_from_config_sequence(
     configs: Sequence[
@@ -102,22 +106,11 @@ def build_from_config_sequence(
             expanded.extend(config.expand())
         else:
             expanded.append(config)
-    xarray_configs = [c for c in expanded if isinstance(c, XarrayDataConfig)]
-    merge_configs = [c for c in expanded if isinstance(c, MergeNoConcatDatasetConfig)]
     datasets: list[DatasetABC] = []
     properties: DatasetProperties | None = None
-    if xarray_configs:
-        ds, prop = get_dataset(
-            xarray_configs,
-            names,
-            n_timesteps,
-            strict=strict_ensemble,
-        )
+    for config in expanded:
+        ds, prop = config.build(names, n_timesteps)
         datasets.append(ds)
-        properties = prop
-    for config in merge_configs:
-        merged_ds, prop = get_merged_datasets(config, names, n_timesteps)
-        datasets.append(merged_ds)
         if properties is None:
             properties = prop
         else:
@@ -125,6 +118,23 @@ def build_from_config_sequence(
     if properties is None:
         raise ValueError("At least one dataset must be provided.")
     return XarrayConcat(datasets, strict=strict_ensemble), properties
+
+
+def _full_configs(
+    configs: Sequence[
+        XarrayDataConfig | MergeNoConcatDatasetConfig | XarrayEnsembleDataConfig
+    ],
+) -> list[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+    """Expands XarrayEnsembleDataConfig to multiple XarrayDataConfig;
+    other configs are unchanged.
+    """
+    all_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = []
+    for config in configs:
+        if isinstance(config, XarrayEnsembleDataConfig):
+            all_configs += config.expand()
+        else:
+            all_configs.append(config)
+    return all_configs
 
 
 @dataclasses.dataclass
@@ -188,13 +198,7 @@ class DataLoaderConfig:
 
     @property
     def full_config(self) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
-        all_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = []
-        for config in self.coarse:
-            if isinstance(config, XarrayEnsembleDataConfig):
-                all_configs += config.expand()
-            else:
-                all_configs.append(config)
-        return all_configs
+        return _full_configs(self.coarse)
 
     @property
     def mp_context(self):
@@ -202,11 +206,7 @@ class DataLoaderConfig:
         if self.num_data_workers == 0:
             return None
         for config in self.full_config:
-            if isinstance(config, XarrayDataConfig):
-                if config.engine == "zarr":
-                    context = "forkserver"
-                    break
-            elif getattr(config, "zarr_engine_used", False):
+            if config.zarr_engine_used is True:
                 context = "forkserver"
                 break
         return context
@@ -434,39 +434,21 @@ class PairedDataLoaderConfig:
         mp_context = None
         if self.num_data_workers == 0:
             return None
-        for config in self.fine:
-            if getattr(config, "engine", None) == "zarr" or getattr(
-                config, "zarr_engine_used", False
-            ):
+        for fine_config in self.fine:
+            if fine_config.zarr_engine_used is True:
                 mp_context = "forkserver"
                 break
-        if mp_context is None:
-            for coarse_config in self.coarse:
-                if isinstance(coarse_config, XarrayEnsembleDataConfig):
-                    if coarse_config.data_config.engine == "zarr":
-                        mp_context = "forkserver"
-                        break
-                elif getattr(coarse_config, "engine", None) == "zarr" or getattr(
-                    coarse_config, "zarr_engine_used", False
-                ):
-                    mp_context = "forkserver"
-                    break
+        for coarse_config in self.coarse:
+            if coarse_config.zarr_engine_used is True:
+                mp_context = "forkserver"
+                break
         return mp_context
 
     @property
     def coarse_full_config(
         self,
     ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
-        """Expands XarrayEnsembleDataConfig to XarrayDataConfig;
-        other configs unchanged.
-        """
-        coarse_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = []
-        for config in self.coarse:
-            if isinstance(config, XarrayEnsembleDataConfig):
-                coarse_configs.extend(config.expand())
-            else:
-                coarse_configs.append(config)
-        return coarse_configs
+        return _full_configs(self.coarse)
 
     def build(
         self,
