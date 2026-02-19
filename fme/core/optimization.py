@@ -215,11 +215,12 @@ class Optimization(OptimizationABC):
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
 
     def _validate_loss(self, loss: torch.Tensor):
+        dist = Distributed.get_instance()
         with torch.no_grad():
-            if torch.isnan(loss):
-                dist = Distributed.get_instance()
-                if dist.is_distributed():
-                    dist.shutdown()
+            is_nan = torch.isnan(loss).float()
+
+            dist.reduce_sum(is_nan)
+            if is_nan.item() > 0:
                 raise ValueError("Loss is NaN-valued during training.")
 
 
