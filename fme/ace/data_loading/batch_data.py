@@ -484,7 +484,7 @@ class PairedData:
 
     def broadcast_ensemble(self, n_ensemble: int) -> "PairedData":
         """
-        Add an explicit ensemble dimension to a data tensor dict.
+        Add an explicit ensemble dimension to a PairedData tensors.
 
         Returns:
             The tensor dict with an explicit ensemble dimension.

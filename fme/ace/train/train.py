@@ -118,6 +118,9 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     inference_n_forward_steps = config.inference_n_forward_steps
     record_step_20 = inference_n_forward_steps >= 20
 
+    n_ensemble_per_ic = (
+        config.inference.n_ensemble_per_ic if config.inference is not None else 1
+    )
     aggregator_builder = AggregatorBuilder(
         train_config=config.train_aggregator,
         inference_config=config.inference_aggregator,
@@ -131,6 +134,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         normalize=stepper.normalizer.normalize,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         validation_config=config.validation_aggregator,
+        n_ensemble_per_ic=n_ensemble_per_ic,
     )
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type
@@ -195,6 +199,7 @@ class AggregatorBuilder(
         validation_config: OneStepAggregatorConfig = dataclasses.field(
             default_factory=lambda: OneStepAggregatorConfig(),
         ),
+        n_ensemble_per_ic: int = 1,
     ):
         self.train_config = train_config
         self.inference_config = inference_config
@@ -208,6 +213,7 @@ class AggregatorBuilder(
         self.output_dir = output_dir
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
         self.validation_config = validation_config
+        self.n_ensemble_per_ic = n_ensemble_per_ic
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator(
@@ -237,6 +243,7 @@ class AggregatorBuilder(
                 normalize=self.normalize,
                 save_diagnostics=self.save_per_epoch_diagnostics,
                 output_dir=os.path.join(self.output_dir, "inference"),
+                n_ensemble_per_ic=self.n_ensemble_per_ic,
             )
         else:
             raise ValueError(
