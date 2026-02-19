@@ -6,10 +6,8 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace-som
+  project: ace
   entity: ai2cm
-aggregator:
-  log_zonal_mean_images: false
 forcing_loader:
   dataset:
     data_path:  /climate-default/2025-03-22-vertically-resolved-1deg-c96-shield-som-3d-radiative-heating-rates-increasing-co2-fme-dataset
