@@ -1,6 +1,6 @@
 experiment_dir: /results
-n_coupled_steps: 2920
-coupled_steps_in_memory: 20
+n_coupled_steps: 146
+coupled_steps_in_memory: 2
 checkpoint_path: /ckpt.tar
 aggregator:
   log_histograms: true
