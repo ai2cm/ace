@@ -13,7 +13,8 @@ def test_gather_tensor_from_local_slices():
     "batch" parallelism in this test.
     """
     dist = Distributed.get_instance()
-    global_shape = (2, 4, 4)
+    n_dp = dist.total_data_parallel_ranks
+    global_shape = (2 * n_dp, 4, 4)
     x_global = (
         torch.arange(np.prod(global_shape), device=get_device()).reshape(global_shape)
         + 1
@@ -40,13 +41,14 @@ def test_local_slices_subdivide_domain():
     "batch" parallelism in this test.
     """
     dist = Distributed.get_instance()
-    global_shape = (2, 4, 4)
+    n_dp = dist.total_data_parallel_ranks
+    global_shape = (2 * n_dp, 4, 4)
     x_global = torch.zeros(global_shape, device=get_device())
     local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
     gathered_local_slices = dist.gather_object(local_slices)
     if dist.is_root():
         assert gathered_local_slices is not None
-        for i in range(dist.world_size):
+        for i in range(n_dp):
             x_global[gathered_local_slices[i]] += 1.0
         torch.testing.assert_close(
             x_global, torch.ones_like(x_global)
@@ -60,7 +62,8 @@ def test_gather_global_tensor():
     Test that gather_object and gather_global produce consistent results.
     """
     dist = Distributed.get_instance()
-    global_shape = (2, 4, 4)
+    n_dp = dist.total_data_parallel_ranks
+    global_shape = (2 * n_dp, 4, 4)
     x_global = torch.arange(np.prod(global_shape), device=get_device()).reshape(
         global_shape
     )
@@ -80,7 +83,8 @@ def test_local_slices_match_gather_tensors():
     Test that gather_object and gather produce consistent results.
     """
     dist = Distributed.get_instance()
-    global_shape = (2, 4, 4)
+    n_dp = dist.total_data_parallel_ranks
+    global_shape = (2 * n_dp, 4, 4)
     x_global = torch.arange(np.prod(global_shape), device=get_device()).reshape(
         global_shape
     )
