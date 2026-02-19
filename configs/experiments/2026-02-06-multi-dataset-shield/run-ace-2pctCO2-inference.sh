@@ -13,10 +13,10 @@ MAIN_FORCING_PATH=increasing-CO2.zarr
 
 declare -A MODELS=( \
     [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
-    # [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
-    # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
-    # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
-    # [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
+    [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
+    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
+    [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
