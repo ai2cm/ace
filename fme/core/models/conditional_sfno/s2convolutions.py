@@ -223,7 +223,38 @@ class SpectralConvS2(nn.Module):
 
         if bias:
             self.bias = nn.Parameter(torch.zeros(1, out_channels, 1, 1))
+        self.in_channels = in_channels
         self.out_channels = out_channels
+
+        # rewrite old checkpoints on load
+        self.register_load_state_dict_pre_hook(self._add_singleton_group_dim)
+
+    @staticmethod
+    def _add_singleton_group_dim(
+        module: "SpectralConvS2",
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict,
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        key = prefix + "weight"
+        if key not in state_dict:
+            return
+
+        weight = state_dict[key]
+
+        ungrouped_shape = (
+            module.in_channels,
+            module.out_channels,
+            module.modes_lat_local,
+            2,
+        )
+
+        if weight.shape == ungrouped_shape:
+            state_dict[key] = weight.view(1, *ungrouped_shape)
 
     def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
