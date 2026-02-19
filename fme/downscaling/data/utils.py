@@ -5,26 +5,9 @@ from collections.abc import Sequence
 import torch
 
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.time import TimeSlice
-from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import get_device
 from fme.core.metrics import spherical_area_weights
-
-
-def replace_config_subset(
-    config: XarrayDataConfig | MergeNoConcatDatasetConfig, subset: TimeSlice
-) -> XarrayDataConfig | MergeNoConcatDatasetConfig:
-    if isinstance(config, XarrayDataConfig):
-        return dataclasses.replace(config, subset=subset)
-    elif isinstance(config, MergeNoConcatDatasetConfig):
-        merge_configs = [
-            dataclasses.replace(_config, subset=subset) for _config in config.merge
-        ]
-        return MergeNoConcatDatasetConfig(merge=merge_configs)
-    else:
-        raise ValueError(f"Invalid config type: {type(config)}")
 
 
 def null_generator(num: int):

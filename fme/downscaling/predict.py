@@ -24,7 +24,6 @@ from fme.downscaling.data import (
     StaticInputs,
     enforce_lat_bounds,
 )
-from fme.downscaling.data.utils import replace_config_subset
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predictors import (
     CascadePredictor,
@@ -98,9 +97,8 @@ class EventConfig:
         static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
         enforce_lat_bounds(self.lat_extent)
-        event_coarse = replace_config_subset(
-            base_data_config.full_config[0], self._time_selection_slice
-        )
+        event_coarse = dataclasses.replace(base_data_config.full_config[0])
+        event_coarse.update_subset(self._time_selection_slice)
         n_processes = Distributed.get_instance().world_size
         event_data_config = dataclasses.replace(
             base_data_config,
