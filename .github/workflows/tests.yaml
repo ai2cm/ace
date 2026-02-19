@@ -134,4 +134,5 @@ jobs:
             source .venv/bin/activate
             export PATH=/usr/local/nvidia/bin:${PATH}
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+            export TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
             python3 -m fme.core.benchmark.run --wandb-project ai2cm/fme-core-benchmarks-ci
