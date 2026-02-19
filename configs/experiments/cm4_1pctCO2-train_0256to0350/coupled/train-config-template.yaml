@@ -56,63 +56,63 @@ train_loader:
   num_data_workers: 2
   prefetch_factor: 2
   dataset:
-    - ocean:
-        merge:
-          - data_path: /climate-default
-            file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
-            engine: zarr
-            subset:
-              start_time: '0256-01-03T12:00:00'
-          - data_path: /climate-default
-            file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
-            engine: zarr
-            subset:
-              start_time: '0256-01-03T12:00:00'
-      atmosphere:
-        merge:
-          - data_path: /climate-default
-            file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
-            engine: zarr
-            subset:
-              start_time: '0256-01-03T12:00:00'
-          - data_path: /climate-default
-            file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
-            engine: zarr
-            subset:
-              start_time: '0256-01-03T12:00:00'
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0256-01-03T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+          engine: zarr
+          subset:
+            start_time: '0256-01-03T12:00:00'
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
+          engine: zarr
+          subset:
+            start_time: '0256-01-03T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+          subset:
+            start_time: '0256-01-03T12:00:00'
 validation_loader:
   batch_size: 16
   num_data_workers: 2
   prefetch_factor: 2
   dataset:
-    - ocean:
-        merge:
-          - data_path: /climate-default
-            file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
-            engine: zarr
-            subset:
-              start_time: '0251-01-03T12:00:00'
-              stop_time: '0255-12-29T12:00:00'
-          - data_path: /climate-default
-            file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
-            engine: zarr
-            subset:
-              start_time: '0251-01-03T12:00:00'
-              stop_time: '0255-12-29T12:00:00'
-      atmosphere:
-        merge:
-          - data_path: /climate-default
-            file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
-            engine: zarr
-            subset:
-              start_time: '0251-01-03T12:00:00'
-              stop_time: '0255-12-29T12:00:00'
-          - data_path: /climate-default
-            file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
-            engine: zarr
-            subset:
-              start_time: '0251-01-03T12:00:00'
-              stop_time: '0255-12-29T12:00:00'
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
@@ -134,9 +134,19 @@ optimization:
     milestones: [2000]
 train_stepper:
   ocean:
+    parameter_init:
+      weights_path: /ocean_ckpt.tar
     loss:
       type: MSE
   atmosphere:
+    parameter_init:
+      weights_path: /atmos_ckpt.tar
+      parameters:
+        - frozen:
+            include:
+              - '*'
+    loss_contributions:
+      n_steps: 0
     loss:
       type: MSE
       weights:
@@ -160,8 +170,6 @@ train_stepper:
         DSWRFsfc: 2
         USWRFtoa: 2
         tendency_of_total_water_path_due_to_advection: 0.5
-    loss_contributions:
-      n_steps: 0
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
@@ -169,15 +177,7 @@ stepper:
   sst_name: sst
   ocean:
     timedelta: 5D
-    stepper:
-      parameter_init:
-        weights_path: /ocean_ckpt.tar
+    # stepper added by job_runner/create_coupled_train_config.sh
   atmosphere:
     timedelta: 6h
-    stepper:
-      parameter_init:
-        weights_path: /atmos_ckpt.tar
-        parameters:
-          - frozen:
-              include:
-                - '*'
+    # stepper added by job_runner/create_coupled_train_config.sh
