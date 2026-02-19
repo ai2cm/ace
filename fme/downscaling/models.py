@@ -112,7 +112,6 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
-    static_inputs: dict[str, str] | None = None
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
