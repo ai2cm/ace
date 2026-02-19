@@ -39,11 +39,21 @@ def run_coupled_dataset_comparison(
     deriver: CoupledDeriverABC,
     writer: CoupledPairedDataWriter | NullDataWriter | None = None,
     record_logs: Callable[[InferenceLogs], None] | None = None,
+    restrict_to_output_names: tuple[list[str], list[str]] | None = None,
 ) -> None:
     if record_logs is None:
         record_logs = get_record_to_wandb(label="inference")
     if writer is None:
         writer = NullDataWriter()
+
+    def _restrict_to_output_names(batch: CoupledBatchData) -> CoupledBatchData:
+        if restrict_to_output_names is None:
+            return batch
+        ocean_names, atmosphere_names = restrict_to_output_names
+        return CoupledBatchData(
+            ocean_data=batch.ocean_data.subset_names(ocean_names),
+            atmosphere_data=batch.atmosphere_data.subset_names(atmosphere_names),
+        )
 
     timer = GlobalTimer.get_instance()
     timer.start("data_loading")
@@ -55,6 +65,8 @@ def run_coupled_dataset_comparison(
             with timer.context("aggregator"):
                 pred_ic = prediction_data.initial_condition.as_batch_data()
                 target_ic = target_data.initial_condition.as_batch_data()
+                pred_ic = _restrict_to_output_names(pred_ic)
+                target_ic = _restrict_to_output_names(target_ic)
                 logs = aggregator.record_initial_condition(
                     initial_condition=CoupledPairedData(
                         ocean_data=PairedData.from_batch_data(
@@ -77,6 +89,8 @@ def run_coupled_dataset_comparison(
         )
         pred = deriver.get_forward_data(pred, compute_derived_variables=True)
         target = deriver.get_forward_data(target, compute_derived_variables=True)
+        pred = _restrict_to_output_names(pred)
+        target = _restrict_to_output_names(target)
         paired_data = CoupledPairedData.from_coupled_batch_data(
             prediction=pred,
             reference=target,

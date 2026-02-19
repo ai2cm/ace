@@ -386,6 +386,10 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             deriver=deriver,
             writer=writer,
             record_logs=record_logs,
+            restrict_to_output_names=(
+                stepper.ocean.out_names,
+                stepper.atmosphere.out_names,
+            ),
         )
     else:
         run_inference(
