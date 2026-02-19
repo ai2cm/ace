@@ -7,6 +7,7 @@ from typing import Literal
 
 import cftime
 import fsspec
+import fsspec.generic
 import numpy as np
 import xarray as xr
 import zarr
