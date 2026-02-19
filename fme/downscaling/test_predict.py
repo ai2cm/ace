@@ -103,8 +103,7 @@ def create_predictor_config(
     return out_path
 
 
-@pytest.mark.parametrize("static_inputs_on_model", [True])
-def test_predictor_runs(static_inputs_on_model, tmp_path, very_fast_only: bool):
+def test_predictor_runs(tmp_path, very_fast_only: bool):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
     n_samples = 2
@@ -124,29 +123,28 @@ def test_predictor_runs(static_inputs_on_model, tmp_path, very_fast_only: bool):
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
     )
 
-    if static_inputs_on_model:
-        # ensure model static inputs shape is consistent with the test data
-        fine_data = xr.load_dataset(predictor_config["data"]["topography"])
-        topo_data = fine_data["HGTsfc"]
-        model.static_inputs = StaticInputs(
-            [
-                StaticInput(
-                    data=torch.randn(topo_data.shape[-2:]),
-                    coords=LatLonCoordinates(
-                        lat=torch.tensor(topo_data.lat.values),
-                        lon=torch.tensor(topo_data.lon.values),
-                    ),
-                )
-            ]
-        )
-        # overwrite dataset removing HGTsfc (fine data path is same as topography path)
-        fine_data.drop_vars("HGTsfc").to_netcdf(
-            predictor_config["data"]["topography"], mode="w"
-        )
-        # overwrite config to remove topography path
-        predictor_config["data"]["topography"] = None
-        with open(predictor_config_path, "w") as f:
-            yaml.dump(predictor_config, f)
+    # ensure model static inputs shape is consistent with the test data
+    fine_data = xr.load_dataset(predictor_config["data"]["topography"])
+    topo_data = fine_data["HGTsfc"]
+    model.static_inputs = StaticInputs(
+        [
+            StaticInput(
+                data=torch.randn(topo_data.shape[-2:]),
+                coords=LatLonCoordinates(
+                    lat=torch.tensor(topo_data.lat.values),
+                    lon=torch.tensor(topo_data.lon.values),
+                ),
+            )
+        ]
+    )
+    # overwrite dataset removing HGTsfc (fine data path is same as topography path)
+    fine_data.drop_vars("HGTsfc").to_netcdf(
+        predictor_config["data"]["topography"], mode="w"
+    )
+    # overwrite config to remove topography path
+    predictor_config["data"]["topography"] = None
+    with open(predictor_config_path, "w") as f:
+        yaml.dump(predictor_config, f)
 
     torch.save(
         {

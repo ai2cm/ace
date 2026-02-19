@@ -74,7 +74,7 @@ class PairedNormalizationConfig:
 
 @dataclasses.dataclass
 class DiffusionModelConfig:
-    f"""
+    """
     This class implements or wraps the algorithms described in `EDM`_.
 
     .. _EDM: https://arxiv.org/abs/2206.00364
