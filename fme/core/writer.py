@@ -285,7 +285,7 @@ class ZarrWriter:
 
         if mode == "a" or mode == "r+":
             self._store_initialized = True if self._path_exists() else False
-        elif mode == "w-" and self._path_exists():
+        elif self._dist.is_root() and mode == "w-" and self._path_exists():
             raise FileExistsError(
                 f"Path {self._path!r} already exists and cannot be overwritten "
                 f"since mode is {mode!r}."
