@@ -1,0 +1,33 @@
+experiment_dir: PLACEHOLDER
+checkpoint_path: /ckpt.tar
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+logging:
+  project: ace-shield
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  entity: ai2cm
+forward_steps_in_memory: 40
+n_forward_steps: 0
+forcing_loader:
+  dataset:
+    data_path: PLACEHOLDER
+  num_data_workers: 8
+initial_condition:
+  path: PLACEHOLDER
+  start_indices:
+    times: []
+# It should be safe to use the same stepper override even when using the
+# published baseline model, since its slab ocean model was configured
+# identically; in other words this override is a no-op in that case.
+stepper_override:
+  multi_call: null
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+    interpolate: true
+    slab:
+      mixed_layer_depth_name: prescribed_mixed_layer_depth
+      q_flux_name: prescribed_qflux
