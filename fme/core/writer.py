@@ -408,7 +408,7 @@ class ZarrWriter:
                     mode=self._mode,
                 )
                 fs, *_ = fsspec.get_fs_token_paths(self._path)
-                fs.copy(temp_path, self._path)
+                fs.copy(temp_path, self._path, recursive=True)
             self._store_initialized = True
             self._dist.barrier()
         else:
