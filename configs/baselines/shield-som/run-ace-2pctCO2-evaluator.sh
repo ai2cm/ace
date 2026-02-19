@@ -2,16 +2,16 @@
 
 set -e
 
-JOB_NAME="ace-2pctCO2-evaluator"  # recommended but not required to change this
+JOB_NAME="ace-2pctCO2-evaluator-test-remote-zarr-write"  # recommended but not required to change this
 CONFIG_FILENAME="ace-2pctCO2-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+BEAKER_USERNAME=spencerc_ai2
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-EXISTING_RESULTS_DATASET="PLACEHOLDER"  # this contains the checkpoint to use for inference
-CHECKPOINT_PATH=fine-tune-with-multi-call/training_checkpoints/best_inference_ckpt.tar
+EXISTING_RESULTS_DATASET="01J4BR6J5AW32ZDQ77VZ60P4KT"  # this contains the checkpoint to use for inference
+CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -20,12 +20,10 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run ACE 2pctCO2 evaluator' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority normal \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --not-preemptible \
-    --cluster ai2/saturn-cirrascale \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --cluster ai2/ceres-cirrascale \
+    --cluster ai2/jupiter \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
