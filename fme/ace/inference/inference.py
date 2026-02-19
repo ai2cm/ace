@@ -430,5 +430,5 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
             with GlobalTimer():
                 run_inference_from_config(config_copy)
         config_copy.initial_condition = InitialConditionConfig(
-            path=restart_path, engine="netcdf4"
+            path=restart_path, engine="h5netcdf"
         )
