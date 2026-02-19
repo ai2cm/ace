@@ -407,8 +407,7 @@ class ZarrWriter:
                     group_attributes=self._group_attributes,
                     mode=self._mode,
                 )
-                fs, *_ = fsspec.get_fs_token_paths(self._path)
-                fs.copy(temp_path, self._path, recursive=True)
+                fsspec.generic.rsync(temp_path, self._path)
             self._store_initialized = True
             self._dist.barrier()
         else:
