@@ -482,19 +482,53 @@ class PairedData:
     def target(self) -> TensorMapping:
         return {k: v for k, v in self.reference.items() if k in self.prediction}
 
-    def broadcast_ensemble(self) -> tuple[EnsembleTensorDict, EnsembleTensorDict]:
+    def broadcast_ensemble(self, n_ensemble: int) -> "PairedData":
         """
         Add an explicit ensemble dimension to a data tensor dict.
 
         Returns:
             The tensor dict with an explicit ensemble dimension.
         """
-        return (
-            unfold_ensemble_dim(TensorDict(self.reference), n_ensemble=1),
-            unfold_ensemble_dim(
-                TensorDict(self.prediction), n_ensemble=self.n_ensemble
-            ),
+        if self.n_ensemble != 1:
+            raise ValueError(
+                "Can only broadcast singleton ensembles, but this PairedData has "
+                f"n_ensemble={self.n_ensemble} and cannot be broadcast."
+            )
+        prediction = repeat_interleave_batch_dim(self.prediction, n_ensemble)
+        reference = repeat_interleave_batch_dim(self.reference, n_ensemble)
+        time = xr.concat([self.time] * n_ensemble, dim="sample")
+        if self.labels is None:
+            labels = None
+        else:
+            labels = BatchLabels(
+                torch.repeat_interleave(self.labels.tensor, n_ensemble, dim=0),
+                self.labels.names,
+            )
+        return PairedData(
+            prediction={k: v.to(get_device()) for k, v in prediction.items()},
+            reference={k: v.to(get_device()) for k, v in reference.items()},
+            time=time,
+            labels=labels,
+            n_ensemble=n_ensemble,
         )
+
+    def as_ensemble_tensor_dicts(
+        self, n_ensemble: int
+    ) -> tuple[EnsembleTensorDict, EnsembleTensorDict]:
+        """
+        Unfold the batch dimension into an explicit ensemble dimension.
+
+        Returns:
+            (unfolded_reference, unfolded_prediction) for use with ensemble
+            aggregators. Each has shape (n_batch, n_ensemble, ...).
+        """
+        unfolded_reference = unfold_ensemble_dim(
+            TensorDict(self.reference), n_ensemble=n_ensemble
+        )
+        unfolded_prediction = unfold_ensemble_dim(
+            TensorDict(self.prediction), n_ensemble=n_ensemble
+        )
+        return (unfolded_reference, unfolded_prediction)
 
     @classmethod
     def from_batch_data(

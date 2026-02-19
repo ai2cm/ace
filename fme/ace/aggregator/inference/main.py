@@ -445,7 +445,9 @@ class InferenceEvaluatorAggregator(
                 i_time_start=self._n_timesteps_seen,
             )
         if self.n_ensemble_per_ic > 1:
-            unfolded_target_data, unfolded_prediction_data = data.broadcast_ensemble()
+            unfolded_target_data, unfolded_prediction_data = (
+                data.as_ensemble_tensor_dicts(data.n_ensemble)
+            )
             for ensemble_aggregator in self._ensemble_aggregators.values():
                 ensemble_aggregator.record_batch(
                     target_data=unfolded_target_data,

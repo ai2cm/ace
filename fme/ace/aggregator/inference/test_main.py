@@ -50,28 +50,30 @@ def test_inference_evaluator_aggregator_channel_mean_names(
         n_ensemble_per_ic=n_ensemble,
     )
 
-    target_data = {
+    target_dict = {
         "a": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()),
         "b": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 3,
         "c": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 4,
     }
-    gen_data = {
+    gen_dict = {
         "a": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 2.0,
         "b": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 5,
         "c": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 6,
     }
 
-    time = xr.DataArray(
-        np.zeros((batch_size * n_ensemble, n_timesteps)), dims=["sample", "time"]
+    # Time must have shape (batch_size, n_timesteps) to match data; broadcast_ensemble
+    # will expand both to (batch_size * n_ensemble, n_timesteps).
+    time = xr.DataArray(np.zeros((batch_size, n_timesteps)), dims=["sample", "time"])
+
+    target_batch = BatchData(data=target_dict, time=time)
+    gen_batch = BatchData(data=gen_dict, time=time)
+
+    target_batch = target_batch.broadcast_ensemble(n_ensemble=n_ensemble)
+    gen_batch = gen_batch.broadcast_ensemble(n_ensemble=n_ensemble)
+
+    paired_data = PairedData.from_batch_data(
+        prediction=gen_batch, reference=target_batch
     )
-
-    target_data = BatchData(data=target_data, time=time)
-    gen_data = BatchData(data=gen_data, time=time)
-
-    target_data = target_data.broadcast_ensemble(n_ensemble=n_ensemble)
-    gen_data = gen_data.broadcast_ensemble(n_ensemble=n_ensemble)
-
-    paired_data = PairedData.from_batch_data(prediction=gen_data, reference=target_data)
 
     agg.record_batch(paired_data)
 
