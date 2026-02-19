@@ -59,6 +59,8 @@ jobs:
   gpu:
     # These steps run on our self-hosted k8s GPU runners. See below for setup notes
     # https://github.com/ai2cm/long-lived-infrastructure#installing-the-github-actions-runner-controller
+    # Additionally, skip if the target repo isn't ai2cm/ace, lest it tries to run in forks
+    if: ${{ github.repository == 'ai2cm/ace' }}
     runs-on: arc-runner-set
     steps:
       - uses: actions/checkout@v6
@@ -94,7 +96,7 @@ jobs:
             make test
             make test_parallel
       - name: Run GPU benchmarks
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ github.repository == 'ai2cm/ace' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
         run: |
