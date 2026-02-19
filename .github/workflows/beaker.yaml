@@ -15,7 +15,8 @@ jobs:
   ace-evaluator:
     runs-on: ubuntu-latest
     # Only deploy on manual trigger or push to main
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    # Additionally, skip if the target repo isn't ai2cm/ace, lest it tries to run in forks
+    if: ${{ github.repository == 'ai2cm/ace' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     env:
       CONFIG_PATH: docs/evaluator-config.yaml
       BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
