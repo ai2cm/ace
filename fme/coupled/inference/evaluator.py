@@ -29,7 +29,7 @@ from fme.coupled.inference.data_writer import (
     CoupledPairedDataWriter,
     DatasetMetadata,
 )
-from fme.coupled.inference.loop import run_coupled_dataset_comparison
+from fme.coupled.inference.loop import CoupledDeriverABC, run_coupled_dataset_comparison
 from fme.coupled.stepper import (
     ComponentConfig,
     CoupledOceanFractionConfig,
@@ -256,7 +256,7 @@ class InferenceEvaluatorConfig:
         )
 
 
-class _Deriver:
+class _Deriver(CoupledDeriverABC):
     """
     Deriver for coupled dataset comparison: removes initial condition and
     computes derived variables on CoupledBatchData.
