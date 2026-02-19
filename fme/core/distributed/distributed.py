@@ -1,11 +1,13 @@
 import contextlib
 import logging
+import os
 from collections.abc import Iterator
 from typing import TypeVar
 
 import torch.distributed
 
 from .base import DistributedBackend
+from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
 from .torch_distributed import TorchDistributed
 
@@ -29,22 +31,62 @@ class Distributed:
     for this global state in the same place as the routines that use it.
     """
 
-    def __init__(self, force_non_distributed: bool = False):
-        if TorchDistributed.is_available() and not force_non_distributed:
-            self._distributed: DistributedBackend = TorchDistributed()
+    def __init__(
+        self,
+        force_non_distributed: bool = False,
+        spatial_parallelism: tuple[int, int] | None = None,
+        verbose: bool = False,
+    ):
+        if force_non_distributed:
+            self._distributed: DistributedBackend = NonDistributed()
+        elif spatial_parallelism is not None:
+            h_size, w_size = spatial_parallelism
+            self._distributed = ModelTorchDistributed(
+                h_size=h_size,
+                w_size=w_size,
+                verbose=verbose,
+            )
+        elif TorchDistributed.is_available():
+            self._distributed = TorchDistributed()
         else:
             self._distributed = NonDistributed()
         self._seed = 0
-        self._force_non_distributed = force_non_distributed  # for debugging
+        self._force_non_distributed = force_non_distributed
 
     @classmethod
     def get_instance(cls) -> "Distributed":
         """
         Get the singleton instance of the Distributed class.
+
+        The backend can be overridden at the session level via environment
+        variables, which is useful for switching between backends
+
+        - ``FME_DISTRIBUTED_BACKEND=torch`` to force :class:`TorchDistributed`
+          (the default when ``torch.distributed`` is available)
+        - ``FME_DISTRIBUTED_BACKEND=model`` to force
+          :class:`ModelTorchDistributed`. Requires ``FME_DISTRIBUTED_H`` and
+          ``FME_DISTRIBUTED_W`` to also be set.
+        - ``FME_DISTRIBUTED_BACKEND=none`` to force
+          :class:`NonDistributed`
         """
         global singleton
         if singleton is None:
-            singleton = cls()
+            backend_env = os.environ.get("FME_DISTRIBUTED_BACKEND")
+            if backend_env == "model":
+                h = int(os.environ["FME_DISTRIBUTED_H"])
+                w = int(os.environ["FME_DISTRIBUTED_W"])
+                singleton = cls(spatial_parallelism=(h, w))
+            elif backend_env == "none":
+                singleton = cls(force_non_distributed=True)
+            elif backend_env == "torch":
+                singleton = cls()
+            elif backend_env is not None:
+                raise ValueError(
+                    f"Unknown FME_DISTRIBUTED_BACKEND value '{backend_env}'. "
+                    "Valid values: 'torch', 'model', 'none'."
+                )
+            else:
+                singleton = cls()
         return singleton
 
     @classmethod
