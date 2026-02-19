@@ -41,7 +41,7 @@ for model in "${!MODELS[@]}"; do
         forcing_loader.dataset.data_path=$SPIN_UP_FORCING_ROOT \
         initial_condition.path=$spin_up_initial_condition_path \
         initial_condition.start_indices.times=[2030-01-01T06:00:00,2030-01-01T06:00:00] \
-        n_forward_steps=$spin_up_n_forward_steps \
+        n_forward_steps=$SPIN_UP_N_FORWARD_STEPS \
         logging.log_to_wandb=$spin_up_log_to_wandb \
         data_writer.files=[] \
     "
