@@ -31,10 +31,12 @@ from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, Valu
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
     EpochNotProvidedError,
+    SingleModuleStepperConfig,
     Stepper,
     StepperConfig,
     StepperOverrideConfig,
     TrainOutput,
+    TrainStepper,
     TrainStepperConfig,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
@@ -151,7 +153,7 @@ def test_stepper_no_train_step_specified():
     train_stepper_config = TrainStepperConfig(
         loss=StepLossConfig(type="MSE"),
     )
-    stepper = train_stepper_config.get_train_stepper(unittest.mock.Mock())
+    stepper = TrainStepper(stepper=unittest.mock.Mock(), config=train_stepper_config)
     stepper._init_for_epoch(0)
     assert stepper._train_n_forward_steps_sampler is None
 
@@ -161,7 +163,7 @@ def test_stepper_step_int():
         train_n_forward_steps=2,
         loss=StepLossConfig(type="MSE"),
     )
-    stepper = train_stepper_config.get_train_stepper(unittest.mock.Mock())
+    stepper = TrainStepper(stepper=unittest.mock.Mock(), config=train_stepper_config)
     assert stepper._train_n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
     assert stepper._train_n_forward_steps_sampler is not None
@@ -177,7 +179,7 @@ def test_stepper_step_probabilities():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    stepper = train_stepper_config.get_train_stepper(unittest.mock.Mock())
+    stepper = TrainStepper(stepper=unittest.mock.Mock(), config=train_stepper_config)
     assert stepper._train_n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
     assert stepper._train_n_forward_steps_sampler is not None
@@ -201,7 +203,7 @@ def test_stepper_step_schedule():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    stepper = train_stepper_config.get_train_stepper(unittest.mock.Mock())
+    stepper = TrainStepper(stepper=unittest.mock.Mock(), config=train_stepper_config)
     assert stepper._train_n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
     assert stepper._train_n_forward_steps_sampler is not None
@@ -239,7 +241,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
         NetworkAndLossNormalizationConfig(network=normalization_config)
     )
     dataset_info = get_dataset_info()
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
     assert torch.allclose(
         stepped.gen_data["a"], stepped.normalize(stepped.gen_data)["a"]
@@ -256,7 +258,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
             ),
         )
     )
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     stepped_double_std = stepper.train_on_batch(
         data=data, optimization=NullOptimization()
     )
@@ -286,9 +288,9 @@ def test_train_on_batch_addition_series():
     train_stepper_config = TrainStepperConfig(
         loss=StepLossConfig(type="MSE"),
     )
-    stepper = train_stepper_config.get_train_stepper(
-        _get_stepper(["a", "b"], ["a", "b"])
-    )
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    dataset_info = get_dataset_info()
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, 1, n_steps + 1, 5, 5)
@@ -366,7 +368,7 @@ def test_train_on_batch_crps_loss():
             },
         ),
     )
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, 2, n_steps + 1, 5, 5)
@@ -425,7 +427,7 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
             },
         ),
     )
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     optimization = unittest.mock.Mock(wraps=NullOptimization())
     stepper.train_on_batch(data=data_with_ic, optimization=optimization)
     if optimize_last_step_only:
@@ -445,9 +447,11 @@ def test_train_on_batch_with_prescribed_ocean():
     data.data["mask"][:] = 0
     data.data["mask"][:, :, :, 0] = 1
     train_stepper_config = TrainStepperConfig()
-    stepper = train_stepper_config.get_train_stepper(
-        _get_stepper(["a", "b"], ["a", "b"], ocean_config=OceanConfig("b", "mask"))
+    config = _get_stepper_config(
+        ["a", "b"], ["a", "b"], ocean_config=OceanConfig("b", "mask")
     )
+    dataset_info = get_dataset_info()
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
@@ -500,11 +504,15 @@ def test_reloaded_stepper_gives_same_prediction():
     train_stepper_config = TrainStepperConfig(
         loss=StepLossConfig(type="MSE"),
     )
-    first_result = train_stepper_config.get_train_stepper(stepper).train_on_batch(
+    first_result = TrainStepper(
+        stepper=stepper, config=train_stepper_config
+    ).train_on_batch(
         data=data,
         optimization=NullOptimization(),
     )
-    second_result = train_stepper_config.get_train_stepper(new_stepper).train_on_batch(
+    second_result = TrainStepper(
+        stepper=new_stepper, config=train_stepper_config
+    ).train_on_batch(
         data=data,
         optimization=NullOptimization(),
     )
@@ -619,7 +627,7 @@ def _setup_and_train_on_batch(
     train_stepper_config = TrainStepperConfig(
         loss=StepLossConfig(type="MSE"),
     )
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     return stepper.train_on_batch(data, optimization=optimization)
 
 
@@ -670,7 +678,7 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
         train_n_forward_steps=train_n_forward_steps,
         loss=StepLossConfig(type="MSE"),
     )
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     if uses_scheduling and not has_epoch:
         with pytest.raises(EpochNotProvidedError):
             stepper.train_on_batch(data, optimization=optimization)
@@ -745,7 +753,10 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     in_names, out_names, all_names = ["a"], ["a"], ["a"]
     data, _, _ = get_data(all_names, 3, n_forward_steps + 1)
     nx, ny = 5, 5
-    stepper = _get_stepper(in_names, out_names, ocean_config=None, module_name="AddOne")
+    config = _get_stepper_config(
+        in_names, out_names, ocean_config=None, module_name="AddOne"
+    )
+    dataset_info = get_dataset_info()
     lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
     # keep area weights ones for simplicity
     lat_lon_coordinates._area_weights = torch.ones(nx, ny)
@@ -753,7 +764,7 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     aggregator = OneStepAggregator(ds_info, save_diagnostics=False)
 
     train_stepper_config = TrainStepperConfig()
-    train_stepper = train_stepper_config.get_train_stepper(stepper)
+    train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     stepped = train_stepper.train_on_batch(data, optimization=NullOptimization())
     assert stepped.gen_data["a"].shape[2] == n_forward_steps + 1
 
@@ -886,9 +897,7 @@ def test_stepper_corrector(
         ),
     )
     train_stepper_config = TrainStepperConfig()
-    stepper = train_stepper_config.get_train_stepper(
-        stepper_config.get_stepper(dataset_info)
-    )
+    stepper = train_stepper_config.get_train_stepper(stepper_config, dataset_info)
     time = xr.DataArray(
         [
             [
@@ -961,7 +970,7 @@ def test_stepper_corrector(
             assert stepped.gen_data[name][:, :, 1:].min() >= 0.0
 
 
-def _get_stepper(
+def _get_stepper_config(
     in_names: list[str],
     out_names: list[str],
     ocean_config: OceanConfig | None = None,
@@ -969,7 +978,7 @@ def _get_stepper(
     norm_mean: float = 0.0,
     derived_forcings: DerivedForcingsConfig | None = None,
     **kwargs,
-) -> Stepper:
+) -> StepperConfig:
     if module_name == "AddOne":
 
         class AddOne(torch.nn.Module):
@@ -1011,7 +1020,7 @@ def _get_stepper(
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
 
-    config = StepperConfig(
+    return StepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
@@ -1033,6 +1042,14 @@ def _get_stepper(
         loss=StepLossConfig(type="MSE"),
         derived_forcings=derived_forcings,
     )
+
+
+def _get_stepper(
+    in_names: list[str],
+    out_names: list[str],
+    **kwargs,
+) -> Stepper:
+    config = _get_stepper_config(in_names, out_names, **kwargs)
     dataset_info = get_dataset_info()
     return config.get_stepper(dataset_info)
 
@@ -1205,6 +1222,84 @@ def test_predict_with_forcing(n_ensemble):
         torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
     xr.testing.assert_equal(output.time, forcing_data.time[:, 1:])
     assert new_input_state.time.equals(output.time[:, -1:])
+
+
+@pytest.mark.parametrize(
+    "in_names,out_names,prescribed,module_name",
+    [
+        (["a", "b"], ["a"], ["a"], "AddOne"),
+    ],
+)
+def test_predict_with_prescribed_prognostic(
+    in_names, out_names, prescribed, module_name
+):
+    n_steps = 3
+    stepper = _get_stepper(
+        in_names,
+        out_names,
+        module_name=module_name,
+        prescribed_prognostic_names=prescribed,
+    )
+
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=list(set(in_names + out_names))
+    )
+
+    output, _ = stepper.predict(input_data, forcing_data)
+
+    # Shape check
+    for name in prescribed:
+        assert output.data[name].size(1) == n_steps
+
+    # Value check
+    for name in prescribed:
+        torch.testing.assert_close(
+            output.data[name], forcing_data.data[name][:, 1 : n_steps + 1]
+        )
+
+
+def test_prescribed_prognostic_config_validation_raises():
+    with pytest.raises(ValueError) as err:
+        SingleModuleStepperConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": torch.nn.Identity()}
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
+            prescribed_prognostic_names=["b"],
+        )
+    assert "prescribed_prognostic_name" in str(err.value)
+    assert "out_names" in str(err.value)
+
+
+def test_get_forcing_window_data_requirements_includes_prescribed_names():
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"a": 0.0, "b": 0.0},
+                            stds={"a": 1.0, "b": 1.0},
+                        ),
+                    ),
+                    prescribed_prognostic_names=["a"],
+                )
+            ),
+        ),
+        loss=StepLossConfig(type="MSE"),
+        derived_forcings=DerivedForcingsConfig(),
+    )
+    requirements = config.get_forcing_window_data_requirements(n_forward_steps=5)
+    assert "a" in requirements.names
+    assert "b" in requirements.names
 
 
 def test_predict_with_ocean():
@@ -1511,9 +1606,90 @@ def test_load_stepper_and_load_stepper_config(
     assert isinstance(stepper.forcing_deriver, ForcingDeriver)
 
 
+def _get_inner_single_module_config(stepper: Stepper):
+    """Get the inner SingleModuleStep config from a stepper
+    (MultiCallStep or single)."""
+    from fme.core.step.multi_call import MultiCallStep
+
+    if isinstance(stepper._step_obj, MultiCallStep):
+        return stepper._step_obj._wrapped_step.config
+    return stepper._step_obj.config
+
+
+def validate_stepper_prescribed_prognostic_names(
+    stepper: Stepper, expected: list[str]
+) -> None:
+    """Assert the stepper's inner step config has the given
+    prescribed_prognostic_names."""
+    config = _get_inner_single_module_config(stepper)
+    assert config.prescribed_prognostic_names == expected
+
+
+def test_load_stepper_with_prescribed_prognostic_override(
+    tmp_path: pathlib.Path, very_fast_only: bool
+):
+    """Loading with StepperOverrideConfig(prescribed_prognostic_names=...) applies the
+    override."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    in_names = ["co2", "var", "a", "b"]
+    out_names = ["var", "a"]
+    stepper_path = tmp_path / "stepper"
+    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        normalization_names=set(in_names + out_names),
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+    )
+
+    # Load without override: prescribed_prognostic_names should be [] (default).
+    stepper = load_stepper(stepper_path)
+    validate_stepper_prescribed_prognostic_names(stepper, [])
+
+    # Load with override: prescribed_prognostic_names should be ["var"].
+    stepper_override = StepperOverrideConfig(prescribed_prognostic_names=["var"])
+    stepper = load_stepper(stepper_path, stepper_override)
+    validate_stepper_prescribed_prognostic_names(stepper, ["var"])
+
+    # Predict with forcing including "var"; output "var" should come from forcing.
+    n_steps = 2
+    n_samples = 3
+    index = xr.date_range("2000", freq="6h", periods=n_steps + 1, use_cftime=True)
+    forcing_time = xr.DataArray(np.stack(n_samples * [index]), dims=["sample", "time"])
+    input_time = forcing_time.isel(time=[0])
+    input_data = BatchData.new_on_device(
+        data={
+            "var": torch.rand(n_samples, 1, 4, 8).to(DEVICE),
+            "a": torch.rand(n_samples, 1, 4, 8).to(DEVICE),
+        },
+        time=input_time,
+        labels=None,
+    ).get_start(prognostic_names=["var", "a"], n_ic_timesteps=1)
+    forcing_data = BatchData.new_on_device(
+        data={
+            name: torch.rand(3, n_steps + 1, 4, 8).to(DEVICE)
+            for name in ["co2", "var", "a", "b"]
+        },
+        time=forcing_time,
+        labels=None,
+    )
+    output, _ = stepper.predict(input_data, forcing_data)
+    expected_var = forcing_data.data["var"][:, 1 : n_steps + 1]
+    torch.testing.assert_close(output.data["var"], expected_var)
+
+
 def get_regression_stepper_and_data(
     crps_training: bool = False,
-) -> tuple[Stepper, TrainStepperConfig, BatchData]:
+) -> tuple[TrainStepper, BatchData]:
     in_names = ["a", "b"]
     out_names = ["b", "c"]
     n_forward_steps = 2
@@ -1568,7 +1744,7 @@ def get_regression_stepper_and_data(
     )
 
     dataset_info = get_dataset_info(img_shape=img_shape)
-    stepper = config.get_stepper(dataset_info)
+    train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     data = BatchData.new_on_device(
         data={
             "a": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
@@ -1583,7 +1759,7 @@ def get_regression_stepper_and_data(
         epoch=0,
         horizontal_dims=["lat", "lon"],
     )
-    return stepper, train_stepper_config, data
+    return train_stepper, data
 
 
 @pytest.mark.parametrize(
@@ -1602,20 +1778,17 @@ def get_regression_stepper_and_data(
 )
 def test_stepper_train_on_batch_regression(use_optimization: bool, crps_training: bool):
     torch.manual_seed(0)
-    stepper, train_stepper_config, data = get_regression_stepper_and_data(
-        crps_training=crps_training
-    )
+    train_stepper, data = get_regression_stepper_and_data(crps_training=crps_training)
     if use_optimization:
         optimization_config = OptimizationConfig(
             optimizer_type="Adam",
             lr=0.0001,
         )
         optimization: OptimizationABC = optimization_config.build(
-            stepper.modules, max_epochs=1
+            train_stepper.modules, max_epochs=1
         )
     else:
         optimization = NullOptimization()
-    train_stepper = train_stepper_config.get_train_stepper(stepper)
     result1 = train_stepper.train_on_batch(data, optimization)
     result2 = train_stepper.train_on_batch(data, optimization)
     output_dict = get_train_outputs_tensor_dict(result1, result2)
@@ -1633,7 +1806,8 @@ def test_stepper_train_on_batch_regression(use_optimization: bool, crps_training
 
 def test_stepper_predict_regression():
     torch.manual_seed(0)
-    stepper, _, data = get_regression_stepper_and_data()
+    train_stepper, data = get_regression_stepper_and_data()
+    stepper = train_stepper._stepper
     initial_condition = data.get_start(
         prognostic_names=["b"],
         n_ic_timesteps=1,
