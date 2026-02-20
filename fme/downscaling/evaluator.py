@@ -7,7 +7,6 @@ import torch
 import yaml
 
 from fme.core.cli import prepare_directory
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
@@ -195,7 +194,7 @@ class EvaluatorConfig:
     events: list[PairedEventConfig] | None = None
 
     def configure_logging(self, log_filename: str):
-        config = to_flat_dict(dataclasses.asdict(self))
+        config = dataclasses.asdict(self)
         self.logging.configure_logging(
             self.experiment_dir, log_filename, config=config, resumable=True
         )

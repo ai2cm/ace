@@ -24,7 +24,6 @@ from fme.core.dataset.merged import MergeDatasetConfig, get_merged_datasets
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import get_xarray_datasets
 from fme.core.device import using_gpu
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 
@@ -136,7 +135,7 @@ class Config:
         )
 
     def configure_logging(self, log_filename: str):
-        config = to_flat_dict(dataclasses.asdict(self))
+        config = dataclasses.asdict(self)
         self.logging.configure_logging(
             self.experiment_dir, log_filename, config=config, resumable=False
         )

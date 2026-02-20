@@ -8,6 +8,7 @@ from typing import Any
 
 from fme.core.cloud import is_local
 from fme.core.device import get_device
+from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
@@ -60,7 +61,7 @@ class LoggingConfig:
         experiment_dir: str,
         log_filename: str,
         config: Mapping[str, Any],
-        resumable: bool = False,
+        resumable: bool = True,
     ):
         """
         Configure global logging settings, including WandB, and output
@@ -119,7 +120,6 @@ class LoggingConfig:
         config: Mapping[str, Any],
         resumable: bool = True,
         resume: Any = None,
-        **kwargs,
     ):
         env_vars = retrieve_env_vars()
         if resume is not None:
@@ -127,7 +127,7 @@ class LoggingConfig:
                 "The 'resume' argument is no longer supported, "
                 "please pass 'resumable' instead."
             )
-        config_copy = {**config}
+        config_copy = to_flat_dict({**config})
         if "environment" in config_copy:
             logging.warning(
                 "Not recording environmental variables since 'environment' key is "

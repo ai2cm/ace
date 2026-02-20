@@ -28,7 +28,6 @@ from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
@@ -161,7 +160,7 @@ class InferenceEvaluatorConfig:
                     )
 
     def configure_logging(self, log_filename: str):
-        config = to_flat_dict(dataclasses.asdict(self))
+        config = dataclasses.asdict(self)
         self.logging.configure_logging(
             self.experiment_dir, log_filename, config=config, resumable=False
         )
