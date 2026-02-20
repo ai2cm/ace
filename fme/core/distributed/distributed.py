@@ -71,8 +71,15 @@ class Distributed:
         instance = cls.get_instance()
         try:
             yield
+        except BaseException:
+            instance.shutdown()  # do not barrier before shutdown, go hard
+            raise  # re-raise the exception after shutdown to avoid masking it
+        else:  # if no exception is raised, let root finish cleanup
+            try:
+                instance.barrier()
+            finally:
+                instance.shutdown()
         finally:
-            instance.shutdown()
             cls._entered = False
 
     @classmethod
