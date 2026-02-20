@@ -50,4 +50,5 @@ run_training() {
 }
 
 # run_training "train-amip-c96-shield-daily.yaml" "train-amip-c96-shield-daily"
-run_training "train-amip-c96-shield.yaml" "train-amip-c96-shield"
+run_training "train-amip-c96-shield-daily-pos16.yaml" "train-amip-c96-shield-daily-pos16"
+# run_training "train-amip-c96-shield.yaml" "train-amip-c96-shield"
