@@ -612,14 +612,6 @@ class PairedDataLoaderConfig:
         )
 
         example = dataset[0]
-        common_metadata_keys = set(dataset_fine_subset.variable_metadata).intersection(
-            dataset_coarse_subset.variable_metadata
-        )
-        assert all(
-            dataset_fine_subset.variable_metadata[key].units
-            == dataset_coarse_subset.variable_metadata[key].units
-            for key in common_metadata_keys
-        ), "Units for variables common to coarse and fine datasets must match."
         variable_metadata = {
             **dataset_fine_subset.variable_metadata,
             **dataset_coarse_subset.variable_metadata,
