@@ -218,8 +218,11 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         )
         config.resume_results.verify_wandb_resumption(config.experiment_dir)
     trainer = build_trainer(builders, config)
-    trainer.train()
-    logging.info(f"DONE ---- rank {dist.rank}")
+    try:
+        trainer.train()
+        logging.info(f"DONE ---- rank {dist.rank}")
+    finally:
+        dist.shutdown()
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
@@ -239,5 +242,4 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
 if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
-    with Distributed.context():
-        main(args.yaml_config, override_dotlist=args.override)
+    main(args.yaml_config, override_dotlist=args.override)

@@ -5,8 +5,6 @@ from unittest import mock
 import pytest
 import torch
 
-from fme.core.distributed.distributed import Distributed
-
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -80,12 +78,6 @@ def pdb_enabled(request):
 @pytest.fixture
 def no_timeout(request):
     return request.config.getoption("--no-timeout")
-
-
-@pytest.fixture(autouse=True, scope="session")
-def distributed_context():
-    with Distributed.context():
-        yield
 
 
 @pytest.fixture(autouse=True, scope="function")
