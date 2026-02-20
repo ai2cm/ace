@@ -562,6 +562,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         lora_alpha: float | None = None,
         spectral_lora_rank: int = 0,
         spectral_lora_alpha: float | None = None,
+        rescale_output_power: bool = False,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
@@ -689,6 +690,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             if hasattr(params, "spectral_lora_alpha")
             else spectral_lora_alpha
         )
+        self.rescale_output_power = (
+            params.rescale_output_power
+            if hasattr(params, "rescale_output_power")
+            else rescale_output_power
+        )
 
         # no global padding because we removed the horizontal distributed code
         self.padding = (0, 0)
@@ -704,13 +710,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         else:
             self.residual_filter_down = nn.Identity()
             self.residual_filter_up = nn.Identity()
-
-        if self.filter_output:
-            self.filter_output_down = self.trans_down
-            self.filter_output_up = self.itrans_up
-        else:
-            self.filter_output_down = nn.Identity()
-            self.filter_output_up = nn.Identity()
 
         # determine activation function
         if self.activation_function == "relu":
@@ -852,6 +851,13 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         else:
             self.norm_big_skip = NoLayerNorm()
 
+        if self.rescale_output_power:
+            self.output_additional_spectral_scale = nn.Parameter(
+                torch.zeros(self.trans_down.lmax)
+            )
+        else:
+            self.output_additional_spectral_scale = None
+
     @torch.jit.ignore
     def no_weight_decay(self):  # pragma: no cover
         """Helper"""
@@ -895,6 +901,34 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         else:
             x = self.decoder(x)
 
-        x = self.filter_output_up(self.filter_output_down(x))
+        # only compute x_hat once, only if needed, but stay type-safe
+        x_hat = None
+
+        def get_x_hat():
+            nonlocal x_hat
+            if x_hat is None:
+                x_hat = self.trans_down(x)
+            return x_hat
+
+        # Compute optional additional spectral term
+        if self.output_additional_spectral_scale is not None:
+            scale = self.output_additional_spectral_scale.view(1, 1, -1, 1)
+            x_hat_additional = scale * get_x_hat()
+        else:
+            x_hat_additional = None
+
+        # Apply logic
+        if self.filter_output:
+            # If x_hat_additional is None, treat it as 0 in spectral space
+            x_hat_total = (
+                get_x_hat()
+                if x_hat_additional is None
+                else (get_x_hat() + x_hat_additional)
+            )
+            x = self.itrans_up(x_hat_total)
+        else:
+            # Only add the additional component if it exists
+            if x_hat_additional is not None:
+                x = x + self.itrans_up(x_hat_additional)
 
         return x

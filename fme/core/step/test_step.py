@@ -166,6 +166,7 @@ def get_single_module_noise_conditioned_selector(
                             num_layers=2,
                             local_blocks=[0],
                             affine_norms=True,
+                            rescale_output_power=True,
                         )
                     ),
                 ),

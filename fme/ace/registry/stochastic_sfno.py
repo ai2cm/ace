@@ -184,6 +184,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             0 (default) disables LoRA.
         spectral_lora_alpha: Strength of the LoRA adaptations for spectral convolutions.
             Defaults to spectral_lora_rank.
+        rescale_output_power: Whether to apply an additional learnable rescaling
+            in spectral space to the output of the model. This is added to the output,
+            and is independent of filter_output determining whether to round-trip
+            the model output.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -221,6 +225,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     lora_alpha: float | None = None
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
+    rescale_output_power: bool = False
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
