@@ -404,13 +404,15 @@ class TrainBuilders:
         """
         Get the training stepper.
 
-        Creates a Stepper for inference and wraps it in a TrainStepper
-        with training-specific configuration including the loss object.
+        Creates a Stepper for inference and wraps it in a TrainStepper with
+        training-specific configuration including the loss and parameter
+        initialization.
+
         """
-        stepper = self.config.stepper.get_stepper(
+        return self.config.train_stepper.get_train_stepper(
+            stepper_config=self.config.stepper,
             dataset_info=dataset_info,
         )
-        return self.config.train_stepper.get_train_stepper(stepper)
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)
