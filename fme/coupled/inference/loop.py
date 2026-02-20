@@ -2,7 +2,6 @@ import logging
 from collections.abc import Callable
 from typing import Protocol
 
-from fme.ace.data_loading.batch_data import PairedData
 from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceLogs
 from fme.core.generics.inference import get_record_to_wandb
 from fme.core.generics.writer import NullDataWriter
@@ -14,9 +13,10 @@ from fme.coupled.data_loading.batch_data import (
 )
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.inference.data_writer import CoupledPairedDataWriter
+from fme.coupled.typing_ import CoupledNames
 
 
-class CoupledDeriverABC(Protocol):
+class CoupledDeriver(Protocol):
     """
     Interface for deriving forward data from CoupledBatchData during
     dataset comparison (remove IC, compute derived variables).
@@ -36,10 +36,10 @@ def run_coupled_dataset_comparison(
     ],
     prediction_data: InferenceGriddedData,
     target_data: InferenceGriddedData,
-    deriver: CoupledDeriverABC,
+    deriver: CoupledDeriver,
     writer: CoupledPairedDataWriter | NullDataWriter | None = None,
     record_logs: Callable[[InferenceLogs], None] | None = None,
-    restrict_to_output_names: tuple[list[str], list[str]] | None = None,
+    restrict_to_output_names: CoupledNames | None = None,
 ) -> None:
     if record_logs is None:
         record_logs = get_record_to_wandb(label="inference")
@@ -49,10 +49,11 @@ def run_coupled_dataset_comparison(
     def _restrict_to_output_names(batch: CoupledBatchData) -> CoupledBatchData:
         if restrict_to_output_names is None:
             return batch
-        ocean_names, atmosphere_names = restrict_to_output_names
         return CoupledBatchData(
-            ocean_data=batch.ocean_data.subset_names(ocean_names),
-            atmosphere_data=batch.atmosphere_data.subset_names(atmosphere_names),
+            ocean_data=batch.ocean_data.subset_names(restrict_to_output_names.ocean),
+            atmosphere_data=batch.atmosphere_data.subset_names(
+                restrict_to_output_names.atmosphere
+            ),
         )
 
     timer = GlobalTimer.get_instance()
@@ -68,15 +69,9 @@ def run_coupled_dataset_comparison(
                 pred_ic = _restrict_to_output_names(pred_ic)
                 target_ic = _restrict_to_output_names(target_ic)
                 logs = aggregator.record_initial_condition(
-                    initial_condition=CoupledPairedData(
-                        ocean_data=PairedData.from_batch_data(
-                            prediction=pred_ic.ocean_data,
-                            reference=target_ic.ocean_data,
-                        ),
-                        atmosphere_data=PairedData.from_batch_data(
-                            prediction=pred_ic.atmosphere_data,
-                            reference=target_ic.atmosphere_data,
-                        ),
+                    initial_condition=CoupledPairedData.from_coupled_batch_data(
+                        prediction=pred_ic,
+                        reference=target_ic,
                     ),
                 )
             with timer.context("wandb_logging"):

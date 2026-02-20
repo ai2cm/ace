@@ -133,6 +133,7 @@ def inference_helper(
     n_extra_initial_conditions = n_initial_conditions - 1
     n_forward_times_ocean = n_coupled_steps + n_extra_initial_conditions
     n_forward_times_atmos = n_forward_times_ocean * 2
+    masked_fill_value = 0.0 if use_prediction_data else float("nan")
     mock_data = create_coupled_data_on_disk(
         data_dir,
         n_forward_times_ocean=n_forward_times_ocean,
@@ -142,6 +143,7 @@ def inference_helper(
         atmosphere_start_time_offset_from_ocean=1,
         n_levels_ocean=1,
         n_levels_atmosphere=1,
+        masked_fill_value=masked_fill_value,
     )
     inference_data_config = InferenceDataLoaderConfig(
         dataset=CoupledDatasetWithOptionalOceanConfig(
@@ -212,6 +214,16 @@ def inference_helper(
         assert not os.path.exists(tmp_path / "atmosphere/initial_condition.nc")
         assert not os.path.exists(tmp_path / "ocean/restart.nc")
         assert not os.path.exists(tmp_path / "ocean/initial_condition.nc")
+        all_out_names = ocean_out_names + atmos_out_names
+        for var in all_out_names:
+            rmse_key = f"inference/mean/weighted_rmse/{var}"
+            bias_key = f"inference/mean/weighted_bias/{var}"
+            logs_with_rmse = [log for log in wandb_logs if rmse_key in log]
+            logs_with_bias = [log for log in wandb_logs if bias_key in log]
+            for log in logs_with_rmse:
+                assert log[rmse_key] == 0.0
+            for log in logs_with_bias:
+                assert log[bias_key] == 0.0
 
 
 def _create_dataset_info_for_stepper(
