@@ -55,4 +55,4 @@ run_eval() {
 
 base_name="SamudrACE"
 
-run_eval "evaluator-config-yr311.yaml" "$base_name-arxiv-ckpt-ft-after-fto" "01JY7H5WR8EXJMA7BRJZWM2JKY"
+run_eval "evaluator-config-yr311.yaml" "$base_name-arxiv-ckpt-ft-after-fto" "01JY7H5WRR475Q5E6V2PA83SYQ"
