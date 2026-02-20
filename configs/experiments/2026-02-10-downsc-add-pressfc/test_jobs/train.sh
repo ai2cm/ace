@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-multivar-prmsl-out"
-CONFIG_FILENAME="train-100-to-3km-prmsl-output.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-multivar-pressfc-out"
+CONFIG_FILENAME="train-100-to-3km-pressfc-output.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -35,7 +35,7 @@ gantry run \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP=$wandb_group \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-    --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+    --env-secret WANDB_API_KEY=wandb-api-key-annak  \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --weka climate-default:/climate-default \
     --gpus $N_GPUS \
