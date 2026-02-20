@@ -15,6 +15,7 @@ import unittest
 import unittest.mock
 from collections.abc import Callable
 
+import numpy as np
 import pytest
 import torch
 from torch import nn
@@ -37,6 +38,8 @@ from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
 DEFAULT_IMG_SHAPE = (45, 90)
+
+DATA_DIR = pathlib.Path(__file__).parent / "testdata"
 
 
 def get_network_and_loss_normalization_config(
@@ -242,18 +245,18 @@ def get_multi_call_selector(
     )
 
 
-SELECTOR_GETTERS = [
-    get_single_module_with_atmosphere_corrector_selector,
-    get_single_module_noise_conditioned_selector,
-    get_multi_call_selector,
-]
+SELECTOR_GETTERS = {
+    "sm_with_atmos_corr": get_single_module_with_atmosphere_corrector_selector,
+    "sm_noise_conditioned": get_single_module_noise_conditioned_selector,
+    "multi_call": get_multi_call_selector,
+}
 
 SELECTOR_CONFIG_CASES = [
     pytest.param(
         getter(),
         id=getter.__name__,
     )
-    for getter in SELECTOR_GETTERS
+    for getter in SELECTOR_GETTERS.values()
 ]
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -362,7 +365,7 @@ def test_step_initializes_weights(config: StepSelector):
 
 @pytest.mark.parametrize(
     "get_config",
-    SELECTOR_GETTERS,
+    SELECTOR_GETTERS.values(),
 )
 def test_load_config(
     get_config: Callable[[pathlib.Path | None], StepSelector],
@@ -388,7 +391,7 @@ def test_load_config(
 
 @pytest.mark.parametrize(
     "get_config",
-    SELECTOR_GETTERS,
+    SELECTOR_GETTERS.values(),
 )
 def test_load_is_required_for_path_config(
     get_config: Callable[[pathlib.Path | None], StepSelector],
@@ -485,3 +488,101 @@ def test_step_with_prescribed_prognostic_overwrites_output():
         wrapper=lambda x: x,
     )
     torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
+
+
+def cache_step_input(
+    step: StepABC,
+    input_data: TensorDict,
+    next_step_input_data: TensorDict,
+    labels: BatchLabels | None,
+    checkpoint_path: pathlib.Path,
+):
+    if checkpoint_path.exists():
+        checkpoint = torch.load(checkpoint_path)
+        step.load_state(checkpoint["step_state_dict"])
+        # TODO: we will need some kind of scatter here for it to work in parallel
+        input_data = checkpoint["input_data"]
+        next_step_input_data = checkpoint["next_step_input_data"]
+        label_tensor = checkpoint["label_tensor"]
+        if label_tensor is not None:
+            assert isinstance(labels, BatchLabels)
+            labels.tensor[:] = label_tensor
+        return step, input_data, next_step_input_data, labels
+    else:
+        checkpoint = {
+            "step_state_dict": step.get_state(),
+            "input_data": input_data,
+            "next_step_input_data": next_step_input_data,
+            "label_tensor": labels.tensor if labels is not None else None,
+        }
+        torch.save(checkpoint, checkpoint_path)
+        raise AssertionError(
+            f"Step state checkpoint created at {checkpoint_path}, "
+            "please re-run the test."
+        )
+
+
+def cache_step_output(output_data: TensorDict, checkpoint_path: pathlib.Path):
+    if checkpoint_path.exists():
+        checkpoint = torch.load(checkpoint_path)
+        expected_output = checkpoint["output_data"]
+        for name in output_data.keys():
+            torch.testing.assert_close(output_data[name], expected_output[name])
+    else:
+        checkpoint = {
+            "output_data": output_data,
+        }
+        torch.save(checkpoint, checkpoint_path)
+        raise AssertionError(
+            f"Step output checkpoint created at {checkpoint_path}, "
+            "please re-run the test."
+        )
+
+
+@pytest.mark.parametrize(
+    "case_name,get_config",
+    SELECTOR_GETTERS.items(),
+)
+def test_step_regression(
+    case_name,
+    get_config: Callable[[pathlib.Path | None], StepSelector],
+):
+    """
+    Test that the step produces the same output as a regression target file.
+
+    This ensures the step produce the same result regardless of parallel
+    decomposition, as well as catching any unintended changes to the
+    step's behavior.
+    """
+    torch.manual_seed(0)
+    img_shape = (20, 40)
+    n_samples = 2
+    selector = get_config(None)
+    if selector.config.get("conditional", False):
+        labels = BatchLabels.new_from_set(
+            {"a", "b"}, n_samples=n_samples, device=fme.get_device()
+        )
+        labels.tensor[:] = np.random.randint(
+            0, 2, (n_samples,), device=fme.get_device()
+        )
+    else:
+        labels = None
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    step, input_data, next_step_input_data, labels = cache_step_input(
+        step,
+        input_data,
+        next_step_input_data,
+        labels,
+        DATA_DIR / f"{case_name}_input.pt",
+    )
+    output = step.step(
+        args=StepArgs(
+            input=input_data, next_step_input_data=next_step_input_data, labels=labels
+        ),
+        wrapper=lambda x: x,
+    )
+    cache_step_output(output, DATA_DIR / f"{case_name}_output.pt")
