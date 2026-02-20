@@ -155,7 +155,7 @@ def main(
     import xpartition  # noqa: F401
 
     logging.basicConfig(level=logging.INFO)
-    distributed.Client(n_workers=16)
+    distributed.Client(n_workers=32)
 
     dataset_config = DatasetConfig.from_file(dataset_config).dataset_computation
     append_config = DatasetAppendConfig.from_file(append_config)
@@ -204,15 +204,20 @@ def main(
 
     ds = clear_compressors_encoding(ds)
 
+    outer_chunks = dataset_config.sharding.get_chunks(standard_names)
+
+    ds = ds.chunk(outer_chunks)
+
     logging.info(f"Append dataset size is {ds.nbytes / 1e9} GB")
     if debug:
         with xr.set_options(display_max_rows=500):
             logging.info(ds)
     else:
-        ds = ds.chunk({"time": 1, "latitude": -1, "longitude": -1})
         if override_store_name is not None:
             append_store = override_store_name
-            ds.partition.initialize_store(append_store, inner_chunks=inner_chunks)
+            ds.partition.initialize_store(
+                append_store, inner_chunks=inner_chunks, mode="w"
+            )
         else:
             ds.partition.initialize_store(
                 append_store, inner_chunks=inner_chunks, mode="a"
