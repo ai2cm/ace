@@ -50,3 +50,5 @@ fto-1pctCO2_0256to0350-correct_budgets-4flptvc8_mb4prsz7|rs0-ep22||run_ICx1|best
 fto-1pctCO2_0256to0350-correct_budgets-4flptvc8_mb4prsz7|rs0-ep22||run_insample|best_inference_ckpt|high|--not-preemptible||01KH9MPEQBQY4NM7F88TNHYRJM
 
 fto-1pctCO2_0256to0350-correct_budgets-e1trm8ih_mb4prsz7|rs0|01KHWQ0RV0KRDQZZJWVDMGC9QZ|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-1pctCO2_0256to0350-correct_budgets-e1trm8ih_mb4prsz7|rs0|01KHXZ25BEHBYVV4BK947PF5XX|training|best_inference_ckpt|normal|--not-preemptible
