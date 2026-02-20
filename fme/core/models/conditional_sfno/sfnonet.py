@@ -853,7 +853,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         if self.rescale_output_power:
             self.output_additional_spectral_scale = nn.Parameter(
-                torch.zeros(self.trans_down.lmax)
+                torch.zeros(self.out_chans, self.trans_down.lmax)
             )
         else:
             self.output_additional_spectral_scale = None
@@ -912,7 +912,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         # Compute optional additional spectral term
         if self.output_additional_spectral_scale is not None:
-            scale = self.output_additional_spectral_scale.view(1, 1, -1, 1)
+            scale = self.output_additional_spectral_scale.view(1, self.out_chans, -1, 1)
             x_hat_additional = scale * get_x_hat()
         else:
             x_hat_additional = None
