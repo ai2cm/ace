@@ -107,43 +107,6 @@ def get_single_module_noise_conditioned_selector(
     )
 
 
-def get_label_conditioned_selector(
-    dir: pathlib.Path | None = None,
-) -> StepSelector:
-    normalization = get_network_and_loss_normalization_config(
-        names=[
-            "forcing_shared",
-            "forcing_rad",
-            "diagnostic_main",
-            "diagnostic_rad",
-        ],
-        dir=dir,
-    )
-    return StepSelector(
-        type="single_module",
-        config=dataclasses.asdict(
-            SingleModuleStepConfig(
-                builder=ModuleSelector(
-                    type="NoiseConditionedSFNO",
-                    conditional=True,
-                    config=dataclasses.asdict(
-                        NoiseConditionedSFNOBuilder(
-                            embed_dim=4,
-                            noise_embed_dim=4,
-                            noise_type="isotropic",
-                            num_layers=2,
-                            local_blocks=[0],
-                        )
-                    ),
-                ),
-                in_names=["forcing_shared", "forcing_rad"],
-                out_names=["diagnostic_main", "diagnostic_rad"],
-                normalization=normalization,
-            ),
-        ),
-    )
-
-
 def get_single_module_with_atmosphere_corrector_selector(
     dir: pathlib.Path | None = None,
 ) -> StepSelector:
@@ -468,8 +431,8 @@ def test_step_regression(
         labels = BatchLabels.new_from_set(
             {"a", "b"}, n_samples=n_samples, device=fme.get_device()
         )
-        labels.tensor[:] = np.random.randint(
-            0, 2, (n_samples,), device=fme.get_device()
+        labels.tensor[:] = torch.as_tensor(
+            np.random.randint(0, 2, (n_samples,)), device=fme.get_device()
         )
     else:
         labels = None
