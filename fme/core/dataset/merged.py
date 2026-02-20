@@ -128,17 +128,12 @@ class MergeDatasetConfig(DatasetConfigABC):
 
     merge: Sequence[ConcatDatasetConfig | XarrayDataConfig]
 
-    def __post_init__(self):
-        self.zarr_engine_used = False
+    @property
+    def zarr_engine_used(self) -> bool:
         for ds in self.merge:
-            if isinstance(ds, ConcatDatasetConfig):
-                if ds.zarr_engine_used:
-                    self.zarr_engine_used = ds.zarr_engine_used
-                    break
-            elif isinstance(ds, XarrayDataConfig):
-                if ds.engine == "zarr":
-                    self.zarr_engine_used = True
-                    break
+            if ds.zarr_engine_used:
+                return True
+        return False
 
     def build(
         self,
@@ -175,13 +170,6 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
 
     merge: Sequence[XarrayDataConfig]
 
-    def __post_init__(self):
-        self.zarr_engine_used = False
-        for ds in self.merge:
-            if ds.engine == "zarr":
-                self.zarr_engine_used = True
-                break
-
     def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
         for ds in self.merge:
             ds.update_subset(subset)
@@ -207,6 +195,13 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
         Return the labels that are available in the dataset.
         """
         return accumulate_labels([ds.available_labels for ds in self.merge])
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        for ds in self.merge:
+            if ds.engine == "zarr":
+                return True
+        return False
 
 
 def get_merged_datasets(
