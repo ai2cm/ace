@@ -29,7 +29,7 @@ run_eval() {
     --description 'Run SamudrACE evaluator' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
+    --priority high \
     --not-preemptible \
     --cluster ai2/titan \
     --cluster ai2/saturn \
@@ -55,4 +55,8 @@ run_eval() {
 
 base_name="SamudrACE"
 
-run_eval "evaluator-config-yr311.yaml" "$base_name-arxiv-ckpt-ft-after-fto" "01JY7H5WRR475Q5E6V2PA83SYQ"
+for year in $(seq -w 311 320); do
+    run_eval "evaluator-config-yr${year}.yaml" \
+             "${base_name}-arxiv-ckpt-ft-after-fto-yr${year}" \
+             "01JY7H5WRR475Q5E6V2PA83SYQ"
+done
