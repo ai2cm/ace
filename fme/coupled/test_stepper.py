@@ -13,7 +13,6 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.stepper import StepperConfig
-from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
@@ -49,6 +48,7 @@ from .stepper import (
     CoupledParameterInitConfig,
     CoupledStepper,
     CoupledStepperConfig,
+    CoupledTrainStepper,
     CoupledTrainStepperConfig,
 )
 
@@ -592,70 +592,20 @@ def test_config_ocean_diag_to_atmos_forcing_error():
 def test_config_parameter_init_error():
     mock_param_init = Mock()
     mock_param_init.weights_path = "ckpt.pt"
-    atmosphere = ComponentConfig(
-        timedelta="6h",
-        stepper=StepperConfig(
-            step=StepSelector(
-                type="single_module",
-                config=dataclasses.asdict(
-                    SingleModuleStepConfig(
-                        builder=ModuleSelector(
-                            type="SphericalFourierNeuralOperatorNet",
-                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
-                        ),
-                        in_names=["a", "f"],
-                        out_names=["a"],
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"a": 0.0, "f": 0.0},
-                                stds={"a": 1.0, "f": 1.0},
-                            ),
-                        ),
-                        ocean=OceanConfig(
-                            surface_temperature_name="a",
-                            ocean_fraction_name="f",
-                        ),
-                    ),
-                ),
-            ),
-            parameter_init=mock_param_init,
-        ),
-    )
-    ocean = ComponentConfig(
-        timedelta="5D",
-        stepper=StepperConfig(
-            step=StepSelector(
-                type="single_module",
-                config=dataclasses.asdict(
-                    SingleModuleStepConfig(
-                        builder=ModuleSelector(
-                            type="SphericalFourierNeuralOperatorNet",
-                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
-                        ),
-                        in_names=["sst"],
-                        out_names=["sst"],
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"sst": 0.0},
-                                stds={"sst": 1.0},
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            parameter_init=mock_param_init,
-        ),
-    )
-    mock_coupled_param_init = Mock()
-    mock_coupled_param_init.checkpoint_path = "ckpt.pt"
     with pytest.raises(
         ValueError,
-        match="Please specify CoupledParameterInitConfig",
+        match="CoupledParameterInitConfig.checkpoint_path",
     ):
-        _ = CoupledStepperConfig(
-            atmosphere=atmosphere,
-            ocean=ocean,
-            parameter_init=mock_coupled_param_init,
+        _ = CoupledTrainStepperConfig(
+            ocean=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"),
+                parameter_init=mock_param_init,
+            ),
+            atmosphere=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"),
+                parameter_init=mock_param_init,
+            ),
+            parameter_init=CoupledParameterInitConfig(checkpoint_path="ckpt.pt"),
         )
 
 
@@ -952,14 +902,7 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
-    ocean_parameter_init: ParameterInitializationConfig | None = None,
-    atmosphere_parameter_init: ParameterInitializationConfig | None = None,
-    checkpoint_path: str | None = None,
 ):
-    if ocean_parameter_init is None:
-        ocean_parameter_init = ParameterInitializationConfig()
-    if atmosphere_parameter_init is None:
-        atmosphere_parameter_init = ParameterInitializationConfig()
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
     # ocean fraction forcing variable
@@ -1004,7 +947,6 @@ def get_stepper_config(
                         ),
                     ),
                 ),
-                parameter_init=atmosphere_parameter_init,
                 loss=StepLossConfig(type="MSE"),
             ),
         ),
@@ -1029,13 +971,11 @@ def get_stepper_config(
                         ),
                     ),
                 ),
-                parameter_init=ocean_parameter_init,
                 loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name=sst_name_in_ocean_data,
         ocean_fraction_prediction=ocean_fraction_prediction,
-        parameter_init=CoupledParameterInitConfig(checkpoint_path=checkpoint_path),
     )
     return config
 
@@ -1094,7 +1034,35 @@ def get_stepper_and_batch(
         vcoord=coupled_data.vertical_coord
     ).dataset_info
     coupler = config.get_stepper(dataset_info)
-    return coupler, coupled_data
+    return coupler, coupled_data, config, dataset_info
+
+
+def get_train_stepper_and_batch(
+    train_stepper_config: CoupledTrainStepperConfig | None = None,
+    **kwargs,
+):
+    """Build a CoupledTrainStepper and batch data for testing.
+
+    Wraps get_stepper_and_batch to additionally construct a
+    CoupledTrainStepperConfig (defaulting to MSE loss for both components)
+    and return the resulting CoupledTrainStepper.
+
+    Args:
+        train_stepper_config: Optional custom train stepper config. If None,
+            uses a default config with MSE loss for both ocean and atmosphere.
+        **kwargs: Forwarded to get_stepper_and_batch.
+
+    Returns:
+        Tuple of (train_stepper, coupled_data, config, dataset_info).
+    """
+    _, coupled_data, config, dataset_info = get_stepper_and_batch(**kwargs)
+    if train_stepper_config is None:
+        train_stepper_config = CoupledTrainStepperConfig(
+            ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+            atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        )
+    train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
+    return train_stepper, coupled_data, config, dataset_info
 
 
 @pytest.mark.parametrize(
@@ -1317,7 +1285,7 @@ def test_predict_paired():
             a_diag = a_prog + x[:, -1:]
             return torch.concat([a_prog, a_sfc_temp, a_diag], dim=1) + 2
 
-    coupler, coupled_data = get_stepper_and_batch(
+    coupler, coupled_data, _, _ = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -1449,7 +1417,7 @@ def test_predict_paired_with_derived_variables():
     ]
     atmos_out_names = atmos_prog_names + ["LHFLX"]
 
-    coupler, coupled_data = get_stepper_and_batch(
+    coupler, coupled_data, _, _ = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_prog_names + ["ocean_fraction"],
@@ -1494,7 +1462,7 @@ def test_train_on_batch_with_derived_variables():
         "surface_temperature",
     ]
     atmos_out_names = atmos_prog_names + ["LHFLX"]
-    coupler, coupled_data = get_stepper_and_batch(
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_prog_names + ["ocean_fraction"],
@@ -1503,11 +1471,6 @@ def test_train_on_batch_with_derived_variables():
         n_forward_times_atmosphere=2,
         n_samples=3,
     )
-    train_stepper_config = CoupledTrainStepperConfig(
-        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-    )
-    train_stepper = train_stepper_config.get_train_stepper(coupler)
     output = train_stepper.train_on_batch(
         data=coupled_data.data,
         optimization=NullOptimization(),
@@ -1599,11 +1562,15 @@ def test_reloaded_stepper_gives_same_prediction():
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
     )
-    first_result = train_stepper_config.get_train_stepper(stepper).train_on_batch(
+    first_result = CoupledTrainStepper(
+        stepper=stepper, loss=train_stepper_config._build_loss(stepper)
+    ).train_on_batch(
         data=data.data,
         optimization=NullOptimization(),
     )
-    second_result = train_stepper_config.get_train_stepper(new_stepper).train_on_batch(
+    second_result = CoupledTrainStepper(
+        stepper=new_stepper, loss=train_stepper_config._build_loss(new_stepper)
+    ).train_on_batch(
         data=data.data,
         optimization=NullOptimization(),
     )
@@ -1645,7 +1612,7 @@ def test_reloaded_stepper_gives_same_prediction():
 
 
 def test_set_train_eval():
-    stepper, _ = get_stepper_and_batch(
+    stepper, _, _, _ = get_stepper_and_batch(
         ["sst", "mask_0"],
         ["sst"],
         ["surface_temperature", "ocean_fraction"],
