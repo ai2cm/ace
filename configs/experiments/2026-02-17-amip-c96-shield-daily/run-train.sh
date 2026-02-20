@@ -43,10 +43,11 @@ run_training() {
     --weka climate-default:/climate-default \
     --budget ai2/climate \
     --system-python \
+    --allow-dirty \
     --install "pip install --no-deps ." \
     "${extra_args[@]}" \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-run_training "train-amip-c96-shield-daily.yaml" "train-amip-c96-shield-daily"
+# run_training "train-amip-c96-shield-daily.yaml" "train-amip-c96-shield-daily"
 run_training "train-amip-c96-shield.yaml" "train-amip-c96-shield"

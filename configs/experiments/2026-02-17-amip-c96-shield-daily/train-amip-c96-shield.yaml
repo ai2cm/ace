@@ -1,3 +1,4 @@
+# arg: --dataset andrep/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats:/statsdata
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
@@ -25,7 +26,7 @@ inference:
     num_data_workers: 8
   aggregator:
     log_histograms: true
-    time_mean_reference_data: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
+    time_mean_reference_data: /statsdata/time-mean.nc
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -116,11 +117,11 @@ stepper:
           filter_num_groups: 4
       normalization:
         network:
-          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
-          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/scaling-full-field.nc
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
-          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats/ic_0001/scaling-residual.nc
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
