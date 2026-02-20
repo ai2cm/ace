@@ -49,7 +49,7 @@ declare -A MODELS=( \
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-GCS_ROOT="gs://vcm-ml-scratch/spencerc/2026-02-18-ace-equilibrium-climate-inference"
+GCS_ROOT="gs://vcm-ml-scratch/spencerc/2026-02-20-ace-equilibrium-climate-inference"
 SPIN_UP_MAXIMUM_N_FORWARD_STEPS=1460
 SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
 
