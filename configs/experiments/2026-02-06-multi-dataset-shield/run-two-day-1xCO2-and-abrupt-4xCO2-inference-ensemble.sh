@@ -3,7 +3,7 @@
 set -e
 
 DATE="2026-02-20"
-CONFIG_FILENAME="ace-abrupt-4xCO2-ensemble-inference-config.yaml"
+CONFIG_FILENAME="ace-1xCO2-ensemble-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 WANDB_USERNAME=spencerc_ai2
@@ -25,11 +25,11 @@ declare -A MODELS=( \
 
 for name in "${!MODELS[@]}"; do
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH
-    job_name="${DATE}-${name}-two-day-abrupt-4xCO2-ensemble-inference"
+    job_name="${DATE}-${name}-two-day-1xCO2-ensemble-inference"
     existing_results_dataset=${MODELS[$name]}
     gantry run \
         --name $job_name \
-        --description 'Run two-day ACE abrupt 4xCO2 ensemble inference' \
+        --description 'Run two-day ACE 1xCO2 ensemble inference' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/climate-titan \
         --priority urgent \
@@ -52,14 +52,14 @@ for name in "${!MODELS[@]}"; do
         -- python -I -m fme.ace.inference $CONFIG_PATH
 done
 
-OVERRIDE="forcing_loader.dataset.overwrite=null"  # For 1xCO2 behavior.
+OVERRIDE="forcing_loader.dataset.overwrite.constant.global_mean_co2=0.0014537"  # Abrupt 4xCO2
 for name in "${!MODELS[@]}"; do
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $OVERRIDE
-    job_name="${DATE}-${name}-two-day-1xCO2-ensemble-inference"
+    job_name="${DATE}-${name}-two-day-abrupt-4xCO2-ensemble-inference"
     existing_results_dataset=${MODELS[$name]}
     gantry run \
         --name $job_name \
-        --description 'Run two-day ACE 1xCO2 ensemble inference' \
+        --description 'Run two-day ACE abrupt 4xCO2 ensemble inference' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/climate-titan \
         --priority urgent \

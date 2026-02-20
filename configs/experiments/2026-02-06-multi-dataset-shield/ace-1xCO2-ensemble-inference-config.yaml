@@ -13,9 +13,6 @@ forcing_loader:
     data_path: /climate-default/2025-04-07-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-combined-spin-up-and-post-spin-up-zarr
     file_pattern: 1xCO2-ic_0005.zarr
     engine: zarr
-    overwrite:
-      constant:
-        global_mean_co2: 0.0014537
   num_data_workers: 4
 initial_condition:
   path: /climate-default/2025-04-07-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-combined-spin-up-and-post-spin-up-zarr/1xCO2-ic_0005.zarr
