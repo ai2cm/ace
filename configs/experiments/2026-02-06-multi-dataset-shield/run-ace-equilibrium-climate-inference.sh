@@ -2,6 +2,7 @@
 
 set -e
 
+DATE="2026-02-20"
 WANDB_USERNAME=spencerc_ai2
 CONFIG_FILENAME="ace-som-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -71,7 +72,7 @@ for model in "${!MODELS[@]}"; do
             spin_up_n_forward_steps="$((SPIN_UP_MAXIMUM_N_FORWARD_STEPS - initial_condition + 1))"
             spin_up_log_to_wandb=false  # Disable logging to wandb in spin up case.
 
-            job_name=2026-02-18-$model-$climate-ic$initial_condition
+            job_name=${DATE}-$model-$climate-ic$initial_condition
             spin_up_overrides="\
                 experiment_dir=$SPIN_UP_EXPERIMENT_DIR \
                 forcing_loader.dataset.data_path=$spin_up_forcing_path \
@@ -101,7 +102,7 @@ for model in "${!MODELS[@]}"; do
                 --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
                 --workspace ai2/climate-titan \
                 --priority urgent \
-                --not-preemptible \
+                --preemptible \
                 --cluster ai2/jupiter \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
