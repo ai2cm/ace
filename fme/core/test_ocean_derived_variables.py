@@ -160,7 +160,7 @@ def test_sea_ice_thickness_derived_variable():
         lat=torch.linspace(-60, 60, n_lat),
         lon=torch.linspace(0, 360, n_lon + 1)[:-1],  # avoid wrapping
     )
-    cell_area = horizontal_coordinates.cell_area_m2
+    cell_area = horizontal_coordinates.area_weights_m2
 
     # Create test data: known thickness and fraction, compute volume from them
     thickness_in_m = torch.full((1, 1, n_lat, n_lon), 2.0)

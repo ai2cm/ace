@@ -665,6 +665,12 @@ class HorizontalCoordinates(abc.ABC):
     def area_weights(self) -> torch.Tensor | None:
         pass
 
+    @property
+    @abc.abstractmethod
+    def area_weights_m2(self) -> torch.Tensor | None:
+        """Cell areas in meters squared."""
+        pass
+
     @abc.abstractmethod
     def get_gridded_operations(
         self, mask_provider: MaskProviderABC = NullMaskProvider
@@ -680,12 +686,6 @@ class HorizontalCoordinates(abc.ABC):
     @property
     @abc.abstractmethod
     def shape(self) -> tuple[int, ...]:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def cell_area_m2(self) -> torch.Tensor:
-        """Cell areas in meters squared."""
         pass
 
     @abc.abstractmethod
@@ -732,31 +732,8 @@ class LatLonCoordinates(HorizontalCoordinates):
         return self._area_weights
 
     @property
-    def cell_area_m2(self) -> torch.Tensor:
-        """Compute cell areas in meters squared for a regular lat-lon grid.
-
-        Uses latitude boundaries at midpoints between cell centers (clamped
-        to the poles) and assumes uniform longitude spacing.
-        """
-        lat_rad = torch.deg2rad(self.lat)
-        half_pi = torch.tensor(torch.pi / 2, dtype=lat_rad.dtype, device=lat_rad.device)
-
-        # latitude boundaries at midpoints, clamped to poles
-        lat_bounds = torch.empty(
-            len(lat_rad) + 1, dtype=lat_rad.dtype, device=lat_rad.device
-        )
-        lat_bounds[1:-1] = (lat_rad[:-1] + lat_rad[1:]) / 2
-        lat_bounds[0] = torch.clamp(
-            lat_rad[0] - (lat_bounds[1] - lat_rad[0]), min=-half_pi
-        )
-        lat_bounds[-1] = torch.clamp(
-            lat_rad[-1] + (lat_rad[-1] - lat_bounds[-2]), max=half_pi
-        )
-
-        dlon = 2 * torch.pi / len(self.lon)
-        sin_diff = torch.abs(torch.sin(lat_bounds[1:]) - torch.sin(lat_bounds[:-1]))
-        area_per_lat = EARTH_RADIUS**2 * sin_diff * dlon
-        return area_per_lat.unsqueeze(-1).expand(-1, len(self.lon))
+    def area_weights_m2(self) -> torch.Tensor:
+        return 4 * torch.pi * EARTH_RADIUS**2 * self.area_weights
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
@@ -911,20 +888,12 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return "healpix"
 
     @property
-    def area_weights(self) -> Literal[None]:
+    def area_weights(self) -> None:
         return None
 
     @property
-    def cell_area_m2(self) -> torch.Tensor:
-        """Compute cell areas in meters squared for a HEALPix grid.
-
-        All HEALPix cells have equal area: 4*pi*R^2 / (12 * nside^2).
-        """
-        npix = 12 * self.nside**2
-        area = 4 * torch.pi * EARTH_RADIUS**2 / npix
-        return torch.full(
-            self.shape, area, dtype=self.face.dtype, device=self.face.device
-        )
+    def area_weights_m2(self) -> None:
+        return None
 
     def get_gridded_operations(
         self, mask_provider: MaskProviderABC = NullMaskProvider

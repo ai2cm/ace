@@ -55,7 +55,7 @@ class HasCellAreaInMetersSquared(Protocol):
     """Protocol for objects that can provide cell areas in square meters."""
 
     @property
-    def cell_area_m2(self) -> torch.Tensor: ...
+    def area_weights_m2(self) -> torch.Tensor: ...
 
 
 class OceanData:
@@ -82,7 +82,7 @@ class OceanData:
                 names or prefix variants (e.g., ["thetao_"] or
                 ["zos"]) found in the data.
             cell_area_provider: An object providing cell areas in square meters
-                via the ``cell_area_m2`` property. Used by derived variables
+                via the ``area_weights_m2`` property. Used by derived variables
                 that need cell area information (e.g. sea ice thickness).
         """
         self._data = dict(ocean_data)
@@ -231,7 +231,7 @@ class OceanData:
         return 1 - self.land_fraction - self.sea_ice_fraction
 
     @property
-    def cell_area_m2(self) -> torch.Tensor:
+    def area_weights_m2(self) -> torch.Tensor:
         """Returns cell areas in square meters.
 
         Raises:
@@ -241,7 +241,7 @@ class OceanData:
             raise ValueError(
                 "A cell area provider must be provided to access cell area information."
             )
-        return self._cell_area_provider.cell_area_m2
+        return self._cell_area_provider.area_weights_m2
 
     @property
     def sea_ice_thickness(self) -> torch.Tensor:
@@ -258,7 +258,7 @@ class OceanData:
             except KeyError:
                 sea_ice_frac = self.sea_ice_fraction
                 sea_ice_vol = sea_ice_vol * sfrac
-            cell_area = self.cell_area_m2
+            cell_area = self.area_weights_m2
             return torch.where(
                 torch.isnan(sea_ice_vol),
                 float("nan"),
