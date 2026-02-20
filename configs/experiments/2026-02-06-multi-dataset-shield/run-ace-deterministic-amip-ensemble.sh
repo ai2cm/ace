@@ -2,6 +2,7 @@
 
 set -e
 
+DATE="2026-02-20"
 WANDB_USERNAME=spencerc_ai2
 CONFIG_FILENAME="ace-amip-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -42,7 +43,7 @@ for model in "${!MODELS[@]}"; do
         spin_up_n_forward_steps="$((SPIN_UP_MAXIMUM_N_FORWARD_STEPS - initial_condition + 1))"
         spin_up_log_to_wandb=false  # Disable logging to wandb in spin up case.
 
-        job_name=2026-02-20-$model-amip-ic$initial_condition
+        job_name=${DATE}-$model-amip-ic$initial_condition
         spin_up_overrides="\
             experiment_dir=$SPIN_UP_EXPERIMENT_DIR \
             forcing_loader.dataset.data_path=$AMIP_DATA_ROOT \
