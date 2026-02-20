@@ -47,6 +47,18 @@ declare -A MODELS=( \
     # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
 )
 
+declare -A OUTPUT_DAILY_PRECIPITATION=( \
+    [published-baseline-rs3]="True" \
+    [no-random-co2-rs0]="False" \
+    [no-random-co2-rs1]="False" \
+    [no-random-co2-energy-conserving-rs0]="True" \
+    [no-random-co2-energy-conserving-rs1]="False" \
+    [full-rs0]="False" \
+    [full-rs1]="False" \
+    [full-energy-conserving-rs0]="True" \
+    [full-energy-conserving-rs1]="False" \
+)
+
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -57,7 +69,6 @@ SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
 MAIN_INITIAL_CONDITION_TIME="2031-01-01T06:00:00"
 MAIN_INITIAL_CONDITION_PATH="/results/spin-up/restart.nc"
 MAIN_N_FORWARD_STEPS=14604
-# MAIN_EXPERIMENT_DIR="/results/main"
 
 for model in "${!MODELS[@]}"; do
     dataset_id="${MODELS[$model]}"
@@ -82,16 +93,30 @@ for model in "${!MODELS[@]}"; do
                 logging.log_to_wandb=$spin_up_log_to_wandb \
                 data_writer.files=[] \
             "
+
             main_experiment_dir="$GCS_ROOT/$model-$climate-ic$initial_condition/main"
-            main_overrides="\
-                experiment_dir=$main_experiment_dir \
-                forcing_loader.dataset.data_path=$MAIN_FORCING_ROOT \
-                forcing_loader.dataset.engine=zarr \
-                forcing_loader.dataset.file_pattern=$main_forcing_path \
-                initial_condition.path=$MAIN_INITIAL_CONDITION_PATH \
-                initial_condition.start_indices.times=[$MAIN_INITIAL_CONDITION_TIME] \
-                n_forward_steps=$MAIN_N_FORWARD_STEPS \
-            "
+            if [ "${OUTPUT_DAILY_PRECIPITATION[$model]}" = "True" ]; then
+                main_overrides="\
+                    experiment_dir=$main_experiment_dir \
+                    forcing_loader.dataset.data_path=$MAIN_FORCING_ROOT \
+                    forcing_loader.dataset.engine=zarr \
+                    forcing_loader.dataset.file_pattern=$main_forcing_path \
+                    initial_condition.path=$MAIN_INITIAL_CONDITION_PATH \
+                    initial_condition.start_indices.times=[$MAIN_INITIAL_CONDITION_TIME] \
+                    n_forward_steps=$MAIN_N_FORWARD_STEPS \
+                "
+            else
+                main_overrides="\
+                    experiment_dir=$main_experiment_dir \
+                    forcing_loader.dataset.data_path=$MAIN_FORCING_ROOT \
+                    forcing_loader.dataset.engine=zarr \
+                    forcing_loader.dataset.file_pattern=$main_forcing_path \
+                    initial_condition.path=$MAIN_INITIAL_CONDITION_PATH \
+                    initial_condition.start_indices.times=[$MAIN_INITIAL_CONDITION_TIME] \
+                    n_forward_steps=$MAIN_N_FORWARD_STEPS \
+                    data_writer.files=[] \
+                "
+            fi
 
             python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_overrides
             python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $main_overrides

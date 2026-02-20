@@ -5,6 +5,7 @@ data_writer:
   files:
     - label: daily
       names: [PRATEsfc]
+      save_reference: false
       time_coarsen:
         coarsen_factor: 4
       format:
