@@ -228,7 +228,7 @@ torch_harmonics.RealSHT = RealSHT
 torch_harmonics.InverseRealSHT = InverseRealSHT
 
 
-@register_benchmark("sht")
+@register_benchmark("sht_100k")
 class RealSHTBenchmark(BenchmarkABC):
 
     def __init__(self, sht: RealSHT, x: torch.Tensor):
@@ -241,7 +241,7 @@ class RealSHTBenchmark(BenchmarkABC):
         Initialize any state needed for the benchmark.
         This will be called once before the benchmark is run.
         """
-        return cls.new_from_shape(batch_size=1024, nlat=180, nlon=360)
+        return cls.new_from_shape(batch_size=100_000, nlat=180, nlon=360)
 
     @classmethod
     def new_for_regression(cls: type[Self]) -> Self | None:
@@ -276,7 +276,7 @@ class RealSHTBenchmark(BenchmarkABC):
         return {"output": result}
 
 
-@register_benchmark("inverse_sht")
+@register_benchmark("inverse_sht_100k")
 class InverseRealSHTBenchmark(BenchmarkABC):
 
     def __init__(self, isht: InverseRealSHT, x_hat: torch.Tensor):
@@ -289,7 +289,7 @@ class InverseRealSHTBenchmark(BenchmarkABC):
         Initialize any state needed for the benchmark.
         This will be called once before the benchmark is run.
         """
-        return cls.new_from_shape(batch_size=1024, nlat=180, nlon=360)
+        return cls.new_from_shape(batch_size=100_000, nlat=180, nlon=360)
 
     @classmethod
     def new_for_regression(cls: type[Self]) -> Self | None:
