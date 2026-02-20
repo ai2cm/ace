@@ -27,6 +27,7 @@ class ModelOutputs:
     target: TensorDict
     loss: torch.Tensor
     latent_steps: list[torch.Tensor] = dataclasses.field(default_factory=list)
+    channel_losses: TensorDict = dataclasses.field(default_factory=dict)
 
 
 def _rename_normalizer(
@@ -380,6 +381,18 @@ class DiffusionModel:
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
 
+        with torch.no_grad():
+            channel_losses = {
+                name: torch.mean(
+                    conditioned_target.weight
+                    * self.loss(
+                        denoised_norm[:, i, :, :],
+                        targets_norm[:, i, :, :],
+                    )
+                )
+                for i, name in enumerate(self.out_packer.names)
+            }
+
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
 
@@ -388,7 +401,11 @@ class DiffusionModel:
             self.out_packer.unpack(denoised_norm, axis=self._channel_axis)
         )
         return ModelOutputs(
-            prediction=denoised, target=target, loss=loss, latent_steps=[]
+            prediction=denoised,
+            target=target,
+            loss=loss,
+            channel_losses=channel_losses,
+            latent_steps=[],
         )
 
     @torch.no_grad()
