@@ -218,11 +218,8 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         )
         config.resume_results.verify_wandb_resumption(config.experiment_dir)
     trainer = build_trainer(builders, config)
-    try:
-        trainer.train()
-        logging.info(f"DONE ---- rank {dist.rank}")
-    finally:
-        dist.shutdown()
+    trainer.train()
+    logging.info(f"DONE ---- rank {dist.rank}")
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
