@@ -40,6 +40,13 @@ class BenchmarkResult:
         except AssertionError as e:
             raise AssertionError(f"Memory results differ: {e}") from e
 
+    def get_logs(self, max_depth: int) -> dict[str, float]:
+        logs = {
+            "max_alloc_mb": self.memory.max_alloc / (1024.0 * 1024.0),
+        }
+        logs.update(self.timer.get_logs(max_depth=max_depth))
+        return logs
+
     def to_png(
         self, path: str | pathlib.Path, label: str, child: str | None = None
     ) -> None:
