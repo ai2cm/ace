@@ -242,4 +242,5 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
 if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
-    main(args.yaml_config, override_dotlist=args.override)
+    with Distributed.context():
+        main(args.yaml_config, override_dotlist=args.override)
