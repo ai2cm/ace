@@ -25,6 +25,7 @@ from fme.coupled.data_loading.batch_data import (
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
+from fme.coupled.typing_ import CoupledTensorMapping
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
@@ -56,8 +57,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         n_timesteps_atmosphere=n_timesteps_atmosphere,
         ocean_normalize=stepper.ocean.normalizer.normalize,
         atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
-        ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
-        atmosphere_loss_scaling=stepper.atmosphere.effective_loss_scaling,
+        loss_scaling=stepper.effective_loss_scaling,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
@@ -87,8 +87,7 @@ class CoupledAggregatorBuilder(
         output_dir: str,
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
-        ocean_loss_scaling: TensorMapping | None = None,
-        atmosphere_loss_scaling: TensorMapping | None = None,
+        loss_scaling: CoupledTensorMapping,
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
@@ -101,8 +100,7 @@ class CoupledAggregatorBuilder(
         self.output_dir = output_dir
         self.ocean_normalize = ocean_normalize
         self.atmosphere_normalize = atmosphere_normalize
-        self.ocean_loss_scaling = ocean_loss_scaling
-        self.atmosphere_loss_scaling = atmosphere_loss_scaling
+        self.loss_scaling = loss_scaling
         self.ocean_channel_mean_names = ocean_channel_mean_names
         self.atmosphere_channel_mean_names = atmosphere_channel_mean_names
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
@@ -115,8 +113,7 @@ class CoupledAggregatorBuilder(
             dataset_info=self.dataset_info,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
-            ocean_loss_scaling=self.ocean_loss_scaling,
-            atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+            loss_scaling=self.loss_scaling,
             ocean_channel_mean_names=self.ocean_channel_mean_names,
             atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )

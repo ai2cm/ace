@@ -161,10 +161,10 @@ class PairedEventConfig(EventConfig):
     ) -> PairedGriddedData:
         enforce_lat_bounds(self.lat_extent)
         time_slice = self._time_selection_slice
-        event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
-        event_coarse = dataclasses.replace(
-            base_data_config.coarse_full_config[0], subset=time_slice
-        )
+        event_fine = dataclasses.replace(base_data_config.fine[0])
+        event_fine.update_subset(time_slice)
+        event_coarse = dataclasses.replace(base_data_config.coarse_full_config[0])
+        event_coarse.update_subset(time_slice)
         n_processes = Distributed.get_instance().world_size
         event_data_config = dataclasses.replace(
             base_data_config,

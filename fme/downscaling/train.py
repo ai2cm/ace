@@ -12,6 +12,7 @@ import torch
 import yaml
 
 from fme.core.cli import prepare_directory
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import get_raw_paths
 from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
@@ -448,12 +449,16 @@ class TrainerConfig:
             model_coarse_shape = train_data.coarse_shape
 
         # load full spatial range of topography to save with model
-        # TODO: this will be replaced in the future with a more general call
-        # to get normalized static inputs from a model config field
+        # TODO: this block will be removed in a following PR that updates the
+        # the training config to have a specified static inputs field with paths.
+        if isinstance(self.train_data.fine[0], MergeNoConcatDatasetConfig):
+            first_fine_config = self.train_data.fine[0].merge[0]
+        else:
+            first_fine_config = self.train_data.fine[0]
         full_topography = get_normalized_topography(
-            get_raw_paths(
-                self.train_data.fine[0].data_path, self.train_data.fine[0].file_pattern
-            )[0]
+            get_raw_paths(first_fine_config.data_path, first_fine_config.file_pattern)[
+                0
+            ]
         )
         downscaling_model = self.model.build(
             model_coarse_shape,

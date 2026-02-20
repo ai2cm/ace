@@ -159,8 +159,10 @@ def get_single_module_noise_conditioned_selector(
                             embed_dim=4,
                             noise_embed_dim=4,
                             noise_type="isotropic",
-                            filter_type="makani-linear",
+                            filter_type="linear",
                             filter_num_groups=2,
+                            context_pos_embed_dim=2,
+                            pos_embed=False,
                             num_layers=2,
                             local_blocks=[0],
                             affine_norms=True,
@@ -653,3 +655,48 @@ def test_input_output_names_secondary_decoder_conflict(conflict: str):
             ),
         )
     assert f"secondary_diagnostic_name is an {conflict} variable:" in str(err.value)
+
+
+def test_step_with_prescribed_prognostic_overwrites_output():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                prescribed_prognostic_names=["diagnostic_main"],
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 2
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    prescribed_value = torch.full(
+        (n_samples,) + img_shape, 42.0, device=fme.get_device()
+    )
+    next_step_input_data["diagnostic_main"] = prescribed_value
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+        wrapper=lambda x: x,
+    )
+    torch.testing.assert_close(output["diagnostic_main"], prescribed_value)

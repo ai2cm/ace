@@ -100,6 +100,8 @@ class SingleModuleStepperConfig:
         loss: The loss configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
+        prescribed_prognostic_names: Prognostic variable names to overwrite from
+            forcing data at each step during inference.
         loss_normalization: The normalization configuration for the loss.
         residual_normalization: Optional alternative to configure loss normalization.
             If provided, it will be used for all *prognostic* variables in loss scaling.
@@ -123,6 +125,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     loss_normalization: NormalizationConfig | None = None
     residual_normalization: NormalizationConfig | None = None
     multi_call: MultiCallConfig | None = None
@@ -130,6 +133,12 @@ class SingleModuleStepperConfig:
     residual_prediction: bool = False
 
     def __post_init__(self):
+        for name in self.prescribed_prognostic_names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
         for name in self.next_step_forcing_names:
             if name not in self.in_names:
                 raise ValueError(
@@ -300,6 +309,7 @@ class SingleModuleStepperConfig:
             ocean=self.ocean,
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
+            prescribed_prognostic_names=self.prescribed_prognostic_names,
             residual_prediction=self.residual_prediction,
         )
 
@@ -490,20 +500,27 @@ class StepperConfig:
     """
     Configuration for a stepper.
 
+    The following fields are training concerns transferred to TrainStepperConfig
+    via get_train_stepper_config() and are not used directly by get_stepper():
+    ``loss``, ``optimize_last_step_only``, ``n_ensemble``,
+    ``parameter_init``, ``train_n_forward_steps``.
+
     Parameters:
         step: The step configuration.
-        loss: The loss configuration.
+        loss: The loss configuration. Training only.
         optimize_last_step_only: Whether to optimize only the last step.
+            Training only.
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
-            the default is 1. Must be 2 for EnsembleLoss to be valid.
+            the default is 1. Must be 2 for EnsembleLoss to be valid. Training only.
         parameter_init: The parameter initialization configuration.
+            Training only.
         input_masking: Config for masking step inputs.
         train_n_forward_steps: The number of timesteps to train on and associated
             sampling probabilities. By default, the stepper will train on the full
             number of timesteps present in the training dataset samples. Values must
             be less than or equal to the number of timesteps present
-            in the training dataset samples.
+            in the training dataset samples. Training only.
         derived_forcings: Configuration for deriving forcing variables.
     """
 
@@ -520,14 +537,6 @@ class StepperConfig:
         default_factory=lambda: DerivedForcingsConfig()
     )  # inference
 
-    @property
-    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
-        if self.train_n_forward_steps is None:
-            return None
-        if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
-            return self.train_n_forward_steps
-        return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
-
     def __post_init__(self):
         if self.n_ensemble == -1:
             if self.loss.type == "EnsembleLoss":
@@ -539,29 +548,8 @@ class StepperConfig:
     def n_ic_timesteps(self) -> int:
         return self.step.n_ic_timesteps
 
-    def get_train_window_data_requirements(
-        self,
-        default_n_forward_steps: int | None,
-    ) -> DataRequirements:
-        if self.train_n_forward_steps is None:
-            if default_n_forward_steps is None:
-                raise ValueError(
-                    "default_n_forward_steps is required if "
-                    "train_n_forward_steps is not provided"
-                )
-            n_forward_steps: int | IntSchedule = default_n_forward_steps
-        elif isinstance(self.train_n_forward_steps, int):
-            n_forward_steps = self.train_n_forward_steps
-        else:
-            n_forward_steps = self.train_n_forward_steps.max_n_forward_steps
-        requirements = DataRequirements(
-            names=self.all_names,
-            n_timesteps=self._window_steps_required(n_forward_steps),
-        )
-        return self.derived_forcings.update_requirements(requirements)
-
     def get_evaluation_window_data_requirements(
-        self, n_forward_steps: int
+        self, n_forward_steps: int | IntSchedule
     ) -> DataRequirements:
         requirements = DataRequirements(
             names=self.all_names,
@@ -604,26 +592,20 @@ class StepperConfig:
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-        apply_parameter_init: bool = True,
+        parameter_initializer: ParameterInitializer | None = None,
         training_history: TrainingHistory | None = None,
-        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
     ):
         """
         Args:
             dataset_info: Information about the training dataset.
-            apply_parameter_init: Whether to apply parameter initialization.
+            parameter_initializer: The parameter initializer to use for loading
+                weights from an external source. If None, no parameter
+                initialization is applied.
             training_history: History of the stepper's training jobs.
-            load_weights_and_history: Function for loading weights and history.
-                Default implementation loads a Trainer checkpoint containing
-                a Stepper.
 
         """
         logging.info("Initializing stepper from provided config")
-        if apply_parameter_init:
-            parameter_initializer = self.get_parameter_initializer(
-                load_weights_and_history
-            )
-        else:
+        if parameter_initializer is None:
             parameter_initializer = ParameterInitializer()
         step = self.step.get_step(
             dataset_info, init_weights=parameter_initializer.freeze_weights
@@ -742,6 +724,15 @@ class StepperConfig:
     def get_ocean(self) -> OceanConfig | None:
         return self.step.get_ocean()
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint).
+
+        Used for inference / evaluation where the trained ckpt does not contain
+        prescribed_prognostic_names and we need to overwrite
+        prescribed_prognostic_names.
+        """
+        self.step.replace_prescribed_prognostic_names(names)
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -771,22 +762,20 @@ class StepperConfig:
         self.derived_forcings.validate_replacement(derived_forcings)
         self.derived_forcings = derived_forcings
 
-    def get_parameter_initializer(
-        self,
-        load_weights_and_history: WeightsAndHistoryLoader,
-    ) -> ParameterInitializer:
-        """
-        Get the parameter initializer for this stepper configuration.
-        """
-        return self.parameter_init.build(
-            load_weights_and_history=load_weights_and_history
-        )
-
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
         state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
+        )
+
+    def get_train_stepper_config(self) -> "TrainStepperConfig":
+        return TrainStepperConfig(
+            loss=self.loss,
+            optimize_last_step_only=self.optimize_last_step_only,
+            n_ensemble=self.n_ensemble,
+            train_n_forward_steps=self.train_n_forward_steps,
+            parameter_init=self.parameter_init,
         )
 
 
@@ -801,15 +790,7 @@ def probabilities_from_time_length(value: TimeLength) -> TimeLengthProbabilities
         return TimeLengthProbabilities.from_constant(value)
 
 
-class Stepper(
-    TrainStepperABC[
-        PrognosticState,
-        BatchData,
-        BatchData,
-        PairedData,
-        TrainOutput,
-    ]
-):
+class Stepper:
     """
     Stepper class for selectable step configurations.
     """
@@ -851,28 +832,6 @@ class Stepper(
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
-        self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
-        self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
-        if config.train_n_forward_steps_schedule is not None:
-            self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
-
-        self._epoch: int | None = None  # to keep track of cached values
-
-        def get_loss_obj() -> StepLoss:
-            loss_normalizer = step.get_loss_normalizer()
-            if config.loss is None:
-                raise ValueError("Loss is not configured")
-            return config.loss.build(
-                dataset_info.gridded_operations,
-                out_names=config.loss_names,
-                channel_dim=self.CHANNEL_DIM,
-                normalizer=loss_normalizer,
-            )
-
-        self._loss_normalizer: StandardNormalizer | None = None
-
-        self._get_loss_obj = get_loss_obj
-        self._loss_obj: StepLoss | None = None
 
         self._parameter_initializer.apply_weights(
             step.modules,
@@ -891,54 +850,33 @@ class Stepper(
             base_training_history=self._parameter_initializer.training_history
         )
 
-        _1: PredictFunction[  # for type checking
-            PrognosticState,
-            BatchData,
-            BatchData,
-        ] = self.predict
-
-        _2: PredictFunction[  # for type checking
+        _: PredictFunction[  # for type checking
             PrognosticState,
             BatchData,
             PairedData,
         ] = self.predict_paired
 
         self._dataset_info = dataset_info
-        self._forcing_deriver = config.derived_forcings.build(dataset_info)
+        self.forcing_deriver = config.derived_forcings.build(dataset_info)
 
-    def _init_for_epoch(self, epoch: int | None):
-        if (
-            epoch is None
-            and self._train_n_forward_steps_schedule is not None
-            and len(self._train_n_forward_steps_schedule.milestones) > 0
-        ):
-            raise EpochNotProvidedError(
-                "current configuration requires epoch to be provided "
-                "on BatchData during training"
-            )
-        if self._epoch == epoch:
-            return
-        if self._train_n_forward_steps_schedule is not None:
-            assert epoch is not None  # already checked, but needed for mypy
-            self._train_n_forward_steps_sampler = probabilities_from_time_length(
-                self._train_n_forward_steps_schedule.get_value(epoch)
-            )
-        else:
-            self._train_n_forward_steps_sampler = None
-        self._epoch = epoch
+    def build_loss(self, loss_config: StepLossConfig) -> StepLoss:
+        """Build a StepLoss from the given config using this stepper's normalizer
+        and dataset info.
 
-    @property
-    def _loaded_loss_normalizer(self) -> StandardNormalizer:
-        if self._loss_normalizer is None:
-            loss_normalizer = self._step_obj.get_loss_normalizer()
-            self._loss_normalizer = loss_normalizer
-        return self._loss_normalizer
+        Args:
+            loss_config: The loss configuration to build from.
 
-    @property
-    def loss_obj(self) -> StepLoss:
-        if self._loss_obj is None:
-            self._loss_obj = self._get_loss_obj()
-        return self._loss_obj
+        Returns:
+            A StepLoss built using this stepper's loss normalizer, gridded
+            operations, loss variable names, and channel dimension.
+        """
+        loss_normalizer = self._step_obj.get_loss_normalizer()
+        return loss_config.build(
+            self._dataset_info.gridded_operations,
+            out_names=self.loss_names,
+            channel_dim=self.CHANNEL_DIM,
+            normalizer=loss_normalizer,
+        )
 
     @property
     def config(self) -> StepperConfig:
@@ -999,15 +937,6 @@ class Stepper(
         if base_training_history is not None:
             self._training_history.extend(base_training_history)
 
-    @property
-    def effective_loss_scaling(self) -> TensorDict:
-        """
-        Effective loss scalings used to normalize outputs before computing loss.
-        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
-        where loss_scaling_i = loss_normalizer_std_i / weight_i.
-        """
-        return self.loss_obj.effective_loss_scaling
-
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         """
         Replace the MultiCall object with a new one. Note this is only
@@ -1020,7 +949,7 @@ class Stepper(
         state = self._step_obj.get_state()
         new_state = self._config.replace_multi_call(multi_call, state)
         new_stepper: Stepper = self._config.get_stepper(
-            dataset_info=self._dataset_info, apply_parameter_init=False
+            dataset_info=self._dataset_info,
         )
         new_stepper._step_obj.load_state(new_state)
         self._step_obj = new_stepper._step_obj
@@ -1035,7 +964,20 @@ class Stepper(
         self._config.replace_ocean(ocean)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
-            apply_parameter_init=False,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
+
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """
+        Replace prescribed prognostic names (e.g. when loading from checkpoint).
+
+        Args:
+            names: The new list of prescribed prognostic variable names.
+        """
+        self._config.replace_prescribed_prognostic_names(names)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
@@ -1048,7 +990,7 @@ class Stepper(
             derived_forcings: The new derived forcings configuration or None.
         """
         self._config.replace_derived_forcings(derived_forcings)
-        self._forcing_deriver = derived_forcings.build(self._dataset_info)
+        self.forcing_deriver = derived_forcings.build(self._dataset_info)
 
     def get_base_weights(self) -> Weights | None:
         """
@@ -1139,7 +1081,7 @@ class Stepper(
             )
         ic_dict = ic_batch_data.data
         forcing_dict = forcing_data.data
-        return self._predict_generator(
+        return self.predict_generator(
             ic_dict, forcing_dict, n_forward_steps, optimizer, forcing_data.labels
         )
 
@@ -1149,7 +1091,7 @@ class Stepper(
             set(self._step_obj.input_names).difference(set(self._step_obj.output_names))
         )
 
-    def _predict_generator(
+    def predict_generator(
         self,
         ic_dict: TensorMapping,
         forcing_dict: TensorMapping,
@@ -1222,7 +1164,7 @@ class Stepper(
         )
 
         if compute_derived_forcings:
-            forcing = self._forcing_deriver(forcing)
+            forcing = self.forcing_deriver(forcing)
 
         if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
             forcing = forcing.broadcast_ensemble(
@@ -1297,7 +1239,7 @@ class Stepper(
             all target/forcing data at the same timesteps, and 2) the prediction's
             final state, which can be used as a new initial condition.
         """
-        forcing = self._forcing_deriver(forcing)
+        forcing = self.forcing_deriver(forcing)
         prediction, new_initial_condition = self.predict(
             initial_condition,
             forcing,
@@ -1332,140 +1274,8 @@ class Stepper(
                 )
         return data.remove_initial_condition(self.n_ic_timesteps)
 
-    def _get_regularizer_loss(self) -> torch.Tensor:
+    def get_regularizer_loss(self) -> torch.Tensor:
         return self._l2_sp_tuning_regularizer() + self._step_obj.get_regularizer_loss()
-
-    def train_on_batch(
-        self,
-        data: BatchData,
-        optimization: OptimizationABC,
-        compute_derived_variables: bool = False,
-    ) -> TrainOutput:
-        """
-        Train the model on a batch of data with one or more forward steps.
-
-        If gradient accumulation is used by the optimization, the computational graph is
-        detached between steps to reduce memory consumption. This means the model learns
-        how to deal with inputs on step N but does not try to improve the behavior at
-        step N by modifying the behavior for step N-1.
-
-        Args:
-            data: The batch data where each tensor in data.data has shape
-                [n_sample, n_forward_steps + self.n_ic_timesteps, <horizontal_dims>].
-            optimization: The optimization class to use for updating the module.
-                Use `NullOptimization` to disable training.
-            compute_derived_variables: Whether to compute derived variables for the
-                prediction and target data.
-
-        Returns:
-            The loss metrics, the generated data, the normalized generated data,
-                and the normalized batch data.
-        """
-        self._init_for_epoch(data.epoch)
-        metrics: dict[str, float] = {}
-        input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
-        target_data = self.get_forward_data(data, compute_derived_variables=False)
-        data = self._forcing_deriver(data)
-
-        optimization.set_mode(self._step_obj.modules)
-        output_list = self._accumulate_loss(
-            input_data,
-            data,
-            target_data,
-            optimization,
-            metrics,
-        )
-
-        regularizer_loss = self._get_regularizer_loss()
-        if torch.any(regularizer_loss > 0):
-            optimization.accumulate_loss(regularizer_loss)
-        metrics["loss"] = optimization.get_accumulated_loss().detach()
-        optimization.step_weights()
-
-        gen_data = process_ensemble_prediction_generator_list(output_list)
-
-        stepped = TrainOutput(
-            metrics=metrics,
-            gen_data=gen_data,
-            target_data=add_ensemble_dim(target_data.data),
-            time=target_data.time,
-            normalize=self.normalizer.normalize,
-            derive_func=self.derive_func,
-        )
-        ic = data.get_start(
-            set(data.data.keys()), self.n_ic_timesteps
-        )  # full data and not just prognostic get prepended
-        stepped = stepped.prepend_initial_condition(ic)
-        if compute_derived_variables:
-            stepped = stepped.compute_derived_variables()
-        # apply post-processing and return
-        return stepped
-
-    def _accumulate_loss(
-        self,
-        input_data: PrognosticState,
-        data: BatchData,
-        target_data: BatchData,
-        optimization: OptimizationABC,
-        metrics: dict[str, float],
-    ) -> list[EnsembleTensorDict]:
-        input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
-        # output from self.predict_paired does not include initial condition
-        n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
-        n_ensemble = self._config.n_ensemble
-        input_batch_data = input_data.as_batch_data()
-        if input_batch_data.labels != data.labels:
-            raise ValueError(
-                "Initial condition and forcing data must have the same labels, "
-                f"got {input_batch_data.labels} and {data.labels}."
-            )
-        input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
-        forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
-        output_generator = self._predict_generator(
-            input_ensemble_data.data,
-            forcing_ensemble_data.data,
-            n_forward_steps,
-            optimization,
-            labels=input_ensemble_data.labels,
-        )
-        output_list: list[EnsembleTensorDict] = []
-        output_iterator = iter(output_generator)
-        if self._train_n_forward_steps_sampler is not None:
-            stochastic_n_forward_steps = self._train_n_forward_steps_sampler.sample()
-            if stochastic_n_forward_steps > n_forward_steps:
-                raise RuntimeError(
-                    "The number of forward steps to train on "
-                    f"({stochastic_n_forward_steps}) is greater than the number of "
-                    f"forward steps in the data ({n_forward_steps}), "
-                    "This is supposed to be ensured by the StepperConfig when train "
-                    "data requirements are retrieved, so this is a bug."
-                )
-            n_forward_steps = stochastic_n_forward_steps
-        for step in range(n_forward_steps):
-            optimize_step = (
-                step == n_forward_steps - 1 or not self._config.optimize_last_step_only
-            )
-            if optimize_step:
-                context = contextlib.nullcontext()
-            else:
-                context = torch.no_grad()
-            with context:
-                gen_step = next(output_iterator)
-                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
-                output_list.append(gen_step)
-                # Note: here we examine the loss for a single timestep,
-                # not a single model call (which may contain multiple timesteps).
-                target_step = add_ensemble_dim(
-                    {
-                        k: v.select(self.TIME_DIM, step)
-                        for k, v in target_data.data.items()
-                    }
-                )
-                step_loss = self.loss_obj(gen_step, target_step, step=step)
-                metrics[f"loss_step_{step}"] = step_loss.detach()
-            if optimize_step:
-                optimization.accumulate_loss(step_loss)
-        return output_list
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
@@ -1565,11 +1375,373 @@ class Stepper(
         stepper = config.get_stepper(
             dataset_info=dataset_info,
             training_history=training_history,
-            # don't need to initialize weights, we're about to load_state
-            apply_parameter_init=False,
+            # no parameter_initializer: we're about to load_state
         )
         stepper.load_state(state)
         return stepper
+
+    def set_eval(self) -> None:
+        for module in self.modules:
+            module.eval()
+
+    def set_train(self) -> None:
+        for module in self.modules:
+            module.train()
+
+
+@dataclasses.dataclass
+class TrainStepperConfig:
+    """
+    Configuration for training-specific aspects of a stepper.
+
+    Parameters:
+        loss: The loss configuration.
+        optimize_last_step_only: Whether to optimize only the last step.
+        n_ensemble: The number of ensemble members evaluated for each training
+            batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
+            the default is 1. Must be 2 for EnsembleLoss to be valid.
+        train_n_forward_steps: The number of timesteps to train on and associated
+            sampling probabilities. By default, the stepper will train on the full
+            number of timesteps present in the training dataset samples. Values must
+            be less than or equal to the number of timesteps present
+            in the training dataset samples.
+        parameter_init: The parameter initialization configuration for fine-tuning.
+    """
+
+    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
+    optimize_last_step_only: bool = False
+    n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
+    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
+    parameter_init: ParameterInitializationConfig = dataclasses.field(
+        default_factory=lambda: ParameterInitializationConfig()
+    )
+
+    def __post_init__(self):
+        if self.n_ensemble == -1:
+            if self.loss.type == "EnsembleLoss":
+                self.n_ensemble = 2
+            else:
+                self.n_ensemble = 1
+
+    @property
+    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
+        if self.train_n_forward_steps is None:
+            return None
+        if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
+            return self.train_n_forward_steps
+        return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
+
+    def _get_parameter_initializer(
+        self,
+        load_weights_and_history_fn: WeightsAndHistoryLoader = load_weights_and_history,
+    ) -> ParameterInitializer:
+        """
+        Build a ParameterInitializer from this configuration.
+
+        Args:
+            load_weights_and_history_fn: Function for loading weights and history.
+                Default implementation loads a Trainer checkpoint containing
+                a Stepper.
+        """
+        return self.parameter_init.build(
+            load_weights_and_history=load_weights_and_history_fn
+        )
+
+    def get_train_stepper(
+        self,
+        stepper_config: StepperConfig,
+        dataset_info: DatasetInfo,
+        load_weights_and_history_fn: WeightsAndHistoryLoader = load_weights_and_history,
+    ) -> "TrainStepper":
+        """
+        Build a TrainStepper from this configuration and a StepperConfig.
+
+        Builds the ParameterInitializer from this config's parameter_init,
+        passes it to StepperConfig.get_stepper() for weight loading and
+        freezing during model construction, then wraps the result in a
+        TrainStepper.
+
+        Args:
+            stepper_config: The stepper configuration for building the model.
+            dataset_info: Information about the training dataset.
+            load_weights_and_history_fn: Function for loading weights and
+                history. Default implementation loads a Trainer checkpoint
+                containing a Stepper.
+
+        Returns:
+            A TrainStepper wrapping the built stepper with training
+            functionality.
+        """
+        parameter_initializer = self._get_parameter_initializer(
+            load_weights_and_history_fn
+        )
+        stepper = stepper_config.get_stepper(
+            dataset_info=dataset_info,
+            parameter_initializer=parameter_initializer,
+        )
+        return TrainStepper(
+            stepper=stepper,
+            config=self,
+        )
+
+
+class TrainStepper(
+    TrainStepperABC[
+        PrognosticState,
+        BatchData,
+        BatchData,
+        PairedData,
+        TrainOutput,
+    ]
+):
+    """
+    Wrapper around Stepper that adds training functionality.
+
+    This class composes a Stepper (for inference) with training-specific
+    configuration and implements the train_on_batch method.
+    """
+
+    TIME_DIM = 1
+    CHANNEL_DIM = -3
+
+    def __init__(
+        self,
+        stepper: Stepper,
+        config: TrainStepperConfig,
+    ):
+        """
+        Args:
+            stepper: The underlying stepper for inference operations.
+            config: Training-specific configuration.
+        """
+        self._stepper = stepper
+        self._config = config
+
+        self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
+        self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
+        if config.train_n_forward_steps_schedule is not None:
+            self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
+
+        self._epoch: int | None = None  # to keep track of cached values
+
+        self._prognostic_names = self._stepper.prognostic_names
+        self._derive_func = self._stepper.derive_func
+        self._loss_obj = self._stepper.build_loss(config.loss)
+
+    def train_on_batch(
+        self,
+        data: BatchData,
+        optimization: OptimizationABC,
+        compute_derived_variables: bool = False,
+    ) -> TrainOutput:
+        """
+        Train the model on a batch of data with one or more forward steps.
+
+        If gradient accumulation is used by the optimization, the computational graph is
+        detached between steps to reduce memory consumption. This means the model learns
+        how to deal with inputs on step N but does not try to improve the behavior at
+        step N by modifying the behavior for step N-1.
+
+        Args:
+            data: The batch data where each tensor in data.data has shape
+                [n_sample, n_forward_steps + self.n_ic_timesteps, <horizontal_dims>].
+            optimization: The optimization class to use for updating the module.
+                Use `NullOptimization` to disable training.
+            compute_derived_variables: Whether to compute derived variables for the
+                prediction and target data.
+
+        Returns:
+            The loss metrics, the generated data, the normalized generated data,
+                and the normalized batch data.
+        """
+        self._init_for_epoch(data.epoch)
+        metrics: dict[str, float] = {}
+        input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
+        target_data = self._stepper.get_forward_data(
+            data, compute_derived_variables=False
+        )
+        data = self._stepper.forcing_deriver(data)
+
+        optimization.set_mode(self._stepper.modules)
+        output_list = self._accumulate_loss(
+            input_data,
+            data,
+            target_data,
+            optimization,
+            metrics,
+        )
+
+        regularizer_loss = self._stepper.get_regularizer_loss()
+        if torch.any(regularizer_loss > 0):
+            optimization.accumulate_loss(regularizer_loss)
+        metrics["loss"] = optimization.get_accumulated_loss().detach()
+        optimization.step_weights()
+
+        gen_data = process_ensemble_prediction_generator_list(output_list)
+
+        stepped = TrainOutput(
+            metrics=metrics,
+            gen_data=gen_data,
+            target_data=add_ensemble_dim(target_data.data),
+            time=target_data.time,
+            normalize=self.normalizer.normalize,
+            derive_func=self._derive_func,
+        )
+        ic = data.get_start(
+            set(data.data.keys()), self.n_ic_timesteps
+        )  # full data and not just prognostic get prepended
+        stepped = stepped.prepend_initial_condition(ic)
+        if compute_derived_variables:
+            stepped = stepped.compute_derived_variables()
+        # apply post-processing and return
+        return stepped
+
+    def _accumulate_loss(
+        self,
+        input_data: PrognosticState,
+        data: BatchData,
+        target_data: BatchData,
+        optimization: OptimizationABC,
+        metrics: dict[str, float],
+    ) -> list[EnsembleTensorDict]:
+        input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
+        # output from self.predict_paired does not include initial condition
+        n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
+        n_ensemble = self._config.n_ensemble
+        input_batch_data = input_data.as_batch_data()
+        if input_batch_data.labels != data.labels:
+            raise ValueError(
+                "Initial condition and forcing data must have the same labels, "
+                f"got {input_batch_data.labels} and {data.labels}."
+            )
+        input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
+        forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
+        output_generator = self._stepper.predict_generator(
+            input_ensemble_data.data,
+            forcing_ensemble_data.data,
+            n_forward_steps,
+            optimization,
+            labels=input_ensemble_data.labels,
+        )
+        output_list: list[EnsembleTensorDict] = []
+        output_iterator = iter(output_generator)
+        if self._train_n_forward_steps_sampler is not None:
+            stochastic_n_forward_steps = self._train_n_forward_steps_sampler.sample()
+            if stochastic_n_forward_steps > n_forward_steps:
+                raise RuntimeError(
+                    "The number of forward steps to train on "
+                    f"({stochastic_n_forward_steps}) is greater than the number of "
+                    f"forward steps in the data ({n_forward_steps}), "
+                    "This is supposed to be ensured by the StepperConfig when train "
+                    "data requirements are retrieved, so this is a bug."
+                )
+            n_forward_steps = stochastic_n_forward_steps
+        for step in range(n_forward_steps):
+            optimize_step = (
+                step == n_forward_steps - 1 or not self._config.optimize_last_step_only
+            )
+            if optimize_step:
+                context = contextlib.nullcontext()
+            else:
+                context = torch.no_grad()
+            with context:
+                gen_step = next(output_iterator)
+                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                output_list.append(gen_step)
+                # Note: here we examine the loss for a single timestep,
+                # not a single model call (which may contain multiple timesteps).
+                target_step = add_ensemble_dim(
+                    {
+                        k: v.select(self.TIME_DIM, step)
+                        for k, v in target_data.data.items()
+                    }
+                )
+                step_loss = self._loss_obj(gen_step, target_step, step=step)
+                metrics[f"loss_step_{step}"] = step_loss.detach()
+            if optimize_step:
+                optimization.accumulate_loss(step_loss)
+        return output_list
+
+    def update_training_history(self, training_job: TrainingJob) -> None:
+        """
+        Update the stepper's history of training jobs.
+
+        Args:
+            training_job: The training job to add to the history.
+        """
+        self._stepper.update_training_history(training_job)
+
+    def get_state(self) -> dict[str, Any]:
+        return self._stepper.get_state()
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        self._stepper.load_state(state)
+
+    def get_base_weights(self):
+        """Get the base weights of the underlying stepper."""
+        return self._stepper.get_base_weights()
+
+    @property
+    def modules(self) -> nn.ModuleList:
+        return self._stepper.modules
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self._stepper.n_ic_timesteps
+
+    @property
+    def normalizer(self):
+        return self._stepper.normalizer
+
+    @property
+    def loss_names(self) -> list[str]:
+        return self._stepper.loss_names
+
+    def predict_paired(
+        self,
+        initial_condition: PrognosticState,
+        forcing: BatchData,
+        compute_derived_variables: bool = False,
+    ) -> tuple[PairedData, PrognosticState]:
+        return self._stepper.predict_paired(
+            initial_condition, forcing, compute_derived_variables
+        )
+
+    @property
+    def effective_loss_scaling(self) -> TensorDict:
+        """
+        Effective loss scalings used to normalize outputs before computing loss.
+        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
+        where loss_scaling_i = loss_normalizer_std_i / weight_i.
+        """
+        return self._loss_obj.effective_loss_scaling
+
+    def _init_for_epoch(self, epoch: int | None):
+        if (
+            epoch is None
+            and self._train_n_forward_steps_schedule is not None
+            and len(self._train_n_forward_steps_schedule.milestones) > 0
+        ):
+            raise EpochNotProvidedError(
+                "current configuration requires epoch to be provided "
+                "on BatchData during training"
+            )
+        if self._epoch == epoch:
+            return
+        if self._train_n_forward_steps_schedule is not None:
+            assert epoch is not None  # already checked, but needed for mypy
+            self._train_n_forward_steps_sampler = probabilities_from_time_length(
+                self._train_n_forward_steps_schedule.get_value(epoch)
+            )
+        else:
+            self._train_n_forward_steps_sampler = None
+        self._epoch = epoch
+
+    def set_eval(self) -> None:
+        self._stepper.set_eval()
+
+    def set_train(self) -> None:
+        self._stepper.set_train()
 
 
 def get_serialized_stepper_vertical_coordinate(
@@ -1608,11 +1780,14 @@ class StepperOverrideConfig:
             serialized stepper.
         derived_forcings: Derived forcings configuration to override that used in
             producing a serialized stepper.
+        prescribed_prognostic_names: List of prognostic variable names to overwrite
+            from forcing at each step during inference.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
+    prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
 
 
 def load_stepper_config(
@@ -1674,4 +1849,13 @@ def load_stepper(
             "derived_forcings configuration."
         )
         stepper.replace_derived_forcings(override_config.derived_forcings)
+
+    if override_config.prescribed_prognostic_names != "keep":
+        logging.info(
+            "Overriding prescribed_prognostic_names with %s.",
+            override_config.prescribed_prognostic_names,
+        )
+        stepper.replace_prescribed_prognostic_names(
+            override_config.prescribed_prognostic_names
+        )
     return stepper
