@@ -116,7 +116,7 @@ def test_event_config_build_creates_output_target_with_single_time(
         lat_extent=ClosedInterval(2.0, 6.0),
         lon_extent=ClosedInterval(2.0, 6.0),
     )
-    static_inputs = static_inputs = _get_static_inputs((8, 8))
+    static_inputs = _get_static_inputs((8, 8))
     output_target = config.build(
         loader_config, requirements, patch_config, static_inputs
     )
