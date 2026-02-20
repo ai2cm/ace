@@ -187,23 +187,15 @@ class SpectralConvS2(nn.Module):
             # seemingly the first weight is not really complex, so we need to account for that
             scale[0, :] *= math.sqrt(2.0)
 
-        # weight_shape = [
-        #     num_groups,
-        #     self.modes_lat_local,
-        #     out_channels // num_groups,
-        #     in_channels // num_groups,
-        # ]
-        old_weight_shape = [
+        weight_shape = [
             num_groups,
-            in_channels // num_groups,
-            out_channels // num_groups,
             self.modes_lat_local,
+            out_channels // num_groups,
+            in_channels // num_groups,
         ]
-        weight_values = torch.randn(*old_weight_shape, 2)
-        weight_values = weight_values.permute(0, 3, 2, 1, 4).contiguous()
 
         assert factorization == "ComplexDense"
-        self.weight = nn.Parameter(scale * weight_values)
+        self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
 
         self.lora_rank = lora_rank
         if lora_rank > 0:
