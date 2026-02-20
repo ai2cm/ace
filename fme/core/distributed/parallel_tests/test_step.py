@@ -298,28 +298,8 @@ def get_step(
     return selector.get_step(dataset_info, init_weights)
 
 
-def test_label_conditioned_step():
-    selector = get_label_conditioned_selector()
-    step = get_step(selector, DEFAULT_IMG_SHAPE, all_labels={"a", "b"})
-    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=1)
-    next_step_input_data = get_tensor_dict(
-        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples=1
-    )
-    output = step.step(
-        args=StepArgs(
-            input=input_data,
-            next_step_input_data=next_step_input_data,
-            labels=BatchLabels.new_from_set(
-                {"a", "b"}, n_samples=1, device=fme.get_device()
-            ),
-        ),
-        wrapper=lambda x: x,
-    )
-    assert output["diagnostic_main"].shape == (1, 45, 90)
-    assert output["diagnostic_rad"].shape == (1, 45, 90)
-
-
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+@pytest.mark.parallel
 def test_step_applies_wrapper(config: StepSelector):
     torch.manual_seed(0)
     img_shape = DEFAULT_IMG_SHAPE
@@ -347,6 +327,7 @@ def test_step_applies_wrapper(config: StepSelector):
 
 
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+@pytest.mark.parallel
 def test_step_initializes_weights(config: StepSelector):
     torch.manual_seed(0)
     img_shape = DEFAULT_IMG_SHAPE
@@ -359,7 +340,9 @@ def test_step_initializes_weights(config: StepSelector):
     assert isinstance(call_args[0], list | nn.ModuleList)
     assert len(call_args[0]) == len(step.modules)
     for i, module in enumerate(step.modules):
-        assert isinstance(module, DummyWrapper)
+        assert isinstance(
+            module, DummyWrapper | torch.nn.parallel.DistributedDataParallel
+        )
         assert call_args[0][i] is module.module
 
 
@@ -367,6 +350,7 @@ def test_step_initializes_weights(config: StepSelector):
     "get_config",
     SELECTOR_GETTERS.values(),
 )
+@pytest.mark.parallel
 def test_load_config(
     get_config: Callable[[pathlib.Path | None], StepSelector],
 ):
@@ -393,6 +377,7 @@ def test_load_config(
     "get_config",
     SELECTOR_GETTERS.values(),
 )
+@pytest.mark.parallel
 def test_load_is_required_for_path_config(
     get_config: Callable[[pathlib.Path | None], StepSelector],
 ):
@@ -408,86 +393,6 @@ def test_load_is_required_for_path_config(
     img_shape = DEFAULT_IMG_SHAPE
     with pytest.raises(FileNotFoundError):
         get_step(config, img_shape)
-
-
-@pytest.mark.parametrize(
-    ["conflict"],
-    [
-        pytest.param(
-            "output",
-            id="conflict_with_output",
-        ),
-        pytest.param(
-            "input",
-            id="conflict_with_input",
-        ),
-    ],
-)
-def test_input_output_names_secondary_decoder_conflict(conflict: str):
-    input_names = ["input"]
-    output_names = ["output"]
-    secondary_decoder_names = [conflict]
-    normalization = get_network_and_loss_normalization_config(
-        names=input_names + output_names + secondary_decoder_names,
-        dir=None,
-    )
-    with pytest.raises(ValueError) as err:
-        SingleModuleStepConfig(
-            normalization=normalization,
-            in_names=input_names,
-            out_names=output_names,
-            builder=ModuleSelector(type="MLP", config={}),
-            secondary_decoder=SecondaryDecoderConfig(
-                secondary_diagnostic_names=secondary_decoder_names,
-                network=ModuleSelector(type="MLP", config={}),
-            ),
-        )
-    assert f"secondary_diagnostic_name is an {conflict} variable:" in str(err.value)
-
-
-def test_step_with_prescribed_prognostic_overwrites_output():
-    normalization = get_network_and_loss_normalization_config(
-        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
-    )
-    config = StepSelector(
-        type="single_module",
-        config=dataclasses.asdict(
-            SingleModuleStepConfig(
-                builder=ModuleSelector(
-                    type="SphericalFourierNeuralOperatorNet",
-                    config={
-                        "scale_factor": 1,
-                        "embed_dim": 4,
-                        "num_layers": 2,
-                    },
-                ),
-                in_names=["forcing_shared", "forcing_rad"],
-                out_names=["diagnostic_main", "diagnostic_rad"],
-                normalization=normalization,
-                prescribed_prognostic_names=["diagnostic_main"],
-            ),
-        ),
-    )
-    img_shape = DEFAULT_IMG_SHAPE
-    n_samples = 2
-    step = get_step(config, img_shape)
-    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
-    next_step_input_data = get_tensor_dict(
-        step.next_step_input_names, img_shape, n_samples
-    )
-    prescribed_value = torch.full(
-        (n_samples,) + img_shape, 42.0, device=fme.get_device()
-    )
-    next_step_input_data["diagnostic_main"] = prescribed_value
-    output = step.step(
-        args=StepArgs(
-            input=input_data,
-            next_step_input_data=next_step_input_data,
-            labels=None,
-        ),
-        wrapper=lambda x: x,
-    )
-    torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
 
 
 def cache_step_input(
@@ -543,6 +448,7 @@ def cache_step_output(output_data: TensorDict, checkpoint_path: pathlib.Path):
     "case_name,get_config",
     SELECTOR_GETTERS.items(),
 )
+@pytest.mark.parallel
 def test_step_regression(
     case_name,
     get_config: Callable[[pathlib.Path | None], StepSelector],
