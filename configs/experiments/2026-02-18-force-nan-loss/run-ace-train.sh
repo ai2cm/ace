@@ -13,7 +13,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="force-nan-loss"
+JOB_GROUP="force-nan-loss-with-nccl-flags"
 JOB_STEM="${JOB_GROUP}-debug"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
@@ -60,6 +60,8 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
           --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
           --env NCCL_DEBUG=WARN \
           --env NCCL_DEBUG_FILE=/results/nccl_debug.log \
+          --env NCCL_ASYNC_ERROR_HANDLING=1 \
+          --env NCCL_BLOCKING_WAIT=1 \
           --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
           --dataset-secret google-credentials:/tmp/google_application_credentials.json \
           --dataset $STATS_DATA:/statsdata \
