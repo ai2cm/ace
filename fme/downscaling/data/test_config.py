@@ -147,7 +147,15 @@ def test_DataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         lat_extent=ClosedInterval(1, 4),
         lon_extent=ClosedInterval(0, 3),
     )
-    data = data_config.build(requirements=requirements)
+    static_inputs = StaticInputs(
+        fields=[
+            StaticInput(
+                data=torch.ones((8, 8)),
+                coords=LatLonCoordinates(lat=torch.ones(8), lon=torch.ones(8)),
+            )
+        ]
+    )
+    data = data_config.build(requirements=requirements, static_inputs=static_inputs)
     # XarrayDataConfig + MergeNoConcatDatasetConfig each
     # contribute 4 timesteps = 8 total
     assert len(data.loader) == 4  # 8 samples / batch_size 2
