@@ -252,12 +252,12 @@ class OceanData:
             sfrac = self.sea_surface_fraction
             sea_ice_vol = self.sea_ice_volume
             try:
-                # more accurate for CM4; see compute_coupled_sea_ice
-                # in scripts/data_process/coupled_dataset_utils.py
                 sea_ice_frac = self.ocean_sea_ice_fraction * sfrac
             except KeyError:
-                sea_ice_frac = self.sea_ice_fraction
-                sea_ice_vol = sea_ice_vol * sfrac
+                # assumes that sea_ice_fraction comes from compute_coupled_sea_ice
+                # in scripts/data_process/coupled_dataset_utils.py
+                lfrac = self.land_fraction
+                sea_ice_frac = self.sea_ice_fraction * sfrac / lfrac
             cell_area = self.area_weights_m2
             return torch.where(
                 torch.isnan(sea_ice_vol),
