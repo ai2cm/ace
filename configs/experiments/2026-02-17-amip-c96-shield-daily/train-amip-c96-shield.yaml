@@ -7,7 +7,7 @@ ema:
   decay: 0.999
 inference:
   n_forward_steps: 7300
-  forward_steps_in_memory: 25
+  forward_steps_in_memory: 40
   loader:
     start_indices:
       times:
