@@ -498,7 +498,7 @@ def cache_step_input(
     checkpoint_path: pathlib.Path,
 ):
     if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
         step.load_state(checkpoint["step_state_dict"])
         # TODO: we will need some kind of scatter here for it to work in parallel
         input_data = checkpoint["input_data"]
@@ -524,7 +524,7 @@ def cache_step_input(
 
 def cache_step_output(output_data: TensorDict, checkpoint_path: pathlib.Path):
     if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
         expected_output = checkpoint["output_data"]
         for name in output_data.keys():
             torch.testing.assert_close(output_data[name], expected_output[name])
