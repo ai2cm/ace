@@ -377,21 +377,16 @@ class DiffusionModel:
         denoised_norm = self.module(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
-        loss = torch.mean(
-            conditioned_target.weight * self.loss(denoised_norm, targets_norm)
+        weighted_loss = conditioned_target.weight * self.loss(
+            denoised_norm, targets_norm
         )
+        loss = torch.mean(weighted_loss)
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
 
         with torch.no_grad():
             channel_losses = {
-                name: torch.mean(
-                    conditioned_target.weight
-                    * self.loss(
-                        denoised_norm[:, i, :, :],
-                        targets_norm[:, i, :, :],
-                    )
-                )
+                name: torch.mean(weighted_loss[:, i, :, :])
                 for i, name in enumerate(self.out_packer.names)
             }
 
