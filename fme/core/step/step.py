@@ -108,6 +108,10 @@ class StepConfigABC(abc.ABC):
     def get_ocean(self) -> OceanConfig | None:
         pass
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+        pass
+
     @abc.abstractmethod
     def load(self):
         """
@@ -210,6 +214,10 @@ class StepSelector(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return self._step_config_instance.get_ocean()
+
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        self._step_config_instance.replace_prescribed_prognostic_names(names)
+        self.config = dataclasses.asdict(self._step_config_instance)
 
     def load(self):
         self._step_config_instance.load()

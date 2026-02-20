@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, DistributedSampler
 
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
@@ -165,8 +166,9 @@ class DownscalingOutputConfig(ABC):
 
     @staticmethod
     def _single_xarray_config(
-        coarse: list[XarrayDataConfig]
-        | Sequence[XarrayDataConfig | XarrayEnsembleDataConfig],
+        coarse: Sequence[
+            XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
+        ],
     ) -> list[XarrayDataConfig]:
         """
         Ensures that the data configuration is a single xarray config.
