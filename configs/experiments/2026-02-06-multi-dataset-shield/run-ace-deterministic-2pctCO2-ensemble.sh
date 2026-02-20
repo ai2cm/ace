@@ -46,7 +46,7 @@ for model in "${!MODELS[@]}"; do
         job_name=${DATE}-$model-2pctCO2-inference-ic$initial_condition
         spin_up_overrides="\
             experiment_dir=$SPIN_UP_EXPERIMENT_DIR \
-            forcing_loader.dataset.data_path=$AMIP_DATA_ROOT \
+            forcing_loader.dataset.data_path=$SPIN_UP_FORCING_ROOT \
             initial_condition.path=$SPIN_UP_INITIAL_CONDITION_PATH \
             initial_condition.start_indices.times=[$spin_up_initial_condition_time] \
             n_forward_steps=$spin_up_n_forward_steps \
