@@ -12,8 +12,9 @@ cp $TEMPLATE_CONFIG_PATH $CONFIG_PATH
 
 # NOTE: requires yq >= 4
 
-# update the coupled stepper config, without modifying template parameter_init
-yq -i '.stepper *= load("config.yaml").stepper' $CONFIG_PATH
+# merge checkpoint stepper as base, then overlay with template stepper so that
+# any values explicitly set in the template take precedence
+yq -i '.stepper = load("config.yaml").stepper * .stepper' $CONFIG_PATH
 
 # cleanup
 rm ./config.yaml
