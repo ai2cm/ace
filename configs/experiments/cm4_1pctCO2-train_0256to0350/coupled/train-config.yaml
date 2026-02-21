@@ -257,6 +257,9 @@ stepper:
                   - sfdsi
                   - UI
                   - VI
+              ocean_heat_content_correction:
+                method: scaled_temperature
+                constant_unaccounted_heating: 0.161
           next_step_forcing_names:
             - DLWRFsfc
             - DSWRFsfc
