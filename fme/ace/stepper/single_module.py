@@ -610,9 +610,14 @@ class StepperConfig:
         step = self.step.get_step(
             dataset_info, init_weights=parameter_initializer.freeze_weights
         )
-        derive_func = dataset_info.vertical_coordinate.build_derive_function(
-            dataset_info.timestep
-        )
+        try:
+            derive_func = dataset_info.vertical_coordinate.build_derive_function(
+                dataset_info.timestep, dataset_info.horizontal_coordinates
+            )
+        except MissingDatasetInfo:
+            derive_func = dataset_info.vertical_coordinate.build_derive_function(
+                dataset_info.timestep
+            )
         if self.input_masking is None:
             input_masking = NullMasking()
         else:

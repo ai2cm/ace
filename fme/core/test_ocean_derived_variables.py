@@ -153,27 +153,44 @@ def test_metadata_registry():
     )
 
 
-def test_sea_ice_thickness_derived_variable():
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param("ocean_sea_ice_fraction", id="try-path"),
+        pytest.param("sea_ice_fraction_and_land_fraction", id="except-path"),
+    ],
+)
+def test_sea_ice_thickness_derived_variable(case):
     """Test recovering sea ice thickness (HI) from sea ice volume."""
     n_lat, n_lon = 4, 8
     horizontal_coordinates = LatLonCoordinates(
         lat=torch.linspace(-60, 60, n_lat),
         lon=torch.linspace(0, 360, n_lon + 1)[:-1],  # avoid wrapping
     )
-    cell_area = horizontal_coordinates.cell_area_m2
+    cell_area = horizontal_coordinates.area_weights_m2
 
-    # Create test data: known thickness and fraction, compute volume from them
     thickness_in_m = torch.full((1, 1, n_lat, n_lon), 2.0)
     thickness_in_m[:, :, 1, 1] = float("nan")
-    sea_ice_frac = torch.full((1, 1, n_lat, n_lon), 0.6)
-    sea_surface_frac = torch.full((1, 1, n_lat, n_lon), 1.0)
-    expected_volume = thickness_in_m * cell_area * sea_ice_frac / 1e9
+    sea_surface_frac = torch.full((1, 1, n_lat, n_lon), 0.7)
 
-    fake_data = {
-        "sea_ice_volume": expected_volume,
-        "sea_ice_fraction": sea_ice_frac,
-        "sea_surface_fraction": sea_surface_frac,
-    }
+    if case == "sea_ice_fraction_and_land_fraction":
+        sea_ice_frac = torch.full((1, 1, n_lat, n_lon), 0.6)
+        land_frac = 1 - sea_surface_frac
+        effective_sea_ice_frac = sea_ice_frac * sea_surface_frac / land_frac
+        fake_data = {
+            "sea_ice_volume": thickness_in_m * cell_area * effective_sea_ice_frac / 1e9,
+            "sea_ice_fraction": sea_ice_frac,
+            "land_fraction": land_frac,
+            "sea_surface_fraction": sea_surface_frac,
+        }
+    else:
+        ocean_sea_ice_frac = torch.full((1, 1, n_lat, n_lon), 0.6)
+        effective_sea_ice_frac = ocean_sea_ice_frac * sea_surface_frac
+        fake_data = {
+            "sea_ice_volume": thickness_in_m * cell_area * effective_sea_ice_frac / 1e9,
+            "ocean_sea_ice_fraction": ocean_sea_ice_frac,
+            "sea_surface_fraction": sea_surface_frac,
+        }
 
     ocean_data = OceanData(fake_data, cell_area_provider=horizontal_coordinates)
 
