@@ -39,7 +39,7 @@ for climate in "1xCO2" "2xCO2" "3xCO2" "4xCO2"; do
                 data_writer.files=[] \
             "
         fi
-        python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $override
+        python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH --override $override
         gantry run \
             --name $job_name \
             --description 'Run equilibrium climate data-only evaluator' \
