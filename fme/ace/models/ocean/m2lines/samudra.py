@@ -58,7 +58,7 @@ class Samudra(torch.nn.Module):
         ),
         dilation: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8]),
         n_layers: list[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1]),
-        pad: Literal["circular", "circular_fixed", "constant"] = "circular",
+        pad: str = "circular",
         norm: str | None = "instance",
         norm_kwargs: Mapping[str, Any] | None = None,
         upscale_factor: int = 4,
@@ -72,12 +72,7 @@ class Samudra(torch.nn.Module):
         self.ch_width = ch_width
         self.dilation = dilation
         self.n_layers = n_layers
-        if pad == "circular_fixed":
-            self.pad = "circular"
-            self.use_circular_upsample_padding = True
-        else:
-            self.pad = pad
-            self.use_circular_upsample_padding = False
+        self.pad = pad
         self.norm = norm
         self.norm_kwargs = norm_kwargs
         self.last_kernel_size = 3
@@ -181,19 +176,10 @@ class Samudra(torch.nn.Module):
                         temp[int(2 * self.num_steps - count - 1)].shape[2:]
                     )
                     pads = shape - crop
-                    if self.use_circular_upsample_padding:
-                        pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
-                        pads_tb = (0, 0, pads[0] // 2, pads[0] - pads[0] // 2)
-                        fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
-                        fts = nn.functional.pad(fts, pads_tb, mode="constant")
-                    else:
-                        pads = [
-                            pads[1] // 2,
-                            pads[1] - pads[1] // 2,
-                            pads[0] // 2,
-                            pads[0] - pads[0] // 2,
-                        ]
-                        fts = nn.functional.pad(fts, pads)
+                    pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
+                    pads_tb = (0, 0, pads[0] // 2, pads[0] - pads[0] // 2)
+                    fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
+                    fts = nn.functional.pad(fts, pads_tb, mode="constant")
                     fts += temp[int(2 * self.num_steps - count - 1)]
                     count += 1
         return fts

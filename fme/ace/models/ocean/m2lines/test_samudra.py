@@ -1,5 +1,4 @@
 import os
-from typing import Literal
 
 import pytest
 import torch
@@ -75,8 +74,7 @@ def test_samudra_norm_kwargs():
             assert not module.track_running_stats
 
 
-@pytest.mark.parametrize("padding", ["circular", "circular_fixed"])
-def test_samudra_output_is_unchanged(padding: Literal["circular", "circular_fixed"]):
+def test_samudra_output_is_unchanged():
     torch.manual_seed(0)
     input_channels = 2
     output_channels = 3
@@ -90,7 +88,6 @@ def test_samudra_output_is_unchanged(padding: Literal["circular", "circular_fixe
         dilation=[1, 2],
         n_layers=[1, 1],
         norm="batch",
-        pad=padding,
     ).to(device)
     # must initialize on CPU to get the same results on GPU
     x = torch.randn(n_samples, input_channels, *img_shape).to(device)
@@ -99,5 +96,5 @@ def test_samudra_output_is_unchanged(padding: Literal["circular", "circular_fixe
     assert output.shape == (n_samples, output_channels, *img_shape)
     validate_tensor(
         output,
-        os.path.join(DIR, f"testdata/test_samudra_output_is_unchanged_{padding}.pt"),
+        os.path.join(DIR, "testdata/test_samudra_output_is_unchanged.pt"),
     )

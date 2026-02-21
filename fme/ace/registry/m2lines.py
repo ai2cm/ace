@@ -21,7 +21,7 @@ class SamudraBuilder(ModuleConfig):
     )
     n_layers: list[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1])
     dilation: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8])
-    pad: Literal["circular", "circular_fixed", "constant"] = "circular"
+    pad: str = "circular"
     norm: str = "instance"
     norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     upscale_factor: int = 4
