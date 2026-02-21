@@ -797,6 +797,7 @@ class Aggregator:
             ]
 
         self.loss = Mean(torch.mean)
+        self.channel_loss = Mean(torch.mean)
         self._fine_latlon_coordinates: LatLonCoordinates | None = None
 
     @torch.no_grad()
@@ -838,6 +839,8 @@ class Aggregator:
             coarse_comparison_aggregator.record_batch(target, prediction, coarse)
 
         self.loss.record_batch({"loss": outputs.loss})
+        if outputs.channel_losses:
+            self.channel_loss.record_batch(outputs.channel_losses)
 
     def get_wandb(
         self,
@@ -850,6 +853,8 @@ class Aggregator:
 
         ret: dict[str, Any] = {}
         ret.update(self.loss.get_wandb(prefix))
+        if self.channel_loss._count > 0:
+            ret.update(self.channel_loss.get_wandb(f"{prefix}channel_loss/"))
         for comparison in self._comparisons:
             ret.update(comparison.get_wandb(prefix))
         for coarse_comparison in self._coarse_comparisons:
