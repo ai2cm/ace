@@ -1,5 +1,3 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
-ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs0|ace2-cm4-atmos-noLSM|fruab0nq|best_inference_ckpt|train|urgent|titan|4|600GiB|1|ai2/climate-titan|seed=0 stepper.step.config.corrector.total_energy_budget_correction.method='constant_temperature' max_epochs=5
-
-ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs1|ace2-cm4-atmos-noLSM|kd5obbep|best_inference_ckpt|train|urgent|titan|4|600GiB|1|ai2/climate-titan|seed=1 stepper.step.config.corrector.total_energy_budget_correction.method='constant_temperature' max_epochs=5
+aceS-cm4_1pctCO2_0256to0350-condSFNO|rs0|ace2-cm4-atmos-noLSM|mb4prsz7|best_inference_ckpt|train|urgent|titan|4|600GiB|1|ai2/climate-titan|seed=0 max_epochs=25
