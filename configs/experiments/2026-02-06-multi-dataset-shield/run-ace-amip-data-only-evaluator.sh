@@ -2,7 +2,7 @@
 
 set -e
 
-DATE="2026-02-18"
+DATE="2026-02-21"
 CONFIG_FILENAME="ace-amip-data-only-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -26,9 +26,10 @@ for ensemble_id in "ic_0001" "ic_0002"; do
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
         --priority high \
-        --not-preemptible \
+        --preemptible \
         --cluster ai2/jupiter \
-        --cluster ai2/saturn \
+        --cluster ai2/ceres \
+        --cluster ai2/titan \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
         --env WANDB_JOB_TYPE=inference \

@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_forward_steps: 61364
+n_forward_steps: 59904
 forward_steps_in_memory: 50
 checkpoint_path: /ckpt.tar
 logging:
@@ -13,7 +13,7 @@ aggregator:
 loader:
   start_indices:
     times:
-      - "1979-01-01T00:00:00"
+      - "1980-01-01T00:00:00"
   dataset:
     data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset
     engine: zarr
@@ -22,7 +22,7 @@ loader:
 prediction_loader:
   start_indices:
     times:
-      - "1979-01-01T00:00:00"
+      - "1980-01-01T00:00:00"
   dataset:
     data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset
     engine: zarr
