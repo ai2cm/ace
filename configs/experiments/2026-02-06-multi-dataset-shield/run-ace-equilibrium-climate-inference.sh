@@ -14,17 +14,17 @@ MAIN_FORCING_ROOT=/climate-default/2026-01-28-vertically-resolved-1deg-c96-shiel
 declare -A SPIN_UP_FORCING_DATASETS
 SPIN_UP_FORCING_DATASETS=( \
     ["1xCO2"]="$SPIN_UP_FORCING_ROOT/concatenated-1xCO2-ic_0005" \
-    # ["2xCO2"]="$SPIN_UP_FORCING_ROOT/concatenated-2xCO2-ic_0005" \
-    # ["3xCO2"]="$SPIN_UP_FORCING_ROOT/concatenated-3xCO2-ic_0002" \
-    # ["4xCO2"]="$SPIN_UP_FORCING_ROOT/concatenated-4xCO2-ic_0005" \
+    ["2xCO2"]="$SPIN_UP_FORCING_ROOT/concatenated-2xCO2-ic_0005" \
+    ["3xCO2"]="$SPIN_UP_FORCING_ROOT/concatenated-3xCO2-ic_0002" \
+    ["4xCO2"]="$SPIN_UP_FORCING_ROOT/concatenated-4xCO2-ic_0005" \
 )
 
 declare -A MAIN_FORCING_DATASETS
 MAIN_FORCING_DATASETS=( \
     ["1xCO2"]="1xCO2-ic_0005.zarr" \
-    # ["2xCO2"]="2xCO2-ic_0005.zarr" \
-    # ["3xCO2"]="3xCO2-ic_0002.zarr" \
-    # ["4xCO2"]="4xCO2-ic_0005.zarr" \
+    ["2xCO2"]="2xCO2-ic_0005.zarr" \
+    ["3xCO2"]="3xCO2-ic_0002.zarr" \
+    ["4xCO2"]="4xCO2-ic_0005.zarr" \
 )
 
 # For stochastic models we do not necessarily need to use this staggered
@@ -33,18 +33,22 @@ MAIN_FORCING_DATASETS=( \
 declare -A INITIAL_CONDITIONS
 INITIAL_CONDITIONS=( \
     ["1"]="2030-01-01T06:00:00" \
-    # ["2"]="2030-01-01T12:00:00" \
-    # ["3"]="2030-01-01T18:00:00" \
-    # ["4"]="2030-01-02T00:00:00" \
-    # ["5"]="2030-01-02T06:00:00" \
+    ["2"]="2030-01-01T12:00:00" \
+    ["3"]="2030-01-01T18:00:00" \
+    ["4"]="2030-01-02T00:00:00" \
+    ["5"]="2030-01-02T06:00:00" \
 )
 
 declare -A MODELS=( \
     [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
-    # [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
-    # [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
-    # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
-    # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
+    [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
+    [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
+    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
+    [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
+    [full-rs1]="01KHJ5EQ04XTFG46QCKX3TTAHF" \
+    # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
 )
 
 declare -A OUTPUT_DAILY_PRECIPITATION=( \
@@ -55,14 +59,14 @@ declare -A OUTPUT_DAILY_PRECIPITATION=( \
     [no-random-co2-energy-conserving-rs1]="False" \
     [full-rs0]="False" \
     [full-rs1]="False" \
-    [full-energy-conserving-rs0]="True" \
+    # [full-energy-conserving-rs0]="True" \
     [full-energy-conserving-rs1]="False" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-GCS_ROOT="gs://vcm-ml-scratch/spencerc/2026-02-20-ace-equilibrium-climate-inference"
+GCS_ROOT="gs://vcm-ml-experiments/spencerc/2026-02-20-ace-equilibrium-climate-inference"
 SPIN_UP_MAXIMUM_N_FORWARD_STEPS=1460
 SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
 
@@ -125,10 +129,12 @@ for model in "${!MODELS[@]}"; do
                 --name $job_name \
                 --description 'Run inference with ACE' \
                 --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-                --workspace ai2/climate-titan \
-                --priority urgent \
+                --workspace ai2/ace \
+                --priority high \
                 --preemptible \
                 --cluster ai2/jupiter \
+                --cluster ai2/titan \
+                --cluster ai2/ceres \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
                 --env WANDB_JOB_TYPE=inference \
