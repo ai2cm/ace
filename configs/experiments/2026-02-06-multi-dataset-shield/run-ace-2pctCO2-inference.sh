@@ -12,11 +12,14 @@ MAIN_FORCING_ROOT=/climate-default/2026-01-28-vertically-resolved-1deg-c96-shiel
 MAIN_FORCING_PATH=increasing-CO2.zarr
 
 declare -A MODELS=( \
-    [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
-    [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
-    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
-    [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
-    [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
+    # [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
+    # [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
+    # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
+    # [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
+    [full-rs1]="01KHJ5EQ04XTFG46QCKX3TTAHF" \
+    [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -61,10 +64,12 @@ for model in "${!MODELS[@]}"; do
         --name $job_name \
         --description 'Run inference with ACE' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/climate-titan \
-        --priority urgent \
-        --not-preemptible \
+        --workspace ai2/ace \
+        --priority high \
+        --preemptible \
         --cluster ai2/jupiter \
+        --cluster ai2/titan \
+        --cluster ai2/ceres \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
         --env WANDB_JOB_TYPE=inference \
