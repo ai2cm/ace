@@ -32,7 +32,7 @@ SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
 MAIN_EXPERIMENT_DIR="/results/main"
 SPIN_UP_N_FORWARD_STEPS=1459
 MAIN_N_FORWARD_STEPS=59904
-AMIP_CONSTANT_CO2_DATA_ROOT="/climate-default/2025-12-17-vertically-resolved-c96-1deg-shield-amip-constant-co2-dataset"
+AMIP_CONSTANT_CO2_DATA_ROOT="/climate-default/2025-12-17-vertically-resolved-c96-1deg-shield-amip-constant-co2-data"
 
 for name in "${!MODELS[@]}"; do
     job_name="${DATE}-${name}-amip-constant-CO2-inference"
