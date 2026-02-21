@@ -1,10 +1,10 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
+evaluate_before_training: true
 ema:
   decay: 0.999
 max_epochs: 20
-n_forward_steps: 2
 inference:
   n_forward_steps: 28810
   forward_steps_in_memory: 43
@@ -85,7 +85,7 @@ stepper:
   parameter_init:
     weights_path: /ckpt.tar
   loss:
-    type: MSE
+    type: EnsembleLoss
     weights:
       air_temperature_0: 0.5
       air_temperature_1: 0.5
@@ -97,7 +97,7 @@ stepper:
       PRATEsfc: 0.5
       h500: 10
       TMP850: 5
-      Q2m: 10
+      Q2m: 0.5
       TMP2m: 10
       UGRD10m: 2.5
       VGRD10m: 2.5
@@ -107,6 +107,10 @@ stepper:
       DSWRFsfc: 2
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
+      PRESsfc: 3
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
   step:
     type: single_module
     config:
@@ -115,7 +119,7 @@ stepper:
         type: NoiseConditionedSFNO
         config:
           embed_dim: 384
-          noise_embed_dim: 0
+          noise_embed_dim: 64
           filter_type: linear
           use_mlp: true
           num_layers: 8
@@ -123,6 +127,7 @@ stepper:
           separable: false
           spectral_layers: 3
           spectral_transform: sht
+          noise_type: isotropic
       normalization:
         network:
           global_means_path: /atmos_stats/centering.nc
@@ -155,6 +160,8 @@ stepper:
           - USWRFsfc
           - USWRFtoa
           - total_frozen_precipitation_rate
+        total_energy_budget_correction:
+          method: constant_temperature
       next_step_forcing_names:
         - DSWRFtoa
         - carbon_dioxide
@@ -254,3 +261,17 @@ stepper:
         - VGRD10m
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
+  n_ensemble: 2
+  train_n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 12
+        probability: 0.05
+      - steps: 20
+        probability: 0.05
+  optimize_last_step_only: true
