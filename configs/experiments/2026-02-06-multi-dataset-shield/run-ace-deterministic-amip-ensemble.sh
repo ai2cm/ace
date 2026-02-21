@@ -54,6 +54,10 @@ for model in "${!MODELS[@]}"; do
             initial_condition.start_indices.times=[$spin_up_initial_condition_time] \
             n_forward_steps=$spin_up_n_forward_steps \
             logging.log_to_wandb=$spin_up_log_to_wandb \
+            stepper_override.ocean.surface_temperature_name=surface_temperature \
+            stepper_override.ocean.ocean_fraction_name=ocean_fraction \
+            stepper_override.ocean.interpolate=true \
+            stepper_override.ocean.slab=null \
         "
         main_overrides="\
             experiment_dir=$MAIN_EXPERIMENT_DIR \
@@ -63,6 +67,10 @@ for model in "${!MODELS[@]}"; do
             initial_condition.path=$MAIN_INITIAL_CONDITION_PATH \
             initial_condition.start_indices.times=[$MAIN_INITIAL_CONDITION_TIME] \
             n_forward_steps=$MAIN_N_FORWARD_STEPS \
+            stepper_override.ocean.surface_temperature_name=surface_temperature \
+            stepper_override.ocean.ocean_fraction_name=ocean_fraction \
+            stepper_override.ocean.interpolate=true \
+            stepper_override.ocean.slab=null \
         "
 
         python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_overrides
