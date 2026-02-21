@@ -2,4 +2,6 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 
 fto-1pctCO2_0256to0350-correct_budgets-4flptvc8_mb4prsz7|rs0|ace-samudra-cm4|4flptvc8|best_inference_ckpt|ace2-cm4-atmos-noLSM|mb4prsz7|best_inference_ckpt|crashed|urgent||8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=40|
 
-fto-1pctCO2_0256to0350-correct_budgets-e1trm8ih_mb4prsz7|rs0|ace-samudra-cm4|e1trm8ih|best_inference_ckpt|ace2-cm4-atmos-noLSM|mb4prsz7|best_inference_ckpt|train|urgent|h100|8|800GiB|3|ai2/climate-titan|stepper.ocean.stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' stepper.ocean.stepper.step.config.corrector.config.ocean_heat_content_correction.constant_unaccounted_heating=0.161 max_epochs=40 seed=0
+fto-1pctCO2_0256to0350-correct_budgets-e1trm8ih_mb4prsz7|rs0|ace-samudra-cm4|e1trm8ih|best_inference_ckpt|ace2-cm4-atmos-noLSM|mb4prsz7|best_inference_ckpt|training|urgent|h100|8|800GiB|3|ai2/climate-titan|stepper.ocean.stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' stepper.ocean.stepper.step.config.corrector.config.ocean_heat_content_correction.constant_unaccounted_heating=0.161 max_epochs=40 seed=0
+
+fto-1pctCO2_0256to0350-correct_budgets-422nakro_mb4prsz7|rs0|ace-samudra-cm4|422nakro|best_inference_ckpt|ace2-cm4-atmos-noLSM|mb4prsz7|best_inference_ckpt|train|urgent|h100|8|800GiB|3|ai2/climate-titan|max_epochs=40 seed=0
