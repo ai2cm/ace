@@ -947,7 +947,6 @@ def get_stepper_config(
                         ),
                     ),
                 ),
-                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
@@ -971,7 +970,6 @@ def get_stepper_config(
                         ),
                     ),
                 ),
-                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name=sst_name_in_ocean_data,
@@ -1514,7 +1512,6 @@ def test_reloaded_stepper_gives_same_prediction():
                         ),
                     ),
                 ),
-                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
@@ -1540,7 +1537,6 @@ def test_reloaded_stepper_gives_same_prediction():
                         ),
                     ),
                 ),
-                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name="o_sfc",
