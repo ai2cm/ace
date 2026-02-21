@@ -42,7 +42,7 @@ for name in "${!MODELS[@]}"; do
         experiment_dir=${SPIN_UP_EXPERIMENT_DIR} \
         n_forward_steps=${SPIN_UP_N_FORWARD_STEPS} \
         initial_condition.start_indices.times=[1979-01-01T06:00:00] \
-        initial_condition.path=${AMIP_CONSTANT_CO2_DATA_ROOT} \
+        initial_condition.path=${AMIP_CONSTANT_CO2_DATA_ROOT}/${ENSEMBLE_ID}.zarr \
         initial_condition.engine=zarr \
         forcing_loader.dataset.data_path=${AMIP_CONSTANT_CO2_DATA_ROOT} \
         forcing_loader.dataset.file_pattern=${ENSEMBLE_ID}.zarr \
