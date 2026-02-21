@@ -47,6 +47,8 @@ for model in "${!MODELS[@]}"; do
         spin_up_overrides="\
             experiment_dir=$SPIN_UP_EXPERIMENT_DIR \
             forcing_loader.dataset.data_path=$AMIP_DATA_ROOT \
+            forcing_loader.dataset.engine=zarr \
+            forcing_loader.dataset.file_pattern=${ENSEMBLE_ID}.zarr \
             initial_condition.path=$AMIP_DATA_ROOT/${ENSEMBLE_ID}.zarr \
             initial_condition.engine=zarr \
             initial_condition.start_indices.times=[$spin_up_initial_condition_time] \

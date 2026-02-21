@@ -14,8 +14,8 @@ MAIN_FORCING_PATH=increasing-CO2.zarr
 
 declare -A INITIAL_CONDITIONS
 INITIAL_CONDITIONS=( \
-    ["1"]="2031-01-01T06:00:00" \
-    ["2"]="2031-01-01T12:00:00" \
+    ["1"]="2030-01-01T06:00:00" \
+    ["2"]="2030-01-01T12:00:00" \
 )
 
 declare -A MODELS=( \
