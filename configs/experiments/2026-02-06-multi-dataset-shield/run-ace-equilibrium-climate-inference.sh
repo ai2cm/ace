@@ -99,7 +99,7 @@ for model in "${!MODELS[@]}"; do
             "
 
             main_experiment_dir="$GCS_ROOT/$model-$climate-ic$initial_condition/main"
-            if [ "${OUTPUT_DAILY_PRECIPITATION[$model]}" = "True" ]; then
+            if { [ "$climate" = "1xCO2" ] || [ "$climate" = "3xCO2" ]; } && [ "${OUTPUT_DAILY_PRECIPITATION[$model]}" = "True" ]; then
                 main_overrides="\
                     experiment_dir=$main_experiment_dir \
                     forcing_loader.dataset.data_path=$MAIN_FORCING_ROOT \
