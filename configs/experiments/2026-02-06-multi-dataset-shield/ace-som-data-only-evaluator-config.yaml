@@ -1,0 +1,50 @@
+experiment_dir: PLACEHOLDER
+checkpoint_path: /ckpt.tar
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+  files:
+    - label: daily
+      names: [PRATEsfc]
+      save_reference: false
+      time_coarsen:
+        coarsen_factor: 4
+      format:
+        name: zarr
+logging:
+  project: ace-shield
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+forward_steps_in_memory: 40
+n_forward_steps: 14604
+loader:
+  dataset:
+    data_path: PLACEHOLDER
+    engine: zarr
+    file_pattern: PLACEHOLDER
+  start_indices:
+    times:
+      - "2031-01-01T06:00:00"
+  num_data_workers: 8
+prediction_loader:
+  dataset:
+    data_path: PLACEHOLDER
+    engine: zarr
+    file_pattern: PLACEHOLDER
+  start_indices:
+    times:
+      - "2031-01-01T06:00:00"
+  num_data_workers: 8
+# It should be safe to use the same stepper override even when using the
+# published baseline model, since its slab ocean model was configured
+# identically; in other words this override is a no-op in that case.
+stepper_override:
+  multi_call: null
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+    interpolate: true
+    slab:
+      mixed_layer_depth_name: prescribed_mixed_layer_depth
+      q_flux_name: prescribed_qflux
