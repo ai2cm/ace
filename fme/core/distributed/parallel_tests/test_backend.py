@@ -9,12 +9,14 @@ Every test constructs payloads whose expected result can be computed
 analytically, so the outcome is deterministic regardless of rank count.
 """
 
+import pytest
 import torch
 
 from fme.core import get_device
 from fme.core.distributed import Distributed
 
 
+@pytest.mark.parallel
 def test_reduce_mean_all_ones():
     """Reducing an all-ones tensor should return all ones."""
     dist = Distributed.get_instance()
@@ -23,6 +25,7 @@ def test_reduce_mean_all_ones():
     torch.testing.assert_close(result, torch.ones_like(t))
 
 
+@pytest.mark.parallel
 def test_reduce_sum_all_ones():
     """Sum of all-ones across N dp-ranks should give N."""
     dist = Distributed.get_instance()
@@ -32,6 +35,7 @@ def test_reduce_sum_all_ones():
     torch.testing.assert_close(result, expected)
 
 
+@pytest.mark.parallel
 def test_reduce_min_constant():
     """Min of a constant tensor is the same constant."""
     dist = Distributed.get_instance()
@@ -40,6 +44,7 @@ def test_reduce_min_constant():
     torch.testing.assert_close(result, t.clone())
 
 
+@pytest.mark.parallel
 def test_reduce_max_constant():
     """Max of a constant tensor is the same constant."""
     dist = Distributed.get_instance()
@@ -48,6 +53,7 @@ def test_reduce_max_constant():
     torch.testing.assert_close(result, t.clone())
 
 
+@pytest.mark.parallel
 def test_reduce_mean_rank_offset():
     """Each dp-rank adds its rank index.  Mean should equal base + avg(ranks)."""
     dist = Distributed.get_instance()
@@ -59,6 +65,7 @@ def test_reduce_mean_rank_offset():
     torch.testing.assert_close(result, expected)
 
 
+@pytest.mark.parallel
 def test_reduce_mean_data_parallel_group_only():
     """reduce_mean must average only over data-parallel ranks, not all ranks.
 
@@ -86,6 +93,7 @@ def test_reduce_mean_data_parallel_group_only():
     torch.testing.assert_close(result, torch.full_like(result, expected_val))
 
 
+@pytest.mark.parallel
 def test_reduce_min_selects_smallest_rank():
     """Each dp-rank holds (base + rank).  Min should select rank-0 values."""
     dist = Distributed.get_instance()
@@ -96,6 +104,7 @@ def test_reduce_min_selects_smallest_rank():
     torch.testing.assert_close(result, expected)
 
 
+@pytest.mark.parallel
 def test_reduce_max_selects_largest_rank():
     """Each dp-rank holds (base + rank).  Max should select last-rank values."""
     dist = Distributed.get_instance()
@@ -107,6 +116,7 @@ def test_reduce_max_selects_largest_rank():
     torch.testing.assert_close(result, expected)
 
 
+@pytest.mark.parallel
 def test_gather_produces_correct_count():
     """Root should receive one tensor per dp-rank; others get None."""
     dist = Distributed.get_instance()
@@ -119,6 +129,7 @@ def test_gather_produces_correct_count():
         assert gathered is None
 
 
+@pytest.mark.parallel
 def test_gather_irregular_matching_shapes():
     """gather_irregular with identical shapes works like gather."""
     dist = Distributed.get_instance()
@@ -136,6 +147,7 @@ def test_gather_irregular_matching_shapes():
         assert gathered is None
 
 
+@pytest.mark.parallel
 def test_gather_global_reconstructs_arange():
     """
     Split an arange tensor across dp-ranks and verify that
@@ -159,6 +171,7 @@ def test_gather_global_reconstructs_arange():
         assert reconstructed is None
 
 
+@pytest.mark.parallel
 def test_local_batch_size_divisibility():
     """local_batch_size * dp_ranks == global_batch_size."""
     dist = Distributed.get_instance()
@@ -168,6 +181,7 @@ def test_local_batch_size_divisibility():
     assert local_bs * n_dp == global_bs
 
 
+@pytest.mark.parallel
 def test_local_slices_cover_full_domain():
     """Union of slices from every rank should cover every element exactly once."""
     dist = Distributed.get_instance()
@@ -188,6 +202,7 @@ def test_local_slices_cover_full_domain():
         torch.testing.assert_close(canvas, torch.ones_like(canvas))
 
 
+@pytest.mark.parallel
 def test_local_slices_no_dp_dim():
     """Without a dp dim, every rank gets full slices."""
     dist = Distributed.get_instance()
@@ -195,6 +210,7 @@ def test_local_slices_no_dp_dim():
     assert slices == tuple(slice(None, None) for _ in range(2))
 
 
+@pytest.mark.parallel
 def test_wrap_module_preserves_underlying():
     """Wrapped module should expose .module pointing at the original."""
     dist = Distributed.get_instance()
@@ -204,22 +220,26 @@ def test_wrap_module_preserves_underlying():
     assert wrapped.module is mod
 
 
+@pytest.mark.parallel
 def test_barrier_does_not_hang():
     """Barrier should complete without deadlock."""
     dist = Distributed.get_instance()
     dist.barrier()  # simply verify it returns
 
 
+@pytest.mark.parallel
 def test_rank_within_world_size():
     dist = Distributed.get_instance()
     assert 0 <= dist.rank < dist.world_size
 
 
+@pytest.mark.parallel
 def test_data_parallel_rank_within_total():
     dist = Distributed.get_instance()
     assert 0 <= dist.data_parallel_rank < dist.total_data_parallel_ranks
 
 
+@pytest.mark.parallel
 def test_world_size_positive():
     dist = Distributed.get_instance()
     assert dist.world_size >= 1

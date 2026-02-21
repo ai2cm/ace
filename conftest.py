@@ -40,6 +40,13 @@ def pytest_addoption(parser):
     )
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "parallel: mark test to work when run in parallel, e.g. with torchrun",
+    )
+
+
 @pytest.fixture
 def skip_slow(request, very_fast_only):
     return very_fast_only or request.config.getoption("--fast")
