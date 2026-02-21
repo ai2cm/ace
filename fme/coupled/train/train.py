@@ -8,10 +8,8 @@ import torch
 import xarray as xr
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -141,13 +139,12 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         torch.backends.cudnn.benchmark = True
     if not os.path.isdir(config.experiment_dir):
         os.makedirs(config.experiment_dir, exist_ok=True)
-    config.logging.configure_logging(config.experiment_dir, log_filename="out.log")
-    env_vars = logging_utils.retrieve_env_vars()
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    config_as_dict = to_flat_dict(dataclasses.asdict(config))
-    config.logging.configure_wandb(
-        config=config_as_dict, env_vars=env_vars, notes=beaker_url
+    config_data = dataclasses.asdict(config)
+    config.logging.configure_logging(
+        config.experiment_dir,
+        log_filename="out.log",
+        config=config_data,
+        resumable=True,
     )
     if config.resume_results is not None:
         logging.info(
