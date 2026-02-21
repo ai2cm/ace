@@ -947,7 +947,6 @@ def get_stepper_config(
                         ),
                     ),
                 ),
-                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
@@ -971,7 +970,6 @@ def get_stepper_config(
                         ),
                     ),
                 ),
-                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name=sst_name_in_ocean_data,
@@ -1514,7 +1512,6 @@ def test_reloaded_stepper_gives_same_prediction():
                         ),
                     ),
                 ),
-                loss=StepLossConfig(type="MSE"),
             ),
         ),
         ocean=ComponentConfig(
@@ -1540,7 +1537,6 @@ def test_reloaded_stepper_gives_same_prediction():
                         ),
                     ),
                 ),
-                loss=StepLossConfig(type="MSE"),
             ),
         ),
         sst_name="o_sfc",
@@ -1563,13 +1559,13 @@ def test_reloaded_stepper_gives_same_prediction():
         atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
     )
     first_result = CoupledTrainStepper(
-        stepper=stepper, loss=train_stepper_config._build_loss(stepper)
+        stepper=stepper, config=train_stepper_config
     ).train_on_batch(
         data=data.data,
         optimization=NullOptimization(),
     )
     second_result = CoupledTrainStepper(
-        stepper=new_stepper, loss=train_stepper_config._build_loss(new_stepper)
+        stepper=new_stepper, config=train_stepper_config
     ).train_on_batch(
         data=data.data,
         optimization=NullOptimization(),
