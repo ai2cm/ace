@@ -33,9 +33,8 @@ model:
     type: unet_diffusion_song_v2
   normalization:
     coarse:
-      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-pressfc-cp-to-prmsl.nc
-      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-pressfc-cp-to-prmsl.nc
-    fine:
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-20260206.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-20260206.nc
       global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering-20260206.nc
       global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260206.nc
   num_diffusion_generation_steps: 8
@@ -79,7 +78,7 @@ train_data:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
     - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
-      file_pattern: pressfc_renamed_to_prmsl_100km.zarr
+      file_pattern: column_integrated_dynamical_fields_100km.zarr #pressfc_renamed_to_prmsl_100km.zarr
       engine: zarr
       subset:
         start_time: '2014-01-01T00:00:00'
@@ -120,7 +119,7 @@ validation_data:
         stop_time: '2024-01-01T00:00:00'
         step: 39
     - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
-      file_pattern: pressfc_renamed_to_prmsl_100km.zarr
+      file_pattern: column_integrated_dynamical_fields_100km.zarr #pressfc_renamed_to_prmsl_100km.zarr
       engine: zarr
       subset:
         start_time: '2023-01-01T00:00:00'
