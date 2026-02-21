@@ -1,11 +1,11 @@
 import abc
 import dataclasses
-from collections.abc import Callable
 
 import torch
 
 from fme.core.device import get_device
-from fme.core.typing_ import TensorMapping
+from fme.core.loss import StepLoss
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 class StepPredictionABC(abc.ABC):
@@ -23,6 +23,10 @@ class StepLossABC(abc.ABC):
     Abstract base class for step loss functions.
 
     """
+
+    @property
+    @abc.abstractmethod
+    def effective_loss_scaling(self) -> TensorDict: ...
 
     @abc.abstractmethod
     def step_is_optimized(self, step: int) -> bool:
@@ -57,11 +61,11 @@ class LossContributionsConfig:
 
     def build(
         self,
-        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
+        loss_obj: StepLoss,
         time_dim: int,
     ) -> StepLossABC:
         if self.n_steps == 0 or self.weight == 0.0:
-            return NullLossContributions()
+            return NullLossContributions(loss_obj)
         return LossContributions(
             n_steps=self.n_steps,
             weight=self.weight,
@@ -75,6 +79,16 @@ class NullLossContributions(StepLossABC):
     Loss that always returns zero and an empty dictionary regardless of inputs.
 
     """
+
+    def __init__(
+        self,
+        loss_obj: StepLoss,
+    ):
+        self._loss = loss_obj
+
+    @property
+    def effective_loss_scaling(self) -> TensorDict:
+        return self._loss.effective_loss_scaling
 
     def step_is_optimized(self, step: int) -> bool:
         return False
@@ -90,13 +104,17 @@ class LossContributions(StepLossABC):
         self,
         n_steps: float,
         weight: float,
-        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
+        loss_obj: StepLoss,
         time_dim: int,
     ):
         self._loss = loss_obj
         self._n_steps = n_steps
         self._weight = weight
         self._time_dim = time_dim
+
+    @property
+    def effective_loss_scaling(self) -> TensorDict:
+        return self._loss.effective_loss_scaling
 
     def step_is_optimized(self, step: int) -> bool:
         """Returns True if the step is less than to the number of steps and

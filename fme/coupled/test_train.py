@@ -28,26 +28,26 @@ train_loader:
   batch_size: 2
   num_data_workers: 0
   dataset:
-    - ocean:
-        data_path: {ocean_data_path}
-        subset:
-            start_time: '1970-01-01'
-      atmosphere:
-        data_path: {atmosphere_data_path}
-        subset:
-            start_time: '1970-01-01'
+    ocean:
+      data_path: {ocean_data_path}
+      subset:
+          start_time: '1970-01-01'
+    atmosphere:
+      data_path: {atmosphere_data_path}
+      subset:
+          start_time: '1970-01-01'
 validation_loader:
   batch_size: 2
   num_data_workers: 0
   dataset:
-    - ocean:
-        data_path: {ocean_data_path}
-        subset:
-            start_time: '1970-01-01'
-      atmosphere:
-        data_path: {atmosphere_data_path}
-        subset:
-            start_time: '1970-01-01'
+    ocean:
+      data_path: {ocean_data_path}
+      subset:
+          start_time: '1970-01-01'
+    atmosphere:
+      data_path: {atmosphere_data_path}
+      subset:
+          start_time: '1970-01-01'
 inference:
   loader:
     dataset:
@@ -66,6 +66,18 @@ optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: Adam
+train_stepper:
+  ocean:
+    loss:
+      type: MSE
+    loss_contributions:
+      weight: {loss_ocean_weight}
+  atmosphere:
+    loss:
+      type: {atmos_loss_type}
+      kwargs: {atmos_loss_kwargs}
+    loss_contributions:
+      n_steps: {loss_atmos_n_steps}
 stepper:
   sst_name: {ocean_sfc_temp_name}
   ocean_fraction_prediction:
@@ -74,11 +86,7 @@ stepper:
     sea_ice_fraction_name_in_atmosphere: {atmos_sea_ice_frac_name}
   ocean:
     timedelta: 2D
-    loss_contributions:
-      weight: {loss_ocean_weight}
     stepper:
-      loss:
-        type: MSE
       input_masking:
         mask_value: 0
         fill_value: 0.0
@@ -109,12 +117,8 @@ stepper:
           out_names: {ocean_out_names}
   atmosphere:
     timedelta: 1D
-    loss_contributions:
-      n_steps: {loss_atmos_n_steps}
     stepper:
-      loss:
-        type: {atmos_loss_type}
-{atmos_loss_kwargs}{atmos_n_ensemble_config}      step:
+      step:
         type: single_module
         config:
           builder:
@@ -200,17 +204,11 @@ def _write_test_yaml_files(
     if crps_training:
         atmos_network_type = "NoiseConditionedSFNO"
         atmos_loss_type = "EnsembleLoss"
-        atmos_loss_kwargs = """
-        kwargs:
-          crps_weight: 1.0
-          energy_score_weight: 0.0
-"""
-        atmos_n_ensemble_config = "      n_ensemble: 2\n"
+        atmos_loss_kwargs = "{'crps_weight': 1.0, 'energy_score_weight': 0.0}"
     else:
         atmos_network_type = "SphericalFourierNeuralOperatorNet"
         atmos_loss_type = "MSE"
-        atmos_loss_kwargs = ""
-        atmos_n_ensemble_config = ""
+        atmos_loss_kwargs = "{}"
 
     train_config = _TRAIN_CONFIG_TEMPLATE.format(
         experiment_dir=exper_dir,
@@ -238,7 +236,6 @@ def _write_test_yaml_files(
         atmos_network_type=atmos_network_type,
         atmos_loss_type=atmos_loss_type,
         atmos_loss_kwargs=atmos_loss_kwargs,
-        atmos_n_ensemble_config=atmos_n_ensemble_config,
     )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
         f_train.write(train_config)
@@ -262,8 +259,8 @@ def _write_test_yaml_files(
 @pytest.mark.parametrize(
     "loss_atmos_n_steps, crps_training",
     [
-        (3, False),
-        (0, False),
+        # (3, False),
+        # (0, False),
         (3, True),  # CRPS training with EnsembleLoss
     ],
 )

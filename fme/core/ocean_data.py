@@ -22,6 +22,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "ocean_sea_ice_fraction": ["ocean_sea_ice_fraction"],
         "land_fraction": ["land_fraction"],
         "net_downward_surface_heat_flux": ["hfds"],
+        "net_downward_surface_heat_flux_total_area": ["hfds_total_area"],
         "geothermal_heat_flux": ["hfgeou"],
         "sea_surface_fraction": ["sea_surface_fraction"],
     }
@@ -151,17 +152,37 @@ class OceanData:
     @property
     def sea_surface_fraction(self) -> torch.Tensor:
         """Returns the sea surface fraction."""
-        return self._get("sea_surface_fraction")
+        try:
+            return self._get("sea_surface_fraction")
+        except KeyError:
+            return 1 - self.land_fraction
 
     @property
     def net_downward_surface_heat_flux(self) -> torch.Tensor:
         """Net heat flux downward across the ocean surface (below the sea-ice)."""
-        return self._get("net_downward_surface_heat_flux")
+        try:
+            return self._get("net_downward_surface_heat_flux")
+        except KeyError:
+            # derive from the sea-surface-fraction-weighted version
+            return (
+                self.net_downward_surface_heat_flux_total_area
+                / self.sea_surface_fraction
+            )
+
+    @property
+    def net_downward_surface_heat_flux_total_area(self) -> torch.Tensor:
+        """Net heat flux downward across the ocean surface (below the sea-ice),
+        normalized by total grid cell area.
+        """
+        return self._get("net_downward_surface_heat_flux_total_area")
 
     @property
     def geothermal_heat_flux(self) -> torch.Tensor:
         """Geothermal heat flux."""
-        return self._get("geothermal_heat_flux")
+        try:
+            return self._get("geothermal_heat_flux")
+        except KeyError:
+            return torch.zeros_like(self.sea_surface_fraction)
 
     @property
     def net_energy_flux_into_ocean(self) -> torch.Tensor:

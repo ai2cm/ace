@@ -160,7 +160,9 @@ stepper:
           sea_ice_fraction_correction:
             sea_ice_fraction_name: sea_ice_fraction
             land_fraction_name: land_fraction
-          ocean_heat_content_correction: true
+          ocean_heat_content_correction:
+            method: scaled_temperature
+            constant_unaccounted_heating: 0.1
 inference:
   aggregator:
     monthly_reference_data: {monthly_data_filename}
@@ -290,7 +292,6 @@ def _setup(
         "thetao_0",
         "thetao_1",
         "sst",
-        "hfds",
         "hfgeou",
         "sea_surface_fraction",
         "sea_ice_fraction",
@@ -301,6 +302,7 @@ def _setup(
         "thetao_1",
         "sst",
         "sea_ice_fraction",
+        "hfds_total_area",
     ]
 
     # Add masks and idepths for data generation
@@ -439,7 +441,7 @@ def test_train_and_inference(tmp_path, very_fast_only: bool):
     assert best_checkpoint_path.exists()
 
     ds_prediction = xr.open_dataset(prediction_output_path, decode_timedelta=False)
-    for name in ["sst", "thetao_0", "thetao_1", "ocean_heat_content"]:
+    for name in ["sst", "thetao_0", "thetao_1", "ocean_heat_content", "hfds"]:
         assert name in ds_prediction
         # outputs should have some non-null values
         assert not np.isnan(ds_prediction[name].values).all()
