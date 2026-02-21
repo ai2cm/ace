@@ -1,5 +1,6 @@
 import dataclasses
 import inspect
+import os
 import pathlib
 import shutil
 
@@ -107,6 +108,7 @@ def inference_helper(
     coupled_steps_in_memory: int,
     n_initial_conditions: int,
     checkpoint_path: str | StandaloneComponentCheckpointsConfig,
+    use_prediction_data: bool = False,
 ):
     """
     Reusable helper for running coupled inference tests.
@@ -131,6 +133,7 @@ def inference_helper(
     n_extra_initial_conditions = n_initial_conditions - 1
     n_forward_times_ocean = n_coupled_steps + n_extra_initial_conditions
     n_forward_times_atmos = n_forward_times_ocean * 2
+    masked_fill_value = 0.0 if use_prediction_data else float("nan")
     mock_data = create_coupled_data_on_disk(
         data_dir,
         n_forward_times_ocean=n_forward_times_ocean,
@@ -140,24 +143,30 @@ def inference_helper(
         atmosphere_start_time_offset_from_ocean=1,
         n_levels_ocean=1,
         n_levels_atmosphere=1,
+        masked_fill_value=masked_fill_value,
     )
-
+    inference_data_config = InferenceDataLoaderConfig(
+        dataset=CoupledDatasetWithOptionalOceanConfig(
+            ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
+            atmosphere=XarrayDataConfig(
+                data_path=mock_data.atmosphere.data_dir,
+            ),
+        ),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=n_initial_conditions, interval=1
+        ),
+    )
+    if use_prediction_data:
+        prediction_data = inference_data_config
+    else:
+        prediction_data = None
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
         n_coupled_steps=n_coupled_steps,
         checkpoint_path=checkpoint_path,
         logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
-        loader=InferenceDataLoaderConfig(
-            dataset=CoupledDatasetWithOptionalOceanConfig(
-                ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
-                atmosphere=XarrayDataConfig(
-                    data_path=mock_data.atmosphere.data_dir,
-                ),
-            ),
-            start_indices=InferenceInitialConditionIndices(
-                first=0, n_initial_conditions=n_initial_conditions, interval=1
-            ),
-        ),
+        loader=inference_data_config,
+        prediction_loader=prediction_data,
         data_writer=CoupledDataWriterConfig(
             ocean=DataWriterConfig(
                 save_prediction_files=True,
@@ -200,6 +209,21 @@ def inference_helper(
         "ak_0" not in ds_atmos.coords
     ), "TODO: update this assertion now that vertical coords are written"
     assert "ak_0" not in ds_ocean.coords
+    if use_prediction_data:
+        assert not os.path.exists(tmp_path / "atmosphere/restart.nc")
+        assert not os.path.exists(tmp_path / "atmosphere/initial_condition.nc")
+        assert not os.path.exists(tmp_path / "ocean/restart.nc")
+        assert not os.path.exists(tmp_path / "ocean/initial_condition.nc")
+        all_out_names = ocean_out_names + atmos_out_names
+        for var in all_out_names:
+            rmse_key = f"inference/mean/weighted_rmse/{var}"
+            bias_key = f"inference/mean/weighted_bias/{var}"
+            logs_with_rmse = [log for log in wandb_logs if rmse_key in log]
+            logs_with_bias = [log for log in wandb_logs if bias_key in log]
+            for log in logs_with_rmse:
+                assert log[rmse_key] == 0.0
+            for log in logs_with_bias:
+                assert log[bias_key] == 0.0
 
 
 def _create_dataset_info_for_stepper(
@@ -250,13 +274,14 @@ def _create_dataset_info_for_stepper(
 
 
 @pytest.mark.parametrize(
-    (
-        "n_coupled_steps,"
-        "coupled_steps_in_memory,"
-        "n_initial_conditions,"
-        "save_standalone_component_checkpoints,"
-    ),
-    [(2, 1, 2, True), (4, 2, 1, False), (2, 2, 1, False)],
+    "n_coupled_steps,coupled_steps_in_memory,n_initial_conditions,"
+    "save_standalone_component_checkpoints,use_prediction_data",
+    [
+        (2, 1, 2, True, False),
+        (4, 2, 1, False, False),
+        (2, 2, 1, False, False),
+        (2, 1, 2, False, True),
+    ],
 )
 def test_evaluator_inference(
     tmp_path: pathlib.Path,
@@ -264,6 +289,7 @@ def test_evaluator_inference(
     coupled_steps_in_memory: int,
     n_initial_conditions: int,
     save_standalone_component_checkpoints: bool,
+    use_prediction_data: bool,
     very_fast_only: bool,
 ):
     if very_fast_only:
@@ -308,6 +334,7 @@ def test_evaluator_inference(
         coupled_steps_in_memory=coupled_steps_in_memory,
         n_initial_conditions=n_initial_conditions,
         checkpoint_path=checkpoint_path,
+        use_prediction_data=use_prediction_data,
     )
 
 
