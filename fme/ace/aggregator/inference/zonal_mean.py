@@ -173,21 +173,20 @@ class ZonalMeanAggregator:
         # if we have a buffer that means we didnt record the last batch
         if self._buffer_gen:
             start_idx = self.last_step
+            buffer_size = (
+                i_time_start + window_steps
+            ) - self.last_step * self.time_coarsening_factor
         else:
             start_idx = i_time_start // self.time_coarsening_factor
-
-        time_slice = slice(
-            start_idx,
-            (i_time_start + window_steps) // self.time_coarsening_factor,
-        )
-
-        self.last_step = (i_time_start + window_steps) // self.time_coarsening_factor
-
-        buffer_size = (
-            i_time_start + window_steps
-        ) - self.last_step * self.time_coarsening_factor
+            buffer_size = (i_time_start + window_steps) - (
+                (i_time_start + window_steps) // self.time_coarsening_factor
+            ) * (self.time_coarsening_factor)
 
         buffer = {}
+        n_coarsened = None
+        time_slice = None
+        new_buffer_size = 0
+        skip_batch = False
         for name, tensor in target_data.items():
             if name in self._target_data:
                 if self._buffer_target:
@@ -198,11 +197,60 @@ class ZonalMeanAggregator:
                         ],
                         dim=self._time_dim,
                     )
-                self._target_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor)
+                # Only coarsen complete bins; remainder goes to buffer
+                n_raw = tensor.shape[self._time_dim]
+                n_raw_to_coarsen = (n_raw // self.time_coarsening_factor) * (
+                    self.time_coarsening_factor
                 )
-                if buffer_size > 0:
-                    buffer[name] = tensor[:, -buffer_size:, :]
+                if n_raw_to_coarsen == 0:
+                    skip_batch = True
+                    break
+                tensor_to_coarsen = tensor[:, 0:n_raw_to_coarsen, :]
+                coarsened = self._coarsen_tensor(self._zonal_mean(tensor_to_coarsen))
+                if n_coarsened is None:
+                    n_coarsened = coarsened.shape[self._time_dim]
+                    time_slice = slice(start_idx, start_idx + n_coarsened)
+                    self.last_step = start_idx + n_coarsened
+                    new_buffer_size = n_raw - n_raw_to_coarsen
+                self._target_data[name][:, time_slice, :] += coarsened
+                if new_buffer_size > 0:
+                    buffer[name] = tensor[:, -new_buffer_size:, :]
+        if skip_batch:
+            if not self.logged_batch_skip:
+                logging.info(
+                    f"Skipping batch with {n_raw} steps (after buffer) because "
+                    f"there are no complete coarsening bins of size "
+                    f"{self.time_coarsening_factor}."
+                )
+                self.logged_batch_skip = True
+            # Buffer the full concatenated tensor for each variable for next batch
+            new_buffer_target = {}
+            for name, tensor in target_data.items():
+                if name in self._target_data:
+                    if self._buffer_target:
+                        tensor = torch.cat(
+                            [
+                                self._buffer_target[name],
+                                tensor[:, 0 : window_steps - buffer_size, :],
+                            ],
+                            dim=self._time_dim,
+                        )
+                    new_buffer_target[name] = tensor
+            self._buffer_target = new_buffer_target
+            new_buffer_gen = {}
+            for name, tensor in gen_data.items():
+                if name in self._gen_data:
+                    if self._buffer_gen:
+                        tensor = torch.cat(
+                            [
+                                self._buffer_gen[name],
+                                tensor[:, 0 : window_steps - buffer_size, :],
+                            ],
+                            dim=self._time_dim,
+                        )
+                    new_buffer_gen[name] = tensor
+            self._buffer_gen = new_buffer_gen
+            return
         self._buffer_target = buffer
 
         buffer = {}
@@ -216,11 +264,15 @@ class ZonalMeanAggregator:
                         ],
                         dim=self._time_dim,
                     )
-                self._gen_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor)
+                n_raw = tensor.shape[self._time_dim]
+                n_raw_to_coarsen = (n_raw // self.time_coarsening_factor) * (
+                    self.time_coarsening_factor
                 )
-                if buffer_size > 0:
-                    buffer[name] = tensor[:, -buffer_size:, :]
+                tensor_to_coarsen = tensor[:, 0:n_raw_to_coarsen, :]
+                coarsened = self._coarsen_tensor(self._zonal_mean(tensor_to_coarsen))
+                self._gen_data[name][:, time_slice, :] += coarsened
+                if new_buffer_size > 0:
+                    buffer[name] = tensor[:, -new_buffer_size:, :]
         self._buffer_gen = buffer
 
         self._n_batches[:, time_slice, :] += 1

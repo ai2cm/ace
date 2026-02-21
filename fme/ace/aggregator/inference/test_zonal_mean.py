@@ -176,6 +176,38 @@ def test_zonal_mean_time_coarsening(n_time):
         )
 
 
+def test_zonal_mean_time_coarsening_25_steps_per_window():
+    """Regression: forward_steps_in_memory=25 with factor=2 causes 13 vs 12
+    size mismatch.
+
+    The bug occurs when there is no buffer and i_time_start is not aligned to the
+    coarsening factor. E.g. i_time_start=1, 25 steps: original code uses
+    time_slice length (1+25)//2 - 0 = 13 but _coarsen_tensor(25 steps) returns 12.
+    We must start at i_time_start=1 so the first batch has no buffer.
+    """
+    n_sample, ny, nx = 3, 10, 20
+    n_time = 100
+    window_steps = 25
+    # Factor 2: first batch at i_time_start=1 has no buffer -> 13 vs 12 mismatch
+    agg = ZonalMeanAggregator(
+        zonal_mean,
+        n_timesteps=n_time,
+        zonal_mean_max_size=50,  # ceil(100/50)=2
+    )
+    assert agg.time_coarsening_factor == 2
+    # Start at 1 so first batch triggers the bug (no buffer, misaligned i_time_start)
+    for i_time_start in range(1, n_time, window_steps):
+        steps = min(window_steps, n_time - i_time_start)
+        arr = torch.arange(ny, dtype=torch.float32, device=get_device())
+        arr = arr[None, None, :, None].expand(n_sample, steps, ny, nx)
+        agg.record_batch(
+            {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=i_time_start
+        )
+    assert agg._target_data is not None
+    assert agg._gen_data is not None
+    assert agg._target_data["a"].shape[1] == n_time // agg.time_coarsening_factor
+
+
 @pytest.mark.parametrize("zonal_mean_max_size", [4, 2**14, 2**16])
 def test_zonal_mean_time_coarsening_override(zonal_mean_max_size):
     n_time = 2**16
