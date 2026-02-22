@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import datetime
 import logging
@@ -768,13 +769,22 @@ class CoupledStepperTrainLoss:
             atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
         )
 
+    def step_is_optimized(
+        self,
+        realm: Literal["ocean", "atmosphere"],
+        step: int,
+        n_total_steps: int,
+    ) -> bool:
+        return self._loss_objs[realm].step_is_optimized(step, n_total_steps)
+
     def __call__(
         self,
         prediction: ComponentStepPrediction,
         target_data: TensorMapping,
+        n_total_steps: int | None = None,
     ) -> torch.Tensor | None:
         loss_obj = self._loss_objs[prediction.realm]
-        if loss_obj.step_is_optimized(prediction.step):
+        if loss_obj.step_is_optimized(prediction.step, n_total_steps):
             return loss_obj(prediction, target_data)
         return None
 
@@ -1589,55 +1599,89 @@ class CoupledTrainStepper(
 
         metrics = ComponentStepMetrics()
         optimization.set_mode(self.modules)
+        n_outer_steps = data.ocean_data.n_timesteps - self.n_ic_timesteps
+        n_total_atmos_steps = n_outer_steps * self.n_inner_steps
         with optimization.autocast():
             output_generator = self._stepper.get_prediction_generator(
                 input_data,
                 data_ensemble,
                 optimization,
             )
-            output_list = []
-            for gen_step in output_generator:
-                if gen_step.realm == "ocean":
-                    # compute ocean step metrics
+            output_list: list[ComponentStepPrediction] = []
+            output_iterator = iter(output_generator)
+
+            for i_outer in range(n_outer_steps):
+                for i_inner in range(self.n_inner_steps):
+                    global_atmos_step = i_outer * self.n_inner_steps + i_inner
+                    optimize = self._loss.step_is_optimized(
+                        "atmosphere",
+                        global_atmos_step,
+                        n_total_atmos_steps,
+                    )
+                    grad_context = (
+                        contextlib.nullcontext() if optimize else torch.no_grad()
+                    )
+                    with grad_context:
+                        gen_step = next(output_iterator)
+                        target_step = {
+                            k: v.select(self.atmosphere.TIME_DIM, gen_step.step)
+                            for k, v in atmos_forward_data.data.items()
+                        }
+                        if n_ensemble > 1:
+                            gen_step_data_unfolded = unfold_ensemble_dim(
+                                gen_step.data, n_ensemble
+                            )
+                            gen_step_for_loss = ComponentStepPrediction(
+                                realm=gen_step.realm,
+                                data=gen_step_data_unfolded,
+                                step=gen_step.step,
+                            )
+                        else:
+                            gen_step_for_loss = gen_step
+                        target_step_ensemble = add_ensemble_dim(target_step)
+                        step_loss = self._loss(
+                            gen_step_for_loss,
+                            target_step_ensemble,
+                            n_total_steps=n_total_atmos_steps,
+                        )
+                        if step_loss is not None:
+                            label = f"loss/{gen_step.realm}_step_{gen_step.step}"
+                            metrics.add_metric(
+                                label, step_loss.detach(), gen_step.realm
+                            )
+                    if step_loss is not None:
+                        optimization.accumulate_loss(step_loss)
+                    if n_ensemble > 1:
+                        gen_step_to_append = gen_step_for_loss.detach(optimization)
+                    else:
+                        gen_step_to_append = gen_step.detach(optimization)
+                    output_list.append(gen_step_to_append)
+
+                optimize = self._loss.step_is_optimized(
+                    "ocean",
+                    i_outer,
+                    n_outer_steps,
+                )
+                grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
+                with grad_context:
+                    gen_step = next(output_iterator)
                     target_step = {
                         k: v.select(self.ocean.TIME_DIM, gen_step.step)
                         for k, v in ocean_forward_data.data.items()
                     }
-                    # Ocean predictions don't need ensemble handling
                     gen_step_for_loss = gen_step
-                else:
-                    assert gen_step.realm == "atmosphere"
-                    target_step = {
-                        k: v.select(self.atmosphere.TIME_DIM, gen_step.step)
-                        for k, v in atmos_forward_data.data.items()
-                    }
-                    # Unfold ensemble dimension for atmosphere loss computation
-                    if n_ensemble > 1:
-                        gen_step_data_unfolded = unfold_ensemble_dim(
-                            gen_step.data, n_ensemble
-                        )
-                        gen_step_for_loss = ComponentStepPrediction(
-                            realm=gen_step.realm,
-                            data=gen_step_data_unfolded,
-                            step=gen_step.step,
-                        )
-                    else:
-                        gen_step_for_loss = gen_step
-                # Add ensemble dim to target (single member)
-                target_step_ensemble = add_ensemble_dim(target_step)
-                step_loss = self._loss(
-                    gen_step_for_loss,
-                    target_step_ensemble,
-                )
+                    target_step_ensemble = add_ensemble_dim(target_step)
+                    step_loss = self._loss(
+                        gen_step_for_loss,
+                        target_step_ensemble,
+                        n_total_steps=n_outer_steps,
+                    )
+                    if step_loss is not None:
+                        label = f"loss/{gen_step.realm}_step_{gen_step.step}"
+                        metrics.add_metric(label, step_loss.detach(), gen_step.realm)
                 if step_loss is not None:
-                    label = f"loss/{gen_step.realm}_step_{gen_step.step}"
-                    metrics.add_metric(label, step_loss.detach(), gen_step.realm)
                     optimization.accumulate_loss(step_loss)
-                # For atmosphere with ensemble, append the unfolded step
-                if gen_step.realm == "atmosphere" and n_ensemble > 1:
-                    gen_step_to_append = gen_step_for_loss.detach(optimization)
-                else:
-                    gen_step_to_append = gen_step.detach(optimization)
+                gen_step_to_append = gen_step.detach(optimization)
                 output_list.append(gen_step_to_append)
 
         loss = optimization.get_accumulated_loss().detach()
