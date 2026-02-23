@@ -17,7 +17,7 @@ model:
     type: MSE
   module:
     config:
-      model_channels: 128
+      model_channels: 256
       attn_resolutions: []
       num_blocks: 1
       channel_mult_emb: 6
@@ -38,7 +38,7 @@ model:
     fine:
       global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering-20260206.nc
       global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260206.nc
-  num_diffusion_generation_steps: 18
+  num_diffusion_generation_steps: 8
   churn: 0.0
   p_mean: -1.2
   p_std: 2.0
@@ -132,7 +132,7 @@ validation_data:
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 700
+max_epochs: 300
 validate_interval: 10
 experiment_dir: /results #/climate-default/home/annak/scratch/2026-02-10-downsc-add-pressfc/3km_bf16
 save_checkpoints: false
