@@ -11,3 +11,5 @@ ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs1|01KBZP41XMBZ8WB8QWM3FQZQ9C
 aceS-cm4_1pctCO2_0256to0350-condSFNO|rs0|01KHZG19J8SFKZ3PDYCCEZNH1X|training|best_inference_ckpt|normal|--not-preemptible
 
 cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs0|01KJ5XMPTBN669V97K55AC7KV3|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs1|01KJ5XN6NRQQYGGQ4D192FBJMG|training|best_inference_ckpt|normal|--not-preemptible
