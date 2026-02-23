@@ -2,6 +2,7 @@ import abc
 import dataclasses
 import math
 import re
+import warnings
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import Literal, TypeVar
@@ -10,6 +11,12 @@ import dacite
 import numpy as np
 import torch
 
+warnings.filterwarnings(
+    "ignore",
+    message="healpixpad_cuda module not available",
+    category=UserWarning,
+    module=r"earth2grid\.healpix",
+)
 try:
     from earth2grid import healpix as e2ghpx
 except ImportError:
