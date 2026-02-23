@@ -75,7 +75,7 @@ class PairedNormalizationConfig:
 
 @dataclasses.dataclass
 class DiffusionModelConfig:
-    f"""
+    """
     This class implements or wraps the algorithms described in `EDM`_.
 
     .. _EDM: https://arxiv.org/abs/2206.00364
@@ -95,8 +95,6 @@ class DiffusionModelConfig:
         use_fine_topography: Whether to use fine topography in the model.
         use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
             UNetDiffusionModule.
-
-
     """
 
     module: DiffusionModuleRegistrySelector
@@ -113,7 +111,6 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
-    static_inputs: dict[str, str] | None = None
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -141,8 +138,6 @@ class DiffusionModelConfig:
         sigma_data = 1.0
 
         n_in_channels = len(self.in_names)
-        # fine topography is already normalized and at fine scale, so needs
-        # some special handling for now
         if static_inputs is not None:
             n_in_channels += len(static_inputs.fields)
 
@@ -399,8 +394,8 @@ class DiffusionModel:
             prediction=denoised,
             target=target,
             loss=loss,
-            channel_losses=channel_losses,
             latent_steps=[],
+            channel_losses=channel_losses,
         )
 
     @torch.no_grad()
@@ -510,9 +505,15 @@ class DiffusionModel:
         state: Mapping[str, Any],
     ) -> "DiffusionModel":
         config = DiffusionModelConfig.from_state(state["config"])
+        # backwards compatibility for models before static inputs serialization
+        if state.get("static_inputs") is not None:
+            static_inputs = StaticInputs.from_state(state["static_inputs"]).to_device()
+        else:
+            static_inputs = None
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
+            static_inputs=static_inputs,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model

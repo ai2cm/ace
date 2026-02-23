@@ -72,11 +72,22 @@ def get_mock_paired_batch(coarse_shape, fine_shape):
 
 def test_module_serialization(tmp_path):
     coarse_shape = (8, 16)
+    static_inputs = StaticInputs(
+        fields=[
+            StaticInput(
+                torch.rand(*coarse_shape, device=get_device()),
+                LatLonCoordinates(
+                    lat=torch.ones(coarse_shape[0]), lon=torch.ones(coarse_shape[1])
+                ),
+            )
+        ]
+    )
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=2,
         predict_residual=True,
         use_fine_topography=False,
+        static_inputs=static_inputs,
     )
     model_from_state = DiffusionModel.from_state(
         model.get_state(),
@@ -98,6 +109,11 @@ def test_module_serialization(tmp_path):
             model.module.parameters(), model_from_disk.module.parameters()
         )
     )
+    loaded_static_inputs = model_from_disk.static_inputs
+    assert loaded_static_inputs is not None
+    assert torch.equal(
+        loaded_static_inputs.fields[0].data, static_inputs.fields[0].data
+    )
 
 
 def _get_diffusion_model(
@@ -105,6 +121,7 @@ def _get_diffusion_model(
     downscale_factor,
     predict_residual=True,
     use_fine_topography=True,
+    static_inputs=None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -127,7 +144,7 @@ def _get_diffusion_model(
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
-    ).build(coarse_shape, downscale_factor)
+    ).build(coarse_shape, downscale_factor, static_inputs=static_inputs)
 
 
 @pytest.mark.parametrize("predict_residual", [True, False])
@@ -135,20 +152,6 @@ def _get_diffusion_model(
 def test_diffusion_model_train_and_generate(predict_residual, use_fine_topography):
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
-    model = _get_diffusion_model(
-        coarse_shape=coarse_shape,
-        downscale_factor=2,
-        predict_residual=predict_residual,
-        use_fine_topography=use_fine_topography,
-    )
-
-    assert model._get_fine_shape(coarse_shape) == fine_shape
-
-    batch_size = 2
-
-    batch = get_mock_paired_batch(
-        [batch_size, *coarse_shape], [batch_size, *fine_shape]
-    )
     if use_fine_topography:
         static_inputs = StaticInputs(
             fields=[
@@ -162,6 +165,21 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
         )
     else:
         static_inputs = None
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        predict_residual=predict_residual,
+        use_fine_topography=use_fine_topography,
+        static_inputs=static_inputs,
+    )
+
+    assert model._get_fine_shape(coarse_shape) == fine_shape
+
+    batch_size = 2
+
+    batch = get_mock_paired_batch(
+        [batch_size, *coarse_shape], [batch_size, *fine_shape]
+    )
     optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
     train_outputs = model.train_on_batch(batch, static_inputs, optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
@@ -297,20 +315,6 @@ def test_DiffusionModel_generate_on_batch_no_target():
     fine_shape = (32, 32)
     coarse_shape = (16, 16)
     downscale_factor = 2
-    model = _get_diffusion_model(
-        coarse_shape=coarse_shape,
-        downscale_factor=downscale_factor,
-        predict_residual=True,
-        use_fine_topography=True,
-    )
-
-    batch_size = 2
-
-    n_generated_samples = 2
-
-    coarse_batch = get_mock_batch(
-        [batch_size, *coarse_shape], topography_scale_factor=downscale_factor
-    )
     static_inputs = StaticInputs(
         fields=[
             StaticInput(
@@ -321,6 +325,22 @@ def test_DiffusionModel_generate_on_batch_no_target():
             )
         ]
     )
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        predict_residual=True,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+
+    batch_size = 2
+
+    n_generated_samples = 2
+
+    coarse_batch = get_mock_batch(
+        [batch_size, *coarse_shape], topography_scale_factor=downscale_factor
+    )
+
     samples = model.generate_on_batch_no_target(
         coarse_batch,
         static_inputs=static_inputs,
@@ -337,14 +357,23 @@ def test_DiffusionModel_generate_on_batch_no_target():
 def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
     # We currently require an input coarse shape for accounting, but the model
     # can handle arbitrary input sizes
-
     coarse_shape = (16, 16)
     downscale_factor = 2
+    static_inputs = StaticInputs(
+        fields=[
+            StaticInput(
+                torch.rand(32, 32, device=get_device()),
+                LatLonCoordinates(torch.ones(32), torch.ones(32)),
+            )
+        ]
+    )
+    # need to build with static inputs to get the correct n_in_channels
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         predict_residual=True,
         use_fine_topography=True,
+        static_inputs=static_inputs,
     )
     n_ensemble = 2
     batch_size = 2

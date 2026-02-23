@@ -612,7 +612,6 @@ class PairedDataLoaderConfig:
         )
 
         example = dataset[0]
-
         variable_metadata = {
             **dataset_fine_subset.variable_metadata,
             **dataset_coarse_subset.variable_metadata,

@@ -19,6 +19,19 @@ from fme.downscaling.requirements import DataRequirements
 # Tests for OutputTargetConfig validation
 
 
+def _get_static_inputs(shape=(8, 8)):
+    return StaticInputs(
+        fields=[
+            StaticInput(
+                data=torch.ones(shape),
+                coords=LatLonCoordinates(
+                    lat=torch.ones(shape[0]), lon=torch.ones(shape[1])
+                ),
+            )
+        ]
+    )
+
+
 def test_single_xarray_config_accepts_single_config():
     """Test that _single_xarray_config accepts a single XarrayDataConfig."""
     xarray_config = XarrayDataConfig(
@@ -103,14 +116,7 @@ def test_event_config_build_creates_output_target_with_single_time(
         lat_extent=ClosedInterval(2.0, 6.0),
         lon_extent=ClosedInterval(2.0, 6.0),
     )
-    static_inputs = StaticInputs(
-        fields=[
-            StaticInput(
-                data=torch.ones((8, 8)),
-                coords=LatLonCoordinates(lat=torch.ones(8), lon=torch.ones(8)),
-            )
-        ]
-    )
+    static_inputs = _get_static_inputs((8, 8))
     output_target = config.build(
         loader_config, requirements, patch_config, static_inputs
     )
@@ -141,14 +147,7 @@ def test_region_config_build_creates_output_target_with_time_range(
         n_ens=4,
         save_vars=["var0", "var1"],
     )
-    static_inputs = StaticInputs(
-        fields=[
-            StaticInput(
-                data=torch.ones((8, 8)),
-                coords=LatLonCoordinates(lat=torch.ones(8), lon=torch.ones(8)),
-            )
-        ]
-    )
+    static_inputs = _get_static_inputs((8, 8))
 
     output_target = config.build(
         loader_config, requirements, patch_config, static_inputs

@@ -16,6 +16,10 @@ from fme.downscaling.predictors.composite import (
 )
 
 
+def _get_static_inputs(shape, coords):
+    return StaticInputs(fields=[StaticInput(data=torch.randn(shape), coords=coords)])
+
+
 def test_composite_predictions():
     patch_yx_size = (2, 2)
     patches = get_patches((4, 4), patch_yx_size, overlap=0)
@@ -133,16 +137,12 @@ def test_SpatialCompositePredictor_generate_on_batch(patch_size_coarse):
     paired_batch_data = get_paired_test_data(
         *coarse_extent, downscale_factor=downscale_factor, batch_size=batch_size
     )
-    static_inputs = StaticInputs(
-        fields=[
-            StaticInput(
-                data=torch.randn(
-                    coarse_extent[0] * downscale_factor,
-                    coarse_extent[1] * downscale_factor,
-                ),
-                coords=paired_batch_data.fine.latlon_coordinates[0],
-            )
-        ]
+    static_inputs = _get_static_inputs(
+        shape=(
+            coarse_extent[0] * downscale_factor,
+            coarse_extent[1] * downscale_factor,
+        ),
+        coords=paired_batch_data.fine.latlon_coordinates[0],
     )
 
     predictor = PatchPredictor(
@@ -174,16 +174,12 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
     paired_batch_data = get_paired_test_data(
         *coarse_extent, downscale_factor=downscale_factor, batch_size=batch_size
     )
-    static_inputs = StaticInputs(
-        fields=[
-            StaticInput(
-                data=torch.randn(
-                    coarse_extent[0] * downscale_factor,
-                    coarse_extent[1] * downscale_factor,
-                ),
-                coords=paired_batch_data.fine.latlon_coordinates[0],
-            )
-        ]
+    static_inputs = _get_static_inputs(
+        shape=(
+            coarse_extent[0] * downscale_factor,
+            coarse_extent[1] * downscale_factor,
+        ),
+        coords=paired_batch_data.fine.latlon_coordinates[0],
     )
     predictor = PatchPredictor(
         DummyModel(coarse_shape=patch_size_coarse, downscale_factor=2),  # type: ignore

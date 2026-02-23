@@ -6,9 +6,7 @@ import dacite
 import torch
 import yaml
 
-import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
@@ -195,14 +193,10 @@ class EvaluatorConfig:
     )
     events: list[PairedEventConfig] | None = None
 
-    def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(self, resumable: bool = False, **kwargs):
-        config = to_flat_dict(dataclasses.asdict(self))
-        env_vars = logging_utils.retrieve_env_vars()
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+    def configure_logging(self, log_filename: str, resumable: bool = False):
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=resumable
         )
 
     def _build_default_evaluator(self) -> Evaluator:
@@ -290,10 +284,7 @@ def main(config_path: str):
     )
     prepare_directory(evaluator_config.experiment_dir, config)
 
-    evaluator_config.configure_logging(log_filename="out.log")
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    evaluator_config.configure_wandb(resumable=True, notes=beaker_url)
+    evaluator_config.configure_logging(log_filename="out.log", resumable=True)
 
     logging.info("Starting downscaling model evaluation")
     evaluators = evaluator_config.build()

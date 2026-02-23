@@ -153,7 +153,8 @@ stepper:
             sea_ice_fraction_name: ocean_sea_ice_fraction
             land_fraction_name: land_fraction
             remove_negative_ocean_fraction: false
-            sea_ice_thickness_name: HI
+            zero_where_ice_free_names:
+            - HI
       next_step_forcing_names:
       - DLWRFsfc
       - DSWRFsfc

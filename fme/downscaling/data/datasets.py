@@ -335,8 +335,9 @@ class GriddedData:
                 or self.static_inputs.shape[1] % self.shape[1] != 0
             ):
                 raise ValueError(
-                    "Topography shape must be evenly divisible by data shape. "
-                    f"Got topography {self.static_inputs.shape} and data {self.shape}"
+                    "Static inputs shape must be evenly divisible by data shape. "
+                    f"Got static inputs with shape {self.static_inputs.shape} "
+                    f"and data with shape {self.shape}"
                 )
             return self.static_inputs.shape[0] // self.shape[0]
         else:
