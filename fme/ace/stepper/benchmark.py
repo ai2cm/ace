@@ -11,10 +11,12 @@ from fme.ace.stepper.single_module import Stepper, StepperConfig
 from fme.core.benchmark.benchmark import BenchmarkABC, register_benchmark
 from fme.core.benchmark.timer import Timer
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.ocean import OceanConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
@@ -252,6 +254,23 @@ class CSFNOPredict(BenchmarkABC):
                     means={name: 0.0 for name in all_names},
                     stds={name: 1.0 for name in all_names},
                 )
+            ),
+            ocean=OceanConfig(
+                surface_temperature_name="surface_temperature",
+                ocean_fraction_name="ocean_fraction",
+            ),
+            corrector=AtmosphereCorrectorConfig(
+                conserve_dry_air=True,
+                zero_global_mean_moisture_advection=True,
+                moisture_budget_correction="advection_and_precipitation",
+                force_positive_names=[
+                    "PRATEsfc",
+                    "Q2m",
+                ]
+                + [f"specific_total_water_{level}" for level in range(n_levels)],
+                total_energy_budget_correction=EnergyBudgetConfig(
+                    method="constant_temperature",
+                ),
             ),
         )
         config = StepperConfig(
