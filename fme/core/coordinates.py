@@ -2,7 +2,6 @@ import abc
 import dataclasses
 import math
 import re
-import warnings
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import Literal, TypeVar
@@ -10,17 +9,6 @@ from typing import Literal, TypeVar
 import dacite
 import numpy as np
 import torch
-
-warnings.filterwarnings(
-    "ignore",
-    message="healpixpad_cuda module not available",
-    category=UserWarning,
-    module=r"earth2grid\.healpix",
-)
-try:
-    from earth2grid import healpix as e2ghpx
-except ImportError:
-    e2ghpx = None
 
 from fme.core import metrics
 from fme.core.constants import GRAVITY
@@ -39,6 +27,15 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
 HC = TypeVar("HC", bound="HorizontalCoordinates")
+
+e2ghpx = None
+
+
+def get_e2ghpx():
+    global e2ghpx
+    if e2ghpx is None:
+        from earth2grid import healpix as e2ghpx
+    return e2ghpx
 
 
 class DeriveFnABC(abc.ABC):
@@ -827,6 +824,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
     @property
     def xyz(self) -> tuple[float, float, float]:
         level = int(math.log2(len(self.width)))
+        e2ghpx = get_e2ghpx()
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
         lats = lats.reshape(len(self.face), len(self.width), len(self.height))
@@ -885,6 +883,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
         # We'll return a 3D (face, width, height) tensor representing the lat-lon
         # coordinates of this grid.
         level = int(math.log2(len(self.width)))
+        e2ghpx = get_e2ghpx()
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
         lats = lats.reshape(self.shape)
