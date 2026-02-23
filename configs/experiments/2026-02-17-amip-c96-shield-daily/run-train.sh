@@ -28,7 +28,7 @@ run_training() {
     --description 'Run ACE training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/climate-titan \
-    --priority urgent \
+    --priority low \
     --preemptible \
     --cluster ai2/jupiter \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
@@ -51,5 +51,6 @@ run_training() {
 
 # run_training "train-amip-c96-shield-daily.yaml" "train-amip-c96-shield-daily"
 # run_training "train-amip-c96-shield-daily-pos16.yaml" "train-amip-c96-shield-daily-pos16"
+run_training "train-amip-c96-shield-daily-pos16-rsop.yaml" "train-amip-c96-shield-daily-pos16-rsop"
 # run_training "train-amip-c96-shield.yaml" "train-amip-c96-shield"
-run_training "train-amip-c96-shield-rsop.yaml" "train-amip-c96-shield-rsop"
+# run_training "train-amip-c96-shield-rsop.yaml" "train-amip-c96-shield-rsop"
