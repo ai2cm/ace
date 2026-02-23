@@ -6,12 +6,12 @@ import datetime
 from pathlib import Path
 from unittest import mock
 
-import dacite
 import numpy as np
 import pytest
 import torch
 
 from fme.ace.stepper import Stepper, StepperConfig, parameter_init
+from fme.ace.stepper.single_module import load_weights_and_history
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -74,17 +74,12 @@ def test_builder_with_weights_loads_same_state(tmpdir):
     parameter_init_config = parameter_init.ParameterInitializationConfig(
         weights_path=str(tmpdir / "weights.ckpt"),
     )
-    stepper_config_data = dataclasses.asdict(stepper_config)
-    with_builder_stepper_config_data = {
-        **stepper_config_data,
-        "parameter_init": parameter_init_config,
-    }
     dataset_info = get_dataset_info()
-    with_builder_stepper = dacite.from_dict(
-        StepperConfig,
-        with_builder_stepper_config_data,
-        config=dacite.Config(strict=True),
-    ).get_stepper(dataset_info=dataset_info)
+    parameter_initializer = parameter_init_config.build(load_weights_and_history)
+    with_builder_stepper = stepper_config.get_stepper(
+        dataset_info=dataset_info,
+        parameter_initializer=parameter_initializer,
+    )
     assert len(with_builder_stepper.modules) == 1
     assert_same_state(
         with_builder_stepper.modules[0].state_dict(),
@@ -159,18 +154,18 @@ def test_builder_with_weights_sfno_init(
         loaded_shape, extra_built_layer, tmpdir
     )
     dataset_info = get_dataset_info(img_shape=built_shape)
+    config = StepperConfig.from_state(with_builder_stepper_config_data)
+    initializer = config.parameter_init.build(load_weights_and_history)
     if expect_exception:
         with pytest.raises(ValueError):
-            with_builder_stepper = StepperConfig.from_state(
-                with_builder_stepper_config_data
-            ).get_stepper(
+            with_builder_stepper = config.get_stepper(
                 dataset_info=dataset_info,
+                parameter_initializer=initializer,
             )
     else:
-        with_builder_stepper = StepperConfig.from_state(
-            with_builder_stepper_config_data
-        ).get_stepper(
+        with_builder_stepper = config.get_stepper(
             dataset_info=dataset_info,
+            parameter_initializer=initializer,
         )
         assert len(with_builder_stepper.modules) == 1
         if extra_built_layer:
@@ -270,9 +265,12 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     with_builder_stepper_config_data, dataset_info, stepper = get_config(
         loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir
     )
-    with_builder_stepper = StepperConfig.from_state(
-        with_builder_stepper_config_data
-    ).get_stepper(dataset_info=dataset_info)
+    config = StepperConfig.from_state(with_builder_stepper_config_data)
+    initializer = config.parameter_init.build(load_weights_and_history)
+    with_builder_stepper = config.get_stepper(
+        dataset_info=dataset_info,
+        parameter_initializer=initializer,
+    )
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights
     (tmpdir / "weights.ckpt").remove()
