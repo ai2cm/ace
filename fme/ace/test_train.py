@@ -366,7 +366,7 @@ def _get_test_yaml_files(
                 ),
             ),
         ),
-        train_stepper=TrainStepperConfig(
+        stepper_training=TrainStepperConfig(
             loss=loss,
             n_ensemble=n_ensemble,
             train_n_forward_steps=train_n_forward_steps,
@@ -914,7 +914,7 @@ def _create_copy_weights_after_batch_config(
 ):
     with open(path_to_train_config_yaml) as config_file:
         config_data = yaml.safe_load(config_file)
-        config_data["train_stepper"]["parameter_init"] = {
+        config_data["stepper_training"]["parameter_init"] = {
             "weights_path": path_to_checkpoint
         }
         config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": None}]

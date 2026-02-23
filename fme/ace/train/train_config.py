@@ -180,10 +180,10 @@ class TrainConfig:
         weather_evaluation: Configuration for weather evaluation.
             If None, no weather evaluation is run. Weather evaluation is not
             used to select checkpoints, but is used to provide metrics.
-        train_stepper: Training-specific configuration including loss, ensemble
+        stepper_training: Training-specific configuration including loss, ensemble
             settings, parameter initialization, and forward step scheduling.
         n_forward_steps: Number of forward steps during training. Cannot be given
-            at the same time as train_n_forward_steps in train_stepper.
+            at the same time as train_n_forward_steps in stepper_training.
         train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
@@ -235,7 +235,7 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig | None
-    train_stepper: TrainStepperConfig = dataclasses.field(
+    stepper_training: TrainStepperConfig = dataclasses.field(
         default_factory=lambda: TrainStepperConfig()
     )
     n_forward_steps: int | None = None
@@ -265,11 +265,11 @@ class TrainConfig:
 
     def __post_init__(self):
         if (
-            self.train_stepper.train_n_forward_steps is not None
+            self.stepper_training.train_n_forward_steps is not None
             and self.n_forward_steps is not None
         ):
             raise ValueError(
-                "train_stepper.train_n_forward_steps may not be given at the same "
+                "stepper_training.train_n_forward_steps may not be given at the same "
                 "time as n_forward_steps at the top level"
             )
         if self.train_loader.using_labels != self.validation_loader.using_labels:
@@ -345,7 +345,7 @@ class TrainBuilders:
 
     def _get_n_forward_steps(self) -> int | IntSchedule:
         """Get n_forward_steps for data loading requirements."""
-        schedule = self.config.train_stepper.train_n_forward_steps_schedule
+        schedule = self.config.stepper_training.train_n_forward_steps_schedule
         if schedule is not None:
             return schedule.max_n_forward_steps
         assert isinstance(
@@ -413,7 +413,7 @@ class TrainBuilders:
         initialization.
 
         """
-        return self.config.train_stepper.get_train_stepper(
+        return self.config.stepper_training.get_train_stepper(
             stepper_config=self.config.stepper,
             dataset_info=dataset_info,
         )

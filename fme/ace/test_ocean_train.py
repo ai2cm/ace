@@ -130,7 +130,7 @@ optimization:
       type: CosineAnnealingLR
       kwargs:
         T_max: 1
-train_stepper:
+stepper_training:
   loss:
     type: "MSE"
 stepper:
