@@ -1,3 +1,4 @@
+import math
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Protocol
@@ -17,7 +18,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "sea_surface_height_above_geoid": ["zos"],
         "sea_surface_temperature": ["sst"],
         "sea_ice_fraction": ["sea_ice_fraction"],
-        "sea_ice_thickness": ["sea_ice_thickness"],
+        "sea_ice_thickness": ["HI"],
         "sea_ice_volume": ["sea_ice_volume"],
         "ocean_sea_ice_fraction": ["ocean_sea_ice_fraction"],
         "land_fraction": ["land_fraction"],
@@ -50,6 +51,13 @@ class HasOceanDepthIntegral(Protocol):
     def to(self, device: str) -> "HasOceanDepthIntegral": ...
 
 
+class HasCellAreaInMetersSquared(Protocol):
+    """Protocol for objects that can provide cell areas in square meters."""
+
+    @property
+    def area_weights_m2(self) -> torch.Tensor: ...
+
+
 class OceanData:
     """Container for ocean data for accessing variables and providing
     torch.Tensor views on data with multiple depth levels.
@@ -60,6 +68,7 @@ class OceanData:
         ocean_data: TensorMapping,
         depth_coordinate: HasOceanDepthIntegral | None = None,
         ocean_field_name_prefixes: Mapping[str, list[str]] = OCEAN_FIELD_NAME_PREFIXES,
+        cell_area_provider: HasCellAreaInMetersSquared | None = None,
     ):
         """
         Initializes the instance based on the provided data and prefixes.
@@ -72,11 +81,15 @@ class OceanData:
                 "potential_temperature" or "salinity") and lists of possible
                 names or prefix variants (e.g., ["thetao_"] or
                 ["zos"]) found in the data.
+            cell_area_provider: An object providing cell areas in square meters
+                via the ``area_weights_m2`` property. Used by derived variables
+                that need cell area information (e.g. sea ice thickness).
         """
         self._data = dict(ocean_data)
         self._prefix_map = ocean_field_name_prefixes
         self._depth_coordinate = depth_coordinate
         self._stacker = Stacker(ocean_field_name_prefixes)
+        self._cell_area_provider = cell_area_provider
 
     @property
     def data(self) -> TensorDict:
@@ -216,3 +229,50 @@ class OceanData:
         fraction and land fraction.
         """
         return 1 - self.land_fraction - self.sea_ice_fraction
+
+    @property
+    def area_weights_m2(self) -> torch.Tensor:
+        """Returns cell areas in square meters.
+
+        Raises:
+            ValueError: If a cell area provider was not provided.
+        """
+        if self._cell_area_provider is None:
+            raise ValueError(
+                "A cell area provider must be provided to access cell area information."
+            )
+        return self._cell_area_provider.area_weights_m2
+
+    @property
+    def sea_ice_thickness(self) -> torch.Tensor:
+        """Returns the sea ice thickness."""
+        try:
+            return self._get("sea_ice_thickness")
+        except KeyError:
+            sfrac = self.sea_surface_fraction
+            sea_ice_vol = self.sea_ice_volume
+            try:
+                sea_ice_frac = self.ocean_sea_ice_fraction * sfrac
+            except KeyError:
+                # assumes that sea_ice_fraction comes from compute_coupled_sea_ice
+                # in scripts/data_process/coupled_dataset_utils.py
+                lfrac = self.land_fraction
+                sea_ice_frac = self.sea_ice_fraction * sfrac / (1 - lfrac)
+            cell_area = self.area_weights_m2
+            return torch.where(
+                torch.isnan(sea_ice_vol),
+                float("nan"),
+                torch.nan_to_num(
+                    torch.exp(
+                        9 * math.log(10)
+                        + torch.log(sea_ice_vol)
+                        - torch.log(cell_area)
+                        - torch.log(sea_ice_frac)
+                    )
+                ),
+            )
+
+    @property
+    def sea_ice_volume(self) -> torch.Tensor:
+        """Returns the sea ice volume."""
+        return self._get("sea_ice_volume")
