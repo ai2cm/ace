@@ -63,7 +63,7 @@ test_parallel:
 	FME_DISTRIBUTED_BACKEND=$(FME_DISTRIBUTED_BACKEND) \
 	FME_DISTRIBUTED_H=$(FME_DISTRIBUTED_H) \
 	FME_DISTRIBUTED_W=$(FME_DISTRIBUTED_W) \
-	torchrun --nproc-per-node $(NPROC) -m pytest ./fme/core/distributed/parallel_tests
+	torchrun --nproc-per-node $(NPROC) -m pytest -m parallel .
 
 # --cov must come  after pytest args to use the sources defined by config
 test_cov:

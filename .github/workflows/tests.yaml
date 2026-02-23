@@ -46,7 +46,7 @@ jobs:
           # | model   |  3 | 1 | 3 |
           # | model   |  4 | 2 | 2 |
           # | model   |  4 | 2 | 1 |
-          # | model   | 18 | 3 | 3 |
+          # | model   |  8 | 2 | 2 |
           NPROC=2  FME_DISTRIBUTED_BACKEND=torch FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=1 make test_parallel
           NPROC=3  FME_DISTRIBUTED_BACKEND=torch FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=1 make test_parallel
           NPROC=3  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=1 make test_parallel
@@ -56,7 +56,7 @@ jobs:
           NPROC=3  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=3 make test_parallel
           NPROC=4  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=2 make test_parallel
           NPROC=4  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=1 make test_parallel
-          NPROC=18 FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=3 FME_DISTRIBUTED_W=3 make test_parallel
+          NPROC=8  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=2 make test_parallel
   cpu-very-fast-no-healpix:
     runs-on: ubuntu-latest
     steps:
