@@ -25,8 +25,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
-# Matching for <event_name>_YYYYMMDD.nc
-_EVENT_FILE_RE = re.compile(r"(.+)_(\d{8})\.nc$")
+# Matching for <event_name>_YYYYMMDD.nc or <event_name>_YYYYMMDDHH.nc (with optional T)
+_EVENT_FILE_RE = re.compile(r"(.+)_(\d{8}(?:T?\d{2})?)\.nc$")
 
 
 def parse_args():
