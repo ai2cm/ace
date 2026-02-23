@@ -6,6 +6,10 @@ USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 DEPLOY_TARGET ?= pypi
 BEAKER_WORKSPACE = ai2/ace
 NPROC ?= 2
+FME_FORCE_CPU ?= 0
+FME_DISTRIBUTED_BACKEND ?= torch
+FME_DISTRIBUTED_H ?= 1
+FME_DISTRIBUTED_W ?= 1
 
 ifeq ($(shell uname), Linux)
 	CONDA_PACKAGES=gxx_linux-64 pip
@@ -55,7 +59,11 @@ test:
 	pytest -n 4 --durations 40 .
 
 test_parallel:
-	torchrun --nproc-per-node $(NPROC) -m pytest ./fme/core/distributed/parallel_tests
+	FME_FORCE_CPU=$(FME_FORCE_CPU) \
+	FME_DISTRIBUTED_BACKEND=$(FME_DISTRIBUTED_BACKEND) \
+	FME_DISTRIBUTED_H=$(FME_DISTRIBUTED_H) \
+	FME_DISTRIBUTED_W=$(FME_DISTRIBUTED_W) \
+	torchrun --nproc-per-node $(NPROC) -m pytest -m parallel .
 
 # --cov must come  after pytest args to use the sources defined by config
 test_cov:

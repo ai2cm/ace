@@ -500,20 +500,27 @@ class StepperConfig:
     """
     Configuration for a stepper.
 
+    The following fields are training concerns transferred to TrainStepperConfig
+    via get_train_stepper_config() and are not used directly by get_stepper():
+    ``loss``, ``optimize_last_step_only``, ``n_ensemble``,
+    ``parameter_init``, ``train_n_forward_steps``.
+
     Parameters:
         step: The step configuration.
-        loss: The loss configuration.
+        loss: The loss configuration. Training only.
         optimize_last_step_only: Whether to optimize only the last step.
+            Training only.
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
-            the default is 1. Must be 2 for EnsembleLoss to be valid.
+            the default is 1. Must be 2 for EnsembleLoss to be valid. Training only.
         parameter_init: The parameter initialization configuration.
+            Training only.
         input_masking: Config for masking step inputs.
         train_n_forward_steps: The number of timesteps to train on and associated
             sampling probabilities. By default, the stepper will train on the full
             number of timesteps present in the training dataset samples. Values must
             be less than or equal to the number of timesteps present
-            in the training dataset samples.
+            in the training dataset samples. Training only.
         derived_forcings: Configuration for deriving forcing variables.
     """
 
@@ -585,26 +592,20 @@ class StepperConfig:
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-        apply_parameter_init: bool = True,
+        parameter_initializer: ParameterInitializer | None = None,
         training_history: TrainingHistory | None = None,
-        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
     ):
         """
         Args:
             dataset_info: Information about the training dataset.
-            apply_parameter_init: Whether to apply parameter initialization.
+            parameter_initializer: The parameter initializer to use for loading
+                weights from an external source. If None, no parameter
+                initialization is applied.
             training_history: History of the stepper's training jobs.
-            load_weights_and_history: Function for loading weights and history.
-                Default implementation loads a Trainer checkpoint containing
-                a Stepper.
 
         """
         logging.info("Initializing stepper from provided config")
-        if apply_parameter_init:
-            parameter_initializer = self.get_parameter_initializer(
-                load_weights_and_history
-            )
-        else:
+        if parameter_initializer is None:
             parameter_initializer = ParameterInitializer()
         step = self.step.get_step(
             dataset_info, init_weights=parameter_initializer.freeze_weights
@@ -761,17 +762,6 @@ class StepperConfig:
         self.derived_forcings.validate_replacement(derived_forcings)
         self.derived_forcings = derived_forcings
 
-    def get_parameter_initializer(
-        self,
-        load_weights_and_history: WeightsAndHistoryLoader,
-    ) -> ParameterInitializer:
-        """
-        Get the parameter initializer for this stepper configuration.
-        """
-        return self.parameter_init.build(
-            load_weights_and_history=load_weights_and_history
-        )
-
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
         state = cls.remove_deprecated_keys(state)
@@ -785,6 +775,7 @@ class StepperConfig:
             optimize_last_step_only=self.optimize_last_step_only,
             n_ensemble=self.n_ensemble,
             train_n_forward_steps=self.train_n_forward_steps,
+            parameter_init=self.parameter_init,
         )
 
 
@@ -958,7 +949,7 @@ class Stepper:
         state = self._step_obj.get_state()
         new_state = self._config.replace_multi_call(multi_call, state)
         new_stepper: Stepper = self._config.get_stepper(
-            dataset_info=self._dataset_info, apply_parameter_init=False
+            dataset_info=self._dataset_info,
         )
         new_stepper._step_obj.load_state(new_state)
         self._step_obj = new_stepper._step_obj
@@ -973,7 +964,6 @@ class Stepper:
         self._config.replace_ocean(ocean)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
-            apply_parameter_init=False,
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
@@ -988,7 +978,6 @@ class Stepper:
         self._config.replace_prescribed_prognostic_names(names)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
-            apply_parameter_init=False,
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
@@ -1386,8 +1375,7 @@ class Stepper:
         stepper = config.get_stepper(
             dataset_info=dataset_info,
             training_history=training_history,
-            # don't need to initialize weights, we're about to load_state
-            apply_parameter_init=False,
+            # no parameter_initializer: we're about to load_state
         )
         stepper.load_state(state)
         return stepper
@@ -1417,12 +1405,16 @@ class TrainStepperConfig:
             number of timesteps present in the training dataset samples. Values must
             be less than or equal to the number of timesteps present
             in the training dataset samples.
+        parameter_init: The parameter initialization configuration for fine-tuning.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
     train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
+    parameter_init: ParameterInitializationConfig = dataclasses.field(
+        default_factory=lambda: ParameterInitializationConfig()
+    )
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1439,16 +1431,54 @@ class TrainStepperConfig:
             return self.train_n_forward_steps
         return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
 
-    def get_train_stepper(self, stepper: Stepper) -> "TrainStepper":
+    def _get_parameter_initializer(
+        self,
+        load_weights_and_history_fn: WeightsAndHistoryLoader = load_weights_and_history,
+    ) -> ParameterInitializer:
         """
-        Build a TrainStepper from this configuration and a Stepper.
+        Build a ParameterInitializer from this configuration.
 
         Args:
-            stepper: The underlying stepper for inference operations.
+            load_weights_and_history_fn: Function for loading weights and history.
+                Default implementation loads a Trainer checkpoint containing
+                a Stepper.
+        """
+        return self.parameter_init.build(
+            load_weights_and_history=load_weights_and_history_fn
+        )
+
+    def get_train_stepper(
+        self,
+        stepper_config: StepperConfig,
+        dataset_info: DatasetInfo,
+        load_weights_and_history_fn: WeightsAndHistoryLoader = load_weights_and_history,
+    ) -> "TrainStepper":
+        """
+        Build a TrainStepper from this configuration and a StepperConfig.
+
+        Builds the ParameterInitializer from this config's parameter_init,
+        passes it to StepperConfig.get_stepper() for weight loading and
+        freezing during model construction, then wraps the result in a
+        TrainStepper.
+
+        Args:
+            stepper_config: The stepper configuration for building the model.
+            dataset_info: Information about the training dataset.
+            load_weights_and_history_fn: Function for loading weights and
+                history. Default implementation loads a Trainer checkpoint
+                containing a Stepper.
 
         Returns:
-            A TrainStepper wrapping the given stepper with training functionality.
+            A TrainStepper wrapping the built stepper with training
+            functionality.
         """
+        parameter_initializer = self._get_parameter_initializer(
+            load_weights_and_history_fn
+        )
+        stepper = stepper_config.get_stepper(
+            dataset_info=dataset_info,
+            parameter_initializer=parameter_initializer,
+        )
         return TrainStepper(
             stepper=stepper,
             config=self,

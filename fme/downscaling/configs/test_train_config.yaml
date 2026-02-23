@@ -1,4 +1,6 @@
 experiment_dir: /will/be/overwritten
+static_inputs:
+  HGTsfc: /will/be/overwritten
 max_epochs: 2
 validate_using_ema: true
 logging:
