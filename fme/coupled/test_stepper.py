@@ -41,6 +41,7 @@ from .data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
 )
+from .loss import LossContributionsConfig
 from .stepper import (
     ComponentConfig,
     ComponentTrainingConfig,
@@ -1625,3 +1626,101 @@ def test_set_train_eval():
     stepper.set_train()
     for module in stepper.modules:
         assert module.training
+
+
+@pytest.mark.parametrize("optimize_last_step_only", [True, False])
+def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
+    torch.manual_seed(0)
+    n_forward_times_ocean = 2
+    n_forward_times_atmosphere = 4
+
+    train_stepper_config = CoupledTrainStepperConfig(
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(
+                optimize_last_step_only=optimize_last_step_only,
+            ),
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(
+                optimize_last_step_only=optimize_last_step_only,
+            ),
+        ),
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_atmosphere=n_forward_times_atmosphere,
+        n_samples=3,
+    )
+    optimization = Mock(wraps=NullOptimization())
+    train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=optimization,
+    )
+    n_total_atmos = n_forward_times_atmosphere
+    n_total_ocean = n_forward_times_ocean
+    if optimize_last_step_only:
+        # only the last atmosphere step and last ocean step are optimized
+        assert len(optimization.accumulate_loss.call_args_list) == 2
+    else:
+        # all atmosphere and ocean steps are optimized
+        expected_calls = n_total_atmos + n_total_ocean
+        assert len(optimization.accumulate_loss.call_args_list) == expected_calls
+
+
+@pytest.mark.parametrize("optimize_last_step_only", [True, False])
+def test_train_on_batch_optimize_last_step_only_with_n_steps(
+    optimize_last_step_only: bool,
+):
+    torch.manual_seed(0)
+    n_forward_times_ocean = 2
+    n_forward_times_atmosphere = 4
+    atmos_n_steps = 3
+    ocean_n_steps = 1
+
+    train_stepper_config = CoupledTrainStepperConfig(
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(
+                n_steps=ocean_n_steps,
+                optimize_last_step_only=optimize_last_step_only,
+            ),
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(
+                n_steps=atmos_n_steps,
+                optimize_last_step_only=optimize_last_step_only,
+            ),
+        ),
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_atmosphere=n_forward_times_atmosphere,
+        n_samples=3,
+    )
+    optimization = Mock(wraps=NullOptimization())
+    train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=optimization,
+    )
+    if optimize_last_step_only:
+        # atmos: only step min(3,4)-1=2 is optimized
+        # ocean: only step min(1,2)-1=0 is optimized
+        assert len(optimization.accumulate_loss.call_args_list) == 2
+    else:
+        # atmos: steps 0,1,2 are optimized (n_steps=3)
+        # ocean: step 0 is optimized (n_steps=1)
+        expected_calls = atmos_n_steps + ocean_n_steps
+        assert len(optimization.accumulate_loss.call_args_list) == expected_calls
