@@ -1,3 +1,4 @@
+from . import benchmark
 from .derived_forcings import DerivedForcingsConfig, ForcingDeriver
 from .single_module import (
     Stepper,

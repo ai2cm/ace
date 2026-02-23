@@ -6,6 +6,11 @@ import torch
 
 class BatchLabels:
     def __init__(self, tensor: torch.Tensor, names: list[str]):
+        """
+        Args:
+            tensor: Tensor of shape (batch_size, n_labels) containing the label data.
+            names: List of label names corresponding to the columns in the tensor.
+        """
         self.tensor = tensor
         self.names = names
         if len(names) != tensor.shape[1]:

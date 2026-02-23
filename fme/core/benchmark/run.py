@@ -7,9 +7,8 @@ import pathlib
 import subprocess
 import sys
 
-import torch
-
 from fme.core.benchmark.benchmark import get_benchmarks
+from fme.core.device import get_device_name
 from fme.core.wandb import WandB
 
 RESULTS_PATH = pathlib.Path(os.path.abspath(os.path.dirname(__file__))) / "results"
@@ -45,13 +44,6 @@ def get_git_commit() -> str:
         _GIT_COMMIT = commit
 
     return _GIT_COMMIT
-
-
-def get_device_name() -> str:
-    if torch.cuda.is_available():
-        return torch.cuda.get_device_properties(0).name
-    else:
-        return "CPU"
 
 
 def main(

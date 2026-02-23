@@ -38,6 +38,14 @@ def using_srun() -> bool:
     return False
 
 
+def get_device_name() -> str:
+    device = get_device()
+    if device.type == "cuda":
+        return torch.cuda.get_device_properties(device).name
+    else:
+        return str(device)
+
+
 def get_device() -> torch.device:
     """If CUDA is available, return a CUDA device. Otherwise, return a CPU device
     unless FME_USE_MPS is set, in which case return an MPS device if available.
