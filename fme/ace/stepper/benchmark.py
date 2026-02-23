@@ -76,13 +76,14 @@ class CSFNOPredict(BenchmarkABC):
                 forcing=self.forcing,
                 compute_derived_variables=self.compute_derived_variables,
                 compute_derived_forcings=self.compute_derived_forcings,
+                timer=timer,
             )
         return {}  # no regression implemented yet
 
     @classmethod
     def new(cls) -> Self:
         B = 2
-        C = 512
+        C = 384
         H = 180
         L = 360
         G = 1

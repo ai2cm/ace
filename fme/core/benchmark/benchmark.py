@@ -50,9 +50,12 @@ class BenchmarkResult:
     def to_png(
         self, path: str | pathlib.Path, label: str, child: str | None = None
     ) -> None:
+        root_count = self.timer.count
+
         # note this function was generated with AI
         def avg_time(t: TimerResult) -> float:
-            return float(t.avg_time)
+            t_count = max(int(getattr(t, "count", 1)), 0)
+            return float(t.avg_time) * (t_count / root_count)
 
         def self_time(t: TimerResult) -> float:
             t_avg = avg_time(t)

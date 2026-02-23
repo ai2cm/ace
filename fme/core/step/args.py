@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+from fme.core.benchmark.timer import NullTimer, Timer
 from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorMapping
 
@@ -18,6 +19,7 @@ class StepArgs:
             data at the output timestep, such as might be needed to prescribe
             sea surface temperature or use a corrector.
         labels: Labels for each batch member.
+        timer: Timer for benchmarking.
     """
 
     def __init__(
@@ -25,10 +27,12 @@ class StepArgs:
         input: TensorMapping,
         next_step_input_data: TensorMapping,
         labels: BatchLabels | None = None,
+        timer: Timer = NullTimer(),
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
         self.labels = labels
+        self.timer = timer
 
     def apply_input_process_func(
         self, func: Callable[[TensorMapping], TensorMapping]
@@ -36,5 +40,8 @@ class StepArgs:
         input = func(self.input)
         next_step_input_data = func(self.next_step_input_data)
         return StepArgs(
-            input=input, next_step_input_data=next_step_input_data, labels=self.labels
+            input=input,
+            next_step_input_data=next_step_input_data,
+            labels=self.labels,
+            timer=self.timer,
         )

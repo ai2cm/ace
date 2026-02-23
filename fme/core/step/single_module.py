@@ -8,6 +8,7 @@ import dacite
 import torch
 from torch import nn
 
+from fme.core.benchmark.timer import NullTimer, Timer
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
@@ -375,6 +376,7 @@ class SingleModuleStep(StepABC):
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
+            timer=args.timer,
         )
 
     def get_regularizer_loss(self):
@@ -417,6 +419,7 @@ def step_with_adjustments(
     residual_prediction: bool,
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
+    timer: Timer = NullTimer(),
 ) -> TensorDict:
     """
     Step the model forward one timestep given input data.
@@ -438,21 +441,28 @@ def step_with_adjustments(
         prognostic_names: Names of prognostic variables.
         prescribed_prognostic_names: Prognostic names to overwrite from
             next_step_input_data after the ocean step (e.g. for inference).
+        timer: Timer for benchmarking.
 
     Returns:
         The denormalized output data at the next time step.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
-    input_norm = normalizer.normalize(input)
-    output_norm = network_calls(input_norm)
+    with timer.child("normalize"):
+        input_norm = normalizer.normalize(input)
+    with timer.child("network"):
+        output_norm = network_calls(input_norm)
     if residual_prediction:
-        output_norm = add_names(input_norm, output_norm, prognostic_names)
-    output = normalizer.denormalize(output_norm)
+        with timer.child("residual_adjustment"):
+            output_norm = add_names(input_norm, output_norm, prognostic_names)
+    with timer.child("denormalize"):
+        output = normalizer.denormalize(output_norm)
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
+        with timer.child("corrector"):
+            output = corrector(input, output, next_step_input_data)
     if ocean is not None:
-        output = ocean(input, output, next_step_input_data)
+        with timer.child("ocean"):
+            output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
         if name in next_step_input_data:
             output = {**output, name: next_step_input_data[name]}

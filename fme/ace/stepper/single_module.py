@@ -28,6 +28,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
     TimeLengthSchedule,
 )
+from fme.core.benchmark.timer import NullTimer, Timer
 from fme.core.coordinates import (
     NullPostProcessFn,
     SerializableVerticalCoordinate,
@@ -1054,6 +1055,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
+        timer: Timer = NullTimer(),
     ) -> Generator[TensorDict, None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
@@ -1069,6 +1071,7 @@ class Stepper:
             n_forward_steps: The number of forward steps to predict, corresponding
                 to the data shapes of forcing_data.
             optimizer: The optimizer to use for updating the module.
+            timer: Timer for benchmarking.
 
         Returns:
             Generator yielding the output data at each timestep.
@@ -1082,7 +1085,12 @@ class Stepper:
         ic_dict = ic_batch_data.data
         forcing_dict = forcing_data.data
         return self.predict_generator(
-            ic_dict, forcing_dict, n_forward_steps, optimizer, forcing_data.labels
+            ic_dict,
+            forcing_dict,
+            n_forward_steps,
+            optimizer,
+            forcing_data.labels,
+            timer=timer,
         )
 
     @property
@@ -1098,6 +1106,7 @@ class Stepper:
         n_forward_steps: int,
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
+        timer: Timer = NullTimer(),
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1124,6 +1133,7 @@ class Stepper:
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
+                        timer=timer,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1136,6 +1146,7 @@ class Stepper:
         forcing: BatchData,
         compute_derived_variables: bool = False,
         compute_derived_forcings: bool = True,
+        timer: Timer = NullTimer(),
     ) -> tuple[BatchData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
@@ -1153,25 +1164,30 @@ class Stepper:
             compute_derived_forcings: Whether to compute derived forcing variables for
                 the prediction. Only used to disable computing the derived forcings
                 if they have been computed ahead of time.
+            timer: Timer for benchmarking.
 
         Returns:
             A batch data containing the prediction and the prediction's final state
             which can be used as a new initial condition.
         """
-        timer = GlobalTimer.get_instance()
+        global_timer = GlobalTimer.get_instance()
         forcing_names = set(self._input_only_names).union(
             self._step_obj.next_step_input_names
         )
 
         if compute_derived_forcings:
-            forcing = self.forcing_deriver(forcing)
+            with timer.child("derive_forcings"):
+                forcing = self.forcing_deriver(forcing)
 
         if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
             forcing = forcing.broadcast_ensemble(
                 n_ensemble=initial_condition.as_batch_data().n_ensemble
             )
 
-        with timer.context("forward_prediction"):
+        with (
+            global_timer.context("forward_prediction"),
+            timer.child("forward_prediction") as child_timer,
+        ):
             ic_batch_data = initial_condition.as_batch_data()
             forcing_data = forcing.subset_names(forcing_names)
             if ic_batch_data.n_timesteps != self.n_ic_timesteps:
@@ -1186,6 +1202,7 @@ class Stepper:
                     forcing_data,
                     n_forward_steps,
                     NullOptimization(),
+                    timer=child_timer,
                 )
             )
         data = process_prediction_generator_list(
@@ -1195,7 +1212,10 @@ class Stepper:
             labels=forcing.labels,
         )
         if compute_derived_variables:
-            with timer.context("compute_derived_variables"):
+            with (
+                global_timer.context("compute_derived_variables"),
+                timer.child("compute_derived_variables"),
+            ):
                 data = (
                     data.prepend(initial_condition)
                     .compute_derived_variables(
