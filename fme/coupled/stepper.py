@@ -389,7 +389,6 @@ class CoupledStepperConfig:
         atmosphere_names = (
             self.atmosphere.stepper.output_names
             + self._atmosphere_forcing_exogenous_names
-            + self._shared_forcing_exogenous_names
         )
         ocean_names = (
             self.ocean.stepper.output_names + self._ocean_forcing_exogenous_names

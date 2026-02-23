@@ -133,7 +133,6 @@ def inference_helper(
     n_extra_initial_conditions = n_initial_conditions - 1
     n_forward_times_ocean = n_coupled_steps + n_extra_initial_conditions
     n_forward_times_atmos = n_forward_times_ocean * 2
-    masked_fill_value = 0.0 if use_prediction_data else float("nan")
     mock_data = create_coupled_data_on_disk(
         data_dir,
         n_forward_times_ocean=n_forward_times_ocean,
@@ -143,7 +142,6 @@ def inference_helper(
         atmosphere_start_time_offset_from_ocean=1,
         n_levels_ocean=1,
         n_levels_atmosphere=1,
-        masked_fill_value=masked_fill_value,
     )
     inference_data_config = InferenceDataLoaderConfig(
         dataset=CoupledDatasetWithOptionalOceanConfig(

@@ -373,7 +373,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             deriver=deriver,
             writer=writer,
             record_logs=record_logs,
-            restrict_to_output_names=stepper_config.all_names,
+            restrict_to_all_names=stepper_config.all_names,
         )
     else:
         run_inference(
