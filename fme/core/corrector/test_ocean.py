@@ -140,12 +140,12 @@ def test_ocean_corrector_has_negative_ocean_fraction():
     assert not (gen_data_corrected["sea_ice_fraction"] < 0.0).any()
 
 
-def test_sea_ice_thickness_correction():
+def test_zero_where_ice_free_names():
     config = OceanCorrectorConfig(
         sea_ice_fraction_correction=SeaIceFractionConfig(
             sea_ice_fraction_name="sea_ice_fraction",
             land_fraction_name="land_fraction",
-            sea_ice_thickness_name="HI",
+            zero_where_ice_free_names=["HI"],
         ),
     )
     ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
@@ -165,14 +165,70 @@ def test_sea_ice_thickness_correction():
     )
 
 
+def test_zero_where_ice_free_names_multiple_variables():
+    config = OceanCorrectorConfig(
+        sea_ice_fraction_correction=SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            land_fraction_name="land_fraction",
+            zero_where_ice_free_names=["HI", "HS"],
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    input_data = {"land_fraction": torch.ones(IMG_SHAPE, device=DEVICE)}
+    input_data["land_fraction"][:3, :3] = torch.rand(3, 3, device=DEVICE)
+    gen_data = {
+        "sea_ice_fraction": torch.rand(IMG_SHAPE, device=DEVICE),
+        "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
+        "HS": torch.rand(IMG_SHAPE, device=DEVICE) * 5,
+    }
+    corrector = OceanCorrector(config, ops, None, timestep)
+    gen_data_corrected = corrector(input_data, gen_data, {})
+    sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
+    for name in ["HI", "HS"]:
+        values = gen_data_corrected[name]
+        torch.testing.assert_close(
+            torch.where(sea_ice_zero, values, 0.0), torch.zeros_like(values)
+        )
+
+
+def test_from_state_migrates_sea_ice_thickness_name():
+    state = {
+        "sea_ice_fraction_correction": {
+            "sea_ice_fraction_name": "ocean_sea_ice_fraction",
+            "land_fraction_name": "land_fraction",
+            "sea_ice_thickness_name": "HI",
+            "remove_negative_ocean_fraction": False,
+        },
+    }
+    config = OceanCorrectorConfig.from_state(state)
+    assert config.sea_ice_fraction_correction is not None
+    assert config.sea_ice_fraction_correction.zero_where_ice_free_names == ["HI"]
+
+
+def test_from_state_migrates_sea_ice_thickness_name_none():
+    state = {
+        "sea_ice_fraction_correction": {
+            "sea_ice_fraction_name": "ocean_sea_ice_fraction",
+            "land_fraction_name": "land_fraction",
+            "sea_ice_thickness_name": None,
+            "remove_negative_ocean_fraction": False,
+        },
+    }
+    config = OceanCorrectorConfig.from_state(state)
+    assert config.sea_ice_fraction_correction is not None
+    assert config.sea_ice_fraction_correction.zero_where_ice_free_names == []
+
+
 @pytest.mark.parametrize(
-    "hfds_in_gen_data",
+    "hfds_type",
     [
-        pytest.param(False, id="hfds_in_input"),
-        pytest.param(True, id="hfds_in_gen"),
+        pytest.param("input", id="hfds_in_input"),
+        pytest.param("gen", id="hfds_in_gen"),
+        pytest.param("total_area", id="hfds_total_area_in_gen"),
     ],
 )
-def test_ocean_heat_content_correction(hfds_in_gen_data):
+def test_ocean_heat_content_correction(hfds_type):
     config = OceanCorrectorConfig(
         ocean_heat_content_correction=OceanHeatContentBudgetConfig(
             method="scaled_temperature",
@@ -196,6 +252,8 @@ def test_ocean_heat_content_correction(hfds_in_gen_data):
     idepth = torch.tensor([2.5, 10, 20])
     depth_coordinate = DepthCoordinate(idepth, mask)
 
+    sea_surface_fraction = mask[:, :, :, 0]
+
     input_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon),
         "thetao_1": torch.ones(nsamples, nlat, nlon),
@@ -206,13 +264,23 @@ def test_ocean_heat_content_correction(hfds_in_gen_data):
         "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
         "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
     }
-    if hfds_in_gen_data:
+    if hfds_type == "gen":
         gen_data_dict["hfds"] = torch.ones(nsamples, nlat, nlon)
+    elif hfds_type == "total_area":
+        # hfds_total_area is already weighted by sea_surface_fraction also
+        # include hfds with a different value to verify hfds_total_area takes
+        # priority
+        gen_data_dict["hfds"] = (
+            torch.ones(nsamples, nlat, nlon) * 100
+        )  # should be ignored
+        gen_data_dict["hfds_total_area"] = (
+            torch.ones(nsamples, nlat, nlon) * sea_surface_fraction
+        )
     else:
         input_data_dict["hfds"] = torch.ones(nsamples, nlat, nlon)
     forcing_data_dict = {
         "hfgeou": torch.ones(nsamples, nlat, nlon),
-        "sea_surface_fraction": mask[:, :, :, 0],
+        "sea_surface_fraction": sea_surface_fraction,
     }
     input_data = OceanData(input_data_dict, depth_coordinate)
     gen_data = OceanData(gen_data_dict, depth_coordinate)

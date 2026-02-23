@@ -58,7 +58,6 @@ import torch
 import xarray as xr
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator import OneStepAggregator, TrainAggregator
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
@@ -69,7 +68,6 @@ from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.cli import get_parser, prepare_config, prepare_directory
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -204,13 +202,12 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         torch.backends.cudnn.benchmark = True
     if not os.path.isdir(config.experiment_dir):
         os.makedirs(config.experiment_dir, exist_ok=True)
-    config.logging.configure_logging(config.experiment_dir, log_filename="out.log")
-    env_vars = logging_utils.retrieve_env_vars()
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    config_as_dict = to_flat_dict(dataclasses.asdict(config))
-    config.logging.configure_wandb(
-        config=config_as_dict, env_vars=env_vars, resumable=True, notes=beaker_url
+    config_data = dataclasses.asdict(config)
+    config.logging.configure_logging(
+        config.experiment_dir,
+        log_filename="out.log",
+        config=config_data,
+        resumable=True,
     )
     if config.resume_results is not None:
         logging.info(

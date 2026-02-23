@@ -12,7 +12,7 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict
-from fme.downscaling.data import BatchData, PairedBatchData, Topography
+from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.models import ModelOutputs, PairedNormalizationConfig
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -121,20 +121,20 @@ class DeterministicModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
+        static_inputs: StaticInputs | None,
         optimization: Optimization | NullOptimization,
     ) -> ModelOutputs:
-        return self._run_on_batch(batch, topography, optimization)
+        return self._run_on_batch(batch, static_inputs, optimization)
 
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
+        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         if n_samples != 1:
             raise ValueError("n_samples must be 1 for deterministic models")
-        result = self._run_on_batch(batch, topography, self.null_optimization)
+        result = self._run_on_batch(batch, static_inputs, self.null_optimization)
         for k, v in result.prediction.items():
             result.prediction[k] = v.unsqueeze(1)  # insert sample dimension
         for k, v in result.target.items():
@@ -144,7 +144,7 @@ class DeterministicModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        topography: Topography | None,
+        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> TensorDict:
         raise NotImplementedError(
@@ -154,7 +154,7 @@ class DeterministicModel:
     def _run_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
+        static_inputs: StaticInputs | None,
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
@@ -166,14 +166,14 @@ class DeterministicModel:
         interpolated = interpolate(coarse_norm, self.downscale_factor)
 
         if self.config.use_fine_topography:
-            if topography is None:
+            if static_inputs is None:
                 raise ValueError(
                     "Topography must be provided for each batch when use of fine "
                     "topography is enabled."
                 )
             else:
                 # Join the normalized topography to the input (see dataset for details)
-                topo = topography.data.unsqueeze(self._channel_axis)
+                topo = static_inputs.fields[0].data.unsqueeze(self._channel_axis)
                 coarse_norm = torch.concat(
                     [interpolated, topo], axis=self._channel_axis
                 )

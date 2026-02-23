@@ -8,10 +8,8 @@ import torch
 import xarray as xr
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -27,6 +25,7 @@ from fme.coupled.data_loading.batch_data import (
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
+from fme.coupled.typing_ import CoupledTensorMapping
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
@@ -58,8 +57,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         n_timesteps_atmosphere=n_timesteps_atmosphere,
         ocean_normalize=stepper.ocean.normalizer.normalize,
         atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
-        ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
-        atmosphere_loss_scaling=stepper.atmosphere.effective_loss_scaling,
+        loss_scaling=stepper.effective_loss_scaling,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
@@ -89,8 +87,7 @@ class CoupledAggregatorBuilder(
         output_dir: str,
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
-        ocean_loss_scaling: TensorMapping | None = None,
-        atmosphere_loss_scaling: TensorMapping | None = None,
+        loss_scaling: CoupledTensorMapping,
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
@@ -103,8 +100,7 @@ class CoupledAggregatorBuilder(
         self.output_dir = output_dir
         self.ocean_normalize = ocean_normalize
         self.atmosphere_normalize = atmosphere_normalize
-        self.ocean_loss_scaling = ocean_loss_scaling
-        self.atmosphere_loss_scaling = atmosphere_loss_scaling
+        self.loss_scaling = loss_scaling
         self.ocean_channel_mean_names = ocean_channel_mean_names
         self.atmosphere_channel_mean_names = atmosphere_channel_mean_names
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
@@ -117,8 +113,7 @@ class CoupledAggregatorBuilder(
             dataset_info=self.dataset_info,
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
-            ocean_loss_scaling=self.ocean_loss_scaling,
-            atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+            loss_scaling=self.loss_scaling,
             ocean_channel_mean_names=self.ocean_channel_mean_names,
             atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )
@@ -144,13 +139,12 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         torch.backends.cudnn.benchmark = True
     if not os.path.isdir(config.experiment_dir):
         os.makedirs(config.experiment_dir, exist_ok=True)
-    config.logging.configure_logging(config.experiment_dir, log_filename="out.log")
-    env_vars = logging_utils.retrieve_env_vars()
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    config_as_dict = to_flat_dict(dataclasses.asdict(config))
-    config.logging.configure_wandb(
-        config=config_as_dict, env_vars=env_vars, notes=beaker_url
+    config_data = dataclasses.asdict(config)
+    config.logging.configure_logging(
+        config.experiment_dir,
+        log_filename="out.log",
+        config=config_data,
+        resumable=True,
     )
     if config.resume_results is not None:
         logging.info(

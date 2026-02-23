@@ -24,6 +24,8 @@ import torch.nn as nn
 import torch_harmonics as th
 from torch.utils.checkpoint import checkpoint
 
+from fme.core.benchmark.timer import Timer, NullTimer
+
 from .initialization import trunc_normal_
 
 # wrap fft, to unify interface to spectral transforms
@@ -62,7 +64,7 @@ class DiscreteContinuousConvS2(nn.Module):
         super().__init__()
         self.conv = th.DiscreteContinuousConvS2(*args, **kwargs)
 
-    def forward(self, x):
+    def forward(self, x, timer: Timer = NullTimer()):
         return self.conv(x), x
 
 
@@ -115,6 +117,7 @@ class SpectralFilterLayer(nn.Module):
                 filter_residual=filter_residual,
                 lora_rank=lora_rank,
                 lora_alpha=lora_alpha,
+                num_groups=num_groups,
             )
         elif filter_type == "makani-linear":
             self.filter = SpectralConv(
@@ -152,8 +155,8 @@ class SpectralFilterLayer(nn.Module):
         else:
             raise (NotImplementedError)
 
-    def forward(self, x):
-        return self.filter(x)
+    def forward(self, x, timer: Timer = NullTimer()):
+        return self.filter(x, timer=timer)
 
 
 class FourierNeuralOperatorBlock(nn.Module):
@@ -294,44 +297,54 @@ class FourierNeuralOperatorBlock(nn.Module):
                 lora_alpha=lora_alpha,
             )
 
-    def forward(self, x, context_embedding):
-        x_norm = torch.zeros_like(x)
-        x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = self.norm0(
-            x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]],
-            context_embedding,
-        )
-        x, residual = self.filter(x_norm)
-
+    def forward(self, x, context_embedding, timer: Timer = NullTimer()):
+        with timer.child("norm0") as norm0_timer:
+            x_norm = torch.zeros_like(x)
+            x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = (
+                self.norm0(
+                    x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]],
+                    context_embedding,
+                    timer=norm0_timer,
+                )
+            )
+        with timer.child("filter") as filter_timer:
+            x, residual = self.filter(x_norm, timer=filter_timer)
         if hasattr(self, "inner_skip"):
-            if self.concat_skip:
-                x = torch.cat((x, self.inner_skip(residual)), dim=1)
-                x = self.inner_skip_conv(x)
-            else:
-                x = x + self.inner_skip(residual)
+            with timer.child("inner_skip"):
+                if self.concat_skip:
+                    x = torch.cat((x, self.inner_skip(residual)), dim=1)
+                    x = self.inner_skip_conv(x)
+                else:
+                    x = x + self.inner_skip(residual)
 
         if hasattr(self, "act_layer"):
-            x = self.act_layer(x)
+            with timer.child("activation"):
+                x = self.act_layer(x)
 
-        x_norm = torch.zeros_like(x)
-        x_norm[..., : self.output_shape_loc[0], : self.output_shape_loc[1]] = (
-            self.norm1(
-                x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]],
-                context_embedding,
+        with timer.child("norm1") as norm1_timer:
+            x_norm = torch.zeros_like(x)
+            x_norm[..., : self.output_shape_loc[0], : self.output_shape_loc[1]] = (
+                self.norm1(
+                    x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]],
+                    context_embedding,
+                    timer=norm1_timer,
+                )
             )
-        )
-        x = x_norm
+            x = x_norm
 
         if hasattr(self, "mlp"):
-            x = self.mlp(x)
+            with timer.child("mlp"):
+                x = self.mlp(x)
 
         x = self.drop_path(x)
 
         if hasattr(self, "outer_skip"):
-            if self.concat_skip:
-                x = torch.cat((x, self.outer_skip(residual)), dim=1)
-                x = self.outer_skip_conv(x)
-            else:
-                x = x + self.outer_skip(residual)
+            with timer.child("outer_skip"):
+                if self.concat_skip:
+                    x = torch.cat((x, self.outer_skip(residual)), dim=1)
+                    x = self.outer_skip_conv(x)
+                else:
+                    x = x + self.outer_skip(residual)
 
         return x
 
@@ -350,6 +363,7 @@ def get_lat_lon_sfnonet(
         embed_dim_scalar=0,
         embed_dim_noise=0,
         embed_dim_labels=0,
+        embed_dim_pos=0,
     ),
 ) -> "SphericalFourierNeuralOperatorNet":
     h, w = img_shape
@@ -515,6 +529,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             embed_dim_scalar=0,
             embed_dim_labels=0,
             embed_dim_noise=0,
+            embed_dim_pos=0,
         ),
         global_layer_norm: bool = False,
         num_layers: int = 12,
@@ -826,7 +841,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         if self.pos_embed:
             self.pos_embed = get_pos_embed()
 
-        self.apply(self._init_weights)
         if normalize_big_skip:
             self.norm_big_skip = ConditionalLayerNorm(
                 in_chans,
@@ -837,17 +851,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             )
         else:
             self.norm_big_skip = NoLayerNorm()
-
-    def _init_weights(self, m):
-        """Helper routine for weight initialization"""
-        if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
-            trunc_normal_(m.weight, std=0.02)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-            if isinstance(m, LoRAConv2d):
-                m.reset_lora_parameters()
-        elif isinstance(m, ConditionalLayerNorm):
-            m.reset_parameters()
 
     @torch.jit.ignore
     def no_weight_decay(self):  # pragma: no cover

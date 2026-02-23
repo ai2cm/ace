@@ -130,9 +130,10 @@ optimization:
       type: CosineAnnealingLR
       kwargs:
         T_max: 1
-stepper:
+stepper_training:
   loss:
     type: "MSE"
+stepper:
   input_masking:
     mask_value: 0
     fill_value: 0.0
@@ -302,7 +303,7 @@ def _setup(
         "thetao_1",
         "sst",
         "sea_ice_fraction",
-        "hfds",
+        "hfds_total_area",
     ]
 
     # Add masks and idepths for data generation
@@ -441,7 +442,7 @@ def test_train_and_inference(tmp_path, very_fast_only: bool):
     assert best_checkpoint_path.exists()
 
     ds_prediction = xr.open_dataset(prediction_output_path, decode_timedelta=False)
-    for name in ["sst", "thetao_0", "thetao_1", "ocean_heat_content"]:
+    for name in ["sst", "thetao_0", "thetao_1", "ocean_heat_content", "hfds"]:
         assert name in ds_prediction
         # outputs should have some non-null values
         assert not np.isnan(ds_prediction[name].values).all()
