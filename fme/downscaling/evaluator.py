@@ -193,10 +193,10 @@ class EvaluatorConfig:
     )
     events: list[PairedEventConfig] | None = None
 
-    def configure_logging(self, log_filename: str):
+    def configure_logging(self, log_filename: str, resumable: bool = False):
         config = dataclasses.asdict(self)
         self.logging.configure_logging(
-            self.experiment_dir, log_filename, config=config, resumable=True
+            self.experiment_dir, log_filename, config=config, resumable=resumable
         )
 
     def _build_default_evaluator(self) -> Evaluator:
@@ -282,7 +282,7 @@ def main(config_path: str):
     )
     prepare_directory(evaluator_config.experiment_dir, config)
 
-    evaluator_config.configure_logging(log_filename="out.log")
+    evaluator_config.configure_logging(log_filename="out.log", resumable=True)
 
     logging.info("Starting downscaling model evaluation")
     evaluators = evaluator_config.build()
