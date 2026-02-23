@@ -40,8 +40,8 @@ model:
       global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260206.nc
   num_diffusion_generation_steps: 8
   churn: 0.0
-  p_mean: -1.2
-  p_std: 2.0
+  p_mean: -0.7
+  p_std: 4.0
   predict_residual: true
   sigma_max: 150.0
   sigma_min: 0.002
