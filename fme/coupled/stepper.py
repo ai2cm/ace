@@ -769,6 +769,10 @@ class CoupledStepperTrainLoss:
             atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
         )
 
+    def sample_n_steps(self) -> None:
+        for loss_obj in self._loss_objs.values():
+            loss_obj.sample_n_steps()
+
     def step_is_optimized(
         self,
         realm: Literal["ocean", "atmosphere"],
@@ -1598,6 +1602,7 @@ class CoupledTrainStepper(
         )
 
         metrics = ComponentStepMetrics()
+        self._loss.sample_n_steps()
         optimization.set_mode(self.modules)
         n_outer_steps = data.ocean_data.n_timesteps - self.n_ic_timesteps
         n_total_atmos_steps = n_outer_steps * self.n_inner_steps
