@@ -110,7 +110,12 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
         LossConfig(type="AreaWeightedMSE"),
         LossConfig(global_mean_type="LpLoss"),
         LossConfig(
-            type="EnsembleLoss", kwargs={"energy_score_weight": 1.0, "crps_weight": 0.0}
+            type="EnsembleLoss",
+            kwargs={
+                "energy_score_weight": 1.0,
+                "crps_weight": 0.0,
+                "finite_difference_crps_weight": 0.05,
+            },
         ),
     ],
 )
