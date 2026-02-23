@@ -12,11 +12,13 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import (
+    ChannelNoiseConfig,
     DiffusionModel,
     DiffusionModelConfig,
     PairedNormalizationConfig,
     _repeat_batch_by_samples,
     _separate_interleaved_samples,
+    condition_with_noise_for_training,
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -403,3 +405,150 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
             n_ensemble,
             *fine_shape,
         )
+
+
+def _get_multi_channel_diffusion_model(
+    coarse_shape,
+    downscale_factor,
+    per_channel_noise=None,
+):
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
+        NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
+    )
+
+    return DiffusionModelConfig(
+        module=DiffusionModuleRegistrySelector(
+            "unet_diffusion_song", {"model_channels": 4}
+        ),
+        loss=LossConfig(type="MSE"),
+        in_names=["x", "y"],
+        out_names=["x", "y"],
+        normalization=normalizer,
+        p_mean=-1.0,
+        p_std=1.0,
+        sigma_min=0.1,
+        sigma_max=1.0,
+        churn=0.5,
+        num_diffusion_generation_steps=3,
+        predict_residual=False,
+        use_fine_topography=False,
+        per_channel_noise=per_channel_noise,
+    ).build(coarse_shape, downscale_factor)
+
+
+def _get_multi_channel_mock_batch(coarse_shape, fine_shape, batch_size):
+    coarse = MagicMock()
+    coarse.data = {
+        "x": torch.ones(batch_size, *coarse_shape, device=get_device()),
+        "y": torch.ones(batch_size, *coarse_shape, device=get_device()),
+    }
+    fine = MagicMock()
+    fine.data = {
+        "x": torch.ones(batch_size, *fine_shape, device=get_device()),
+        "y": torch.ones(batch_size, *fine_shape, device=get_device()),
+    }
+    return FineResCoarseResPair(fine=fine, coarse=coarse)
+
+
+def test_per_channel_noise_config_validation():
+    """per_channel_noise keys must be in out_names."""
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    with pytest.raises(ValueError, match="per_channel_noise"):
+        DiffusionModelConfig(
+            module=DiffusionModuleRegistrySelector(
+                "unet_diffusion_song", {"model_channels": 4}
+            ),
+            loss=LossConfig(type="MSE"),
+            in_names=["x"],
+            out_names=["x"],
+            normalization=normalizer,
+            p_mean=-1.0,
+            p_std=1.0,
+            sigma_min=0.1,
+            sigma_max=1.0,
+            churn=0.5,
+            num_diffusion_generation_steps=3,
+            predict_residual=False,
+            per_channel_noise={"z": ChannelNoiseConfig(p_mean=0.0, p_std=1.0)},
+        )
+
+
+def test_per_channel_noise_train_on_batch():
+    """Training with per_channel_noise runs without error."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    batch_size = 2
+
+    per_channel_noise = {
+        "x": ChannelNoiseConfig(p_mean=-2.0, p_std=0.5),
+    }
+    model = _get_multi_channel_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        per_channel_noise=per_channel_noise,
+    )
+    batch = _get_multi_channel_mock_batch(coarse_shape, fine_shape, batch_size)
+    optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
+    outputs = model.train_on_batch(batch, None, optimization)
+    assert outputs.loss.shape == ()
+    assert "x" in outputs.prediction
+    assert "y" in outputs.prediction
+
+
+def test_condition_with_noise_per_channel_shapes():
+    """Per-channel noise produces per-channel weight but single model sigma."""
+    n_batch, n_channels, h, w = 4, 3, 8, 8
+    targets = torch.randn(n_batch, n_channels, h, w)
+    channel_p_means = torch.tensor([[-2.0], [0.0], [1.0]]).reshape(1, 3, 1, 1)
+    channel_p_stds = torch.tensor([[0.5], [1.0], [1.5]]).reshape(1, 3, 1, 1)
+
+    result = condition_with_noise_for_training(
+        targets,
+        p_std=1.0,
+        p_mean=-1.0,
+        sigma_data=1.0,
+        channel_p_means=channel_p_means,
+        channel_p_stds=channel_p_stds,
+    )
+    # sigma is the geometric mean across channels for the model
+    assert result.sigma.shape == (n_batch, 1, 1, 1)
+    # weight is per-channel for loss weighting
+    assert result.weight.shape == (n_batch, n_channels, 1, 1)
+    assert result.latents.shape == targets.shape
+
+
+def test_condition_with_noise_default_is_shared():
+    """Without per-channel params, sigma is shared across channels."""
+    n_batch, n_channels, h, w = 4, 3, 8, 8
+    targets = torch.randn(n_batch, n_channels, h, w)
+
+    result = condition_with_noise_for_training(
+        targets, p_std=1.0, p_mean=-1.0, sigma_data=1.0
+    )
+    assert result.sigma.shape == (n_batch, 1, 1, 1)
+
+
+def test_per_channel_noise_serialization(tmp_path):
+    """Model with per_channel_noise can be serialized and deserialized."""
+    coarse_shape = (8, 16)
+    per_channel_noise = {
+        "x": ChannelNoiseConfig(p_mean=-2.0, p_std=0.5),
+    }
+    model = _get_multi_channel_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        per_channel_noise=per_channel_noise,
+    )
+    state = model.get_state()
+    torch.save(state, tmp_path / "test.ckpt")
+    loaded = DiffusionModel.from_state(
+        torch.load(tmp_path / "test.ckpt", weights_only=False)
+    )
+    assert loaded.config.per_channel_noise is not None
+    assert "x" in loaded.config.per_channel_noise
+    assert loaded.config.per_channel_noise["x"].p_mean == -2.0
+    assert loaded.config.per_channel_noise["x"].p_std == 0.5

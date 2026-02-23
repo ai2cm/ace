@@ -22,6 +22,19 @@ from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 @dataclasses.dataclass
+class ChannelNoiseConfig:
+    """Per-channel noise distribution parameters.
+
+    Attributes:
+        p_mean: The mean of the log-normal noise distribution for this channel.
+        p_std: The std of the log-normal noise distribution for this channel.
+    """
+
+    p_mean: float
+    p_std: float
+
+
+@dataclasses.dataclass
 class ModelOutputs:
     prediction: TensorDict
     target: TensorDict
@@ -110,6 +123,7 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
+    per_channel_noise: dict[str, ChannelNoiseConfig] | None = None
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -118,6 +132,13 @@ class DiffusionModelConfig:
                 "Fine topography can only be used when predicting on interpolated"
                 " coarse input"
             )
+        if self.per_channel_noise is not None:
+            invalid = set(self.per_channel_noise) - set(self.out_names)
+            if invalid:
+                raise ValueError(
+                    f"per_channel_noise keys {invalid} are not in out_names "
+                    f"{self.out_names}"
+                )
 
     def build(
         self,
@@ -210,8 +231,9 @@ class ConditionedTarget:
 
     Attributes:
         latents: The normalized targets with noise added.
-        sigma: The noise level.
-        weight: The loss weighting.
+        sigma: The noise level passed to the model for conditioning,
+            with shape [batch, 1, 1, 1].
+        weight: The loss weighting (may be per-channel).
     """
 
     latents: torch.Tensor
@@ -224,28 +246,52 @@ def condition_with_noise_for_training(
     p_std: float,
     p_mean: float,
     sigma_data: float,
+    channel_p_means: torch.Tensor | None = None,
+    channel_p_stds: torch.Tensor | None = None,
 ) -> ConditionedTarget:
     """
     Condition the targets with noise for training.
 
     Args:
-        targets_norm: The normalized targets.
-        p_std: The standard deviation of the noise distribution used during training.
-        p_mean: The mean of the noise distribution used during training.
+        targets_norm: The normalized targets with shape
+            [batch, channels, height, width].
+        p_std: The default standard deviation of the noise distribution.
+        p_mean: The default mean of the noise distribution.
         sigma_data: The standard deviation of the data,
             used to determine loss weighting.
+        channel_p_means: Optional per-channel p_mean values with shape
+            [1, channels, 1, 1]. If None, p_mean is used for all channels.
+        channel_p_stds: Optional per-channel p_std values with shape
+            [1, channels, 1, 1]. If None, p_std is used for all channels.
 
     Returns:
         The conditioned targets and the loss weighting.
     """
-    rnd_normal = randn([targets_norm.shape[0], 1, 1, 1], device=targets_norm.device)
-    # This is taken from EDM's original implementation in EDMLoss:
-    # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
-    sigma = (rnd_normal * p_std + p_mean).exp()
-    weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
-    noise = randn_like(targets_norm) * sigma
-    latents = targets_norm + noise
-    return ConditionedTarget(latents=latents, sigma=sigma, weight=weight)
+    n_batch = targets_norm.shape[0]
+    n_channels = targets_norm.shape[-3]
+
+    if channel_p_means is not None and channel_p_stds is not None:
+        # Per-channel noise: sample independent noise level per channel.
+        # channel_sigma has shape [batch, channels, 1, 1] for noise and weighting.
+        rnd_normal = randn([n_batch, n_channels, 1, 1], device=targets_norm.device)
+        channel_sigma = (rnd_normal * channel_p_stds + channel_p_means).exp()
+        weight = (channel_sigma**2 + sigma_data**2) / (channel_sigma * sigma_data) ** 2
+        noise = randn_like(targets_norm) * channel_sigma
+        latents = targets_norm + noise
+        # The model needs a single sigma per sample for its noise embedding.
+        # Use the geometric mean (mean in log space) across channels.
+        model_sigma = channel_sigma.log().mean(dim=1, keepdim=True).exp()
+        return ConditionedTarget(latents=latents, sigma=model_sigma, weight=weight)
+    else:
+        # Shared noise level across all channels (original behavior)
+        rnd_normal = randn([n_batch, 1, 1, 1], device=targets_norm.device)
+        sigma = (rnd_normal * p_std + p_mean).exp()
+        # This is taken from EDM's original implementation in EDMLoss:
+        # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
+        weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
+        noise = randn_like(targets_norm) * sigma
+        latents = targets_norm + noise
+        return ConditionedTarget(latents=latents, sigma=sigma, weight=weight)
 
 
 class DiffusionModel:
@@ -337,6 +383,34 @@ class DiffusionModel:
             return interpolated
         return normalized
 
+    def _get_per_channel_noise_params(
+        self, device: torch.device
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Build per-channel p_mean/p_std tensors if per_channel_noise is set.
+
+        Returns (None, None) if per_channel_noise is not configured,
+        otherwise returns tensors of shape [1, n_channels, 1, 1].
+        """
+        if self.config.per_channel_noise is None:
+            return None, None
+        p_means = []
+        p_stds = []
+        for name in self.out_packer.names:
+            if name in self.config.per_channel_noise:
+                ch_cfg = self.config.per_channel_noise[name]
+                p_means.append(ch_cfg.p_mean)
+                p_stds.append(ch_cfg.p_std)
+            else:
+                p_means.append(self.config.p_mean)
+                p_stds.append(self.config.p_std)
+        channel_p_means = torch.tensor(
+            p_means, device=device, dtype=torch.float32
+        ).reshape(1, -1, 1, 1)
+        channel_p_stds = torch.tensor(
+            p_stds, device=device, dtype=torch.float32
+        ).reshape(1, -1, 1, 1)
+        return channel_p_means, channel_p_stds
+
     def train_on_batch(
         self,
         batch: PairedBatchData,
@@ -362,8 +436,16 @@ class DiffusionModel:
             )
             targets_norm = targets_norm - base_prediction
 
+        channel_p_means, channel_p_stds = self._get_per_channel_noise_params(
+            targets_norm.device
+        )
         conditioned_target = condition_with_noise_for_training(
-            targets_norm, self.config.p_std, self.config.p_mean, self.sigma_data
+            targets_norm,
+            self.config.p_std,
+            self.config.p_mean,
+            self.sigma_data,
+            channel_p_means=channel_p_means,
+            channel_p_stds=channel_p_stds,
         )
 
         denoised_norm = self.module(
