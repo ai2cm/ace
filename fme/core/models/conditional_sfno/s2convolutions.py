@@ -245,10 +245,11 @@ class SpectralConvS2(nn.Module):
         unexpected_keys: list[str],
         error_msgs: list[str],
     ) -> None:
-        if "weight" not in state_dict:
+        key = prefix + "weight"
+        if key not in state_dict:
             return
 
-        weight = state_dict["weight"]
+        weight = state_dict[key]
 
         # check if the weight is in the old shape (group, in_channels, out_channels, nlat, 2)
         if weight.ndim == 5 and weight.shape == (
@@ -260,9 +261,9 @@ class SpectralConvS2(nn.Module):
         ):
             # reorder to (group, nlat, out_channels // group, in_channels // group, 2)
             weight = weight.permute(0, 3, 2, 1, 4)
-            state_dict["weight"] = weight
+            state_dict[key] = weight
 
-        lora_A = state_dict.get("lora_A", None)
+        lora_A = state_dict.get(prefix + "lora_A", None)
         if (
             lora_A is not None
             and lora_A.ndim == 5
@@ -276,9 +277,9 @@ class SpectralConvS2(nn.Module):
             )
         ):
             lora_A = lora_A.permute(0, 3, 2, 1, 4)
-            state_dict["lora_A"] = lora_A
+            state_dict[prefix + "lora_A"] = lora_A
 
-        lora_B = state_dict.get("lora_B", None)
+        lora_B = state_dict.get(prefix + "lora_B", None)
         if (
             lora_B is not None
             and lora_B.ndim == 5
@@ -292,7 +293,7 @@ class SpectralConvS2(nn.Module):
             )
         ):
             lora_B = lora_B.permute(0, 3, 2, 1, 4)
-            state_dict["lora_B"] = lora_B
+            state_dict[prefix + "lora_B"] = lora_B
 
     @staticmethod
     def _add_singleton_group_dim(

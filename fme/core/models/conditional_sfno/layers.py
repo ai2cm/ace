@@ -73,6 +73,23 @@ class Context:
         if self.labels is not None and self.labels.ndim != 2:
             raise ValueError("labels must have 2 dimensions")
 
+    def asdict(self) -> dict[str, torch.Tensor | None]:
+        return {
+            "embedding_scalar": self.embedding_scalar,
+            "embedding_pos": self.embedding_pos,
+            "labels": self.labels,
+            "noise": self.noise,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, torch.Tensor | None]) -> "Context":
+        return cls(
+            embedding_scalar=data.get("embedding_scalar"),
+            embedding_pos=data.get("embedding_pos"),
+            labels=data.get("labels"),
+            noise=data.get("noise"),
+        )
+
 
 class ChannelLayerNorm(nn.Module):
     """
