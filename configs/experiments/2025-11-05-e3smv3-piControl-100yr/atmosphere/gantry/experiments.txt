@@ -58,3 +58,6 @@ BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-0103|3|01KHSFWPX3N2ZCP2JWNZ31RDN4|
 BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-ft-from-amip-1iu8plp8|1|01KJ6FFG1AQ52AG95WFNAC63E6|training|best_inference_ckpt
 BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-ft-from-amip-1iu8plp8|1|01KJ6FFG1AQ52AG95WFNAC63E6|training|best_ckpt
 BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-ft-from-amip-1iu8plp8|1|01KJ6FFG1AQ52AG95WFNAC63E6|training|ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-ft-from-amip-c0z4b5d0|1|01KJ6G1HVT15AY6K5WY80TX85C|training|best_inference_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-ft-from-amip-c0z4b5d0|1|01KJ6G1HVT15AY6K5WY80TX85C|training|best_ckpt
+BK-v1124-ACE-E3SMv3-piControl-100yr-energy-cs-ft-from-amip-c0z4b5d0|1|01KJ6G1HVT15AY6K5WY80TX85C|training|ckpt
