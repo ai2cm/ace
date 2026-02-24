@@ -453,7 +453,10 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
         )
 
 
-def test_inference_data_loader(tmp_path):
+@pytest.mark.parametrize(
+    "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
+)
+def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver: bool):
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
@@ -465,6 +468,7 @@ def test_inference_data_loader(tmp_path):
         start_indices=InferenceInitialConditionIndices(
             first=0, n_initial_conditions=batch_size, interval=step
         ),
+        num_data_workers=num_data_workers,
     )
     n_forward_steps_in_memory = 3
     window_requirements = DataRequirements(
@@ -480,6 +484,7 @@ def test_inference_data_loader(tmp_path):
         total_forward_steps=6,
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
+        _force_forkserver=force_forkserver,
     )
     data_loader = data.loader
     batch_data = next(iter(data_loader))

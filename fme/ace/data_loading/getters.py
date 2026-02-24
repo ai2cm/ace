@@ -143,6 +143,7 @@ def get_inference_data(
     label_override: list[str] | None = None,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
+    _force_forkserver: bool = False,
 ) -> InferenceGriddedData:
     """
     Args:
@@ -159,6 +160,9 @@ def get_inference_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
+        _force_forkserver: Whether to force using forkserver multiprocessing context.
+            This is useful for debugging or testing in cases where forkserver is not
+            the default, but should generally be unused in production code.
 
     Returns:
         A data loader for inference with coordinates and metadata.
@@ -173,7 +177,7 @@ def get_inference_data(
     )
     properties = dataset.properties
 
-    if config.zarr_engine_used:
+    if config.zarr_engine_used or _force_forkserver:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
         mp_context = "forkserver"
