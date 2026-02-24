@@ -161,7 +161,7 @@ def test_sfnonet_output_is_unchanged():
     )
 
 
-def cache_model_state(
+def load_or_cache_model_state(
     model: SphericalFourierNeuralOperatorNet,
     x: torch.Tensor,
     context: Context,
