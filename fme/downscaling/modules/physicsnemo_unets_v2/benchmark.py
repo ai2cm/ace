@@ -175,6 +175,7 @@ class SongUNetv2Benchmark(BenchmarkABC):
             label_dim=0,
             model_channels=128,
             channel_mult=[1, 2, 2, 2, 2, 2],
+            use_apex_gn=False,
         )
 
     @classmethod
@@ -234,6 +235,7 @@ class SongUNetv2Benchmark(BenchmarkABC):
             label_dim=0,
             model_channels=4,
             channel_mult=[1, 2, 2],
+            use_apex_gn=False,
         )
 
 
@@ -248,6 +250,7 @@ class SongUNetv2BenchmarkBf16(SongUNetv2Benchmark):
             label_dim=0,
             model_channels=128,
             channel_mult=[1, 2, 2, 2, 2, 2],
+            use_apex_gn=False,
             use_amp_bf16=True,
         )
 
@@ -261,9 +264,51 @@ class SongUNetv2BenchmarkBf16(SongUNetv2Benchmark):
             label_dim=0,
             model_channels=4,
             channel_mult=[1, 2, 2],
+            use_apex_gn=False,
             use_amp_bf16=True,
         )
 
 
+class SongUNetv2BenchmarkApex(SongUNetv2Benchmark):
+    @classmethod
+    def new(cls) -> Self:
+        return cls._new_with_params(
+            img_resolution=512,
+            B=1,
+            in_channels=6,
+            out_channels=4,
+            label_dim=0,
+            model_channels=128,
+            channel_mult=[1, 2, 2, 2, 2, 2],
+            use_apex_gn=True,
+        )
+
+    @classmethod
+    def new_for_regression(cls) -> Self | None:
+        return None
+
+
+class SongUNetv2BenchmarkApexBf16(SongUNetv2Benchmark):
+    @classmethod
+    def new(cls) -> Self:
+        return cls._new_with_params(
+            img_resolution=512,
+            B=1,
+            in_channels=6,
+            out_channels=4,
+            label_dim=0,
+            model_channels=128,
+            channel_mult=[1, 2, 2, 2, 2, 2],
+            use_apex_gn=True,
+            use_amp_bf16=True,
+        )
+
+    @classmethod
+    def new_for_regression(cls) -> Self | None:
+        return None
+
+
 register_benchmark("songunetv2")(SongUNetv2Benchmark)
 register_benchmark("songunetv2_bf16")(SongUNetv2BenchmarkBf16)
+register_benchmark("songunetv2_apex")(SongUNetv2BenchmarkApex)
+register_benchmark("songunetv2_apex_bf16")(SongUNetv2BenchmarkApexBf16)

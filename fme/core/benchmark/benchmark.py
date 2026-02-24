@@ -272,7 +272,7 @@ class BenchmarkABC(abc.ABC):
                     result_dict = benchmark.run_instance(timer)
         diagnostics = {
             k: v.item()
-            for k, v in result_dict.items()
+            for k, v in (result_dict or {}).items()
             if k != "output" and v.numel() == 1
         }
         return BenchmarkResult(
