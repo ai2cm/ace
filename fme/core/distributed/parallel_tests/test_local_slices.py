@@ -1,10 +1,12 @@
 import numpy as np
+import pytest
 import torch
 
 from fme.core import get_device
 from fme.core.distributed import Distributed
 
 
+@pytest.mark.parallel
 def test_gather_tensor_from_local_slices():
     """
     Only tests get_local_slices and gather.
@@ -30,6 +32,7 @@ def test_gather_tensor_from_local_slices():
         assert gathered is None
 
 
+@pytest.mark.parallel
 def test_local_slices_subdivide_domain():
     """
     Only tests get_local_slices and gather.
@@ -57,6 +60,7 @@ def test_local_slices_subdivide_domain():
         assert gathered_local_slices is None
 
 
+@pytest.mark.parallel
 def test_gather_global_tensor():
     """
     Test that gather_object and gather_global produce consistent results.
@@ -78,6 +82,7 @@ def test_gather_global_tensor():
         assert gathered_local_slices is None
 
 
+@pytest.mark.parallel
 def test_local_slices_match_gather_tensors():
     """
     Test that gather_object and gather produce consistent results.
@@ -109,6 +114,7 @@ def test_local_slices_match_gather_tensors():
         assert gathered_tensors is None
 
 
+@pytest.mark.parallel
 def test_reduce_mean_from_multiple_ranks():
     """
     dist.reduce_mean should only reduce along the "data parallel" dimension, not
