@@ -28,3 +28,5 @@ ft_fto-v1124-phuetnpl-rv0ike6m||01KG2SZMN4S170VE28DE86WGQ5|done|best_inference_c
 fto-v1124-phuetnpl-rv0ike6m-0421-0461||01KG08VYB96RT8NEF9ZCR39V2R|done|best_inference_ckpt|high|--not-preemptible
 
 ft_fto-v1124-phuetnpl-rv0ike6m-0421-0461||01KG2SZMN4S170VE28DE86WGQ5|done|best_inference_ckpt|high|--not-preemptible
+
+fto-v1124-train-95yr-gvot5r9r-mohzi23t||01KJ6JPDRRZEBZXPZEGSKV7FQT|training|best_inference_ckpt|normal|--not-preemptible
