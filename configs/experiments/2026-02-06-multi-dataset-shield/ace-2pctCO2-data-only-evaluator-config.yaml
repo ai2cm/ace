@@ -1,4 +1,4 @@
-experiment_dir: PLACEHOLDER
+experiment_dir: /results/main
 checkpoint_path: /ckpt.tar
 data_writer:
   save_monthly_files: false
@@ -8,6 +8,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
+  entity: ai2cm
 forward_steps_in_memory: 40
 n_forward_steps: 102267
 loader:
