@@ -36,7 +36,7 @@ from fme.ace.registry.test_hpx import (
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.ace.stepper.time_length_probabilities import (
     TimeLength,
     TimeLengthMilestone,
@@ -335,9 +335,6 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=loss,
-            n_ensemble=n_ensemble,
-            train_n_forward_steps=train_n_forward_steps,
             derived_forcings=derived_forcings,
             step=StepSelector(
                 type="single_module",
@@ -368,6 +365,11 @@ def _get_test_yaml_files(
                     )
                 ),
             ),
+        ),
+        stepper_training=TrainStepperConfig(
+            loss=loss,
+            n_ensemble=n_ensemble,
+            train_n_forward_steps=train_n_forward_steps,
         ),
         inference=inline_inference_config,
         weather_evaluation=weather_evaluation_config,
@@ -912,7 +914,9 @@ def _create_copy_weights_after_batch_config(
 ):
     with open(path_to_train_config_yaml) as config_file:
         config_data = yaml.safe_load(config_file)
-        config_data["stepper"]["parameter_init"] = {"weights_path": path_to_checkpoint}
+        config_data["stepper_training"]["parameter_init"] = {
+            "weights_path": path_to_checkpoint
+        }
         config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": None}]
         config_data["experiment_dir"] = experiment_dir
         with tempfile.NamedTemporaryFile(
