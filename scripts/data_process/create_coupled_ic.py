@@ -4,13 +4,13 @@ import os
 import re
 from dataclasses import dataclass, field
 
-import cftime
 import click
 import dacite
 import xarray as xr
 import yaml
 from create_coupled_datasets import (
     CreateCoupledDatasetsConfig,
+    InputDatasetsConfig,
     NullCoupledInputDatasetConfig,
 )
 
@@ -45,7 +45,8 @@ class CreateCoupledICConfig:
         coupled_ocean_zarr: Optional path (or glob) to coupled ocean zarr.
             Defaults to {output_directory}/{version}-{family_name}-ocean.zarr.
         coupled_atmosphere_zarr: Optional path (or glob) to coupled atmosphere
-            zarr. Defaults to {output_directory}/{version}-{family_name}-{how}-atmosphere.zarr.
+            zarr. Defaults to path with how from coupled config:
+            {output_directory}/{version}-{family_name}-{how}-atmosphere.zarr.
         original_ocean_zarr: Optional path to original ocean zarr. Defaults to
             input_datasets.ocean.zarr_path from the coupled config.
         original_atmosphere_zarr: Optional path to original atmosphere zarr.
@@ -71,24 +72,26 @@ class CreateCoupledICConfig:
 
     def resolve_paths(self, coupled_config: CreateCoupledDatasetsConfig) -> None:
         """Resolve zarr paths from coupled config when not overridden."""
+        input_datasets = coupled_config.input_datasets
+        if not isinstance(input_datasets, InputDatasetsConfig):
+            raise ValueError(
+                "create_coupled_ic expects a single-dataset coupled config "
+                "(InputDatasetsConfig); ensemble configs are not supported. "
+                "Use a YAML with input_datasets containing atmosphere/ocean, not runs."
+            )
         # Original paths are always needed (for merge or as sole source)
         if self.original_ocean_zarr is None:
-            ocean_cfg = getattr(coupled_config.input_datasets, "ocean", None)
-            if ocean_cfg is None or isinstance(
-                ocean_cfg, NullCoupledInputDatasetConfig
-            ):
+            ocean_cfg = input_datasets.ocean
+            if isinstance(ocean_cfg, NullCoupledInputDatasetConfig):
                 raise ValueError(
                     "original_ocean_zarr not set and could not be inferred from "
                     "coupled config (no ocean input dataset)."
                 )
             self.original_ocean_zarr = ocean_cfg.zarr_path
         if self.original_atmosphere_zarr is None:
-            self.original_atmosphere_zarr = (
-                coupled_config.input_datasets.atmosphere.zarr_path
-            )
+            self.original_atmosphere_zarr = input_datasets.atmosphere.zarr_path
 
         if not self.use_coupled:
-            # Only original data; no need to resolve coupled paths
             return
 
         if self.coupled_ocean_zarr is None:
@@ -103,9 +106,7 @@ class CreateCoupledICConfig:
             self.coupled_ocean_zarr = matches[0]
 
         if self.coupled_atmosphere_zarr is None:
-            coupled_ts = getattr(
-                coupled_config.coupled_datasets, "coupled_ts", None
-            )
+            coupled_ts = getattr(coupled_config.coupled_datasets, "coupled_ts", None)
             if coupled_ts is not None and getattr(coupled_ts, "how", None):
                 how = coupled_ts.how
                 path_with_how = os.path.join(
@@ -115,7 +116,9 @@ class CreateCoupledICConfig:
                 if os.path.exists(path_with_how):
                     self.coupled_atmosphere_zarr = path_with_how
                 else:
-                    self.coupled_atmosphere_zarr = coupled_config.atmosphere_output_store
+                    self.coupled_atmosphere_zarr = (
+                        coupled_config.atmosphere_output_store
+                    )
             else:
                 self.coupled_atmosphere_zarr = coupled_config.atmosphere_output_store
         elif "*" in self.coupled_atmosphere_zarr:
@@ -145,7 +148,8 @@ def _load_original_only(
     ds = xr.open_zarr(original_zarr)
     out = _select_time(ds, time_config)
     logging.info(
-        f"Original {label}: {len(out.data_vars)} vars, time size {out.sizes.get('time', 1)}"
+        f"Original {label}: {len(out.data_vars)} vars, \
+            time size {out.sizes.get('time', 1)}"
     )
     return out
 
@@ -189,6 +193,7 @@ def _select_time(ds: xr.Dataset, time_config: TimeSelectionConfig) -> xr.Dataset
                 f"Use an exact timestamp present in the data."
             )
         return ds.sel(time=t)
+    assert time_config.start_time is not None and time_config.end_time is not None
     start = _parse_timestamp_to_cftime(time_config.start_time, time_coord)
     end = _parse_timestamp_to_cftime(time_config.end_time, time_coord)
     return ds.sel(time=slice(start, end))
@@ -207,7 +212,8 @@ def _load_and_merge(
     merged = _merge_with_original(coupled, original)
     out = _select_time(merged, time_config)
     logging.info(
-        f"Merged {label}: {len(out.data_vars)} vars, time size {out.sizes.get('time', 1)}"
+        f"Merged {label}: {len(out.data_vars)} vars, \
+            time size {out.sizes.get('time', 1)}"
     )
     return out
 
@@ -219,18 +225,28 @@ def run(config: CreateCoupledICConfig) -> None:
     coupled_config = CreateCoupledDatasetsConfig.from_file(config.coupled_config_path)
     config.resolve_paths(coupled_config)
 
+    # Paths are resolved by resolve_paths (or set in config)
+    original_ocean = config.original_ocean_zarr
+    original_atmosphere = config.original_atmosphere_zarr
+    assert original_ocean is not None
+    assert original_atmosphere is not None
+
     os.makedirs(config.output_directory, exist_ok=True)
 
     if config.use_coupled:
+        coupled_ocean = config.coupled_ocean_zarr
+        coupled_atmosphere = config.coupled_atmosphere_zarr
+        assert coupled_ocean is not None
+        assert coupled_atmosphere is not None
         ocean_ic = _load_and_merge(
-            config.coupled_ocean_zarr,
-            config.original_ocean_zarr,
+            coupled_ocean,
+            original_ocean,
             config.time,
             "ocean",
         )
     else:
         ocean_ic = _load_original_only(
-            config.original_ocean_zarr,
+            original_ocean,
             config.time,
             "ocean",
         )
@@ -241,15 +257,17 @@ def run(config: CreateCoupledICConfig) -> None:
     ocean_ic.to_netcdf(ocean_path)
 
     if config.use_coupled:
+        coupled_atmosphere = config.coupled_atmosphere_zarr
+        assert coupled_atmosphere is not None
         atmosphere_ic = _load_and_merge(
-            config.coupled_atmosphere_zarr,
-            config.original_atmosphere_zarr,
+            coupled_atmosphere,
+            original_atmosphere,
             config.time,
             "atmosphere",
         )
     else:
         atmosphere_ic = _load_original_only(
-            config.original_atmosphere_zarr,
+            original_atmosphere,
             config.time,
             "atmosphere",
         )
