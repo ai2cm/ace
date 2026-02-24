@@ -8,6 +8,7 @@ from fme.core.loss import (
     AreaWeightedMSELoss,
     CRPSLoss,
     EnergyScoreLoss,
+    EnsembleLoss,
     GlobalMeanLoss,
     LossConfig,
     StepLossConfig,
@@ -102,6 +103,19 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
         else {"atol": 0.01, "rtol": 0.0}
     )
     torch.testing.assert_close(result.cpu(), expected, **tol)
+
+
+def test_ensemble_loss_runs():
+    torch.manual_seed(0)
+    device = get_device()
+    n_lat, n_lon = 16, 32
+    pred = torch.rand(10000, 2, n_lat, n_lon, device=device)
+    target = torch.rand(10000, 2, n_lat, n_lon, device=device)
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=device)).get_real_sht()
+    ensemble_loss = EnsembleLoss(
+        crps_weight=0.4, energy_score_weight=0.3, laplacian_crps_weight=0.3, sht=sht
+    )
+    ensemble_loss(pred, target)
 
 
 @pytest.mark.parametrize(

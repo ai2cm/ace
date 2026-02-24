@@ -5,6 +5,7 @@ from typing import Any, Literal
 import torch
 import torch.linalg
 import torch.nn.functional as F
+from torch_harmonics import InverseRealSHT, RealSHT
 
 from fme.core.device import get_device
 from fme.core.ensemble import get_crps, get_energy_score
@@ -338,6 +339,55 @@ def _get_finite_difference_crps_loss(
         )
 
 
+def laplacian(
+    x: torch.Tensor,
+    sht: Callable[[torch.Tensor], torch.Tensor],
+    isht: Callable[[torch.Tensor], torch.Tensor],
+    R: float = 1.0,
+) -> torch.Tensor:
+    """
+    Applies spherical Laplacian in spectral space: multiply by -ell(ell+1)/R^2.
+    """
+    x_hat = sht(x)
+
+    # Identify L dimension as the first of the last two
+    # (or three) dims: (..., L, M[, K])
+    L = x_hat.shape[-2] if x_hat.ndim >= 2 else x_hat.shape[-1]
+
+    dtype = x_hat.dtype
+    if dtype.is_complex:
+        dtype = x_hat.real.dtype  # just for constructing ell safely
+
+    ell = torch.arange(L, device=x.device, dtype=dtype)  # (L,)
+    eig = -(ell * (ell + 1)) / (R * R)  # (L,)
+
+    # Broadcast eig to x_hat:
+    # x_hat: (..., L, M)      -> eig: (..., L, 1)
+    # x_hat: (..., L, M, K)   -> eig: (..., L, 1, 1)
+    broadcast_shape = [1] * x_hat.ndim
+    broadcast_shape[-2] = L
+    eig = eig.view(*broadcast_shape)
+
+    x_hat_lap = x_hat * eig
+    return isht(x_hat_lap)
+
+
+class LaplacianCRPSLoss(torch.nn.Module):
+    def __init__(self, sht: Callable[[torch.Tensor], torch.Tensor]):
+        super().__init__()
+        self.sht = sht
+        self.isht: InverseRealSHT | None = None
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        if self.sht is None:
+            self.sht = RealSHT(nlat=x.shape[-2], nlon=x.shape[-1]).to(x.device)
+        if self.isht is None:
+            self.isht = InverseRealSHT(nlat=x.shape[-2], nlon=x.shape[-1]).to(x.device)
+        x_lap = laplacian(x, self.sht, self.isht)
+        y_lap = laplacian(y, self.sht, self.isht)
+        return get_crps(x_lap, y_lap, alpha=1.0).mean()
+
+
 class EnsembleLoss(torch.nn.Module):
     def __init__(
         self,
@@ -346,6 +396,7 @@ class EnsembleLoss(torch.nn.Module):
         sht: Callable[[torch.Tensor], torch.Tensor],
         finite_difference_crps_weight: float = 0.0,
         finite_difference_crps_levels: int = 1,
+        laplacian_crps_weight: float = 0.0,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -368,10 +419,17 @@ class EnsembleLoss(torch.nn.Module):
         else:
             self.diff_crps_loss = None
         self.energy_score_loss = EnergyScoreLoss(sht=sht)
+        if laplacian_crps_weight > 0:
+            self.laplacian_crps_loss: LaplacianCRPSLoss | None = LaplacianCRPSLoss(
+                sht=sht
+            )
+        else:
+            self.laplacian_crps_loss = None
 
         self.crps_weight = crps_weight
         self.diff_crps_weight = finite_difference_crps_weight
         self.energy_score_weight = energy_score_weight
+        self.laplacian_crps_weight = laplacian_crps_weight
 
     def forward(
         self,
@@ -394,7 +452,13 @@ class EnsembleLoss(torch.nn.Module):
             )
         else:
             diff_crps = torch.tensor(0.0)
-        return crps + energy_score_loss + diff_crps
+        if self.laplacian_crps_loss is not None:
+            laplacian_crps = self.laplacian_crps_weight * self.laplacian_crps_loss(
+                gen_norm, target_norm
+            )
+        else:
+            laplacian_crps = torch.tensor(0.0)
+        return crps + energy_score_loss + diff_crps + laplacian_crps
 
 
 @dataclasses.dataclass
