@@ -135,6 +135,17 @@ def get_gridded_data(
     )
 
 
+_WORKER_DIST_CX = None  # needed so it doesn't get garbage collected and finalized
+
+
+def _forkserver_worker_init_fn(worker_id: int) -> None:
+    global _WORKER_DIST_CX
+    _WORKER_DIST_CX = Distributed.context()
+    _WORKER_DIST_CX.__enter__()
+    # don't need to exit the context on workers as they are not
+    # initialized/managed by torchrun
+
+
 def get_inference_data(
     config: InferenceDataLoaderConfig,
     total_forward_steps: int,
@@ -182,9 +193,11 @@ def get_inference_data(
         # persist workers since startup is slow
         mp_context = "forkserver"
         persistent_workers = True
+        worker_init_fn = _forkserver_worker_init_fn
     else:
         mp_context = None
         persistent_workers = False
+        worker_init_fn = None
 
     logging.info(f"Multiprocessing inference context: {mp_context or 'fork'}")
 
@@ -197,6 +210,7 @@ def get_inference_data(
         pin_memory=using_gpu(),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
+        worker_init_fn=worker_init_fn,
     )
     gridded_data = InferenceGriddedData(
         loader=loader,
