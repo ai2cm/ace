@@ -2,6 +2,7 @@ import dataclasses
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
+import numpy as np
 import torch
 import torch.linalg
 from torch_harmonics import InverseRealSHT, RealSHT
@@ -339,14 +340,21 @@ class LaplacianCRPSLoss(torch.nn.Module):
         super().__init__()
         self.sht = sht
         self.isht: InverseRealSHT | None = None
+        self._R = None
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        if self._R is None:
+            nlat = x.shape[-2]
+            R = 2 * nlat / np.pi  # empirical constant
+            self._R = R  # gynmastics needed to keep mypy happy
+        else:
+            R = self._R
         if self.sht is None:
             self.sht = RealSHT(nlat=x.shape[-2], nlon=x.shape[-1]).to(x.device)
         if self.isht is None:
             self.isht = InverseRealSHT(nlat=x.shape[-2], nlon=x.shape[-1]).to(x.device)
-        x_lap = laplacian(x, self.sht, self.isht)
-        y_lap = laplacian(y, self.sht, self.isht)
+        x_lap = laplacian(x, self.sht, self.isht, R=R)
+        y_lap = laplacian(y, self.sht, self.isht, R=R)
         return get_crps(x_lap, y_lap, alpha=1.0).mean()
 
 
