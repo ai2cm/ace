@@ -1,3 +1,4 @@
+import dataclasses
 from dataclasses import dataclass
 from typing import Self
 
@@ -99,12 +100,36 @@ def check_weights_channels_last(model: torch.nn.Module) -> dict[str, bool]:
     return results
 
 
+@dataclass
+class ChannelsLastDiagnostics:
+    n_channels_last_weights: int
+    n_total_4d_weights: int
+    n_conversions_to_channels_last: int
+    n_conversions_from_channels_last: int
+    conversion_layers: list[dict[str, str]]
+
+    def to_tensor_dict(self) -> dict[str, torch.Tensor]:
+        return {
+            "n_channels_last_weights": torch.tensor(self.n_channels_last_weights),
+            "n_total_4d_weights": torch.tensor(self.n_total_4d_weights),
+            "n_conversions_to_channels_last": torch.tensor(
+                self.n_conversions_to_channels_last
+            ),
+            "n_conversions_from_channels_last": torch.tensor(
+                self.n_conversions_from_channels_last
+            ),
+        }
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
 def _run_channels_last_diagnostics(
     model: SongUNetv2,
     x: torch.Tensor,
     noise_labels: torch.Tensor,
     class_labels: torch.Tensor | None,
-) -> dict[str, torch.Tensor]:
+) -> ChannelsLastDiagnostics:
     """Run a single-sample forward pass with hooks to collect channels_last
     diagnostics.  Uses B=1 slice and ``torch.no_grad`` to minimise memory."""
     weight_info = check_weights_channels_last(model)
@@ -124,12 +149,23 @@ def _run_channels_last_diagnostics(
     to_cl = sum(1 for e in events if e.direction == "to_channels_last")
     from_cl = sum(1 for e in events if e.direction == "from_channels_last")
 
-    return {
-        "n_channels_last_weights": torch.tensor(n_cl_weights),
-        "n_total_4d_weights": torch.tensor(n_total_weights),
-        "n_conversions_to_channels_last": torch.tensor(to_cl),
-        "n_conversions_from_channels_last": torch.tensor(from_cl),
-    }
+    conversion_layers = [
+        {
+            "module_name": e.module_name,
+            "module_type": e.module_type,
+            "direction": e.direction,
+            "tensor_role": e.tensor_role,
+        }
+        for e in events
+    ]
+
+    return ChannelsLastDiagnostics(
+        n_channels_last_weights=n_cl_weights,
+        n_total_4d_weights=n_total_weights,
+        n_conversions_to_channels_last=to_cl,
+        n_conversions_from_channels_last=from_cl,
+        conversion_layers=conversion_layers,
+    )
 
 
 class SongUNetv2Benchmark(BenchmarkABC):
@@ -146,7 +182,7 @@ class SongUNetv2Benchmark(BenchmarkABC):
         self.noise_labels = noise_labels
         self.class_labels = class_labels
         self.use_amp_bf16 = use_amp_bf16
-        self._channels_last_info = _run_channels_last_diagnostics(
+        self._channels_last_diagnostics = _run_channels_last_diagnostics(
             model, x, noise_labels, class_labels
         )
 
@@ -154,6 +190,9 @@ class SongUNetv2Benchmark(BenchmarkABC):
         if self.use_amp_bf16:
             return torch.amp.autocast(get_device().type, dtype=torch.bfloat16)
         return torch.amp.autocast(get_device().type, enabled=False)
+
+    def get_diagnostics(self) -> dict:
+        return self._channels_last_diagnostics.to_dict()
 
     def run_instance(self, timer) -> TensorDict:
         with self._get_amp_context():
@@ -163,7 +202,10 @@ class SongUNetv2Benchmark(BenchmarkABC):
                 self.class_labels,
                 timer=timer,
             )
-        return {"output": result.detach(), **self._channels_last_info}
+        return {
+            "output": result.detach(),
+            **self._channels_last_diagnostics.to_tensor_dict(),
+        }
 
     @classmethod
     def new(cls) -> Self:

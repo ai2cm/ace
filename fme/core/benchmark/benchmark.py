@@ -17,7 +17,7 @@ from fme.core.typing_ import TensorDict
 class BenchmarkResult:
     memory: MemoryResult
     timer: TimerResult
-    diagnostics: dict[str, float] = dataclasses.field(default_factory=dict)
+    diagnostics: dict = dataclasses.field(default_factory=dict)
 
     def __repr__(self) -> str:
         return (
@@ -265,20 +265,14 @@ class BenchmarkABC(abc.ABC):
         for _ in range(warmup):
             benchmark.run_instance(null_timer)
         timer = CUDATimer()
-        result_dict: TensorDict = {}
         with benchmark_memory() as bm:
             for _ in range(iters):
                 with timer:
-                    result_dict = benchmark.run_instance(timer)
-        diagnostics = {
-            k: v.item()
-            for k, v in (result_dict or {}).items()
-            if k != "output" and v.numel() == 1
-        }
+                    benchmark.run_instance(timer)
         return BenchmarkResult(
             timer=timer.result,
             memory=bm.result,
-            diagnostics=diagnostics,
+            diagnostics=benchmark.get_diagnostics(),
         )
 
     @classmethod
@@ -288,6 +282,14 @@ class BenchmarkABC(abc.ABC):
             return None
         null_timer = NullTimer()
         return benchmark.run_instance(null_timer)
+
+    def get_diagnostics(self) -> dict:
+        """Return optional diagnostics dict to include in BenchmarkResult.
+
+        Override in subclasses to provide benchmark-specific diagnostics
+        (e.g. memory format conversion info). Default returns empty dict.
+        """
+        return {}
 
     @abc.abstractmethod
     def run_instance(self: Self, timer: Timer) -> TensorDict:
