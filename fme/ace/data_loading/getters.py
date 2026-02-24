@@ -66,6 +66,7 @@ def get_gridded_data(
     config: DataLoaderConfig,
     train: bool,
     requirements: DataRequirements,
+    _force_forkserver: bool = False,
 ) -> GriddedData:
     """
     Args:
@@ -73,6 +74,9 @@ def get_gridded_data(
         train: Whether loader is intended for training or validation data; if True,
             then data will be shuffled.
         requirements: Data requirements for the model.
+        _force_forkserver: Whether to force using forkserver multiprocessing context.
+            This is useful for debugging or testing in cases where forkserver is not
+            the default, but should generally be unused in production code.
     """
     n_timesteps_preloaded = requirements.n_timesteps_schedule.add(config.time_buffer)
     dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
@@ -88,7 +92,7 @@ def get_gridded_data(
 
     sampler = _get_sampler(dataset, config.sample_with_replacement, train)
 
-    if config.zarr_engine_used and config.num_data_workers > 0:
+    if _force_forkserver or (config.zarr_engine_used and config.num_data_workers > 0):
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # reading zarr with async from weka also requires forkserver
         mp_context = "forkserver"
