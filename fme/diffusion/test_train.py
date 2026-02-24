@@ -153,8 +153,8 @@ loader:
 
 def get_sizes(
     spatial_dims: HorizontalCoordinates = LatLonCoordinates(
-        lon=torch.Tensor(np.arange(32)),
-        lat=torch.Tensor(np.arange(16)),
+        lon=torch.Tensor(np.arange(18)),
+        lat=torch.Tensor(np.arange(9)),
     ),
     n_time=3,
     nz_interface=3,

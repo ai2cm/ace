@@ -165,7 +165,6 @@ class TorchDistributed(DistributedBackend):
         torch.distributed.barrier(device_ids=self._device_ids)
 
     def shutdown(self):
-        self.barrier()
         logger.debug(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()
 
