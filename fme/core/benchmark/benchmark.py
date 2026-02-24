@@ -89,13 +89,6 @@ class BenchmarkResult:
         logs.update(self.timer.get_logs(max_depth=max_depth))
         return logs
 
-    def get_logs(self, max_depth: int) -> dict[str, float]:
-        logs = {
-            "max_alloc_mb": self.memory.max_alloc / (1024.0 * 1024.0),
-        }
-        logs.update(self.timer.get_logs(max_depth=max_depth))
-        return logs
-
     def to_png(
         self, path: str | pathlib.Path, label: str, child: str | None = None
     ) -> None:
