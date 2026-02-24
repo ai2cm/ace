@@ -48,8 +48,8 @@ class CPUEventPair:
 class BenchmarkResult:
     memory: MemoryResult
     timer: TimerResult
-    diagnostics: dict = dataclasses.field(default_factory=dict)
     cpu_time: float
+    diagnostics: dict = dataclasses.field(default_factory=dict)
 
     def __repr__(self) -> str:
         return (
