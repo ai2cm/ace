@@ -13,13 +13,7 @@ from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import (
-    BatchData,
-    PairedBatchData,
-    StaticInputs,
-    Topography,
-    get_normalized_topography,
-)
+from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
@@ -33,6 +27,7 @@ class ModelOutputs:
     target: TensorDict
     loss: torch.Tensor
     latent_steps: list[torch.Tensor] = dataclasses.field(default_factory=list)
+    channel_losses: TensorDict = dataclasses.field(default_factory=dict)
 
 
 def _rename_normalizer(
@@ -143,10 +138,8 @@ class DiffusionModelConfig:
         sigma_data = 1.0
 
         n_in_channels = len(self.in_names)
-        # fine topography is already normalized and at fine scale, so needs
-        # some special handling for now
-        if self.use_fine_topography:
-            n_in_channels += 1
+        if static_inputs is not None:
+            n_in_channels += len(static_inputs.fields)
 
         module = self.module.build(
             n_in_channels=n_in_channels,
@@ -317,7 +310,7 @@ class DiffusionModel:
         )
 
     def _get_input_from_coarse(
-        self, coarse: TensorMapping, topography: Topography | None
+        self, coarse: TensorMapping, static_inputs: StaticInputs | None
     ) -> torch.Tensor:
         inputs = filter_tensor_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
@@ -326,19 +319,20 @@ class DiffusionModel:
         interpolated = interpolate(normalized, self.downscale_factor)
 
         if self.config.use_fine_topography:
-            if topography is None:
+            if static_inputs is None:
                 raise ValueError(
-                    "Topography must be provided for each batch when use of fine "
-                    "topography is enabled."
+                    "Static inputs must be provided for each batch when use of fine "
+                    "static inputs is enabled."
                 )
             else:
                 n_batches = normalized.shape[0]
-                # Join the normalized topography to the input (see dataset for details)
-                topo = topography.data.unsqueeze(0).repeat(n_batches, 1, 1)
-                topo = topo.unsqueeze(self._channel_axis)
-                interpolated = torch.concat(
-                    [interpolated, topo], axis=self._channel_axis
-                )
+                # Join normalized static inputs to input (see dataset for details)
+                for field in static_inputs.fields:
+                    topo = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
+                    topo = topo.unsqueeze(self._channel_axis)
+                    interpolated = torch.concat(
+                        [interpolated, topo], axis=self._channel_axis
+                    )
 
         if self.config._interpolate_input:
             return interpolated
@@ -347,12 +341,12 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
+        static_inputs: StaticInputs | None,
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_norm = self._get_input_from_coarse(coarse, topography)
+        inputs_norm = self._get_input_from_coarse(coarse, static_inputs)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
@@ -376,11 +370,18 @@ class DiffusionModel:
         denoised_norm = self.module(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
-        loss = torch.mean(
-            conditioned_target.weight * self.loss(denoised_norm, targets_norm)
+        weighted_loss = conditioned_target.weight * self.loss(
+            denoised_norm, targets_norm
         )
+        loss = torch.mean(weighted_loss)
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
+
+        with torch.no_grad():
+            channel_losses = {
+                name: torch.mean(weighted_loss[:, i, :, :])
+                for i, name in enumerate(self.out_packer.names)
+            }
 
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
@@ -390,17 +391,21 @@ class DiffusionModel:
             self.out_packer.unpack(denoised_norm, axis=self._channel_axis)
         )
         return ModelOutputs(
-            prediction=denoised, target=target, loss=loss, latent_steps=[]
+            prediction=denoised,
+            target=target,
+            loss=loss,
+            channel_losses=channel_losses,
+            latent_steps=[],
         )
 
     @torch.no_grad()
     def generate(
         self,
         coarse_data: TensorMapping,
-        topography: torch.Tensor | None,
+        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        inputs_ = self._get_input_from_coarse(coarse_data, topography)
+        inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
         # expand samples and fold to
         # [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
@@ -449,22 +454,22 @@ class DiffusionModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        topography: Topography | None,
+        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> TensorDict:
-        generated, _, _ = self.generate(batch.data, topography, n_samples)
+        generated, _, _ = self.generate(batch.data, static_inputs, n_samples)
         return generated
 
     @torch.no_grad()
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        topography: Topography | None,
+        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
         generated, generated_norm, latent_steps = self.generate(
-            coarse, topography, n_samples
+            coarse, static_inputs, n_samples
         )
 
         targets_norm = self.out_packer.pack(
@@ -500,9 +505,15 @@ class DiffusionModel:
         state: Mapping[str, Any],
     ) -> "DiffusionModel":
         config = DiffusionModelConfig.from_state(state["config"])
+        # backwards compatibility for models before static inputs serialization
+        if state.get("static_inputs") is not None:
+            static_inputs = StaticInputs.from_state(state["static_inputs"]).to_device()
+        else:
+            static_inputs = None
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
+            static_inputs=static_inputs,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
@@ -611,14 +622,3 @@ class CheckpointModelConfig:
     @property
     def out_names(self):
         return self._checkpoint["model"]["config"]["out_names"]
-
-    def get_topography(self) -> Topography | None:
-        if self.data_requirements.use_fine_topography:
-            if self.fine_topography_path is None:
-                raise ValueError(
-                    "Topography path must be provided for model configured "
-                    "to use fine topography."
-                )
-            return get_normalized_topography(self.fine_topography_path).to_device()
-        else:
-            return None

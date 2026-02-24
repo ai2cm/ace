@@ -286,7 +286,11 @@ def _get_test_yaml_files(
     if crps_training:
         loss = StepLossConfig(
             type="EnsembleLoss",
-            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+            kwargs={
+                "crps_weight": 1.0,
+                "energy_score_weight": 0.0,
+                "finite_difference_crps_weight": 0.05,
+            },
         )
         n_ensemble: int = 2
     else:

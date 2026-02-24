@@ -300,10 +300,32 @@ class CRPSLoss(torch.nn.Module):
         return get_crps(x, y, alpha=self.alpha).mean()
 
 
+class FiniteDifferenceCRPSLoss(torch.nn.Module):
+    """
+    Computes the CRPS of the x and y finite differences of the input tensors,
+    which helps with representations of horizontal stochastic structures.
+    """
+
+    def __init__(self, alpha: float):
+        super().__init__()
+        self.alpha = alpha
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        x_diff_lat = x[:, :, 1:, :] - x[:, :, :-1, :]
+        y_diff_lat = y[:, :, 1:, :] - y[:, :, :-1, :]
+        crps_lat = get_crps(x_diff_lat, y_diff_lat, alpha=self.alpha).mean()
+        # roll on lon because the axis is circular
+        x_diff_lon = torch.roll(x, shifts=-1, dims=-1) - x
+        y_diff_lon = torch.roll(y, shifts=-1, dims=-1) - y
+        crps_lon = get_crps(x_diff_lon, y_diff_lon, alpha=self.alpha).mean()
+        return 0.5 * (crps_lat + crps_lon)
+
+
 class EnsembleLoss(torch.nn.Module):
     def __init__(
         self,
         crps_weight: float,
+        finite_difference_crps_weight: float,
         energy_score_weight: float,
         sht: Callable[[torch.Tensor], torch.Tensor],
     ):
@@ -319,9 +341,16 @@ class EnsembleLoss(torch.nn.Module):
                 f"got {crps_weight} and {energy_score_weight}"
             )
         self.crps_loss = CRPSLoss(alpha=0.95)
+        if finite_difference_crps_weight > 0:
+            self.diff_crps_loss: FiniteDifferenceCRPSLoss | None = (
+                FiniteDifferenceCRPSLoss(alpha=0.95)
+            )
+        else:
+            self.diff_crps_loss = None
         self.energy_score_loss = EnergyScoreLoss(sht=sht)
 
         self.crps_weight = crps_weight
+        self.diff_crps_weight = finite_difference_crps_weight
         self.energy_score_weight = energy_score_weight
 
     def forward(
@@ -339,7 +368,13 @@ class EnsembleLoss(torch.nn.Module):
             )
         else:
             energy_score_loss = torch.tensor(0.0)
-        return crps + energy_score_loss
+        if self.diff_crps_loss is not None:
+            diff_crps = self.diff_crps_weight * self.diff_crps_loss(
+                gen_norm, target_norm
+            )
+        else:
+            diff_crps = torch.tensor(0.0)
+        return crps + energy_score_loss + diff_crps
 
 
 @dataclasses.dataclass
