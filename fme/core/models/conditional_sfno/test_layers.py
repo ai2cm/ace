@@ -119,6 +119,9 @@ def test_context_round_trip(
     )
     round_trip = Context.from_dict(context.asdict())
     for attr_name in dir(context):
+        # this ensures the test fails if we ever add additional attributes to
+        # Context and forget to update the test, which would be a problem since
+        # those attributes would not be tested for correct round-tripping
         if not attr_name.startswith("_") and not callable(getattr(context, attr_name)):
             original = getattr(context, attr_name)
             round_tripped = getattr(round_trip, attr_name)
