@@ -10,6 +10,7 @@ from fme.core.loss import (
     EnergyScoreLoss,
     EnsembleLoss,
     GlobalMeanLoss,
+    LaplacianCRPSLoss,
     LossConfig,
     StepLossConfig,
     VariableWeightingLoss,
@@ -57,6 +58,30 @@ def test_spectral_energy_score(very_fast_only: bool):
     larger_domain_score = spectral_energy_score_loss(pred, target)
     torch.testing.assert_close(larger_domain_score, score, rtol=0.05, atol=0.0)
     torch.testing.assert_close(score, crps, rtol=0.5, atol=0.0)
+
+
+def test_laplacian_crps(very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_lat, n_lon = 16, 32
+    pred = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
+    target = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
+    crps_loss = CRPSLoss(alpha=0.95)
+    crps = crps_loss(pred, target)
+    laplacian_crps_loss = LaplacianCRPSLoss(sht)
+    laplacian_crps = laplacian_crps_loss(pred, target)
+
+    n_lat2, n_lon2 = 32, 64
+    pred = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
+    target = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
+    sht = LatLonOperations(torch.ones((n_lat2, n_lon2), device=DEVICE)).get_real_sht()
+    laplacian_crps_loss = LaplacianCRPSLoss(sht=sht)
+    larger_domain_crps = laplacian_crps_loss(pred, target)
+    torch.testing.assert_close(larger_domain_crps, laplacian_crps, rtol=0.05, atol=0.0)
+    torch.testing.assert_close(laplacian_crps, crps, rtol=0.05, atol=0.0)
 
 
 def test_loss_of_zeros_is_variance():
