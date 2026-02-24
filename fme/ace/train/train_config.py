@@ -247,7 +247,7 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
-    train_evaluation_samples: int = 1000
+    train_evaluation_samples: int = 0  # FIXME
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
@@ -404,13 +404,15 @@ class TrainBuilders:
         """
         Get the training stepper.
 
-        Creates a Stepper for inference and wraps it in a TrainStepper
-        with training-specific configuration including the loss object.
+        Creates a Stepper for inference and wraps it in a TrainStepper with
+        training-specific configuration including the loss and parameter
+        initialization.
+
         """
-        stepper = self.config.stepper.get_stepper(
+        return self.config.train_stepper.get_train_stepper(
+            stepper_config=self.config.stepper,
             dataset_info=dataset_info,
         )
-        return self.config.train_stepper.get_train_stepper(stepper)
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)

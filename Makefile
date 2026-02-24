@@ -6,12 +6,19 @@ USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 DEPLOY_TARGET ?= pypi
 BEAKER_WORKSPACE = ai2/ace
 NPROC ?= 2
+FME_FORCE_CPU ?= 0
+FME_DISTRIBUTED_BACKEND ?= torch
+FME_DISTRIBUTED_H ?= 1
+FME_DISTRIBUTED_W ?= 1
 
 ifeq ($(shell uname), Linux)
 	CONDA_PACKAGES=gxx_linux-64 pip
 else
 	CONDA_PACKAGES=pip
 endif
+
+help:	## Show this help.
+	@sed -ne '/@sed/!s/## //p' $(MAKEFILE_LIST)
 
 build_docker_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE):$(VERSION) --target production .
@@ -55,6 +62,10 @@ test:
 	pytest -n 4 --durations 40 .
 
 test_parallel:
+	FME_FORCE_CPU=$(FME_FORCE_CPU) \
+	FME_DISTRIBUTED_BACKEND=$(FME_DISTRIBUTED_BACKEND) \
+	FME_DISTRIBUTED_H=$(FME_DISTRIBUTED_H) \
+	FME_DISTRIBUTED_W=$(FME_DISTRIBUTED_W) \
 	torchrun --nproc-per-node $(NPROC) -m pytest ./fme/core/distributed/parallel_tests
 
 # --cov must come  after pytest args to use the sources defined by config
@@ -79,3 +90,9 @@ deploy_pypi: build_pypi
 
 deploy_test_pypi: DEPLOY_TARGET = testpypi
 deploy_test_pypi: deploy_pypi
+
+# job_runner
+
+jr_changelog:	## Interactively update job_runner/CHANGELOG.md
+	@job_runner/bin/changelog.sh
+

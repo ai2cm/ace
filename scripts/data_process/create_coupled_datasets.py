@@ -22,6 +22,21 @@ from get_stats import ClimateDataType, StatsConfig, get_stats
 from merge_stats import MergeStatsConfig, merge_stats
 from writer_utils import OutputWriterConfig
 
+"""Create coupled atmosphere-ocean datasets for training coupled climate emulators.
+
+This script processes separate atmosphere, ocean, and sea ice datasets, applying
+coupling logic to create consistent training datasets. The computation follows a
+three-stage dependency chain:
+
+    compute_coupled_sea_ice -> compute_coupled_ocean -> compute_coupled_atmosphere
+
+Each stage can either compute from scratch or read from existing zarr outputs:
+- If a zarr already exists, it will be read from disk instead of being recomputed
+- Downstream stages that depend on earlier outputs will read those outputs as needed
+- Only missing datasets are computed and written, saving substantial time when
+  rerunning the script with partial outputs already present
+"""
+
 
 def _get_stats(
     input_zarr_path: str,
@@ -256,7 +271,7 @@ class CoupledInputDatasetConfig:
                 f"{self.last_timestamp or 'end'}"
             )
         if self.extra_fields.names_and_prefixes:
-            logging.info("  extra_fields: " f"{self.extra_fields.names_and_prefixes}")
+            logging.info(f"  extra_fields: {self.extra_fields.names_and_prefixes}")
 
 
 @dataclasses.dataclass
@@ -472,25 +487,22 @@ class CoupledDatasetsConfig:
         ocean_exists = not debug and os.path.exists(ocean_output_store)
         atmos_exists = not debug and os.path.exists(atmosphere_output_store)
 
-        if sea_ice_exists:
-            logging.warning(
-                f"Coupled sea ice output {sea_ice_output_store} already exists. "
-                "It will be recomputed but not overwritten."
-            )
-
         compute_ocean = self.coupled_sea_surface is not None
         compute_atmos = self.coupled_ts is not None
 
-        if compute_ocean and ocean_exists:
-            logging.warning(
-                f"Coupled ocean output {ocean_output_store} already exists. "
-                "It will be recomputed but not overwritten."
-            )
+        need_compute_sea_ice = not sea_ice_exists
+        need_compute_ocean = compute_ocean and not ocean_exists
+        need_compute_atmos = compute_atmos and not atmos_exists
 
+        if sea_ice_exists:
+            logging.info(
+                f"Coupled sea ice output {sea_ice_output_store} already exists."
+            )
+        if compute_ocean and ocean_exists:
+            logging.info(f"Coupled ocean output {ocean_output_store} already exists.")
         if compute_atmos and atmos_exists:
-            logging.warning(
-                f"Coupled atmosphere output {atmosphere_output_store} already "
-                "exists. It will be recomputed but not overwritten."
+            logging.info(
+                f"Coupled atmosphere output {atmosphere_output_store} already exists."
             )
 
         all_exist = sea_ice_exists
@@ -500,7 +512,7 @@ class CoupledDatasetsConfig:
             all_exist = all_exist and atmos_exists
 
         if all_exist and not debug:
-            logging.info(f"All coupled output datasets already exist. Skipping...")
+            logging.info("All coupled output datasets already exist. Skipping...")
             # Still compute stats if they don't exist
             self._get_and_merge_stats(
                 input_datasets,
@@ -517,34 +529,47 @@ class CoupledDatasetsConfig:
 
         self.output_writer.start_dask_client(debug)
 
-        atmos = input_datasets.atmosphere.get_dataset()
-        ocean = input_datasets.ocean.get_dataset()
-        sea_ice = input_datasets.sea_ice.get_dataset()
-
-        logging.info("=" * 80)
-        logging.info("Computing coupled sea ice fields")
-        logging.info("=" * 80)
-        atmos_extras = input_datasets.atmosphere.extra_fields
-        coupled_sea_ice = compute_coupled_sea_ice(
-            ocean=ocean,
-            atmos=atmos,
-            sea_ice=sea_ice,
-            config=self.coupled_sea_ice,
-            input_field_names=self.input_field_names,
-            atmos_extras=atmos_extras,
-            sea_ice_extras=input_datasets.sea_ice.extra_fields,
+        # Only load input datasets needed for remaining computations
+        need_any_compute = (
+            need_compute_sea_ice or need_compute_ocean or need_compute_atmos
         )
+        atmos = input_datasets.atmosphere.get_dataset() if need_any_compute else None
+        ocean = input_datasets.ocean.get_dataset() if need_any_compute else None
+        atmos_extras = input_datasets.atmosphere.extra_fields
 
+        # Stage 1: Coupled sea ice — compute or read from existing zarr
+        if need_compute_sea_ice:
+            sea_ice = input_datasets.sea_ice.get_dataset()
+            logging.info("=" * 80)
+            logging.info("Computing coupled sea ice fields")
+            logging.info("=" * 80)
+            coupled_sea_ice = compute_coupled_sea_ice(
+                ocean=ocean,
+                atmos=atmos,
+                sea_ice=sea_ice,
+                config=self.coupled_sea_ice,
+                input_field_names=self.input_field_names,
+                atmos_extras=atmos_extras,
+                sea_ice_extras=input_datasets.sea_ice.extra_fields,
+            )
+        elif need_compute_ocean:
+            # Need coupled_sea_ice as input for downstream ocean computation
+            logging.info(
+                f"Reading existing coupled sea ice from {sea_ice_output_store}"
+            )
+            coupled_sea_ice = xr.open_zarr(sea_ice_output_store)
+        else:
+            coupled_sea_ice = None
+
+        # Stage 2: Coupled ocean — compute or read from existing zarr
         coupled_ocean: xr.Dataset | None = None
-        coupled_atmos: xr.Dataset | None = None
-
-        if compute_ocean:
+        if need_compute_ocean:
             assert self.coupled_sea_surface is not None
+            assert ocean is not None
+            assert coupled_sea_ice is not None
             logging.info("=" * 80)
             logging.info("Computing coupled ocean fields")
             logging.info("=" * 80)
-            # Validation ensures ocean is not None if coupled_sea_surface is set
-            assert ocean is not None
             coupled_ocean = compute_coupled_ocean(
                 ocean=ocean,
                 atmos=atmos,
@@ -554,15 +579,20 @@ class CoupledDatasetsConfig:
                 input_field_names=self.input_field_names,
                 extras=input_datasets.ocean.extra_fields,
             )
+        elif compute_ocean and need_compute_atmos:
+            # Need coupled_ocean as input for downstream atmosphere computation
+            logging.info(f"Reading existing coupled ocean from {ocean_output_store}")
+            coupled_ocean = xr.open_zarr(ocean_output_store)
 
-        if compute_atmos:
+        # Stage 3: Coupled atmosphere — compute if needed
+        coupled_atmos: xr.Dataset | None = None
+        if need_compute_atmos:
             assert self.coupled_ts is not None
+            assert ocean is not None
+            assert coupled_ocean is not None
             logging.info("=" * 80)
             logging.info("Computing coupled atmosphere fields")
             logging.info("=" * 80)
-            # Validation ensures ocean/coupled_ocean are set if coupled_ts is set
-            assert ocean is not None
-            assert coupled_ocean is not None
             coupled_atmos = compute_coupled_atmosphere(
                 atmos=atmos,
                 ocean=ocean,
@@ -574,14 +604,15 @@ class CoupledDatasetsConfig:
 
         if subsample:
             tdim = self.input_field_names.time_dim
-            if coupled_ocean is not None:
-                logging.info(f"Subsampling coupled ocean to 73 timesteps")
+            if need_compute_ocean and coupled_ocean is not None:
+                logging.info("Subsampling coupled ocean to 73 timesteps")
                 coupled_ocean = coupled_ocean.isel({tdim: slice(None, 73)})
-            if coupled_atmos is not None:
-                logging.info(f"Subsampling coupled atmosphere to 1460 timesteps")
+            if need_compute_atmos and coupled_atmos is not None:
+                logging.info("Subsampling coupled atmosphere to 1460 timesteps")
                 coupled_atmos = coupled_atmos.isel({tdim: slice(None, 365 * 4)})
-            logging.info(f"Subsampling coupled sea ice to 1460 timesteps")
-            coupled_sea_ice = coupled_sea_ice.isel({tdim: slice(None, 365 * 4)})
+            if need_compute_sea_ice and coupled_sea_ice is not None:
+                logging.info("Subsampling coupled sea ice to 1460 timesteps")
+                coupled_sea_ice = coupled_sea_ice.isel({tdim: slice(None, 365 * 4)})
 
         if debug:
             with xr.set_options(display_max_rows=500):
@@ -594,7 +625,7 @@ class CoupledDatasetsConfig:
                 logging.info("Debug mode: printing coupled sea ice dataset")
                 print(coupled_sea_ice)
         else:
-            if not sea_ice_exists:
+            if not sea_ice_exists and coupled_sea_ice is not None:
                 self.output_writer.write(coupled_sea_ice, sea_ice_output_store)
 
             if not atmos_exists and coupled_atmos is not None:
