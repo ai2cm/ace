@@ -17,9 +17,13 @@ from fme.core.typing_ import TensorDict
 class BenchmarkResult:
     memory: MemoryResult
     timer: TimerResult
+    diagnostics: dict[str, float] = dataclasses.field(default_factory=dict)
 
     def __repr__(self) -> str:
-        return f"BenchmarkResult(memory={self.memory}, timer={self.timer})"
+        return (
+            f"BenchmarkResult(memory={self.memory}, timer={self.timer}, "
+            f"diagnostics={self.diagnostics})"
+        )
 
     def asdict(self) -> dict:
         return dataclasses.asdict(self)
@@ -261,13 +265,20 @@ class BenchmarkABC(abc.ABC):
         for _ in range(warmup):
             benchmark.run_instance(null_timer)
         timer = CUDATimer()
+        result_dict: TensorDict = {}
         with benchmark_memory() as bm:
             for _ in range(iters):
                 with timer:
-                    benchmark.run_instance(timer)
+                    result_dict = benchmark.run_instance(timer)
+        diagnostics = {
+            k: v.item()
+            for k, v in result_dict.items()
+            if k != "output" and v.numel() == 1
+        }
         return BenchmarkResult(
             timer=timer.result,
             memory=bm.result,
+            diagnostics=diagnostics,
         )
 
     @classmethod
