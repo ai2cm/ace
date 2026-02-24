@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 import torch
 import torch.linalg
+import torch.nn.functional as F
 
 from fme.core.device import get_device
 from fme.core.ensemble import get_crps, get_energy_score
@@ -306,28 +307,45 @@ class FiniteDifferenceCRPSLoss(torch.nn.Module):
     which helps with representations of horizontal stochastic structures.
     """
 
-    def __init__(self, alpha: float):
+    def __init__(self, alpha: float, levels: int = 1):
         super().__init__()
         self.alpha = alpha
+        self.levels = levels
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        x_diff_lat = x[:, :, 1:, :] - x[:, :, :-1, :]
-        y_diff_lat = y[:, :, 1:, :] - y[:, :, :-1, :]
-        crps_lat = get_crps(x_diff_lat, y_diff_lat, alpha=self.alpha).mean()
-        # roll on lon because the axis is circular
-        x_diff_lon = torch.roll(x, shifts=-1, dims=-1) - x
-        y_diff_lon = torch.roll(y, shifts=-1, dims=-1) - y
-        crps_lon = get_crps(x_diff_lon, y_diff_lon, alpha=self.alpha).mean()
-        return 0.5 * (crps_lat + crps_lon)
+        return (
+            _get_finite_difference_crps_loss(x, y, self.alpha, levels=self.levels)
+            / self.levels
+        )
+
+
+def _get_finite_difference_crps_loss(
+    x: torch.Tensor, y: torch.Tensor, alpha: float, levels: int
+) -> torch.Tensor:
+    x_diff_lat = x[:, :, 1:, :] - x[:, :, :-1, :]
+    y_diff_lat = y[:, :, 1:, :] - y[:, :, :-1, :]
+    crps_lat = get_crps(x_diff_lat, y_diff_lat, alpha=alpha).mean()
+    # roll on lon because the axis is circular
+    x_diff_lon = torch.roll(x, shifts=-1, dims=-1) - x
+    y_diff_lon = torch.roll(y, shifts=-1, dims=-1) - y
+    crps_lon = get_crps(x_diff_lon, y_diff_lon, alpha=alpha).mean()
+    level_crps = 0.5 * (crps_lat + crps_lon)
+    if levels > 1:
+        x_coarse = F.avg_pool2d(x, kernel_size=2, stride=2)
+        y_coarse = F.avg_pool2d(y, kernel_size=2, stride=2)
+        return level_crps + _get_finite_difference_crps_loss(
+            x_coarse, y_coarse, alpha=alpha, levels=levels - 1
+        )
 
 
 class EnsembleLoss(torch.nn.Module):
     def __init__(
         self,
         crps_weight: float,
-        finite_difference_crps_weight: float,
         energy_score_weight: float,
         sht: Callable[[torch.Tensor], torch.Tensor],
+        finite_difference_crps_weight: float = 0.0,
+        finite_difference_crps_levels: int = 1,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -343,7 +361,9 @@ class EnsembleLoss(torch.nn.Module):
         self.crps_loss = CRPSLoss(alpha=0.95)
         if finite_difference_crps_weight > 0:
             self.diff_crps_loss: FiniteDifferenceCRPSLoss | None = (
-                FiniteDifferenceCRPSLoss(alpha=0.95)
+                FiniteDifferenceCRPSLoss(
+                    alpha=1.0, levels=finite_difference_crps_levels
+                )
             )
         else:
             self.diff_crps_loss = None
