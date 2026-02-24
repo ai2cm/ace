@@ -86,6 +86,8 @@ while read PRETRAINING; do
     RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f14)
     WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f15)
     OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
+    EXISTING_RESULTS_ATMOS_DATASET=$(echo "$PRETRAINING" | cut -d"|" -f17)
+    EXISTING_RESULTS_OCEAN_DATASET=$(echo "$PRETRAINING" | cut -d"|" -f18)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -101,11 +103,18 @@ while read PRETRAINING; do
     JOB_GROUP="${GROUP}"
     JOB_NAME=$(build_job_name "$JOB_GROUP" "$TAG" "train")
 
-    # Get experiment IDs and datasets
-    ATMOS_EXPER_ID=$(get_experiment_from_wandb "$ATMOS_PROJECT" "$ATMOS_WANDB_ID")
-    OCEAN_EXPER_ID=$(get_experiment_from_wandb "$OCEAN_PROJECT" "$OCEAN_WANDB_ID")
-    EXISTING_RESULTS_ATMOS_DATASET=$(get_beaker_dataset_from_experiment "$ATMOS_EXPER_ID")
-    EXISTING_RESULTS_OCEAN_DATASET=$(get_beaker_dataset_from_experiment "$OCEAN_EXPER_ID")
+    if [[ -z "$EXISTING_RESULTS_ATMOS_DATASET" ]]; then
+        ATMOS_EXPER_ID=$(get_experiment_from_wandb "$ATMOS_PROJECT" "$ATMOS_WANDB_ID")
+        EXISTING_RESULTS_ATMOS_DATASET=$(get_beaker_dataset_from_experiment "$ATMOS_EXPER_ID")
+    else
+        ATMOS_EXPER_ID="Not-used"
+    fi
+    if [[ -z "$EXISTING_RESULTS_OCEAN_DATASET" ]]; then
+        OCEAN_EXPER_ID=$(get_experiment_from_wandb "$OCEAN_PROJECT" "$OCEAN_WANDB_ID")
+        EXISTING_RESULTS_OCEAN_DATASET=$(get_beaker_dataset_from_experiment "$OCEAN_EXPER_ID")
+    else
+        OCEAN_EXPER_ID="Not-used"
+    fi
 
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"
