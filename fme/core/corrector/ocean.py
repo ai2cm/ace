@@ -19,13 +19,23 @@ from fme.core.typing_ import TensorDict, TensorMapping
 class SeaIceFractionConfig:
     """Correct predicted sea_ice_fraction to ensure it is always in 0-1, and
     land_fraction + sea_ice_fraction + ocean_fraction = 1. After
-    sea_ice_fraction is corrected, if the sea_ice_thickness_name is provided
-    it will be set to 0 everywhere the sea_ice_fraction is 0.
+    sea_ice_fraction is corrected, all variables listed in
+    zero_where_ice_free_names will be set to 0 everywhere
+    sea_ice_fraction is 0.
+
+    Parameters:
+        sea_ice_fraction_name: Name of the sea ice fraction variable.
+        land_fraction_name: Name of the land fraction variable.
+        zero_where_ice_free_names: List of variable names to set to 0
+            wherever sea_ice_fraction is 0.
+        remove_negative_ocean_fraction: If True, reduce sea_ice_fraction
+            to prevent ocean_fraction (1 - sea_ice_fraction - land_fraction)
+            from being negative.
     """
 
     sea_ice_fraction_name: str
     land_fraction_name: str
-    sea_ice_thickness_name: str | None = None
+    zero_where_ice_free_names: list[str] = dataclasses.field(default_factory=list)
     remove_negative_ocean_fraction: bool = True
 
     def __call__(
@@ -43,10 +53,8 @@ class SeaIceFractionConfig:
             )
             negative_ocean_fraction = negative_ocean_fraction.clip(max=0)
             out[self.sea_ice_fraction_name] += negative_ocean_fraction
-        if self.sea_ice_thickness_name:
-            thickness = gen_data[self.sea_ice_thickness_name]
-            thickness = thickness * (out[self.sea_ice_fraction_name] > 0.0)
-            out[self.sea_ice_thickness_name] = thickness
+        for name in self.zero_where_ice_free_names:
+            out[name] = gen_data[name] * (out[self.sea_ice_fraction_name] > 0.0)
         return out
 
 
@@ -99,6 +107,14 @@ class OceanCorrectorConfig:
                 )
             else:
                 state_copy["ocean_heat_content_correction"] = None
+        if "sea_ice_fraction_correction" in state_copy:
+            sif = state_copy["sea_ice_fraction_correction"]
+            if isinstance(sif, dict) and "sea_ice_thickness_name" in sif:
+                thickness_name = sif.pop("sea_ice_thickness_name")
+                if thickness_name is not None:
+                    sif.setdefault("zero_where_ice_free_names", []).append(
+                        thickness_name
+                    )
         return state_copy
 
 
@@ -187,13 +203,22 @@ def _force_conserve_ocean_heat_content(
         name="ocean_heat_content",
     )
     try:
+        # First priority: pre-weighted heat flux in gen_data
         net_energy_flux_into_ocean = (
-            gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
-        ) * forcing.sea_surface_fraction
+            gen.net_downward_surface_heat_flux_total_area
+            + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
+        )
     except KeyError:
-        net_energy_flux_into_ocean = (
-            input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
-        ) * forcing.sea_surface_fraction
+        try:
+            # Second priority: standard heat flux in gen_data
+            net_energy_flux_into_ocean = (
+                gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+            ) * forcing.sea_surface_fraction
+        except KeyError:
+            # Third priority: standard heat flux in input_data
+            net_energy_flux_into_ocean = (
+                input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+            ) * forcing.sea_surface_fraction
     energy_flux_global_mean = area_weighted_mean(
         net_energy_flux_into_ocean,
         keepdim=True,
