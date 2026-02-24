@@ -321,11 +321,29 @@ class FiniteDifferenceCRPSLoss(torch.nn.Module):
         )
 
 
+def _avg_pool_5d(x: torch.Tensor) -> torch.Tensor:
+    """
+    Helper function to apply 2D average pooling
+    to the last two dimensions of a 5D tensor.
+    """
+    n_samples, n_ensemble, n_channels, n_lat, n_lon = x.shape
+    x_reshaped = x.view(-1, 1, n_lat, n_lon)
+    x_pooled = F.avg_pool2d(x_reshaped, kernel_size=2, stride=2)
+    new_n_lat, new_n_lon = x_pooled.shape[-2:]
+    return x_pooled.view(n_samples, n_ensemble, n_channels, new_n_lat, new_n_lon)
+
+
 def _get_finite_difference_crps_loss(
     x: torch.Tensor, y: torch.Tensor, alpha: float, levels: int
 ) -> torch.Tensor:
-    x_diff_lat = x[:, :, 1:, :] - x[:, :, :-1, :]
-    y_diff_lat = y[:, :, 1:, :] - y[:, :, :-1, :]
+    if len(x.shape) != 5:
+        raise ValueError(
+            "Expected input tensors to have shape (n_samples, "
+            "n_ensemble, n_channels, n_lat, n_lon), "
+            f"but got shape {x.shape}"
+        )
+    x_diff_lat = x[..., 1:, :] - x[..., :-1, :]
+    y_diff_lat = y[..., 1:, :] - y[..., :-1, :]
     crps_lat = get_crps(x_diff_lat, y_diff_lat, alpha=alpha).mean()
     # roll on lon because the axis is circular
     x_diff_lon = torch.roll(x, shifts=-1, dims=-1) - x
@@ -333,11 +351,12 @@ def _get_finite_difference_crps_loss(
     crps_lon = get_crps(x_diff_lon, y_diff_lon, alpha=alpha).mean()
     level_crps = 0.5 * (crps_lat + crps_lon)
     if levels > 1:
-        x_coarse = F.avg_pool2d(x, kernel_size=2, stride=2)
-        y_coarse = F.avg_pool2d(y, kernel_size=2, stride=2)
+        x_coarse = _avg_pool_5d(x)
+        y_coarse = _avg_pool_5d(y)
         return level_crps + _get_finite_difference_crps_loss(
             x_coarse, y_coarse, alpha=alpha, levels=levels - 1
         )
+    return level_crps
 
 
 def laplacian(
