@@ -251,6 +251,19 @@ class SongUNetv2BenchmarkBf16(SongUNetv2Benchmark):
             use_amp_bf16=True,
         )
 
+    @classmethod
+    def new_for_regression(cls) -> Self | None:
+        return cls._new_with_params(
+            img_resolution=16,
+            B=2,
+            in_channels=3,
+            out_channels=3,
+            label_dim=0,
+            model_channels=4,
+            channel_mult=[1, 2, 2],
+            use_amp_bf16=True,
+        )
+
 
 register_benchmark("songunetv2")(SongUNetv2Benchmark)
 register_benchmark("songunetv2_bf16")(SongUNetv2BenchmarkBf16)
