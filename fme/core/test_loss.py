@@ -8,6 +8,7 @@ from fme.core.loss import (
     AreaWeightedMSELoss,
     CRPSLoss,
     EnergyScoreLoss,
+    FiniteDifferenceCRPSLoss,
     GlobalMeanLoss,
     LossConfig,
     StepLossConfig,
@@ -40,8 +41,9 @@ def test_spectral_energy_score(very_fast_only: bool):
     torch.manual_seed(0)
     DEVICE = get_device()
     n_lat, n_lon = 16, 32
-    pred = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
-    target = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
+    n_channels = 1
+    pred = torch.rand(10000, 2, n_channels, n_lat, n_lon, device=DEVICE)
+    target = torch.rand(10000, 2, n_channels, n_lat, n_lon, device=DEVICE)
     sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
     crps_loss = CRPSLoss(alpha=0.95)
@@ -49,13 +51,26 @@ def test_spectral_energy_score(very_fast_only: bool):
     crps = crps_loss(pred, target)
 
     n_lat2, n_lon2 = 32, 64
-    pred = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
-    target = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
+    pred = torch.rand(10000, 2, n_channels, n_lat2, n_lon2, device=DEVICE)
+    target = torch.rand(10000, 2, n_channels, n_lat2, n_lon2, device=DEVICE)
     sht = LatLonOperations(torch.ones((n_lat2, n_lon2), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
     larger_domain_score = spectral_energy_score_loss(pred, target)
     torch.testing.assert_close(larger_domain_score, score, rtol=0.05, atol=0.0)
     torch.testing.assert_close(score, crps, rtol=0.5, atol=0.0)
+
+
+def test_finite_difference_crps_loss():
+    device = get_device()
+    loss = FiniteDifferenceCRPSLoss(alpha=1, levels=2)
+    n_lat, n_lon = 16, 32
+    n_channels = 1
+    pred = torch.rand(100, 2, n_channels, n_lat, n_lon, device=device)
+    target = torch.rand(100, 2, n_channels, n_lat, n_lon, device=device)
+    result = loss(pred, target)
+    assert result.shape == ()
+    assert isinstance(result, torch.Tensor)
+    assert not torch.isnan(result)
 
 
 def test_loss_of_zeros_is_variance():
