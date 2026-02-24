@@ -65,6 +65,7 @@ def _save_netcdf(
     timestep_size=1,
     timestep_start=0,
     nz=3,
+    masked_fill_value: float = float("nan"),
 ):
     data_vars = {}
     dim_sizes_without_time = {k: v for k, v in dim_sizes.items() if k != "time"}
@@ -91,22 +92,22 @@ def _save_netcdf(
             data_vars[f"ak_{i}"] = float(i)
             data_vars[f"bk_{i}"] = float(i + 1)
     elif realm == "ocean":
+        if "mask_0" in data_vars and "mask_2d" not in data_vars:
+            data_vars["mask_2d"] = data_vars["mask_0"]
         if "mask_2d" in data_vars and "mask_0" in data_vars:
             data_vars["mask_2d"] = data_vars["mask_0"]
         if "mask_2d" in data_vars or "mask_0" in data_vars:
             mask = data_vars.get("mask_2d", data_vars.get("mask_0"))
             assert mask is not None
-            # add nans to 2D vars
             names = [
                 name
                 for name in data_vars
                 if re.search(r"_\d+$", name) is None and name != "mask_2d"
             ]
             for name in names:
-                data_vars[name] = data_vars[name].where(mask == 1, float("nan"))
+                data_vars[name] = data_vars[name].where(mask == 1, masked_fill_value)
         for i in range(nz):
             if f"mask_{i}" in data_vars:
-                # add nans to 3D vars
                 mask = data_vars[f"mask_{i}"]
                 names = [
                     name
@@ -114,7 +115,9 @@ def _save_netcdf(
                     if name != f"mask_{i}" and name.endswith(f"_{i}")
                 ]
                 for name in names:
-                    data_vars[name] = data_vars[name].where(mask == 1, float("nan"))
+                    data_vars[name] = data_vars[name].where(
+                        mask == 1, masked_fill_value
+                    )
             data_vars[f"idepth_{i}"] = float(i)
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
@@ -229,6 +232,7 @@ def create_coupled_data_on_disk(
     n_levels_ocean: int = 2,
     n_levels_atmosphere: int = 2,
     ocean_timestep_size_in_days: int | None = None,
+    masked_fill_value: float = float("nan"),
 ) -> MockCoupledData:
     """Create synthetic coupled ocean-atmosphere data on disk for testing.
 
@@ -256,6 +260,9 @@ def create_coupled_data_on_disk(
         n_levels_atmosphere: Number of atmosphere vertical levels. Default is 2.
         ocean_timestep_size_in_days: The ocean timestep size, in days. If None, then
             n_forward_times_ocean must evenly divide n_forward_times_atmosphere.
+        masked_fill_value: Value to use for points where the mask is 0 (e.g. land).
+            Default is NaN. Use 0.0 when metrics must stay finite (e.g. prediction vs
+            target comparison tests).
 
     Returns:
         MockCoupledData containing the created ocean and atmosphere datasets,
@@ -295,6 +302,7 @@ def create_coupled_data_on_disk(
         timestep_size=ocean_timestep_size,
         nz=n_levels_ocean + 1,
         timestep_start=0,  # ocean start time fixed
+        masked_fill_value=masked_fill_value,
     )
 
     atmos_dir = data_dir / "atmos"
@@ -318,6 +326,7 @@ def create_coupled_data_on_disk(
         timestep_size=1,
         timestep_start=timestep_start_atmosphere,
         nz=n_levels_atmosphere + 1,
+        masked_fill_value=masked_fill_value,
     )
     # _save_netcdf creates integer times in units of "days since 1970-01-01"
     timedelta_atmos = "1D"
