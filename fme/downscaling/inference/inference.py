@@ -1,13 +1,12 @@
+import dataclasses
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 
 import dacite
 import torch
 import yaml
 
-from fme.core import logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 
 from ..data import DataLoaderConfig, StaticInputs
@@ -232,13 +231,9 @@ class InferenceConfig:
     patch: PatchPredictionConfig = field(default_factory=PatchPredictionConfig)
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(self, resumable: bool = False, **kwargs):
-        config = to_flat_dict(asdict(self))
-        env_vars = logging_utils.retrieve_env_vars()
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=True
         )
 
     def build(self) -> Downscaler:
@@ -267,9 +262,6 @@ def main(config_path: str):
     prepare_directory(generation_config.experiment_dir, config)
 
     generation_config.configure_logging(log_filename="out.log")
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    generation_config.configure_wandb(resumable=True, notes=beaker_url)
 
     logging.info("Starting downscaling generation...")
     downscaler = generation_config.build()
