@@ -10,8 +10,8 @@ ema:
 max_epochs: 20
 n_coupled_steps: 4
 inference:
-  n_coupled_steps: 730
-  coupled_steps_in_memory: 8
+  n_coupled_steps: 876
+  coupled_steps_in_memory: 12
   loader:
     num_data_workers: 1
     dataset:
@@ -33,14 +33,14 @@ inference:
           engine: zarr
     start_indices:
       times:
-      - '0421-01-03T12:00:00'
-      - '0431-01-03T12:00:00'
-      - '0441-01-03T12:00:00'
-      - '0451-01-03T12:00:00'
+      - '0401-01-03T12:00:00'
+      - '0413-01-03T12:00:00'
+      - '0425-01-03T12:00:00'
+      - '0437-01-03T12:00:00'
+      - '0449-01-03T12:00:00'
       - '0461-01-03T12:00:00'
-      - '0471-01-03T12:00:00'
-      - '0481-01-03T12:00:00'
-      - '0488-12-04T12:00:00'
+      - '0473-01-03T12:00:00'
+      - '0484-01-03T12:00:00'
   aggregator:
     log_zonal_mean_images: false
     log_histograms: false
@@ -55,67 +55,67 @@ train_loader:
   num_data_workers: 2
   prefetch_factor: 2
   dataset:
-    - ocean:
-        merge:
-        - data_path: /climate-default
-          file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
-          engine: zarr
-          subset:
-            start_time: '0421-01-03T12:00:00'
-            stop_time: '0499-12-29T12:00:00'
-        - data_path: /climate-default
-          file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
-          engine: zarr
-          subset:
-            start_time: '0421-01-03T12:00:00'
-            stop_time: '0499-12-29T12:00:00'
-      atmosphere:
-        merge:
-        - data_path: /climate-default
-          file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
-          engine: zarr
-          subset:
-            start_time: '0421-01-03T12:00:00'
-            stop_time: '0499-12-29T12:00:00'
-        - data_path: /climate-default
-          file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
-          engine: zarr
-          subset:
-            start_time: '0421-01-03T12:00:00'
-            stop_time: '0499-12-29T12:00:00'
+    ocean:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0401-01-03T12:00:00'
+          stop_time: '0496-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
+        engine: zarr
+        subset:
+          start_time: '0401-01-03T12:00:00'
+          stop_time: '0496-01-01T00:00:00'
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+        engine: zarr
+        subset:
+          start_time: '0401-01-03T12:00:00'
+          stop_time: '0496-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+        engine: zarr
+        subset:
+          start_time: '0401-01-03T12:00:00'
+          stop_time: '0496-01-01T00:00:00'
 validation_loader:
   batch_size: 16
   num_data_workers: 2
   prefetch_factor: 2
   dataset:
-    - ocean:
-        merge:
-        - data_path: /climate-default
-          file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
-          engine: zarr
-          subset:
-            start_time: '0402-01-03T12:00:00'
-            stop_time: '0407-01-03T12:00:00'
-        - data_path: /climate-default
-          file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
-          engine: zarr
-          subset:
-            start_time: '0402-01-03T12:00:00'
-            stop_time: '0407-01-03T12:00:00'
-      atmosphere:
-        merge:
-        - data_path: /climate-default
-          file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
-          engine: zarr
-          subset:
-            start_time: '0402-01-03T12:00:00'
-            stop_time: '0407-01-03T12:00:00'
-        - data_path: /climate-default
-          file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
-          engine: zarr
-          subset:
-            start_time: '0402-01-03T12:00:00'
-            stop_time: '0407-01-03T12:00:00'
+    ocean:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0496-01-01T06:00:00'
+          stop_time: '0499-12-31T18:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
+        engine: zarr
+        subset:
+          start_time: '0496-01-01T06:00:00'
+          stop_time: '0499-12-31T18:00:00'
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
+        engine: zarr
+        subset:
+          start_time: '0496-01-01T06:00:00'
+          stop_time: '0499-12-31T18:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+        engine: zarr
+        subset:
+          start_time: '0496-01-01T06:00:00'
+          stop_time: '0499-12-31T18:00:00'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: true
@@ -124,21 +124,46 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-stepper:
+  scheduler:
+    type: CosineAnnealingLR
+train_stepper:
   parameter_init:
     checkpoint_path: /ckpt.tar
   ocean:
-    timedelta: 5D
+    parameter_init:
+      weights_path: null # required
     loss_contributions:
       n_steps: 4
       weight: 1.0
-    stepper:
-      parameter_init:
-        weights_path: null # required
+    loss:
+      type: MSE
   atmosphere:
-    timedelta: 6h
+    parameter_init:
+      weights_path: null
     loss_contributions:
       n_steps: 2
-    stepper:
-      parameter_init:
-        weights_path: null # required
+      weight: 1.0
+    loss:
+      type: MSE
+      weights:
+        T_0: 0.5
+        T_1: 0.5
+        U_0: 0.5
+        V_0: 0.5
+        specific_total_water_0: 0.25
+        specific_total_water_1: 0.25
+        specific_total_water_2: 0.5
+        surface_precipitation_rate: 2
+        FLDS: 2
+        surface_upward_longwave_flux: 5
+        surface_upward_shortwave_flux: 2
+        FSDS: 2
+        top_of_atmos_upward_shortwave_flux: 2
+        tendency_of_total_water_path_due_to_advection: 0.5
+stepper:
+  ocean:
+    timedelta: 5D
+    # stepper added by job_runner/create_coupled_train_config.sh
+  atmosphere:
+    timedelta: 6h
+    # stepper added by job_runner/create_coupled_train_config.sh
