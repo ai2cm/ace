@@ -132,7 +132,7 @@ class TrainConfig:
     train_loader: CoupledDataLoaderConfig
     validation_loader: CoupledDataLoaderConfig
     stepper: CoupledStepperConfig
-    train_stepper: CoupledTrainStepperConfig
+    stepper_training: CoupledTrainStepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
@@ -248,7 +248,7 @@ class TrainBuilders:
         return self.config.stepper.ocean_timestep
 
     def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledTrainStepper:
-        return self.config.train_stepper.get_train_stepper(
+        return self.config.stepper_training.get_train_stepper(
             stepper_config=self.config.stepper,
             dataset_info=dataset_info,
         )
