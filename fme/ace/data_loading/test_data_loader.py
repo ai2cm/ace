@@ -456,7 +456,11 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
 @pytest.mark.parametrize(
     "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
 )
-def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver: bool):
+def test_inference_data_loader(
+    tmp_path, num_data_workers: int, force_forkserver: bool, very_fast_only: bool
+):
+    if very_fast_only and force_forkserver:
+        pytest.skip("Skipping non-fast tests")
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
