@@ -472,6 +472,7 @@ def get_step(
     return selector.get_step(dataset_info, init_weights)
 
 
+@pytest.mark.parallel
 def test_label_conditioned_step():
     selector = get_label_conditioned_selector()
     step = get_step(selector, DEFAULT_IMG_SHAPE, all_labels={"a", "b"})
@@ -635,6 +636,7 @@ def test_load_is_required_for_path_config(
         ),
     ],
 )
+@pytest.mark.parallel
 def test_input_output_names_secondary_decoder_conflict(conflict: str):
     input_names = ["input"]
     output_names = ["output"]
