@@ -8,9 +8,9 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 
 1pct_nosmooth_0256to0350-hfds_total_area|rs3|01KGV4DN6T217MQF10K4P2R6D2|trained|best_inference_ckpt|high|--not-preemptible
 
-ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs0|01KH20ABJSVBBS28GFBPRHAQC5|run_ICx1|best_inference_ckpt|high|--not-preemptible
+ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs0|01KH20ABJSVBBS28GFBPRHAQC5|run_insample|best_inference_ckpt|high|--not-preemptible
 
-ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs3|01KH20ATM7CWGCPGYAW5TMSNWW|run_ICx1|best_inference_ckpt|high|--not-preemptible
+ft_correctOHC-1pct_nosmooth_0256to0350_hfds_total_area|rs3|01KH20ATM7CWGCPGYAW5TMSNWW|run_insample|best_inference_ckpt|high|--not-preemptible
 
 resume-1pct_nosmooth_0256to0350-hfds_total_area|rs0|01KH88KJ008NHVE7J6B96YKQSB|training|best_inference_ckpt|high|--not-preemptible
 
