@@ -64,3 +64,41 @@ def test_conditional_layer_norm(
             atol=1e-3,
             rtol=0,
         )
+
+
+@pytest.mark.parametrize("embed_dim_scalar", [9, 0])
+@pytest.mark.parametrize("embed_dim_noise", [10, 0])
+@pytest.mark.parametrize("embed_dim_labels", [11, 0])
+@pytest.mark.parametrize("embed_dim_pos", [18, 0])
+def test_context_round_trip(
+    embed_dim_scalar: int,
+    embed_dim_labels: int,
+    embed_dim_noise: int,
+    embed_dim_pos: int,
+):
+    img_shape = (8, 16)
+    device = get_device()
+    context_embedding_scalar = torch.randn(1, embed_dim_scalar, device=device)
+    context_embedding_labels = torch.randn(1, embed_dim_labels, device=device)
+    context_embedding_noise = torch.randn(1, embed_dim_noise, *img_shape, device=device)
+    context_embedding_pos = torch.randn(1, embed_dim_pos, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=context_embedding_scalar,
+        noise=context_embedding_noise,
+        labels=context_embedding_labels,
+        embedding_pos=context_embedding_pos,
+    )
+    round_trip = Context.from_dict(context.asdict())
+    for attr_name in dir(context):
+        if not attr_name.startswith("_") and not callable(getattr(context, attr_name)):
+            original = getattr(context, attr_name)
+            round_tripped = getattr(round_trip, attr_name)
+            if original is None:
+                assert round_tripped is None
+            elif isinstance(original, torch.Tensor):
+                torch.testing.assert_close(original, round_tripped)
+            else:
+                raise NotImplementedError(
+                    f"Unsupported attribute type for {attr_name}: {type(original)}, "
+                    "update the test if this is expected"
+                )
