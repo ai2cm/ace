@@ -61,13 +61,13 @@ train_loader:
         engine: zarr
         subset:
           start_time: '0401-01-03T12:00:00'
-          stop_time: '0496-01-01T00:00:00'
+          stop_time: '0496-01-03T12:00:00'
       - data_path: /climate-default
         file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
         engine: zarr
         subset:
           start_time: '0401-01-03T12:00:00'
-          stop_time: '0496-01-01T00:00:00'
+          stop_time: '0496-01-03T12:00:00'
     atmosphere:
       merge:
       - data_path: /climate-default
@@ -75,13 +75,13 @@ train_loader:
         engine: zarr
         subset:
           start_time: '0401-01-03T12:00:00'
-          stop_time: '0496-01-01T00:00:00'
+          stop_time: '0496-01-03T12:00:00'
       - data_path: /climate-default
         file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
         engine: zarr
         subset:
           start_time: '0401-01-03T12:00:00'
-          stop_time: '0496-01-01T00:00:00'
+          stop_time: '0496-01-03T12:00:00'
 validation_loader:
   batch_size: 16
   num_data_workers: 4
@@ -93,28 +93,28 @@ validation_loader:
         file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
         engine: zarr
         subset:
-          start_time: '0496-01-01T06:00:00'
-          stop_time: '0499-12-31T18:00:00'
+          start_time: '0496-01-03T12:00:00'
+          stop_time: '0499-12-29T12:00:00'
       - data_path: /climate-default
         file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
         engine: zarr
         subset:
-          start_time: '0496-01-01T06:00:00'
-          stop_time: '0499-12-31T18:00:00'
+          start_time: '0496-01-03T12:00:00'
+          stop_time: '0499-12-29T12:00:00'
     atmosphere:
       merge:
       - data_path: /climate-default
         file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
         engine: zarr
         subset:
-          start_time: '0496-01-01T06:00:00'
-          stop_time: '0499-12-31T18:00:00'
+          start_time: '0496-01-03T12:00:00'
+          stop_time: '0499-12-29T12:00:00'
       - data_path: /climate-default
         file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
         engine: zarr
         subset:
-          start_time: '0496-01-01T06:00:00'
-          stop_time: '0499-12-31T18:00:00'
+          start_time: '0496-01-03T12:00:00'
+          stop_time: '0499-12-29T12:00:00'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
