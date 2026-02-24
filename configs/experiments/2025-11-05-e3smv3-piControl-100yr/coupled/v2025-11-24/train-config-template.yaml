@@ -19,27 +19,17 @@ inference:
         - data_path: /climate-default
           file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
           engine: zarr
-          subset:
-            start_time: '0401-01-03T12:00:00'
         - data_path: /climate-default
           file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
           engine: zarr
-          subset:
-            start_time: '0401-01-03T12:00:00'
       atmosphere:
         merge:
         - data_path: /climate-default
           file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
           engine: zarr
-          subset:
-            # NOTE: this is required to align the atmosphere and ocean start times
-            start_time: '0401-01-03T12:00:00' # earlier times nan sea ice
         - data_path: /climate-default
           file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
           engine: zarr
-          subset:
-            # NOTE: this is required to align the atmosphere and ocean start times
-            start_time: '0401-01-03T12:00:00'
     start_indices:
       times:
       - '0401-01-03T12:00:00'
