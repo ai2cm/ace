@@ -40,7 +40,9 @@ BENCHMARKS = get_benchmarks()
 
 
 @pytest.mark.parametrize("benchmark_name", BENCHMARKS.keys())
-def test_regression(benchmark_name: str):
+def test_regression(benchmark_name: str, very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping SongUNet benchmark regression in very_fast_only mode")
     with force_cpu():
         set_seed(0)
         benchmark_cls = BENCHMARKS[benchmark_name]
