@@ -18,6 +18,6 @@ resume_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|01KFAC2P3JSSYNZTNTG7VJKRJ
 
 1pct_nosmooth_0256to0350_correctOHC|rs1|01KFACJRNA996P6WFATJ3X7A1P|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs0|01KFC226RBWE7NKXZ0VA0DQ0N3|run_insample|best_inference_ckpt|normal|--not-preemptible
+ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs0|01KFC226RBWE7NKXZ0VA0DQ0N3|run_insample5yr|best_inference_ckpt|normal|--not-preemptible
 
-ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|01KFC22Q4Y082R52BK15AQW0SX|run_insample|best_inference_ckpt|normal|--not-preemptible
+ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds_diag|rs1|01KFC22Q4Y082R52BK15AQW0SX|run_insample5yr|best_inference_ckpt|normal|--not-preemptible
