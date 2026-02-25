@@ -1,6 +1,7 @@
 # Compute the 1940-2021 ENSO/Nino 3.4 index from the CMIP6 AMIP SST forcing data
 # Based on notebook here: github.com/ai2cm/explore/blob/master/brianh/2024-05-06-AMIP-interannual-variability/2024-07-03-compute-CMIP6-AMIP-ENSO-index.ipynb # noqa
 
+import argparse
 import dataclasses
 from datetime import timedelta
 
@@ -21,24 +22,31 @@ class RegionBounds:
     lat: tuple[int, int]
     lon: tuple[int, int]
 
-    def get_regional_average(self, ds, weights):
+    def get_regional_average(self, ds, weights, lat_dim="lat", lon_dim="lon"):
         masked = (
-            ds.where(ds.lat >= self.lat[0])
-            .where(ds.lat <= self.lat[1])
-            .where(ds.lon >= self.lon[0])
-            .where(ds.lon <= self.lon[1])
+            ds.where(ds[lat_dim] >= self.lat[0])
+            .where(ds[lat_dim] <= self.lat[1])
+            .where(ds[lon_dim] >= self.lon[0])
+            .where(ds[lon_dim] <= self.lon[1])
         )
-        return masked.weighted(weights).mean(dim=["lat", "lon"])
+        return masked.weighted(weights).mean(dim=[lat_dim, lon_dim])
 
 
-def get_ocean_mask(source, template: xr.DataArray):
+def open_dataset(path):
+    """Open a dataset from a zarr store or a netCDF file."""
+    if path.endswith(".zarr") or ".zarr/" in path:
+        return xr.open_zarr(path)
+    return xr.open_dataset(path)
+
+
+def get_ocean_mask(source, template: xr.DataArray, lat_dim="lat", lon_dim="lon"):
     """
     Get an ocean mask from the FV3GFS dataset. Regrid to the 1deg lat/lon grid
     of the SST dataset.
     """
-    ds = xr.open_zarr(source)
+    ds = open_dataset(source)
     ocean_fraction = ds.ocean_fraction.isel(time=-1).rename(
-        {"grid_xt": "lon", "grid_yt": "lat"}
+        {"grid_xt": lon_dim, "grid_yt": lat_dim}
     )
     ocean_fraction_1deg = ocean_fraction.interp_like(template).load()
     ocean_mask = xr.where(ocean_fraction_1deg > 0.5, True, False)
@@ -79,17 +87,32 @@ def get_time_trendline(da):
 
 
 def main():
-    surface_temperature = xr.open_dataset(SST_DATASET)["sea_surface_temperature"]
-    ocean_mask = get_ocean_mask(OCEAN_MASK_SOURCE, template=surface_temperature)
-    area_weights = np.cos(np.deg2rad(surface_temperature.lat))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sst-dataset", default=SST_DATASET)
+    parser.add_argument("--ocean-mask-source", default=OCEAN_MASK_SOURCE)
+    parser.add_argument("--lat-dim", default="lat")
+    parser.add_argument("--lon-dim", default="lon")
+    args = parser.parse_args()
+
+    surface_temperature = open_dataset(args.sst_dataset)["sea_surface_temperature"]
+    ocean_mask = get_ocean_mask(
+        args.ocean_mask_source,
+        template=surface_temperature,
+        lat_dim=args.lat_dim,
+        lon_dim=args.lon_dim,
+    )
+    area_weights = np.cos(np.deg2rad(surface_temperature[args.lat_dim]))
     nino34_region = RegionBounds(**NINO_REGION_BOUNDS)
     tropical_region = RegionBounds(**TROPICAL_REGION_BOUNDS)
 
     nino34_temperature = nino34_region.get_regional_average(
-        surface_temperature, area_weights
+        surface_temperature, area_weights, lat_dim=args.lat_dim, lon_dim=args.lon_dim
     )
     tropical_sst = tropical_region.get_regional_average(
-        surface_temperature, weights=(area_weights * ocean_mask)
+        surface_temperature,
+        weights=(area_weights * ocean_mask),
+        lat_dim=args.lat_dim,
+        lon_dim=args.lon_dim,
     )
     nino34_temperature_anom = nino34_temperature - tropical_sst
     nino34_temperature_anom_index = get_anomalies(
