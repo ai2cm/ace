@@ -163,17 +163,17 @@ class MaskProvider(MaskProviderABC):
             + ",\n    ]\n)"
         )
 
-    def is_compatible_with(self, other):
+    def assert_compatible_with(self, other) -> None:
         if not isinstance(other, MaskProvider):
-            return False
-        if not self.masks.keys() <= other.masks.keys():
-            return False
+            raise AssertionError(f"expected MaskProvider, got {type(other).__name__}")
+        missing_keys = self.masks.keys() - other.masks.keys()
+        if missing_keys:
+            raise AssertionError(f"mask keys {missing_keys} not found in other")
         for name, mask in self.masks.items():
             try:
                 torch.testing.assert_close(mask, other.masks[name])
             except AssertionError:
-                return False
-        return True
+                raise AssertionError(f"mask values differ for '{name}'")
 
     def to_state(self) -> dict[str, Any]:
         return {"masks": self.masks}

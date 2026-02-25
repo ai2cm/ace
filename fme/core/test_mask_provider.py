@@ -195,61 +195,70 @@ def test_mask_provider_round_trip(mask_provider: MaskProvider):
 
 
 @pytest.mark.parametrize(
-    "masks1, masks2, expected_compatible",
+    "masks1, masks2",
     [
         pytest.param(
             {"mask_temp": torch.tensor([1.0, 0.0])},
             {"mask_temp": torch.tensor([1.0, 0.0])},
-            True,
             id="equal_providers",
         ),
         pytest.param(
             {"mask_temp": torch.tensor([1.0, 0.0])},
             {"mask_temp": torch.tensor([1.0, 0.0]), "mask_humidity": torch.ones(2)},
-            True,
             id="subset_of_other",
         ),
         pytest.param(
             {},
             {"mask_temp": torch.tensor([1.0, 0.0])},
-            True,
             id="empty_self_compatible_with_any",
         ),
         pytest.param(
             {},
             {},
-            True,
             id="both_empty",
         ),
+    ],
+)
+def test_mask_provider_assert_compatible_with_compatible(masks1, masks2):
+    provider1 = MaskProvider(masks=masks1)
+    provider2 = MaskProvider(masks=masks2)
+    provider1.assert_compatible_with(provider2)
+
+
+@pytest.mark.parametrize(
+    "masks1, masks2, match",
+    [
         pytest.param(
             {"mask_temp": torch.tensor([1.0, 0.0]), "mask_humidity": torch.ones(2)},
             {"mask_temp": torch.tensor([1.0, 0.0])},
-            False,
+            "mask keys.*not found in other",
             id="self_has_extra_key",
         ),
         pytest.param(
             {"mask_temp": torch.tensor([1.0, 0.0])},
             {"mask_humidity": torch.tensor([1.0, 0.0])},
-            False,
+            "mask keys.*not found in other",
             id="disjoint_keys",
         ),
         pytest.param(
             {"mask_temp": torch.tensor([1.0, 0.0])},
             {"mask_temp": torch.tensor([0.0, 1.0])},
-            False,
+            "mask values differ for 'mask_temp'",
             id="same_keys_different_values",
         ),
     ],
 )
-def test_mask_provider_is_compatible_with(masks1, masks2, expected_compatible: bool):
+def test_mask_provider_assert_compatible_with_incompatible(masks1, masks2, match):
     provider1 = MaskProvider(masks=masks1)
     provider2 = MaskProvider(masks=masks2)
-    assert provider1.is_compatible_with(provider2) is expected_compatible
+    with pytest.raises(AssertionError, match=match):
+        provider1.assert_compatible_with(provider2)
 
 
-def test_mask_provider_is_compatible_with_non_mask_provider():
+def test_mask_provider_assert_compatible_with_non_mask_provider():
     provider = MaskProvider(masks={"mask_temp": torch.tensor([1.0, 0.0])})
-    assert provider.is_compatible_with("not a mask provider") is False
+    with pytest.raises(AssertionError, match="expected MaskProvider"):
+        provider.assert_compatible_with("not a mask provider")
 
 
 def test_null_mask_provider_update_err():
