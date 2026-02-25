@@ -14,15 +14,16 @@ CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 declare -A MODELS=( \
-    [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
-    [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
-    [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
-    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
-    [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
-    [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
-    [full-rs1]="01KHJ5EQ04XTFG46QCKX3TTAHF" \
-    [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
-    [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
+    # [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
+    [residual-predicting-energy-conserving-multi-call-rs0]="01JQNAQC4PJDX0765PEDEZ15HR" \
+    # [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
+    # [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
+    # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
+    # [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
+    # [full-rs1]="01KHJ5EQ04XTFG46QCKX3TTAHF" \
+    # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    # [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
 )
 
 OVERRIDE="n_forward_steps=28"
