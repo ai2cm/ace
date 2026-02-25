@@ -100,17 +100,12 @@ class DatasetConfig:
         _validate_variables_exist(ds, self.variable_names, self.name, self.path)
 
         ds = ds[self.variable_names]
+        # Add source path tracking to each variable's attributes
+        for variable in ds.data_vars:
+            ds[variable].attrs["source_path"] = self.path
+        
         ds = ds.rename(self.rename_map)
         return ds
-
-    def get_source_path(self, variable_name: str) -> str:
-        """Return the source path for a variable (always self.path for this class)."""
-        if variable_name not in self.variable_names:
-            raise ValueError(
-                f"Variable {variable_name} not found in dataset {self.name}. "
-                f"Available variables: {self.variable_names}"
-            )
-        return self.path
 
 
 @dataclasses.dataclass
@@ -161,23 +156,15 @@ class DatasetPerVariableConfig:
             _validate_variables_exist(ds, variable_names, self.name, path)
 
             ds = ds[variable_names]
+            
+            # Add source path tracking to each variable's attributes
+            for variable in ds.data_vars:
+                ds[variable].attrs["source_path"] = path
+            
             ds = ds.rename(self.rename_map)
             datasets.append(ds)
         combined_ds = xr.merge(datasets)
         return combined_ds
-
-    def get_source_path(self, variable_name: str) -> str:
-        """
-        Return the source path for a given variable by looking up which
-        file contains it.
-        """
-        for filename_key, variable_names in self.per_file_variables.items():
-            if variable_name in variable_names:
-                return f"{self.base_path}/{self.filename_map[filename_key]}"
-        raise ValueError(
-            f"Variable {variable_name} not found in dataset {self.name}. "
-            f"Available variables: {list(self.rename_map.keys())}"
-        )
 
 
 # =============================================================================
@@ -259,25 +246,17 @@ def main(
 
             # Load dataset with configured variables
             ds = loader.load_dataset()
-            print(f"  Loaded {len(ds.data_vars)} variables: {list(ds.data_vars)}")
-
-            # Add source path tracking to each variable's attributes
-            for variable in ds.data_vars:
-                source_path = loader.get_source_path(variable)
-                ds[variable].attrs["source_path"] = source_path
+            print(
+                f"Opened dataset of {len(ds.data_vars)} variables: {list(ds.data_vars)}"
+            )
 
             # Filter to requested variables if specified
             if variables_to_process is not None:
-                missing_vars = [
-                    var for var in variables_to_process if var not in ds.data_vars
-                ]
-                if missing_vars:
-                    raise ValueError(
-                        f"Variables {missing_vars} not found in dataset {loader.name}. "
-                        f"Available variables: {list(ds.data_vars)}"
-                    )
+                _validate_variables_exist(
+                    ds, variables_to_process, loader.name, "merged dataset"
+                )
                 ds = ds[variables_to_process]
-                print(f"  Filtered to {len(ds.data_vars)} requested variables")
+                print(f"Filtered to {variables_to_process} requested variables")
 
             # Write output or print dry-run message
             output_file = f"{output_path}/{loader.name}.zarr"
@@ -346,13 +325,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Configure dataset loaders for each resolution
+    # COARSE Is missing PRMSL
     coarse_config = DatasetConfig(
         name="100km",
         path=COARSE_RES_PATH,
         variable_names=[
             "PRATEsfc",
             "PRESsfc",
-            "PRMSL",
             "TMP2m",
             "UGRD10m",
             "VGRD10m",
@@ -368,6 +347,7 @@ if __name__ == "__main__":
         },
     )
 
+    # finer resolutions are missing land fraction
     mid_res_config = DatasetPerVariableConfig(
         name="25km",
         base_path=MED_RES_BASE_PATH,
