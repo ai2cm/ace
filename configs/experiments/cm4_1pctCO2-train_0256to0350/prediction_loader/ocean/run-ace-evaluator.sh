@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="cm4_1pctCO2_reference-ic0211_40yrs"
+JOB_NAME="cm4_1pctCO2_reference-ic0256_40yrs"
 JOB_GROUP="cm4_1pctCO2_reference"
 EXISTING_RESULTS_DATASET="01KFAC2F8DWGQ60JQF4G18HPCH" # determines variables
 CONFIG_FILENAME="ace-evaluator-config.yaml"
@@ -22,7 +22,7 @@ gantry run \
     --description 'Run prediction loader eval for CM4 ocean data' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
+    --priority high \
     --not-preemptible \
     --cluster ceres \
     --cluster jupiter \

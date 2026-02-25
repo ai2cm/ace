@@ -11,7 +11,7 @@ logging:
 loader:
   start_indices:
     times:
-      - '0211-01-03T12:00:00'
+      - '0256-01-03T12:00:00'
   dataset:
     merge:
       - data_path: /climate-default
@@ -30,7 +30,7 @@ data_writer:
 prediction_loader:
   start_indices:
     times:
-      - '0211-01-03T12:00:00'
+      - '0256-01-03T12:00:00'
   dataset:
     merge:
       - data_path: /climate-default
