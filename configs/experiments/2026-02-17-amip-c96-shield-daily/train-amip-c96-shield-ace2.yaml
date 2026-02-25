@@ -71,7 +71,7 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-stepper:
+stepper_training:
   n_ensemble: 1
   train_n_forward_steps: 2
   optimize_last_step_only: false
@@ -96,9 +96,7 @@ stepper:
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
       PRESsfc: 3
-    kwargs:
-      crps_weight: 0.9
-      energy_score_weight: 0.1
+stepper:
   step:
     type: single_module
     config:
