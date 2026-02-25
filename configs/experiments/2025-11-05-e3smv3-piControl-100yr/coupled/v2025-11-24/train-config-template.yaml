@@ -164,6 +164,7 @@ stepper:
     timedelta: 5D
     stepper:
       step:
+        type: single_module
         config:
           normalization:
             network:
@@ -174,6 +175,7 @@ stepper:
     timedelta: 6h
     stepper:
       step:
+        type: single_module
         config:
           normalization:
             network:
