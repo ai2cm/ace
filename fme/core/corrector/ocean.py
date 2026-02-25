@@ -107,6 +107,14 @@ class OceanCorrectorConfig:
                 )
             else:
                 state_copy["ocean_heat_content_correction"] = None
+        elif (
+            "ocean_heat_content_correction" in state_copy
+            and "method" in state_copy["ocean_heat_content_correction"]
+            and state_copy["ocean_heat_content_correction"]["method"]
+            == "constant_temperature"
+        ):
+            # FIXME: don't merge!
+            state_copy["ocean_heat_content_correction"]["method"] = "scaled_temperature"
         if "sea_ice_fraction_correction" in state_copy:
             sif = state_copy["sea_ice_fraction_correction"]
             if isinstance(sif, dict) and "sea_ice_thickness_name" in sif:
