@@ -310,14 +310,14 @@ class BenchmarkABC(abc.ABC):
             cpu_timer.record_start()
             for _ in range(iters):
                 with timer:
-                    benchmark.run_instance(timer)
+                    benchmark_result = benchmark.run_instance(timer)
             torch.cuda.synchronize()
             cpu_timer.record_end()
         return BenchmarkResult(
             timer=timer.result,
             cpu_time=cpu_timer.elapsed_time_ms(),
             memory=bm.result,
-            diagnostics=benchmark.get_diagnostics(),
+            diagnostics=benchmark_result.get("diagnostics", {}),
         )
 
     @classmethod
@@ -327,14 +327,6 @@ class BenchmarkABC(abc.ABC):
             return None
         null_timer = NullTimer()
         return benchmark.run_instance(null_timer)
-
-    def get_diagnostics(self) -> dict:
-        """Return optional diagnostics dict to include in BenchmarkResult.
-
-        Override in subclasses to provide benchmark-specific diagnostics
-        (e.g. memory format conversion info). Default returns empty dict.
-        """
-        return {}
 
     @abc.abstractmethod
     def run_instance(self: Self, timer: Timer) -> TensorDict:

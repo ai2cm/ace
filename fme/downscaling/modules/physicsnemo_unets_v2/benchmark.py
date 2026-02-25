@@ -191,9 +191,6 @@ class SongUNetv2Benchmark(BenchmarkABC):
             return torch.amp.autocast(get_device().type, dtype=torch.bfloat16)
         return torch.amp.autocast(get_device().type, enabled=False)
 
-    def get_diagnostics(self) -> dict:
-        return self._channels_last_diagnostics.to_dict()
-
     def run_instance(self, timer) -> TensorDict:
         with self._get_amp_context():
             result = self.model(
@@ -204,7 +201,7 @@ class SongUNetv2Benchmark(BenchmarkABC):
             )
         return {
             "output": result.detach(),
-            **self._channels_last_diagnostics.to_tensor_dict(),
+            "diagnostics": self._channels_last_diagnostics.to_dict(),
         }
 
     @classmethod
