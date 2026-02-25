@@ -1,36 +1,39 @@
-experiment_dir: /results
+experiment_dir: /root/repos/ace/scratch/test
 n_samples: 4
 patch:
   divide_generation: true
   composite_prediction: true
   coarse_horizontal_overlap: 1
 model:
-  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+  checkpoint_path: /root/repos/ace/scratch/checkpoints/best_histogram_tail.ckpt
 data:
   topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   coarse:
   - data_path: /climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling
     engine: zarr
     file_pattern: 100km.zarr
+    subset:
+      start: 0
+      stop: 1
   fine:
   - data_path: /climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling
     engine: zarr
     file_pattern: 3km.zarr
+    subset:
+      start: 0
+      stop: 1
   lat_extent:
     start: 22.0
     stop: 50.0
   lon_extent:
     start: 228.0
     stop: 300.0
-  subset:
-    start: 0
-    stop: 1
   batch_size: 1
   num_data_workers: 2
   strict_ensemble: false
 events:
-- name: WA_AR_20200113
-  date: 2020-01-13T00:00:00
+- name: "WA_AR_20200113"
+  date: "2020-01-13T00:00"
   lat_extent:
     start: 35
     stop: 51
@@ -38,7 +41,7 @@ events:
     start: 228
     stop: 244
   save_generated_samples: true
-  n_samples: 32
+  n_samples: 4
 logging:
   log_to_screen: true
   log_to_wandb: true
