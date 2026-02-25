@@ -25,6 +25,7 @@ IGNORE_CONFIGS_WITH_SUFFIX = [
     "-append.yaml",
     "-coupled.yaml",
     "-vertical-coarsen.yaml",
+    "-coupled-ic.yaml",
 ]
 
 
