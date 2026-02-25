@@ -25,7 +25,6 @@ beaker session create --remote --bare --cluster ${cluster_name} \
     ${image_flag} \
     --mount src=weka,ref=climate-default,subpath=${home_dir_subpath},dst=/root \
     --mount src=weka,ref=climate-default,dst=/climate-default \
-    --mount src=beaker,ref=01KBG82WNTS5355FR95PV7ZY2F,subpath=output_6hourly_predictions_ic0000.zarr,dst=/ace-outputs.zarr \
     --mount src=secret,ref=github-ssh-key,dst=/secrets/ghub \
     --mount src=secret,ref=beaker-config,dst=/secrets/.beaker/config.yml \
     --mount src=secret,ref=google-credentials,dst=/secrets/google_app_credentials.json \
