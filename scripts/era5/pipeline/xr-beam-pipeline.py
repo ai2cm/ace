@@ -784,14 +784,21 @@ def _get_parser():
         default="F90",
         help=(
             "Output grid specification according to ECMWF nomenclature. E.g. 'F90' for "
-            f"1° Gaussian Grid. See more information at {GRID_DOCS_URL}"
+            "1° Gaussian Grid. See more information at "
+            + GRID_DOCS_URL.replace("%", "%%")
         ),
     )
     parser.add_argument(
         "--output_time_chunksize",
         type=int,
-        default=50,
-        help="Number of times per output chunk.",
+        default=1,
+        help="Number of times per output chunk (zarr inner chunk size).",
+    )
+    parser.add_argument(
+        "--output_time_shardsize",
+        type=int,
+        default=120,
+        help="Number of times per output shard (zarr shard size).",
     )
     parser.add_argument(
         "--ncar_process_time_chunksize",
@@ -800,7 +807,7 @@ def _get_parser():
         help=(
             "Time chunk size for intermediate regridding step for all data from "
             "NCAR-sourced datasets (mean flux / surface analysis / invariant). Must "
-            "be a multiple of 2 and divide evenly into output_time_chunksize."
+            "be a multiple of 2 and divide evenly into output_time_shardsize."
         ),
     )
     parser.add_argument(
@@ -862,11 +869,17 @@ def main():
     )
     assert args.ncar_process_time_chunksize % 2 == 0, msg
     msg = (
-        "output_time_chunksize must be a multiple of ncar_process_time_chunksize, "
-        f"got {args.output_time_chunksize} and {args.ncar_process_time_chunksize}"
+        "output_time_shardsize must be a multiple of ncar_process_time_chunksize, "
+        f"got {args.output_time_shardsize} and {args.ncar_process_time_chunksize}"
     )
-    assert args.output_time_chunksize % args.ncar_process_time_chunksize == 0, msg
+    assert args.output_time_shardsize % args.ncar_process_time_chunksize == 0, msg
+    msg = (
+        "output_time_shardsize must be a multiple of output_time_chunksize, "
+        f"got {args.output_time_shardsize} and {args.output_time_chunksize}"
+    )
+    assert args.output_time_shardsize % args.output_time_chunksize == 0, msg
     output_chunks = {"time": args.output_time_chunksize}
+    output_shards = {"time": args.output_time_shardsize}
     ncar_process_chunks = {"time": args.ncar_process_time_chunksize}
 
     logging.info("Opening datasets")
@@ -905,9 +918,15 @@ def main():
             | beam.MapTuple(
                 process_quarter_degree_data_mean_flux, output_grid=args.output_grid
             )
-            | "mean_flux_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
+            | "mean_flux_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "mean_flux_to_zarr"
-            >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
+            >> xbeam.ChunksToZarr(
+                args.output_path,
+                template,
+                zarr_chunks=output_chunks,
+                zarr_shards=output_shards,
+                zarr_format=3,
+            )
         )
 
         (
@@ -919,9 +938,15 @@ def main():
                 invariant_ds=ds_pt25deg_inv_regridded,
                 output_grid=args.output_grid,
             )
-            | "qd_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
+            | "qd_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "qd_to_zarr"
-            >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
+            >> xbeam.ChunksToZarr(
+                args.output_path,
+                template,
+                zarr_chunks=output_chunks,
+                zarr_shards=output_shards,
+                zarr_format=3,
+            )
         )
 
         (
@@ -929,9 +954,15 @@ def main():
             | "pl_DatasetToChunks"
             >> xbeam.DatasetToChunks(ds_google_latlon, chunks=ncar_process_chunks)
             | beam.MapTuple(process_pressure_level_data)
-            | "pl_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
+            | "pl_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "pl_to_zarr"
-            >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
+            >> xbeam.ChunksToZarr(
+                args.output_path,
+                template,
+                zarr_chunks=output_chunks,
+                zarr_shards=output_shards,
+                zarr_format=3,
+            )
         )
 
         (
@@ -943,9 +974,15 @@ def main():
                 output_grid=args.output_grid,
                 output_layer_indices=args.output_layer_indices,
             )
-            | "native_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
+            | "native_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "native_to_zarr"
-            >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
+            >> xbeam.ChunksToZarr(
+                args.output_path,
+                template,
+                zarr_chunks=output_chunks,
+                zarr_shards=output_shards,
+                zarr_format=3,
+            )
         )
 
 
