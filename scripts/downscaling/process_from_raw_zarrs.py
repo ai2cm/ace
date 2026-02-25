@@ -50,6 +50,30 @@ class DatasetLoader(Protocol):
         ...
 
 
+def _validate_variables_exist(
+    ds: xr.Dataset,
+    variable_names: list[str],
+    dataset_name: str,
+    path: str
+ ) -> None:
+    """Validate that all requested variables exist in the dataset.
+
+    Args:
+        ds: The opened xarray Dataset
+        variable_names: List of variable names to validate
+        dataset_name: Name of the dataset (for error messages)
+        path: Path to the source file (for error messages)
+
+    Raises:
+        ValueError: If any variables are missing from the dataset
+    """
+    missing_vars = [var for var in variable_names if var not in ds.data_vars]
+    if missing_vars:
+        raise ValueError(
+            f"Variables {missing_vars} not found in dataset '{dataset_name}' at {path}. "
+            f"Available variables in source: {list(ds.data_vars)}"
+        )
+
 @dataclasses.dataclass
 class DatasetConfig:
     """Configuration for loading a dataset from a single zarr file.
@@ -71,6 +95,10 @@ class DatasetConfig:
     def load_dataset(self) -> xr.Dataset:
         """Load the dataset, selecting and renaming specified variables."""
         ds = xr.open_zarr(self.path)
+
+        # Validate that all configured variables exist in the source
+        _validate_variables_exist(ds, self.variable_names, self.name, self.path)
+
         ds = ds[self.variable_names]
         ds = ds.rename(self.rename_map)
         return ds
@@ -128,6 +156,10 @@ class DatasetPerVariableConfig:
         for filename_key, variable_names in self.per_file_variables.items():
             path = f"{self.base_path}/{self.filename_map[filename_key]}"
             ds = xr.open_zarr(path)
+
+            # Validate that all configured variables exist in this source file
+            _validate_variables_exist(ds, variable_names, self.name, path)
+
             ds = ds[variable_names]
             ds = ds.rename(self.rename_map)
             datasets.append(ds)
