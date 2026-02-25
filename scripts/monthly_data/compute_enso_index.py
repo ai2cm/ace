@@ -72,14 +72,7 @@ def get_time_average(da):
     return da_out
 
 
-def get_anomalies(
-    ds,
-    time_groupby_key,
-    time_dim="time",
-    start_time="1940-01-01",
-    end_time="2021-01-01",
-):
-    ds = ds.sel(time=slice(start_time, end_time))
+def get_anomalies(ds, time_groupby_key, time_dim="time"):
     full_groupby_key = f"{time_dim}.{time_groupby_key}"
     ds_monthly_climo = ds.groupby(full_groupby_key).mean(time_dim)
     ds_monthly_anomalies = ds.groupby(full_groupby_key) - ds_monthly_climo
@@ -111,6 +104,9 @@ def main():
     args = parser.parse_args()
 
     surface_temperature = open_dataset(args.sst_dataset)["sea_surface_temperature"]
+    surface_temperature = surface_temperature.sel(
+        time=slice(args.start_time, args.stop_time)
+    )
     ocean_mask = get_ocean_mask(
         args.ocean_mask_source,
         template=surface_temperature,
@@ -135,10 +131,7 @@ def main():
     )
     nino34_temperature_anom = nino34_temperature - tropical_sst
     nino34_temperature_anom_index = get_anomalies(
-        nino34_temperature_anom,
-        time_groupby_key="month",
-        start_time=args.start_time,
-        end_time=args.stop_time,
+        nino34_temperature_anom, time_groupby_key="month"
     )
     if args.detrend:
         nino34_temperature_anom_index = (
