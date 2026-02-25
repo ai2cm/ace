@@ -4,4 +4,4 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 
 ft_w_EC_sst-1pct_nosmooth_0256to0350_hfds|rs0|01KFFDS5TZ8DP4CBC5T32TTY6K|trained|best_inference_ckpt|high|--not-preemptible
 
-ft_OHCBudget-1pct_nosmooth_0256to0350_hfds|rs0|01KFH483B38SGDEWSNAX4D3W28|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+ft_OHCBudget-1pct_nosmooth_0256to0350_hfds|rs0|01KFH483B38SGDEWSNAX4D3W28|run_insample|best_inference_ckpt|high|--not-preemptible
