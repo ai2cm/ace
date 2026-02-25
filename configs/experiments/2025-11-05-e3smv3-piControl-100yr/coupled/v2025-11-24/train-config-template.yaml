@@ -162,7 +162,24 @@ stepper:
   sst_name: sst
   ocean:
     timedelta: 5D
+    stepper:
+      step:
+        config:
+          normalization:
+            network:
+              global_means_path: /ocean_stats/centering.nc
+              global_stds_path: /ocean_stats/scaling-full-field.nc
     # stepper added by job_runner/create_coupled_train_config.sh
   atmosphere:
     timedelta: 6h
+    stepper:
+      step:
+        config:
+          normalization:
+            network:
+              global_means_path: /atmos_stats/centering.nc
+              global_stds_path: /atmos_stats/scaling-full-field.nc
+            residual:
+              global_means_path: /atmos_stats/centering.nc
+              global_stds_path: /atmos_stats/scaling-residual.nc
     # stepper added by job_runner/create_coupled_train_config.sh
