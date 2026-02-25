@@ -39,14 +39,24 @@ def open_dataset(path):
     return xr.open_dataset(path)
 
 
-def get_ocean_mask(source, template: xr.DataArray, lat_dim="lat", lon_dim="lon"):
+def get_ocean_mask(
+    source,
+    template: xr.DataArray,
+    lat_dim="lat",
+    lon_dim="lon",
+    mask_var="ocean_fraction",
+    mask_lat_dim="grid_yt",
+    mask_lon_dim="grid_xt",
+):
     """
     Get an ocean mask from the FV3GFS dataset. Regrid to the 1deg lat/lon grid
     of the SST dataset.
     """
     ds = open_dataset(source)
-    ocean_fraction = ds.ocean_fraction.isel(time=-1).rename(
-        {"grid_xt": lon_dim, "grid_yt": lat_dim}
+    ocean_fraction = (
+        ds[mask_var]
+        .isel(time=-1)
+        .rename({mask_lon_dim: lon_dim, mask_lat_dim: lat_dim})
     )
     ocean_fraction_1deg = ocean_fraction.interp_like(template).load()
     ocean_mask = xr.where(ocean_fraction_1deg > 0.5, True, False)
@@ -92,6 +102,9 @@ def main():
     parser.add_argument("--ocean-mask-source", default=OCEAN_MASK_SOURCE)
     parser.add_argument("--lat-dim", default="lat")
     parser.add_argument("--lon-dim", default="lon")
+    parser.add_argument("--ocean-mask-var", default="ocean_fraction")
+    parser.add_argument("--ocean-mask-lat-dim", default="grid_yt")
+    parser.add_argument("--ocean-mask-lon-dim", default="grid_xt")
     args = parser.parse_args()
 
     surface_temperature = open_dataset(args.sst_dataset)["sea_surface_temperature"]
@@ -100,6 +113,9 @@ def main():
         template=surface_temperature,
         lat_dim=args.lat_dim,
         lon_dim=args.lon_dim,
+        mask_var=args.ocean_mask_var,
+        mask_lat_dim=args.ocean_mask_lat_dim,
+        mask_lon_dim=args.ocean_mask_lon_dim,
     )
     area_weights = np.cos(np.deg2rad(surface_temperature[args.lat_dim]))
     nino34_region = RegionBounds(**NINO_REGION_BOUNDS)
