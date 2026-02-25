@@ -2,10 +2,12 @@
 
 set -e
 
-JOB_BASE="evaluate-HiRO-xshield-amip-plus4K-100km-to-3km-conus-events-generate-v2"
+# JOB_BASE="evaluate-HiRO-xshield-amip-plus4K-100km-to-3km-conus-events-generate-v2"
+JOB_BASE="evaluate-HiRO-xshield-amip-control-100km-to-3km-conus-events-generate"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
-CONFIG_PATH="$SCRIPT_PATH/config-plus4k.yaml"
+# CONFIG_PATH="$SCRIPT_PATH/config-plus4k.yaml"
+CONFIG_PATH="$SCRIPT_PATH/config-control.yaml"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
