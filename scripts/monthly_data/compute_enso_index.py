@@ -107,6 +107,7 @@ def main():
     parser.add_argument("--ocean-mask-lon-dim", default="grid_xt")
     parser.add_argument("--start-time", default="1940-01-01")
     parser.add_argument("--stop-time", default="2021-01-01")
+    parser.add_argument("--detrend", action="store_true", default=False)
     args = parser.parse_args()
 
     surface_temperature = open_dataset(args.sst_dataset)["sea_surface_temperature"]
@@ -139,6 +140,11 @@ def main():
         start_time=args.start_time,
         end_time=args.stop_time,
     )
+    if args.detrend:
+        nino34_temperature_anom_index = (
+            nino34_temperature_anom_index
+            - get_time_trendline(nino34_temperature_anom_index)
+        )
     nino34_anom_index = get_time_average(nino34_temperature_anom_index)
 
     with open(OUTPUT_FILE, "w") as f:
