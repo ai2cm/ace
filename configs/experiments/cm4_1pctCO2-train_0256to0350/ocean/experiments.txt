@@ -1,5 +1,5 @@
 group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
 
-ft_smooth-1pct_nosmooth_0256to0350|rs1_484ss1vq|01K89WS2PGG851DAK7S0T1KFQ1|run_ICx1|best_inference_ckpt|high|--not-preemptible
+ft_smooth-1pct_nosmooth_0256to0350|rs1_484ss1vq|01K89WS2PGG851DAK7S0T1KFQ1|run_insample|best_inference_ckpt|high|--not-preemptible
 
-ft_smooth-1pct_nosmooth_0256to0350|rs2_41qhptht|01K89WSGQMZ5WN0NB1W4JRT6DW|run_ICx1|best_inference_ckpt|high|--not-preemptible
+ft_smooth-1pct_nosmooth_0256to0350|rs2_41qhptht|01K89WSGQMZ5WN0NB1W4JRT6DW|trained|best_inference_ckpt|high|--not-preemptible
