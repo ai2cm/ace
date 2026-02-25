@@ -12,10 +12,14 @@ data:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
+    subset:
+      start_time: "2023-01-01T00:00"
   fine:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 3km.zarr
+    subset:
+      start_time: "2023-01-01T00:00"
   lat_extent:
     start: 22.0
     stop: 50.0

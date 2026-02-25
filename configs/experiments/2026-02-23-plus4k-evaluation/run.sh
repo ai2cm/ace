@@ -3,7 +3,7 @@
 set -e
 
 # JOB_BASE="evaluate-HiRO-xshield-amip-plus4K-100km-to-3km-conus-events-generate-v2"
-JOB_BASE="evaluate-HiRO-xshield-amip-control-100km-to-3km-conus-events-generate-v2"
+JOB_BASE="evaluate-HiRO-xshield-amip-control-100km-to-3km-conus-events-generate-v3"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 # CONFIG_PATH="$SCRIPT_PATH/config-plus4k.yaml"
