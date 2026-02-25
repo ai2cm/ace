@@ -38,3 +38,5 @@ fto-v1124-train-95yr-gvot5r9r-mohzi23t||01KJ8F4YEFWWQNDJNT320GPEGC|training|best
 fto-v1124-train-95yr-gvot5r9r-dso4ysdg||01KJ8F5APT6VH91XZKWPKKRN8E|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v1124-train-95yr-gvot5r9r-mohzi23t||01KJB5YB15095D4JE2YWRZ10DG|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v1124-train-95yr-gvot5r9r-dso4ysdg||01KJB5YNSXZRCB4GQVMZYM598K|training|best_inference_ckpt|normal|--not-preemptible
