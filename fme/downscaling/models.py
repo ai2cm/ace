@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from collections.abc import Mapping
 from typing import Any
 
@@ -15,7 +16,11 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
-from fme.downscaling.noise import condition_with_noise_for_training
+from fme.downscaling.noise import (
+    LogNormalNoiseDistribution,
+    LogUniformNoiseDistribution,
+    condition_with_noise_for_training,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -102,8 +107,6 @@ class DiffusionModelConfig:
     in_names: list[str]
     out_names: list[str]
     normalization: PairedNormalizationConfig
-    p_mean: float
-    p_std: float
     sigma_min: float
     sigma_max: float
     churn: float
@@ -111,6 +114,11 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
+    training_noise_distribution: (
+        LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
+    ) = None
+    p_mean: float | None = None
+    p_std: float | None = None
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -118,6 +126,30 @@ class DiffusionModelConfig:
             raise ValueError(
                 "Fine topography can only be used when predicting on interpolated"
                 " coarse input"
+            )
+        if self.p_mean is not None and self.p_std is not None:
+            if self.training_noise_distribution is None:
+                warnings.warn(
+                    "p_mean and p_std are deprecated. "
+                    f"Use training_noise_distribution field instead."
+                )
+            else:
+                raise ValueError(
+                    "Training noise should be specified in training_noise_distribution "
+                    "field only. Both training_noise_distribution and p_mean, p_std "
+                    "were specified. The latter two fields are deprecated."
+                )
+
+    @property
+    def noise(self) -> LogNormalNoiseDistribution | LogUniformNoiseDistribution:
+        if self.training_noise_distribution is not None:
+            return self.training_noise_distribution
+        elif self.p_mean is not None and self.p_std is not None:
+            return LogNormalNoiseDistribution(p_mean=self.p_mean, p_std=self.p_std)
+        else:
+            raise ValueError(
+                "Noise distribution must be specified in training_noise_distribution "
+                "or in p_mean and p_std fields."
             )
 
     def build(
@@ -319,7 +351,7 @@ class DiffusionModel:
             targets_norm = targets_norm - base_prediction
 
         conditioned_target = condition_with_noise_for_training(
-            targets_norm, self.config.p_std, self.config.p_mean, self.sigma_data
+            targets_norm, self.config.noise, self.sigma_data
         )
 
         denoised_norm = self.module(
