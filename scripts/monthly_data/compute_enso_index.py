@@ -105,6 +105,8 @@ def main():
     parser.add_argument("--ocean-mask-var", default="ocean_fraction")
     parser.add_argument("--ocean-mask-lat-dim", default="grid_yt")
     parser.add_argument("--ocean-mask-lon-dim", default="grid_xt")
+    parser.add_argument("--start-time", default="1940-01-01")
+    parser.add_argument("--stop-time", default="2021-01-01")
     args = parser.parse_args()
 
     surface_temperature = open_dataset(args.sst_dataset)["sea_surface_temperature"]
@@ -132,7 +134,10 @@ def main():
     )
     nino34_temperature_anom = nino34_temperature - tropical_sst
     nino34_temperature_anom_index = get_anomalies(
-        nino34_temperature_anom, time_groupby_key="month"
+        nino34_temperature_anom,
+        time_groupby_key="month",
+        start_time=args.start_time,
+        end_time=args.stop_time,
     )
     nino34_anom_index = get_time_average(nino34_temperature_anom_index)
 
