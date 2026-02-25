@@ -210,7 +210,7 @@ class SongUNetv2Benchmark(BenchmarkABC):
     @classmethod
     def new(cls) -> Self:
         return cls._new_with_params(
-            img_resolution=512,
+            img_resolution=32,
             B=1,
             in_channels=6,
             out_channels=4,
@@ -230,7 +230,7 @@ class SongUNetv2Benchmark(BenchmarkABC):
         label_dim: int,
         model_channels: int,
         channel_mult: list[int],
-        use_apex_gn: bool = True,
+        use_apex_gn: bool = False,
         use_amp_bf16: bool = False,
     ) -> Self:
         device = get_device()
@@ -270,7 +270,7 @@ class SongUNetv2Benchmark(BenchmarkABC):
     @classmethod
     def new_for_regression(cls) -> Self | None:
         return cls._new_with_params(
-            img_resolution=512,
+            img_resolution=32,
             B=1,
             in_channels=6,
             out_channels=4,
@@ -280,12 +280,11 @@ class SongUNetv2Benchmark(BenchmarkABC):
             use_apex_gn=False,
         )
 
-
 class SongUNetv2BenchmarkBf16(SongUNetv2Benchmark):
     @classmethod
     def new(cls) -> Self:
         return cls._new_with_params(
-            img_resolution=512,
+            img_resolution=32,
             B=1,
             in_channels=6,
             out_channels=4,
@@ -298,7 +297,7 @@ class SongUNetv2BenchmarkBf16(SongUNetv2Benchmark):
     @classmethod
     def new_for_regression(cls) -> Self | None:
         return cls._new_with_params(
-            img_resolution=512,
+            img_resolution=32,
             B=1,
             in_channels=6,
             out_channels=4,
@@ -340,6 +339,7 @@ class SongUNetv2BenchmarkApexBf16(SongUNetv2Benchmark):
             model_channels=128, # min for apex gn
             channel_mult=[1, 2, 2, 2],
             use_apex_gn=True,
+            use_amp_bf16=True,
         )
 
     @classmethod
