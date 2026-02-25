@@ -37,7 +37,7 @@ events:
   save_generated_samples: true
   n_samples: 32
 - name: "WA_AR_20201125"
-  date: "2020-11-25T00:00:00"
+  date: "2020-11-25T00:00"
   lat_extent:
     start: 35
     stop: 51
@@ -47,7 +47,7 @@ events:
   save_generated_samples: true
   n_samples: 32
 - name: "CA_AR_20200126"
-  date: "2020-01-26T00:00:00"
+  date: "2020-01-26T00:00"
   lat_extent:
     start: 30
     stop: 46
@@ -57,7 +57,7 @@ events:
   save_generated_samples: true
   n_samples: 32
 - name: "WPac_concentric_tc_20200806"
-  date: "2020-08-06T12:00:00"
+  date: "2020-08-06T12:00"
   lat_extent:
     start: 19
     stop: 35
@@ -67,7 +67,7 @@ events:
   save_generated_samples: true
   n_samples: 32
 - name: "WPac_pinhole_eye_tc_20200801"
-  date: "2020-08-01T12:00:00"
+  date: "2020-08-01T12:00"
   lat_extent:
     start: 8
     stop: 24
@@ -77,7 +77,7 @@ events:
   save_generated_samples: true
   n_samples: 32
 - name: "WPac_assym_tc_20200106"
-  date: "2020-01-06T06:00:00"
+  date: "2020-01-06T06:00"
   lat_extent:
     start: 8
     stop: 24
