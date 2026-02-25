@@ -163,17 +163,15 @@ stepper:
   sst_name: sst
   ocean:
     timedelta: 5D
-    # stepper added by job_runner/create_coupled_train_config.sh
-
     stepper:
-      input_masking:
-        mask_value: 0
-        fill_value: 0
-        exclude_names_and_prefixes:
-          - land_fraction
       step:
         type: single_module
         config:
+          normalization:
+            network:
+              global_means_path: /ocean_stats/centering.nc
+              global_stds_path: /ocean_stats/scaling-full-field.nc
+              # stepper added by job_runner/create_coupled_train_config.sh
           builder:
             type: Samudra
             config:
@@ -195,10 +193,6 @@ stepper:
               norm: instance
               upscale_factor: 2
               checkpoint_strategy: all
-          normalization:
-            network:
-              global_means_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-11-24-E3SMv3-piControl-100yr-coupled-stats/ocean/centering.nc
-              global_stds_path: /pscratch/sd/e/elynnwu/fme-dataset/2025-11-24-E3SMv3-piControl-100yr-coupled-stats/ocean/scaling-full-field.nc
           corrector:
             type: ocean_corrector
             config:
@@ -410,14 +404,26 @@ stepper:
             - vo_18
             - ocean_sea_ice_fraction
             - sea_ice_volume
+      input_masking:
+        mask_value: 0
+        fill_value: 0
+        exclude_names_and_prefixes:
+          - land_fraction
   atmosphere:
     timedelta: 6h
-    # stepper added by job_runner/create_coupled_train_config.sh
-
     stepper:
       step:
         type: single_module
         config:
+          normalization:
+            network:
+              global_means_path: /atmos_stats/centering.nc
+              global_stds_path: /atmos_stats/scaling-full-field.nc
+              fill_nans_on_normalize: false
+            residual:
+              global_means_path: /atmos_stats/centering.nc
+              global_stds_path: /atmos_stats/scaling-residual.nc
+              # stepper added by job_runner/create_coupled_train_config.sh
           builder:
             type: NoiseConditionedSFNO
             config:
@@ -430,14 +436,6 @@ stepper:
               separable: false
               spectral_layers: 3
               spectral_transform: sht
-          normalization:
-            network:
-              global_means_path: /atmos_stats/uncoupled_atmosphere/centering.nc
-              global_stds_path: /atmos_stats/uncoupled_atmosphere/scaling-full-field.nc
-              fill_nans_on_normalize: false
-            residual:
-              global_means_path: /atmos_stats/uncoupled_atmosphere/centering.nc
-              global_stds_path: /atmos_stats/uncoupled_atmosphere/scaling-residual.nc
           ocean:
             surface_temperature_name: TS
             ocean_fraction_name: ocean_fraction
