@@ -140,6 +140,8 @@ class DiffusionModelConfig:
         n_in_channels = len(self.in_names)
         if static_inputs is not None:
             n_in_channels += len(static_inputs.fields)
+        elif self.use_fine_topography:
+            n_in_channels += 1
 
         module = self.module.build(
             n_in_channels=n_in_channels,
