@@ -28,7 +28,7 @@ gantry run \
     --workspace ai2/climate-titan \
     --priority urgent \
     --preemptible \
-    --cluster ai2/jupiter \
+    --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
