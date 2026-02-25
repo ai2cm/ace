@@ -73,27 +73,57 @@ class CRPSMetric(ReducedMetric):
         return self._total / self._n_batches
 
 
+class EnsembleMeanRMSEMetric(ReducedMetric):
+    """
+    Computes the ensemble mean RMSE.
+    """
+
+    def __init__(self):
+        self._total_rmse = None
+        self._n_batches = 0
+
+    def record(self, target: torch.Tensor, gen: torch.Tensor):
+        ensemble_mean = gen.mean(dim=1, keepdim=True)  # mean over ensemble dimension
+        rmse = ((ensemble_mean - target) ** 2).mean(dim=(0, 1, 2)).sqrt()
+        if self._total_rmse is None:
+            self._total_rmse = rmse
+        else:
+            self._total_rmse += rmse
+        self._n_batches += 1
+
+    def get(self) -> torch.Tensor:
+        if self._total_rmse is None:
+            raise ValueError("No batches have been recorded.")
+        return self._total_rmse / self._n_batches
+
+
 class SSRBiasMetric(ReducedMetric):
     """
     Computes the spread-skill ratio bias (equal to (stdev / rmse) - 1).
     """
 
     def __init__(self):
-        self._total_mse = None
+        self._total_unbiased_mse = None
         self._total_variance = None
         self._n_batches = 0
 
     def record(self, target: torch.Tensor, gen: torch.Tensor):
-        mse = ((gen - target) ** 2).mean(dim=(0, 1, 2))  # batch, ensemble, time
+        num_ensemble = gen.shape[1]
+        ensemble_mean = gen.mean(dim=1, keepdim=True)  # batch, 1, time
+        mse = ((ensemble_mean - target) ** 2).mean(dim=(0, 1, 2))  # batch, 1, time
         variance = gen.var(dim=1, unbiased=True).mean(dim=(0, 1))
-        self._add_mse(mse)
+        self._add_unbiased_mse(mse, variance, num_ensemble)
         self._add_variance(variance)
         self._n_batches += 1
 
-    def _add_mse(self, mse: torch.Tensor):
-        if self._total_mse is None:
-            self._total_mse = torch.zeros_like(mse)
-        self._total_mse += mse
+    def _add_unbiased_mse(
+        self, mse: torch.Tensor, variance: torch.Tensor, num_ensemble: int
+    ):
+        if self._total_unbiased_mse is None:
+            self._total_unbiased_mse = torch.zeros_like(mse)
+        # must remove the component of the MSE that is due to the
+        # variance of the generated values
+        self._total_unbiased_mse += mse - variance / num_ensemble
 
     def _add_variance(self, variance: torch.Tensor):
         if self._total_variance is None:
@@ -101,12 +131,10 @@ class SSRBiasMetric(ReducedMetric):
         self._total_variance += variance
 
     def get(self) -> torch.Tensor:
-        if self._total_mse is None or self._total_variance is None:
+        if self._total_unbiased_mse is None or self._total_variance is None:
             raise ValueError("No batches have been recorded.")
         spread = self._total_variance.sqrt()
-        # must remove the component of the MSE that is due to the
-        # variance of the generated values
-        skill = (self._total_mse - self._total_variance).sqrt()
+        skill = self._total_unbiased_mse.sqrt()
         return spread / skill - 1
 
 
@@ -141,10 +169,14 @@ class _EnsembleAggregator:
             self._variable_metrics = {
                 "crps": {},
                 "ssr_bias": {},
+                "ensemble_mean_rmse": {},
             }
             for key in gen_data:
                 self._variable_metrics["crps"][key] = CRPSMetric()
                 self._variable_metrics["ssr_bias"][key] = SSRBiasMetric()
+                self._variable_metrics["ensemble_mean_rmse"][key] = (
+                    EnsembleMeanRMSEMetric()
+                )
         return self._variable_metrics
 
     @torch.no_grad()

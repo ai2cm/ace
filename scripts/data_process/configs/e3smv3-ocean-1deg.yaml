@@ -1,26 +1,30 @@
 runs:
-  data: /pscratch/sd/e/elynnwu/e3smv3-couple-run/2024-11-06-e3smv3-ocn-seaice-1deg/
-data_output_directory: /pscratch/sd/e/elynnwu/e3smv3-couple-run/2024-11-06-e3smv3-ocn-seaice-1deg
+  2025-11-17-E3SMv3-piControl-ocean-ice-no-smoothing: /pscratch/sd/e/elynnwu/fme_dataset
+data_output_directory: /pscratch/sd/e/elynnwu/fme_dataset
 dataset_computation:
-  ocean_dataset_nc_files: /pscratch/sd/e/elynnwu/e3smv3-couple-run/ocean_data/v3.LR.piControl_bonus.mpaso.hist.am.timeSeriesStatsCustom.*.nc
-  ocean_dataset_monthly_layer_thickness_files: /pscratch/sd/e/elynnwu/e3smv3-couple-run/ocean_data/v3.LR.piControl_bonus.mpaso.hist.am.timeSeriesStatsMonthly.*.nc
-  compute_e3sm_surface_downward_heat_flux: True
-  ice_dataset_nc_files: /pscratch/sd/e/elynnwu/e3smv3-couple-run/ice_data/v3.LR.piControl_bonus.mpassi.hist.am.timeSeriesStatsCustom.*.nc
   ocean_zarr: not-used
   ice_zarr: not-used
-  nc_grid_path: /pscratch/sd/e/elynnwu/e3smv3-couple-run/mpaso.IcoswISC30E3r5.regrid.nc
+  nc_grid_path: not-used
   nc_mosaic_path: not-used
   nc_target_grid_path: not-used
+  ocean_dataset_nc_files: /pscratch/sd/e/elynnwu/e3smv3-couple-run/v3.LR.piControl_bonus/vertical_coarsened/1deg/*.nc
+  compute_e3sm_surface_downward_heat_flux: True
+  sharding:
+    time_dim: 50
+    latitude_dim: 180
+    longitude_dim: 360
   chunking:
-    time_dim: 10
+    time_dim: 1
     latitude_dim: 180
     longitude_dim: 360
   standard_names:
-    time_dim: Time
+    time_dim: time
     longitude_dim: lon
     latitude_dim: lat
-    vertical_dim: nVertLevels
-    ocean_layer_thickness: timeMonthly_avg_layerThickness
+    vertical_dim: nVertLevelsP1
+    sea_surface_height: timeCustom_avg_ssh
+    wetmask_reference_variable: timeCustom_avg_activeTracers_temperature
+    ocean_layer_thickness: restingThickness
   renaming:
     timeCustom_avg_activeTracers_salinity: so
     timeCustom_avg_activeTracers_temperature: thetao
@@ -31,35 +35,65 @@ dataset_computation:
     timeCustom_avg_ssh: zos
     timeCustom_avg_iceAreaCell: sea_ice_fraction
     timeCustom_avg_iceVolumeCell: sea_ice_volume
-    Time: time
     timeCustom_avg_rainFlux: rain_flux
     timeCustom_avg_snowFlux: snow_flux
     timeCustom_avg_frazilIceFreshwaterFlux: frazil_flux
+    timeCustom_avg_sensibleHeatFlux: sensible_heat_flux
+    timeCustom_avg_evaporationFlux: evap_flux
+    timeCustom_avg_longWaveHeatFluxDown: lw_heat_flux_down
+    timeCustom_avg_shortWaveHeatFlux: sw_heat_flux
+    nVertLevelsP1: depth_center
+  spatial_filter:
+    enabled: true
+    filter_scale: 4
+    exclude_from_filtering:
+      - timeCustom_avg_iceAreaCell
+      - timeCustom_avg_iceVolumeCell
+  ocean_vertical_target_layer_levels:
+  - 10.0
+  - 25.0
+  - 35.0
+  - 45.0
+  - 65.0
+  - 95.0
+  - 125.0
+  - 155.0
+  - 200.0
+  - 320.0
+  - 470.0
+  - 775.0
+  - 1050.0
+  - 1400.0
+  - 1850.0
+  - 2400.0
+  - 3100.0
+  - 4000.0
+  - 5500.0
   ocean_vertical_target_interface_levels:
-    - 5.0
-    - 15.0
-    - 30.0
-    - 40.0
-    - 65.0
-    - 105.0
-    - 165.0
-    - 250.0
-    - 375.0
-    - 550.0
-    - 775.0
-    - 1050.0
-    - 1400.0
-    - 1850.0
-    - 2400.0
-    - 3100.0
-    - 3500.0
-    - 4000.0
-    - 4700.0
-    - 5400.0
-n_split: 100
+  - 0
+  - 20.0
+  - 30.0
+  - 40.0
+  - 50.0
+  - 80.0
+  - 110.0
+  - 140.0
+  - 170.0
+  - 230.0
+  - 410.0
+  - 530.0
+  - 1020.0
+  - 1080.0
+  - 1720.0
+  - 1980.0
+  - 2820.0
+  - 3380.0
+  - 4620.0
+  - 6380.0
+n_split: 10
 stats:
-  output_directory: /pscratch/sd/e/elynnwu/e3smv3-couple-run/2024-11-06-E3SM-trial-run-ocean-100yr/stats
-  start_date: "0401-01-01"
+  output_directory: /pscratch/sd/e/elynnwu/fme_dataset
+  start_date: "0420-01-01"
   end_date: "0501-01-01"
   data_type: E3SMV2
   beaker_dataset: not_used

@@ -37,6 +37,7 @@ class WindowAvgDatasetConfig:
             e.g. '2016-01-01T06:00:00'. The 'origin' used in resampling is
             one step (of size window_timedelta) earlier than first_timestamp.
         last_timestamp: Optional final timestamp in case of extra unneeded windows.
+            Used after window averaging but before shifting timestamps.
         shift_timestamps_to_avg_interval_midpoint: If True, shift time axis labels
             backwards by half the window size.
         time_dim: Name of the time dimension.

@@ -22,6 +22,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector
+from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -73,8 +74,9 @@ class FCN3Config:
         n_aux_channels: int,
         n_atmo_diagnostic_channels: int,
         n_surf_diagnostic_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ) -> AtmoSphericNeuralOperatorNet:
+        img_shape = dataset_info.img_shape
         return AtmoSphericNeuralOperatorNet(
             n_atmo_channels=n_atmo_channels,
             n_atmo_groups=n_atmo_groups,
@@ -128,7 +130,7 @@ class FCN3Selector:
         n_aux_channels: int,
         n_atmo_diagnostic_channels: int,
         n_surf_diagnostic_channels: int,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
     ) -> AtmoSphericNeuralOperatorNet:
         return self.config.build(
             n_atmo_channels=n_atmo_channels,
@@ -137,7 +139,7 @@ class FCN3Selector:
             n_aux_channels=n_aux_channels,
             n_atmo_diagnostic_channels=n_atmo_diagnostic_channels,
             n_surf_diagnostic_channels=n_surf_diagnostic_channels,
-            img_shape=img_shape,
+            dataset_info=dataset_info,
         )
 
 
@@ -171,6 +173,7 @@ class FCN3StepConfig(StepConfigABC):
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
 
     def __post_init__(self):
@@ -201,6 +204,12 @@ class FCN3StepConfig(StepConfigABC):
             self.forcing_names + self.atmosphere_input_names + self.surface_input_names
         )
         self.out_names = self.atmosphere_output_names + self.surface_output_names
+        for name in self.prescribed_prognostic_names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -262,10 +271,11 @@ class FCN3StepConfig(StepConfigABC):
     @property
     def next_step_input_names(self) -> list[str]:
         """Names of variables provided in next_step_input_data."""
-        input_only_names = set(self.input_names).difference(self.output_names)
-        if self.ocean is None:
-            return list(input_only_names)
-        return list(input_only_names.union(self.ocean.forcing_names))
+        result = set(self.input_names).difference(self.output_names)
+        if self.ocean is not None:
+            result = result.union(self.ocean.forcing_names)
+        result = result.union(self.prescribed_prognostic_names)
+        return list(result)
 
     @property
     def loss_names(self) -> list[str]:
@@ -282,6 +292,16 @@ class FCN3StepConfig(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean
+
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+        for name in names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
+        self.prescribed_prognostic_names = names
 
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
@@ -302,7 +322,7 @@ class FCN3StepConfig(StepConfigABC):
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return FCN3Step(
             config=self,
-            img_shape=dataset_info.img_shape,
+            dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
@@ -324,7 +344,7 @@ class FCN3Step(StepABC):
     def __init__(
         self,
         config: FCN3StepConfig,
-        img_shape: tuple[int, int],
+        dataset_info: DatasetInfo,
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
@@ -333,7 +353,7 @@ class FCN3Step(StepABC):
         """
         Args:
             config: The configuration.
-            img_shape: Shape of domain as (n_lat, n_lon).
+            dataset_info: Information about the dataset.
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
@@ -361,14 +381,14 @@ class FCN3Step(StepABC):
             + len(config.surface_diagnostic_names),
             n_surf_diagnostic_channels=len(config.surface_diagnostic_names),
             n_aux_channels=len(config.forcing_names),
-            img_shape=img_shape,
+            dataset_info=dataset_info,
         )
         module = module.to(get_device())
         init_weights([module])
 
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
-        self._img_shape = img_shape
+        self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
@@ -421,26 +441,21 @@ class FCN3Step(StepABC):
 
     def step(
         self,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
+        args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
         Args:
-            input: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from the
-                initial timestep. In practice this contains the ML inputs.
-            next_step_input_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon] containing denormalized data from
-                the output timestep. In practice this contains the necessary data
-                at the output timestep for the ocean model and corrector.
+            args: The arguments to the step function.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
         """
+        if args.labels is not None:
+            raise ValueError("Labels are not supported for FCN3")
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             forcing_tensor = self.forcing_packer.pack(input_norm, axis=self.CHANNEL_DIM)
@@ -465,14 +480,15 @@ class FCN3Step(StepABC):
             }
 
         return step_with_adjustments(
-            input=input,
-            next_step_input_data=next_step_input_data,
+            input=args.input,
+            next_step_input_data=args.next_step_input_data,
             network_calls=network_call,
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
+            prescribed_prognostic_names=self._config.prescribed_prognostic_names,
         )
 
     def get_regularizer_loss(self):

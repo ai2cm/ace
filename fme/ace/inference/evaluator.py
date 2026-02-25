@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 import logging
-import os
 from collections.abc import Callable, Mapping, Sequence
 
 import dacite
@@ -9,7 +8,6 @@ import numpy as np
 import torch
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.getters import get_inference_data
@@ -26,10 +24,10 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
@@ -87,7 +85,29 @@ class InferenceEvaluatorConfig:
     Configuration for running inference including comparison to reference data.
 
     Parameters:
-        experiment_dir: Directory to save results to.
+        experiment_dir: Directory to save results to. This can be a local
+            directory, like ``/results``, or a remote directory prefixed with a
+            protocol recognized by ``fsspec``, like ``gs://bucket/results``.
+
+            .. note::
+                While most types of output can be written to a remote
+                ``experiment_dir``, there are some limitations:
+
+                - To write raw or time-coarsened data, the zarr writer must be
+                  used. See the ``files`` parameter of the
+                  :class:`fme.ace.DataWriterConfig` for more details on how this
+                  can be configured. Note that monthly coarsened data cannot
+                  currently be written to zarr, and hence a remote directory,
+                  since it uses a different code path than uniformly coarsened
+                  data.
+                - Piping logging output to a file in the ``experiment_dir``
+                  is not supported. To silence the warning related to this, set
+                  ``log_to_file`` to ``False`` in the
+                  :class:`fme.ace.LoggingConfig`.
+
+                There are no restrictions on the types of output that can be
+                written to a local ``experiment_dir``.
+
         n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: configuration for logging.
@@ -140,14 +160,9 @@ class InferenceEvaluatorConfig:
                     )
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(
-        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
-    ):
-        config = to_flat_dict(dataclasses.asdict(self))
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=False
         )
 
     def load_stepper(self) -> Stepper:
@@ -222,18 +237,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer.start_outer("inference")
     timer.start("initialization")
 
-    if not os.path.isdir(config.experiment_dir):
-        os.makedirs(config.experiment_dir, exist_ok=True)
+    makedirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
-    env_vars = logging_utils.retrieve_env_vars()
-    beaker_url = logging_utils.log_beaker_url()
-    config.configure_wandb(env_vars=env_vars, notes=beaker_url)
 
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
-
-    logging_utils.log_versions()
-    logging.info(f"Current device is {fme.get_device()}")
 
     stepper_config = config.load_stepper_config()
     logging.info("Initializing data loader")

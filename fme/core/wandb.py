@@ -160,11 +160,15 @@ class WandB:
         if self._enabled:
             wandb.watch(modules)
 
-    def log(self, data: Mapping[str, Any], step=None, sleep=None):
+    def log(
+        self, data: Mapping[str, Any], step=None, sleep=None, commit: bool | None = None
+    ):
         if self._enabled:
-            wandb.log(dict(data), step=step)
+            wandb.log(dict(data), step=step, commit=commit)
             if sleep is not None:
                 time.sleep(sleep)
+        dist = Distributed.get_instance()
+        dist.barrier()
 
     def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):

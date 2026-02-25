@@ -20,7 +20,7 @@ class ConditionalSFNOBuilder(ModuleConfig):
 
     spectral_transform: str = "sht"
     filter_type: str = "linear"
-    operator_type: str = "diagonal"
+    operator_type: Literal["dhconv"] = "dhconv"
     scale_factor: int = 1
     embed_dim: int = 256
     num_layers: int = 12
@@ -54,7 +54,9 @@ class ConditionalSFNOBuilder(ModuleConfig):
             img_shape=img_shape,
             context_config=ContextConfig(
                 embed_dim_scalar=n_sigma_embedding_channels,
+                embed_dim_labels=0,
                 embed_dim_noise=0,
+                embed_dim_pos=0,
             ),
         )
 

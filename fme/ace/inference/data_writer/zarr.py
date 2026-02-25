@@ -31,20 +31,28 @@ def _variable_metadata_to_dict(
 
 
 def _get_ace_time_coords(batch_time: xr.DataArray, n_timesteps: int):
-    dt_timedelta = _get_timestep(batch_time.isel(sample=0).values)
-    dt_microseconds = encode_timestep(dt_timedelta)
+    if n_timesteps > 1:
+        dt_timedelta = _get_timestep(batch_time.isel(sample=0).values)
+        dt_microseconds = encode_timestep(dt_timedelta)
+        lead_times_microseconds = dt_microseconds * np.arange(n_timesteps)
+        lead_times_coord = xr.DataArray(
+            lead_times_microseconds,
+            dims=["time"],
+            attrs={"units": "microseconds", "dtype": "timedelta64[us]"},
+        )
+    elif n_timesteps == 1:
+        lead_times_coord = xr.DataArray(
+            np.array([0], dtype=np.int64),
+            dims=["time"],
+            attrs={"units": "microseconds", "dtype": "timedelta64[us]"},
+        )
     init_times_datetime = batch_time.isel(time=0).values
     init_times_numeric = cftime.date2num(
         init_times_datetime,
         units=DATETIME_ENCODING_UNITS,
         calendar=batch_time.dt.calendar,
     )
-    lead_times_microseconds = dt_microseconds * np.arange(n_timesteps)
-    lead_times_coord = xr.DataArray(
-        lead_times_microseconds,
-        dims=["time"],
-        attrs={"units": "microseconds", "dtype": "timedelta64[us]"},
-    )
+
     init_times_coord = xr.DataArray(
         init_times_numeric,
         dims=["sample"],
@@ -68,6 +76,18 @@ class ZarrWriterConfig:
     suffix: str = "zarr"
 
 
+def ensure_numpy_coords(
+    data_coords: dict[str, xr.DataArray | np.ndarray],
+) -> dict[str, np.ndarray]:
+    numpy_coords = {}
+    for coord_name, coord_value in data_coords.items():
+        if isinstance(coord_value, xr.DataArray):
+            numpy_coords[coord_name] = coord_value.to_numpy()
+        else:
+            numpy_coords[coord_name] = coord_value
+    return numpy_coords
+
+
 class ZarrWriterAdapter:
     _SAMPLE_DIM = 0
     _TIME_DIM = 1
@@ -76,7 +96,7 @@ class ZarrWriterAdapter:
         self,
         path: str,
         dims: tuple,
-        data_coords: dict[str, xr.DataArray],
+        data_coords: dict[str, np.ndarray],
         n_timesteps: int,
         n_initial_conditions: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
@@ -113,7 +133,7 @@ class ZarrWriterAdapter:
         for vertical_nondim_coord in ["ak", "bk"]:
             if vertical_nondim_coord in data_coords:
                 self._nondim_coords[vertical_nondim_coord] = xr.DataArray(
-                    data_coords.pop(vertical_nondim_coord).values,
+                    data_coords.pop(vertical_nondim_coord),
                     dims=("z_interface",),
                 )
         self._horizontal_coords = data_coords
@@ -142,7 +162,6 @@ class ZarrWriterAdapter:
                 "valid_time": valid_times_coord,
             }
         )
-
         self._dim_coords = {
             **self._horizontal_coords,
             "time": lead_times_coord,
@@ -151,7 +170,7 @@ class ZarrWriterAdapter:
         self._writer = ZarrWriter(
             path=self.path,
             dims=self.dims,
-            coords=self._dim_coords,
+            coords=ensure_numpy_coords(self._dim_coords),
             data_vars=self.data_vars,
             chunks=self.chunks,
             shards={"time": batch_time.sizes["time"]},
@@ -246,7 +265,7 @@ class SeparateICZarrWriterAdapter:
         for vertical_nondim_coord in ["ak", "bk"]:
             if vertical_nondim_coord in data_coords:
                 self._nondim_coords[vertical_nondim_coord] = xr.DataArray(
-                    data_coords.pop(vertical_nondim_coord).values,
+                    data_coords.pop(vertical_nondim_coord),
                     dims=("z_interface",),
                 )
         self._horizontal_coords = data_coords

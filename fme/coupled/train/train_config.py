@@ -23,7 +23,11 @@ from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
 )
-from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
+from fme.coupled.stepper import (
+    CoupledStepperConfig,
+    CoupledTrainStepper,
+    CoupledTrainStepperConfig,
+)
 
 
 @dataclasses.dataclass
@@ -79,7 +83,10 @@ class TrainConfig:
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
-        save_checkpoint: Whether to save checkpoints.
+        save_checkpoint: Whether to save checkpoints. If false, no checkpoints
+            are saved regardless of other checkpoint configuration settings. If
+            true, checkpoints are saved at the end of the training loop, after
+            evaluation, and on catching a termination signal.
         experiment_dir: Directory where checkpoints and logs are saved.
         inference: Configuration for inline inference.
         n_coupled_steps: Number of coupled forward steps to take gradient over.
@@ -101,6 +108,9 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        train_evaluation_samples: Number of samples to evaluate on after training
+            on each epoch. The remainder samples after dividing by the batch size
+            are discarded.
         checkpoint_every_n_batches: How often to save checkpoints.
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
@@ -122,6 +132,7 @@ class TrainConfig:
     train_loader: CoupledDataLoaderConfig
     validation_loader: CoupledDataLoaderConfig
     stepper: CoupledStepperConfig
+    stepper_training: CoupledTrainStepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
@@ -138,6 +149,7 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
+    train_evaluation_samples: int = 1000
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
@@ -168,6 +180,10 @@ class TrainConfig:
     def set_random_seed(self):
         if self.seed is not None:
             set_seed(self.seed)
+
+    @property
+    def train_evaluation_batches(self) -> int:
+        return self.train_evaluation_samples // self.train_loader.batch_size
 
     def get_inference_epochs(self) -> list[int]:
         start_epoch = 0 if self.evaluate_before_training else 1
@@ -231,8 +247,11 @@ class TrainBuilders:
     def ocean_timestep(self) -> datetime.timedelta:
         return self.config.stepper.ocean_timestep
 
-    def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledStepper:
-        return self.config.stepper.get_stepper(dataset_info)
+    def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledTrainStepper:
+        return self.config.stepper_training.get_train_stepper(
+            stepper_config=self.config.stepper,
+            dataset_info=dataset_info,
+        )
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)

@@ -2,6 +2,7 @@ from .config import (
     ContiguousDistributedSampler,
     DataLoaderConfig,
     PairedDataLoaderConfig,
+    enforce_lat_bounds,
 )
 from .datasets import (
     BatchData,
@@ -11,7 +12,7 @@ from .datasets import (
     PairedBatchItem,
     PairedGriddedData,
 )
-from .topography import Topography, get_normalized_topography
+from .topography import StaticInput, StaticInputs, get_normalized_topography
 from .utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,

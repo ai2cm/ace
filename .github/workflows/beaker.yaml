@@ -12,74 +12,71 @@ on:
   workflow_dispatch:
 
 jobs:
-  evaluator:
+  ace-evaluator:
     runs-on: ubuntu-latest
     # Only deploy on manual trigger or push to main
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    # Additionally, skip if the target repo isn't ai2cm/ace, lest it tries to run in forks
+    if: ${{ github.repository == 'ai2cm/ace' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     env:
+      CONFIG_PATH: docs/evaluator-config.yaml
       BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
       BEAKER_WORKSPACE: ai2/ace-ci-tests
+      BEAKER_CHECKPOINT_TEST_DATASET: elynn/ci-inference
+      WANDB_PROJECT: ace-ci-tests
+      WANDB_ENTITY: ai2cm
+      PYTHON_VERSION: "3.11"
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
-      - name: Read BEAKER_IMAGE from file
-        id: image
-        run: echo "BEAKER_IMAGE=$(cat latest_deps_only_image.txt)" >> $GITHUB_OUTPUT
-
-      - name: Determine current commit SHA (pull request)
-        if: github.event_name == 'pull_request'
+      - name: Get commit SHA and set job name
         run: |
-          echo "COMMIT_SHA=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          echo "JOB_NAME=ci-ace-evaluator-${COMMIT_SHA}" >> $GITHUB_ENV
 
-      - name: Determine current commit SHA (push)
-        if: github.event_name != 'pull_request'
-        run: |
-          echo "COMMIT_SHA=$GITHUB_SHA" >> $GITHUB_ENV
-
-      - name: Shortened commit SHA
-        run: |
-          echo "COMMIT_SHA_SHORT=$(echo "$GITHUB_SHA" | cut -c1-6)" >> $GITHUB_ENV
-
-      - name: Integration tests
-        uses: allenai/beaker-run-action@v1.2
+      - uses: astral-sh/setup-uv@v6
         with:
-          spec: |
-            version: v2
-            description: CI standalone inference evaluator test
-            budget: ai2/climate
-            tasks:
-              - name: ace-inference-test
-                image:
-                  beaker: ${{ steps.image.outputs.BEAKER_IMAGE }}
-                context:
-                  priority: low
-                  preemptible: true
-                resources:
-                  gpuCount: 1
-                  sharedMemory: 10 GiB
-                constraints:
-                  cluster:
-                    - ai2/saturn
-                    - ai2/jupiter
-                    - ai2/augusta
-                    - ai2/ceres
-                    - ai2/neptune
-                    - ai2/rhea
-                datasets:
-                  - mountPath: /test-data
-                    source:
-                      beaker: elynn/ci-inference
-                envVars:
-                  - name: COMMIT_SHA
-                    value: ${{ env.COMMIT_SHA }}
-                  - name: TMP_GITHUB_TOKEN
-                    value: ${{ secrets.GITHUB_TOKEN }}
-                  - name: WANDB_API_KEY
-                    secret: wandb-api-key-ai2cm-sa
-                command: ["/entrypoint.sh"]
-                result:
-                  path: /results
-          token: ${{ env.BEAKER_TOKEN }}
-          workspace: ${{ env.BEAKER_WORKSPACE }}
-          name: ci-ace-evaluator-${{ env.COMMIT_SHA_SHORT }}
+          python-version: "${{ env.PYTHON_VERSION }}"
+
+      - name: Install Gantry
+        run:
+          uv tool install 'beaker-gantry>=3.1,<4.0'
+
+      - name: ACE evaluator beaker job
+        run: |
+          exec gantry run \
+            --show-logs \
+            --name ${{ env.JOB_NAME }} \
+            --task-name ${{ env.JOB_NAME }} \
+            --description 'ACE evaluator test on CI' \
+            --beaker-image "$(cat latest_deps_only_image.txt)" \
+            --workspace ${{ env.BEAKER_WORKSPACE }} \
+            --priority low \
+            --preemptible \
+            --cluster ai2/saturn-cirrascale \
+            --cluster ai2/jupiter \
+            --cluster ai2/ceres-cirrascale \
+            --cluster ai2/neptune \
+            --cluster ai2/rhea \
+            --cluster ai2/prometheus \
+            --env WANDB_NAME=${{ env.JOB_NAME }} \
+            --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+            --dataset ${{ env.BEAKER_CHECKPOINT_TEST_DATASET }}:/test-data \
+            --gpus 1 \
+            --shared-memory 50GiB \
+            --budget ai2/climate \
+            --system-python \
+            --install "pip install --no-deps ." \
+            -- python -I -m fme.ace.evaluator ${{ env.CONFIG_PATH }} \
+                --override \
+                experiment_dir=/results \
+                n_forward_steps=2800 \
+                forward_steps_in_memory=30 \
+                checkpoint_path=/test-data/ckpt.tar \
+                loader.dataset.data_path=/test-data/data \
+                loader.dataset.n_repeats=24 \
+                logging.log_to_wandb=True \
+                logging.project=${{ env.WANDB_PROJECT }} \
+                logging.entity=${{ env.WANDB_ENTITY }} \
+                aggregator.log_global_mean_norm_time_series=False \
+                aggregator.log_zonal_mean_images=False

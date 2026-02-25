@@ -28,6 +28,7 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.mask_provider import MaskProvider
@@ -35,6 +36,7 @@ from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
 from .data_typing import VariableMetadata
+from .dataset import DatasetABC, DatasetItem
 from .utils import (
     as_broadcasted_tensor,
     get_horizontal_coordinates,
@@ -456,7 +458,7 @@ class XarrayDataConfig(DatasetConfigABC):
     overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
-    labels: list[str] = dataclasses.field(default_factory=list)
+    labels: list[str] | None = None
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -465,6 +467,15 @@ class XarrayDataConfig(DatasetConfigABC):
                 "but the engine is specified as 'zarr'. Please set "
                 "`XarrayDataConfig.file_pattern` to match the zarr filename."
             )
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        if self.labels is None:
+            return None
+        return set(self.labels)
 
     @property
     def torch_dtype(self) -> torch.dtype | None:
@@ -491,15 +502,19 @@ class XarrayDataConfig(DatasetConfigABC):
             )
         self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()
-        self.zarr_engine_used = False
-        if self.engine == "zarr":
-            self.zarr_engine_used = True
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        return self.engine == "zarr"
+
+    def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
+        self.subset = subset
 
     def build(
         self,
         names: Sequence[str],
-        n_timesteps: int,
-    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+        n_timesteps: IntSchedule,
+    ) -> tuple["XarraySubset", DatasetProperties]:
         return get_xarray_dataset(
             self,
             list(names),
@@ -507,7 +522,7 @@ class XarrayDataConfig(DatasetConfigABC):
         )
 
 
-class XarrayDataset(torch.utils.data.Dataset):
+class XarrayDataset(DatasetABC):
     """Load data from a directory of files matching a pattern using xarray. The
     number of contiguous timesteps to load for each sample is specified by the
     n_timesteps argument.
@@ -518,7 +533,7 @@ class XarrayDataset(torch.utils.data.Dataset):
     """
 
     def __init__(
-        self, config: XarrayDataConfig, names: Sequence[str], n_timesteps: int
+        self, config: XarrayDataConfig, names: Sequence[str], n_timesteps: IntSchedule
     ):
         self._horizontal_coordinates: HorizontalCoordinates
         self._names = names
@@ -535,8 +550,12 @@ class XarrayDataset(torch.utils.data.Dataset):
                 f"No files found matching '{self.path}/{self.file_pattern}'."
             )
         self.full_paths = self._raw_paths * config.n_repeats
-        self.sample_n_times = n_timesteps
-        self._get_files_stats(config.n_repeats, config.infer_timestep)
+        self._n_timesteps_schedule = n_timesteps
+        self._get_files_stats(
+            config.n_repeats,
+            config.infer_timestep,
+            max_sample_n_times=n_timesteps.max_value,
+        )
         first_dataset = xr.open_dataset(
             self.full_paths[0],
             decode_times=False,
@@ -574,8 +593,38 @@ class XarrayDataset(torch.utils.data.Dataset):
             [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
         )
         self._check_isel_dimensions(first_dataset.sizes)
-        self._labels = set(config.labels)
+        self._apply_sample_n_times(self._n_timesteps_schedule.get_value(0))
+        self._labels = set(config.labels) if config.labels is not None else None
         self._infer_timestep = config.infer_timestep
+        self._local_epoch: int = -1
+        self._global_epoch = torch.tensor(
+            -1
+        ).share_memory_()  # required for multi-worker parallelism
+
+    def _ensure_epoch_synchronized(self):
+        """Ensure that the local epoch is synchronized with the global epoch.
+
+        This is required for multi-worker data loading, where each worker
+        process has its own copy of the dataset object.
+        """
+        if self._local_epoch != self._global_epoch.item():
+            self._local_epoch = self._global_epoch.item()
+            sample_n_times = self._n_timesteps_schedule.get_value(self._local_epoch)
+            self._apply_sample_n_times(sample_n_times)
+
+    @property
+    def _epoch(self) -> int | None:
+        self._ensure_epoch_synchronized()
+        if self._local_epoch == -1:
+            return None
+        return self._local_epoch
+
+    def _apply_sample_n_times(self, sample_n_times: int):
+        self._sample_n_times = sample_n_times
+        logging.info(
+            f"Dataset now has {self._n_initial_conditions} samples of "
+            f"length {sample_n_times}."
+        )
 
     def _check_isel_dimensions(self, data_dim_sizes):
         # Horizontal dimensions are not currently supported, as the current isel code
@@ -640,11 +689,6 @@ class XarrayDataset(torch.utils.data.Dataset):
             return False
         return True
 
-    @property
-    def all_times(self) -> xr.CFTimeIndex:
-        """Time index of all available times in the data."""
-        return self._all_times
-
     def _get_variable_metadata(self, ds):
         result = {}
         for name in self._names:
@@ -657,7 +701,9 @@ class XarrayDataset(torch.utils.data.Dataset):
                 )
         self._variable_metadata = result
 
-    def _get_files_stats(self, n_repeats: int, infer_timestep: bool):
+    def _get_files_stats(
+        self, n_repeats: int, infer_timestep: bool, max_sample_n_times: int
+    ):
         logging.info(f"Opening data at {os.path.join(self.path, self.file_pattern)}")
         raw_times = _get_raw_times(self._raw_paths, engine=self.engine)
 
@@ -674,19 +720,17 @@ class XarrayDataset(torch.utils.data.Dataset):
 
         cum_num_timesteps = _get_cumulative_timesteps(time_coord)
         self.start_indices = cum_num_timesteps[:-1]
-        self.total_timesteps = cum_num_timesteps[-1]
-        self._n_initial_conditions = self.total_timesteps - self.sample_n_times + 1
+        self._total_timesteps = cum_num_timesteps[-1]
+        self._n_initial_conditions = self._total_timesteps - max_sample_n_times + 1
         self._sample_start_times = xr.CFTimeIndex(
             np.concatenate(time_coord)[: self._n_initial_conditions]
         )
         self._all_times = xr.CFTimeIndex(np.concatenate(time_coord))
 
-        del cum_num_timesteps, time_coord
+        del cum_num_timesteps
 
         ds = self._open_file(0)
         self._get_variable_metadata(ds)
-
-        logging.info(f"Found {self._n_initial_conditions} samples.")
 
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent
@@ -764,9 +808,6 @@ class XarrayDataset(torch.utils.data.Dataset):
         else:
             return self._timestep
 
-    def __len__(self):
-        return self._n_initial_conditions
-
     def _open_file(self, idx):
         logger.debug(f"Opening file {self.full_paths[idx]}")
         return _open_file_fh_cached(self.full_paths[idx], engine=self.engine)
@@ -774,9 +815,30 @@ class XarrayDataset(torch.utils.data.Dataset):
     @property
     def sample_start_times(self) -> xr.CFTimeIndex:
         """Return cftime index corresponding to start time of each sample."""
+        self._ensure_epoch_synchronized()
         return self._sample_start_times
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    @property
+    def all_times(self) -> xr.CFTimeIndex:
+        """
+        Like sample_start_times, but includes all times in the dataset, including
+        final times which are not valid as a start index.
+
+        This is relevant for inference, where we may use get_sample_by_time_slice to
+        retrieve time windows directly.
+
+        If this dataset does not support inference,
+        this will raise a NotImplementedError.
+        """
+        return self._all_times
+
+    @property
+    def sample_n_times(self) -> int:
+        """Number of timesteps in each sample."""
+        self._ensure_epoch_synchronized()
+        return self._sample_n_times
+
+    def __getitem__(self, idx: int) -> DatasetItem:
         """Return a sample of data spanning the timesteps
         [idx, idx + self.sample_n_times).
 
@@ -787,12 +849,21 @@ class XarrayDataset(torch.utils.data.Dataset):
             Tuple of a sample's data (i.e. a mapping from names to torch.Tensors) and
             its corresponding time coordinate.
         """
+        self._ensure_epoch_synchronized()
         time_slice = slice(idx, idx + self.sample_n_times)
         return self.get_sample_by_time_slice(time_slice)
 
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        self._ensure_epoch_synchronized()
+        if max_window_len + max_start_index > self._total_timesteps:
+            raise ValueError(
+                f"The maximum start index {max_start_index} plus window length "
+                f"{max_window_len} must be less than or "
+                f"equal to the number of steps in the dataset {self._total_timesteps}."
+            )
+
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
+        self._ensure_epoch_synchronized()
         input_file_idx, input_local_idx = _get_file_local_index(
             time_slice.start, self.start_indices
         )
@@ -878,7 +949,14 @@ class XarrayDataset(torch.utils.data.Dataset):
         # is valid even when n_repeats > 1.
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
 
-        return tensors, time, self._labels
+        return tensors, time, self._labels, self._epoch
+
+    def set_epoch(self, epoch: int):
+        """
+        Set the epoch for the dataset. This will update the number of initial
+        conditions and the sample start times if the number of timesteps is a schedule.
+        """
+        self._global_epoch.fill_(epoch)  # values get set lazily based on this
 
 
 def _get_timestep(time: np.ndarray) -> datetime.timedelta:
@@ -926,19 +1004,20 @@ def _as_index_selection(
     return index_selection
 
 
-class XarraySubset(torch.utils.data.Dataset):
+class XarraySubset(DatasetABC):
     def __init__(self, dataset: XarrayDataset, subset: slice | np.ndarray):
         indices = np.arange(len(dataset))[subset]
         logging.info(f"Subsetting dataset samples according to {subset}.")
+        self._wrapped_dataset = dataset
         self._dataset = torch.utils.data.Subset(dataset, indices)
         self._sample_start_times = dataset.sample_start_times[indices]
         self._sample_n_times = dataset.sample_n_times
+        self._max_timestep_index: int | None = None
+        if len(indices) > 0 and np.all(indices[:-1] <= indices[1:]):
+            self._max_timestep_index = indices[-1] + dataset.sample_n_times - 1
         self.dims = dataset.dims
 
-    def __len__(self):
-        return len(self._dataset)
-
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def __getitem__(self, idx: int) -> DatasetItem:
         return self._dataset[idx]
 
     @property
@@ -946,25 +1025,64 @@ class XarraySubset(torch.utils.data.Dataset):
         return self._sample_start_times
 
     @property
+    def all_times(self) -> xr.CFTimeIndex:
+        """
+        Like sample_start_times, but includes all times in the dataset, including
+        final times which are not valid as a start index.
+
+        This is relevant for inference, where we may use get_sample_by_time_slice to
+        retrieve time windows directly.
+
+        If this dataset does not support inference,
+        this will raise a NotImplementedError.
+        """
+        raise NotImplementedError("XarraySubset does not support inference.")
+
+    @property
     def sample_n_times(self) -> int:
         """The length of the time dimension of each sample."""
         return self._sample_n_times
 
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
+        raise NotImplementedError(
+            "XarraySubset does not support getting samples by time slice, "
+            "is this a bug?."
+        )
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        if self._max_timestep_index is None:
+            raise ValueError(
+                "XarraySubset that does not preserve time ordering of the data "
+                "cannot be used for inference."
+            )
+        if max_start_index + max_window_len - 1 > self._max_timestep_index:
+            raise ValueError(
+                f"The maximum start index {max_start_index} plus forward steps "
+                f"{max_window_len - 1} must be less than or equal to the "
+                f"max timestep index in the dataset {self._max_timestep_index}."
+            )
+
+    @property
+    def properties(self) -> DatasetProperties:
+        return self._wrapped_dataset.properties
+
+    def set_epoch(self, epoch: int):
+        self._wrapped_dataset.set_epoch(epoch)
+
 
 def get_xarray_dataset(
-    config: XarrayDataConfig, names: Sequence[str], n_timesteps: int
+    config: XarrayDataConfig, names: Sequence[str], n_timesteps: IntSchedule
 ) -> tuple["XarraySubset", DatasetProperties]:
     dataset = XarrayDataset(config, names, n_timesteps)
     properties = dataset.properties
     index_slice = _as_index_selection(config.subset, dataset)
-    dataset = XarraySubset(dataset, index_slice)
-    return dataset, properties
+    return XarraySubset(dataset, index_slice), properties
 
 
 def get_xarray_datasets(
     dataset_configs: Sequence[XarrayDataConfig],
     names: Sequence[str],
-    n_timesteps: int,
+    n_timesteps: IntSchedule,
     strict: bool = True,
 ) -> tuple[list[XarraySubset], DatasetProperties]:
     datasets = []
@@ -974,15 +1092,8 @@ def get_xarray_datasets(
         datasets.append(dataset)
         if properties is None:
             properties = new_properties
-        elif not strict:
-            try:
-                properties.update(new_properties)
-            except ValueError as e:
-                warnings.warn(
-                    f"Metadata for each ensemble member are not the same: {e}"
-                )
         else:
-            properties.update(new_properties)
+            properties.update(new_properties, strict=strict)
     if properties is None:
         raise ValueError("At least one dataset must be provided.")
 

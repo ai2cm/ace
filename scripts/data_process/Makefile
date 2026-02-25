@@ -28,7 +28,7 @@ NAME_CLIMSST_4DEG = fv3gfs-ensemble-4deg
 NAME_AMIP_1DEG = fv3gfs-AMIP-ensemble
 NAME_AMIP_4DEG = fv3gfs-AMIP-ensemble-4deg
 ATMOSPHERE_PROCESSING_IMAGE = us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing
-ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.03.1  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
+ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.12.0  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 HEALPIX_PROCESSING_IMAGE = dlwp-ace-datapipe
 HEALPIX_PROCESSING_IMAGE_VERSION = v2025.09.0  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 
@@ -61,7 +61,7 @@ SHIELD_RES ?= c96
 .PHONY: shield_AMIP_dataset
 shield_AMIP_dataset:
 	./compute_dataset.sh \
-	--config configs/shield-amip-ensemble-$(SHIELD_RES)-$(RESOLUTION)-8layer.yaml
+	--config configs/shield-amip-$(SHIELD_RES)-$(RESOLUTION)-8layer.yaml
 
 .PHONY: shield_AMIP_monthly_netcdfs
 shield_AMIP_monthly_netcdfs:
@@ -276,11 +276,11 @@ cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
 	--end-date "0351-01-01T00:00:00"
 
 create_ocean_data_proc_env:
-	conda create -y -n ocean_data_proc python=3.10 pip yq
-	conda install -y -n ocean_data_proc -c conda-forge xesmf
-	conda run --no-capture-output -n ocean_data_proc python -m pip install uv
-	conda run --no-capture-output -n ocean_data_proc uv pip install -r requirements-ocean.txt
-	conda run --no-capture-output -n ocean_data_proc bash ./install_ocean_emulators.sh
+	conda create -y -n ocean_preprocess python=3.11 pip yq
+	conda install -y -n ocean_preprocess -c conda-forge xesmf
+	conda run --no-capture-output -n ocean_preprocess python -m pip install uv
+	conda run --no-capture-output -n ocean_preprocess uv pip install -r requirements-ocean.txt
+	conda run --no-capture-output -n ocean_preprocess bash ./install_ocean_emulators.sh
 
 .PHONY: cm4_trial_run_ocean_dataset_and_stats
 cm4_trial_run_ocean_dataset_and_stats:
@@ -306,6 +306,14 @@ shield_amip_c96_idealized_0p1_heating_ensemble_dataset:
 xshield_amip_dataset_and_stats:
 	./compute_dataset.sh --config configs/X-SHiELD-AMIP-1deg-$(LAYERS)-11yr.yaml
 
+.PHONY: xshield_amip_plus_4K_dataset_and_stats
+xshield_amip_plus_4K_dataset_and_stats:
+	./compute_dataset.sh --config configs/X-SHiELD-AMIP-plus-4K-1deg-$(LAYERS)-1yr.yaml
+
+.PHONY: shield_c96_ramped_climSST_random_CO2_ensemble_dataset
+shield_c96_ramped_climSST_random_CO2_ensemble_dataset:
+	./compute_dataset.sh --config configs/shield-ramped-climSST-random-CO2-ensemble-c96-1deg-$(LAYERS).yaml
+
 .PHONY: build_atmosphere_processing_image
 build_atmosphere_processing_image:
 	docker build -f atmosphere.Dockerfile -t $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION) .
@@ -322,14 +330,32 @@ build_healpix_processing_image:
 push_healpix_image_to_beaker:
 	beaker image create --name $(HEALPIX_PROCESSING_IMAGE)-$(HEALPIX_PROCESSING_IMAGE_VERSION) $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION)
 
+.PHONY: create_coupled_datasets_env
+create_coupled_datasets_env:
+	conda create -y -n create_coupled_datasets python=3.11 pip
+	conda run --no-capture-output -n create_coupled_datasets python -m pip install uv
+	conda run --no-capture-output -n create_coupled_datasets uv pip install -r requirements-coupled.txt
+
 .PHONY: cm4_piControl_200yr_coupled_no_smoothing
 cm4_piControl_200yr_coupled_no_smoothing:
-	python ./create_coupled_datasets.py --yaml configs/CM4-piControl-200yr-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-200yr-coupled.yaml
 
 .PHONY: cm4_1pctCO2_140yr_coupled_no_smoothing
 cm4_1pctCO2_140yr_coupled_no_smoothing:
-	python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-140yr-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-140yr-coupled.yaml
 
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
-	python ./create_coupled_datasets.py --yaml configs/E3SMv3-piControl-100yr-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/E3SMv3-piControl-100yr-coupled.yaml
+
+.PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
+cm4_like_am4_random_co2_ensemble_atmosphere:
+	./compute_dataset.sh --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
+
+.PHONY:
+cm4_like_am4_random_co2_ensemble_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-like-AM4-random-CO2-ensemble-coupled.yaml
+
+.PHONY: shield_amip_constant_co2_c96_dataset
+shield_amip_constant_co2_c96_dataset:
+	./compute_dataset.sh --config configs/shield-amip-constant-co2-c96-1deg-8layer.yaml

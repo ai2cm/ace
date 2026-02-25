@@ -22,7 +22,6 @@ from fme.core.generics.inference import (
     get_record_to_wandb,
     run_inference,
 )
-from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.single_module import SingleModuleStepConfig
@@ -89,7 +88,7 @@ class MockLoader(torch.utils.data.DataLoader):
                 data=self._data,
                 time=self._time
                 + (self._current_window - 1) * (self._time.shape[1] - 1),
-                labels=[set() for _ in range(self._time.shape[0])],
+                labels=None,
             )
         else:
             raise StopIteration
@@ -143,7 +142,6 @@ def _get_stepper():
                 ),
             ),
         ),
-        loss=StepLossConfig(),
     )
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(
@@ -162,7 +160,7 @@ def get_batch_data(
     return BatchData.new_on_device(
         data=data,
         time=time,
-        labels=[set() for _ in range(time.shape[0])],
+        labels=None,
     )
 
 
@@ -364,7 +362,7 @@ class PlusOneStepper:
         data = BatchData.new_on_device(
             data={"var": out_tensor},
             time=forcing.time[:, self.n_ic_timesteps :],
-            labels=[set() for _ in range(forcing.time.shape[0])],
+            labels=None,
         )
         if compute_derived_variables:
             data = data.compute_derived_variables(

@@ -10,6 +10,7 @@ from fme.ace.aggregator import (
     OneStepAggregatorConfig,
 )
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import (
@@ -23,10 +24,12 @@ from fme.ace.requirements import (
     NullDataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.ace.stepper import Stepper
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper import TrainStepper
+from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.core.cli import ResumeResultsConfig
+from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -78,6 +81,10 @@ class WeatherEvaluationConfig:
             # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
+
+    @property
+    def using_labels(self) -> bool:
+        return self.loader.using_labels
 
     def get_inference_data(
         self,
@@ -132,6 +139,10 @@ class InlineInferenceConfig:
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
 
+    @property
+    def using_labels(self) -> bool:
+        return self.loader.using_labels
+
     def get_inference_data(
         self,
         window_requirements: DataRequirements,
@@ -157,16 +168,23 @@ class TrainConfig:
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
-        save_checkpoint: Whether to save checkpoints.
-        experiment_dir: Directory where checkpoints and logs are saved.
+        save_checkpoint: Whether to save checkpoints. If false, no checkpoints
+            are saved regardless of other checkpoint configuration settings. If
+            true, checkpoints are saved at the end of the training loop, after
+            evaluation, and on catching a termination signal.
+        experiment_dir: Directory where checkpoints and logs are saved. For the
+            time being, this must be a local directory.
         inference: Configuration for inline inference.
             If None, no inline inference is run,
             and no "best_inline_inference" checkpoint will be saved.
         weather_evaluation: Configuration for weather evaluation.
             If None, no weather evaluation is run. Weather evaluation is not
             used to select checkpoints, but is used to provide metrics.
+        stepper_training: Training-specific configuration including loss, ensemble
+            settings, parameter initialization, and forward step scheduling.
         n_forward_steps: Number of forward steps during training. Cannot be given
-            at the same time as train_n_forward_steps in StepperConfig.
+            at the same time as train_n_forward_steps in stepper_training.
+        train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
             If unset, weight initialization is not reproducible but data shuffling is.
@@ -184,6 +202,9 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        train_evaluation_samples: Number of samples to evaluate on after training
+            on each epoch. The remainder samples after dividing by the batch size
+            are discarded.
         checkpoint_every_n_batches: How often to save latest checkpoint during training.
             If 0 is given, checkpoints will not be saved based on batch progress,
             only other factors like pre-emption or being at the end of an epoch.
@@ -214,7 +235,13 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig | None
+    stepper_training: TrainStepperConfig = dataclasses.field(
+        default_factory=lambda: TrainStepperConfig()
+    )
     n_forward_steps: int | None = None
+    train_aggregator: TrainAggregatorConfig = dataclasses.field(
+        default_factory=lambda: TrainAggregatorConfig()
+    )
     seed: int | None = None
     copy_weights_after_batch: list[CopyWeightsConfig] = dataclasses.field(
         default_factory=list
@@ -225,6 +252,7 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
+    train_evaluation_samples: int = 1000
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
@@ -237,18 +265,45 @@ class TrainConfig:
 
     def __post_init__(self):
         if (
-            isinstance(self.stepper, StepperConfig)
-            and self.stepper.train_n_forward_steps is not None
+            self.stepper_training.train_n_forward_steps is not None
             and self.n_forward_steps is not None
         ):
             raise ValueError(
-                "stepper.train_n_forward_steps may not be given at the same time as "
-                "n_forward_steps at the top level"
+                "stepper_training.train_n_forward_steps may not be given at the same "
+                "time as n_forward_steps at the top level"
+            )
+        if self.train_loader.using_labels != self.validation_loader.using_labels:
+            raise ValueError(
+                "train_loader and validation_loader must both use labels or both not "
+                "use labels"
+            )
+        if self.inference is not None and (
+            self.train_loader.using_labels != self.inference.using_labels
+        ):
+            raise ValueError(
+                "train_loader and inference loader must both use labels or both not "
+                "use labels"
+            )
+        if self.weather_evaluation is not None and (
+            self.train_loader.using_labels != self.weather_evaluation.using_labels
+        ):
+            raise ValueError(
+                "train_loader and weather_evaluation loader must both use labels or "
+                "both not use labels"
+            )
+        if not is_local(self.experiment_dir):
+            raise ValueError(
+                f"During training, experiment_dir must currently be a local "
+                f"directory, got {self.experiment_dir!r}."
             )
 
     def set_random_seed(self):
         if self.seed is not None:
             set_seed(self.seed)
+
+    @property
+    def train_evaluation_batches(self) -> int:
+        return self.train_evaluation_samples // self.train_loader.batch_size
 
     @property
     def inference_n_forward_steps(self) -> int:
@@ -288,9 +343,20 @@ class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
+    def _get_n_forward_steps(self) -> int | IntSchedule:
+        """Get n_forward_steps for data loading requirements."""
+        schedule = self.config.stepper_training.train_n_forward_steps_schedule
+        if schedule is not None:
+            return schedule.max_n_forward_steps
+        assert isinstance(
+            self.config.n_forward_steps, int
+        )  # this is already validated in TrainConfig.__post_init__
+        return self.config.n_forward_steps
+
     def _get_train_window_data_requirements(self) -> DataRequirements:
-        return self.config.stepper.get_train_window_data_requirements(
-            default_n_forward_steps=self.config.n_forward_steps
+        n_forward_steps = self._get_n_forward_steps()
+        return self.config.stepper.get_evaluation_window_data_requirements(
+            n_forward_steps
         )
 
     def _get_evaluation_window_data_requirements(self) -> DataRequirements:
@@ -338,8 +404,17 @@ class TrainBuilders:
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-    ) -> Stepper:
-        return self.config.stepper.get_stepper(
+    ) -> TrainStepper:
+        """
+        Get the training stepper.
+
+        Creates a Stepper for inference and wraps it in a TrainStepper with
+        training-specific configuration including the loss and parameter
+        initialization.
+
+        """
+        return self.config.stepper_training.get_train_stepper(
+            stepper_config=self.config.stepper,
             dataset_info=dataset_info,
         )
 

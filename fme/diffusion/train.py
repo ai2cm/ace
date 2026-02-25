@@ -58,17 +58,16 @@ import torch
 import xarray as xr
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator import OneStepAggregator, TrainAggregator
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
 )
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.cli import get_parser, prepare_config, prepare_directory
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -96,6 +95,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         initial_inference_times = batch.time.isel(time=0)
         break
     aggregator_builder = AggregatorBuilder(
+        train_config=config.train_aggregator,
         inference_config=config.inference_aggregator,
         dataset_info=train_data.dataset_info,
         initial_inference_time=initial_inference_times,
@@ -137,6 +137,7 @@ class AggregatorBuilder(
 ):
     def __init__(
         self,
+        train_config: TrainAggregatorConfig,
         inference_config: InferenceEvaluatorAggregatorConfig,
         dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray,
@@ -149,6 +150,7 @@ class AggregatorBuilder(
         channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
+        self.train_config = train_config
         self.inference_config = inference_config
         self.dataset_info = dataset_info
         self.initial_inference_time = initial_inference_time
@@ -162,7 +164,10 @@ class AggregatorBuilder(
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
-        return TrainAggregator()
+        return TrainAggregator(
+            config=self.train_config,
+            operations=self.dataset_info.gridded_operations,
+        )
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
@@ -197,13 +202,12 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         torch.backends.cudnn.benchmark = True
     if not os.path.isdir(config.experiment_dir):
         os.makedirs(config.experiment_dir, exist_ok=True)
-    config.logging.configure_logging(config.experiment_dir, log_filename="out.log")
-    env_vars = logging_utils.retrieve_env_vars()
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    config_as_dict = to_flat_dict(dataclasses.asdict(config))
-    config.logging.configure_wandb(
-        config=config_as_dict, env_vars=env_vars, resumable=True, notes=beaker_url
+    config_data = dataclasses.asdict(config)
+    config.logging.configure_logging(
+        config.experiment_dir,
+        log_filename="out.log",
+        config=config_data,
+        resumable=True,
     )
     if config.resume_results is not None:
         logging.info(
