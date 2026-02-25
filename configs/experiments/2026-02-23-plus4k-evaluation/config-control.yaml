@@ -22,7 +22,7 @@ data:
   lon_extent:
     start: 228.0
     stop: 300.0
-  batch_size: 8
+  batch_size: 16
   num_data_workers: 2
   strict_ensemble: false
 events: []

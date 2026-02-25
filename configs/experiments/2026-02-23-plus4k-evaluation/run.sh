@@ -3,7 +3,7 @@
 set -e
 
 # JOB_BASE="evaluate-HiRO-xshield-amip-plus4K-100km-to-3km-conus-events-generate-v2"
-JOB_BASE="evaluate-HiRO-xshield-amip-control-100km-to-3km-conus-events-generate"
+JOB_BASE="evaluate-HiRO-xshield-amip-control-100km-to-3km-conus-events-generate-v2"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 # CONFIG_PATH="$SCRIPT_PATH/config-plus4k.yaml"
@@ -13,7 +13,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-NGPU=4
+NGPU=8
 IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 
 #EXISTING_RESULTS_DATASET=01K8P3P5205396WR50FCMZR6P7 # best crps checkpoint from job using global validation
@@ -22,7 +22,6 @@ EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD # best hist checkpoint from 
 wandb_group=""
 
 JOB_NAME="$JOB_BASE"
-CONFIG_PATH="$SCRIPT_PATH/config-plus4k.yaml"
 
 gantry run \
     --name $JOB_NAME \
