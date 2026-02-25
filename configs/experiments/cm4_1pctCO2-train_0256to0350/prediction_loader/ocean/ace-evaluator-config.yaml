@@ -1,6 +1,6 @@
 experiment_dir: /results
-n_forward_steps: 2920
-forward_steps_in_memory: 40
+n_forward_steps: 10218
+forward_steps_in_memory: 78
 checkpoint_path: /ckpt.tar
 logging:
   log_to_screen: true
@@ -11,7 +11,7 @@ logging:
 loader:
   start_indices:
     times:
-      - '0256-01-03T12:00:00'
+      - '0211-01-03T12:00:00'
   dataset:
     merge:
       - data_path: /climate-default
@@ -30,7 +30,7 @@ data_writer:
 prediction_loader:
   start_indices:
     times:
-      - '0256-01-03T12:00:00'
+      - '0211-01-03T12:00:00'
   dataset:
     merge:
       - data_path: /climate-default
