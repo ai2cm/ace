@@ -49,11 +49,12 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
+run_training "train-amip-c96-shield-ace2.yaml" "train-amip-c96-shield-ace2"
 # run_training "train-amip-c96-shield-daily.yaml" "train-amip-c96-shield-daily"
 # run_training "train-amip-c96-shield-daily-pos16.yaml" "train-amip-c96-shield-daily-pos16"
 # run_training "train-amip-c96-shield-daily-pos16-rsop.yaml" "train-amip-c96-shield-daily-pos16-rsop"
 # run_training "train-amip-c96-shield-daily-e1c7d2-pos16-rsop.yaml" "train-amip-c96-shield-daily-e1c7d2-pos16-rsop"
-run_training "train-amip-c96-shield-daily-e1c7d2-l2-pos16-rsop.yaml" "train-amip-c96-shield-daily-e1c7d2-l2-pos16-rsop"
+# run_training "train-amip-c96-shield-daily-e1c7d2-l2-pos16-rsop.yaml" "train-amip-c96-shield-daily-e1c7d2-l2-pos16-rsop"
 # run_training "train-amip-c96-shield-daily-e1c7l2-pos16-rsop.yaml" "train-amip-c96-shield-daily-e1c7l2-pos16-rsop"
 # run_training "train-amip-c96-shield.yaml" "train-amip-c96-shield"
 # run_training "train-amip-c96-shield-rsop.yaml" "train-amip-c96-shield-rsop"
