@@ -30,6 +30,8 @@ import dataclasses
 import dask.distributed as dd
 import xarray as xr
 from typing import Protocol
+from zarr.storage import ObjectStore
+from obstore.store import GCSStore
 
 
 class DatasetLoader(Protocol):
@@ -72,7 +74,42 @@ def _validate_variables_exist(
         raise ValueError(
             f"Variables {missing_vars} not found in dataset '{dataset_name}' at {path}. "
             f"Available variables in source: {list(ds.data_vars)}"
+        ) 
+
+def _open_gcs_obstore(path: str) -> xr.Dataset:
+    # extract bucket and prefix
+    protocol, _, bucket, *prefix_parts = path.split("/")
+    prefix = "/".join(prefix_parts)
+    # open GCS store and dataset
+    gcs_store = GCSStore(bucket, prefix=prefix)
+    store = ObjectStore(gcs_store, read_only=True)
+    ds = xr.open_dataset(store, consolidated=True, engine="zarr", chunks="auto")
+    return ds
+
+def _maybe_rechunk_with_shard(ds: xr.Dataset) -> xr.Dataset:
+    key = list(ds.data_vars.keys())[0]
+    encoding = ds[key].encoding
+    if "shards" in encoding and encoding["shards"] is not None:
+        chunk_leading = encoding["chunks"][0]
+        shard_leading = encoding["shards"][0]
+        if chunk_leading != shard_leading:
+            print(
+                f"Rechunking dataset to match shard size for variable '{key}': "
+                f"chunk size {chunk_leading} -> {shard_leading}"
+            )
+            ds = ds.chunk({ds[key].dims[0]: shard_leading})
+    return ds
+
+def _open_zarr_store(path: str) -> xr.Dataset:
+    if path.startswith("gs://"):
+        ds = _open_gcs_obstore(path)
+    else:
+        raise NotImplementedError(
+            f"Unsupported path protocol in {path}. Only 'gs://' is supported."
         )
+    
+    ds = _maybe_rechunk_with_shard(ds)
+    return ds
 
 @dataclasses.dataclass
 class DatasetConfig:
@@ -94,7 +131,7 @@ class DatasetConfig:
 
     def load_dataset(self) -> xr.Dataset:
         """Load the dataset, selecting and renaming specified variables."""
-        ds = xr.open_zarr(self.path)
+        ds = _open_zarr_store(self.path)
 
         # Validate that all configured variables exist in the source
         _validate_variables_exist(ds, self.variable_names, self.name, self.path)
@@ -150,7 +187,7 @@ class DatasetPerVariableConfig:
         datasets = []
         for filename_key, variable_names in self.per_file_variables.items():
             path = f"{self.base_path}/{self.filename_map[filename_key]}"
-            ds = xr.open_zarr(path)
+            ds = _open_zarr_store(path)
 
             # Validate that all configured variables exist in this source file
             _validate_variables_exist(ds, variable_names, self.name, path)
@@ -265,6 +302,7 @@ def main(
                 ds.to_zarr(output_file, mode=zarr_mode)
                 print(f"  ✓ Successfully wrote {loader.name}")
             else:
+                print(f"  [DRY RUN] Dataset chunks: {dict(ds.chunks)}")
                 print(
                     f"  [DRY RUN] Would write {len(ds.data_vars)} variables to "
                     f"{output_file} with mode '{zarr_mode}'"
