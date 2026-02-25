@@ -9,34 +9,81 @@ model:
 data:
   topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   coarse:
-  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling
     engine: zarr
     file_pattern: 100km.zarr
-    subset:
-      start_time: 2023-01-01T00:00
-      step: 29
   fine:
-  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+  - data_path: /climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling
     engine: zarr
     file_pattern: 3km.zarr
-    subset:
-      start_time: 2023-01-01T00:00
-      step: 29
   lat_extent:
-    start: -30.0
-    stop: 30.0
-  batch_size: 8
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 228.0
+    stop: 300.0
+  batch_size: 4
   num_data_workers: 2
   strict_ensemble: false
 events:
-- name: WPacific_hurricane_landfall_china_20230510
-  date: 2023-05-10T12:00
+- name: WA_AR_20200113
+  date: 2020-01-13T00:00:00
   lat_extent:
-    start: 7
-    stop: 23
+    start: 35
+    stop: 51
   lon_extent:
-    start: 104
-    stop: 120
+    start: 228
+    stop: 244
+  save_generated_samples: true
+  n_samples: 32
+- name: WA_AR_20201125
+  date: 2020-11-25T00:00:00
+  lat_extent:
+    start: 35
+    stop: 51
+  lon_extent:
+    start: 228
+    stop: 244
+  save_generated_samples: true
+  n_samples: 32
+- name: CA_AR_20200126
+  date: 2020-01-26T00:00:00
+  lat_extent:
+    start: 30
+    stop: 46
+  lon_extent:
+    start: 228
+    stop: 244
+  save_generated_samples: true
+  n_samples: 32
+- name: WPac_concentric_tc_20200806
+  date: 2020-08-06T12:00:00
+  lat_extent:
+    start: 19
+    stop: 35
+  lon_extent:
+    start: 120
+    stop: 136
+  save_generated_samples: true
+  n_samples: 32
+- name: WPac_pinhole_eye_tc_20200801
+  date: 2020-08-01T12:00:00
+  lat_extent:
+    start: 8
+    stop: 24
+  lon_extent:
+    start: 130
+    stop: 146
+  save_generated_samples: true
+  n_samples: 32
+- name: WPac_assym_tc_20200106
+  date: 2020-01-06T06:00:00
+  lat_extent:
+    start: 8
+    stop: 24
+  lon_extent:
+    start: 130
+    stop: 146
   save_generated_samples: true
   n_samples: 32
 logging:

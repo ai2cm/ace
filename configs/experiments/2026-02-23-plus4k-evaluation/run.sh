@@ -2,8 +2,7 @@
 
 set -e
 
-JOB_BASE="evaluate-HiRO-100km-to-3km-generate-step-ablation"
-ALL_CONFIGS=(config-default.yaml config-step-12.yaml config-step-8.yaml)
+JOB_BASE="evaluate-HiRO-100km-to-3km-generate"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
@@ -20,11 +19,8 @@ EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD # best hist checkpoint from 
 wandb_group=""
 
 run_config() {
-    local CONFIG_FILENAME="$1"
-    local SUFFIX="${CONFIG_FILENAME%.yaml}"   # strip .yaml
-    local SUFFIX="${SUFFIX#config-}"          # strip leading "config-"
-    local JOB_NAME="${JOB_BASE}-${SUFFIX}"
-    local CONFIG_PATH="$SCRIPT_PATH/$CONFIG_FILENAME"
+    local JOB_NAME="$JOB_BASE"
+    local CONFIG_PATH="$SCRIPT_PATH/config.yaml"
 
     gantry run \
         --name $JOB_NAME \
@@ -51,10 +47,4 @@ run_config() {
         -- torchrun --nproc_per_node $NGPU -m fme.downscaling.evaluator $CONFIG_PATH
 }
 
-if [[ $# -eq 1 ]]; then
-    run_config "$1"
-else
-    for cfg in "${ALL_CONFIGS[@]}"; do
-        run_config "$cfg"
-    done
-fi
+run_config
