@@ -6,7 +6,7 @@ from typing import Any, Literal, Protocol
 import dacite
 import torch
 
-from fme.core.constants import FREEZING_TEMPERATURE_KELVIN
+from fme.core.constants import FREEZING_TEMPERATURE_KELVIN, REFERENCE_SALINITY_PSU
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
@@ -79,12 +79,32 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
+@dataclasses.dataclass
+class OceanSaltContentBudgetConfig:
+    """Configuration for ocean salt content budget correction.
+
+    Parameters:
+        method: Method to use for salt content budget correction. The available
+            option is "scaled_salinity", which enforces conservation of salt
+            content by scaling the predicted salinity by a vertically and
+            horizontally uniform correction factor.
+        constant_unaccounted_salt_flux: Area-weighted global mean
+            column-integrated salt flux in g/m**2/s to be added to the virtual
+            salt flux when conserving the salt content. This can be useful for
+            correcting errors in salt budget in target data.
+    """
+
+    method: Literal["scaled_salinity"]
+    constant_unaccounted_salt_flux: float = 0.0
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig:
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
+    ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
@@ -141,6 +161,22 @@ class OceanCorrector(CorrectorABC):
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.sea_ice_fraction_correction is not None:
             gen_data = self._config.sea_ice_fraction_correction(gen_data, input_data)
+        if self._config.ocean_salt_content_correction is not None:
+            if self._vertical_coordinate is None:
+                raise ValueError(
+                    "Ocean salt content correction is turned on, but no vertical "
+                    "coordinate is available."
+                )
+            gen_data = _force_conserve_ocean_salt_content(
+                input_data,
+                gen_data,
+                forcing_data,
+                self._gridded_operations.area_weighted_mean,
+                self._vertical_coordinate,
+                self._timestep.total_seconds(),
+                self._config.ocean_salt_content_correction.method,
+                self._config.ocean_salt_content_correction.constant_unaccounted_salt_flux,
+            )
         if self._config.ocean_heat_content_correction is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
@@ -239,4 +275,59 @@ def _force_conserve_ocean_heat_content(
         gen.data["sst"] = (  # assuming sst in Kelvin
             gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
         ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    return gen.data
+
+
+def _force_conserve_ocean_salt_content(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    forcing_data: TensorMapping,
+    area_weighted_mean: AreaWeightedMean,
+    vertical_coordinate: HasOceanDepthIntegral,
+    timestep_seconds: float,
+    method: Literal["scaled_salinity"] = "scaled_salinity",
+    unaccounted_salt_flux: float = 0.0,
+) -> TensorDict:
+    if method != "scaled_salinity":
+        raise NotImplementedError(
+            f"Method {method!r} not implemented for ocean salt content conservation"
+        )
+    if "wfo" in gen_data and "wfo" in forcing_data:
+        raise ValueError(
+            "Water flux into sea water cannot be present in both gen_data and "
+            "forcing_data."
+        )
+    input = OceanData(input_data, vertical_coordinate)
+    gen = OceanData(gen_data, vertical_coordinate)
+    forcing = OceanData(forcing_data)
+    global_gen_salt_content = area_weighted_mean(
+        gen.ocean_salt_content,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    global_input_salt_content = area_weighted_mean(
+        input.ocean_salt_content,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    try:
+        wfo = gen.water_flux_into_sea_water
+    except KeyError:
+        wfo = input.water_flux_into_sea_water
+    virtual_salt_flux = -REFERENCE_SALINITY_PSU * wfo * forcing.sea_surface_fraction
+    salt_flux_global_mean = area_weighted_mean(
+        virtual_salt_flux,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    expected_change_salt_content = (
+        salt_flux_global_mean + unaccounted_salt_flux
+    ) * timestep_seconds
+    salt_content_correction_ratio = (
+        global_input_salt_content + expected_change_salt_content
+    ) / global_gen_salt_content
+    n_levels = gen.sea_water_salinity.shape[-1]
+    for k in range(n_levels):
+        name = f"so_{k}"
+        gen.data[name] = gen.data[name] * salt_content_correction_ratio
     return gen.data
