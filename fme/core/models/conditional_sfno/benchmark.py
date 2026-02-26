@@ -1,13 +1,13 @@
 from typing import Self
 
 import torch
+from torch_harmonics import InverseRealSHT, RealSHT
 
 from fme.core.benchmark.benchmark import BenchmarkABC, register_benchmark
 from fme.core.benchmark.timer import Timer
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.conditional_sfno.sfnonet import FourierNeuralOperatorBlock
-from fme.core.models.conditional_sfno.sht import InverseRealSHT, RealSHT
 from fme.core.typing_ import TensorDict
 
 
