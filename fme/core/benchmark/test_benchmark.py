@@ -53,7 +53,7 @@ def test_regression(benchmark_name: str, very_fast_only: bool):
         # If run_regression returns something,
         # we expect it to be a TensorDict of results
         assert isinstance(regression_result, dict)
-        #for key, value in regression_result.items():
+        # for key, value in regression_result.items():
         if "diagnostics" in regression_result:
             validate_tensor(
                 regression_result["output"],
@@ -61,7 +61,9 @@ def test_regression(benchmark_name: str, very_fast_only: bool):
             )
             validate_tensor_dict(
                 regression_result["diagnostics"],
-                os.path.join(DIR, "testdata", f"{benchmark_name}-diagnostics-regression.pt"),
+                os.path.join(
+                    DIR, "testdata", f"{benchmark_name}-diagnostics-regression.pt"
+                ),
             )
         else:
             validate_tensor_dict(
