@@ -1,0 +1,201 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 120
+n_forward_steps: 2
+seed: 0
+ema:
+  decay: 0.999
+inference:
+  n_forward_steps: 7300
+  forward_steps_in_memory: 40
+  loader:
+    start_indices:
+      times:
+        - '2009-01-01T00:00:00'
+        - '2009-02-15T00:00:00'
+        - '2009-04-01T00:00:00'
+        - '2009-05-15T00:00:00'
+        - '2009-07-01T00:00:00'
+        - '2009-08-15T00:00:00'
+        - '2009-10-01T00:00:00'
+        - '2009-11-15T00:00:00'
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
+      engine: zarr
+    num_data_workers: 16
+  aggregator:
+    log_histograms: true
+    time_mean_reference_data: /statsdata/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 16
+  prefetch_factor: 4
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
+    engine: zarr
+    subset:
+      start_time: '1979-01-01'
+      stop_time: '2008-12-31'
+validation_loader:
+  batch_size: 128
+  num_data_workers: 16
+  prefetch_factor: 4
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
+    engine: zarr
+    subset:
+      start_time: '2009-01-01'
+      stop_time: '2014-12-31'
+      step: 3
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper:
+  loss:
+    type: MSE
+    weights:
+      air_temperature_1: 0.5
+      specific_total_water_1: 0.25
+      specific_total_water_2: 0.5
+      PRATEsfc: 0.5
+      DLWRFsfc: 2
+      ULWRFsfc: 5
+      USWRFsfc: 2
+      DSWRFsfc: 2
+      USWRFtoa: 2
+      tendency_of_total_water_path_due_to_advection: 0.5
+  step:
+    type: single_module
+    config:
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 384
+          noise_embed_dim: 0
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+      normalization:
+        network:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-full-field.nc
+        residual:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-residual.nc
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        force_positive_names:
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - PRATEsfc
+        - ULWRFsfc
+        - ULWRFtoa
+        - DLWRFsfc
+        - DSWRFsfc
+        - USWRFsfc
+        - USWRFtoa
+      next_step_forcing_names:
+      - DSWRFtoa
+      in_names:
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
+      - DSWRFtoa
+      - HGTsfc
+      - PRESsfc
+      - sea_surface_temperature
+      - skin_temperature
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      out_names:
+      - PRESsfc
+      - skin_temperature
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - DLWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - USWRFtoa
+      - tendency_of_total_water_path_due_to_advection
