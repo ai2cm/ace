@@ -185,31 +185,30 @@ class ZonalMeanAggregator:
         buffer = {}
         time_slice = None
         for name, tensor in target_data.items():
-            if self._buffer_target:
-                tensor = torch.cat(
-                    [
-                        self._buffer_target[name],
-                        tensor[:, 0 : window_steps - buffer_size, :],
-                    ],
-                    dim=self._time_dim,
-                )
-            n_raw = tensor.shape[self._time_dim]
-            if n_raw < self.time_coarsening_factor:
-                if not self.logged_batch_skip:
-                    self.logged_batch_skip = True
-                new_buffer_target = {}
-                for n, t in target_data.items():
-                    if self._buffer_target:
-                        t = torch.cat(
-                            [
-                                self._buffer_target[n],
-                                t[:, 0 : window_steps - buffer_size, :],
-                            ],
-                            dim=self._time_dim,
-                        )
-                    new_buffer_target[n] = t
-                new_buffer_gen = {}
-                for n, t in gen_data.items():
+            if name in self._target_data:
+                if self._buffer_target:
+                    tensor = torch.cat(
+                        [
+                            self._buffer_target[name],
+                            tensor[:, 0 : window_steps - buffer_size, :],
+                        ],
+                        dim=self._time_dim,
+                    )
+                n_raw = tensor.shape[self._time_dim]
+                if n_raw < self.time_coarsening_factor:
+                    new_buffer_target = {}
+                    for n, t in target_data.items():
+                        if n in self._target_data:
+                            if self._buffer_target:
+                                t = torch.cat(
+                                    [
+                                        self._buffer_target[n],
+                                        t[:, 0 : window_steps - buffer_size, :],
+                                    ],
+                                    dim=self._time_dim,
+                                )
+                            new_buffer_target[n] = t
+                    new_buffer_gen = {}
                     if self._buffer_gen:
                         t = torch.cat(
                             [
@@ -219,38 +218,39 @@ class ZonalMeanAggregator:
                             dim=self._time_dim,
                         )
                     new_buffer_gen[n] = t
-                self._buffer_target = new_buffer_target
-                self._buffer_gen = new_buffer_gen
-                return
-            coarsened = self._coarsen_tensor(self._zonal_mean(tensor))
-            if time_slice is None:
-                # Use actual coarsened size so slice matches when i_time_start is
-                # misaligned with coarsening factor
-                n_coarsened = coarsened.shape[self._time_dim]
-                time_slice = slice(start_idx, start_idx + n_coarsened)
-                self.last_step = start_idx + n_coarsened
-                new_buffer_size = (
-                    i_time_start + window_steps
-                ) - self.last_step * self.time_coarsening_factor
-            self._target_data[name][:, time_slice, :] += coarsened
-            if new_buffer_size > 0:
-                buffer[name] = tensor[:, -new_buffer_size:, :]
+                    self._buffer_target = new_buffer_target
+                    self._buffer_gen = new_buffer_gen
+                    return
+                coarsened = self._coarsen_tensor(self._zonal_mean(tensor))
+                if time_slice is None:
+                    # Use actual coarsened size so slice matches when i_time_start is
+                    # misaligned with coarsening factor
+                    n_coarsened = coarsened.shape[self._time_dim]
+                    time_slice = slice(start_idx, start_idx + n_coarsened)
+                    self.last_step = start_idx + n_coarsened
+                    new_buffer_size = (
+                        i_time_start + window_steps
+                    ) - self.last_step * self.time_coarsening_factor
+                self._target_data[name][:, time_slice, :] += coarsened
+                if new_buffer_size > 0:
+                    buffer[name] = tensor[:, -new_buffer_size:, :]
         self._buffer_target = buffer
 
         buffer = {}
         for name, tensor in gen_data.items():
-            if self._buffer_gen:
-                tensor = torch.cat(
-                    [
-                        self._buffer_gen[name],
-                        tensor[:, 0 : window_steps - buffer_size, :],
-                    ],
-                    dim=self._time_dim,
-                )
-            coarsened = self._coarsen_tensor(self._zonal_mean(tensor))
-            self._gen_data[name][:, time_slice, :] += coarsened
-            if new_buffer_size > 0:
-                buffer[name] = tensor[:, -new_buffer_size:, :]
+            if name in self._gen_data:
+                if self._buffer_gen:
+                    tensor = torch.cat(
+                        [
+                            self._buffer_gen[name],
+                            tensor[:, 0 : window_steps - buffer_size, :],
+                        ],
+                        dim=self._time_dim,
+                    )
+                coarsened = self._coarsen_tensor(self._zonal_mean(tensor))
+                self._gen_data[name][:, time_slice, :] += coarsened
+                if new_buffer_size > 0:
+                    buffer[name] = tensor[:, -new_buffer_size:, :]
         self._buffer_gen = buffer
 
         self._n_batches[:, time_slice, :] += 1
