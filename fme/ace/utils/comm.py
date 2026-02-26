@@ -14,7 +14,9 @@
 # limitations under the License.
 
 import math
+from datetime import timedelta
 
+import torch.distributed as dist
 from physicsnemo.distributed.config import ProcessGroupConfig, ProcessGroupNode
 
 # we are using the distributed manager from physicsnemo
@@ -23,6 +25,17 @@ from physicsnemo.distributed.manager import DistributedManager
 # we need this
 _DM = None
 _COMM_ROOTS = {}
+
+_orig_init_process_group = dist.init_process_group
+
+
+def _patched_init_process_group(*args, **kwargs):
+    if "timeout" not in kwargs:
+        kwargs["timeout"] = timedelta(minutes=30)
+    return _orig_init_process_group(*args, **kwargs)
+
+
+dist.init_process_group = _patched_init_process_group
 
 
 def get_size(name: str) -> int:

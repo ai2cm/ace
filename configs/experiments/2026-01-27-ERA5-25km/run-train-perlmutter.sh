@@ -3,8 +3,6 @@
 set -x
 
 # directories for input data (training, validation, inference, stats)
-export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2024-05-29-era5-025deg-8layer-2010-2022.zarr
-export FME_VALID_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2024-05-29-era5-025deg-8layer-2010-2022.zarr
 export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2024-05-29-era5-025deg-8layer-2010-2022-stats
 export EMBED_DIM_VALUE=256
 export SCALE_FACTOR_VALUE=1
