@@ -54,7 +54,7 @@ from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
 )
-from fme.coupled.typing_ import CoupledTensorMapping
+from fme.coupled.typing_ import CoupledNames, CoupledTensorMapping
 
 
 @dataclasses.dataclass
@@ -382,6 +382,18 @@ class CoupledStepperConfig:
 
         """
         return self._shared_forcing_exogenous_names
+
+    @property
+    def all_names(self) -> CoupledNames:
+        """All variable names to log (outputs plus input-only forcings)."""
+        atmosphere_names = (
+            self.atmosphere.stepper.output_names
+            + self._atmosphere_forcing_exogenous_names
+        )
+        ocean_names = (
+            self.ocean.stepper.output_names + self._ocean_forcing_exogenous_names
+        )
+        return CoupledNames(ocean=ocean_names, atmosphere=atmosphere_names)
 
     @property
     def atmosphere_to_ocean_forcing_names(self) -> list[str]:
