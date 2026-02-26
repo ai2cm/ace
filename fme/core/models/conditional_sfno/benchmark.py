@@ -1,7 +1,6 @@
 from typing import Self
 
 import torch
-from torch_harmonics import InverseRealSHT, RealSHT
 
 from fme.core.benchmark.benchmark import BenchmarkABC, register_benchmark
 from fme.core.benchmark.timer import Timer
