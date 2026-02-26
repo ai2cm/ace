@@ -12,6 +12,14 @@ import torch
 from fme.core.benchmark.benchmark import get_benchmarks
 from fme.core.wandb import WandB
 
+
+def _json_default(obj):
+    """json.dumps ``default`` hook that converts tensors to Python scalars."""
+    if isinstance(obj, torch.Tensor):
+        return obj.item()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 RESULTS_PATH = pathlib.Path(os.path.abspath(os.path.dirname(__file__))) / "results"
 
 _GIT_COMMIT: str | None = None
@@ -101,7 +109,9 @@ def main(
         png_filename = get_filename(benchmark_name, "png")
         logging.info(f"Saving result image to {png_filename}")
         result.to_png(png_filename, label=get_label(benchmark_name))
-        result_data = json.dumps(dataclasses.asdict(result), indent=2)
+        result_data = json.dumps(
+            dataclasses.asdict(result), indent=2, default=_json_default
+        )
         logging.info(f"Result: {result_data}")
         with open(get_filename(benchmark_name, "json"), "w") as f:
             logging.info(f"Saving result json to {f.name}")

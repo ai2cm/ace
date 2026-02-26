@@ -289,6 +289,7 @@ class SongUNetv2BenchmarkBf16(SongUNetv2Benchmark):
             model_channels=64,
             channel_mult=[1, 2, 2, 2],
             use_apex_gn=False,
+            use_amp_bf16=True,
         )
 
     @classmethod
@@ -302,6 +303,7 @@ class SongUNetv2BenchmarkBf16(SongUNetv2Benchmark):
             model_channels=64,
             channel_mult=[1, 2, 2, 2],
             use_apex_gn=False,
+            use_amp_bf16=True,
         )
 
 
