@@ -6,6 +6,7 @@ import dataclasses
 
 import numpy as np
 import xarray as xr
+from dask.diagnostics import ProgressBar
 
 # SST_SOURCE = "gs://vcm-ml-intermediate/2023-10-06-AMIP-forcing-data/sst.nc"
 # !gsutil cp {SST_SOURCE} .
@@ -139,7 +140,8 @@ def main():
             nino34_temperature_anom_index
             - get_time_trendline(nino34_temperature_anom_index)
         )
-    nino34_anom_index = get_time_average(nino34_temperature_anom_index).compute()
+    with ProgressBar():
+        nino34_anom_index = get_time_average(nino34_temperature_anom_index).compute()
 
     with open(args.output_file, "w") as f:
         print(
