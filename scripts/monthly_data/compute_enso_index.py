@@ -3,7 +3,6 @@
 
 import argparse
 import dataclasses
-from datetime import timedelta
 
 import numpy as np
 import xarray as xr
@@ -66,7 +65,7 @@ def get_ocean_mask(
 def get_time_average(da):
     # this version of xarray's resample method doesn't allow
     # data shifting to create a centered 3-month average, so do it manually
-    da = da.assign_coords({"time": da.time + timedelta(days=45)})
+    da = da.assign_coords({"time": da.time + np.timedelta64(45, "D")})
     # the label is at the start of the 3-month season
     da_out = da.resample(time="QS").mean()
     return da_out
@@ -140,7 +139,7 @@ def main():
             nino34_temperature_anom_index
             - get_time_trendline(nino34_temperature_anom_index)
         )
-    nino34_anom_index = get_time_average(nino34_temperature_anom_index)
+    nino34_anom_index = get_time_average(nino34_temperature_anom_index).compute()
 
     with open(args.output_file, "w") as f:
         print(
@@ -157,11 +156,9 @@ def main():
         print("# `scripts/monthly_data/compute_enso_index.py`", file=f)
         print("NINO34_INDEX = [", file=f)
         for point in nino34_anom_index:
+            t = point.time.astype("datetime64[ms]").item()
             print(
-                (
-                    f"    (({point.time.item().year}, {point.time.item().month}, "
-                    f"{point.time.item().day}), {point.item():0.3f}),"
-                ),
+                (f"    (({t.year}, {t.month}, " f"{t.day}), {point.item():0.3f}),"),
                 file=f,
             )
         print("]", file=f)
