@@ -61,7 +61,9 @@ def test_regression(benchmark_name: str, very_fast_only: bool):
             )
             validate_tensor_dict(
                 regression_result["diagnostics"],
-                os.path.join(DIR, "testdata", f"{benchmark_name}-diagnostics-regression.pt"),
+                os.path.join(
+                    DIR, "testdata", f"{benchmark_name}-diagnostics-regression.pt"
+                ),
             )
         else:
             validate_tensor_dict(
