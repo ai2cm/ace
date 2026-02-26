@@ -102,8 +102,6 @@ stepper:
           global_means_path: /statsdata/centering.nc
           global_stds_path: /statsdata/scaling-residual.nc
       corrector:
-        conserve_dry_air: true
-        moisture_budget_correction: advection_and_precipitation
         force_positive_names:
         - specific_total_water_1
         - specific_total_water_2
