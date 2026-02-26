@@ -73,7 +73,7 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-stepper:
+stepper_training:
   loss:
     type: MSE
     weights:
@@ -94,6 +94,7 @@ stepper:
       DSWRFsfc: 2
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
+stepper:
   step:
     type: single_module
     config:

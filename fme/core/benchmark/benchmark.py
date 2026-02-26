@@ -1,6 +1,7 @@
 import abc
 import dataclasses
 import pathlib
+import time
 from collections.abc import Callable
 from typing import Self
 
@@ -13,13 +14,47 @@ from fme.core.benchmark.timer import CUDATimer, NullTimer, Timer, TimerResult
 from fme.core.typing_ import TensorDict
 
 
+class CPUEventPair:
+    def __init__(self):
+        self.start_time = None
+        self.end_time = None
+
+    def record_start(self):
+        if self.start_time is not None:
+            raise RuntimeError(
+                "record_start has already been called on this CPUEventPair."
+            )
+        self.start_time = time.time()
+
+    def record_end(self):
+        if self.start_time is None:
+            raise RuntimeError("record_start must be called before record_end")
+        if self.end_time is not None:
+            raise RuntimeError(
+                "record_end has already been called on this CPUEventPair."
+            )
+        self.end_time = time.time()
+
+    def elapsed_time_ms(self) -> float:
+        if self.start_time is None or self.end_time is None:
+            raise RuntimeError(
+                "Both record_start and record_end must be called "
+                "before elapsed_time_ms can be called."
+            )
+        return (self.end_time - self.start_time) * 1000
+
+
 @dataclasses.dataclass
 class BenchmarkResult:
     memory: MemoryResult
     timer: TimerResult
+    cpu_time: float
 
     def __repr__(self) -> str:
-        return f"BenchmarkResult(memory={self.memory}, timer={self.timer})"
+        return (
+            f"BenchmarkResult(memory={self.memory}, timer={self.timer}, "
+            f"cpu_time={self.cpu_time})"
+        )
 
     def asdict(self) -> dict:
         return dataclasses.asdict(self)
@@ -39,6 +74,13 @@ class BenchmarkResult:
             self.memory.assert_close(other.memory, rtol=rtol)
         except AssertionError as e:
             raise AssertionError(f"Memory results differ: {e}") from e
+        if not torch.isclose(
+            torch.tensor(self.cpu_time), torch.tensor(other.cpu_time), rtol=rtol
+        ):
+            raise AssertionError(
+                f"CPU times differ: {self.cpu_time} vs {other.cpu_time} "
+                f"given rtol={rtol}"
+            )
 
     def get_logs(self, max_depth: int) -> dict[str, float]:
         logs = {
@@ -261,12 +303,17 @@ class BenchmarkABC(abc.ABC):
         for _ in range(warmup):
             benchmark.run_instance(null_timer)
         timer = CUDATimer()
+        cpu_timer = CPUEventPair()
         with benchmark_memory() as bm:
+            cpu_timer.record_start()
             for _ in range(iters):
                 with timer:
                     benchmark.run_instance(timer)
+            torch.cuda.synchronize()
+            cpu_timer.record_end()
         return BenchmarkResult(
             timer=timer.result,
+            cpu_time=cpu_timer.elapsed_time_ms(),
             memory=bm.result,
         )
 
