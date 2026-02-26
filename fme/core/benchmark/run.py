@@ -192,7 +192,10 @@ if __name__ == "__main__":
         "--all-labels",
         action="store_true",
         default=False,
-        help="Show labels on all chart segments. Else will show labels for blocks >= 5%% of total.",
+        help=(
+            "Show labels on all chart segments. Else will show labels for "
+            "blocks >= 5% of total."
+        ),
     )
     parser.add_argument(
         "--wandb-project",
