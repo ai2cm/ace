@@ -161,7 +161,7 @@ def test_sfnonet_output_is_unchanged():
     )
 
 
-def cache_model_state(
+def load_or_cache_model_state(
     model: SphericalFourierNeuralOperatorNet,
     x: torch.Tensor,
     context: Context,
@@ -184,7 +184,7 @@ def test_sfnonet_output_from_checkpoint_is_unchanged():
     torch.manual_seed(0)
     model, x, context = setup_sfnonet()
     checkpoint_path = os.path.join(DIR, "testdata/test_sfnonet_checkpoint_input.pt")
-    model, x, context = cache_model_state(model, x, context, checkpoint_path)
+    model, x, context = load_or_cache_model_state(model, x, context, checkpoint_path)
     with torch.no_grad():
         output = model(x, context)
     validate_tensor(
