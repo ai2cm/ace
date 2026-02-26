@@ -645,26 +645,31 @@ class SongUNetv2(torch.nn.Module):
         with timer.child("encoder") as enc_timer:
             skips = []
             aux = x
-            for level_name, level_blocks in itertools.groupby(
-                self.enc.items(), key=lambda item: item[0].split("_", 1)[0]
-            ):
-                with enc_timer.child(level_name):
-                    for name, block in level_blocks:
-                        if "aux_down" in name:
+
+            for name, block in self.enc.items():
+                with enc_timer.child(name.split("_", 1)[0]) as level_timer:
+                    if "aux_down" in name:
+                        with level_timer.child("down"):
                             aux = block(aux)
-                        elif "aux_skip" in name:
+                    elif "aux_skip" in name:
+                        with level_timer.child("skip"):
                             x = skips[-1] = x + block(aux)
-                        elif "aux_residual" in name:
+                    elif "aux_residual" in name:
+                        with level_timer.child("residual"):
                             x = skips[-1] = aux = (x + block(aux)) / np.sqrt(2)
-                        elif "_conv" in name:
+                    elif "_conv" in name:
+                        with level_timer.child("conv"):
                             x = block(x)
                             if self.additive_pos_embed:
                                 x = x + self.spatial_emb.to(dtype=x.dtype)
                             skips.append(x)
-                        else:
+                    else:
+                        with level_timer.child("block"):
                             if isinstance(block, UNetBlock):
                                 if (
-                                    math.floor(math.sqrt(x.shape[-2] * x.shape[-1]))
+                                    math.floor(
+                                        math.sqrt(x.shape[-2] * x.shape[-1])
+                                    )
                                     > self.checkpoint_threshold
                                 ):
                                     x = checkpoint(
@@ -680,31 +685,40 @@ class SongUNetv2(torch.nn.Module):
         with timer.child("decoder") as dec_timer:
             aux = None
             tmp = None
-            for level_name, level_blocks in itertools.groupby(
-                self.dec.items(), key=lambda item: item[0].split("_", 1)[0]
-            ):
-                with dec_timer.child(level_name):
-                    for name, block in level_blocks:
-                        if "aux_up" in name:
+            for name, block in self.dec.items():
+                with dec_timer.child(name.split("_", 1)[0]) as level_timer:
+                    if "aux_up" in name:
+                        with level_timer.child("up"):
                             aux = block(aux)
-                        elif "aux_norm" in name:
+                    elif "aux_norm" in name:
+                        with level_timer.child("norm"):
                             tmp = block(x)
-                        elif "aux_conv" in name:
+                    elif "aux_conv" in name:
+                        with level_timer.child("conv"):
                             tmp = block(silu(tmp))
                             aux = tmp if aux is None else tmp + aux
-                        else:
+                    else:
+                        timer_name = "up" if "_up" in name else "block"
+                        with level_timer.child(timer_name):
                             if x.shape[1] != block.in_channels:
                                 x = torch.cat([x, skips.pop()], dim=1)
+
                             if (
-                                math.floor(math.sqrt(x.shape[-2] * x.shape[-1]))
+                                math.floor(
+                                    math.sqrt(x.shape[-2] * x.shape[-1])
+                                )
                                 > self.checkpoint_threshold
                                 and "_block" in name
                             ) or (
-                                math.floor(math.sqrt(x.shape[-2] * x.shape[-1]))
+                                math.floor(
+                                    math.sqrt(x.shape[-2] * x.shape[-1])
+                                )
                                 > (self.checkpoint_threshold / 2)
                                 and "_up" in name
                             ):
-                                x = checkpoint(block, x, emb, use_reentrant=False)
+                                x = checkpoint(
+                                    block, x, emb, use_reentrant=False
+                                )
                             else:
                                 x = block(x, emb)
         return aux
