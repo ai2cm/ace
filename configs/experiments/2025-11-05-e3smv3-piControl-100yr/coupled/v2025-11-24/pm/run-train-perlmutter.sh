@@ -7,6 +7,8 @@ export WANDB_NAME=PM-fto-v1124-train-95yr-ebpeysbb-dso4ysdg-ft-AMIP-train
 export WANDB_RUN_GROUP=fto
 
 export COMMIT=$(git rev-parse --short HEAD)
+export OCEAN_CKPT=/pscratch/sd/e/elynnwu/fme-output/48937597/training_checkpoints/best_inference_ckpt.tar
+export ATMOS_CKPT=/pscratch/sd/e/elynnwu/fme-output/ebpeysbb//training_checkpoints/best_inference_ckpt.tar
 
 # if resuming a failed job, provide its slurm job ID below and uncomment;
 # note that information entered above should be consistent with that of

@@ -134,12 +134,12 @@ optimization:
 train_stepper:
   ocean:
     parameter_init:
-      weights_path: /ocean_ckpt.tar
+      weights_path: OCEAN_CKPT
     loss:
       type: MSE
   atmosphere:
     parameter_init:
-      weights_path: /atmos_ckpt.tar
+      weights_path: ATMOS_CKPT
       parameters:
         - frozen:
             include:
