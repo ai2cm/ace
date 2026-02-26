@@ -250,7 +250,9 @@ class BenchmarkResult:
                 # First child is closest to parent; later children are lighter.
                 lighten = 0.10 + (0.55 * (i / max(k - 1, 1)))
                 rgb = blend_with_white(parent_rgb, lighten)
-                lvl2_segments.append((n2, avg_total_time_per_iter(t2), (rgb[0], rgb[1], rgb[2], 1.0)))
+                lvl2_segments.append(
+                    (n2, avg_total_time_per_iter(t2), (rgb[0], rgb[1], rgb[2], 1.0))
+                )
 
             s1 = self_time(t1)
             if s1 > 0.0:
