@@ -259,6 +259,9 @@ def setup(app):
     app.connect("build-finished", _exit_distributed_context)
 
 
+_dist_ctx = None
+
+
 def _enter_distributed_context(app):
     global _dist_ctx
     _dist_ctx = Distributed.context()

@@ -72,13 +72,11 @@ class Distributed:
         try:
             yield
         except BaseException:
-            instance.shutdown()  # do not barrier before shutdown, go hard
-            raise  # re-raise the exception after shutdown to avoid masking it
+            # exit immediately to avoid hanging other ranks
+            # the OS should clean up resources based on the non-zero exit
+            raise  # re-raise the exception to avoid masking it
         else:  # if no exception is raised, let root finish cleanup
-            try:
-                instance.barrier()
-            finally:
-                instance.shutdown()
+            instance.shutdown()
         finally:
             cls._entered = False
 
