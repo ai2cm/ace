@@ -201,7 +201,7 @@ class SongUNetv2Benchmark(BenchmarkABC):
             )
         return {
             "output": result.detach(),
-            "diagnostics": self._channels_last_diagnostics.to_dict(),
+            "diagnostics": self._channels_last_diagnostics.to_tensor_dict(),
         }
 
     @classmethod
