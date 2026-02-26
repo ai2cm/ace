@@ -45,7 +45,6 @@ TEMPLATE_CONFIG_FILENAME="train-config-template.yaml"
 # Construct absolute paths for file operations
 FULL_EXPERIMENT_DIR="$REPO_ROOT/$EXPERIMENT_DIR"
 CONFIG_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/$CONFIG_FILENAME"
-TEMPLATE_CONFIG_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/$TEMPLATE_CONFIG_FILENAME"
 INPUT_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/$INPUT_FILE"
 
 # Construct relative paths for gantry/python commands
@@ -88,6 +87,13 @@ while read PRETRAINING; do
     OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$PRETRAINING" | cut -d"|" -f17)
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$PRETRAINING" | cut -d"|" -f18)
+
+    if [[ "$CLUSTER" == "titan" ]]; then
+        TEMPLATE_CONFIG_FILENAME="train-config-template-titan.yaml"
+    else
+        TEMPLATE_CONFIG_FILENAME="train-config-template.yaml"
+    fi
+    TEMPLATE_CONFIG_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/$TEMPLATE_CONFIG_FILENAME"
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
