@@ -9,6 +9,7 @@ era5_enso_index:
 	python compute_enso_index.py \
 		--sst-dataset $(ERA5_ZARR) \
 		--ocean-mask-source $(ERA5_ZARR) \
+		--sst-var surface_temperature \
 		--lat-dim latitude \
 		--lon-dim longitude \
 		--ocean-mask-lat-dim latitude \

@@ -92,6 +92,7 @@ def get_time_trendline(da):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sst-dataset", default=SST_DATASET)
+    parser.add_argument("--sst-var", default="sea_surface_temperature")
     parser.add_argument("--ocean-mask-source", default=OCEAN_MASK_SOURCE)
     parser.add_argument("--lat-dim", default="lat")
     parser.add_argument("--lon-dim", default="lon")
@@ -103,7 +104,7 @@ def main():
     parser.add_argument("--detrend", action="store_true", default=False)
     args = parser.parse_args()
 
-    surface_temperature = open_dataset(args.sst_dataset)["sea_surface_temperature"]
+    surface_temperature = open_dataset(args.sst_dataset)[args.sst_var]
     surface_temperature = surface_temperature.sel(
         time=slice(args.start_time, args.stop_time)
     )
