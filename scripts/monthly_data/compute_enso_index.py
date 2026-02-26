@@ -102,6 +102,7 @@ def main():
     parser.add_argument("--start-time", default="1940-01-01")
     parser.add_argument("--stop-time", default="2021-01-01")
     parser.add_argument("--detrend", action="store_true", default=False)
+    parser.add_argument("--output-file", default=OUTPUT_FILE)
     args = parser.parse_args()
 
     surface_temperature = open_dataset(args.sst_dataset)[args.sst_var]
@@ -141,7 +142,7 @@ def main():
         )
     nino34_anom_index = get_time_average(nino34_temperature_anom_index)
 
-    with open(OUTPUT_FILE, "w") as f:
+    with open(args.output_file, "w") as f:
         print(
             (
                 "# Nino3.4 index anomaly from tropical SST average, "
