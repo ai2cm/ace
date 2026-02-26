@@ -7,7 +7,7 @@ import fme  # to trigger registration of benchmarks
 from fme.core.benchmark.benchmark import BenchmarkABC, get_benchmarks
 from fme.core.device import force_cpu
 from fme.core.rand import set_seed
-from fme.core.testing.regression import validate_tensor, validate_tensor_dict
+from fme.core.testing.regression import validate_tensor_dict
 
 del fme
 
@@ -53,7 +53,6 @@ def test_regression(benchmark_name: str, very_fast_only: bool):
         # If run_regression returns something,
         # we expect it to be a TensorDict of results
         assert isinstance(regression_result, dict)
-      
         validate_tensor_dict(
             regression_result,
             os.path.join(DIR, "testdata", f"{benchmark_name}-regression.pt"),
