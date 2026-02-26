@@ -9,7 +9,7 @@ ema:
 max_epochs: 20
 n_coupled_steps: 4
 inference:
-  n_coupled_steps: 1752
+  n_coupled_steps: 876
   coupled_steps_in_memory: 12
   loader:
     num_data_workers: 1
@@ -33,9 +33,13 @@ inference:
     start_indices:
       times:
         - '0401-01-03T12:00:00'
+        - '0413-01-03T12:00:00'
         - '0425-01-03T12:00:00'
+        - '0437-01-03T12:00:00'
         - '0449-01-03T12:00:00'
+        - '0461-01-03T12:00:00'
         - '0473-01-03T12:00:00'
+        - '0484-01-03T12:00:00'
   aggregator:
     log_zonal_mean_images: false
     log_histograms: false
