@@ -50,3 +50,5 @@ fto-v1124-train-95yr-hp5rcl7w-mohzi23t-ft-AMIP||01KJBBBCBN29R7EWCC9A0B0FVY|train
 fto-v1124-train-95yr-ebpeysbb-dso4ysdg-ft-AMIP||01KJBJWHJPHR9159TTR1KFGC9K|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v1124-train-95yr-ebpeysbb-mohzi23t-ft-AMIP||01KJBJWV2ZRYKVJRJE7SNMPYRB|training|best_inference_ckpt|normal|--not-preemptible
+
+fto-v1124-train-95yr-ebpeysbb-mohzi23t-ft-AMIP||01KJBMDZ7J5CFWE7GED6HDA5YE|training|best_inference_ckpt|normal|--not-preemptible
