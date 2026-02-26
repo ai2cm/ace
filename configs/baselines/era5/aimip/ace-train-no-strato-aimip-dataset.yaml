@@ -41,6 +41,7 @@ train_loader:
   dataset:
     data_path: /climate-default
     file_pattern: 2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
+    engine: zarr
     subset:
       start_time: '1979-01-01'
       stop_time: '2008-12-31'
@@ -51,6 +52,7 @@ validation_loader:
   dataset:
     data_path: /climate-default
     file_pattern: 2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
+    engine: zarr
     subset:
       start_time: '2009-01-01'
       stop_time: '2014-12-31'
