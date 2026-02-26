@@ -1193,12 +1193,14 @@ class CoupledStepper:
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
             labels=forcing_data.atmosphere_data.labels,
+            n_ensemble=forcing_data.atmosphere_data.n_ensemble,
         )
         ocean_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "ocean"],
             time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
             labels=forcing_data.ocean_data.labels,
+            n_ensemble=forcing_data.ocean_data.n_ensemble,
         )
         return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmos_data)
 

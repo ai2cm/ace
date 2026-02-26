@@ -235,6 +235,7 @@ def _get_test_yaml_files(
             ),
             n_forward_steps=inference_forward_steps,
             forward_steps_in_memory=2,
+            n_ensemble_per_ic=2,
         )
         weather_evaluation_config = WeatherEvaluationConfig(
             aggregator=InferenceEvaluatorAggregatorConfig(
@@ -620,6 +621,13 @@ def test_train_and_inference(
         epoch_logs = wandb_logs[-1]
         assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
         assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+        ensemble_step_20_keys = [
+            k for k in epoch_logs if "inference/ensemble_step_20/" in k
+        ]
+        assert ensemble_step_20_keys, (
+            "expected at least one ensemble_step_20 metric in inline inference "
+            "epoch log"
+        )
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
     assert validation_output_dir.exists()

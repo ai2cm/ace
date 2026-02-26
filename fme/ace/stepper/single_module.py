@@ -481,6 +481,7 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[TensorDict],
     time: xr.DataArray,
+    n_ensemble: int,
     labels: BatchLabels | None = None,
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
@@ -490,6 +491,7 @@ def process_prediction_generator_list(
         time=time,
         horizontal_dims=horizontal_dims,
         labels=labels,
+        n_ensemble=n_ensemble,
     )
 
 
@@ -1163,6 +1165,7 @@ class Stepper:
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
             labels=forcing.labels,
+            n_ensemble=forcing.n_ensemble,
         )
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):

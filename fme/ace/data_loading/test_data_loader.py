@@ -443,7 +443,8 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
         )
 
 
-def test_inference_data_loader(tmp_path):
+@pytest.mark.parametrize("n_ensemble", [1, 4])
+def test_inference_data_loader(n_ensemble, tmp_path):
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
@@ -470,21 +471,23 @@ def test_inference_data_loader(tmp_path):
         total_forward_steps=6,
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
+        n_ensemble=n_ensemble,
     )
     data_loader = data.loader
     batch_data = next(iter(data_loader))
     assert isinstance(batch_data, BatchData)
+    assert batch_data.n_ensemble == n_ensemble
     for name in ["foo", "bar"]:
         assert isinstance(batch_data.data[name], torch.Tensor)
         assert batch_data.data[name].shape == (
-            batch_size,
+            batch_size * n_ensemble,
             n_forward_steps_in_memory + 1,
             16,
             32,
         )
     assert isinstance(batch_data.time, xr.DataArray)
     assert list(batch_data.time.dims) == ["sample", "time"]
-    assert batch_data.time.sizes["sample"] == batch_size
+    assert batch_data.time.sizes["sample"] == batch_size * n_ensemble
     assert batch_data.time.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.time.dt.calendar == "proleptic_gregorian"
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
@@ -492,7 +495,7 @@ def test_inference_data_loader(tmp_path):
     initial_condition = data.initial_condition.as_batch_data()
     assert isinstance(initial_condition, BatchData)
     assert "bar" not in initial_condition.data
-    assert initial_condition.data["foo"].shape == (batch_size, 1, 16, 32)
+    assert initial_condition.data["foo"].shape == (batch_size * n_ensemble, 1, 16, 32)
 
 
 @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])

@@ -3,14 +3,15 @@ seed: 0
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 120
+max_epochs: 1
 ema:
   decay: 0.999
 inference:
   epochs:
     start: 0
-  n_forward_steps: 7300
+  n_forward_steps: 500
   forward_steps_in_memory: 40
+  n_ensemble_per_ic: 2
   loader:
     start_indices:
       times:

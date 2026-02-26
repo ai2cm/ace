@@ -127,6 +127,9 @@ class InferenceEvaluatorConfig:
             This should be used with caution, as it may allow the stepper to make
             scientifically invalid predictions, but it can allow running inference with
             incorrectly formatted or missing grid information.
+        n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
+            stochastic model weather inference. n_ensemble_per_ic = 1 is default
+            inference behavior.
     """
 
     experiment_dir: str
@@ -144,6 +147,7 @@ class InferenceEvaluatorConfig:
     )
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
+    n_ensemble_per_ic: int = 1
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -181,7 +185,8 @@ class InferenceEvaluatorConfig:
     ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            n_initial_conditions=self.loader.n_initial_conditions,
+            n_initial_conditions=self.loader.n_initial_conditions
+            * self.n_ensemble_per_ic,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,
             variable_metadata=variable_metadata,
@@ -251,11 +256,13 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     initial_condition_requirements = (
         stepper_config.get_prognostic_state_data_requirements()
     )
+    initial_condition_requirements.n_ensemble = config.n_ensemble_per_ic
     data = get_inference_data(
         config=config.loader,
         total_forward_steps=config.n_forward_steps,
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
+        n_ensemble=config.n_ensemble_per_ic,
     )
 
     stepper = config.load_stepper()
@@ -289,6 +296,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
         output_dir=config.experiment_dir,
+        n_ensemble_per_ic=config.n_ensemble_per_ic,
     )
 
     writer = config.get_data_writer(
@@ -306,6 +314,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             total_forward_steps=config.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
+            n_ensemble=config.n_ensemble_per_ic,
         )
         deriver = _Deriver(
             n_ic_timesteps=stepper_config.n_ic_timesteps,

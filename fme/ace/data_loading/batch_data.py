@@ -168,6 +168,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels.to(device) if self.labels is not None else None,
+            n_ensemble=self.n_ensemble,
         )
 
     def to_cpu(self) -> "BatchData":
@@ -177,6 +178,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     @classmethod
@@ -327,6 +329,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
@@ -341,6 +344,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
@@ -353,6 +357,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def get_start(
@@ -389,6 +394,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def prepend(self: SelfType, initial_condition: PrognosticState) -> SelfType:
@@ -411,6 +417,7 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels,
+            n_ensemble=self.n_ensemble,
         )
 
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
@@ -432,8 +439,11 @@ class BatchData:
                 torch.repeat_interleave(self.labels.tensor, n_ensemble, dim=0),
                 self.labels.names,
             )
+        # Keep tensors on the same device as input. Do not move to get_device() here:
+        # from a DataLoader worker (e.g. InferenceDataset with n_ensemble > 1), data
+        # must stay on CPU so the loader can pin_memory() and transfer to GPU later.
         return self.__class__(
-            data={k: v.to(get_device()) for k, v in data.items()},
+            data=data,
             time=time,
             horizontal_dims=self.horizontal_dims,
             labels=labels,
@@ -462,6 +472,7 @@ class PairedData:
     reference: TensorMapping
     time: xr.DataArray
     labels: BatchLabels | None = None
+    n_ensemble: int = 1
 
     @property
     def forcing(self) -> TensorMapping:
@@ -470,6 +481,54 @@ class PairedData:
     @property
     def target(self) -> TensorMapping:
         return {k: v for k, v in self.reference.items() if k in self.prediction}
+
+    def broadcast_ensemble(self, n_ensemble: int) -> "PairedData":
+        """
+        Add an explicit ensemble dimension to a PairedData tensors.
+
+        Returns:
+            The tensor dict with an explicit ensemble dimension.
+        """
+        if self.n_ensemble != 1:
+            raise ValueError(
+                "Can only broadcast singleton ensembles, but this PairedData has "
+                f"n_ensemble={self.n_ensemble} and cannot be broadcast."
+            )
+        prediction = repeat_interleave_batch_dim(self.prediction, n_ensemble)
+        reference = repeat_interleave_batch_dim(self.reference, n_ensemble)
+        time = xr.concat([self.time] * n_ensemble, dim="sample")
+        if self.labels is None:
+            labels = None
+        else:
+            labels = BatchLabels(
+                torch.repeat_interleave(self.labels.tensor, n_ensemble, dim=0),
+                self.labels.names,
+            )
+        return PairedData(
+            prediction={k: v.to(get_device()) for k, v in prediction.items()},
+            reference={k: v.to(get_device()) for k, v in reference.items()},
+            time=time,
+            labels=labels,
+            n_ensemble=n_ensemble,
+        )
+
+    def as_ensemble_tensor_dicts(
+        self, n_ensemble: int
+    ) -> tuple[EnsembleTensorDict, EnsembleTensorDict]:
+        """
+        Unfold the batch dimension into an explicit ensemble dimension.
+
+        Returns:
+            (unfolded_reference, unfolded_prediction) for use with ensemble
+            aggregators. Each has shape (n_batch, n_ensemble, ...).
+        """
+        unfolded_reference = unfold_ensemble_dim(
+            TensorDict(self.reference), n_ensemble=n_ensemble
+        )
+        unfolded_prediction = unfold_ensemble_dim(
+            TensorDict(self.prediction), n_ensemble=n_ensemble
+        )
+        return (unfolded_reference, unfolded_prediction)
 
     @classmethod
     def from_batch_data(
@@ -484,6 +543,7 @@ class PairedData:
             reference=reference.data,
             labels=prediction.labels,
             time=prediction.time,
+            n_ensemble=prediction.n_ensemble,
         )
 
     @classmethod
@@ -493,6 +553,7 @@ class PairedData:
         reference: TensorMapping,
         time: xr.DataArray,
         labels: BatchLabels | None = None,
+        n_ensemble: int = 1,
     ) -> "PairedData":
         device = get_device()
         _check_device(prediction, device)
@@ -502,6 +563,7 @@ class PairedData:
             reference=reference,
             labels=labels,
             time=time,
+            n_ensemble=n_ensemble,
         )
 
     @classmethod
@@ -511,6 +573,7 @@ class PairedData:
         reference: TensorMapping,
         time: xr.DataArray,
         labels: BatchLabels | None = None,
+        n_ensemble: int = 1,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))
         _check_device(reference, torch.device("cpu"))
@@ -519,4 +582,5 @@ class PairedData:
             reference=reference,
             labels=labels,
             time=time,
+            n_ensemble=n_ensemble,
         )
