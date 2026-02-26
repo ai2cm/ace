@@ -35,5 +35,5 @@ cp upload-to-beaker.sh $CONFIG_DIR/upload-to-beaker.sh
 export FME_VENV=$($CONFIG_DIR/make-venv.sh $COMMIT | tail -n 1)
 conda activate $FME_VENV
 set -e
-python -m fme.ace.validate_config --config_type train $CONFIG_DIR/train-config.yaml
+python -m fme.coupled.validate_config --config_type train $CONFIG_DIR/train-config.yaml
 sbatch sbatch-scripts/sbatch-train.sh

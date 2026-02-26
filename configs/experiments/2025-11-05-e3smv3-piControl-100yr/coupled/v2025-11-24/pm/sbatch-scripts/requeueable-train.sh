@@ -22,7 +22,7 @@ torchrun --nnodes $SLURM_JOB_NUM_NODES \
  --nproc_per_node $SLURM_GPUS_PER_NODE \
  --rdzv-backend=c10d \
  --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT \
- -m fme.ace.train ${TRAIN_CONFIG} &
+ -m fme.coupled.train ${TRAIN_CONFIG} &
 
 pid=$!
 trap "preempt_handler '$pid'" SIGTERM #this catches preempt SIGTERM from slurm
