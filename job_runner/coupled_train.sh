@@ -89,7 +89,7 @@ while read PRETRAINING; do
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$PRETRAINING" | cut -d"|" -f18)
 
     if [[ "$CLUSTER" == "titan" ]]; then
-        TEMPLATE_CONFIG_FILENAME="train-config-template-titan.yaml"
+        TEMPLATE_CONFIG_FILENAME="train-config-template.yaml"
     else
         TEMPLATE_CONFIG_FILENAME="train-config-template.yaml"
     fi
