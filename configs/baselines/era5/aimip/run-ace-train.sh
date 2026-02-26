@@ -27,7 +27,7 @@ launch_job () {
         --task-name $JOB_NAME \
         --description 'Run ACE2-ERA5 training on AIMIP dataset with out level 0' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/climate-titan \
+        --workspace ai2/ace \
         --priority high \
         --preemptible \
         --cluster ai2/titan \
