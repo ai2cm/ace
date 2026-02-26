@@ -63,6 +63,31 @@ def _contract_lora(
 
 
 @torch.jit.script
+def _contract_lora_lowmem(
+    lora_A: torch.Tensor,
+    lora_B: torch.Tensor,
+    x: torch.Tensor,
+):
+    """
+    Performs LoRA update contraction.
+
+    Args:
+        lora_A: LoRA A matrix of shape (group, nlat, rank, in_channels, 2)
+        lora_B: LoRA B matrix of shape (group, nlat, out_channels, rank, 2)
+        x: Complex input tensor of shape
+            (batch_size, group, in_channels, nlat, nlon)
+
+    Returns:
+        Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
+    """
+    lora_A = torch.view_as_complex(lora_A)
+    lora_B = torch.view_as_complex(lora_B)
+    tmp = torch.einsum("girx,bgixy->bgxry", lora_A, x)
+    out = torch.einsum("grox,bgxry->bgoxy", lora_B, tmp)
+    return out
+
+
+@torch.jit.script
 def _contract_dhconv(
     xc: torch.Tensor, weight: torch.Tensor
 ) -> torch.Tensor:  # pragma: no cover
@@ -276,7 +301,7 @@ class SpectralConvS2(nn.Module):
 
         if self.lora_A is not None and self.lora_B is not None:
             with timer.child("lora_update"):
-                lora_update = _contract_lora(
+                lora_update = _contract_lora_lowmem(
                     self.lora_A,
                     self.lora_B,
                     x[..., : self.modes_lat_local, : self.modes_lon_local],

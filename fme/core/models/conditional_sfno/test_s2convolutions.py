@@ -7,7 +7,7 @@ from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.models.conditional_sfno.s2convolutions import SpectralConvS2
 
-from .s2convolutions import _contract_dhconv
+from .s2convolutions import _contract_dhconv, _contract_lora, _contract_lora_lowmem
 
 
 @dataclasses.dataclass
@@ -86,6 +86,50 @@ def test_contract_dhconv_groups_are_faster():
         "Expected grouped DHConv to use less memory than ungrouped, but got "
         f"{grouped_result.max_alloc/1024/1024:.2f} MB for grouped and "
         f"{ungrouped_result.max_alloc/1024/1024:.2f} MB for ungrouped."
+    )
+
+
+@pytest.mark.skipif(
+    get_device().type != "cuda",
+    reason=(
+        "This test is only relevant for CUDA since "
+        "it's testing speed of DHConv groups on GPU."
+    ),
+)  # noqa: E501
+def test_lora_lowmem_is_faster():
+    B = 2
+    C = 512
+    R = 32
+    H = 180
+    L = 360
+    x = torch.randn(B, 1, C, H, L, dtype=torch.complex64, device=get_device())
+    lora_A = torch.randn(1, C, R, H, 2, dtype=torch.float32, device=get_device())
+    lora_B = torch.randn(1, R, C, H, 2, dtype=torch.float32, device=get_device())
+
+    def contract():
+        return _contract_lora(lora_A, lora_B, x)
+
+    baseline_result = benchmark(contract)
+
+    def contract_lowmem():
+        return _contract_lora_lowmem(lora_A, lora_B, x)
+
+    lowmem_result = benchmark(contract_lowmem)
+
+    theoretical_ratio = (R / C) ** 0.5
+
+    assert theoretical_ratio < 0.5
+
+    assert lowmem_result.ms_per < 2 * theoretical_ratio * baseline_result.ms_per, (
+        "Expected LoRA low-memory contraction to be faster than standard, but got "
+        f"{lowmem_result.ms_per:.6f} seconds for low-memory and "
+        f"{baseline_result.ms_per:.6f} seconds for standard."
+    )
+    assert lowmem_result.max_alloc < 0.75 * baseline_result.max_alloc, (
+        "Expected LoRA low-memory contraction to use significantly less memory "
+        "than standard, but got "
+        f"{lowmem_result.max_alloc/1024/1024:.2f} MB for low-memory and "
+        f"{baseline_result.max_alloc/1024/1024:.2f} MB for standard."
     )
 
 
