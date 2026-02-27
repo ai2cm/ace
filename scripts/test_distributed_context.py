@@ -1,8 +1,6 @@
 import pathlib
 
-EXCLUDED_FILES = {
-    "noise_floor/generate_train_report.py",
-}
+EXCLUDED_FILES: set[str] = set()
 
 
 def _iter_python_files(root: pathlib.Path):
