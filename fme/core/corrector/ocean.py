@@ -14,6 +14,7 @@ from fme.core.constants import (
 )
 from fme.core.corrector.ocean_mld import (
     apply_geothermal_bottom_correction,
+    compute_mld_soft_weights_from_ocean_data,
     compute_mld_weights_from_ocean_data,
 )
 from fme.core.corrector.registry import CorrectorABC
@@ -79,7 +80,10 @@ class OceanHeatContentBudgetConfig:
             deficit within the mixed layer using JMD95-derived MLD weights.
             "mixed_layer_depth_geo" first applies a geothermal heat flux
             correction to the bottom ocean cell and then distributes the
-            remaining deficit via MLD weights.
+            remaining deficit via MLD weights. "mixed_layer_depth_soft" and
+            "mixed_layer_depth_soft_geo" are differentiable variants that use
+            soft-thresholded MLD (requires ``mld_soft_threshold`` on the
+            parent ``OceanCorrectorConfig``).
         constant_unaccounted_heating: Area-weighted global mean
             column-integrated heating in W/m**2 to be added to the energy flux
             into the ocean when conserving the heat content. This can be useful
@@ -88,7 +92,13 @@ class OceanHeatContentBudgetConfig:
 
     """
 
-    method: Literal["scaled_temperature", "mixed_layer_depth", "mixed_layer_depth_geo"]
+    method: Literal[
+        "scaled_temperature",
+        "mixed_layer_depth",
+        "mixed_layer_depth_geo",
+        "mixed_layer_depth_soft",
+        "mixed_layer_depth_soft_geo",
+    ]
     constant_unaccounted_heating: float = 0.0
 
 
@@ -101,15 +111,25 @@ class OceanSaltContentBudgetConfig:
             "scaled_salinity" enforces conservation by scaling the predicted
             salinity by a vertically and horizontally uniform correction factor.
             "mixed_layer_depth" distributes the salt deficit within the mixed
-            layer using JMD95-derived MLD weights.
+            layer using JMD95-derived MLD weights. "mixed_layer_depth_soft"
+            is a differentiable variant using soft-thresholded MLD (requires
+            ``mld_soft_threshold`` on the parent ``OceanCorrectorConfig``).
         constant_unaccounted_salt_flux: Area-weighted global mean
             column-integrated salt flux in g/m**2/s to be added to the virtual
             salt flux when conserving the salt content. This can be useful for
             correcting errors in salt budget in target data.
     """
 
-    method: Literal["scaled_salinity", "mixed_layer_depth"]
+    method: Literal["scaled_salinity", "mixed_layer_depth", "mixed_layer_depth_soft"]
     constant_unaccounted_salt_flux: float = 0.0
+
+
+_SOFT_MLD_METHODS = frozenset(
+    {
+        "mixed_layer_depth_soft",
+        "mixed_layer_depth_soft_geo",
+    }
+)
 
 
 @CorrectorSelector.register("ocean_corrector")
@@ -119,6 +139,25 @@ class OceanCorrectorConfig:
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
     ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
+    mld_soft_threshold: float | None = None
+
+    def __post_init__(self) -> None:
+        methods = set()
+        if self.ocean_heat_content_correction is not None:
+            methods.add(str(self.ocean_heat_content_correction.method))
+        if self.ocean_salt_content_correction is not None:
+            methods.add(str(self.ocean_salt_content_correction.method))
+        uses_soft = bool(methods & _SOFT_MLD_METHODS)
+        if uses_soft and self.mld_soft_threshold is None:
+            raise ValueError(
+                "mld_soft_threshold must be set when using a soft MLD method "
+                f"({methods & _SOFT_MLD_METHODS})."
+            )
+        if self.mld_soft_threshold is not None and not uses_soft:
+            raise ValueError(
+                "mld_soft_threshold is set but no budget correction uses a "
+                "soft MLD method."
+            )
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
@@ -199,6 +238,7 @@ class OceanCorrector(CorrectorABC):
                 self._timestep.total_seconds(),
                 self._config.ocean_salt_content_correction.method,
                 self._config.ocean_salt_content_correction.constant_unaccounted_salt_flux,
+                mld_soft_tau=self._config.mld_soft_threshold,
             )
         if self._config.ocean_heat_content_correction is not None:
             if self._vertical_coordinate is None:
@@ -216,6 +256,7 @@ class OceanCorrector(CorrectorABC):
                 self._config.ocean_heat_content_correction.method,
                 self._config.ocean_heat_content_correction.constant_unaccounted_heating,
                 mld_weights=mld_weights,
+                mld_soft_tau=self._config.mld_soft_threshold,
             )
         return dict(gen_data)
 
@@ -237,9 +278,12 @@ def _force_conserve_ocean_heat_content(
         "scaled_temperature",
         "mixed_layer_depth",
         "mixed_layer_depth_geo",
+        "mixed_layer_depth_soft",
+        "mixed_layer_depth_soft_geo",
     ] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
     mld_weights: torch.Tensor | None = None,
+    mld_soft_tau: float | None = None,
 ) -> TensorDict:
     if "hfds" in gen_data and "hfds" in forcing_data:
         raise ValueError(
@@ -254,7 +298,7 @@ def _force_conserve_ocean_heat_content(
     gen = OceanData(gen_data, vertical_coordinate)
     forcing = OceanData(forcing_data)
 
-    if method == "mixed_layer_depth_geo":
+    if method in ("mixed_layer_depth_geo", "mixed_layer_depth_soft_geo"):
         apply_geothermal_bottom_correction(
             gen,
             forcing,
@@ -295,6 +339,24 @@ def _force_conserve_ocean_heat_content(
                 gen,
                 forcing,
                 vertical_coordinate,
+            )
+        _apply_mld_heat_correction(
+            gen,
+            global_input_ocean_heat_content,
+            expected_change_ocean_heat_content,
+            global_gen_ocean_heat_content,
+            mld_weights,
+            vertical_coordinate,
+            area_weighted_mean,
+        )
+    elif method in ("mixed_layer_depth_soft", "mixed_layer_depth_soft_geo"):
+        assert mld_soft_tau is not None
+        if mld_weights is None:
+            mld_weights = compute_mld_soft_weights_from_ocean_data(
+                gen,
+                forcing,
+                vertical_coordinate,
+                tau=mld_soft_tau,
             )
         _apply_mld_heat_correction(
             gen,
@@ -397,8 +459,11 @@ def _force_conserve_ocean_salt_content(
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
-    method: Literal["scaled_salinity", "mixed_layer_depth"] = "scaled_salinity",
+    method: Literal[
+        "scaled_salinity", "mixed_layer_depth", "mixed_layer_depth_soft"
+    ] = "scaled_salinity",
     unaccounted_salt_flux: float = 0.0,
+    mld_soft_tau: float | None = None,
 ) -> tuple[TensorDict, torch.Tensor | None]:
     if "wfo" in gen_data and "wfo" in forcing_data:
         raise ValueError(
@@ -445,6 +510,24 @@ def _force_conserve_ocean_salt_content(
             gen,
             forcing,
             vertical_coordinate,
+        )
+        _apply_mld_salt_correction(
+            gen,
+            global_input_salt_content,
+            expected_change_salt_content,
+            global_gen_salt_content,
+            mld_weights,
+            vertical_coordinate,
+            area_weighted_mean,
+        )
+        return gen.data, mld_weights
+    elif method == "mixed_layer_depth_soft":
+        assert mld_soft_tau is not None
+        mld_weights = compute_mld_soft_weights_from_ocean_data(
+            gen,
+            forcing,
+            vertical_coordinate,
+            tau=mld_soft_tau,
         )
         _apply_mld_salt_correction(
             gen,

@@ -121,6 +121,73 @@ def compute_mld(
     return mld
 
 
+def compute_mld_soft(
+    density: torch.Tensor,
+    idepth: torch.Tensor,
+    deptho: torch.Tensor,
+    mask: torch.Tensor,
+    tau: float,
+    threshold: float = DELTA_RHO_THRESHOLD,
+    ref_layer: int = MLD_REF_LAYER,
+) -> torch.Tensor:
+    """Differentiable MLD via soft-argmax over density-threshold crossings.
+
+    A smooth, fully vectorized alternative to :func:`compute_mld`.  Each
+    layer's probability of being the *first* threshold crossing is computed
+    with a sigmoid of steepness ``1/tau``, enabling gradient flow through
+    the MLD estimate.  In the limit ``tau -> 0`` this converges to the
+    hard-threshold result.
+
+    Args:
+        density: Potential density, shape ``(B, Y, X, Z)``.
+        idepth: Interface depths (1-D, length ``Z + 1``).
+        deptho: Sea-floor depth, shape broadcastable to ``(B, Y, X)``.
+        mask: Ocean mask, shape broadcastable to ``(B, Y, X, Z)``.
+        tau: Sigmoid temperature controlling threshold sharpness.
+        threshold: Density difference threshold (kg/m^3).
+        ref_layer: Reference layer index for the density difference.
+
+    Returns:
+        MLD in metres, shape ``(B, Y, X)``.
+    """
+    lev_center = (idepth[:-1] + idepth[1:]) / 2.0
+
+    rho_ref = density[..., ref_layer : ref_layer + 1]
+    delta_rho = density - rho_ref
+
+    drho_eval = delta_rho[..., ref_layer + 1 :]  # (B, Y, X, Z')
+    drho_prev = delta_rho[..., ref_layer:-1]  # (B, Y, X, Z')
+
+    z_eval = lev_center[ref_layer + 1 :]  # (Z',)
+    z_prev = lev_center[ref_layer:-1]  # (Z',)
+
+    cross_prob = torch.sigmoid((drho_eval - threshold) / tau)
+    mask_eval = mask[..., ref_layer + 1 :]
+    cross_prob = cross_prob * mask_eval
+
+    not_cross_prob = 1.0 - cross_prob
+
+    shifted_not_cross = torch.cat(
+        [
+            torch.ones_like(not_cross_prob[..., :1]),
+            torch.cumprod(not_cross_prob[..., :-1], dim=-1),
+        ],
+        dim=-1,
+    )
+    first_cross_prob = cross_prob * shifted_not_cross
+
+    frac = (threshold - drho_prev) / (drho_eval - drho_prev + 1e-8)
+    frac = torch.clamp(frac, 0.0, 1.0)
+    interp_depth = z_prev + frac * (z_eval - z_prev)
+
+    mld = torch.sum(first_cross_prob * interp_depth, dim=-1)
+
+    residual_prob = torch.prod(not_cross_prob, dim=-1)
+    mld = mld + residual_prob * deptho
+
+    return mld
+
+
 def compute_mld_active_thickness(
     mld_2d: torch.Tensor,
     idepth: torch.Tensor,
@@ -178,6 +245,37 @@ def compute_mld_weights_from_ocean_data(
     deptho = forcing.sea_floor_depth
 
     mld_2d = compute_mld(density, idepth, deptho, mask)
+    return compute_mld_active_thickness(mld_2d, idepth, mask)
+
+
+def compute_mld_soft_weights_from_ocean_data(
+    gen: OceanData,
+    forcing: OceanData,
+    vertical_coordinate: HasOceanDepthIntegral,
+    tau: float,
+) -> torch.Tensor:
+    """Like :func:`compute_mld_weights_from_ocean_data` but differentiable.
+
+    Uses :func:`compute_mld_soft` instead of :func:`compute_mld`.
+
+    Args:
+        gen: Generated ocean data (must contain ``thetao`` and ``so``).
+        forcing: Forcing data (must contain ``deptho``).
+        vertical_coordinate: Provides interface depths and ocean mask.
+        tau: Sigmoid temperature for soft thresholding.
+
+    Returns:
+        Active thickness tensor ``h`` with shape ``(B, Y, X, Z)``.
+    """
+    theta = gen.sea_water_potential_temperature  # (B, Y, X, Z)
+    S = gen.sea_water_salinity  # (B, Y, X, Z)
+    density = jmd95_potential_density(S, theta)
+
+    idepth = vertical_coordinate.get_idepth()
+    mask = vertical_coordinate.get_mask()
+    deptho = forcing.sea_floor_depth
+
+    mld_2d = compute_mld_soft(density, idepth, deptho, mask, tau=tau)
     return compute_mld_active_thickness(mld_2d, idepth, mask)
 
 
