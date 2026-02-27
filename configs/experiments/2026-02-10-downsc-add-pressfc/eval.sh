@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-events"
+JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni-events"
 CONFIG_FILENAME="eval-100-to-3km-prmsl-output.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -19,8 +19,7 @@ NGPU=2
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET=01KHRT4VXCWCJ9YBBQZEVV9Y5X  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
-
+EXISTING_RESULTS_DATASET=01KJG6E05ZVP82W8EMSV39SQA3  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
 wandb_group=""
 
 gantry run \
@@ -29,7 +28,6 @@ gantry run \
     --workspace ai2/climate-titan \
     --priority urgent \
     --not-preemptible \
-    --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
