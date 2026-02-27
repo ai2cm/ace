@@ -283,8 +283,8 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
     aggregator = aggregator_config.build(
         dataset_info=dataset_info,
-        record_step_20=config.n_forward_steps >= 20,
-        n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
+        n_ic_steps=stepper_config.n_ic_timesteps,
+        n_forward_steps=config.n_forward_steps,
         initial_time=initial_time,
         channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,

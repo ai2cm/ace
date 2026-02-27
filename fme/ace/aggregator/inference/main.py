@@ -106,6 +106,24 @@ class _TimeDependentEvaluatorAggregator(Protocol):
     def get_dataset(self) -> xr.Dataset: ...
 
 
+def get_day_5_step(timestep_hours: int, n_forward_steps: int) -> int | None:
+    """
+    Returns the step corresponding to 5 days of evolution, or None if it doesn't
+    correspond to an integer step or is beyond the number of forward steps.
+    """
+    day_5_step_float = datetime.timedelta(days=5) / datetime.timedelta(
+        hours=timestep_hours
+    )
+    if not torch.isclose(torch.tensor(day_5_step_float % 1), torch.tensor(0.0)):
+        # the 5 day step doesn't correspond to an integer number of steps,
+        # so we won't record it
+        return None
+    elif int(day_5_step_float) > n_forward_steps:
+        return None
+    else:
+        return int(day_5_step_float)
+
+
 @dataclasses.dataclass
 class InferenceEvaluatorAggregatorConfig:
     """
@@ -126,6 +144,8 @@ class InferenceEvaluatorAggregatorConfig:
             time series metrics.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
+        timestep_hours: Timestep of the data in hours, used for determining
+            which timestep corresponds to 5 days of evolution.
     """
 
     log_histograms: bool = False
@@ -138,18 +158,20 @@ class InferenceEvaluatorAggregatorConfig:
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
     log_nino34_index: bool = True
+    timestep_hours: int = 6
 
     def build(
         self,
         dataset_info: DatasetInfo,
-        n_timesteps: int,
+        n_ic_steps: int,
+        n_forward_steps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
         output_dir: str | None = None,
-        record_step_20: bool = False,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
     ) -> "InferenceEvaluatorAggregator":
+        n_timesteps = n_ic_steps + n_forward_steps
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
         if self.monthly_reference_data is None:
@@ -164,6 +186,7 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean = xr.open_dataset(
                 self.time_mean_reference_data, decode_timedelta=False
             )
+        day_5_step = get_day_5_step(self.timestep_hours, n_forward_steps)
         return InferenceEvaluatorAggregator(
             dataset_info=dataset_info,
             n_timesteps=n_timesteps,
@@ -178,7 +201,7 @@ class InferenceEvaluatorAggregatorConfig:
             log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
             monthly_reference_data=monthly_reference_data,
             time_mean_reference_data=time_mean,
-            record_step_20=record_step_20,
+            day_5_step=day_5_step,
             channel_mean_names=channel_mean_names,
             log_nino34_index=self.log_nino34_index,
             normalize=normalize,
@@ -204,7 +227,7 @@ class InferenceEvaluatorAggregator(
         normalize: Callable[[TensorMapping], TensorDict],
         log_zonal_mean_images: bool | int,
         output_dir: str | None = None,
-        record_step_20: bool = False,
+        day_5_step: int | None = None,
         log_video: bool = False,
         enable_extended_videos: bool = False,
         log_seasonal_means: bool = False,
@@ -226,7 +249,7 @@ class InferenceEvaluatorAggregator(
             normalize: Normalization function to use.
             log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
                 time dimension.
-            record_step_20: Whether to record the mean of the 20th steps.
+            day_5_step: Step corresponding to 5 days. If None, don't record.
             log_video: Whether to log videos of the state evolution.
             enable_extended_videos: Whether to log videos of statistical
                 metrics of state evolution
@@ -273,16 +296,16 @@ class InferenceEvaluatorAggregator(
                 n_timesteps=n_timesteps,
                 variable_metadata=dataset_info.variable_metadata,
             )
-        self._record_step_20 = record_step_20
-        if record_step_20:
+        self._day_5_step = day_5_step
+        if day_5_step is not None:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
                 ops,
-                target_time=20,
+                target_time=day_5_step,
                 target="denorm",
             )
             self._aggregators["mean_step_20_norm"] = OneStepMeanAggregator(
                 ops,
-                target_time=20,
+                target_time=day_5_step,
                 target="norm",
                 include_bias=False,
                 include_grad_mag_percent_diff=False,
@@ -471,7 +494,7 @@ class InferenceEvaluatorAggregator(
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
-        if self._record_step_20:
+        if self._day_5_step is not None:
             # we don't provide it so these are NaN always
             logs.pop("mean_step_20/loss")
             logs.pop("mean_step_20_norm/loss")

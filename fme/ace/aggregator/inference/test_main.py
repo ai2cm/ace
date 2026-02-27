@@ -20,6 +20,26 @@ def get_ds_info(nx: int, ny: int) -> DatasetInfo:
     )
 
 
+@pytest.mark.parametrize(
+    "timestep_hours, n_forward_steps, expected_day_5_step",
+    [
+        (6, 40, 20),
+        (6, 20, 20),
+        (6, 19, None),
+        (7, 40, None),
+        (12, 40, 10),
+        (12, 5, None),
+    ],
+)
+def test_get_day_5_step(
+    timestep_hours: int, n_forward_steps: int, expected_day_5_step: int | None
+):
+    from fme.ace.aggregator.inference.main import get_day_5_step
+
+    actual_day_5_step = get_day_5_step(timestep_hours, n_forward_steps)
+    assert actual_day_5_step == expected_day_5_step
+
+
 @pytest.mark.parametrize("channel_mean_names", [None, ["a", "b"]])
 def test_inference_evaluator_aggregator_channel_mean_names(
     channel_mean_names: Sequence[str] | None,
