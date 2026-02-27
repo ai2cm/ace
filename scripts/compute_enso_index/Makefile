@@ -15,6 +15,7 @@ era5_aimip_enso_index:
 		--ocean-mask-lat-dim latitude \
 		--ocean-mask-lon-dim longitude \
 		--start-time $(ERA5_AIMIP_START_TIME) \
-		--stop-time $(ERA5_AIMIP_STOP_TIME)
+		--stop-time $(ERA5_AIMIP_STOP_TIME) \
+		--output-file era5_aimip_enso_index.py
 
 .PHONY: amip_enso_index era5_aimip_enso_index
