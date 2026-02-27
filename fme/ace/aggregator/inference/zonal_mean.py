@@ -173,21 +173,17 @@ class ZonalMeanAggregator:
         # if we have a buffer that means we didnt record the last batch
         if self._buffer_gen:
             start_idx = self.last_step
+            buffer_size = (
+                i_time_start + window_steps
+            ) - self.last_step * self.time_coarsening_factor
         else:
             start_idx = i_time_start // self.time_coarsening_factor
-
-        time_slice = slice(
-            start_idx,
-            (i_time_start + window_steps) // self.time_coarsening_factor,
-        )
-
-        self.last_step = (i_time_start + window_steps) // self.time_coarsening_factor
-
-        buffer_size = (
-            i_time_start + window_steps
-        ) - self.last_step * self.time_coarsening_factor
+            buffer_size = (i_time_start + window_steps) - (
+                (i_time_start + window_steps) // self.time_coarsening_factor
+            ) * (self.time_coarsening_factor)
 
         buffer = {}
+        time_slice = None
         for name, tensor in target_data.items():
             if name in self._target_data:
                 if self._buffer_target:
@@ -198,11 +194,19 @@ class ZonalMeanAggregator:
                         ],
                         dim=self._time_dim,
                     )
-                self._target_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor)
-                )
-                if buffer_size > 0:
-                    buffer[name] = tensor[:, -buffer_size:, :]
+                coarsened = self._coarsen_tensor(self._zonal_mean(tensor))
+                if time_slice is None:
+                    # Use actual coarsened size so slice matches when i_time_start is
+                    # misaligned with coarsening factor
+                    n_coarsened = coarsened.shape[self._time_dim]
+                    time_slice = slice(start_idx, start_idx + n_coarsened)
+                    self.last_step = start_idx + n_coarsened
+                    new_buffer_size = (
+                        i_time_start + window_steps
+                    ) - self.last_step * self.time_coarsening_factor
+                self._target_data[name][:, time_slice, :] += coarsened
+                if new_buffer_size > 0:
+                    buffer[name] = tensor[:, -new_buffer_size:, :]
         self._buffer_target = buffer
 
         buffer = {}
@@ -216,11 +220,10 @@ class ZonalMeanAggregator:
                         ],
                         dim=self._time_dim,
                     )
-                self._gen_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor)
-                )
-                if buffer_size > 0:
-                    buffer[name] = tensor[:, -buffer_size:, :]
+                coarsened = self._coarsen_tensor(self._zonal_mean(tensor))
+                self._gen_data[name][:, time_slice, :] += coarsened
+                if new_buffer_size > 0:
+                    buffer[name] = tensor[:, -new_buffer_size:, :]
         self._buffer_gen = buffer
 
         self._n_batches[:, time_slice, :] += 1
