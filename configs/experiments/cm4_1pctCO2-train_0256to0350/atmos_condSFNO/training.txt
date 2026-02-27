@@ -1,4 +1,4 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs0|train|high|titan|4|600GiB|1|ai2/ace|seed=0
-cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs1|train|high|titan|4|600GiB|1|ai2/ace|seed=1
+cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs2|train|urgent|titan|4|600GiB|1|ai2/climate-titan|seed=2
+cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs3|train|urgent|titan|4|600GiB|1|ai2/climate-titan|seed=3
