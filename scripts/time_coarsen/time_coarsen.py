@@ -45,6 +45,25 @@ def main(config: Config):
         process_path_pair(paths, config)
 
 
+def write_zarr(
+    ds: xr.Dataset, original_attributes: dict | None, history_entry: str, path: str
+) -> None:
+    if len(ds.attrs) > 0 and original_attributes is not None:
+        raise ValueError(
+            "Dataset already has attributes, cannot overwrite original "
+            "attributes. Instead copy over any original attributes you want "
+            "onto ds.attrs, and then pass original_attributes=None."
+        )
+    if original_attributes is not None:
+        ds.attrs = original_attributes
+    attributes = ds.attrs
+    if "history" in attributes:
+        attributes["history"] = attributes["history"] + " " + history_entry
+    else:
+        attributes["history"] = history_entry
+    ds.to_zarr(path, mode="w", zarr_version=3)
+
+
 def process_path_pair(pair: PathPair, config: Config):
     logging.info(f"Processing input: {pair.input} to output: {pair.output}")
     if os.path.exists(pair.output):
@@ -74,9 +93,22 @@ def process_path_pair(pair: PathPair, config: Config):
         .mean()
         .drop("time")
     )  # use time of snapshots
-    # ds_coarsened = ds_snapshot#xr.merge([ds_snapshot, ds_window, ds_coords])
     ds_coarsened = xr.merge([ds_snapshot, ds_window, ds_constants])
-    ds_coarsened.to_zarr(pair.output)
+    attributes = ds.attrs.copy()
+    attributes["snapshot_names"] = config.snapshot_names
+    attributes["window_names"] = config.window_names
+    attributes["constant_prefixes"] = config.constant_prefixes
+    attributes["coarsen_factor"] = config.coarsen_factor
+    history_entry = (
+        f"Dataset coarsened by a factor of {config.coarsen_factor} "
+        "by scripts/time_coarsen/time_coarsen.py."
+    )
+    write_zarr(
+        ds_coarsened,
+        original_attributes=attributes,
+        history_entry=history_entry,
+        path=pair.output,
+    )
 
 
 if __name__ == "__main__":
