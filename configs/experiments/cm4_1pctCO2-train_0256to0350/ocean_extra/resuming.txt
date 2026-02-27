@@ -1,1 +1,3 @@
 group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+1pct_nosmooth_0256to0350-ocean_extra-ft_correct_OSC_OHC_50Ep|rs0|ace-samudra-cm4|xoirbdgf|train|high|a100+h100|4|500GiB|3||max_epochs=150 resume_results.resume_wandb=true
