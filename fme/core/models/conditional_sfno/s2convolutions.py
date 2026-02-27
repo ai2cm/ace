@@ -49,8 +49,8 @@ def _contract_lora(
     Performs LoRA update contraction.
 
     Args:
-        lora_A: LoRA A matrix of shape (group, in_channels, rank, nlat, 2)
-        lora_B: LoRA B matrix of shape (group, rank, out_channels, nlat, 2)
+        lora_A: LoRA A matrix of shape (group, nlat, rank, in_channels, 2)
+        lora_B: LoRA B matrix of shape (group, nlat, out_channels, rank, 2)
         x: Complex input tensor of shape
             (batch_size, group, in_channels, nlat, nlon)
 
@@ -59,7 +59,9 @@ def _contract_lora(
     """
     lora_A = torch.view_as_complex(lora_A)
     lora_B = torch.view_as_complex(lora_B)
-    return torch.einsum("girx,grox,bgixy->bgoxy", lora_A, lora_B, x)
+    # tmp = torch.einsum("gxri,bgixy->bgxry", lora_A, x)
+    # out = torch.einsum("gxor,bgxry->bgoxy", lora_B, tmp)
+    return torch.einsum("gxri,gxor,bgixy->bgoxy", lora_A, lora_B, x)
 
 
 @torch.jit.script
@@ -78,7 +80,7 @@ def _contract_dhconv(
         Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
     """
     wc = torch.view_as_complex(weight)
-    return torch.einsum("bgixy,giox->bgoxy", xc, wc)
+    return torch.einsum("bgixy,gxoi->bgoxy", xc, wc)
 
 
 class SpectralConvS2(nn.Module):
@@ -179,38 +181,40 @@ class SpectralConvS2(nn.Module):
             self.mpad = 0
 
         if scale == "auto":
-            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat_local, 2)
+            scale = math.sqrt(1 / (in_channels)) * torch.ones(
+                self.modes_lat_local, 1, 1, 2
+            )
             # seemingly the first weight is not really complex, so we need to account for that
             scale[0, :] *= math.sqrt(2.0)
 
         weight_shape = [
             num_groups,
-            in_channels // num_groups,
-            out_channels // num_groups,
             self.modes_lat_local,
+            out_channels // num_groups,
+            in_channels // num_groups,
         ]
 
         assert factorization == "ComplexDense"
         self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
-        self.weight.is_shared_mp = ["matmul", "w"]
 
+        self.lora_rank = lora_rank
         if lora_rank > 0:
             self.lora_A = nn.Parameter(
                 scale
                 * torch.randn(
                     num_groups,
-                    in_channels // num_groups,
-                    lora_rank,
                     self.modes_lat_local,
+                    lora_rank,
+                    in_channels // num_groups,
                     2,
                 )
             )
             self.lora_B = nn.Parameter(
                 torch.zeros(
                     num_groups,
-                    lora_rank,
-                    out_channels // num_groups,
                     self.modes_lat_local,
+                    out_channels // num_groups,
+                    lora_rank,
                     2,
                 )
             )
@@ -228,6 +232,68 @@ class SpectralConvS2(nn.Module):
 
         # rewrite old checkpoints on load
         self.register_load_state_dict_pre_hook(self._add_singleton_group_dim)
+        self.register_load_state_dict_pre_hook(self._reorder_weight_dims)
+
+    @staticmethod
+    def _reorder_weight_dims(
+        module: "SpectralConvS2",
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict,
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        key = prefix + "weight"
+        if key not in state_dict:
+            return
+
+        weight = state_dict[key]
+
+        # check if the weight is in the old shape (group, in_channels, out_channels, nlat, 2)
+        if weight.ndim == 5 and weight.shape == (
+            module.num_groups,
+            module.in_channels // module.num_groups,
+            module.out_channels // module.num_groups,
+            module.modes_lat_local,
+            2,
+        ):
+            # reorder to (group, nlat, out_channels // group, in_channels // group, 2)
+            weight = weight.permute(0, 3, 2, 1, 4)
+            state_dict[key] = weight
+
+        lora_A = state_dict.get(prefix + "lora_A", None)
+        if (
+            lora_A is not None
+            and lora_A.ndim == 5
+            and lora_A.shape
+            == (
+                module.num_groups,
+                module.in_channels // module.num_groups,
+                module.lora_rank,
+                module.modes_lat_local,
+                2,
+            )
+        ):
+            lora_A = lora_A.permute(0, 3, 2, 1, 4)
+            state_dict[prefix + "lora_A"] = lora_A
+
+        lora_B = state_dict.get(prefix + "lora_B", None)
+        if (
+            lora_B is not None
+            and lora_B.ndim == 5
+            and lora_B.shape
+            == (
+                module.num_groups,
+                module.lora_rank,
+                module.out_channels // module.num_groups,
+                module.modes_lat_local,
+                2,
+            )
+        ):
+            lora_B = lora_B.permute(0, 3, 2, 1, 4)
+            state_dict[prefix + "lora_B"] = lora_B
 
     @staticmethod
     def _add_singleton_group_dim(
