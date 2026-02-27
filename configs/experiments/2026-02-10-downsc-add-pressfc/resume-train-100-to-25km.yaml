@@ -1,0 +1,141 @@
+resume_results_dir: /previous_results
+static_inputs:
+  HGTsfc:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/25km.zarr
+  land_fraction: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/25km.zarr
+model:
+  use_amp_bf16: true
+  out_names:
+  - PRATEsfc
+  - eastward_wind_at_ten_meters
+  - northward_wind_at_ten_meters
+  - PRESsfc
+  in_names:
+  - PRATEsfc
+  - eastward_wind_at_ten_meters
+  - northward_wind_at_ten_meters
+  - PRESsfc
+  loss:
+    type: MSE
+  module:
+    config:
+      model_channels: 128
+      attn_resolutions: []
+      num_blocks: 1
+      channel_mult_emb: 6
+      channel_mult:
+      - 1
+      - 2
+      - 2
+      - 2
+      use_apex_gn: true
+    type: unet_diffusion_song_v2
+  normalization:
+    coarse:
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-20260206.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-20260206.nc
+    fine:
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/centering-20260206.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/scaling-full-field-20260206.nc
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+  p_mean: -0.5
+  p_std: 1.8
+  predict_residual: true
+  sigma_max: 200.0
+  sigma_min: 0.002
+  use_fine_topography: true
+optimization:
+  lr: 0.0001
+  optimizer_type: Adam
+ema:
+  decay: 0.999
+validate_using_ema: true
+train_data:
+  sample_with_replacement: 1760
+  batch_size: 880
+  num_data_workers: 2
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 25km.zarr
+      engine: zarr
+      subset:
+        start_time: '2014-01-01T00:00:00'
+        stop_time: '2022-12-31T23:59:00'
+    - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_25km.zarr
+      engine: zarr
+      subset:
+        start_time: '2014-01-01T00:00:00'
+        stop_time: '2022-12-31T23:59:00'
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2014-01-01T00:00:00'
+        stop_time: '2022-12-31T23:59:00'
+    - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: column_integrated_dynamical_fields_100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2014-01-01T00:00:00'
+        stop_time: '2022-12-31T23:59:00'
+  lat_extent:
+    start: -66.0
+    stop: 70.0
+  # lon_extent:
+  #   start: 0 #230.0
+  #   stop:  16 #246.0
+  strict_ensemble: false
+validation_data:
+  batch_size: 72
+  num_data_workers: 4
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 25km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2024-01-01T00:00:00'
+        step: 19
+    - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_25km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2024-01-01T00:00:00'
+        step: 19
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2024-01-01T00:00:00'
+        step: 19
+    - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: column_integrated_dynamical_fields_100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2024-01-01T00:00:00'
+        step: 19
+  lat_extent:
+    start: -20.0
+    stop: 20.0
+  strict_ensemble: false
+coarse_patch_extent_lat: 16
+coarse_patch_extent_lon: 16
+max_epochs: 400
+validate_interval: 10
+experiment_dir: /results #/climate-default/home/annak/scratch/2026-02-10-downsc-add-pressfc/25km_bf16
+save_checkpoints: false
+logging:
+  project:  annak-downscaling
+  entity: ai2cm
+  log_to_wandb: true
+generate_n_samples: 2
