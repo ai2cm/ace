@@ -1,7 +1,7 @@
 import contextlib
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from typing import TypeVar
 
 import torch.distributed
@@ -31,6 +31,8 @@ class Distributed:
     for this global state in the same place as the routines that use it.
     """
 
+    _entered: bool = False
+
     def __init__(
         self,
         force_non_distributed: bool = False,
@@ -54,6 +56,31 @@ class Distributed:
         self._force_non_distributed = force_non_distributed
 
     @classmethod
+    @contextlib.contextmanager
+    def context(cls) -> Generator[None, None, None]:
+        """
+        Context manager for initializing and shutting down the distributed backend.
+
+        This should generally be used at the top level of the training script to
+        wrap the entire training process, to ensure proper initialization and
+        shutdown of the distributed backend.
+        """
+        if cls._entered:
+            raise RuntimeError("Nested Distributed.context() is not supported.")
+        cls._entered = True
+        instance = cls.get_instance()
+        try:
+            yield
+        except BaseException:
+            # exit immediately to avoid hanging other ranks
+            # the OS should clean up resources based on the non-zero exit
+            raise  # re-raise the exception to avoid masking it
+        else:  # if no exception is raised, let root finish cleanup
+            instance.shutdown()
+        finally:
+            cls._entered = False
+
+    @classmethod
     def get_instance(cls) -> "Distributed":
         """
         Get the singleton instance of the Distributed class.
@@ -69,6 +96,12 @@ class Distributed:
         - ``FME_DISTRIBUTED_BACKEND=none`` to force
           :class:`NonDistributed`
         """
+        if not cls._entered:
+            raise RuntimeError(
+                "Distributed.get_instance() called before entering context. "
+                "Please use Distributed.context() to wrap the training process, "
+                "or ensure that get_instance() is only called within the context."
+            )
         global singleton
         if singleton is None:
             backend_env = os.environ.get("FME_DISTRIBUTED_BACKEND")

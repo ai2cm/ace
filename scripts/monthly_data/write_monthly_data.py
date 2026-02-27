@@ -239,6 +239,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(
-        yaml_config=args.yaml_config,
-    )
+    with Distributed.context():
+        main(
+            yaml_config=args.yaml_config,
+        )
