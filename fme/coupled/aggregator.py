@@ -368,11 +368,11 @@ class InferenceEvaluatorAggregator(
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
     ):
-        if n_timesteps_ocean < 20:
+        if n_timesteps_ocean >= 20:
             ocean_day_5 = 20
         else:
             ocean_day_5 = None
-        if n_timesteps_atmosphere < 20:
+        if n_timesteps_atmosphere >= 20:
             atmosphere_day_5 = 20
         else:
             atmosphere_day_5 = None
