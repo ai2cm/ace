@@ -6,8 +6,8 @@ patch:
   coarse_horizontal_overlap: 1
 model:
   checkpoint_path: /checkpoints/best.ckpt
-  #model_updates:
-  #  churn: 2.5
+  model_updates:
+   num_diffusion_generation_steps: 18
 data:
   coarse:
   - merge:
