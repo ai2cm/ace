@@ -58,7 +58,7 @@ for name in "${!MODELS[@]}"; do
         --description 'Run ACE AMIP +4 K spinup inference' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
-        --priority high \
+        --priority low \
         --preemptible \
         --cluster ai2/jupiter \
         --cluster ai2/titan \
