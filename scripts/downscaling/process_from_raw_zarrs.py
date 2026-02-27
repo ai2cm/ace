@@ -77,7 +77,7 @@ def _validate_variables_exist(
         ) 
 
 def _open_gcs_obstore(path: str) -> xr.Dataset:
-    # extract bucket and prefix
+    # extract bucket and prefix from "gs://bucket/prefix" path
     protocol, _, bucket, *prefix_parts = path.split("/")
     prefix = "/".join(prefix_parts)
     # open GCS store and dataset
@@ -160,6 +160,9 @@ class DatasetPerVariableConfig:
             each file
         rename_map: Mapping of source names to target names for variables and
             dimensions
+        extra_paths: Optional mapping of logical names to to fully specified
+            paths (overrides base_path + filename_map) for any files that don't
+            follow the standard base_path + filename structure
     """
 
     name: str
@@ -167,6 +170,7 @@ class DatasetPerVariableConfig:
     filename_map: dict[str, str]
     per_file_variables: dict[str, list[str]]
     rename_map: dict[str, str]
+    extra_paths: dict[str, str]
 
     def __post_init__(self):
         """Validate that no variable appears in multiple files."""
@@ -186,7 +190,10 @@ class DatasetPerVariableConfig:
         """Load variables from multiple files and merge into a single dataset."""
         datasets = []
         for filename_key, variable_names in self.per_file_variables.items():
-            path = f"{self.base_path}/{self.filename_map[filename_key]}"
+            if filename_key in self.extra_paths:
+                path = self.extra_paths[filename_key]
+            else:
+                path = f"{self.base_path}/{self.filename_map[filename_key]}"
             ds = _open_zarr_store(path)
 
             # Validate that all configured variables exist in this source file
@@ -215,6 +222,8 @@ FLUX_FIELDS = "fluxes"
 INSTANTANEOUS_PHYSICS_FIELDS = "inst_phys"
 STATIC_FIELDS = "static"
 PRESSURE_FIELDS = "pressures"
+LAND_FRAC_25KM = "land_frac_25km"
+LAND_FRAC_3KM = "land_frac_3km"
 
 # Mapping from logical field groups to actual zarr filenames
 RAW_FILENAMES = {
@@ -222,6 +231,12 @@ RAW_FILENAMES = {
     INSTANTANEOUS_PHYSICS_FIELDS: "instantaneous_physics_fields.zarr",
     STATIC_FIELDS: "static.zarr",
     PRESSURE_FIELDS: "instantaneous_surface_and_sea_level_pressure.zarr",
+}
+
+# 25km 
+EXTRA_PATHS = {
+    LAND_FRAC_25KM: "gs://vcm-ml-intermediate/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/25km/land_fraction.zarr", # noqa
+    LAND_FRAC_3KM: "gs://vcm-ml-intermediate/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr", # noqa
 }
 
 # Variables to extract from each file group (for 25km and 3km resolutions)
@@ -237,6 +252,8 @@ FILENAME_KEY_TO_VARIABLES = {
         "HGTsfc",  # Note: land_fraction not available in 25km/3km data
     ],
     PRESSURE_FIELDS: ["PRESsfc", "PRMSL"],
+    LAND_FRAC_25KM: ["land_fraction"],
+    LAND_FRAC_3KM: ["land_fraction"],
 }
 
 # Source data paths for SHiELD AMIP plus-4K simulations
