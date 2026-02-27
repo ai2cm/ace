@@ -764,7 +764,11 @@ def inference_one_epoch(
     logging.info("Starting flush of reduced diagnostics to disk")
     aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
     logging.info("Getting inline inference aggregator logs")
+    Distributed.get_instance().barrier()
     logs = aggregator.get_summary_logs()
+    inference_error_val = logs.get("time_mean_norm/rmse/channel_mean")
+    if inference_error_val is not None:
+        logging.info(f"Inference error: {inference_error_val}")
     return {f"{label}/{k}": v for k, v in logs.items()}
 
 
