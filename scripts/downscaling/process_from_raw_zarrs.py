@@ -18,8 +18,8 @@ Usage examples:
     # Process only 25km and 3km resolutions
     python process_from_raw_zarrs.py /output/path --datasets 25km 3km
 
-    # Add specific variables from all resolutions
-    python process_from_raw_zarrs.py /output/path --variables PRATEsfc HGTsfc --zarr-mode a
+    # Add specific variable from all resolutions to the output zarr
+    python process_from_raw_zarrs.py /output/path --variables PRATEsfc --zarr-mode a
 
     # Dry run to preview actions
     python process_from_raw_zarrs.py /output/path --dry-run
@@ -48,10 +48,6 @@ class DatasetLoader(Protocol):
         """Load and return the dataset with all configured variables."""
         ...
 
-    def get_source_path(self, variable_name: str) -> str:
-        """Return the source path (zarr file) for a given variable name."""
-        ...
-
 
 def _validate_variables_exist(
     ds: xr.Dataset, variable_names: list[str], dataset_name: str, path: str
@@ -70,8 +66,8 @@ def _validate_variables_exist(
     missing_vars = [var for var in variable_names if var not in ds.data_vars]
     if missing_vars:
         raise ValueError(
-            f"Variables {missing_vars} not found in dataset '{dataset_name}' at {path}. "
-            f"Available variables in source: {list(ds.data_vars)}"
+            f"Variables {missing_vars} not found in dataset '{dataset_name}' "
+            f"at {path}. Available variables in source: {list(ds.data_vars)}"
         )
 
 
@@ -163,7 +159,7 @@ class DatasetPerVariableConfig:
         rename_map: Mapping of source names to target names for variables and
             dimensions
         extra_paths: Optional mapping of variable names to full paths, used to
-            override the base_path + filename_map for specific variables (e.g., land 
+            override the base_path + filename_map for specific variables (e.g., land
             fraction)
     """
 
@@ -212,15 +208,13 @@ class DatasetPerVariableConfig:
                 ds_extra = _open_zarr_store(extra_path)
 
                 # Validate that the variable exists in the extra path
-                _validate_variables_exist(
-                    ds_extra, [variable], self.name, extra_path
-                )
+                _validate_variables_exist(ds_extra, [variable], self.name, extra_path)
 
                 ds_extra = ds_extra[[variable]]
                 ds_extra[variable].attrs["source_path"] = extra_path
                 ds_extra = ds_extra.rename(self.rename_map)
                 datasets.append(ds_extra)
-        
+
         combined_ds = xr.merge(datasets)
         return combined_ds
 
