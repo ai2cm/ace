@@ -77,7 +77,9 @@ def _contract_dhconv(
     Returns:
         Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
     """
-    wc = torch.view_as_complex(weight)
+    wc = torch.view_as_complex(
+        weight.to(torch.float32)
+    )  # einsum does not support complexhalf
     return torch.einsum("bgixy,giox->bgoxy", xc, wc)
 
 
