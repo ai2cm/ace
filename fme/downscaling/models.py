@@ -91,8 +91,7 @@ class DiffusionModelConfig:
         in_names: The input variable names for the diffusion model.
         out_names: The output variable names for the diffusion model.
         normalization: The normalization configurations for the diffusion model.
-        p_mean: The mean of noise distribution used during training.
-        p_std: The std of the noise distribution used during training.
+
         sigma_min: Min noise level for generation.
         sigma_max: Max noise level for generation.
         churn: The amount of stochasticity during generation.
@@ -100,6 +99,13 @@ class DiffusionModelConfig:
         use_fine_topography: Whether to use fine topography in the model.
         use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
             UNetDiffusionModule.
+        training_noise_distribution: Noise distribution to use during training.
+        p_mean: The mean of noise distribution used during training.
+            Deprecated. Use training_noise_distribution field instead.
+            This is kept for backwards compatibility.
+        p_std: The std of the noise distribution used during training.
+            Deprecated. Use training_noise_distribution field instead.
+            This is kept for backwards compatibility.
     """
 
     module: DiffusionModuleRegistrySelector
@@ -139,6 +145,13 @@ class DiffusionModelConfig:
                     "field only. Both training_noise_distribution and p_mean, p_std "
                     "were specified. The latter two fields are deprecated."
                 )
+        if self.training_noise_distribution is None and (
+            self.p_mean is None or self.p_std is None
+        ):
+            raise ValueError(
+                "Noise distribution must be specified in training_noise_distribution "
+                "field or in p_mean and p_std fields."
+            )
 
     @property
     def noise(self) -> LogNormalNoiseDistribution | LogUniformNoiseDistribution:
