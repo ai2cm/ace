@@ -42,7 +42,8 @@ from fme.ace.registry.hpx import (
 from fme.ace.registry.land_net import LandNetBuilder
 from fme.ace.registry.m2lines import FloeNetBuilder, SamudraBuilder
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
-from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
+from fme.ace.step import FCN3StepConfig
 from fme.ace.stepper import DerivedForcingsConfig, StepperOverrideConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.parameter_init import (
@@ -64,8 +65,11 @@ from fme.ace.stepper.time_length_probabilities import (
 )
 from fme.ace.train.train_config import WeatherEvaluationConfig
 from fme.core.cli import ResumeResultsConfig
-from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.corrector.ocean import OceanCorrectorConfig
+from fme.core.corrector import (
+    AtmosphereCorrectorConfig,
+    IceCorrectorConfig,
+    OceanCorrectorConfig,
+)
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
@@ -88,7 +92,6 @@ from fme.core.step import (
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
 
-from . import step
 from .train.train import run_train
 from .train.train_config import (
     CopyWeightsConfig,

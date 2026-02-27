@@ -186,6 +186,30 @@ class IceBudgetCorrectionConfig:
 @CorrectorSelector.register("ice_corrector")
 @dataclasses.dataclass
 class IceCorrectorConfig:
+    r"""
+    Configuration for the post-step state corrector.
+
+    ``budget_correction`` enforces closure of the sea ice budget equation:
+
+    .. math::
+
+        tendency\_of\_total\_mass = (tendency\_of\_mass\_due\_to\_advection
+        \\\\ + tendency\_of\_mass\_due\_to\_thermodynamic\_growth
+        \\\\ + tendency\_of\_mass\_due\_to\_thermodynamic\_melt)
+
+    in the generated data, where ``tendency_of_total_mass`` is the difference
+    between the total mass at the current timestep and the previous
+    timestep divided by the time difference. This is done by modifying the
+    sea ice concentration, sea ice mass, and/or snow mass fields as
+    described in the ``budget_correction`` attribute.
+
+    Parameters:
+        budget_correction: If specified, force the generated data to conserve sea ice
+            and/or snow-on-sea-ice mass and area by replacing the predicted
+            sea ice concentration, sea ice mass, and/or snow mass with the
+            integral of individual budget terms added to the initial state.
+    """
+
     # Correctors here. Can add more as needed
     budget_correction: IceBudgetCorrectionConfig | None = None
 
