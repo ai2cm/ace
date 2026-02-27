@@ -106,6 +106,24 @@ class _TimeDependentEvaluatorAggregator(Protocol):
     def get_dataset(self) -> xr.Dataset: ...
 
 
+def get_day_5_step(timestep_hours: int, n_forward_steps: int) -> int | None:
+    """
+    Returns the step corresponding to 5 days of evolution, or None if it doesn't
+    correspond to an integer step or is beyond the number of forward steps.
+    """
+    day_5_step_float = datetime.timedelta(days=5) / datetime.timedelta(
+        hours=timestep_hours
+    )
+    if not torch.isclose(torch.tensor(day_5_step_float % 1), torch.tensor(0.0)):
+        # the 5 day step doesn't correspond to an integer number of steps,
+        # so we won't record it
+        return None
+    elif int(day_5_step_float) > n_forward_steps:
+        return None
+    else:
+        return int(day_5_step_float)
+
+
 @dataclasses.dataclass
 class InferenceEvaluatorAggregatorConfig:
     """
@@ -168,17 +186,7 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean = xr.open_dataset(
                 self.time_mean_reference_data, decode_timedelta=False
             )
-        day_5_step_float = datetime.timedelta(days=5) / datetime.timedelta(
-            hours=self.timestep_hours
-        )
-        if not torch.isclose(torch.tensor(day_5_step_float % 1), torch.tensor(0.0)):
-            # the 5 day step doesn't correspond to an integer number of steps,
-            # so we won't record it
-            day_5_step: int | None = None
-        elif int(day_5_step_float) > n_forward_steps:
-            day_5_step = None
-        else:
-            day_5_step = int(day_5_step_float)
+        day_5_step = get_day_5_step(self.timestep_hours, n_forward_steps)
         return InferenceEvaluatorAggregator(
             dataset_info=dataset_info,
             n_timesteps=n_timesteps,
