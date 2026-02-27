@@ -31,6 +31,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "geothermal_heat_flux": ["hfgeou"],
         "water_flux_into_sea_water": ["wfo"],
         "sea_surface_fraction": ["sea_surface_fraction"],
+        "sea_floor_depth": ["deptho"],
     }
 )
 
@@ -218,6 +219,11 @@ class OceanData:
             return self._get("geothermal_heat_flux")
         except KeyError:
             return torch.zeros_like(self.sea_surface_fraction)
+
+    @property
+    def sea_floor_depth(self) -> torch.Tensor:
+        """Returns the sea floor depth (bathymetry) in meters."""
+        return self._get("sea_floor_depth")
 
     @property
     def net_energy_flux_into_ocean(self) -> torch.Tensor:

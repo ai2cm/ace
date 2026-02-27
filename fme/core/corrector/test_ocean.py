@@ -1,10 +1,15 @@
 import datetime
+from unittest.mock import patch
 
 import pytest
 import torch
 
 from fme import get_device
-from fme.core.constants import REFERENCE_SALINITY_PSU
+from fme.core.constants import (
+    DENSITY_OF_WATER_CM4,
+    REFERENCE_SALINITY_PSU,
+    SPECIFIC_HEAT_OF_WATER_CM4,
+)
 from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrector,
@@ -406,3 +411,257 @@ def test_ocean_salt_content_correction(wfo_type):
         gen_data_corrected.ocean_salt_content,
         equal_nan=True,
     )
+
+
+# ---------------------------------------------------------------------------
+#  Fixtures for MLD-weighted correction tests (4 vertical levels)
+# ---------------------------------------------------------------------------
+
+_MLD_NZ = 4
+_MLD_NSAMPLES = 2
+_MLD_NLAT = 3
+_MLD_NLON = 3
+_MLD_TIMESTEP = datetime.timedelta(seconds=5 * 24 * 3600)
+_MLD_IDEPTH = torch.tensor([0.0, 10.0, 50.0, 200.0, 1000.0])
+
+
+def _mld_test_fixtures():
+    """Build depth coordinate, ops and masks for the 4-level MLD tests."""
+    mask = torch.ones(_MLD_NSAMPLES, _MLD_NLAT, _MLD_NLON, _MLD_NZ)
+    mask[:, 0, 0, :] = 0.0  # one fully masked column
+    masks = {f"mask_{k}": mask[:, :, :, k] for k in range(_MLD_NZ)}
+    masks["mask_2d"] = mask[:, :, :, 0]
+    mask_provider = MaskProvider(masks)
+    ops = LatLonOperations(torch.ones(size=[_MLD_NLAT, _MLD_NLON]), mask_provider)
+    depth_coordinate = DepthCoordinate(_MLD_IDEPTH, mask)
+    return depth_coordinate, ops, mask
+
+
+def _mld_input_gen_forcing(mask, *, gen_temp_surface=20.0, gen_temp_deep=5.0):
+    """Build input / gen / forcing dicts with a clear pycnocline in gen."""
+    shape = (_MLD_NSAMPLES, _MLD_NLAT, _MLD_NLON)
+    ssf = mask[:, :, :, 0]
+
+    input_data = {
+        **{f"thetao_{k}": torch.ones(shape) for k in range(_MLD_NZ)},
+        **{f"so_{k}": torch.ones(shape) * 35.0 for k in range(_MLD_NZ)},
+        "sst": torch.ones(shape) + 273.15,
+        "hfds": torch.ones(shape),
+        "wfo": torch.ones(shape) * 0.5,
+    }
+    gen_data = {
+        "thetao_0": torch.ones(shape) * gen_temp_surface,
+        "thetao_1": torch.ones(shape) * gen_temp_surface,
+        "thetao_2": torch.ones(shape) * gen_temp_deep,
+        "thetao_3": torch.ones(shape) * gen_temp_deep,
+        **{f"so_{k}": torch.ones(shape) * 35.0 for k in range(_MLD_NZ)},
+        "sst": torch.ones(shape) * gen_temp_surface + 273.15,
+    }
+    forcing_data = {
+        "hfgeou": torch.ones(shape) * 0.05,
+        "sea_surface_fraction": ssf,
+        "deptho": torch.full(shape, 1000.0),
+    }
+    return input_data, gen_data, forcing_data
+
+
+def test_ocean_heat_content_correction_mld():
+    depth_coordinate, ops, mask = _mld_test_fixtures()
+    input_data, gen_data, forcing_data = _mld_input_gen_forcing(mask)
+
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="mixed_layer_depth",
+            constant_unaccounted_heating=0.1,
+        )
+    )
+    corrector = OceanCorrector(config, ops, depth_coordinate, _MLD_TIMESTEP)
+    corrected = corrector(input_data, gen_data, forcing_data)
+
+    # Check OHC conservation: corrected_ohc == input_ohc + flux * dt
+    corrected_ocean = OceanData(corrected, depth_coordinate)
+    input_ocean = OceanData(input_data, depth_coordinate)
+    corrected_ohc = ops.area_weighted_mean(
+        corrected_ocean.ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    input_ohc = ops.area_weighted_mean(
+        input_ocean.ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    ssf = forcing_data["sea_surface_fraction"]
+    net_flux = (input_data["hfds"] + forcing_data["hfgeou"]) * ssf
+    flux_mean = ops.area_weighted_mean(
+        net_flux,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    expected_ohc = input_ohc + (flux_mean + 0.1) * _MLD_TIMESTEP.total_seconds()
+    torch.testing.assert_close(corrected_ohc, expected_ohc, atol=1e-3, rtol=1e-5)
+
+    # Deep layers (below MLD) should be unchanged
+    torch.testing.assert_close(corrected["thetao_2"], gen_data["thetao_2"])
+    torch.testing.assert_close(corrected["thetao_3"], gen_data["thetao_3"])
+
+
+def test_ocean_heat_content_correction_mld_geo():
+    depth_coordinate, ops, mask = _mld_test_fixtures()
+    input_data, gen_data, forcing_data = _mld_input_gen_forcing(mask)
+
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="mixed_layer_depth_geo",
+        )
+    )
+    corrector = OceanCorrector(config, ops, depth_coordinate, _MLD_TIMESTEP)
+    gen_data_before = {k: v.clone() for k, v in gen_data.items()}
+    corrected = corrector(input_data, gen_data, forcing_data)
+
+    # OHC must be conserved globally
+    corrected_ocean = OceanData(corrected, depth_coordinate)
+    input_ocean = OceanData(input_data, depth_coordinate)
+    corrected_ohc = ops.area_weighted_mean(
+        corrected_ocean.ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    input_ohc = ops.area_weighted_mean(
+        input_ocean.ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    ssf = forcing_data["sea_surface_fraction"]
+    net_flux = (input_data["hfds"] + forcing_data["hfgeou"]) * ssf
+    flux_mean = ops.area_weighted_mean(
+        net_flux,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    expected_ohc = input_ohc + flux_mean * _MLD_TIMESTEP.total_seconds()
+    torch.testing.assert_close(corrected_ohc, expected_ohc, atol=1e-3, rtol=1e-5)
+
+    # Bottom layer should be warmed by geothermal (not just MLD correction)
+    dz_bottom = _MLD_IDEPTH[-1] - _MLD_IDEPTH[-2]  # 800 m
+    expected_geo_dT = (
+        forcing_data["hfgeou"]
+        * ssf
+        * _MLD_TIMESTEP.total_seconds()
+        / (DENSITY_OF_WATER_CM4 * SPECIFIC_HEAT_OF_WATER_CM4 * dz_bottom)
+    )
+    bottom_change = corrected["thetao_3"] - gen_data_before["thetao_3"]
+    torch.testing.assert_close(
+        bottom_change,
+        expected_geo_dT,
+        atol=1e-6,
+        rtol=1e-6,
+    )
+
+
+def test_ocean_salt_content_correction_mld():
+    depth_coordinate, ops, mask = _mld_test_fixtures()
+    input_data, gen_data, forcing_data = _mld_input_gen_forcing(mask)
+
+    config = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="mixed_layer_depth",
+        )
+    )
+    corrector = OceanCorrector(config, ops, depth_coordinate, _MLD_TIMESTEP)
+    corrected = corrector(input_data, gen_data, forcing_data)
+
+    # OSC conservation: corrected_osc == input_osc + virtual_salt_flux * dt
+    corrected_ocean = OceanData(corrected, depth_coordinate)
+    input_ocean = OceanData(input_data, depth_coordinate)
+    corrected_osc = ops.area_weighted_mean(
+        corrected_ocean.ocean_salt_content,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    input_osc = ops.area_weighted_mean(
+        input_ocean.ocean_salt_content,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    ssf = forcing_data["sea_surface_fraction"]
+    vsf = -REFERENCE_SALINITY_PSU * input_data["wfo"] * ssf
+    vsf_mean = ops.area_weighted_mean(
+        vsf,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    expected_osc = input_osc + vsf_mean * _MLD_TIMESTEP.total_seconds()
+    torch.testing.assert_close(corrected_osc, expected_osc, atol=1e-3, rtol=1e-5)
+
+    # Deep layers should be unchanged
+    torch.testing.assert_close(corrected["so_2"], gen_data["so_2"])
+    torch.testing.assert_close(corrected["so_3"], gen_data["so_3"])
+
+
+def test_mld_weights_reused_from_salt_to_heat():
+    """When both salt and heat use MLD, weights computed during salt correction
+    are passed to heat correction (avoiding redundant MLD computation)."""
+    depth_coordinate, ops, mask = _mld_test_fixtures()
+    input_data, gen_data, forcing_data = _mld_input_gen_forcing(mask)
+
+    config = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="mixed_layer_depth",
+        ),
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="mixed_layer_depth",
+        ),
+    )
+    corrector = OceanCorrector(config, ops, depth_coordinate, _MLD_TIMESTEP)
+
+    with patch(
+        "fme.core.corrector.ocean.compute_mld_weights_from_ocean_data",
+        wraps=__import__(
+            "fme.core.corrector.ocean_mld",
+            fromlist=["compute_mld_weights_from_ocean_data"],
+        ).compute_mld_weights_from_ocean_data,
+    ) as mock_weights:
+        corrector(input_data, gen_data, forcing_data)
+        # Should be called once (by salt), not twice
+        assert mock_weights.call_count == 1
+
+    # Also verify both budgets are conserved simultaneously
+    corrected = corrector(input_data, gen_data, forcing_data)
+    corrected_ocean = OceanData(corrected, depth_coordinate)
+    input_ocean = OceanData(input_data, depth_coordinate)
+
+    corrected_ohc = ops.area_weighted_mean(
+        corrected_ocean.ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    input_ohc = ops.area_weighted_mean(
+        input_ocean.ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    ssf = forcing_data["sea_surface_fraction"]
+    net_flux = (input_data["hfds"] + forcing_data["hfgeou"]) * ssf
+    flux_mean = ops.area_weighted_mean(
+        net_flux,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    expected_ohc = input_ohc + flux_mean * _MLD_TIMESTEP.total_seconds()
+    torch.testing.assert_close(corrected_ohc, expected_ohc, atol=1e-3, rtol=1e-5)
+
+    corrected_osc = ops.area_weighted_mean(
+        corrected_ocean.ocean_salt_content,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    input_osc = ops.area_weighted_mean(
+        input_ocean.ocean_salt_content,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    vsf = -REFERENCE_SALINITY_PSU * input_data["wfo"] * ssf
+    vsf_mean = ops.area_weighted_mean(vsf, keepdim=True, name="ocean_salt_content")
+    expected_osc = input_osc + vsf_mean * _MLD_TIMESTEP.total_seconds()
+    torch.testing.assert_close(corrected_osc, expected_osc, atol=1e-3, rtol=1e-5)

@@ -19,3 +19,6 @@ FREEZING_TEMPERATURE_KELVIN = 273.15  # K
 REFERENCE_SALINITY_PSU = 35  # g/kg
 
 EARTH_RADIUS = 6371000.0  # m
+
+DELTA_RHO_THRESHOLD = 0.03  # kg/m^3, density difference for MLD
+MLD_REF_LAYER = 1  # reference layer index (~10 m depth in CM4)
