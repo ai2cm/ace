@@ -167,6 +167,45 @@ def implied_tendency_of_ocean_heat_content_due_to_advection(
     return implied_column_heating
 
 
+@register(VariableMetadata("g/m**2", "Column-integrated ocean salt content"))
+def ocean_salt_content(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    return data.ocean_salt_content
+
+
+@register(
+    VariableMetadata("g/m**2/s", "Tendency of column-integrated ocean salt content")
+)
+def ocean_salt_content_tendency(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    osc = data.ocean_salt_content
+    osc_tendency = torch.zeros_like(osc)
+    osc_tendency[:, 1:] = torch.diff(osc, n=1, dim=1) / timestep.total_seconds()
+    return osc_tendency
+
+
+@register(
+    VariableMetadata(
+        "g/m**2/s",
+        "Implied advective tendency of ocean salt content assuming closed budget",
+    )
+)
+def implied_tendency_of_ocean_salt_content_due_to_advection(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Implied tendency of ocean salt content due to advection.
+    This is computed as a residual from the column salt budget.
+    """
+    column_salt_tendency = ocean_salt_content_tendency(data, timestep)
+    flux_through_surface = data.net_virtual_salt_flux_into_ocean
+    return column_salt_tendency - flux_through_surface
+
+
 @register(
     VariableMetadata(
         "W/m**2",

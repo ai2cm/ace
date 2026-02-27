@@ -51,6 +51,50 @@ def test_column_integrated_ocean_heat_content(has_depth_coordinate: bool):
             _ = ocean_data.ocean_heat_content
 
 
+@pytest.mark.parametrize("has_depth_coordinate", [True, False])
+def test_column_integrated_ocean_salt_content(has_depth_coordinate: bool):
+    """Test column-integrated ocean salt content."""
+    n_samples, n_time_steps, nlat, nlon, nlevels = 2, 2, 2, 2, 2
+    shape_2d = (n_samples, n_time_steps, nlat, nlon)
+
+    data = {
+        "so_0": torch.ones(n_samples, n_time_steps, nlat, nlon),
+        "so_1": torch.ones(n_samples, n_time_steps, nlat, nlon),
+    }
+
+    if has_depth_coordinate:
+        idepth = torch.tensor([2.5, 10, 20])
+        lev_thickness = idepth.diff(dim=-1)
+        mask = torch.ones(n_samples, n_time_steps, nlat, nlon, nlevels)
+        mask[:, :, 0, 0, 0] = 0.0
+        mask[:, :, 0, 0, 1] = 0.0
+        mask[:, :, 0, 1, 1] = 0.0
+
+        expected_osc = torch.tensor(
+            DENSITY_OF_WATER_CM4
+            * n_samples
+            * n_time_steps
+            * (
+                nlat * nlon * lev_thickness.sum()
+                - lev_thickness[0]
+                - 2 * lev_thickness[1]
+            )
+        )
+        depth_coordinate = DepthCoordinate(idepth, mask)
+        ocean_data = OceanData(data, depth_coordinate)
+        assert ocean_data.ocean_salt_content.shape == shape_2d
+        assert torch.allclose(
+            ocean_data.ocean_salt_content.nansum(),
+            expected_osc,
+            atol=1e-10,
+            equal_nan=True,
+        )
+    else:
+        ocean_data = OceanData(data)
+        with pytest.raises(ValueError, match="Depth coordinate must be provided"):
+            _ = ocean_data.ocean_salt_content
+
+
 def test_get_3d_fields():
     """Test getting 3D fields (fields with vertical levels)."""
     n_samples, n_time_steps, nlat, nlon, nlevels = 2, 3, 4, 8, 2
