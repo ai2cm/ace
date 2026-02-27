@@ -5,6 +5,7 @@ import dacite.exceptions
 import yaml
 
 from fme.core.config import update_dict_with_dotlist
+from fme.core.distributed.distributed import Distributed
 from fme.coupled.inference.evaluator import InferenceEvaluatorConfig
 from fme.coupled.inference.inference import InferenceConfig
 from fme.coupled.train.train_config import TrainConfig
@@ -35,26 +36,28 @@ if __name__ == "__main__":
         config_data = yaml.load(f, Loader=yaml.CLoader)
 
     config_data = update_dict_with_dotlist(config_data, args.override)
-    try:
-        if args.config_type == "evaluator":
-            dacite.from_dict(
-                data_class=InferenceEvaluatorConfig,
-                data=config_data,
-                config=dacite.Config(strict=True),
-            )
-        elif args.config_type == "inference":
-            dacite.from_dict(
-                data_class=InferenceConfig,
-                data=config_data,
-                config=dacite.Config(strict=True),
-            )
-        elif args.config_type == "train":
-            dacite.from_dict(
-                data_class=TrainConfig,
-                data=config_data,
-                config=dacite.Config(strict=True),
-            )
-    except Exception as err:
-        raise ValueError(
-            f"Building the coupled {args.config_type} config from {args.path} failed"
-        ) from err
+    with Distributed.context():
+        try:
+            if args.config_type == "evaluator":
+                dacite.from_dict(
+                    data_class=InferenceEvaluatorConfig,
+                    data=config_data,
+                    config=dacite.Config(strict=True),
+                )
+            elif args.config_type == "inference":
+                dacite.from_dict(
+                    data_class=InferenceConfig,
+                    data=config_data,
+                    config=dacite.Config(strict=True),
+                )
+            elif args.config_type == "train":
+                dacite.from_dict(
+                    data_class=TrainConfig,
+                    data=config_data,
+                    config=dacite.Config(strict=True),
+                )
+        except Exception as err:
+            raise ValueError(
+                f"Building the coupled {args.config_type} "
+                f"config from {args.path} failed"
+            ) from err
