@@ -13,7 +13,6 @@ import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator.inference import InferenceAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.getters import get_forcing_data
@@ -36,7 +35,6 @@ from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
-from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
@@ -235,14 +233,9 @@ class InferenceConfig:
                     )
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(
-        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
-    ):
-        config = to_flat_dict(dataclasses.asdict(self))
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=False
         )
 
     def load_stepper(self) -> Stepper:
@@ -299,15 +292,9 @@ def run_inference_from_config(config: InferenceConfig):
     with timer.context("initialization"):
         makedirs(config.experiment_dir, exist_ok=True)
         config.configure_logging(log_filename="inference_out.log")
-        env_vars = logging_utils.retrieve_env_vars()
-        beaker_url = logging_utils.log_beaker_url()
-        config.configure_wandb(env_vars=env_vars, notes=beaker_url)
 
         if fme.using_gpu():
             torch.backends.cudnn.benchmark = True
-
-        logging_utils.log_versions()
-        logging.info(f"Current device is {fme.get_device()}")
 
         stepper_config = config.load_stepper_config()
         data_requirements = stepper_config.get_forcing_window_data_requirements(

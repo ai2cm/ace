@@ -10,7 +10,6 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.single_module import SingleModuleStepConfig
@@ -58,7 +57,6 @@ def test_landnet_init(shape):
                 ),
             ),
         ),
-        loss=StepLossConfig(type="MSE", weights={"temperature": 1.0}),
     )
     stepper = stepper_config.get_stepper(
         dataset_info=DatasetInfo(

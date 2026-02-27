@@ -176,7 +176,7 @@ def test_sea_ice_thickness_derived_variable(case):
     if case == "sea_ice_fraction_and_land_fraction":
         sea_ice_frac = torch.full((1, 1, n_lat, n_lon), 0.6)
         land_frac = 1 - sea_surface_frac
-        effective_sea_ice_frac = sea_ice_frac * sea_surface_frac / land_frac
+        effective_sea_ice_frac = sea_ice_frac * sea_surface_frac / (1 - land_frac)
         fake_data = {
             "sea_ice_volume": thickness_in_m * cell_area * effective_sea_ice_frac / 1e9,
             "sea_ice_fraction": sea_ice_frac,

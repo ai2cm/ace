@@ -117,7 +117,12 @@ def _create_dataset_on_disk(
     return data_path
 
 
-def test_ensemble_loader(tmp_path, num_ensemble_members=3):
+@pytest.mark.parametrize(
+    "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
+)
+def test_ensemble_loader(
+    tmp_path, num_data_workers: int, force_forkserver: bool, num_ensemble_members=3
+):
     """Tests that the ensemble loader returns the correct number of samples."""
 
     # Create a dataset for each ensemble member. We assume that each member
@@ -134,7 +139,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
             concat=[XarrayDataConfig(data_path=str(path)) for path in netcdfs]
         ),
         batch_size=1,
-        num_data_workers=0,
+        num_data_workers=num_data_workers,
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
@@ -142,7 +147,12 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_timesteps - window_timesteps + 1
 
-    data = get_gridded_data(config, True, requirements)
+    data = get_gridded_data(
+        config,
+        train=True,
+        requirements=requirements,
+        _force_forkserver=force_forkserver,
+    )
     assert data.n_batches == samples_per_member * num_ensemble_members
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
@@ -443,7 +453,14 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
         )
 
 
-def test_inference_data_loader(tmp_path):
+@pytest.mark.parametrize(
+    "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
+)
+def test_inference_data_loader(
+    tmp_path, num_data_workers: int, force_forkserver: bool, very_fast_only: bool
+):
+    if very_fast_only and force_forkserver:
+        pytest.skip("Skipping non-fast tests")
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
@@ -455,6 +472,7 @@ def test_inference_data_loader(tmp_path):
         start_indices=InferenceInitialConditionIndices(
             first=0, n_initial_conditions=batch_size, interval=step
         ),
+        num_data_workers=num_data_workers,
     )
     n_forward_steps_in_memory = 3
     window_requirements = DataRequirements(
@@ -470,6 +488,7 @@ def test_inference_data_loader(tmp_path):
         total_forward_steps=6,
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
+        _force_forkserver=force_forkserver,
     )
     data_loader = data.loader
     batch_data = next(iter(data_loader))

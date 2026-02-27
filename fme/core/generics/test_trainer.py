@@ -924,7 +924,9 @@ def test_evaluate_before_training(tmp_path: str):
         return trainer
 
     with mock_wandb() as wandb:
-        LoggingConfig(log_to_wandb=True).configure_wandb({"experiment_dir": tmp_path})
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
         # run training in two segments to ensure coverage of check that extra validation
         # really only happens before any training is done.
         trainer = _get_trainer(train_losses[:1], val_losses[:2], inference_errors[:2])
@@ -1068,7 +1070,9 @@ def test_lr_logging_by_epoch(tmp_path: str):
         return trainer
 
     with mock_wandb() as wandb:
-        LoggingConfig(log_to_wandb=True).configure_wandb({"experiment_dir": tmp_path})
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
         trainer = _get_trainer(train_losses, val_losses, inference_errors)
         trainer.train()
         wandb_logs = wandb.get_logs()
@@ -1107,7 +1111,9 @@ def test_lr_logging_by_iter(tmp_path: str):
         return trainer
 
     with mock_wandb() as wandb:
-        LoggingConfig(log_to_wandb=True).configure_wandb({"experiment_dir": tmp_path})
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
         trainer = _get_trainer(train_losses, val_losses, inference_errors)
         trainer.train()
         wandb_logs = wandb.get_logs()

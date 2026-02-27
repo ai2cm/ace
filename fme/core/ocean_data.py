@@ -298,7 +298,7 @@ class OceanData:
                 # assumes that sea_ice_fraction comes from compute_coupled_sea_ice
                 # in scripts/data_process/coupled_dataset_utils.py
                 lfrac = self.land_fraction
-                sea_ice_frac = self.sea_ice_fraction * sfrac / lfrac
+                sea_ice_frac = self.sea_ice_fraction * sfrac / (1 - lfrac)
             cell_area = self.area_weights_m2
             return torch.where(
                 torch.isnan(sea_ice_vol),

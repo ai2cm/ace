@@ -335,13 +335,6 @@ def test_train_on_batch_crps_loss():
                 )
             ),
         ),
-        loss=StepLossConfig(
-            type="EnsembleLoss",
-            kwargs={
-                "crps_weight": 0.1,
-                "energy_score_weight": 0.9,
-            },
-        ),
     )
     stepper = _get_train_stepper(
         config,
@@ -391,13 +384,6 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
                     ),
                 )
             ),
-        ),
-        loss=StepLossConfig(
-            type="EnsembleLoss",
-            kwargs={
-                "crps_weight": 0.1,
-                "energy_score_weight": 0.9,
-            },
         ),
     )
     stepper = _get_train_stepper(
@@ -477,7 +463,6 @@ def test_reloaded_stepper_gives_same_prediction():
                 )
             ),
         ),
-        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
@@ -599,7 +584,6 @@ def _setup_and_train_on_batch(
                 )
             ),
         ),
-        loss=StepLossConfig(type="MSE"),
     )
 
     stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
@@ -645,7 +629,6 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
                 )
             ),
         ),
-        loss=StepLossConfig(type="MSE"),
     )
 
     stepper = _get_train_stepper(
@@ -1010,7 +993,6 @@ def _get_stepper_config(
                 )
             ),
         ),
-        loss=StepLossConfig(type="MSE"),
         derived_forcings=derived_forcings,
     )
 
@@ -1286,7 +1268,6 @@ def test_get_forcing_window_data_requirements_includes_prescribed_names():
                 )
             ),
         ),
-        loss=StepLossConfig(type="MSE"),
         derived_forcings=DerivedForcingsConfig(),
     )
     requirements = config.get_forcing_window_data_requirements(n_forward_steps=5)
@@ -1727,7 +1708,6 @@ def get_regression_stepper_and_data(
                 )
             ),
         ),
-        loss=loss,
     )
 
     dataset_info = get_dataset_info(img_shape=img_shape)
@@ -2061,7 +2041,6 @@ def _get_ocean_stepper(
                 )
             ),
         ),
-        loss=StepLossConfig(type="MSE"),
     )
     dataset_info = _get_ocean_dataset_info()
     return config.get_stepper(dataset_info)

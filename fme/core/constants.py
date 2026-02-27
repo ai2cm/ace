@@ -16,9 +16,10 @@ SPECIFIC_HEAT_OF_WATER_CM4 = 3992.0  # J/kg/K
 DENSITY_OF_WATER_CM4 = 1035.0  # kg/m^3
 
 FREEZING_TEMPERATURE_KELVIN = 273.15  # K
-REFERENCE_SALINITY_PSU = 35  # g/kg
 
 EARTH_RADIUS = 6371000.0  # m
+
+REFERENCE_SALINITY_PSU = 35  # g/kg
 
 DELTA_RHO_THRESHOLD = 0.03  # kg/m^3, density difference for MLD
 MLD_REF_LAYER = 1  # reference layer index (~10 m depth in CM4)

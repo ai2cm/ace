@@ -120,11 +120,10 @@ class DatasetInfo:
                     f"{self._vertical_coordinate} != {other._vertical_coordinate}"
                 )
         if self._mask_provider is not None and other._mask_provider is not None:
-            if not self._mask_provider.is_compatible_with(other._mask_provider):
-                issues.append(
-                    f"mask_provider is not compatible, "
-                    f"{self._mask_provider} not a subset of {other._mask_provider}"
-                )
+            try:
+                self._mask_provider.assert_compatible_with(other._mask_provider)
+            except AssertionError as e:
+                issues.append(f"mask_provider is not compatible: {e}")
         if self._timestep is not None:
             if self._timestep != other._timestep:
                 issues.append(
