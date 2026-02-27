@@ -23,6 +23,9 @@ Usage examples:
 
     # Dry run to preview actions
     python process_from_raw_zarrs.py /output/path --dry-run
+
+    # Use more processes for faster execution (if supported by the system)
+    python process_from_raw_zarrs.py /output/path --nprocesses 16
 """
 
 import argparse
@@ -36,10 +39,9 @@ from zarr.storage import ObjectStore
 
 
 class DatasetLoader(Protocol):
-    """Protocol for dataset loaders that can load datasets and track source paths.
+    """Protocol for dataset loaders that can load datasets.
 
-    Implementations should handle loading variables from one or more source files
-    and provide source path information for each variable.
+    Implementations should handle loading variables from one or more source files.
     """
 
     name: str
@@ -75,6 +77,10 @@ def _open_gcs_obstore(path: str) -> xr.Dataset:
     # extract bucket and prefix from "gs://bucket/prefix" path
     protocol, _, bucket, *prefix_parts = path.split("/")
     prefix = "/".join(prefix_parts)
+
+    if not prefix:
+        raise ValueError(f"Invalid GCS path: {path}. Expected format 'gs://bucket/prefix'")
+    
     # open GCS store and dataset
     gcs_store = GCSStore(bucket, prefix=prefix)
     store = ObjectStore(gcs_store, read_only=True)
@@ -83,9 +89,16 @@ def _open_gcs_obstore(path: str) -> xr.Dataset:
 
 
 def _maybe_rechunk_with_shard(ds: xr.Dataset) -> xr.Dataset:
+    # Assumes all variables in the dataset have the same shard and chunk encoding
+    # update this if that assumption does not hold for the source data
     key = list(ds.data_vars.keys())[0]
     encoding = ds[key].encoding
     if "shards" in encoding and encoding["shards"] is not None:
+        if "chunks" not in encoding or encoding["chunks"] is None:
+            # I don't think this should happen
+            raise ValueError(
+                f"Dataset variable '{key}' has shard encoding but no chunk encoding. "
+            )
         chunk_leading = encoding["chunks"][0]
         shard_leading = encoding["shards"][0]
         if chunk_leading != shard_leading:
@@ -145,10 +158,10 @@ class DatasetConfig:
 
 @dataclasses.dataclass
 class DatasetPerVariableConfig:
-    """Configuration for loading a dataset from multiple zarr files.
-
-    Use this when variables are split across multiple source zarr files. This class
-    loads each file separately, selects the specified variables, and merges them.
+    """
+    Configuration for loading a dataset from multiple zarr files under the
+    same base directory.  Additional paths can be specified for specific
+    variables.
 
     Attributes:
         name: Identifier for this dataset (e.g., "25km")
@@ -254,7 +267,7 @@ FILENAME_KEY_TO_VARIABLES = {
         "northward_wind_at_ten_meters",
     ],
     STATIC_FIELDS: [
-        "HGTsfc",  # Note: land_fraction not available in 25km/3km data
+        "HGTsfc",
     ],
     PRESSURE_FIELDS: ["PRESsfc", "PRMSL"],
 }
@@ -369,7 +382,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--nprocesses",
         type=int,
-        default=8,
+        default=4,
         help="Number of processes to use for dask operations.",
     )
     parser.add_argument(
@@ -383,7 +396,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Configure dataset loaders for each resolution
-    # COARSE Is missing PRMSL
+    # Coarse data does not include PRMSL
     coarse_config = DatasetConfig(
         name="100km",
         path=COARSE_RES_PATH,
@@ -400,8 +413,8 @@ if __name__ == "__main__":
             "TMP2m": "air_temperature_at_two_meters",
             "UGRD10m": "eastward_wind_at_ten_meters",
             "VGRD10m": "northward_wind_at_ten_meters",
-            "grid_xt": "latitude",
-            "grid_yt": "longitude",
+            "grid_xt": "longitude",
+            "grid_yt": "latitude",
         },
     )
 
@@ -410,7 +423,7 @@ if __name__ == "__main__":
         base_path=MED_RES_BASE_PATH,
         filename_map=RAW_FILENAMES,
         per_file_variables=FILENAME_KEY_TO_VARIABLES,
-        rename_map={"grid_xt": "latitude", "grid_yt": "longitude"},
+        rename_map={"grid_xt": "longitude", "grid_yt": "latitude"},
         extra_paths={"land_fraction": LAND_FRAC_25KM_PATH},
     )
 
@@ -419,7 +432,7 @@ if __name__ == "__main__":
         base_path=FINE_RES_BASE_PATH,
         filename_map=RAW_FILENAMES,
         per_file_variables=FILENAME_KEY_TO_VARIABLES,
-        rename_map={"grid_xt": "latitude", "grid_yt": "longitude"},
+        rename_map={"grid_xt": "longitude", "grid_yt": "latitude"},
         extra_paths={"land_fraction": LAND_FRAC_3KM_PATH},
     )
 
