@@ -12,6 +12,14 @@ import torch
 from fme.core.benchmark.benchmark import get_benchmarks
 from fme.core.wandb import WandB
 
+
+def _json_default(obj):
+    """json.dumps ``default`` hook that converts tensors to Python objects."""
+    if isinstance(obj, torch.Tensor):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 RESULTS_PATH = pathlib.Path(os.path.abspath(os.path.dirname(__file__))) / "results"
 
 _GIT_COMMIT: str | None = None
@@ -60,6 +68,7 @@ def main(
     output_dir: pathlib.Path,
     child: str | None = None,
     wandb_project: str | None = None,
+    all_labels: bool = False,
 ) -> int:
     output_dir.mkdir(exist_ok=True)
     device_name = get_device_name()
@@ -100,8 +109,12 @@ def main(
         )
         png_filename = get_filename(benchmark_name, "png")
         logging.info(f"Saving result image to {png_filename}")
-        result.to_png(png_filename, label=get_label(benchmark_name))
-        result_data = json.dumps(dataclasses.asdict(result), indent=2)
+        result.to_png(
+            png_filename, label=get_label(benchmark_name), all_labels=all_labels
+        )
+        result_data = json.dumps(
+            dataclasses.asdict(result), indent=2, default=_json_default
+        )
         logging.info(f"Result: {result_data}")
         with open(get_filename(benchmark_name, "json"), "w") as f:
             logging.info(f"Saving result json to {f.name}")
@@ -112,7 +125,9 @@ def main(
             logging.info(f"Generating benchmark result for child timer: {child_label}")
             png_filename = get_filename(child_name, "png")
             logging.info(f"Saving child result image to {png_filename}")
-            result.to_png(png_filename, label=child_label, child=child)
+            result.to_png(
+                png_filename, label=child_label, child=child, all_labels=all_labels
+            )
 
     if wandb_project is not None:
         entity, project = wandb_project.split("/")
@@ -174,6 +189,15 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--all-labels",
+        action="store_true",
+        default=False,
+        help=(
+            "Show labels on all chart segments. Else will show labels for "
+            "blocks >= 5% of total."
+        ),
+    )
+    parser.add_argument(
         "--wandb-project",
         type=str,
         default=None,
@@ -195,5 +219,6 @@ if __name__ == "__main__":
             child=args.child,
             output_dir=output_dir,
             wandb_project=args.wandb_project,
+            all_labels=args.all_labels,
         )
     )

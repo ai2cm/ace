@@ -22,6 +22,7 @@ Note this is a newer version of the layer modules and SongUNet vendorized in une
 # limitations under the License.
 
 import math
+import itertools
 from typing import Any, Literal
 
 import numpy as np
@@ -29,6 +30,7 @@ import torch
 from torch.nn.functional import silu
 from torch.utils.checkpoint import checkpoint
 
+from fme.core.benchmark.timer import NullTimer, Timer
 from fme.downscaling.modules.utils import check_level_compatibility, validate_shape
 
 from .group_norm import get_group_norm
@@ -549,7 +551,14 @@ class SongUNetv2(torch.nn.Module):
         "Should be set to ``True`` to enable automatic mixed precision.",
     )
 
-    def forward(self, x, noise_labels, class_labels, augment_labels=None):
+    def forward(
+        self,
+        x,
+        noise_labels,
+        class_labels,
+        augment_labels=None,
+        timer: Timer = NullTimer(),
+    ):
         batch_size = x.shape[0]
 
         if x.ndim != 4:
@@ -604,88 +613,112 @@ class SongUNetv2(torch.nn.Module):
             and x.dim() == 4
         ):
             x = x.to(memory_format=torch.channels_last)
-        if self.embedding_type != "zero":
-            # Mapping.
-            emb = self.map_noise(noise_labels)
-            emb = (
-                emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape)
-            )  # swap sin/cos
-            if self.map_label is not None:
-                tmp = class_labels
-                if self.training and self.label_dropout:
-                    tmp = tmp * (
-                        torch.rand([x.shape[0], 1], device=x.device)
-                        >= self.label_dropout
-                    ).to(tmp.dtype)
-                emb = emb + self.map_label(tmp * np.sqrt(self.map_label.in_features))
-            if self.map_augment is not None and augment_labels is not None:
-                emb = emb + self.map_augment(augment_labels)
-            emb = silu(self.map_layer0(emb))
-            emb = silu(self.map_layer1(emb))
-        else:
-            emb = torch.zeros(
-                (noise_labels.shape[0], self.emb_channels),
-                device=x.device,
-                dtype=x.dtype,
-            )
+        with timer.child("mapping"):
+            if self.embedding_type != "zero":
+                # Mapping.
+                emb = self.map_noise(noise_labels)
+                emb = (
+                    emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape)
+                )  # swap sin/cos
+                if self.map_label is not None:
+                    tmp = class_labels
+                    if self.training and self.label_dropout:
+                        tmp = tmp * (
+                            torch.rand([x.shape[0], 1], device=x.device)
+                            >= self.label_dropout
+                        ).to(tmp.dtype)
+                    emb = emb + self.map_label(
+                        tmp * np.sqrt(self.map_label.in_features)
+                    )
+                if self.map_augment is not None and augment_labels is not None:
+                    emb = emb + self.map_augment(augment_labels)
+                emb = silu(self.map_layer0(emb))
+                emb = silu(self.map_layer1(emb))
+            else:
+                emb = torch.zeros(
+                    (noise_labels.shape[0], self.emb_channels),
+                    device=x.device,
+                    dtype=x.dtype,
+                )
 
         # Encoder.
-        skips = []
-        aux = x
-        for name, block in self.enc.items():
-            if "aux_down" in name:
-                aux = block(aux)
-            elif "aux_skip" in name:
-                x = skips[-1] = x + block(aux)
-            elif "aux_residual" in name:
-                x = skips[-1] = aux = (x + block(aux)) / np.sqrt(2)
-            elif "_conv" in name:
-                x = block(x)
-                if self.additive_pos_embed:
-                    x = x + self.spatial_emb.to(dtype=x.dtype)
-                skips.append(x)
-            else:
-                # For UNetBlocks check if we should use gradient checkpointing
-                if isinstance(block, UNetBlock):
-                    if (
-                        math.floor(math.sqrt(x.shape[-2] * x.shape[-1]))
-                        > self.checkpoint_threshold
-                    ):
-                        # self.checkpoint = checkpoint?
-                        # else: self.checkpoint  = lambda(block,x,emb:block(x,emb))
-                        x = checkpoint(block, x, emb, use_reentrant=False)
+        with timer.child("encoder") as enc_timer:
+            skips = []
+            aux = x
+
+            for name, block in self.enc.items():
+                with enc_timer.child(name.split("_", 1)[0]) as level_timer:
+                    if "aux_down" in name:
+                        with level_timer.child("down"):
+                            aux = block(aux)
+                    elif "aux_skip" in name:
+                        with level_timer.child("skip"):
+                            x = skips[-1] = x + block(aux)
+                    elif "aux_residual" in name:
+                        with level_timer.child("residual"):
+                            x = skips[-1] = aux = (x + block(aux)) / np.sqrt(2)
+                    elif "_conv" in name:
+                        with level_timer.child("conv"):
+                            x = block(x)
+                            if self.additive_pos_embed:
+                                x = x + self.spatial_emb.to(dtype=x.dtype)
+                            skips.append(x)
                     else:
-                        # AssertionError: Only support NHWC layout.
-                        x = block(x, emb)
-                else:
-                    x = block(x)
-                skips.append(x)
+                        with level_timer.child("block"):
+                            if isinstance(block, UNetBlock):
+                                if (
+                                    math.floor(
+                                        math.sqrt(x.shape[-2] * x.shape[-1])
+                                    )
+                                    > self.checkpoint_threshold
+                                ):
+                                    x = checkpoint(
+                                        block, x, emb, use_reentrant=False
+                                    )
+                                else:
+                                    x = block(x, emb)
+                            else:
+                                x = block(x)
+                            skips.append(x)
 
         # Decoder.
-        aux = None
-        tmp = None
-        for name, block in self.dec.items():
-            if "aux_up" in name:
-                aux = block(aux)
-            elif "aux_norm" in name:
-                tmp = block(x)
-            elif "aux_conv" in name:
-                tmp = block(silu(tmp))
-                aux = tmp if aux is None else tmp + aux
-            else:
-                if x.shape[1] != block.in_channels:
-                    x = torch.cat([x, skips.pop()], dim=1)
-                # check for checkpointing on decoder blocks and up sampling blocks
-                if (
-                    math.floor(math.sqrt(x.shape[-2] * x.shape[-1]))
-                    > self.checkpoint_threshold
-                    and "_block" in name
-                ) or (
-                    math.floor(math.sqrt(x.shape[-2] * x.shape[-1]))
-                    > (self.checkpoint_threshold / 2)
-                    and "_up" in name
-                ):
-                    x = checkpoint(block, x, emb, use_reentrant=False)
-                else:
-                    x = block(x, emb)
+        with timer.child("decoder") as dec_timer:
+            aux = None
+            tmp = None
+            for name, block in self.dec.items():
+                with dec_timer.child(name.split("_", 1)[0]) as level_timer:
+                    if "aux_up" in name:
+                        with level_timer.child("up"):
+                            aux = block(aux)
+                    elif "aux_norm" in name:
+                        with level_timer.child("norm"):
+                            tmp = block(x)
+                    elif "aux_conv" in name:
+                        with level_timer.child("conv"):
+                            tmp = block(silu(tmp))
+                            aux = tmp if aux is None else tmp + aux
+                    else:
+                        timer_name = "up" if "_up" in name else "block"
+                        with level_timer.child(timer_name):
+                            if x.shape[1] != block.in_channels:
+                                x = torch.cat([x, skips.pop()], dim=1)
+
+                            if (
+                                math.floor(
+                                    math.sqrt(x.shape[-2] * x.shape[-1])
+                                )
+                                > self.checkpoint_threshold
+                                and "_block" in name
+                            ) or (
+                                math.floor(
+                                    math.sqrt(x.shape[-2] * x.shape[-1])
+                                )
+                                > (self.checkpoint_threshold / 2)
+                                and "_up" in name
+                            ):
+                                x = checkpoint(
+                                    block, x, emb, use_reentrant=False
+                                )
+                            else:
+                                x = block(x, emb)
         return aux

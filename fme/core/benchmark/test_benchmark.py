@@ -18,6 +18,7 @@ DIR = os.path.abspath(os.path.dirname(__file__))
 def test_run_benchmark():
     def benchmark_fn(timer):
         torch.cuda._sleep(100_000_000)
+        return {}
 
     benchmark = BenchmarkABC.new_from_fn(benchmark_fn)
 
