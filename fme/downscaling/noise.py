@@ -25,17 +25,23 @@ class ConditionedTarget:
 
 @dataclasses.dataclass
 class NoiseDistribution(abc.ABC):
-    clamp_min: float = dataclasses.field(default=0.0, kw_only=True)
-    clamp_max: float = dataclasses.field(default=float("inf"), kw_only=True)
+    min: float = dataclasses.field(default=0.0, kw_only=True)
+    max: float = dataclasses.field(default=float("inf"), kw_only=True)
 
     @abc.abstractmethod
     def _sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
         pass
 
     def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
-        return torch.clamp(
-            self._sample(batch_size, device), self.clamp_min, self.clamp_max
-        )
+        result = self._sample(batch_size, device)
+        out_of_bounds = (result < self.min) | (result > self.max)
+        bad = out_of_bounds.view(batch_size, -1).any(dim=1)
+        while bad.any():
+            n_bad = bad.sum().item()
+            result[bad] = self._sample(n_bad, device)
+            out_of_bounds = (result < self.min) | (result > self.max)
+            bad = out_of_bounds.view(batch_size, -1).any(dim=1)
+        return result
 
 
 @dataclasses.dataclass
@@ -64,29 +70,21 @@ class LogUniformNoiseDistribution(NoiseDistribution):
 
 @dataclasses.dataclass
 class SkewedLogNormalNoiseDistribution(NoiseDistribution):
-    loc: float = -1.2  # Location (xi) in log-space
-    scale: float = 1.5  # Scale (omega) in log-space
-    alpha: float = 3.0  # Skewness; > 0 favors higher noise (better tails)
-    p_min: float = 0.01  # Recommended floor for 512x512
-    p_max: float = 80.0  # Typical EDM max
+    loc: (
+        float  # Peak location in log-space. For alpha = 0, this is the log normal mean.
+    )
+    scale: float  # Scale in log-space. For alpha = 0, this is the log normal std.
+    alpha: float  # Skewness, > 0 favors higher noise
 
     def _sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
-        # 1. Sample two standard normals for the transformation method
         z0 = np.random.randn(batch_size)
         z1 = np.random.randn(batch_size)
 
-        # 2. Skew-Normal transformation in log-space
         delta = self.alpha / np.sqrt(1 + self.alpha**2)
-        # y follows SkewNormal(loc, scale, alpha)
         y = self.loc + self.scale * (delta * np.abs(z0) + np.sqrt(1 - delta**2) * z1)
-
-        # 3. Convert to sigma and enforce bounds
         sigma = np.exp(y)
-        sigma = np.clip(sigma, self.p_min, self.p_max)
 
-        return torch.tensor(sigma, device=device, dtype=torch.float32).reshape(
-            batch_size, 1, 1, 1
-        )
+        return torch.tensor(sigma, device=device).reshape(batch_size, 1, 1, 1)
 
 
 def condition_with_noise_for_training(

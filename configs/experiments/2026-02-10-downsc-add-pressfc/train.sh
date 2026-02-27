@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-prmsl-output-loguniform-noise"
+JOB_NAME="xshield-downscaling-100km-to-3km-prmsl-output-loguniform-noise-pmin0.02"
 CONFIG_FILENAME="train-100-to-3km-prmsl-output.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -25,8 +25,8 @@ IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km multivar training' \
-    --workspace ai2/downscaling \
-    --priority low \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
