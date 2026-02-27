@@ -3,7 +3,7 @@
 set -e
 
 JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni-conus-18st"
-CONFIG_FILENAME="eval-100-to-3km-prmsl-output.yaml"
+CONFIG_FILENAME="eval-100-to-3km-prmsl-conus.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

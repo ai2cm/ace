@@ -23,10 +23,19 @@ class ConditionedTarget:
     weight: torch.Tensor
 
 
+@dataclasses.dataclass
 class NoiseDistribution(abc.ABC):
+    clamp_min: float = dataclasses.field(default=0.0, kw_only=True)
+    clamp_max: float = dataclasses.field(default=float("inf"), kw_only=True)
+
     @abc.abstractmethod
-    def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
+    def _sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
         pass
+
+    def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
+        return torch.clamp(
+            self._sample(batch_size, device), self.clamp_min, self.clamp_max
+        )
 
 
 @dataclasses.dataclass
@@ -34,7 +43,7 @@ class LogNormalNoiseDistribution(NoiseDistribution):
     p_mean: float
     p_std: float
 
-    def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
+    def _sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
         rnd = randn([batch_size, 1, 1, 1], device=device)
         # This is taken from EDM's original implementation in EDMLoss:
         # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
@@ -46,11 +55,38 @@ class LogUniformNoiseDistribution(NoiseDistribution):
     p_min: float
     p_max: float
 
-    def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
+    def _sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
         sigma = np.exp(
             np.random.uniform(np.log(self.p_min), np.log(self.p_max), batch_size)
         )
         return torch.tensor(sigma, device=device).reshape(batch_size, 1, 1, 1)
+
+
+@dataclasses.dataclass
+class SkewedLogNormalNoiseDistribution(NoiseDistribution):
+    loc: float = -1.2  # Location (xi) in log-space
+    scale: float = 1.5  # Scale (omega) in log-space
+    alpha: float = 3.0  # Skewness; > 0 favors higher noise (better tails)
+    p_min: float = 0.01  # Recommended floor for 512x512
+    p_max: float = 80.0  # Typical EDM max
+
+    def _sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
+        # 1. Sample two standard normals for the transformation method
+        z0 = np.random.randn(batch_size)
+        z1 = np.random.randn(batch_size)
+
+        # 2. Skew-Normal transformation in log-space
+        delta = self.alpha / np.sqrt(1 + self.alpha**2)
+        # y follows SkewNormal(loc, scale, alpha)
+        y = self.loc + self.scale * (delta * np.abs(z0) + np.sqrt(1 - delta**2) * z1)
+
+        # 3. Convert to sigma and enforce bounds
+        sigma = np.exp(y)
+        sigma = np.clip(sigma, self.p_min, self.p_max)
+
+        return torch.tensor(sigma, device=device, dtype=torch.float32).reshape(
+            batch_size, 1, 1, 1
+        )
 
 
 def condition_with_noise_for_training(

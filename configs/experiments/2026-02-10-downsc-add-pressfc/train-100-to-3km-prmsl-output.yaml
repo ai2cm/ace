@@ -41,7 +41,7 @@ model:
   num_diffusion_generation_steps: 8
   churn: 0.0
   training_noise_distribution:
-    p_min: 0.002
+    p_min: 0.02
     p_max: 150.0
   predict_residual: true
   sigma_max: 150.0
