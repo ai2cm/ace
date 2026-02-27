@@ -1,10 +1,10 @@
-apache_beam[gcp]==2.54.0
+apache_beam[gcp,tfrecord]==2.71.0
 cftime
 dask
 gcsfs
 h5netcdf
 numpy
 scipy
-xarray
-xarray_beam
-zarr
+xarray==2026.2.0
+xarray_beam==0.11.5
+zarr==3.1.5
