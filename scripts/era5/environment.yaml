@@ -3,5 +3,6 @@ channels:
   - conda-forge
 dependencies:
   - python=3.11
-  - metview-batch
+  - esmf
+  - xesmf
   - pip

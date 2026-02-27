@@ -3,15 +3,16 @@
 # Options,
 # DirectRunner - local
 # DataflowRunner - cloud
-RUNNER=${1:-DataflowRunner}
+RUNNER=${1:-DirectRunner}
 
 python3 xr-beam-pipeline.py \
-    gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-1940-2022.zarr \
-    1940-01-01T12:00:00 \
+    gs://vcm-ml-scratch/oliwm/test-era5-pipeline/2026-02-25-era5-1deg-8layer-1940-2022.zarr \
+    2022-12-26T12:00:00 \
     2022-12-31T18:00:00 \
     --output_grid F90 \
-    --output_time_chunksize 20 \
-    --ncar_process_time_chunksize 4 \
+    --output_time_chunksize 2 \
+    --output_time_shardsize 12 \
+    --process_time_chunksize 4 \
     --project vcm-ml \
     --region us-central1 \
     --temp_location gs://vcm-ml-scratch/oliwm/temp/ \

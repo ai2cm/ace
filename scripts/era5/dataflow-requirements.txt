@@ -1,4 +1,4 @@
-apache_beam[gcp]==2.71.0
+apache_beam[gcp,tfrecord]==2.71.0
 cftime
 dask
 gcsfs
