@@ -27,11 +27,12 @@ Usage examples:
 
 import argparse
 import dataclasses
+from typing import Protocol
+
 import dask.distributed as dd
 import xarray as xr
-from typing import Protocol
-from zarr.storage import ObjectStore
 from obstore.store import GCSStore
+from zarr.storage import ObjectStore
 
 
 class DatasetLoader(Protocol):
@@ -53,11 +54,8 @@ class DatasetLoader(Protocol):
 
 
 def _validate_variables_exist(
-    ds: xr.Dataset,
-    variable_names: list[str],
-    dataset_name: str,
-    path: str
- ) -> None:
+    ds: xr.Dataset, variable_names: list[str], dataset_name: str, path: str
+) -> None:
     """Validate that all requested variables exist in the dataset.
 
     Args:
@@ -74,7 +72,8 @@ def _validate_variables_exist(
         raise ValueError(
             f"Variables {missing_vars} not found in dataset '{dataset_name}' at {path}. "
             f"Available variables in source: {list(ds.data_vars)}"
-        ) 
+        )
+
 
 def _open_gcs_obstore(path: str) -> xr.Dataset:
     # extract bucket and prefix from "gs://bucket/prefix" path
@@ -85,6 +84,7 @@ def _open_gcs_obstore(path: str) -> xr.Dataset:
     store = ObjectStore(gcs_store, read_only=True)
     ds = xr.open_dataset(store, engine="zarr", chunks="auto")
     return ds
+
 
 def _maybe_rechunk_with_shard(ds: xr.Dataset) -> xr.Dataset:
     key = list(ds.data_vars.keys())[0]
@@ -100,6 +100,7 @@ def _maybe_rechunk_with_shard(ds: xr.Dataset) -> xr.Dataset:
             ds = ds.chunk({ds[key].dims[0]: shard_leading})
     return ds
 
+
 def _open_zarr_store(path: str) -> xr.Dataset:
     if path.startswith("gs://"):
         ds = _open_gcs_obstore(path)
@@ -107,9 +108,10 @@ def _open_zarr_store(path: str) -> xr.Dataset:
         raise NotImplementedError(
             f"Unsupported path protocol in {path}. Only 'gs://' is supported."
         )
-    
+
     ds = _maybe_rechunk_with_shard(ds)
     return ds
+
 
 @dataclasses.dataclass
 class DatasetConfig:
@@ -140,7 +142,7 @@ class DatasetConfig:
         # Add source path tracking to each variable's attributes
         for variable in ds.data_vars:
             ds[variable].attrs["source_path"] = self.path
-        
+
         ds = ds.rename(self.rename_map)
         return ds
 
@@ -197,11 +199,11 @@ class DatasetPerVariableConfig:
             _validate_variables_exist(ds, variable_names, self.name, path)
 
             ds = ds[variable_names]
-            
+
             # Add source path tracking to each variable's attributes
             for variable in ds.data_vars:
                 ds[variable].attrs["source_path"] = path
-            
+
             ds = ds.rename(self.rename_map)
             datasets.append(ds)
 
@@ -428,6 +430,7 @@ if __name__ == "__main__":
     )
 
     # Select which datasets to process based on command-line arguments
+    selected_loaders: list[DatasetLoader]
     if "all" in args.datasets:
         selected_loaders = [coarse_config, mid_res_config, fine_res_config]
     else:
