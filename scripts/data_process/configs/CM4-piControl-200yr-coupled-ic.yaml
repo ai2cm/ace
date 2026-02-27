@@ -1,0 +1,5 @@
+coupled_config_path: configs/CM4-piControl-200yr-coupled.yaml
+time:
+  timestamp: "0151-01-03T12:00:00"
+output_directory: /climate-default/home/elynn/ace/scratch
+output_prefix: "0151-01-03"
