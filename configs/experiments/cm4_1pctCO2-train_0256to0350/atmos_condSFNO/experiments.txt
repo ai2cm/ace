@@ -15,3 +15,5 @@ cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs0|01KJ5XMPTBN669V97K55AC7KV3
 cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs1|01KJ5XN6NRQQYGGQ4D192FBJMG|training|best_inference_ckpt|normal|--not-preemptible
 
 cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs2|01KJGPNXN82C4XG0CR7TH43JTZ|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs3|01KJGPP96NWWPT4TZ47VJRX1K5|training|best_inference_ckpt|normal|--not-preemptible
