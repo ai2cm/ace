@@ -21,7 +21,7 @@ run_coarsen() {
 
   gantry run \
     --name "$job_name" \
-    --description 'Run ACE training' \
+    --description 'Run ACE dataset time coarsening' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/climate-titan \
     --priority urgent \
