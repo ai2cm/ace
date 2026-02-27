@@ -19,6 +19,7 @@ from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySe
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
+    SkewedLogNormalNoiseDistribution,
     condition_with_noise_for_training,
 )
 from fme.downscaling.requirements import DataRequirements
@@ -115,7 +116,10 @@ class DiffusionModelConfig:
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
     training_noise_distribution: (
-        LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
+        LogNormalNoiseDistribution
+        | LogUniformNoiseDistribution
+        | SkewedLogNormalNoiseDistribution
+        | None
     ) = None
     p_mean: float | None = None
     p_std: float | None = None
@@ -141,7 +145,13 @@ class DiffusionModelConfig:
                 )
 
     @property
-    def noise(self) -> LogNormalNoiseDistribution | LogUniformNoiseDistribution:
+    def noise(
+        self,
+    ) -> (
+        LogNormalNoiseDistribution
+        | LogUniformNoiseDistribution
+        | SkewedLogNormalNoiseDistribution
+    ):
         if self.training_noise_distribution is not None:
             return self.training_noise_distribution
         elif self.p_mean is not None and self.p_std is not None:

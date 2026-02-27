@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-prmsl-output-loguniform-noise-pmin0.02"
-CONFIG_FILENAME="train-100-to-3km-prmsl-output.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-prmsl-output-skewlognormal-noise"
+CONFIG_FILENAME="train-100-to-3km-prmsl-output-skeweddist.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

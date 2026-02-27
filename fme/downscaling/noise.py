@@ -27,6 +27,7 @@ class ConditionedTarget:
 class NoiseDistribution(abc.ABC):
     min: float = dataclasses.field(default=0.0, kw_only=True)
     max: float = dataclasses.field(default=float("inf"), kw_only=True)
+    max_resample_iters: int = dataclasses.field(default=10, kw_only=True)
 
     @abc.abstractmethod
     def _sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
@@ -36,11 +37,15 @@ class NoiseDistribution(abc.ABC):
         result = self._sample(batch_size, device)
         out_of_bounds = (result < self.min) | (result > self.max)
         bad = out_of_bounds.view(batch_size, -1).any(dim=1)
-        while bad.any():
+        for _ in range(self.max_resample_iters):
+            if not bad.any():
+                break
             n_bad = bad.sum().item()
             result[bad] = self._sample(n_bad, device)
             out_of_bounds = (result < self.min) | (result > self.max)
             bad = out_of_bounds.view(batch_size, -1).any(dim=1)
+        if bad.any():
+            result = torch.clamp(result, self.min, self.max)
         return result
 
 
