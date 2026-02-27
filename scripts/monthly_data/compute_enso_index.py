@@ -3,6 +3,7 @@
 
 import argparse
 import dataclasses
+from datetime import timedelta
 
 import numpy as np
 import xarray as xr
@@ -35,8 +36,8 @@ class RegionBounds:
 def open_dataset(path):
     """Open a dataset from a zarr store or a netCDF file."""
     if path.endswith(".zarr") or ".zarr/" in path:
-        return xr.open_zarr(path)
-    return xr.open_dataset(path)
+        return xr.open_zarr(path, use_cftime=True)
+    return xr.open_dataset(path, use_cftime=True)
 
 
 def get_ocean_mask(
@@ -66,7 +67,7 @@ def get_ocean_mask(
 def get_time_average(da):
     # this version of xarray's resample method doesn't allow
     # data shifting to create a centered 3-month average, so do it manually
-    da = da.assign_coords({"time": da.time + np.timedelta64(45, "D")})
+    da = da.assign_coords({"time": da.time + timedelta(days=45)})
     # the label is at the start of the 3-month season
     da_out = da.resample(time="QS").mean()
     return da_out
@@ -158,7 +159,7 @@ def main():
         print("# `scripts/monthly_data/compute_enso_index.py`", file=f)
         print("NINO34_INDEX = [", file=f)
         for point in nino34_anom_index:
-            t = point.time.astype("datetime64[ms]").item()
+            t = point.time.item()
             print(
                 (f"    (({t.year}, {t.month}, " f"{t.day}), {point.item():0.3f}),"),
                 file=f,
