@@ -77,7 +77,7 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-stepper:
+stepper_training:
   loss:
     type: MSE
   input_masking:
@@ -95,6 +95,7 @@ stepper:
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
       - total_frozen_precipitation_rate
+stepper:
   step:
     type: single_module
     config:

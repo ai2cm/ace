@@ -134,7 +134,7 @@ optimization:
     weight_decay: 0.01
   scheduler:
     type: CosineAnnealingLR
-train_stepper:
+stepper_training:
   parameter_init:
     checkpoint_path: /ckpt.tar
   ocean:

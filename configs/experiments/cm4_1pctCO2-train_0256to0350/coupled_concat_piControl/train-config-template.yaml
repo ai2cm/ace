@@ -162,7 +162,7 @@ optimization:
       - type: ConstantLR
         step_each_iteration: true
     milestones: [2000]
-train_stepper:
+stepper_training:
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar

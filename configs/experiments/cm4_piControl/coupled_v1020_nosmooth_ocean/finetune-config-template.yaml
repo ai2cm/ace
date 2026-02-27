@@ -129,7 +129,7 @@ optimization:
     step_each_iteration: true
     kwargs:
       T_max: 14140
-train_stepper:
+stepper_training:
   parameter_init:
     checkpoint_path: /ckpt.tar
   ocean:

@@ -93,7 +93,7 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-stepper:
+stepper_training:
   loss:
     type: MSE
   input_masking:
@@ -101,6 +101,7 @@ stepper:
     fill_value: 0.0
     exclude_names_and_prefixes:
       - land_fraction
+stepper:
   step:
     type: single_module
     config:

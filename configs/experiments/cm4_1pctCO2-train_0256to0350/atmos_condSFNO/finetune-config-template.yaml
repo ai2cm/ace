@@ -81,7 +81,7 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-stepper:
+stepper_training:
   parameter_init:
     weights_path: /ckpt.tar
   n_ensemble: 2
@@ -122,6 +122,7 @@ stepper:
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
+stepper:
   step:
     type: single_module
     config:

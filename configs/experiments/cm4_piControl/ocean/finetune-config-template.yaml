@@ -93,6 +93,6 @@ optimization:
       - type: ConstantLR
         step_each_iteration: true
     milestones: [42420]
-stepper:
+stepper_training:
   parameter_init:
     weights_path: /ckpt.tar

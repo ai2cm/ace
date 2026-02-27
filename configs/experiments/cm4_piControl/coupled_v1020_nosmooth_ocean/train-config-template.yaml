@@ -124,7 +124,7 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-train_stepper:
+stepper_training:
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
