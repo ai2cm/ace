@@ -368,8 +368,15 @@ class InferenceEvaluatorAggregator(
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
     ):
-        self._record_ocean_step_20 = n_timesteps_ocean >= 20
-        self._record_atmos_step_20 = n_timesteps_atmosphere >= 20
+        if n_timesteps_ocean < 20:
+            ocean_day_5 = 20
+        else:
+            ocean_day_5 = None
+        if n_timesteps_atmosphere < 20:
+            atmosphere_day_5 = 20
+        else:
+            atmosphere_day_5 = None
+
         self._aggregators = {
             "ocean": InferenceEvaluatorAggregator_(
                 dataset_info=dataset_info.ocean,
@@ -384,7 +391,7 @@ class InferenceEvaluatorAggregator(
                 log_global_mean_norm_time_series=log_global_mean_norm_time_series,
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
-                record_step_20=self._record_ocean_step_20,
+                day_5_step=ocean_day_5,
                 channel_mean_names=ocean_channel_mean_names,
                 normalize=ocean_normalize,
                 save_diagnostics=save_diagnostics,
@@ -407,7 +414,7 @@ class InferenceEvaluatorAggregator(
                 log_global_mean_norm_time_series=log_global_mean_norm_time_series,
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
-                record_step_20=self._record_atmos_step_20,
+                day_5_step=atmosphere_day_5,
                 channel_mean_names=atmosphere_channel_mean_names,
                 normalize=atmosphere_normalize,
                 save_diagnostics=save_diagnostics,
@@ -479,11 +486,11 @@ class InferenceEvaluatorAggregator(
             + atmos_channel_mean * self._num_channels_atmos
         ) / (self._num_channels_ocean + self._num_channels_atmos)
         prefix = "mean_step_20_norm/weighted_rmse"
-        if self._record_atmos_step_20:
+        if f"{prefix}/channel_mean" in atmos_logs:
             atmos_logs[f"{prefix}/atmosphere_channel_mean"] = atmos_logs.pop(
                 f"{prefix}/channel_mean"
             )
-        if self._record_ocean_step_20:
+        if f"{prefix}/channel_mean" in ocean_logs:
             ocean_logs[f"{prefix}/ocean_channel_mean"] = ocean_logs.pop(
                 f"{prefix}/channel_mean"
             )
