@@ -65,7 +65,7 @@ def get_ocean_mask(
 
 
 def get_time_average(da):
-    # this version of xarray's resample method doesn't allow
+    # xarray's resample method didn't allow
     # data shifting to create a centered 3-month average, so do it manually
     da = da.assign_coords({"time": da.time + timedelta(days=45)})
     # the label is at the start of the 3-month season
@@ -161,7 +161,7 @@ def main():
         for point in nino34_anom_index:
             t = point.time.item()
             print(
-                (f"    (({t.year}, {t.month}, " f"{t.day}), {point.item():0.3f}),"),
+                (f"    (({t.year}, {t.month}, {t.day}), {point.item():0.3f}),"),
                 file=f,
             )
         print("]", file=f)
