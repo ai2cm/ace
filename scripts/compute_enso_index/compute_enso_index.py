@@ -156,7 +156,7 @@ def main():
             "# computed from the CMIP6 AMIP SST forcing data using the script in",
             file=f,
         )
-        print("# `scripts/monthly_data/compute_enso_index.py`", file=f)
+        print("# `scripts/compute_enso_index/compute_enso_index.py`", file=f)
         print("NINO34_INDEX = [", file=f)
         for point in nino34_anom_index:
             t = point.time.item()
