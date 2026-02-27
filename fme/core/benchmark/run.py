@@ -14,9 +14,9 @@ from fme.core.wandb import WandB
 
 
 def _json_default(obj):
-    """json.dumps ``default`` hook that converts tensors to Python scalars."""
+    """json.dumps ``default`` hook that converts tensors to Python objects."""
     if isinstance(obj, torch.Tensor):
-        return obj.item()
+        return obj.tolist()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 

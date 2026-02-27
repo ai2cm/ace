@@ -132,15 +132,15 @@ class BenchmarkResult:
                 root = root.children[part]
         root_count = root.count
 
-        def avg_total_time_per_iter(t: TimerResult) -> float:
+        def avg_total_time_per_root_iter(t: TimerResult) -> float:
             return float(t.count * t.avg_time) / root_count
 
         def self_time(t: TimerResult) -> float:
-            t_total = avg_total_time_per_iter(t)
-            c_total = sum(avg_total_time_per_iter(c) for c in t.children.values())
+            t_total = avg_total_time_per_root_iter(t)
+            c_total = sum(avg_total_time_per_root_iter(c) for c in t.children.values())
             return max(t_total - c_total, 0.0)
 
-        root_avg = avg_total_time_per_iter(root)
+        root_avg = avg_total_time_per_root_iter(root)
 
         max_alloc_mb = self.memory.max_alloc / (1024.0 * 1024.0)
 
@@ -184,7 +184,7 @@ class BenchmarkResult:
         lvl1_segments: list[tuple[str, float, tuple[float, float, float, float]]] = []
         for n1, t1 in lvl1:
             base = cmap(lvl1_index[n1] % cmap.N)
-            lvl1_segments.append((n1, avg_total_time_per_iter(t1), base))
+            lvl1_segments.append((n1, avg_total_time_per_root_iter(t1), base))
         r_self = self_time(root)
         if r_self > 0.0:
             lvl1_segments.append(("", r_self, gray))
@@ -251,7 +251,11 @@ class BenchmarkResult:
                 lighten = 0.10 + (0.55 * (i / max(k - 1, 1)))
                 rgb = blend_with_white(parent_rgb, lighten)
                 lvl2_segments.append(
-                    (n2, avg_total_time_per_iter(t2), (rgb[0], rgb[1], rgb[2], 1.0))
+                    (
+                        n2,
+                        avg_total_time_per_root_iter(t2),
+                        (rgb[0], rgb[1], rgb[2], 1.0),
+                    )
                 )
 
             s1 = self_time(t1)
