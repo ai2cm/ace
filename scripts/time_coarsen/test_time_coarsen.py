@@ -1,8 +1,48 @@
 import numpy as np
 import xarray as xr
 from time_coarsen import Config, PathPair, main
+from zarr.codecs import BloscCodec
 
 from fme.ace.testing import DimSize, DimSizes, get_nd_dataset
+
+
+def _assert_encoding_matches(ds_in: xr.Dataset, ds_out: xr.Dataset) -> None:
+    """
+    Assert that the chunking and sharding encoding of variables in the
+    output dataset match the input dataset.
+    """
+    for name, da_out in ds_out.data_vars.items():
+        da_in = ds_in[name]
+
+        # chunks: tuple-of-tuples in xarray encoding for zarr
+        in_chunks = da_in.encoding.get("chunks")
+        out_chunks = da_out.encoding.get("chunks")
+        assert (
+            in_chunks == out_chunks
+        ), f"{name}: chunks differ: {in_chunks} vs {out_chunks}"
+
+        # shards: only present if your writer uses sharding and xarray propagates it
+        in_shards = da_in.encoding.get("shards")
+        out_shards = da_out.encoding.get("shards")
+        assert (
+            in_shards == out_shards
+        ), f"{name}: shards differ: {in_shards} vs {out_shards}"
+
+
+def write_v3_with_chunks(ds: xr.Dataset, path: str) -> None:
+    compressor = BloscCodec(cname="zstd", clevel=3, shuffle="shuffle")
+
+    encoding = {}
+    for name, da in ds.variables.items():  # includes coords + data_vars
+        if da.ndim == 0:
+            continue
+        chunks = tuple(
+            2 if dim == "time" else 2 if dim == "lat" else 4 if dim == "lon" else 1
+            for dim in da.dims
+        )
+        encoding[name] = {"chunks": chunks, "compressor": compressor}
+
+    ds.to_zarr(path, mode="w", zarr_version=3, encoding=encoding)
 
 
 def test_time_coarsen() -> None:
@@ -33,7 +73,7 @@ def test_time_coarsen() -> None:
     output_path = "memory://test-time-coarsen/dataset_coarsened.zarr"
 
     # Write to an in-memory filesystem (xarray recognizes the memory:// protocol)
-    ds.to_zarr(input_path)
+    write_v3_with_chunks(ds, input_path)
     ds = xr.open_zarr(input_path)  # for comparison later, use fresh read
 
     config = Config(
@@ -46,6 +86,7 @@ def test_time_coarsen() -> None:
 
     # Read back the coarsened dataset
     ds_coarsened = xr.open_zarr(output_path)
+    _assert_encoding_matches(ds, ds_coarsened)
     # Note on each timestep, we have the tendencies which led to the current
     # snapshot alongside the snapshot itself. This means the first snapshot
     # of the coarsened dataset is not the first snapshot of the input dataset.
