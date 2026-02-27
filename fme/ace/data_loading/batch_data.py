@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import Any, TypeVar
 
@@ -197,7 +198,18 @@ class BatchData:
         n_ensemble: int = 1,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
+        if labels is not None:
+            if labels.tensor.device != torch.device("cpu"):
+                raise ValueError(f"labels must be on cpu, got {labels.tensor.device}")
         kwargs = cls._get_kwargs(horizontal_dims)
+        if isinstance(labels, list):
+            warnings.warn(
+                "Passing labels as a list is deprecated, and they will be ignored. "
+                "Please pass a BatchLabels object "
+                "instead, or None to indicate no label information.",
+                DeprecationWarning,
+            )
+            labels = None
         return BatchData(
             data=data,
             time=time,
@@ -222,6 +234,14 @@ class BatchData:
         """
         _check_device(data, get_device())
         kwargs = cls._get_kwargs(horizontal_dims)
+        if isinstance(labels, list):
+            warnings.warn(
+                "Passing labels as a list is deprecated, and they will be ignored. "
+                "Please pass a BatchLabels object "
+                "instead, or None to indicate no label information.",
+                DeprecationWarning,
+            )
+            labels = None
         return BatchData(
             data=data,
             time=time,
@@ -272,7 +292,7 @@ class BatchData:
                 raise ValueError("label_encoding must be provided if labels are used.")
             labels = None
         else:
-            labels = label_encoding.encode(list(sample_labels))
+            labels = label_encoding.encode(list(sample_labels), device="cpu")
         return BatchData.new_on_cpu(
             data=batch_data,
             time=batch_time,

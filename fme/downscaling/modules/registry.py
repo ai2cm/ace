@@ -14,8 +14,8 @@ import dacite
 import torch
 
 from fme.core.device import get_device
+from fme.downscaling.modules.physicsnemo_unets_v1 import SongUNet
 from fme.downscaling.modules.swinir import SwinIR
-from fme.downscaling.modules.unets import DhariwalUNet, SongUNet
 
 
 class ModuleConfig(Protocol):
@@ -144,43 +144,6 @@ class UNetRegressionSong:
 
 
 @dataclasses.dataclass
-class UNetRegressionDhariwal:
-    model_channels: int = 192
-    channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 3, 4])
-
-    channel_mult_emb: int = 4
-    num_blocks: int = 3
-    attn_resolutions: list[int] = dataclasses.field(default_factory=lambda: [32, 16, 8])
-    dropout: float = 0.10
-    label_dropout: int = 0
-
-    def build(
-        self,
-        n_in_channels: int,
-        n_out_channels: int,
-        coarse_shape: tuple[int, int],
-        downscale_factor: int,
-    ):
-        target_height, target_width = [s * downscale_factor for s in coarse_shape]
-        unet = DhariwalUNet(
-            min(target_height, target_width),
-            n_in_channels,
-            n_out_channels,
-            model_channels=self.model_channels,
-            channel_mult=self.channel_mult,
-            channel_mult_emb=self.channel_mult_emb,
-            num_blocks=self.num_blocks,
-            attn_resolutions=self.attn_resolutions,
-            dropout=self.dropout,
-            label_dropout=self.label_dropout,
-        )
-        return UNetRegressionModule(
-            unet,
-            downscale_factor,
-        )
-
-
-@dataclasses.dataclass
 class ModuleRegistrySelector:
     """
     Model architecture selector for deterministic regression models.
@@ -276,7 +239,6 @@ NET_REGISTRY: Mapping[str, type[ModuleConfig]] = {
     "prebuilt": PreBuiltBuilder,
     "interpolate": InterpolateConfig,
     "unet_regression_song": UNetRegressionSong,
-    "unet_regression_dhariwal": UNetRegressionDhariwal,
 }
 
 

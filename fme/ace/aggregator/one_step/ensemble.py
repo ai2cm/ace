@@ -73,6 +73,30 @@ class CRPSMetric(ReducedMetric):
         return self._total / self._n_batches
 
 
+class EnsembleMeanRMSEMetric(ReducedMetric):
+    """
+    Computes the ensemble mean RMSE.
+    """
+
+    def __init__(self):
+        self._total_rmse = None
+        self._n_batches = 0
+
+    def record(self, target: torch.Tensor, gen: torch.Tensor):
+        ensemble_mean = gen.mean(dim=1, keepdim=True)  # mean over ensemble dimension
+        rmse = ((ensemble_mean - target) ** 2).mean(dim=(0, 1, 2)).sqrt()
+        if self._total_rmse is None:
+            self._total_rmse = rmse
+        else:
+            self._total_rmse += rmse
+        self._n_batches += 1
+
+    def get(self) -> torch.Tensor:
+        if self._total_rmse is None:
+            raise ValueError("No batches have been recorded.")
+        return self._total_rmse / self._n_batches
+
+
 class SSRBiasMetric(ReducedMetric):
     """
     Computes the spread-skill ratio bias (equal to (stdev / rmse) - 1).
@@ -145,10 +169,14 @@ class _EnsembleAggregator:
             self._variable_metrics = {
                 "crps": {},
                 "ssr_bias": {},
+                "ensemble_mean_rmse": {},
             }
             for key in gen_data:
                 self._variable_metrics["crps"][key] = CRPSMetric()
                 self._variable_metrics["ssr_bias"][key] = SSRBiasMetric()
+                self._variable_metrics["ensemble_mean_rmse"][key] = (
+                    EnsembleMeanRMSEMetric()
+                )
         return self._variable_metrics
 
     @torch.no_grad()

@@ -9,7 +9,6 @@ import torch.utils.data
 import xarray as xr
 import yaml
 
-import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.batch_data import BatchData, default_collate
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
@@ -136,7 +135,10 @@ class Config:
         )
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=False
+        )
 
     def get_data_writer(self, data: "Data") -> MonthlyDataWriter:
         assert data.properties.timestep is not None
@@ -179,7 +181,6 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
 
 def run(config: Config):
     config.configure_logging(log_filename="write_monthly_data_out.log")
-    logging_utils.log_versions()
 
     data = config.get_data()
     writer = config.get_data_writer(data)

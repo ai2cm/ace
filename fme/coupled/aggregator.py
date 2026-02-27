@@ -29,6 +29,7 @@ from fme.coupled.data_loading.batch_data import (
 )
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
+from fme.coupled.typing_ import CoupledTensorMapping
 
 
 class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
@@ -65,11 +66,10 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
     def __init__(
         self,
         dataset_info: CoupledDatasetInfo,
+        loss_scaling: CoupledTensorMapping,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
-        ocean_loss_scaling: TensorMapping | None = None,
-        atmosphere_loss_scaling: TensorMapping | None = None,
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
     ):
@@ -79,13 +79,12 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             save_diagnostics: Whether to save diagnostics to disk.
             output_dir: Directory to write diagnostics to.
             variable_metadata: Metadata for each variable.
-            ocean_loss_scaling: Dictionary of variables and their scaling factors
-                used in loss computation for the ocean stepper.
-            atmosphere_loss_scaling: Dictionary of variables and their scaling factors
-                used in loss computation for the atmosphere stepper.
+            loss_scaling: Optional coupled mapping of variables and their
+                scaling factors used in loss computation for the stepper.
             ocean_channel_mean_names: Names to include in ocean channel-mean metrics.
             atmosphere_channel_mean_names: Names to include in atmosphere channel-mean
                 metrics.
+
         """
         self._dist = Distributed.get_instance()
         self._loss = torch.tensor(0.0, device=get_device())
@@ -101,7 +100,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                     if output_dir is not None
                     else None
                 ),
-                loss_scaling=ocean_loss_scaling,
+                loss_scaling=loss_scaling.ocean,
                 channel_mean_names=ocean_channel_mean_names,
             ),
             "atmosphere": OneStepAggregator_(
@@ -112,7 +111,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                     if output_dir is not None
                     else None
                 ),
-                loss_scaling=atmosphere_loss_scaling,
+                loss_scaling=loss_scaling.atmosphere,
                 channel_mean_names=atmosphere_channel_mean_names,
             ),
         }

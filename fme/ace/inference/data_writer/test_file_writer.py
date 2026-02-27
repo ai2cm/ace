@@ -22,7 +22,7 @@ from .file_writer import (
     _select_time,
 )
 from .raw import NetCDFWriterConfig
-from .time_coarsen import MonthlyCoarsenConfig, TimeCoarsen
+from .time_coarsen import MonthlyCoarsenConfig, TimeCoarsen, TimeCoarsenConfig
 from .zarr import ZarrWriterConfig
 
 
@@ -571,3 +571,34 @@ def test_file_writer_paired_save_reference(tmpdir, save_reference: bool):
     else:
         expected_filename = "test_writer.nc"
         assert (tmpdir / expected_filename).exists()
+
+
+@pytest.mark.parametrize(
+    "time_coarsen",
+    [
+        pytest.param(None, id="no-coarsen"),
+        pytest.param(TimeCoarsenConfig(coarsen_factor=2), id="integer-coarsen"),
+        pytest.param(MonthlyCoarsenConfig(), id="monthly-coarsen"),
+    ],
+)
+def test_netcdf_file_writer_with_non_local_experiment_dir(
+    time_coarsen: TimeCoarsenConfig | MonthlyCoarsenConfig | None,
+):
+    experiment_dir = "memory://experiment_dir"
+    format = NetCDFWriterConfig()
+    config = FileWriterConfig(
+        label="test",
+        names=["temperature"],
+        time_coarsen=time_coarsen,
+        format=format,
+    )
+    with pytest.raises(ValueError, match="only supports local"):
+        config.build(
+            experiment_dir=experiment_dir,
+            n_initial_conditions=1,
+            n_timesteps=1,
+            timestep=datetime.timedelta(hours=6),
+            variable_metadata={},
+            coords={},
+            dataset_metadata=DatasetMetadata(),
+        )

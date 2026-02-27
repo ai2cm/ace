@@ -2,12 +2,15 @@ import os
 
 import pytest
 import torch
+import xarray as xr
 import yaml
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
+from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
@@ -19,7 +22,11 @@ class LinearDownscalingDiffusion(LinearDownscaling):
         return super().forward(coarse)
 
 
-def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
+def get_model_config(
+    coarse_shape: tuple[int, int],
+    downscale_factor: int,
+    use_fine_topography: bool = True,
+):
     fine_shape = (
         coarse_shape[0] * downscale_factor,
         coarse_shape[1] * downscale_factor,
@@ -31,7 +38,7 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
                 "module": LinearDownscalingDiffusion(
                     factor=1,  # will pass coarse input interpolated to fine shape
                     fine_img_shape=fine_shape,
-                    n_channels_in=3,
+                    n_channels_in=3 if use_fine_topography else 2,
                     n_channels_out=2,
                 )
             },
@@ -55,7 +62,7 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
         churn=1,
         num_diffusion_generation_steps=2,
         predict_residual=True,
-        use_fine_topography=True,
+        use_fine_topography=use_fine_topography,
     )
 
 
@@ -115,12 +122,37 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
     os.makedirs(
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
     )
+
+    # ensure model static inputs shape is consistent with the test data
+    fine_data = xr.load_dataset(predictor_config["data"]["topography"])
+    topo_data = fine_data["HGTsfc"]
+    model.static_inputs = StaticInputs(
+        [
+            StaticInput(
+                data=torch.randn(topo_data.shape[-2:]),
+                coords=LatLonCoordinates(
+                    lat=torch.tensor(topo_data.lat.values),
+                    lon=torch.tensor(topo_data.lon.values),
+                ),
+            )
+        ]
+    )
+    # overwrite dataset removing HGTsfc (fine data path is same as topography path)
+    fine_data.drop_vars("HGTsfc").to_netcdf(
+        predictor_config["data"]["topography"], mode="w"
+    )
+    # overwrite config to remove topography path
+    predictor_config["data"]["topography"] = None
+    with open(predictor_config_path, "w") as f:
+        yaml.dump(predictor_config, f)
+
     torch.save(
         {
             "model": model.get_state(),
         },
         predictor_config["model"]["checkpoint_path"],
     )
+
     with mock_wandb():
         predict.main(str(predictor_config_path))
     assert os.path.exists(
@@ -147,13 +179,16 @@ def test_predictor_renaming(
             "rename": {"var0": "var0_renamed", "var1": "var1_renamed"}
         },
     )
-    model_config = get_model_config(coarse_shape, downscale_factor)
+    model_config = get_model_config(
+        coarse_shape, downscale_factor, use_fine_topography=False
+    )
     model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
     os.makedirs(
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
     )
+
     torch.save(
         {
             "model": model.get_state(),

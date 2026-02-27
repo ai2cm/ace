@@ -18,6 +18,7 @@ from fme.ace.inference.data_writer.utils import (
     DIM_INFO_LATLON,
     get_all_names,
 )
+from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "time"
@@ -120,6 +121,12 @@ class RawDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
+        if not is_local(path):
+            raise ValueError(
+                "The RawDataWriter only supports local file systems. Consider "
+                "using the ZarrWriter instead, which supports writing to a "
+                "non-local filesystem."
+            )
         filename = str(Path(path) / f"{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata

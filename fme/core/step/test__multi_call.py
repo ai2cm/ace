@@ -9,7 +9,7 @@ from torch import nn
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
@@ -125,7 +125,6 @@ def _get_stepper_config(
                 ),
             ),
         ),
-        loss=StepLossConfig(type="MSE", weights={"temperature": 1.0}),
     )
 
     return config
@@ -158,13 +157,15 @@ def test_integration_with_stepper():
     )
 
     assert set(config.all_names) == expected_all_names
-    stepper = config.get_stepper(
-        dataset_info=DatasetInfo(
-            horizontal_coordinates=horizontal_coord,
-            vertical_coordinate=vertical_coord,
-            timestep=timestep,
-        ),
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=horizontal_coord,
+        vertical_coordinate=vertical_coord,
+        timestep=timestep,
     )
+    train_stepper_config = TrainStepperConfig(
+        loss=StepLossConfig(type="MSE", weights={"temperature": 1.0}),
+    )
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     time = xr.DataArray([[1, 1, 1]], dims=["sample", "time"])
     data = BatchData(
         {
@@ -209,13 +210,7 @@ def test_integration_with_stepper():
     config = _get_stepper_config(
         in_names, out_names, expected_all_names, multi_call_config, False
     )
-    stepper = config.get_stepper(
-        dataset_info=DatasetInfo(
-            horizontal_coordinates=horizontal_coord,
-            vertical_coordinate=vertical_coord,
-            timestep=timestep,
-        ),
-    )
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     with GlobalTimer():
         output_without_loss = stepper.train_on_batch(data, NullOptimization())
 

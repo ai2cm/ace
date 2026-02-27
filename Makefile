@@ -5,6 +5,11 @@ ENVIRONMENT_NAME ?= fme
 USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 DEPLOY_TARGET ?= pypi
 BEAKER_WORKSPACE = ai2/ace
+NPROC ?= 2
+FME_FORCE_CPU ?= 0
+FME_DISTRIBUTED_BACKEND ?= torch
+FME_DISTRIBUTED_H ?= 1
+FME_DISTRIBUTED_W ?= 1
 
 ifeq ($(shell uname), Linux)
 	CONDA_PACKAGES=gxx_linux-64 pip
@@ -51,14 +56,21 @@ create_environment:
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -r analysis-deps.txt
 
 test:
-	pytest --durations 40 .
+	pytest -n 4 --durations 40 .
+
+test_parallel:
+	FME_FORCE_CPU=$(FME_FORCE_CPU) \
+	FME_DISTRIBUTED_BACKEND=$(FME_DISTRIBUTED_BACKEND) \
+	FME_DISTRIBUTED_H=$(FME_DISTRIBUTED_H) \
+	FME_DISTRIBUTED_W=$(FME_DISTRIBUTED_W) \
+	torchrun --nproc-per-node $(NPROC) -m pytest -m parallel .
 
 # --cov must come  after pytest args to use the sources defined by config
 test_cov:
-	pytest --durations 40 --cov --cov-report=term-missing:skip-covered --cov-config=pyproject.toml .
+	pytest -n 4 --durations 40 --cov --cov-report=term-missing:skip-covered --cov-config=pyproject.toml .
 
 test_fast:
-	pytest --durations 40 --fast .
+	pytest -n 4 --durations 40 --fast .
 
 test_very_fast:
 	pytest --durations 40 --very-fast .

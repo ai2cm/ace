@@ -179,14 +179,13 @@ def test_interpolate(
     assert outputs.shape == (batch_size, n_in_channels, *fine_shape)
 
 
-@pytest.mark.parametrize("type_", ["unet_regression_song", "unet_regression_dhariwal"])
-def test_unets_output_shape(type_):
+def test_unets_output_shape():
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
     downscale_factor = 2
     unet = (
         ModuleRegistrySelector(
-            type_,
+            "unet_regression_song",
             dict(
                 model_channels=4,
                 attn_resolutions=[],
@@ -205,7 +204,6 @@ def test_unets_output_shape(type_):
     assert outputs.shape == (2, 3, *fine_shape)
 
 
-@pytest.mark.parametrize("type_", ["unet_regression_song", "unet_regression_dhariwal"])
 @pytest.mark.parametrize(
     "channel_mult,attn_resolution",
     [
@@ -213,13 +211,13 @@ def test_unets_output_shape(type_):
         pytest.param([1, 2], [4, 1], id="missing_requested_attn"),
     ],
 )
-def test_unets_invalid_config(type_, channel_mult, attn_resolution):
+def test_unets_invalid_config(channel_mult, attn_resolution):
     # determined by min coarse dimension
     coarse_shape = (8, 16)
     downscale_factor = 1
     with pytest.raises(ValueError):
         ModuleRegistrySelector(
-            type_,
+            "unet_regression_song",
             dict(
                 model_channels=4,
                 attn_resolutions=attn_resolution,

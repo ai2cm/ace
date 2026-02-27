@@ -176,13 +176,10 @@ class Samudra(torch.nn.Module):
                         temp[int(2 * self.num_steps - count - 1)].shape[2:]
                     )
                     pads = shape - crop
-                    pads = [
-                        pads[1] // 2,
-                        pads[1] - pads[1] // 2,
-                        pads[0] // 2,
-                        pads[0] - pads[0] // 2,
-                    ]
-                    fts = nn.functional.pad(fts, pads)
+                    pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
+                    pads_tb = (0, 0, pads[0] // 2, pads[0] - pads[0] // 2)
+                    fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
+                    fts = nn.functional.pad(fts, pads_tb, mode="constant")
                     fts += temp[int(2 * self.num_steps - count - 1)]
                     count += 1
         return fts

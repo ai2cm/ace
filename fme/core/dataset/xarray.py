@@ -502,9 +502,10 @@ class XarrayDataConfig(DatasetConfigABC):
             )
         self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()
-        self.zarr_engine_used = False
-        if self.engine == "zarr":
-            self.zarr_engine_used = True
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        return self.engine == "zarr"
 
     def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
         self.subset = subset
@@ -1091,15 +1092,8 @@ def get_xarray_datasets(
         datasets.append(dataset)
         if properties is None:
             properties = new_properties
-        elif not strict:
-            try:
-                properties.update(new_properties)
-            except ValueError as e:
-                warnings.warn(
-                    f"Metadata for each ensemble member are not the same: {e}"
-                )
         else:
-            properties.update(new_properties)
+            properties.update(new_properties, strict=strict)
     if properties is None:
         raise ValueError("At least one dataset must be provided.")
 

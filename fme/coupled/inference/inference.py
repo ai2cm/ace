@@ -1,6 +1,5 @@
 import dataclasses
 import logging
-import os
 from collections.abc import Sequence
 from typing import Literal
 
@@ -9,7 +8,6 @@ import torch
 import xarray as xr
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     InferenceInitialConditionIndices,
@@ -17,8 +15,8 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.inference import InitialConditionConfig, get_initial_condition
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
@@ -143,14 +141,9 @@ class InferenceConfig:
     n_ensemble_per_ic: int = 1
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(
-        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
-    ):
-        config = to_flat_dict(dataclasses.asdict(self))
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=False
         )
 
     def load_stepper(self) -> CoupledStepper:
@@ -225,18 +218,11 @@ def run_inference_from_config(config: InferenceConfig):
     timer.start_outer("inference")
     timer.start("initialization")
 
-    if not os.path.isdir(config.experiment_dir):
-        os.makedirs(config.experiment_dir, exist_ok=True)
+    makedirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
-    env_vars = logging_utils.retrieve_env_vars()
-    beaker_url = logging_utils.log_beaker_url()
-    config.configure_wandb(env_vars=env_vars, notes=beaker_url)
 
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
-
-    logging_utils.log_versions()
-    logging.info(f"Current device is {fme.get_device()}")
 
     stepper_config = config.load_stepper_config()
     data_requirements = stepper_config.get_forcing_window_data_requirements(

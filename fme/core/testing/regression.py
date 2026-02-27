@@ -16,7 +16,7 @@ def validate_tensor(x: torch.Tensor, filename: str, **assert_close_kwargs):
         torch.testing.assert_close(x, y, **assert_close_kwargs)
 
 
-def validate_tensor_dict(x: TensorDict, filename: str):
+def validate_tensor_dict(x: TensorDict, filename: str, **assert_close_kwargs):
     if not os.path.exists(filename):
         x_cpu = {k: v.cpu() for k, v in x.items()}
         torch.save(x_cpu, filename)
@@ -24,4 +24,4 @@ def validate_tensor_dict(x: TensorDict, filename: str):
     else:
         y = torch.load(filename, map_location=get_device())
         for k, v in x.items():
-            torch.testing.assert_close(v, y[k].to(v.device))
+            torch.testing.assert_close(v, y[k].to(v.device), **assert_close_kwargs)

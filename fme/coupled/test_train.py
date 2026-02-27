@@ -28,26 +28,26 @@ train_loader:
   batch_size: 2
   num_data_workers: 0
   dataset:
-    - ocean:
-        data_path: {ocean_data_path}
-        subset:
-            start_time: '1970-01-01'
-      atmosphere:
-        data_path: {atmosphere_data_path}
-        subset:
-            start_time: '1970-01-01'
+    ocean:
+      data_path: {ocean_data_path}
+      subset:
+          start_time: '1970-01-01'
+    atmosphere:
+      data_path: {atmosphere_data_path}
+      subset:
+          start_time: '1970-01-01'
 validation_loader:
   batch_size: 2
   num_data_workers: 0
   dataset:
-    - ocean:
-        data_path: {ocean_data_path}
-        subset:
-            start_time: '1970-01-01'
-      atmosphere:
-        data_path: {atmosphere_data_path}
-        subset:
-            start_time: '1970-01-01'
+    ocean:
+      data_path: {ocean_data_path}
+      subset:
+          start_time: '1970-01-01'
+    atmosphere:
+      data_path: {atmosphere_data_path}
+      subset:
+          start_time: '1970-01-01'
 inference:
   loader:
     dataset:
@@ -66,6 +66,17 @@ optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: Adam
+stepper_training:
+  ocean:
+    loss:
+      type: MSE
+    loss_contributions:
+      weight: {loss_ocean_weight}
+  atmosphere:
+    loss:
+      type: MSE
+    loss_contributions:
+      n_steps: {loss_atmos_n_steps}
 stepper:
   sst_name: {ocean_sfc_temp_name}
   ocean_fraction_prediction:
@@ -74,11 +85,7 @@ stepper:
     sea_ice_fraction_name_in_atmosphere: {atmos_sea_ice_frac_name}
   ocean:
     timedelta: 2D
-    loss_contributions:
-      weight: {loss_ocean_weight}
     stepper:
-      loss:
-        type: MSE
       input_masking:
         mask_value: 0
         fill_value: 0.0
@@ -109,11 +116,7 @@ stepper:
           out_names: {ocean_out_names}
   atmosphere:
     timedelta: 1D
-    loss_contributions:
-      n_steps: {loss_atmos_n_steps}
     stepper:
-      loss:
-        type: MSE
       step:
         type: single_module
         config:
@@ -296,7 +299,11 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
         "ocean_sea_ice_fraction",
     ]
     ocean_out_names = ["thetao_0", "thetao_1", "sst", "ocean_sea_ice_fraction"]
-    ocean_derived_names = ["ocean_heat_content", "sea_ice_fraction"]
+    ocean_derived_names = [
+        "ocean_heat_content",
+        "ocean_heat_content_tendency",
+        "sea_ice_fraction",
+    ]
     atmos_in_names = [
         "DLWRFsfc",
         "PRESsfc",

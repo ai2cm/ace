@@ -42,6 +42,7 @@ the torch harmonics sht.py file [*].
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+from typing import Self
 import torch
 import torch.nn as nn
 import torch.fft
@@ -50,7 +51,10 @@ from torch_harmonics.quadrature import legendre_gauss_weights, lobatto_weights, 
 from torch_harmonics.legendre import _precompute_legpoly
 import torch_harmonics
 
+from fme.core.benchmark.timer import Timer
 from fme.core.device import get_device
+from fme.core.benchmark.benchmark import BenchmarkABC, register_benchmark
+from fme.core.typing_ import TensorDict
 
 class RealSHT(nn.Module):
     """
@@ -118,27 +122,30 @@ class RealSHT(nn.Module):
         return f'nlat={self.nlat}, nlon={self.nlon},\n lmax={self.lmax}, mmax={self.mmax},\n grid={self.grid}, csphase={self.csphase}'
 
     def forward(self, x: torch.Tensor):
-
         assert(x.shape[-2] == self.nlat)
         assert(x.shape[-1] == self.nlon)
+        with torch.autocast("cuda", enabled=False):
+            # rfft and view_as_complex don't support BF16, see https://github.com/pytorch/pytorch/issues/117844
+            x = x.float()
 
-        # apply real fft in the longitudinal direction
-        x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
+            # apply real fft in the longitudinal direction
+            x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
 
-        # do the Legendre-Gauss quadrature
-        x = torch.view_as_real(x)
+            x = x.transpose(-2, -1).contiguous()
+            # do the Legendre-Gauss quadrature
+            x = torch.view_as_real(x)
 
-        # distributed contraction: fork
-        out_shape = list(x.size())
-        out_shape[-3] = self.lmax
-        out_shape[-2] = self.mmax
-        xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
+            # distributed contraction: fork
+            out_shape = list(x.size())
+            out_shape[-3] = self.lmax
+            out_shape[-2] = self.mmax
+            xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
 
-        # contraction
-        weights = self.weights.to(x.device).to(x.dtype)
-        xout[..., 0] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 0], weights)
-        xout[..., 1] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 1], weights)
-        x = torch.view_as_complex(xout)
+            # contraction
+            weights = self.weights.to(x.device).to(x.dtype)
+            xout[..., 0] = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, :, 0], weights)
+            xout[..., 1] = torch.einsum('...mk,mlk->...lm', x[..., :self.mmax, :, 1], weights)
+            x = torch.view_as_complex(xout)
 
         return x
 
@@ -200,19 +207,120 @@ class InverseRealSHT(nn.Module):
         assert(x.shape[-2] == self.lmax)
         assert(x.shape[-1] == self.mmax)
 
-        # Evaluate associated Legendre functions on the output nodes
-        x = torch.view_as_real(x)
+        with torch.autocast("cuda", enabled=False):
+            x = x.transpose(-1, -2).contiguous()
+            # irfft and view_as_complex don't support BF16, see https://github.com/pytorch/pytorch/issues/117844
+            # Evaluate associated Legendre functions on the output nodes
+            x = torch.view_as_real(x).float()
 
-        pct = self.pct.to(x.device).to(x.dtype)
-        rl = torch.einsum('...lm, mlk->...km', x[..., 0], pct )
-        im = torch.einsum('...lm, mlk->...km', x[..., 1], pct )
-        xs = torch.stack((rl, im), -1)
+            pct = self.pct.to(x.device).to(x.dtype)
+            rl = torch.einsum('...ml, mlk->...km', x[..., 0], pct )
+            im = torch.einsum('...ml, mlk->...km', x[..., 1], pct )
+            xs = torch.stack((rl, im), -1)
 
-        # apply the inverse (real) FFT
-        x = torch.view_as_complex(xs)
-        x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
+            # apply the inverse (real) FFT
+            x = torch.view_as_complex(xs)
+            x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
 
         return x
 
 torch_harmonics.RealSHT = RealSHT
 torch_harmonics.InverseRealSHT = InverseRealSHT
+
+
+@register_benchmark("sht")
+class RealSHTBenchmark(BenchmarkABC):
+
+    def __init__(self, sht: RealSHT, x: torch.Tensor):
+        self.sht = sht
+        self.x = x
+
+    @classmethod
+    def new(cls: type[Self]) -> Self:
+        """
+        Initialize any state needed for the benchmark.
+        This will be called once before the benchmark is run.
+        """
+        return cls.new_from_shape(batch_size=1024, nlat=180, nlon=360)
+
+    @classmethod
+    def new_for_regression(cls: type[Self]) -> Self | None:
+        """
+        Initialize any state needed for regression testing.
+        This will be called once before regression tests are run.
+
+        If regression testing is not needed, this can return None,
+        and regression testing will not be run.
+
+        This exists as a separate method from new so that it can
+        use small data sizes more conducive to storing regression targets in git.
+        """
+        return cls.new_from_shape(batch_size=1, nlat=9, nlon=18)
+
+    @classmethod
+    def new_from_shape(cls: type[Self], batch_size: int, nlat: int, nlon: int) -> Self:
+        device = get_device()
+        sht = RealSHT(nlat, nlon).to(device)
+        x = torch.randn(batch_size, nlat, nlon, device=device)
+        return cls(sht, x)
+
+    def run_instance(self: Self, timer: Timer) -> TensorDict:
+        """
+        Run the benchmark. This will be called multiple times,
+        and should return a TensorDict of results.
+
+        This must not mutate any state on self, since the same instance may be
+        used across multiple iterations.
+        """
+        result = self.sht(self.x)
+        return {"output": result}
+
+
+@register_benchmark("inverse_sht")
+class InverseRealSHTBenchmark(BenchmarkABC):
+
+    def __init__(self, isht: InverseRealSHT, x_hat: torch.Tensor):
+        self.isht = isht
+        self.x_hat = x_hat
+
+    @classmethod
+    def new(cls: type[Self]) -> Self:
+        """
+        Initialize any state needed for the benchmark.
+        This will be called once before the benchmark is run.
+        """
+        return cls.new_from_shape(batch_size=1024, nlat=180, nlon=360)
+
+    @classmethod
+    def new_for_regression(cls: type[Self]) -> Self | None:
+        """
+        Initialize any state needed for regression testing.
+        This will be called once before regression tests are run.
+
+        If regression testing is not needed, this can return None,
+        and regression testing will not be run.
+
+        This exists as a separate method from new so that it can
+        use small data sizes more conducive to storing regression targets in git.
+        """
+        return cls.new_from_shape(batch_size=1, nlat=9, nlon=18)
+
+    @classmethod
+    def new_from_shape(cls: type[Self], batch_size: int, nlat: int, nlon: int) -> Self:
+        device = get_device()
+        sht = RealSHT(nlat, nlon).to(device)
+        x = torch.randn(batch_size, nlat, nlon, device=device)
+        x_hat = sht(x)
+        isht = InverseRealSHT(nlat, nlon).to(device)
+        return cls(isht, x_hat)
+
+    def run_instance(self: Self, timer: Timer) -> TensorDict:
+        """
+        Run the benchmark. This will be called multiple times,
+        and should return a TensorDict of results.
+
+        This must not mutate any state on self, since the same instance may be
+        used across multiple iterations.
+        """
+        result = self.isht(self.x_hat)
+        return {"output": result}

@@ -49,9 +49,10 @@ optimization:
   lr: 0.0001
   optimizer_type: AdamW
   # can also set kwargs: fused: true for performance if using GPU
-stepper:
+stepper_training:
   loss:
     type: MSE
+stepper:
   step:
     type: single_module
     config:

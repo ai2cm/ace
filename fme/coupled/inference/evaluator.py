@@ -1,23 +1,23 @@
 import dataclasses
 import logging
-import os
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import dacite
 import torch
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import load_stepper_config as load_single_stepper_config
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
+from fme.coupled.data_loading.batch_data import CoupledBatchData
 from fme.coupled.data_loading.getters import get_inference_data
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
@@ -27,6 +27,7 @@ from fme.coupled.inference.data_writer import (
     CoupledPairedDataWriter,
     DatasetMetadata,
 )
+from fme.coupled.inference.loop import CoupledDeriver, run_coupled_dataset_comparison
 from fme.coupled.stepper import (
     ComponentConfig,
     CoupledOceanFractionConfig,
@@ -173,6 +174,9 @@ class InferenceEvaluatorConfig:
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference evaluator aggregator.
+        prediction_loader: Configuration for prediction data to evaluate. If given,
+            model evaluation will not run, and instead predictions will be evaluated.
+            Model checkpoint will still be used to determine inputs and outputs.
     """
 
     experiment_dir: str
@@ -187,16 +191,12 @@ class InferenceEvaluatorConfig:
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
+    prediction_loader: InferenceDataLoaderConfig | None = None
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(
-        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
-    ):
-        config = to_flat_dict(dataclasses.asdict(self))
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=False
         )
 
     def load_stepper(self) -> CoupledStepper:
@@ -249,6 +249,43 @@ class InferenceEvaluatorConfig:
         )
 
 
+class _Deriver(CoupledDeriver):
+    """
+    Deriver for coupled dataset comparison: removes initial condition and
+    computes derived variables on CoupledBatchData.
+    """
+
+    def __init__(
+        self,
+        n_ic_timesteps_ocean: int,
+        n_ic_timesteps_atmosphere: int,
+        ocean_derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+        atmosphere_derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+    ):
+        self._n_ic_timesteps_ocean = n_ic_timesteps_ocean
+        self._n_ic_timesteps_atmosphere = n_ic_timesteps_atmosphere
+        self._ocean_derive_func = ocean_derive_func
+        self._atmosphere_derive_func = atmosphere_derive_func
+
+    def get_forward_data(
+        self,
+        data: CoupledBatchData,
+        compute_derived_variables: bool = False,
+    ) -> CoupledBatchData:
+        if compute_derived_variables:
+            timer = GlobalTimer.get_instance()
+            with timer.context("compute_derived_variables"):
+                data = data.compute_derived_variables(
+                    ocean_derive_func=self._ocean_derive_func,
+                    atmosphere_derive_func=self._atmosphere_derive_func,
+                    forcing_data=data,
+                )
+        return data.remove_initial_condition(
+            n_ic_timesteps_ocean=self._n_ic_timesteps_ocean,
+            n_ic_timesteps_atmosphere=self._n_ic_timesteps_atmosphere,
+        )
+
+
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
@@ -266,18 +303,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer.start_outer("inference")
     timer.start("initialization")
 
-    if not os.path.isdir(config.experiment_dir):
-        os.makedirs(config.experiment_dir, exist_ok=True)
+    makedirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
-    env_vars = logging_utils.retrieve_env_vars()
-    beaker_url = logging_utils.log_beaker_url()
-    config.configure_wandb(env_vars=env_vars, notes=beaker_url)
 
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
-
-    logging_utils.log_versions()
-    logging.info(f"Current device is {fme.get_device()}")
 
     stepper_config = config.load_stepper_config()
     logging.info("Loading inference data")
@@ -322,13 +352,37 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer.stop()
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")
-    run_inference(
-        predict=stepper.predict_paired,
-        data=data,
-        aggregator=aggregator,
-        writer=writer,
-        record_logs=record_logs,
-    )
+    if config.prediction_loader is not None:
+        prediction_data = get_inference_data(
+            config=config.prediction_loader,
+            total_coupled_steps=config.n_coupled_steps,
+            window_requirements=window_requirements,
+            initial_condition=initial_condition_requirements,
+            dataset_info=stepper.training_dataset_info,
+        )
+        deriver = _Deriver(
+            n_ic_timesteps_ocean=stepper.ocean.n_ic_timesteps,
+            n_ic_timesteps_atmosphere=stepper.atmosphere.n_ic_timesteps,
+            ocean_derive_func=stepper.ocean.derive_func,
+            atmosphere_derive_func=stepper.atmosphere.derive_func,
+        )
+        run_coupled_dataset_comparison(
+            aggregator=aggregator,
+            prediction_data=prediction_data,
+            target_data=data,
+            deriver=deriver,
+            writer=writer,
+            record_logs=record_logs,
+            restrict_to_all_names=stepper_config.all_names,
+        )
+    else:
+        run_inference(
+            predict=stepper.predict_paired,
+            data=data,
+            aggregator=aggregator,
+            writer=writer,
+            record_logs=record_logs,
+        )
 
     timer.start("final_writer_flush")
     logging.info("Starting final flush of data writer")

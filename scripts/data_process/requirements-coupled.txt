@@ -1,3 +1,4 @@
+bokeh>=3.1.0
 cftime
 click
 dacite
@@ -5,6 +6,7 @@ dask[distributed]
 fsspec
 gcsfs
 h5netcdf
+h5py
 pandas
 pyyaml
 scipy

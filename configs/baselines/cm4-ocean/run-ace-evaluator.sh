@@ -7,6 +7,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
@@ -47,9 +48,11 @@ while read TRAIN_EXPER; do
         --workspace ai2/ace \
         --priority high \
         --not-preemptible \
-        --cluster ai2/jupiter-cirrascale-2 \
-        --cluster ai2/ceres-cirrascale \
-        --env WANDB_USERNAME=$BEAKER_USERNAME \
+        --cluster ai2/ceres \
+        --cluster ai2/jupiter \
+        --cluster ai2/neptune \
+        --cluster ai2/saturn \
+        --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
         --env WANDB_JOB_TYPE=inference \
         --env WANDB_RUN_GROUP=$JOB_GROUP \

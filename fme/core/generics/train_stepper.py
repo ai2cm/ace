@@ -3,7 +3,6 @@ from typing import Any, Generic, TypeVar
 
 from torch import nn
 
-from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import TensorDict
@@ -35,6 +34,15 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     ) -> TO:
         pass
 
+    @abc.abstractmethod
+    def predict_paired(
+        self,
+        initial_condition: PS,
+        forcing: FD,
+        compute_derived_variables: bool = False,
+    ) -> tuple[SD, PS]:
+        pass
+
     @property
     @abc.abstractmethod
     def modules(self) -> nn.ModuleList:
@@ -48,28 +56,13 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     def load_state(self, state: dict[str, Any]) -> None:
         pass
 
-    @classmethod
     @abc.abstractmethod
-    def from_state(cls: type[SelfType], state: dict[str, Any]) -> SelfType:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def n_ic_timesteps(self) -> int:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def predict_paired(self) -> PredictFunction[PS, FD, SD]:
-        pass
-
     def set_eval(self) -> None:
-        for module in self.modules:
-            module.eval()
+        pass
 
+    @abc.abstractmethod
     def set_train(self) -> None:
-        for module in self.modules:
-            module.train()
+        pass
 
     @abc.abstractmethod
     def update_training_history(self, training_job: TrainingJob) -> None:

@@ -9,6 +9,7 @@ from typing import Any
 import dacite
 import torch
 from torch import nn
+from torch.nn.functional import silu
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
@@ -47,7 +48,7 @@ from fme.core.weight_ops import strip_leading_module
 from fme.diffusion.loss import WeightedMappingLossConfig
 from fme.diffusion.registry import ModuleSelector
 from fme.downscaling.models import condition_with_noise_for_training
-from fme.downscaling.modules.unets import Linear, PositionalEmbedding, silu
+from fme.downscaling.modules.physicsnemo_unets_v1 import Linear, PositionalEmbedding
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -333,6 +334,7 @@ class PositionalEmbeddingWrapper(torch.nn.Module):
             Context(
                 embedding_scalar=emb,
                 labels=None,
+                embedding_pos=None,
                 noise=None,
             ),
         )
@@ -385,33 +387,87 @@ class EDMPrecond(torch.nn.Module):
 
 
 def edm_sampler(
-    net,
+    net: torch.nn.Module,
     latents: torch.Tensor,
-    conditioning: torch.Tensor,
-    num_steps=18,
-    sigma_min=0.002,
-    sigma_max=80.0,
-    rho=7,
-    S_churn=0.0,
-    S_min=0.0,
-    S_max=float("inf"),
-    S_noise=1,
+    img_lr: torch.Tensor,
+    num_steps: int = 18,
+    sigma_min: float = 0.002,
+    sigma_max: float = 80.0,
+    rho: float = 7.0,
+    S_churn: float = 0.0,
+    S_min: float = 0.0,
+    S_max: float = float("inf"),
+    S_noise: float = 1.0,
 ) -> torch.Tensor:
-    # This function is vendorized from edm/generate.py which you can find here:
-    # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/generate.py
-    # this comes from the paper
-    # "Elucidating the Design Space of Diffusion-Based Generative Models"
-    # https://arxiv.org/abs/2206.00364
+    """
+    Proposed EDM sampler (Algorithm 2) with minor changes to enable
+    super-resolution and patch-based diffusion.
 
-    # Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+    Parameters
+    ----------
+    net : torch.nn.Module
+        The neural network model that generates denoised images from noisy
+        inputs.
+        Expected signature: `net(x, x_lr, t_hat)`,
+        where:
+            x (torch.Tensor): Noisy input of shape (batch_size, C_out, H, W)
+            x_lr (torch.Tensor): Conditioning input of shape (batch_size, C_cond, H, W)
+            t_hat (torch.Tensor): Noise level of shape (batch_size, 1, 1, 1) or scalar
+        Returns:
+            torch.Tensor: Denoised prediction of shape (batch_size, C_out, H, W)
+    latents : torch.Tensor
+        The latent variables (e.g., noise) used as the initial input for the
+        sampler. Has shape (batch_size, C_out, img_shape_y, img_shape_x).
+    img_lr : torch.Tensor
+        Low-resolution input image for conditioning the super-resolution
+        process. Must have shape (batch_size, C_lr, img_lr_shape_y,
+        img_lr_shape_x).
+    num_steps : int
+        Number of time steps for the sampler. By default 18.
+    sigma_min : float
+        Minimum noise level. By default 0.002.
+    sigma_max : float
+        Maximum noise level. By default 80.0.
+    rho : float
+        Exponent used in the time step discretization. By default 7.
+    S_churn : float
+        Churn parameter controlling the level of noise added in each step. By
+        default 0.
+    S_min : float
+        Minimum time step for applying churn. By default 0.
+    S_max : float
+        Maximum time step for applying churn. By default float("inf").
+    S_noise : float
+        Noise scaling factor applied during the churn step. By default 1.
+
+    Returns:
+    -------
+    torch.Tensor
+        The final denoised image produced by the sampler. Same shape as
+        `latents`: (batch_size, C_out, img_shape_y, img_shape_x).
+    """
+    # This file is vendorized from physicsnemo/physicsnemo/utis/generative/stochastic_sampler.py which you can find here: # noqa
+    # https://github.com/NVIDIA/physicsnemo/blob/327d9928abc17983ad7aa3df94da9566c197c468/physicsnemo/utils/generative/stochastic_sampler.py # noqa
+    # SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
+    # SPDX-FileCopyrightText: All rights reserved.
+    # SPDX-License-Identifier: Apache-2.0
     #
-    # This work is licensed under a Creative Commons
-    # Attribution-NonCommercial-ShareAlike 4.0 International License.
-    # You should have received a copy of the license along with this
-    # work. If not, see http://creativecommons.org/licenses/by-nc-sa/4.0/
+    # Licensed under the Apache License, Version 2.0 (the "License");
+    # you may not use this file except in compliance with the License.
+    # You may obtain a copy of the License at
+    #
+    #     http://www.apache.org/licenses/LICENSE-2.0
+    #
+    # Unless required by applicable law or agreed to in writing, software
+    # distributed under the License is distributed on an "AS IS" BASIS,
+    # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    # See the License for the specific language governing permissions and
+    # limitations under the License.
 
     input_dtype = torch.float32  # what is expected by the model
     # we will integrate in float64 to avoid numerical issues
+
+    x_lr = img_lr
 
     step_indices = torch.arange(num_steps, dtype=torch.float64, device=latents.device)
     t_steps = (
@@ -435,7 +491,7 @@ def edm_sampler(
         # Euler step.
         denoised = net(
             x_hat.to(input_dtype),
-            conditioning.to(input_dtype),
+            x_lr.to(input_dtype),
             t_hat.to(input_dtype),
         ).to(torch.float64)
         d_cur = (x_hat - denoised) / t_hat
@@ -445,7 +501,7 @@ def edm_sampler(
         if i < num_steps - 1:
             denoised = net(
                 x_next.to(input_dtype),
-                conditioning.to(input_dtype),
+                x_lr.to(input_dtype),
                 t_next.to(input_dtype),
             ).to(torch.float64)
             d_prime = (x_next - denoised) / t_next

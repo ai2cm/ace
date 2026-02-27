@@ -1,6 +1,7 @@
 import logging
 import os
 from collections.abc import Callable
+from datetime import timedelta
 
 import torch.distributed
 from torch.nn import SyncBatchNorm
@@ -23,7 +24,9 @@ class TorchDistributed(DistributedBackend):
             if not torch.distributed.is_initialized():
                 if using_gpu():
                     torch.distributed.init_process_group(
-                        backend="nccl", init_method="env://"
+                        backend="nccl",
+                        init_method="env://",
+                        timeout=timedelta(minutes=20),
                     )
                 else:
                     torch.distributed.init_process_group(
@@ -67,9 +70,32 @@ class TorchDistributed(DistributedBackend):
         return self._rank
 
     @property
+    def data_parallel_rank(self) -> int:
+        return self.rank  # no model parallelism
+
+    @property
     def total_ranks(self) -> int:
         """Total number of processes."""
         return self.world_size
+
+    @property
+    def total_data_parallel_ranks(self) -> int:
+        return self.total_ranks  # no model parallelism
+
+    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None):
+        return_list = [slice(None, None) for _ in tensor_shape]
+        if data_parallel_dim is not None:
+            if tensor_shape[data_parallel_dim] % self.total_data_parallel_ranks != 0:
+                raise ValueError(
+                    "expected global data parallel dim to be divisible by data "
+                    f"parallel ranks, got global shape {tensor_shape} with "
+                    f"{self.total_data_parallel_ranks} data parallel ranks"
+                )
+            per_rank = tensor_shape[data_parallel_dim] // self.total_data_parallel_ranks
+            return_list[data_parallel_dim] = slice(
+                self.rank * per_rank, (self.rank + 1) * per_rank
+            )
+        return tuple(return_list)
 
     def local_batch_size(self, batch_size: int) -> int:
         return batch_size // self.total_ranks
@@ -90,13 +116,21 @@ class TorchDistributed(DistributedBackend):
         torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX)
         return tensor
 
-    def gather(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
-        gather_list: list[torch.Tensor] | None = None
-        if self.rank == 0:
+    def gather(
+        self, tensor: torch.Tensor, gather_list: list[torch.Tensor] | None = None
+    ) -> list[torch.Tensor] | None:
+        if gather_list is None and self.rank == 0:
             gather_list = [tensor] + [
                 torch.empty_like(tensor) for _ in range(self.world_size - 1)
             ]
         torch.distributed.gather(tensor, gather_list)
+        return gather_list
+
+    def gather_object(self, obj: object) -> list[object] | None:
+        gather_list: list[object] | None = (
+            [None for _ in range(self.world_size)] if self.rank == 0 else None
+        )
+        torch.distributed.gather_object(obj, gather_list)
         return gather_list
 
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
@@ -131,7 +165,6 @@ class TorchDistributed(DistributedBackend):
         torch.distributed.barrier(device_ids=self._device_ids)
 
     def shutdown(self):
-        self.barrier()
         logger.debug(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()
 

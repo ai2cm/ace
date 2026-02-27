@@ -5,7 +5,11 @@ from collections.abc import Callable, MutableMapping
 import torch
 
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
+from fme.core.ocean_data import (
+    HasCellAreaInMetersSquared,
+    HasOceanDepthIntegral,
+    OceanData,
+)
 from fme.core.typing_ import TensorDict
 
 OceanDerivedVariableFunc = Callable[[OceanData, datetime.timedelta], torch.Tensor]
@@ -41,6 +45,7 @@ def _compute_ocean_derived_variable(
     derived_variable_func: OceanDerivedVariableFunc,
     forcing_data: TensorDict | None = None,
     exists_ok: bool = False,
+    cell_area_provider: HasCellAreaInMetersSquared | None = None,
 ) -> TensorDict:
     """Computes an ocean derived variable and adds it to the given data.
 
@@ -62,6 +67,8 @@ def _compute_ocean_derived_variable(
         exists_ok: Whether or not to allow the label to already exist in data,
             in which case a copy of the data TensorDict is returned with values
             unchanged.
+        cell_area_provider: optional provider of cell areas in meters squared,
+            needed by some derived variables.
 
     Returns:
         A new data dictionary with the derived variable added.
@@ -81,7 +88,9 @@ def _compute_ocean_derived_variable(
             if key not in data:
                 data[key] = value
 
-    ocean_data = OceanData(data, depth_coordinate)
+    ocean_data = OceanData(
+        data, depth_coordinate, cell_area_provider=cell_area_provider
+    )
 
     try:
         output = derived_variable_func(ocean_data, timestep)
@@ -97,6 +106,7 @@ def compute_ocean_derived_quantities(
     depth_coordinate: HasOceanDepthIntegral | None,
     timestep: datetime.timedelta,
     forcing_data: TensorDict | None = None,
+    cell_area_provider: HasCellAreaInMetersSquared | None = None,
 ) -> TensorDict:
     """Computes all derived quantities from the given data."""
     for label in _OCEAN_DERIVED_VARIABLE_REGISTRY:
@@ -110,6 +120,7 @@ def compute_ocean_derived_quantities(
             func,
             forcing_data=forcing_data,
             exists_ok=exists_ok,
+            cell_area_provider=cell_area_provider,
         )
     return data
 
@@ -123,6 +134,52 @@ def ocean_heat_content(
     return data.ocean_heat_content
 
 
+@register(
+    VariableMetadata("W/m**2", "Tendency of column-integrated ocean heat content")
+)
+def ocean_heat_content_tendency(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Compute the column-integrated ocean heat content tendency."""
+    ohc = data.ocean_heat_content
+    ohc_tendency = torch.zeros_like(ohc)
+    ohc_tendency[:, 1:] = torch.diff(ohc, n=1, dim=1) / timestep.total_seconds()
+    return ohc_tendency
+
+
+@register(
+    VariableMetadata(
+        "W/m**2",
+        "Implied advective tendency of ocean heat content assuming closed budget",
+    )
+)
+def implied_tendency_of_ocean_heat_content_due_to_advection(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Implied tendency of ocean heat content due to advection.
+    This is computed as a residual from the column total energy budget.
+    """
+    column_energy_tendency = ocean_heat_content_tendency(data, timestep)
+    flux_through_vertical_boundaries = data.net_energy_flux_into_ocean
+    implied_column_heating = column_energy_tendency - flux_through_vertical_boundaries
+    return implied_column_heating
+
+
+@register(
+    VariableMetadata(
+        "W/m**2",
+        "Net energy flux through surface and sea floor into ocean",
+    )
+)
+def net_energy_flux_into_ocean_column(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    return data.net_energy_flux_into_ocean
+
+
 @register(VariableMetadata("[0-1]", "sea ice concentration"), exists_ok=True)
 def sea_ice_fraction(
     data: OceanData,
@@ -130,3 +187,24 @@ def sea_ice_fraction(
 ) -> torch.Tensor:
     """Compute the sea ice fraction."""
     return data.sea_ice_fraction
+
+
+@register(VariableMetadata("m", "Sea ice thickness"), exists_ok=True)
+def HI(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Recover sea ice thickness (HI) in meters from sea ice volume in 1000 * km^3.
+
+    HI = sea_ice_volume * 1e9 / (area_weights_m2 * sea_ice_frac)
+    """
+    return data.sea_ice_thickness
+
+
+@register(VariableMetadata("W/m**2", "Surface ocean heat flux"), exists_ok=True)
+def hfds(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Compute the net downward surface heat flux."""
+    return data.net_downward_surface_heat_flux

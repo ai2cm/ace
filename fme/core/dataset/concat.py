@@ -1,5 +1,4 @@
 import dataclasses
-import warnings
 from collections.abc import Sequence
 
 import torch
@@ -31,15 +30,7 @@ class XarrayConcat(DatasetABC):
         self._sample_n_times = datasets[0].sample_n_times
         self._properties = datasets[0].properties.copy()
         for dataset in datasets[1:]:
-            if strict:
-                self._properties.update(dataset.properties)
-            else:
-                try:
-                    self._properties.update(dataset.properties)
-                except ValueError as e:
-                    warnings.warn(
-                        f"Metadata for each ensemble member are not the same: {e}"
-                    )
+            self._properties.update(dataset.properties, strict=strict)
 
     def __getitem__(self, idx: int) -> DatasetItem:
         return self._dataset[idx]

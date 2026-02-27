@@ -36,7 +36,7 @@ from fme.ace.registry.test_hpx import (
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.ace.stepper.time_length_probabilities import (
     TimeLength,
     TimeLengthMilestone,
@@ -325,6 +325,7 @@ def _get_test_yaml_files(
         ),
         optimization=OptimizationConfig(
             use_gradient_accumulation=True,
+            enable_automatic_mixed_precision=True,
             optimizer_type="Adam",
             lr=0.001,
             kwargs=dict(weight_decay=0.01),
@@ -334,9 +335,6 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=loss,
-            n_ensemble=n_ensemble,
-            train_n_forward_steps=train_n_forward_steps,
             derived_forcings=derived_forcings,
             step=StepSelector(
                 type="single_module",
@@ -367,6 +365,11 @@ def _get_test_yaml_files(
                     )
                 ),
             ),
+        ),
+        stepper_training=TrainStepperConfig(
+            loss=loss,
+            n_ensemble=n_ensemble,
+            train_n_forward_steps=train_n_forward_steps,
         ),
         inference=inline_inference_config,
         weather_evaluation=weather_evaluation_config,
@@ -911,8 +914,10 @@ def _create_copy_weights_after_batch_config(
 ):
     with open(path_to_train_config_yaml) as config_file:
         config_data = yaml.safe_load(config_file)
-        config_data["stepper"]["parameter_init"] = {"weights_path": path_to_checkpoint}
-        config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": []}]
+        config_data["stepper_training"]["parameter_init"] = {
+            "weights_path": path_to_checkpoint
+        }
+        config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": None}]
         config_data["experiment_dir"] = experiment_dir
         with tempfile.NamedTemporaryFile(
             mode="w", delete=False, suffix=".yaml"
@@ -1041,3 +1046,49 @@ def test_train_and_inference_with_derived_forcings(
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True)
         inference_evaluator_main(yaml_config=inference_config)
+
+
+def test_train_with_non_local_experiment_dir_error():
+    """Test that an error is raised if the experiment_dir is not local during
+    training. This test can be removed when we support non-local experiment
+    directories in training."""
+    non_local_experiment_dir = "memory://path/to/experiment_dir"
+
+    # Construct dummy configurations for the rest of the training config, since
+    # all we are testing is that an error is raised upon construction.
+    step = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                in_names=[],
+                out_names=[],
+                normalization=NetworkAndLossNormalizationConfig(
+                    network=NormalizationConfig(
+                        global_means_path="",
+                        global_stds_path="",
+                    ),
+                ),
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet", config={}
+                ),
+            ),
+        ),
+    )
+    stepper = StepperConfig(step=step)
+    dummy_data_loader = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=""),
+        batch_size=1,
+    )
+
+    with pytest.raises(ValueError, match="local directory"):
+        TrainConfig(
+            experiment_dir=non_local_experiment_dir,
+            stepper=stepper,
+            train_loader=dummy_data_loader,
+            validation_loader=dummy_data_loader,
+            optimization=OptimizationConfig(),
+            logging=LoggingConfig(),
+            max_epochs=1,
+            save_checkpoint=False,
+            inference=None,
+        )

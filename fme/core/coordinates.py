@@ -10,13 +10,8 @@ import dacite
 import numpy as np
 import torch
 
-try:
-    from earth2grid import healpix as e2ghpx
-except ImportError:
-    e2ghpx = None
-
 from fme.core import metrics
-from fme.core.constants import GRAVITY
+from fme.core.constants import EARTH_RADIUS, GRAVITY
 from fme.core.corrector.atmosphere import AtmosphereCorrector, AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrector, IceCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
@@ -32,6 +27,15 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
 HC = TypeVar("HC", bound="HorizontalCoordinates")
+
+e2ghpx = None
+
+
+def get_e2ghpx():
+    global e2ghpx
+    if e2ghpx is None:
+        from earth2grid import healpix as e2ghpx
+    return e2ghpx
 
 
 class DeriveFnABC(abc.ABC):
@@ -74,22 +78,35 @@ class OceanDeriveFn(DeriveFnABC):
         self,
         depth_coordinate: "OptionalDepthCoordinate",
         timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
     ):
         self.depth_coordinate = depth_coordinate.to(
             "cpu"
         )  # must be on cpu for multiprocessing fork context
         self.timestep = timestep
+        # must be on cpu for multiprocessing fork context
+        self.horizontal_coordinates = (
+            horizontal_coordinates.to("cpu")
+            if horizontal_coordinates is not None
+            else None
+        )
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.depth_coordinate, NullVerticalCoordinate):
             depth_coord: DepthCoordinate | None = None
         else:
             depth_coord = self.depth_coordinate.to(get_device())
+        cell_area_provider = (
+            self.horizontal_coordinates.to(get_device())
+            if self.horizontal_coordinates is not None
+            else None
+        )
         return compute_ocean_derived_quantities(
             dict(data),
             depth_coordinate=depth_coord,
             timestep=self.timestep,
             forcing_data=dict(forcing_data),
+            cell_area_provider=cell_area_provider,
         )
 
 
@@ -130,7 +147,11 @@ class VerticalCoordinate(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+    def build_derive_function(
+        self,
+        timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
+    ) -> DeriveFnABC:
         pass
 
     @property
@@ -217,7 +238,11 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
             timestep=timestep,
         )
 
-    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+    def build_derive_function(
+        self,
+        timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
+    ) -> DeriveFnABC:
         return AtmosphericDeriveFn(self, timestep)
 
     def get_ak(self) -> torch.Tensor:
@@ -384,11 +409,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Cannot build corrector for vertical coordinate {self} with "
                 f"corrector selector {config}."
             )
-        config_instance = dacite.from_dict(
-            data_class=OceanCorrectorConfig,
-            data=config.config,
-            config=dacite.Config(strict=True),
-        )
+        config_instance = OceanCorrectorConfig.from_state(config.config)
         return OceanCorrector(
             config=config_instance,
             gridded_operations=gridded_operations,
@@ -396,8 +417,12 @@ class DepthCoordinate(VerticalCoordinate):
             timestep=timestep,
         )
 
-    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
-        return OceanDeriveFn(self, timestep)
+    def build_derive_function(
+        self,
+        timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
+    ) -> DeriveFnABC:
+        return OceanDeriveFn(self, timestep, horizontal_coordinates)
 
     def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
         """
@@ -520,11 +545,7 @@ class NullVerticalCoordinate(VerticalCoordinate):
                 timestep=timestep,
             )
         elif config.type == "ocean_corrector":
-            config_instance = dacite.from_dict(
-                data_class=OceanCorrectorConfig,
-                data=config.config,
-                config=dacite.Config(strict=True),
-            )
+            config_instance = OceanCorrectorConfig.from_state(config.config)
             return OceanCorrector(
                 config=config_instance,
                 gridded_operations=gridded_operations,
@@ -548,7 +569,11 @@ class NullVerticalCoordinate(VerticalCoordinate):
                 "Must be either 'atmosphere_corrector' or 'ocean_corrector'."
             )
 
-    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+    def build_derive_function(
+        self,
+        timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
+    ) -> DeriveFnABC:
         return NullDeriveFn()
 
     def to(self, device: str) -> "NullVerticalCoordinate":
@@ -644,6 +669,12 @@ class HorizontalCoordinates(abc.ABC):
     def area_weights(self) -> torch.Tensor | None:
         pass
 
+    @property
+    @abc.abstractmethod
+    def area_weights_m2(self) -> torch.Tensor | None:
+        """Cell areas in meters squared."""
+        pass
+
     @abc.abstractmethod
     def get_gridded_operations(
         self, mask_provider: MaskProviderABC = NullMaskProvider
@@ -703,6 +734,10 @@ class LatLonCoordinates(HorizontalCoordinates):
         if self._area_weights is None:
             self._area_weights = metrics.spherical_area_weights(self.lat, len(self.lon))
         return self._area_weights
+
+    @property
+    def area_weights_m2(self) -> torch.Tensor:
+        return 4 * torch.pi * EARTH_RADIUS**2 * self.area_weights
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
@@ -828,6 +863,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
     @property
     def xyz(self) -> tuple[float, float, float]:
         level = int(math.log2(len(self.width)))
+        e2ghpx = get_e2ghpx()
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
         lats = lats.reshape(len(self.face), len(self.width), len(self.height))
@@ -857,7 +893,11 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return "healpix"
 
     @property
-    def area_weights(self) -> Literal[None]:
+    def area_weights(self) -> None:
+        return None
+
+    @property
+    def area_weights_m2(self) -> None:
         return None
 
     def get_gridded_operations(
@@ -886,6 +926,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
         # We'll return a 3D (face, width, height) tensor representing the lat-lon
         # coordinates of this grid.
         level = int(math.log2(len(self.width)))
+        e2ghpx = get_e2ghpx()
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
         lats = lats.reshape(self.shape)

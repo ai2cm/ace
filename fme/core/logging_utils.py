@@ -2,9 +2,13 @@ import contextlib
 import dataclasses
 import logging
 import os
+import warnings
 from collections.abc import Mapping
 from typing import Any
 
+from fme.core.cloud import is_local
+from fme.core.device import get_device
+from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
@@ -52,7 +56,34 @@ class LoggingConfig:
     def __post_init__(self):
         self._dist = Distributed.get_instance()
 
-    def configure_logging(self, experiment_dir: str, log_filename: str):
+    def configure_logging(
+        self,
+        experiment_dir: str,
+        log_filename: str,
+        config: Mapping[str, Any],
+        resumable: bool = True,
+    ):
+        """
+        Configure global logging settings, including WandB, and output
+        initial logs of the runtime environment.
+
+        Args:
+            experiment_dir: Directory to save logs to.
+            log_filename: Name of the log file.
+            config: Configuration dictionary to log to WandB.
+            resumable: Whether this is a resumable run.
+        """
+        self._configure_logging_module(experiment_dir, log_filename)
+        log_versions()
+        log_beaker_url()
+        self._configure_wandb(
+            experiment_dir=experiment_dir,
+            config=config,
+            resumable=resumable,
+        )
+        logging.info(f"Current device is {get_device()}")
+
+    def _configure_logging_module(self, experiment_dir: str, log_filename: str):
         """
         Configure the global `logging` module based on this LoggingConfig.
         """
@@ -64,6 +95,14 @@ class LoggingConfig:
             logging.basicConfig(level=logging.ERROR)
         logger = logging.getLogger()
         if self.log_to_file and self._dist.is_root():
+            if not is_local(experiment_dir):
+                warnings.warn(
+                    f"Logging to a file is only supported if the experiment "
+                    f"directory is on a local file system. Got "
+                    f"experiment_dir={experiment_dir!r}, so no logs will be "
+                    f"saved to a file."
+                )
+                return
             if not os.path.exists(experiment_dir):
                 raise ValueError(
                     f"experiment directory {experiment_dir} does not exist, "
@@ -75,20 +114,20 @@ class LoggingConfig:
             fh.setFormatter(logging.Formatter(self.log_format))
             logger.addHandler(fh)
 
-    def configure_wandb(
+    def _configure_wandb(
         self,
+        experiment_dir: str,
         config: Mapping[str, Any],
-        env_vars: Mapping[str, Any] | None = None,
         resumable: bool = True,
         resume: Any = None,
-        **kwargs,
     ):
+        env_vars = retrieve_env_vars()
         if resume is not None:
             raise ValueError(
                 "The 'resume' argument is no longer supported, "
                 "please pass 'resumable' instead."
             )
-        config_copy = {**config}
+        config_copy = to_flat_dict({**config})
         if "environment" in config_copy:
             logging.warning(
                 "Not recording environmental variables since 'environment' key is "
@@ -97,7 +136,6 @@ class LoggingConfig:
         elif env_vars is not None:
             config_copy["environment"] = env_vars
 
-        experiment_dir = config["experiment_dir"]
         if self.wandb_dir_in_experiment_dir:
             wandb_dir = experiment_dir
         else:
@@ -113,8 +151,22 @@ class LoggingConfig:
             experiment_dir=experiment_dir,
             resumable=resumable,
             dir=wandb_dir,
-            **kwargs,
+            notes=_get_beaker_url(_get_beaker_id()),
         )
+
+
+def _get_beaker_id() -> str | None:
+    try:
+        return os.environ["BEAKER_EXPERIMENT_ID"]
+    except KeyError:
+        logging.warning("Beaker Experiment ID not found.")
+        return None
+
+
+def _get_beaker_url(beaker_id: str | None) -> str:
+    if beaker_id is None:
+        return "No beaker URL."
+    return f"https://beaker.org/ex/{beaker_id}"
 
 
 def log_versions():
@@ -148,13 +200,9 @@ def log_beaker_url(beaker_id=None):
     Returns the Beaker URL.
     """
     if beaker_id is None:
-        try:
-            beaker_id = os.environ["BEAKER_EXPERIMENT_ID"]
-        except KeyError:
-            logging.warning("Beaker Experiment ID not found.")
-            return None
+        beaker_id = _get_beaker_id()
 
-    beaker_url = f"https://beaker.org/ex/{beaker_id}"
+    beaker_url = _get_beaker_url(beaker_id)
     logging.info(f"Beaker ID: {beaker_id}")
     logging.info(f"Beaker URL: {beaker_url}")
     return beaker_url

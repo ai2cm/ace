@@ -7,7 +7,7 @@ coupled_datasets:
     how: interpolate_sst
   coupled_sea_surface:
     sst_threshold: 291.75
-    ocean_extra_masked_names: ["HI", "sea_ice_volume"]
+    ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
     surface_flux_window_avg:
       window_timedelta: 120h
       first_timestamp: "0151-01-03T12:00:00"
@@ -22,6 +22,7 @@ coupled_datasets:
         - PRATEsfc
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
+        - total_frozen_precipitation_rate
   coupled_sea_ice:
     window_avg:
       window_timedelta: 120h

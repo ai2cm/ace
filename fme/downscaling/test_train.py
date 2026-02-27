@@ -86,6 +86,9 @@ def _create_config_dict(
 
     experiment_dir = tmp_path / "output"
     experiment_dir.mkdir()
+    config["static_inputs"] = {
+        "HGTsfc": str(train_paths.fine) + "/data.nc",
+    }
     config["train_data"]["fine"] = [{"data_path": str(train_paths.fine)}]
     config["train_data"]["coarse"] = [{"data_path": str(train_paths.coarse)}]
     config["validation_data"]["fine"] = [
@@ -205,7 +208,10 @@ def test_train_main_logs(default_trainer_config, tmp_path, very_fast_only: bool)
         assert len(keys) > 5 or keys == set(["train/batch_loss"])
 
 
-def test_restore_checkpoint(default_trainer_config, tmp_path):
+def test_restore_checkpoint(default_trainer_config, tmp_path, very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
     config = dacite.from_dict(data_class=TrainerConfig, data=default_trainer_config)
     trainer1 = config.build()
     trainer2 = config.build()

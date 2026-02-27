@@ -1,16 +1,15 @@
+import dataclasses
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 
 import dacite
 import torch
 import yaml
 
-from fme.core import logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig, Topography
+from ..data import DataLoaderConfig, StaticInputs
 from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import (
     CascadePredictor,
@@ -56,7 +55,7 @@ class Downscaler:
 
     def _get_generation_model(
         self,
-        topography: Topography,
+        static_inputs: StaticInputs,
         output: DownscalingOutput,
     ) -> DiffusionModel | PatchPredictor | CascadePredictor:
         """
@@ -67,7 +66,7 @@ class Downscaler:
         generations.
         """
         model_patch_shape = self.model.fine_shape
-        actual_shape = tuple(topography.data.shape)
+        actual_shape = tuple(static_inputs.shape)
 
         if model_patch_shape == actual_shape:
             # short circuit, no patching necessary
@@ -111,16 +110,20 @@ class Downscaler:
         total_batches = len(output.data.loader)
 
         loaded_item: LoadedSliceWorkItem
-        topography: Topography
-        for i, (loaded_item, topography) in enumerate(output.data.get_generator()):
+        static_inputs: StaticInputs
+        for i, (loaded_item, static_inputs) in enumerate(output.data.get_generator()):
             if writer is None:
                 writer = output.get_writer(
-                    latlon_coords=topography.coords,
+                    latlon_coords=static_inputs.coords,
                     output_dir=self.output_dir,
                 )
-                writer.initialize_store(topography.data.cpu().numpy().dtype)
+                writer.initialize_store(
+                    static_inputs.fields[0].data.cpu().numpy().dtype
+                )
             if model is None:
-                model = self._get_generation_model(topography=topography, output=output)
+                model = self._get_generation_model(
+                    static_inputs=static_inputs, output=output
+                )
 
             logging.info(
                 f"[{output.name}] Batch {i+1}/{total_batches}, "
@@ -128,7 +131,9 @@ class Downscaler:
             )
 
             output_data = model.generate_on_batch_no_target(
-                loaded_item.batch, topography=topography, n_samples=loaded_item.n_ens
+                loaded_item.batch,
+                static_inputs=static_inputs,
+                n_samples=loaded_item.n_ens,
             )
             output_np = {key: value.cpu().numpy() for key, value in output_data.items()}
             insert_slices = loaded_item.dim_insert_slices
@@ -154,7 +159,7 @@ class InferenceConfig:
     sizes, and output variables. Outputs are processed sequentially, with generation
     parallelized across GPUs using distributed data loading.
 
-    Attributes:
+    Parameters:
         model: Model specification to load for generation.
         data: Base data loader configuration that is shared to each output
             generation task. Specifics for each output like the time(range),
@@ -166,8 +171,9 @@ class InferenceConfig:
         logging: Logging configuration.
         patch: Default patch prediction configuration.
 
-    Example YAML configuration:
-    ```yaml
+    Exclude following from autoclass documentation:
+    Example YAML configuration::
+
         experiment_dir: /results
         model:
             checkpoint_path: /checkpoints/best_histogram_tail.ckpt
@@ -215,7 +221,6 @@ class InferenceConfig:
             log_to_file: true
             project: downscaling
             entity: my_organization
-    ```
     """
 
     model: CheckpointModelConfig | CascadePredictorConfig
@@ -226,25 +231,22 @@ class InferenceConfig:
     patch: PatchPredictionConfig = field(default_factory=PatchPredictionConfig)
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(self, resumable: bool = False, **kwargs):
-        config = to_flat_dict(asdict(self))
-        env_vars = logging_utils.retrieve_env_vars()
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=True
         )
 
     def build(self) -> Downscaler:
+        model = self.model.build()
         outputs = [
             output_cfg.build(
                 loader_config=self.data,
                 requirements=self.model.data_requirements,
                 patch=self.patch,
+                static_inputs_from_checkpoint=model.static_inputs,
             )
             for output_cfg in self.outputs
         ]
-        model = self.model.build()
         return Downscaler(model=model, outputs=outputs, output_dir=self.experiment_dir)
 
 
@@ -260,9 +262,6 @@ def main(config_path: str):
     prepare_directory(generation_config.experiment_dir, config)
 
     generation_config.configure_logging(log_filename="out.log")
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    generation_config.configure_wandb(resumable=True, notes=beaker_url)
 
     logging.info("Starting downscaling generation...")
     downscaler = generation_config.build()

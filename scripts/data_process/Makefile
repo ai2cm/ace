@@ -61,7 +61,7 @@ SHIELD_RES ?= c96
 .PHONY: shield_AMIP_dataset
 shield_AMIP_dataset:
 	./compute_dataset.sh \
-	--config configs/shield-amip-ensemble-$(SHIELD_RES)-$(RESOLUTION)-8layer.yaml
+	--config configs/shield-amip-$(SHIELD_RES)-$(RESOLUTION)-8layer.yaml
 
 .PHONY: shield_AMIP_monthly_netcdfs
 shield_AMIP_monthly_netcdfs:
@@ -306,6 +306,14 @@ shield_amip_c96_idealized_0p1_heating_ensemble_dataset:
 xshield_amip_dataset_and_stats:
 	./compute_dataset.sh --config configs/X-SHiELD-AMIP-1deg-$(LAYERS)-11yr.yaml
 
+.PHONY: xshield_amip_plus_4K_dataset_and_stats
+xshield_amip_plus_4K_dataset_and_stats:
+	./compute_dataset.sh --config configs/X-SHiELD-AMIP-plus-4K-1deg-$(LAYERS)-1yr.yaml
+
+.PHONY: shield_c96_ramped_climSST_random_CO2_ensemble_dataset
+shield_c96_ramped_climSST_random_CO2_ensemble_dataset:
+	./compute_dataset.sh --config configs/shield-ramped-climSST-random-CO2-ensemble-c96-1deg-$(LAYERS).yaml
+
 .PHONY: build_atmosphere_processing_image
 build_atmosphere_processing_image:
 	docker build -f atmosphere.Dockerfile -t $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION) .
@@ -347,3 +355,7 @@ cm4_like_am4_random_co2_ensemble_atmosphere:
 .PHONY:
 cm4_like_am4_random_co2_ensemble_coupled:
 	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-like-AM4-random-CO2-ensemble-coupled.yaml
+
+.PHONY: shield_amip_constant_co2_c96_dataset
+shield_amip_constant_co2_c96_dataset:
+	./compute_dataset.sh --config configs/shield-amip-constant-co2-c96-1deg-8layer.yaml

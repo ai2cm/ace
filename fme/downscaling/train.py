@@ -11,7 +11,6 @@ import dacite
 import torch
 import yaml
 
-import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
 from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
@@ -25,6 +24,8 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
+    StaticInputs,
+    get_normalized_topography,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
 
@@ -182,11 +183,11 @@ class Trainer:
             self.train_data, random_offset=True, shuffle=True
         )
         outputs = None
-        for i, (batch, topography) in enumerate(train_batch_generator):
+        for i, (batch, static_inputs) in enumerate(train_batch_generator):
             self.num_batches_seen += 1
             if i % 10 == 0:
                 logging.info(f"Training on batch {i+1}")
-            outputs = self.model.train_on_batch(batch, topography, self.optimization)
+            outputs = self.model.train_on_batch(batch, static_inputs, self.optimization)
             self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -258,9 +259,9 @@ class Trainer:
             validation_batch_generator = self._get_batch_generator(
                 self.validation_data, random_offset=False, shuffle=False
             )
-            for batch, topography in validation_batch_generator:
+            for batch, static_inputs in validation_batch_generator:
                 outputs = self.model.train_on_batch(
-                    batch, topography, self.null_optimization
+                    batch, static_inputs, self.null_optimization
                 )
                 validation_aggregator.record_batch(
                     outputs=outputs,
@@ -269,7 +270,7 @@ class Trainer:
                 )
                 generated_outputs = self.model.generate_on_batch(
                     batch,
-                    topography=topography,
+                    static_inputs=static_inputs,
                     n_samples=self.config.generate_n_samples,
                 )
                 # Add sample dimension to coarse values for generation comparison
@@ -404,6 +405,7 @@ class TrainerConfig:
     experiment_dir: str
     save_checkpoints: bool
     logging: LoggingConfig
+    static_inputs: dict[str, str] | None = None
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
@@ -431,11 +433,23 @@ class TrainerConfig:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
+        static_inputs_fields = self.static_inputs or {}
+        static_inputs = StaticInputs(
+            fields=[
+                get_normalized_topography(path, topography_name=key)
+                for key, path in static_inputs_fields.items()
+            ]
+        )
+
         train_data: PairedGriddedData = self.train_data.build(
-            train=True, requirements=self.model.data_requirements
+            train=True,
+            requirements=self.model.data_requirements,
+            static_inputs=static_inputs,
         )
         validation_data: PairedGriddedData = self.validation_data.build(
-            train=False, requirements=self.model.data_requirements
+            train=False,
+            requirements=self.model.data_requirements,
+            static_inputs=static_inputs,
         )
         if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:
             model_coarse_shape = (
@@ -444,9 +458,11 @@ class TrainerConfig:
             )
         else:
             model_coarse_shape = train_data.coarse_shape
+
         downscaling_model = self.model.build(
             model_coarse_shape,
             train_data.downscale_factor,
+            static_inputs=static_inputs,
         )
 
         optimization = self.optimization.build(
@@ -463,13 +479,9 @@ class TrainerConfig:
         )
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(self, resumable: bool = True, **kwargs):
         config = to_flat_dict(dataclasses.asdict(self))
-        env_vars = logging_utils.retrieve_env_vars()
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=True
         )
 
 
@@ -516,9 +528,6 @@ def main(config_path: str):
     prepare_directory(train_config.experiment_dir, config)
 
     train_config.configure_logging(log_filename="out.log")
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    train_config.configure_wandb(notes=beaker_url)
     logging.info("Starting training")
     trainer = train_config.build()
 

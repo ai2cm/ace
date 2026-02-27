@@ -6,14 +6,17 @@ import dacite
 import torch
 import yaml
 
-import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
-from fme.downscaling.data import PairedDataLoaderConfig, PairedGriddedData
+from fme.downscaling.data import (
+    PairedDataLoaderConfig,
+    PairedGriddedData,
+    StaticInputs,
+    enforce_lat_bounds,
+)
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predict import EventConfig
 from fme.downscaling.predictors import (
@@ -57,11 +60,11 @@ class Evaluator:
         else:
             batch_generator = self.data.get_generator()
 
-        for i, (batch, topography) in enumerate(batch_generator):
+        for i, (batch, static_inputs) in enumerate(batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 outputs = self.model.generate_on_batch(
-                    batch, topography, n_samples=self.n_samples
+                    batch, static_inputs, n_samples=self.n_samples
                 )
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
@@ -108,7 +111,7 @@ class EventEvaluator:
 
     def run(self):
         logging.info(f"Running {self.event_name} event evaluation")
-        batch, topography = next(iter(self.data.get_generator()))
+        batch, static_inputs = next(iter(self.data.get_generator()))
         sample_agg = PairedSampleAggregator(
             target=batch[0].fine.data,
             coarse=batch[0].coarse.data,
@@ -127,7 +130,7 @@ class EventEvaluator:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch(
-                batch, topography, n_samples=end_idx - start_idx
+                batch, static_inputs, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs.prediction)
 
@@ -150,13 +153,17 @@ class EventEvaluator:
 @dataclasses.dataclass
 class PairedEventConfig(EventConfig):
     def get_paired_gridded_data(
-        self, base_data_config: PairedDataLoaderConfig, requirements: DataRequirements
+        self,
+        base_data_config: PairedDataLoaderConfig,
+        requirements: DataRequirements,
+        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> PairedGriddedData:
+        enforce_lat_bounds(self.lat_extent)
         time_slice = self._time_selection_slice
-        event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
-        event_coarse = dataclasses.replace(
-            base_data_config.coarse_full_config[0], subset=time_slice
-        )
+        event_fine = dataclasses.replace(base_data_config.fine[0])
+        event_fine.update_subset(time_slice)
+        event_coarse = dataclasses.replace(base_data_config.coarse_full_config[0])
+        event_coarse.update_subset(time_slice)
         n_processes = Distributed.get_instance().world_size
         event_data_config = dataclasses.replace(
             base_data_config,
@@ -167,7 +174,11 @@ class PairedEventConfig(EventConfig):
             lat_extent=self.lat_extent,
             lon_extent=self.lon_extent,
         )
-        return event_data_config.build(train=False, requirements=requirements)
+        return event_data_config.build(
+            train=False,
+            requirements=requirements,
+            static_inputs=static_inputs_from_checkpoint,
+        )
 
 
 @dataclasses.dataclass
@@ -183,21 +194,18 @@ class EvaluatorConfig:
     events: list[PairedEventConfig] | None = None
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(self, resumable: bool = False, **kwargs):
-        config = to_flat_dict(dataclasses.asdict(self))
-        env_vars = logging_utils.retrieve_env_vars()
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=True
         )
 
     def _build_default_evaluator(self) -> Evaluator:
-        dataset = self.data.build(
-            train=False, requirements=self.model.data_requirements
-        )
-
         model = self.model.build()
+        dataset = self.data.build(
+            train=False,
+            requirements=self.model.data_requirements,
+            static_inputs=model.static_inputs,
+        )
         evaluator_model: DiffusionModel | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
@@ -275,9 +283,6 @@ def main(config_path: str):
     prepare_directory(evaluator_config.experiment_dir, config)
 
     evaluator_config.configure_logging(log_filename="out.log")
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    evaluator_config.configure_wandb(resumable=True, notes=beaker_url)
 
     logging.info("Starting downscaling model evaluation")
     evaluators = evaluator_config.build()

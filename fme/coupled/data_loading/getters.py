@@ -1,7 +1,6 @@
 import datetime
 import logging
 import warnings
-from collections.abc import Sequence
 
 import torch
 import torch.utils.data
@@ -17,6 +16,7 @@ from fme.core.labels import LabelEncoding
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.concat import ConcatDataset
 from fme.coupled.data_loading.config import (
+    CoupledConcatDatasetConfig,
     CoupledDataLoaderConfig,
     CoupledDatasetConfig,
 )
@@ -88,13 +88,13 @@ def get_dataset(
 
 
 def get_datasets(
-    configs: Sequence[CoupledDatasetConfig],
+    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
     requirements: CoupledDataRequirements,
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:
     datasets = []
     properties: CoupledDatasetProperties | None = None
-    for coupled_data_config in configs:
+    for coupled_data_config in configs.coupled_configs:
         ds, prop = get_dataset(coupled_data_config, requirements)
         datasets.append(ds)
         if properties is None:

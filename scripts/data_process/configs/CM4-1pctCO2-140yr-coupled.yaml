@@ -8,7 +8,10 @@ coupled_datasets:
   coupled_sea_surface:
     precomputed_sea_ice_mask:
       zarr_path: /climate-default/2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
-    ocean_extra_masked_names: ["HI", "sea_ice_volume"]
+    ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
+    ocean_extra_fill_values:
+      UI: 0.0
+      VI: 0.0
     surface_flux_window_avg:
       window_timedelta: 120h
       first_timestamp: "0211-01-03T12:00:00"
@@ -23,6 +26,7 @@ coupled_datasets:
         - PRATEsfc
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
+        - total_frozen_precipitation_rate
   coupled_sea_ice:
     window_avg:
       window_timedelta: 120h

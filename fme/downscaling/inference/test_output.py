@@ -1,10 +1,12 @@
 from unittest.mock import MagicMock
 
 import pytest
+import torch
 
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.downscaling.data import ClosedInterval, DataLoaderConfig
+from fme.downscaling.data import ClosedInterval, StaticInput, StaticInputs
+from fme.downscaling.data.utils import LatLonCoordinates
 from fme.downscaling.inference.output import (
     DownscalingOutput,
     DownscalingOutputConfig,
@@ -13,9 +15,21 @@ from fme.downscaling.inference.output import (
 )
 from fme.downscaling.predictors import PatchPredictionConfig
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.test_utils import data_paths_helper
 
 # Tests for OutputTargetConfig validation
+
+
+def _get_static_inputs(shape=(8, 8)):
+    return StaticInputs(
+        fields=[
+            StaticInput(
+                data=torch.ones(shape),
+                coords=LatLonCoordinates(
+                    lat=torch.ones(shape[0]), lon=torch.ones(shape[1])
+                ),
+            )
+        ]
+    )
 
 
 def test_single_xarray_config_accepts_single_config():
@@ -70,31 +84,6 @@ def test_region_config_requires_time_range():
 
 
 @pytest.fixture
-def loader_config(tmp_path):
-    """Create DataLoaderConfig with test data."""
-    path = tmp_path / "test_data"
-    path.mkdir()
-    # TODO: should probably consolidate cross imported
-    # .      data path helpers to a single file instead
-    # .      of importing from test_train in each location
-    test_data_path = data_paths_helper(path)
-
-    return DataLoaderConfig(
-        coarse=[
-            XarrayDataConfig(
-                data_path=str(test_data_path.coarse),
-                file_pattern="*.nc",
-                engine="netcdf4",
-            )
-        ],
-        batch_size=2,
-        num_data_workers=0,
-        strict_ensemble=False,
-        topography=f"{test_data_path.fine}/data.nc",
-    )
-
-
-@pytest.fixture
 def requirements():
     """Create DataRequirements for generation."""
     return DataRequirements(
@@ -114,6 +103,7 @@ def patch_config():
 # Integration tests for Config.build()
 
 
+@pytest.mark.parametrize("loader_config", [True], indirect=True)
 def test_event_config_build_creates_output_target_with_single_time(
     loader_config, requirements, patch_config
 ):
@@ -126,8 +116,10 @@ def test_event_config_build_creates_output_target_with_single_time(
         lat_extent=ClosedInterval(2.0, 6.0),
         lon_extent=ClosedInterval(2.0, 6.0),
     )
-
-    output_target = config.build(loader_config, requirements, patch_config)
+    static_inputs = _get_static_inputs((8, 8))
+    output_target = config.build(
+        loader_config, requirements, patch_config, static_inputs
+    )
 
     # Verify OutputTarget was created
     assert isinstance(output_target, DownscalingOutput)
@@ -144,6 +136,7 @@ def test_event_config_build_creates_output_target_with_single_time(
     assert tuple(output_target.shards.values()) == output_target.data.max_output_shape
 
 
+@pytest.mark.parametrize("loader_config", [True], indirect=True)
 def test_region_config_build_creates_output_target_with_time_range(
     loader_config, requirements, patch_config
 ):
@@ -154,8 +147,11 @@ def test_region_config_build_creates_output_target_with_time_range(
         n_ens=4,
         save_vars=["var0", "var1"],
     )
+    static_inputs = _get_static_inputs((8, 8))
 
-    output_target = config.build(loader_config, requirements, patch_config)
+    output_target = config.build(
+        loader_config, requirements, patch_config, static_inputs
+    )
 
     # Verify OutputTarget was created
     assert isinstance(output_target, DownscalingOutput)
@@ -169,3 +165,25 @@ def test_region_config_build_creates_output_target_with_time_range(
     assert tuple(output_target.chunks.values())[:2] == (1, 1)
     assert output_target.shards is not None
     assert tuple(output_target.shards.values()) == output_target.data.max_output_shape
+
+
+def test_time_range_config_raise_error_invalid_lat_extent():
+    with pytest.raises(ValueError):
+        TimeRangeConfig(
+            name="test_region",
+            time_range=TimeSlice("2000-01-01T00:00:00", "2000-01-02T00:00:00"),
+            n_ens=4,
+            save_vars=["var0", "var1"],
+            lat_extent=ClosedInterval(-90, 90),
+        )
+
+
+def test_event_config_raise_error_invalid_lat_extent():
+    with pytest.raises(ValueError):
+        EventConfig(
+            name="test_event",
+            event_time="2000-01-01T00:00:00",
+            n_ens=4,
+            save_vars=["var0", "var1"],
+            lat_extent=ClosedInterval(-90, 90),
+        )

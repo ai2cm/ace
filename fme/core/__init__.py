@@ -1,3 +1,4 @@
+from . import models as _  # to trigger registrations
 from .atmosphere_data import AtmosphereData
 from .device import get_device, using_gpu
 from .gridded_ops import GriddedOperations
@@ -14,11 +15,14 @@ from .packer import Packer
 from .rand import set_seed
 from .registry import Registry
 
+del _
+
 __all__ = [
     "spherical_area_weights",
     "weighted_mean",
     "weighted_mean_bias",
     "weighted_nanmean",
+    "weighted_sum",
     "root_mean_squared_error",
     "get_device",
     "using_gpu",

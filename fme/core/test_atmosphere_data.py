@@ -30,6 +30,34 @@ def test_compute_layer_thickness():
     assert torch.all(dz >= 0.0)
 
 
+def test_backpropagate_through_compute_layer_thickness():
+    # Regression test to ensure we can properly handle a TOA interface pressure
+    # of 0.0, as is present in the ERA5 dataset. The key for this test to be
+    # meaningful is the presence of zeros in the pressure_at_interface tensor.
+    pressure_at_interface = torch.tensor(
+        [
+            [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]],
+            [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]],
+        ],
+        requires_grad=True,
+    )
+    air_temperature = torch.tensor(
+        [
+            [[300.0, 310.0], [300.0, 310.0]],
+            [[300.0, 310.0], [300.0, 310.0]],
+        ],
+        requires_grad=True,
+    )
+    specific_total_water = torch.full((2, 2, 2), 0.1, requires_grad=True)
+    dz = compute_layer_thickness(
+        pressure_at_interface, air_temperature, specific_total_water
+    )
+    with torch.autograd.detect_anomaly():
+        # Take the sum to reduce dz to a scalar prior to backpropagation to
+        # avoid the need to provide a gradient argument to backward.
+        dz.sum().backward()
+
+
 def test__height_at_interface():
     layer_thickness = torch.tensor([[[3, 2], [1, 0.5]], [[3, 2], [1, 0.5]]])
     height_at_surface = torch.tensor([[10, 20], [10, 20]])

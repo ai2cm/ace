@@ -173,6 +173,7 @@ class FCN3StepConfig(StepConfigABC):
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
 
     def __post_init__(self):
@@ -203,6 +204,12 @@ class FCN3StepConfig(StepConfigABC):
             self.forcing_names + self.atmosphere_input_names + self.surface_input_names
         )
         self.out_names = self.atmosphere_output_names + self.surface_output_names
+        for name in self.prescribed_prognostic_names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -264,10 +271,11 @@ class FCN3StepConfig(StepConfigABC):
     @property
     def next_step_input_names(self) -> list[str]:
         """Names of variables provided in next_step_input_data."""
-        input_only_names = set(self.input_names).difference(self.output_names)
-        if self.ocean is None:
-            return list(input_only_names)
-        return list(input_only_names.union(self.ocean.forcing_names))
+        result = set(self.input_names).difference(self.output_names)
+        if self.ocean is not None:
+            result = result.union(self.ocean.forcing_names)
+        result = result.union(self.prescribed_prognostic_names)
+        return list(result)
 
     @property
     def loss_names(self) -> list[str]:
@@ -284,6 +292,16 @@ class FCN3StepConfig(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean
+
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+        for name in names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
+        self.prescribed_prognostic_names = names
 
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
@@ -470,6 +488,7 @@ class FCN3Step(StepABC):
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
+            prescribed_prognostic_names=self._config.prescribed_prognostic_names,
         )
 
     def get_regularizer_loss(self):

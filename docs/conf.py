@@ -231,3 +231,24 @@ doctest.OutputChecker = CustomOutputChecker
 doctest_global_setup = """
 import fme
 """
+
+
+# -- Custom docstring processing -----------------------------------------
+
+
+def remove_excluded_lines_from_docstring(app, what, name, obj, options, lines):
+    """
+    Remove "Exclude following from autoclass documentation:"
+    and everything after it from docstrings.
+    This is used to keep the docs tidy.
+    """
+    for i, line in enumerate(lines):
+        if "Exclude following from autoclass documentation:" in line:
+            # Removes everything from this line onwards in the docs
+            del lines[i:]
+            break
+
+
+def setup(app):
+    """Register the docstring processor."""
+    app.connect("autodoc-process-docstring", remove_excluded_lines_from_docstring)

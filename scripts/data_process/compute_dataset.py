@@ -271,6 +271,8 @@ class DatasetComputationConfig:
         mask_soil_moisture: (optional) whether to mask soil moisture content using soil
             temperature. This is useful for CM4 dataset, where soil moisture content is
             zero instead of NaN over the oceans.
+        CO2_concentration: (optional) CO2 concentration in volume mixing ratio.
+            This is used for E3SM dataset to add time-invariant CO2 concentration.
     """
 
     reference_vertical_coordinate_file: str
@@ -295,6 +297,7 @@ class DatasetComputationConfig:
     validate_vertical_coarsening_indices_land: bool = True
     reference_vertical_coordinate_file_land: Optional[str] = None
     mask_soil_moisture: bool = False
+    CO2_concentration: Optional[float] = None
 
 
 @dataclasses.dataclass
@@ -326,6 +329,10 @@ class DatasetConfig:
 
 def weighted_mean(da: xr.DataArray, weights: xr.DataArray, dims) -> xr.DataArray:
     """Compute weighted mean of xr.DataArray."""
+    # Drop attrs of the weights to ensure weighted_mean propagates the attrs of
+    # the input DataArray instead of the weights. This is to preserve the
+    # pre-pydata/xarray#10726 attrs propagation behavior.
+    weights = weights.drop_attrs()
     return (da * weights).sum(dims, skipna=False) / weights.sum(dims)
 
 
@@ -397,12 +404,17 @@ def compute_ocean_fraction(
     land_fraction_name: str,
     sea_ice_fraction_name: str,
 ) -> xr.Dataset:
-    """Compute latent heat flux, if needed."""
+    """Compute ocean fraction, if needed."""
     if output_name in ds.data_vars:
         # if ocean_fraction is already computed, assume that NaNs have been handled
         return ds
     ds[sea_ice_fraction_name] = ds[sea_ice_fraction_name].fillna(0.0)
     ocean_fraction = 1 - ds[sea_ice_fraction_name] - ds[land_fraction_name]
+    # Ensure that the ocean_fraction has an empty attrs dict, consistent with
+    # the left-most object used in its computation (a scalar number in this
+    # case). This is to preserve the pre-pydata/xarray#10726 attrs propagation
+    # behavior.
+    ocean_fraction = ocean_fraction.drop_attrs()
     negative_ocean = xr.where(ocean_fraction < 0, ocean_fraction, 0)
     ocean_fraction -= negative_ocean
     ds["sea_ice_fraction"] += negative_ocean
@@ -457,12 +469,20 @@ def compute_pressure_thickness(
     surface_pressure_name: str,
     output_name: str,
     z_dim: str = "xaxis_1",
+    vertical_coordinate_file_is_local: bool = False,
 ):
     if output_name in ds.data_vars:
         return ds
 
-    with fsspec.open(vertical_coordinate_file) as f:
-        vertical_coordinate = xr.open_dataset(f, decode_timedelta=False).load()
+    if vertical_coordinate_file_is_local:
+        # Used only when testing to work around h5netcdf / netCDF4 wheel
+        # incompatibility issues.
+        vertical_coordinate = xr.open_dataset(
+            vertical_coordinate_file, decode_timedelta=False
+        ).load()
+    else:
+        with fsspec.open(vertical_coordinate_file) as f:
+            vertical_coordinate = xr.open_dataset(f, decode_timedelta=False).load()
 
     vertical_coordinate = vertical_coordinate.astype(ds[surface_pressure_name].dtype)
 
@@ -472,7 +492,13 @@ def compute_pressure_thickness(
     sfc_pressure = ds[surface_pressure_name].expand_dims(
         {z_dim: vertical_coord[z_dim]}, axis=3
     )
-    phalf = sfc_pressure * vertical_coord["bk"] + vertical_coord["ak"]
+    # Drop the attrs of bk and ak to ensure that phalf has the same attributes
+    # as the sfc_pressure. This is to preserve the pre-pydata/xarray#10726 attrs
+    # propagation behavior.
+    phalf = (
+        sfc_pressure * vertical_coord["bk"].drop_attrs()
+        + vertical_coord["ak"].drop_attrs()
+    )
 
     thickness = (
         phalf.diff(dim=z_dim)
@@ -640,6 +666,11 @@ def compute_tendencies(
     will be NaNs for the first timestep in the output dataset."""
     # this code does not assume that all time steps are equally spaced
     timestep_seconds = (ds[dim].diff(dim) / np.timedelta64(1, "s")).astype("float32")
+    # In the division operation in the loop we prefer to propagate the attrs of
+    # the numerator verbatim rather than the merged attrs of the numerator and
+    # the timestep. This is to preserve the pre-pydata/xarray#10726 attrs
+    # propagation behavior.
+    timestep_seconds = timestep_seconds.drop_attrs()
     tendencies = {}
     for name in time_derivative_names:
         tendency = ds[name].diff(dim) / timestep_seconds
@@ -656,8 +687,13 @@ def compute_column_advective_moisture_tendency(
     precip: str,
     latent_heat_of_vaporization: float,
 ) -> xr.Dataset:
-    evaporation = ds[latent_heat_flux] / latent_heat_of_vaporization
-    advective_tendency = ds[pwat_tendency] - evaporation + ds[precip]
+    # Drop the attrs on the latent_heat_flux and precipitation variables prior
+    # to computing the advective tendency to ensure that the advective_tendency
+    # starts with attrs propagated solely from the pwat_tendency. This is to
+    # preserve the pre-pydata/xarray#10726 attrs propagation behavior.
+    evaporation = ds[latent_heat_flux].drop_attrs() / latent_heat_of_vaporization
+    precipitation = ds[precip].drop_attrs()
+    advective_tendency = ds[pwat_tendency] - evaporation + precipitation
     long_name = "tendency of total water path due to advection"
     advective_tendency.attrs["long_name"] = long_name
     return ds.assign({f"{pwat_tendency}_due_to_advection": advective_tendency})

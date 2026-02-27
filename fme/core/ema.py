@@ -36,6 +36,8 @@ from typing import Protocol
 import torch
 from torch import nn
 
+from fme.core.device import get_device
+
 
 class HasNamedParameters(Protocol):
     def named_parameters(
@@ -87,9 +89,9 @@ class EMATracker:
             raise ValueError("Decay must be between 0 and 1")
 
         self._module_name_to_ema_name = {}
-        self.decay = torch.tensor(decay, dtype=torch.float32)
+        self.decay = torch.tensor(decay, dtype=torch.float32).to(get_device())
         self._faster_decay_at_start = faster_decay_at_start
-        self.num_updates = torch.tensor(0, dtype=torch.int)
+        self.num_updates = torch.tensor(0, dtype=torch.int).to(get_device())
 
         self._ema_params: dict[str, torch.Tensor] = {}
 

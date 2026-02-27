@@ -150,6 +150,10 @@ class ModuleSelector:
             )
         self._instance = self.registry.get(self.type, self.config)
 
+    @property
+    def module_config(self) -> ModuleConfig:
+        return self._instance
+
     @classmethod
     def register(
         cls, type_name: str
@@ -161,7 +165,7 @@ class ModuleSelector:
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
-    ) -> nn.Module:
+    ) -> Module:
         """
         Build a nn.Module given information about the input and output channels
         and the dataset.
