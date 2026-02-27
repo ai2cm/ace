@@ -2,12 +2,12 @@
 
 set -e
 
-# JOB_BASE="evaluate-HiRO-xshield-amip-plus4K-100km-to-3km-conus-events-generate-v2"
-JOB_BASE="evaluate-HiRO-xshield-amip-control-100km-to-3km-conus-events-generate"
+# JOB_NAME="evaluate-HiRO-xshield-amip-plus4K-100km-to-3km-conus-events-generate-v2"
+JOB_NAME="evaluate-HiRO-xshield-amip-control-100km-to-3km-maritime-generate"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 # CONFIG_PATH="$SCRIPT_PATH/config-plus4k.yaml"
-CONFIG_PATH="$SCRIPT_PATH/config-control.yaml"
+CONFIG_PATH="$SCRIPT_PATH/config-control-tropic.yaml"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
@@ -20,9 +20,6 @@ IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD # best hist checkpoint from job using global validation
 
 wandb_group=""
-
-JOB_NAME="$JOB_BASE"
-CONFIG_PATH="$SCRIPT_PATH/config-plus4k.yaml"
 
 gantry run \
     --name $JOB_NAME \
