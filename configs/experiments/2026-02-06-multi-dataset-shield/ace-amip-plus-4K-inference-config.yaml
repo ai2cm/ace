@@ -1,0 +1,29 @@
+experiment_dir: /results
+n_forward_steps: PLACEHOLDER
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-shield
+  entity: ai2cm
+initial_condition:
+  start_indices:
+    times:
+      - "1979-01-01T06:00:00"
+  path: PLACEHOLDER
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset
+    engine: zarr
+    file_pattern: PLACEHOLDER
+  num_data_workers: 4
+  perturbations:
+    sst:
+      - type: constant
+        config:
+          amplitude: 4.0
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
