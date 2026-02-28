@@ -13,7 +13,14 @@ from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
+from fme.downscaling.data import (
+    BatchData,
+    LatLonCoordinates,
+    PairedBatchData,
+    StaticInputs,
+    Topography,
+    get_normalized_topography,
+)
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
@@ -138,8 +145,10 @@ class DiffusionModelConfig:
         sigma_data = 1.0
 
         n_in_channels = len(self.in_names)
-        if static_inputs is not None:
-            n_in_channels += len(static_inputs.fields)
+        # fine topography is already normalized and at fine scale, so needs
+        # some special handling for now
+        if self.use_fine_topography:
+            n_in_channels += 1
 
         module = self.module.build(
             n_in_channels=n_in_channels,
@@ -308,6 +317,19 @@ class DiffusionModel:
             coarse_shape[0] * self.downscale_factor,
             coarse_shape[1] * self.downscale_factor,
         )
+
+    def _get_static_input_for_batch(
+        self, coarse_latlon: LatLonCoordinates
+    ) -> Topography | None:
+        """Get the subset topography for a batch from internal static inputs."""
+        if not self.config.use_fine_topography or self.static_inputs is None:
+            return None
+        topo = self.static_inputs.get_topography_for_coarse_coords(
+            coarse_latlon, self.downscale_factor
+        )
+        if topo is not None:
+            topo = topo.to_device()
+        return topo
 
     def _get_input_from_coarse(
         self, coarse: TensorMapping, static_inputs: StaticInputs | None
@@ -589,6 +611,10 @@ class CheckpointModelConfig:
             static_inputs = StaticInputs.from_state(
                 self._checkpoint["model"]["static_inputs"]
             )
+        elif self.fine_topography_path is not None:
+            # Fallback for old checkpoints without serialized static_inputs
+            topo = get_normalized_topography(self.fine_topography_path)
+            static_inputs = StaticInputs([topo])
         else:
             static_inputs = None
         model = _CheckpointModelConfigSelector.from_state(
@@ -622,3 +648,14 @@ class CheckpointModelConfig:
     @property
     def out_names(self):
         return self._checkpoint["model"]["config"]["out_names"]
+
+    def get_topography(self) -> Topography | None:
+        if self.data_requirements.use_fine_topography:
+            if self.fine_topography_path is None:
+                raise ValueError(
+                    "Topography path must be provided for model configured "
+                    "to use fine topography."
+                )
+            return get_normalized_topography(self.fine_topography_path).to_device()
+        else:
+            return None

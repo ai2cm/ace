@@ -7,10 +7,12 @@ import xarray as xr
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.downscaling.data.patching import Patch
-from fme.downscaling.data.utils import ClosedInterval
+from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 
 
 def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
+    # Ensure all tensors are on the same device for comparison
+    coords = coords.cpu()
     mask = (coords >= range.start) & (coords <= range.stop)
     indices = mask.nonzero(as_tuple=True)[0]
     if indices.numel() == 0:
@@ -19,7 +21,7 @@ def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
 
 
 @dataclasses.dataclass
-class StaticInput:
+class Topography:
     data: torch.Tensor
     coords: LatLonCoordinates
 
@@ -46,14 +48,14 @@ class StaticInput:
         self,
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
-    ) -> "StaticInput":
+    ) -> "Topography":
         lat_slice = _range_to_slice(self.coords.lat, lat_interval)
         lon_slice = _range_to_slice(self.coords.lon, lon_interval)
         return self._latlon_index_slice(lat_slice=lat_slice, lon_slice=lon_slice)
 
-    def to_device(self) -> "StaticInput":
+    def to_device(self) -> "Topography":
         device = get_device()
-        return StaticInput(
+        return Topography(
             data=self.data.to(device),
             coords=LatLonCoordinates(
                 lat=self.coords.lat.to(device),
@@ -70,13 +72,13 @@ class StaticInput:
         self,
         lat_slice: slice,
         lon_slice: slice,
-    ) -> "StaticInput":
+    ) -> "Topography":
         sliced_data = self.data[lat_slice, lon_slice]
         sliced_latlon = LatLonCoordinates(
             lat=self.coords.lat[lat_slice],
             lon=self.coords.lon[lon_slice],
         )
-        return StaticInput(
+        return Topography(
             data=sliced_data,
             coords=sliced_latlon,
         )
@@ -84,7 +86,7 @@ class StaticInput:
     def generate_from_patches(
         self,
         patches: list[Patch],
-    ) -> Generator["StaticInput", None, None]:
+    ) -> Generator["Topography", None, None]:
         for patch in patches:
             yield self._apply_patch(patch)
 
@@ -93,6 +95,10 @@ class StaticInput:
             "data": self.data.cpu(),
             "coords": self.coords.to_state(),
         }
+
+
+# Backward-compatible alias
+StaticInput = Topography
 
 
 def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
@@ -115,7 +121,7 @@ def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
 
     topography_normalized = (topography - topography.mean()) / topography.std()
 
-    return StaticInput(
+    return Topography(
         data=torch.tensor(topography_normalized.values, dtype=torch.float32),
         coords=coords,
     )
@@ -150,7 +156,7 @@ def get_topography_downscale_factor(
 
 @dataclasses.dataclass
 class StaticInputs:
-    fields: list[StaticInput]
+    fields: list[Topography]
 
     def __post_init__(self):
         for i, field in enumerate(self.fields[1:]):
@@ -162,6 +168,13 @@ class StaticInputs:
 
     def __getitem__(self, index: int):
         return self.fields[index]
+
+    @property
+    def input_tensors(self) -> list[torch.Tensor]:
+        if len(self.fields) > 0:
+            return [field.data for field in self.fields]
+        else:
+            return torch.tensor([])
 
     @property
     def coords(self) -> LatLonCoordinates:
@@ -186,6 +199,63 @@ class StaticInputs:
             ]
         )
 
+    def subset_for_coarse_coords(
+        self, coarse_coords: LatLonCoordinates, downscale_factor: int
+    ) -> "StaticInputs":
+        """
+        Subset the StaticInputs to the fine-resolution region that corresponds
+        to the given coarse coordinates.
+
+        Args:
+            coarse_coords: Coarse-resolution coordinates to subset to.
+            downscale_factor: The downscaling factor between coarse and fine grids.
+
+        Returns:
+            A new StaticInputs subset to the fine-resolution region.
+        """
+        lat_interval = ClosedInterval(
+            start=coarse_coords.lat.min().item(), stop=coarse_coords.lat.max().item()
+        )
+        lon_interval = ClosedInterval(
+            start=coarse_coords.lon.min().item(), stop=coarse_coords.lon.max().item()
+        )
+
+        device = coarse_coords.lat.device
+        fine_lat_interval = adjust_fine_coord_range(
+            lat_interval,
+            full_coarse_coord=coarse_coords.lat,
+            full_fine_coord=self.coords.lat.to(device),
+            downscale_factor=downscale_factor,
+        )
+        fine_lon_interval = adjust_fine_coord_range(
+            lon_interval,
+            full_coarse_coord=coarse_coords.lon,
+            full_fine_coord=self.coords.lon.to(device),
+            downscale_factor=downscale_factor,
+        )
+
+        return self.subset_latlon(fine_lat_interval, fine_lon_interval)
+
+    def get_topography_for_coarse_coords(
+        self, coarse_coords: LatLonCoordinates, downscale_factor: int
+    ) -> "Topography | None":
+        """
+        Convenience method that returns the first field as a Topography object
+        after subsetting, or None if there are no fields.
+
+        Args:
+            coarse_coords: Coarse-resolution coordinates to subset to.
+            downscale_factor: The downscaling factor between coarse and fine grids.
+
+        Returns:
+            The first field as a Topography object after subsetting, or None if
+            there are no fields.
+        """
+        if len(self.fields) == 0:
+            return None
+        subset = self.subset_for_coarse_coords(coarse_coords, downscale_factor)
+        return subset.fields[0]
+
     def to_device(self) -> "StaticInputs":
         return StaticInputs(fields=[field.to_device() for field in self.fields])
 
@@ -207,7 +277,7 @@ class StaticInputs:
     def from_state(cls, state: dict) -> "StaticInputs":
         return cls(
             fields=[
-                StaticInput(
+                Topography(
                     data=field_state["data"],
                     coords=LatLonCoordinates(
                         lat=field_state["coords"]["lat"],
