@@ -141,6 +141,9 @@ class DiffusionModelConfig:
         if static_inputs is not None:
             n_in_channels += len(static_inputs.fields)
         elif self.use_fine_topography:
+            # Old checkpoints may not have static inputs serialized, but if 
+            # use_fine_topography is True, we still need to account for the topography
+            # channel, which was the only static input at the time
             n_in_channels += 1
 
         module = self.module.build(
