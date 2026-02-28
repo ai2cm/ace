@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-dataset-with-out-level0-no-sst"
+JOB_NAME_BASE="ace-aimip-dataset-with-out-level0"
 JOB_GROUP="ace-aimip-dataset-with-out-level0"
 CONFIG_FILENAME="ace-train-no-strato-aimip-dataset.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository

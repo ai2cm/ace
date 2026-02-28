@@ -66,6 +66,9 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper:
+  input_masking:
+    mask_value: 0
+    fill_value: 0.0
   loss:
     type: MSE
     weights:
@@ -128,7 +131,7 @@ stepper:
       - DSWRFtoa
       - HGTsfc
       - PRESsfc
-      # - sea_surface_temperature
+      - sea_surface_temperature
       - skin_temperature
       - air_temperature_1
       - air_temperature_2
