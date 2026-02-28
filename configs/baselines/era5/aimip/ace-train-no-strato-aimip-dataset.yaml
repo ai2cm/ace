@@ -128,7 +128,7 @@ stepper:
       - DSWRFtoa
       - HGTsfc
       - PRESsfc
-      - sea_surface_temperature
+      # - sea_surface_temperature
       - skin_temperature
       - air_temperature_1
       - air_temperature_2
