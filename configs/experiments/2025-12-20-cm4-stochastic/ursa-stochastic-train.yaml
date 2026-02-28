@@ -6,9 +6,8 @@ ema:
   decay: 0.999
 max_epochs: 23
 inference:
-  # n_forward_steps: 28810
-  n_forward_steps: 2920
-  forward_steps_in_memory: 40
+  n_forward_steps: 28810
+  forward_steps_in_memory: 43
   loader:
     start_indices:
       times:
