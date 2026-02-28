@@ -48,7 +48,7 @@ model:
   sigma_min: 0.002
   use_fine_topography: true
 optimization:
-  lr: 0.0001
+  lr: 0.00005 #0.0001
   optimizer_type: Adam
 ema:
   decay: 0.999
