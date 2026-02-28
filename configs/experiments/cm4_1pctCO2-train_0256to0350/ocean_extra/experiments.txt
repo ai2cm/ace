@@ -1,22 +1,27 @@
 group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
 
-1pct_nosmooth_0256to0350-ocean_extra|rs0|01KHJB41R1GEHTRQ8MXHF7NS3M|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-ocean_extra|rs0|01KHJB41R1GEHTRQ8MXHF7NS3M|run_insample|best_inference_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC_50Ep|rs0|01KHT9KJMM3Q55K0C1ZA4BCV16|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC_50Ep|rs0|01KHT9KJMM3Q55K0C1ZA4BCV16|run_ICx1|best_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC_50Ep|rs0|01KHT9KJMM3Q55K0C1ZA4BCV16|run_insample|best_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350-ocean_extra-ft_correct_OSC_OHC_50Ep|rs0|01KJCBSDVQX7QBWHNR0YVK8TX3|training|best_inference_ckpt|normal|--not-preemptible
-
-1pct_nosmooth_0256to0350-ocean_extra-ft_correct_OSC_OHC_50Ep|rs0||training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-ocean_extra-ft_correct_OSC_OHC_50Ep|rs0|01KJCBSDVQX7QBWHNR0YVK8TX3|trained|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-ocean_extra-ft_correct_OSC_OHC_50Ep|rs0|01KJER4YZYF4KZMF81MVMEBNVJ|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-ocean_extra-ft_correct_OSC_OHC_50Ep|rs0-ep116||run_ICx1|best_ckpt|high|--not-preemptible||01KJGEMHYZ6646KD7V4B69WS7T
+1pct_nosmooth_0256to0350-ocean_extra-ft_correct_OSC_OHC_50Ep|rs0-ep116||run_insample|best_ckpt|high|--not-preemptible||01KJGEMHYZ6646KD7V4B69WS7T
 
 1pct_nosmooth_0256to0350-ocean_extra-ft_MLD|rs0|01KJEZ5S4KXT89A304SEG2ZB83|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-ocean_extra-ft_MLDgeo|rs0|01KJEZ681QFBBWY6WDVMM2CC49|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-ocean_extra-ft_MLD_OHC|rs0|01KJFYKA502JX13Q160CM4G55A|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-ocean_extra-ft_MLD_OHC|rs0-ep7||run_ICx1|best_ckpt|high|--not-preemptible||01KJFYKAG2RDF7SGYVT51WTPF0
+1pct_nosmooth_0256to0350-ocean_extra-ft_MLD_OHC|rs0-ep7||run_insample|best_ckpt|high|--not-preemptible||01KJFYKAG2RDF7SGYVT51WTPF0
 
 1pct_nosmooth_0256to0350-ocean_extra-ft_MLDsoft0p01_OHC|rs0|01KJG37VJNDE0JQWXTQ4C8XP3E|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-ocean_extra-ft_MLDsoft0p01_OHC|rs0-ep4||run_ICx1|best_ckpt|high|--not-preemptible||01KJG37VQ9EQDQY8C03BYZ1PEK
+1pct_nosmooth_0256to0350-ocean_extra-ft_MLDsoft0p01_OHC|rs0-ep4||run_insample|best_ckpt|high|--not-preemptible||01KJG37VQ9EQDQY8C03BYZ1PEK
 
 1pct_nosmooth_0256to0350-ocean_extra-ft_MLDsoft0p01geo_OHC|rs0|01KJGDYYKT183J9S3P74MZHM17|training|best_inference_ckpt|normal|--not-preemptible
 
