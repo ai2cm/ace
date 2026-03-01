@@ -17,6 +17,7 @@ from fme.core.corrector.ocean import (
     OceanHeatContentBudgetConfig,
     OceanSaltContentBudgetConfig,
     SeaIceFractionConfig,
+    dz_from_idepth,
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.mask_provider import MaskProvider
@@ -51,9 +52,12 @@ class _MockDepth:
     def get_idepth(self) -> torch.Tensor:
         return torch.tensor([0, 5, 15], device=DEVICE)
 
-    def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
-        thickness = self.get_idepth().diff(dim=-1)
-        return torch.nansum(_MASK * integrand * thickness, dim=-1)
+    def depth_integral(
+        self, integrand: torch.Tensor, sea_floor_depth: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        idepth = self.get_idepth()
+        dz = dz_from_idepth(idepth, sea_floor_depth)
+        return torch.nansum(_MASK * integrand * dz, dim=-1)
 
     def build_output_masker(self):
         raise NotImplementedError
@@ -63,6 +67,18 @@ class _MockDepth:
 
 
 _VERTICAL_COORD = _MockDepth()
+
+
+def test_ocean_corrector_raises_on_missing_forcing_keys_in_input():
+    config = OceanCorrectorConfig()
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = OceanCorrector(config, ops, None, timestep)
+    input_data = {"a": torch.zeros(IMG_SHAPE)}
+    gen_data = {"a": torch.zeros(IMG_SHAPE)}
+    forcing_data = {"b": torch.zeros(IMG_SHAPE), "c": torch.zeros(IMG_SHAPE)}
+    with pytest.raises(RuntimeError, match=r"\['b', 'c'\]"):
+        corrector(input_data, gen_data, forcing_data)
 
 
 def test_ocean_corrector_force_positive():
@@ -265,6 +281,8 @@ def test_ocean_heat_content_correction(hfds_type):
         "thetao_0": torch.ones(nsamples, nlat, nlon),
         "thetao_1": torch.ones(nsamples, nlat, nlon),
         "sst": torch.ones(nsamples, nlat, nlon) + 273.15,
+        "hfgeou": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": sea_surface_fraction,
     }
     gen_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon) * 2,
@@ -329,6 +347,99 @@ def test_ocean_heat_content_correction(hfds_type):
     )
 
 
+def test_ocean_heat_content_correction_dz_3d():
+    """Verify OHC correction uses deptho from forcing_data for the depth integral.
+
+    With deptho=15 and idepth=[2.5, 10, 20], the bottom layer effective thickness
+    is truncated from 10m to 5m, giving a total column depth of 12.5m instead of
+    17.5m.  This changes both the gen OHC and the correction ratio compared to
+    the no-deptho case.
+    """
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+            constant_unaccounted_heating=0.1,
+        )
+    )
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
+    mask = torch.ones(nsamples, nlat, nlon, nlevels)
+    mask[:, 0, 0, 0] = 0.0
+    mask[:, 0, 0, 1] = 0.0
+    mask[:, 0, 1, 1] = 0.0
+    masks = {
+        "mask_0": mask[:, :, :, 0],
+        "mask_1": mask[:, :, :, 1],
+        "mask_2d": mask[:, :, :, 0],
+    }
+    mask_provider = MaskProvider(masks)
+    ops = LatLonOperations(torch.ones(size=[3, 3]), mask_provider)
+
+    idepth = torch.tensor([2.5, 10, 20])
+    depth_coordinate = DepthCoordinate(idepth, mask)
+
+    sea_surface_fraction = mask[:, :, :, 0]
+    deptho = torch.full((nsamples, nlat, nlon), 15.0)
+
+    input_data_dict = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon),
+        "thetao_1": torch.ones(nsamples, nlat, nlon),
+        "sst": torch.ones(nsamples, nlat, nlon) + 273.15,
+        "hfds": torch.ones(nsamples, nlat, nlon),
+        "hfgeou": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": sea_surface_fraction,
+        "deptho": deptho,
+    }
+    gen_data_dict = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon) * 2,
+        "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
+        "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
+    }
+    forcing_data_dict = {
+        "hfgeou": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": sea_surface_fraction,
+        "deptho": deptho,
+    }
+
+    input_data = OceanData(input_data_dict, depth_coordinate)
+    gen_data = OceanData({**gen_data_dict, **forcing_data_dict}, depth_coordinate)
+
+    corrector = OceanCorrector(config, ops, depth_coordinate, timestep)
+    gen_data_corrected_dict = corrector(
+        input_data_dict, gen_data_dict, forcing_data_dict
+    )
+
+    input_ohc = input_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
+    gen_ohc = gen_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
+    torch.testing.assert_close(gen_ohc, input_ohc * 2, equal_nan=True)
+
+    ohc_change = 2.1 * timestep.total_seconds()
+    corrector_ratio = (input_ohc + ohc_change) / gen_ohc
+
+    expected_gen_data_dict = {
+        key: value * corrector_ratio if key.startswith("thetao") else value
+        for key, value in gen_data_dict.items()
+    }
+    expected_gen_data_dict["sst"] = (
+        gen_data_dict["sst"] - 273.15
+    ) * corrector_ratio + 273.15
+
+    torch.testing.assert_close(
+        gen_data_corrected_dict["sst"],
+        expected_gen_data_dict["sst"],
+    )
+
+    expected_gen_data = OceanData(
+        {**expected_gen_data_dict, **forcing_data_dict}, depth_coordinate
+    )
+    gen_data_corrected = OceanData(gen_data_corrected_dict, depth_coordinate)
+    torch.testing.assert_close(
+        expected_gen_data.ocean_heat_content,
+        gen_data_corrected.ocean_heat_content,
+        equal_nan=True,
+    )
+
+
 @pytest.mark.parametrize(
     "wfo_type",
     [
@@ -368,6 +479,7 @@ def test_ocean_salt_content_correction(wfo_type):
     input_data_dict = {
         "so_0": torch.ones(nsamples, nlat, nlon),
         "so_1": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": sea_surface_fraction,
     }
     gen_data_dict = {
         "so_0": torch.ones(nsamples, nlat, nlon) * 2,
@@ -442,12 +554,18 @@ def _mld_input_gen_forcing(mask, *, gen_temp_surface=20.0, gen_temp_deep=5.0):
     shape = (_MLD_NSAMPLES, _MLD_NLAT, _MLD_NLON)
     ssf = mask[:, :, :, 0]
 
+    forcing_data = {
+        "hfgeou": torch.ones(shape) * 0.05,
+        "sea_surface_fraction": ssf,
+        "deptho": torch.full(shape, 1000.0),
+    }
     input_data = {
         **{f"thetao_{k}": torch.ones(shape) for k in range(_MLD_NZ)},
         **{f"so_{k}": torch.ones(shape) * 35.0 for k in range(_MLD_NZ)},
         "sst": torch.ones(shape) + 273.15,
         "hfds": torch.ones(shape),
         "wfo": torch.ones(shape) * 0.5,
+        **forcing_data,
     }
     gen_data = {
         "thetao_0": torch.ones(shape) * gen_temp_surface,
@@ -456,11 +574,6 @@ def _mld_input_gen_forcing(mask, *, gen_temp_surface=20.0, gen_temp_deep=5.0):
         "thetao_3": torch.ones(shape) * gen_temp_deep,
         **{f"so_{k}": torch.ones(shape) * 35.0 for k in range(_MLD_NZ)},
         "sst": torch.ones(shape) * gen_temp_surface + 273.15,
-    }
-    forcing_data = {
-        "hfgeou": torch.ones(shape) * 0.05,
-        "sea_surface_fraction": ssf,
-        "deptho": torch.full(shape, 1000.0),
     }
     return input_data, gen_data, forcing_data
 

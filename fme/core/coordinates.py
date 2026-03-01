@@ -14,7 +14,11 @@ from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
 from fme.core.corrector.atmosphere import AtmosphereCorrector, AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrector, IceCorrectorConfig
-from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
+from fme.core.corrector.ocean import (
+    OceanCorrector,
+    OceanCorrectorConfig,
+    dz_from_idepth,
+)
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
@@ -503,13 +507,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        if sea_floor_depth is not None:
-            z_top = self.idepth[..., :-1]
-            z_bot = self.idepth[..., 1:]
-            sea_floor_depth = sea_floor_depth.unsqueeze(-1)
-            dz = torch.clamp(sea_floor_depth, min=z_top, max=z_bot) - z_top
-        else:
-            dz = self.idepth.diff(dim=-1)
+        dz = dz_from_idepth(self.idepth, sea_floor_depth)
         integral = (integrand * dz * self.mask).nansum(dim=-1)
         mask = self.get_mask_level(0).expand(integral.shape)
         return integral.where(mask > 0, float("nan"))

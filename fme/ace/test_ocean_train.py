@@ -297,6 +297,7 @@ def _setup(
         "sea_surface_fraction",
         "sea_ice_fraction",
         "land_fraction",
+        "deptho",
     ]
     out_variable_names = [
         "thetao_0",

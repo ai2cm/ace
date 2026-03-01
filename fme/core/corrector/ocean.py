@@ -218,6 +218,13 @@ class OceanCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
     ) -> TensorDict:
+        missing = set(forcing_data) - set(input_data)
+        if missing:
+            raise RuntimeError(
+                f"input_data is missing keys that are present in forcing_data: "
+                f"{sorted(missing)}. Forcing variables must be included in "
+                f"input_data for the ocean corrector to work correctly."
+            )
         if len(self._config.force_positive_names) > 0:
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.sea_ice_fraction_correction is not None:
@@ -267,6 +274,19 @@ class AreaWeightedMean(Protocol):
     ) -> torch.Tensor: ...
 
 
+def dz_from_idepth(
+    idepth: torch.Tensor, sea_floor_depth: torch.Tensor | None = None
+) -> torch.Tensor:
+    if sea_floor_depth is not None:
+        z_top = idepth[..., :-1]
+        z_bot = idepth[..., 1:]
+        sea_floor_depth = sea_floor_depth.unsqueeze(-1)
+        dz = torch.clamp(sea_floor_depth, min=z_top, max=z_bot) - z_top
+    else:
+        dz = idepth.diff(dim=-1)
+    return dz
+
+
 def _force_conserve_ocean_heat_content(
     input_data: TensorMapping,
     gen_data: TensorMapping,
@@ -295,7 +315,7 @@ def _force_conserve_ocean_heat_content(
         raise ValueError(
             "ocean_heat_content is required to force ocean heat content conservation"
         )
-    gen = OceanData(gen_data, vertical_coordinate)
+    gen = OceanData({**gen_data, **forcing_data}, vertical_coordinate)
     forcing = OceanData(forcing_data)
 
     if method in ("mixed_layer_depth_geo", "mixed_layer_depth_soft_geo"):
@@ -471,7 +491,7 @@ def _force_conserve_ocean_salt_content(
             "forcing_data."
         )
     input = OceanData(input_data, vertical_coordinate)
-    gen = OceanData(gen_data, vertical_coordinate)
+    gen = OceanData({**gen_data, **forcing_data}, vertical_coordinate)
     forcing = OceanData(forcing_data)
 
     global_gen_salt_content = area_weighted_mean(
