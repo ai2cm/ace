@@ -50,6 +50,7 @@ class HasOceanDepthIntegral(Protocol):
     def depth_integral(
         self,
         integrand: torch.Tensor,
+        sea_floor_depth: torch.Tensor | None = None,
     ) -> torch.Tensor: ...
 
     def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
@@ -162,11 +163,19 @@ class OceanData:
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean heat content."
             )
-        return self._depth_coordinate.depth_integral(
-            self.sea_water_potential_temperature
-            * SPECIFIC_HEAT_OF_WATER_CM4
-            * DENSITY_OF_WATER_CM4
-        )
+        try:
+            return self._depth_coordinate.depth_integral(
+                self.sea_water_potential_temperature
+                * SPECIFIC_HEAT_OF_WATER_CM4
+                * DENSITY_OF_WATER_CM4,
+                sea_floor_depth=self.sea_floor_depth,
+            )
+        except KeyError:
+            return self._depth_coordinate.depth_integral(
+                self.sea_water_potential_temperature
+                * SPECIFIC_HEAT_OF_WATER_CM4
+                * DENSITY_OF_WATER_CM4,
+            )
 
     @property
     def ocean_salt_content(self) -> torch.Tensor:

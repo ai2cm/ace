@@ -474,7 +474,11 @@ class DepthCoordinate(VerticalCoordinate):
     def as_dict(self) -> TensorMapping:
         return {"idepth": self.idepth, "mask": self.mask}
 
-    def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
+    def depth_integral(
+        self,
+        integrand: torch.Tensor,
+        sea_floor_depth: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Compute the depth integral of the integrand.
 
         ∫ x dz
@@ -484,6 +488,7 @@ class DepthCoordinate(VerticalCoordinate):
 
         Args:
             integrand: A tensor whose last dimension is the vertical.
+            sea_floor_depth: Optional 2D sea floor depth tensor.
 
         Returns:
             A tensor of same shape as integrand but without the last dimension.
@@ -498,10 +503,16 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        layer_thickness = self.idepth.diff(dim=-1)
-        ohc = (integrand * layer_thickness * self.mask).nansum(dim=-1)
-        mask = self.get_mask_level(0).expand(ohc.shape)
-        return ohc.where(mask > 0, float("nan"))
+        if sea_floor_depth is not None:
+            z_top = self.idepth[..., :-1]
+            z_bot = self.idepth[..., 1:]
+            sea_floor_depth = sea_floor_depth.unsqueeze(-1)
+            dz = torch.clamp(sea_floor_depth, min=z_top, max=z_bot) - z_top
+        else:
+            dz = self.idepth.diff(dim=-1)
+        integral = (integrand * dz * self.mask).nansum(dim=-1)
+        mask = self.get_mask_level(0).expand(integral.shape)
+        return integral.where(mask > 0, float("nan"))
 
 
 @dataclasses.dataclass

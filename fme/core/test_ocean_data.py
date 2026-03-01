@@ -187,3 +187,100 @@ def test_getitem():
         AttributeError, match="object has no attribute 'nonexistent_field'"
     ):
         _ = ocean_data["nonexistent_field"]
+
+
+def _make_ohc_test_data(
+    n_samples, n_time_steps, nlat, nlon, nlevels, deptho_value=None
+):
+    """Helper to build OceanData with uniform temperature and optional deptho."""
+    shape_2d = (n_samples, n_time_steps, nlat, nlon)
+    data = {f"thetao_{i}": torch.ones(shape_2d) for i in range(nlevels)}
+    if deptho_value is not None:
+        data["deptho"] = torch.full(shape_2d, deptho_value)
+    idepth = torch.tensor([2.5, 10, 20])
+    mask = torch.ones(n_samples, n_time_steps, nlat, nlon, nlevels)
+    depth_coordinate = DepthCoordinate(idepth, mask)
+    return OceanData(data, depth_coordinate), idepth
+
+
+def test_ocean_heat_content_with_deep_sea_floor():
+    """When deptho exceeds the deepest interface, OHC matches the no-deptho case."""
+    n_samples, n_time_steps, nlat, nlon, nlevels = 2, 2, 3, 4, 2
+
+    ocean_data_with, idepth = _make_ohc_test_data(
+        n_samples, n_time_steps, nlat, nlon, nlevels, deptho_value=100.0
+    )
+    ocean_data_without, _ = _make_ohc_test_data(
+        n_samples, n_time_steps, nlat, nlon, nlevels, deptho_value=None
+    )
+
+    ohc_with = ocean_data_with.ocean_heat_content
+    ohc_without = ocean_data_without.ocean_heat_content
+
+    assert ohc_with.shape == (n_samples, n_time_steps, nlat, nlon)
+    torch.testing.assert_close(ohc_with, ohc_without)
+
+    lev_thickness = idepth.diff(dim=-1)
+    expected_total = torch.tensor(
+        SPECIFIC_HEAT_OF_WATER_CM4
+        * DENSITY_OF_WATER_CM4
+        * n_samples
+        * n_time_steps
+        * nlat
+        * nlon
+        * lev_thickness.sum().item()
+    )
+    torch.testing.assert_close(ohc_with.nansum(), expected_total, rtol=1e-6, atol=0)
+
+
+def test_ocean_heat_content_with_shallow_sea_floor():
+    """When deptho is shallower than some layers, OHC is reduced."""
+    n_samples, n_time_steps, nlat, nlon, nlevels = 2, 2, 3, 4, 2
+
+    ocean_data_shallow, idepth = _make_ohc_test_data(
+        n_samples, n_time_steps, nlat, nlon, nlevels, deptho_value=15.0
+    )
+    ocean_data_full, _ = _make_ohc_test_data(
+        n_samples, n_time_steps, nlat, nlon, nlevels, deptho_value=None
+    )
+
+    ohc_shallow = ocean_data_shallow.ocean_heat_content
+    ohc_full = ocean_data_full.ocean_heat_content
+
+    assert ohc_shallow.shape == (n_samples, n_time_steps, nlat, nlon)
+
+    # deptho = 15:
+    # layer 0 dz = clamp(15, 2.5, 10) - 2.5 = 7.5,
+    # layer 1 dz = clamp(15, 10, 20) - 10 = 5
+    expected_dz = 7.5 + 5.0
+    n_cells = n_samples * n_time_steps * nlat * nlon
+    expected_total = torch.tensor(
+        SPECIFIC_HEAT_OF_WATER_CM4 * DENSITY_OF_WATER_CM4 * n_cells * expected_dz
+    )
+    torch.testing.assert_close(ohc_shallow.nansum(), expected_total, rtol=1e-6, atol=0)
+
+    assert ohc_shallow.nansum() < ohc_full.nansum()
+
+
+def test_ocean_heat_content_without_deptho_fallback():
+    """When deptho is absent, ocean_heat_content falls back to full-column integral."""
+    n_samples, n_time_steps, nlat, nlon, nlevels = 2, 2, 3, 4, 2
+
+    ocean_data, idepth = _make_ohc_test_data(
+        n_samples, n_time_steps, nlat, nlon, nlevels, deptho_value=None
+    )
+
+    ohc = ocean_data.ocean_heat_content
+    assert ohc.shape == (n_samples, n_time_steps, nlat, nlon)
+
+    lev_thickness = idepth.diff(dim=-1)
+    expected_total = torch.tensor(
+        SPECIFIC_HEAT_OF_WATER_CM4
+        * DENSITY_OF_WATER_CM4
+        * n_samples
+        * n_time_steps
+        * nlat
+        * nlon
+        * lev_thickness.sum().item()
+    )
+    torch.testing.assert_close(ohc.nansum(), expected_total, rtol=1e-6, atol=0)
