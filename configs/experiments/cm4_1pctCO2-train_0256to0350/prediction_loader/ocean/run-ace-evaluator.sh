@@ -2,10 +2,18 @@
 
 set -e
 
-JOB_NAME="cm4_1pctCO2_reference-ic0211_140yrs"
-JOB_GROUP="cm4_1pctCO2_reference"
+CONFIG_FILENAME="${1:-ace-evaluator-config.yaml}"
+JOB_NAME="${CONFIG_FILENAME%.yaml}"
+
+shift || true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --job-name) JOB_NAME="$2"; shift 2;;
+    *) echo "Unknown option: $1"; exit 1;;
+  esac
+done
+
 EXISTING_RESULTS_DATASET="01KFAC2F8DWGQ60JQF4G18HPCH" # determines variables
-CONFIG_FILENAME="ace-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -30,7 +38,6 @@ gantry run \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
-    --env WANDB_RUN_GROUP=$JOB_GROUP \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
