@@ -29,7 +29,7 @@ inference:
         - data_path: /climate-default
           file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
           engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator:
     log_histograms: false
 logging:
@@ -40,7 +40,7 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 16
+  num_data_workers: 8
   dataset:
     merge:
       - data_path: /climate-default
