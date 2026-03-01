@@ -28,3 +28,5 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 1pct_nosmooth_0256to0350-ocean_extra-ft_MLDgeo_OHC|rs0|01KJGDZDDC6QXGK7PV7BTM6YND|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-ocean_extra-ft_MLDsoft0p01geo_OHC-dz_3d|rs0|01KJM73A8J729AF6BB0FV3WZKW|training|best_inference_ckpt|normal|--not-preemptible
+
+1pct_nosmooth_0256to0350-ocean_extra-ft_MLDgeo_OHC-dz_3d|rs0|01KJM73SNZDGCGDA7QWVAB4551|training|best_inference_ckpt|normal|--not-preemptible
