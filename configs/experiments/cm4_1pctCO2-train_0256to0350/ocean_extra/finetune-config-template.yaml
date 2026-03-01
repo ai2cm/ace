@@ -81,3 +81,5 @@ optimization:
 stepper_training:
   parameter_init:
     weights_path: /ckpt.tar
+  loss:
+    type: MSE
