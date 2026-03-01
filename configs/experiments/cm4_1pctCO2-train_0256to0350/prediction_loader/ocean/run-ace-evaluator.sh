@@ -13,7 +13,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-EXISTING_RESULTS_DATASET="01KFAC2F8DWGQ60JQF4G18HPCH" # determines variables
+EXISTING_RESULTS_DATASET="01KHS85RQR6Q78PDR0PESK3YM5" # determines variables
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
