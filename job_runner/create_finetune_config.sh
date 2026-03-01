@@ -12,8 +12,11 @@ cp $TEMPLATE_CONFIG_PATH $CONFIG_PATH
 
 # NOTE: requires yq >= 4
 
-# update the coupled stepper config, without modifying template parameter_init
-yq -i '.stepper *= load("config.yaml").stepper' $CONFIG_PATH
+# Remove training-specific fields from loaded stepper configs
+yq -i 'del(.stepper.loss, .stepper.optimize_last_step_only, .stepper.n_ensemble, .stepper.parameter_init, .stepper.train_n_forward_step)' ./config.yaml
+
+# update stepper config, preserving template values on conflict
+yq -i '.stepper *=n load("config.yaml").stepper' $CONFIG_PATH
 
 # cleanup
 rm ./config.yaml
