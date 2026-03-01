@@ -78,9 +78,12 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-stepper:
+stepper_training:
+  parameter_init:
+    weights_path: /ckpt.tar
   loss:
     type: MSE
+stepper:
   input_masking:
     mask_value: 0
     fill_value: 0.0
@@ -356,5 +359,3 @@ stepper:
         - tauuo
         - tauvo
         - wfo
-  parameter_init:
-    weights_path: /ckpt.tar
