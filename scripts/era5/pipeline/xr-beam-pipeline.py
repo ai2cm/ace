@@ -10,6 +10,8 @@ import xarray as xr
 import xarray_beam as xbeam
 import xesmf as xe
 from apache_beam.options.pipeline_options import PipelineOptions
+from obstore.store import from_url
+from zarr.storage import ObjectStore
 
 GRAVITY = 9.80665
 TIME_STEP = 6  # hours between output timesteps
@@ -255,9 +257,17 @@ def _to_geopotential_height(geopotential: xr.DataArray) -> xr.DataArray:
 # ---------------------------------------------------------------------------
 
 
+def _make_zarr_store(url: str, read_only: bool = True):
+    """Create a zarr store from a URL using obstore. If local, just return the path."""
+    if url.startswith("gs://"):
+        return ObjectStore(from_url(url), read_only=read_only)
+    else:
+        return url
+
+
 def open_full_37(variables, time_slice) -> xr.Dataset:
     """Open variables from the full_37 ARCO-ERA5 store."""
-    ds = xr.open_zarr(URL_FULL_37, chunks=None)
+    ds = xr.open_zarr(_make_zarr_store(URL_FULL_37), chunks=None)
     ds = ds[variables]
     if time_slice is not None:
         _check_time_bounds(ds, time_slice)
@@ -267,7 +277,7 @@ def open_full_37(variables, time_slice) -> xr.Dataset:
 
 def open_model_level(variables, time_slice) -> xr.Dataset:
     """Open variables from the model-level ARCO-ERA5 store."""
-    ds = xr.open_zarr(URL_MODEL_LEVEL, chunks=None)
+    ds = xr.open_zarr(_make_zarr_store(URL_MODEL_LEVEL), chunks=None)
     ds = ds[variables]
     _check_time_bounds(ds, time_slice)
     ds = ds.sel(time=time_slice)
@@ -275,7 +285,7 @@ def open_model_level(variables, time_slice) -> xr.Dataset:
 
 
 def open_co2_dataset(start_time, end_time) -> xr.Dataset:
-    co2 = xr.open_zarr(URL_CO2, chunks=None)
+    co2 = xr.open_zarr(_make_zarr_store(URL_CO2), chunks=None)
     ds_start = pd.Timestamp(co2.time.values[0])
     ds_stop = pd.Timestamp(co2.time.values[-1])
     assert start_time >= ds_start, "CO2 dataset time start out of bounds"
@@ -430,8 +440,8 @@ def _process_pressure_level_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset
                 pressure_levels = OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL
             else:
                 pressure_levels = OUTPUT_PRESSURE_LEVELS
+            logging.info(f"Subselecting desired pressure levels for {name}")
             for pressure in pressure_levels:
-                logging.info(f"Selecting {name} at {pressure} hPa")
                 out_name = f"{name}_{pressure}"
                 select_levels[out_name] = ds[name].sel(level=pressure)
                 if name == "geopotential":
@@ -522,7 +532,7 @@ def _vertical_coarsen(
         dp_fine = dp.isel(hybrid=fine_slice)
         weighted = (var_fine * dp_fine).sum("hybrid")
         total_dp = dp_fine.sum("hybrid")
-        results[i] = weighted / total_dp
+        results[i] = (weighted / total_dp).astype(np.float32)
     return results
 
 
@@ -710,6 +720,9 @@ def _make_template(
         join="outer",
     ).squeeze()
 
+    # drop encoding (otherwise hit https://github.com/pydata/xarray/issues/10032)
+    ds_regridded = ds_regridded.drop_encoding()
+
     # Build template with full time coordinate
     template = xbeam.make_template(ds_regridded.drop_vars("time", errors="ignore"))
     template = template.expand_dims(dim={"time": output_time}, axis=0)
@@ -718,6 +731,8 @@ def _make_template(
     # Invariant + ak/bk written eagerly (not chunked)
     inv_fields = xr.merge([ds_inv_regridded, ds_akbk])
     inv_fields = inv_fields.drop_vars("time", errors="ignore")
+    inv_fields = inv_fields.drop_encoding()
+    ds_co2 = ds_co2.drop_encoding()
     template.update(inv_fields)
     template.update(ds_co2)
 
@@ -779,6 +794,7 @@ def _get_parser():
 def main():
     parser = _get_parser()
     args, pipeline_args = parser.parse_known_args()
+    print(pipeline_args)
 
     start_time = datetime.datetime.strptime(args.start_time, "%Y-%m-%dT%H:%M:%S")
     end_time = datetime.datetime.strptime(args.end_time, "%Y-%m-%dT%H:%M:%S")
@@ -856,6 +872,8 @@ def main():
     )
 
     logging.info("Template finished generating. Starting pipeline.")
+    output_store = _make_zarr_store(args.output_path, read_only=False)
+    print(PipelineOptions(pipeline_args).get_all_options())
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
         # Stream 1: Mean flux
         # Chunk by 6 hourly timesteps; each chunk of 6 hours -> 1 output timestep
@@ -866,7 +884,7 @@ def main():
             | "mean_flux_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "mean_flux_to_zarr"
             >> xbeam.ChunksToZarr(
-                args.output_path,
+                output_store,
                 template,
                 zarr_chunks=output_chunks,
                 zarr_shards=output_shards,
@@ -887,7 +905,7 @@ def main():
             | "sfc_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "sfc_to_zarr"
             >> xbeam.ChunksToZarr(
-                args.output_path,
+                output_store,
                 template,
                 zarr_chunks=output_chunks,
                 zarr_shards=output_shards,
@@ -904,7 +922,7 @@ def main():
             | "pl_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "pl_to_zarr"
             >> xbeam.ChunksToZarr(
-                args.output_path,
+                output_store,
                 template,
                 zarr_chunks=output_chunks,
                 zarr_shards=output_shards,
@@ -928,7 +946,7 @@ def main():
             | "ml_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "ml_to_zarr"
             >> xbeam.ChunksToZarr(
-                args.output_path,
+                output_store,
                 template,
                 zarr_chunks=output_chunks,
                 zarr_shards=output_shards,
@@ -938,6 +956,6 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    logging.getLogger().setLevel(logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
+    logging.getLogger().setLevel(logging.DEBUG)
     main()
