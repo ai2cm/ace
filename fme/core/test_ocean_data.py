@@ -47,7 +47,7 @@ def test_column_integrated_ocean_heat_content(has_depth_coordinate: bool):
         )
     else:
         ocean_data = OceanData(data)
-        with pytest.raises(ValueError, match="Depth coordinate must be provided"):
+        with pytest.raises(RuntimeError, match="Depth coordinate must be provided"):
             _ = ocean_data.ocean_heat_content
 
 
