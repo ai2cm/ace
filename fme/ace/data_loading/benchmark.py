@@ -15,6 +15,7 @@ import yaml
 
 from fme.core import logging_utils
 from fme.core.dicts import to_flat_dict
+from fme.core.distributed.distributed import Distributed
 from fme.core.timing import GlobalTimer
 from fme.core.wandb import WandB
 
@@ -122,4 +123,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with Distributed.context():
+        main()
