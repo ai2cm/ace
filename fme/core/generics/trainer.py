@@ -63,7 +63,6 @@ from typing import Any, ClassVar, Generic, Protocol, TypeVar
 import torch
 
 import fme
-from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
@@ -303,42 +302,6 @@ class Trainer:
         dist = Distributed.get_instance()
         return self.config.save_checkpoint and dist.is_root()
 
-    def _run_inference_with_error_sync(self) -> dict[str, Any]:
-        """
-        Run inference and sync any exception across ranks so all processes
-        exit cleanly (avoids other ranks hanging on NCCL/collective errors).
-        """
-        dist = Distributed.get_instance()
-        error_flag = 0
-        result: dict[str, Any] | None = None
-        stored_exception: BaseException | None = None
-        try:
-            result = self.inference_one_epoch()
-        except Exception as e:
-            logging.exception("Inference failed")
-            error_flag = 1
-            stored_exception = e
-
-        # Sync error flag so all ranks exit if any rank failed
-        error_tensor = torch.tensor(
-            [error_flag], dtype=torch.int64, device=get_device()
-        )
-        try:
-            dist.reduce_max(error_tensor)
-        except Exception as e2:
-            if stored_exception is not None:
-                raise stored_exception from e2
-            raise
-
-        if error_tensor.item() != 0:
-            if stored_exception is not None:
-                raise stored_exception
-            raise RuntimeError(
-                "Inference failed on another rank (see logs for details)"
-            )
-        assert result is not None
-        return result
-
     def train(self):
         logging.info("Starting Training Loop...")
 
@@ -359,7 +322,7 @@ class Trainer:
             valid_logs = self.validate_one_epoch()
             if self._epochs_trained in inference_epochs:
                 logging.info("Starting inline inference before training")
-                inference_logs = self._run_inference_with_error_sync()
+                inference_logs = self.inference_one_epoch()
             else:
                 inference_logs = {}
             valid_loss = valid_logs["val/mean/loss"]
@@ -383,7 +346,7 @@ class Trainer:
             valid_logs = self.validate_one_epoch()
             valid_end = time.time()
             if self._epochs_trained in inference_epochs:
-                inference_logs = self._run_inference_with_error_sync()
+                inference_logs = self.inference_one_epoch()
                 inference_end: float | None = time.time()
             else:
                 inference_logs = {}
@@ -764,11 +727,7 @@ def inference_one_epoch(
     logging.info("Starting flush of reduced diagnostics to disk")
     aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
     logging.info("Getting inline inference aggregator logs")
-    Distributed.get_instance().barrier()
     logs = aggregator.get_summary_logs()
-    inference_error_val = logs.get("time_mean_norm/rmse/channel_mean")
-    if inference_error_val is not None:
-        logging.info(f"Inference error: {inference_error_val}")
     return {f"{label}/{k}": v for k, v in logs.items()}
 
 
