@@ -42,13 +42,13 @@ model:
   churn: 0.0
   training_noise_distribution:
     p_min: 0.02
-    p_max: 150.0
+    p_max: 200.0
   predict_residual: true
-  sigma_max: 150.0
+  sigma_max: 200.0
   sigma_min: 0.002
   use_fine_topography: true
 optimization:
-  lr: 0.00005 #0.0001
+  lr: 0.0001
   optimizer_type: Adam
 ema:
   decay: 0.999
@@ -134,7 +134,7 @@ validation_data:
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
 max_epochs: 300
-validate_interval: 10
+validate_interval: 15
 experiment_dir: /results #/climate-default/home/annak/scratch/2026-02-10-downsc-add-pressfc/3km_bf16
 save_checkpoints: false
 logging:
