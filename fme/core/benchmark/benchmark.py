@@ -322,14 +322,14 @@ class BenchmarkABC(abc.ABC):
             cpu_timer.record_start()
             for _ in range(iters):
                 with timer:
-                    benchmark_result = benchmark.run_instance(timer)
+                    last_iter_result = benchmark.run_instance(timer)
             torch.cuda.synchronize()
             cpu_timer.record_end()
         return BenchmarkResult(
             timer=timer.result,
             cpu_time=cpu_timer.elapsed_time_ms(),
             memory=bm.result,
-            diagnostics=benchmark_result.get("diagnostics", {}),
+            diagnostics=last_iter_result.get("diagnostics", {}),
         )
 
     @classmethod
