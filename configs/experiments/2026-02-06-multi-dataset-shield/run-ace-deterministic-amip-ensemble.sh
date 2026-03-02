@@ -21,7 +21,8 @@ INITIAL_CONDITIONS=( \
 )
 
 declare -A MODELS=( \
-    [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
+    # [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
+    ["ACE2-SHiELD"]="brianhenn/shield-amip-1deg-ace2-train-RS2-best-inference-ckpt" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
