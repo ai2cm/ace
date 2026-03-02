@@ -19,13 +19,13 @@ class TimeCoarsenConfig:
     Configuration for time coarsening of a dataset.
 
     Attributes:
-        input_path: Path to the input dataset.
-        output_path: Path to save the coarsened dataset as a zarr store.
-        coarsen_factor: Factor by which to coarsen the time dimension.
+        factor: Factor by which to coarsen the time dimension.
+        data_output_directory: Directory to save the coarsened datasets as zarr stores.
+        stats_output_directory: Directory to save the stats of the coarsened datasets.
         snapshot_names: List of snapshot variable names to coarsen. These will be
-            coarsened by skipping each coarsen_factor times.
+            coarsened by skipping each factor times.
         window_names: List of window variable names to coarsen. These will be
-            coarsened by averaging over each coarsen_factor times.
+            coarsened by averaging over each factor times.
         constant_prefixes: List of prefixes for constant data variables to copy without
             modification. Raises an exception if any of these have a "time" dimension.
     """
