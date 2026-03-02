@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni-conus-18st"
-CONFIG_FILENAME="eval-100-to-3km-prmsl-conus.yaml"
+JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-skewlog-events-18st"
+CONFIG_FILENAME="eval-100-to-3km-prmsl-output.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -19,7 +19,7 @@ NGPU=2
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET=01KJG6E05ZVP82W8EMSV39SQA3  # best hist checkpoint from cont training job 01K51T9H7V9HGZR501XYN5VNGV
+EXISTING_RESULTS_DATASET=01KJGPG0MR2M7CEYABSQDG9PCM  # skw log normal
 wandb_group=""
 
 gantry run \

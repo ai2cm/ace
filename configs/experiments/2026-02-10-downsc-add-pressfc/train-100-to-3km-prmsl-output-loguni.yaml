@@ -41,10 +41,8 @@ model:
   num_diffusion_generation_steps: 18
   churn: 0.0
   training_noise_distribution:
-    p_mean: -1.2
-    p_std: 2.0
-    #p_min: 0.02
-    #p_max: 150.0
+    p_min: 0.02
+    p_max: 150.0
   predict_residual: true
   sigma_max: 150.0
   sigma_min: 0.002
@@ -135,7 +133,7 @@ validation_data:
   strict_ensemble: false
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 41 #300
+max_epochs: 300
 validate_interval: 10
 experiment_dir: /results #/climate-default/home/annak/scratch/2026-02-10-downsc-add-pressfc/3km_bf16
 save_checkpoints: false
