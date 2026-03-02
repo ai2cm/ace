@@ -2,11 +2,15 @@ import argparse
 import dataclasses
 import logging
 import os
-from typing import Literal, Mapping
+import sys
+from typing import Mapping
 
 import dacite
 import xarray as xr
 import yaml
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from get_stats import StatsConfig
 
 
 @dataclasses.dataclass
@@ -32,19 +36,6 @@ class TimeCoarsenConfig:
     snapshot_names: list[str]
     window_names: list[str]
     constant_prefixes: list[str]
-
-
-ClimateDataType = Literal["FV3GFS", "E3SMV2", "ERA5", "CM4"]
-
-
-@dataclasses.dataclass
-class StatsConfig:
-    output_directory: str
-    data_type: ClimateDataType
-    exclude_runs: list[str] = dataclasses.field(default_factory=list)
-    start_date: str | None = None
-    end_date: str | None = None
-    beaker_dataset: str | None = None
 
 
 @dataclasses.dataclass
