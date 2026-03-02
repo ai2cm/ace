@@ -40,7 +40,7 @@ class NonDistributed(DistributedBackend):
     def total_data_parallel_ranks(self) -> int:
         return self.total_ranks  # no model parallelism
 
-    def get_local_slices(self, tensor_shape, rank: int, data_parallel_dim: int | None):
+    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None):
         return tuple(slice(None, None) for _ in tensor_shape)
 
     def local_batch_size(self, batch_size: int) -> int:
@@ -70,6 +70,9 @@ class NonDistributed(DistributedBackend):
             gather_list[0][:] = tensor
             return gather_list
         return [tensor]
+
+    def gather_object(self, obj: object) -> list[object] | None:
+        return [obj]
 
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
         return [tensor]

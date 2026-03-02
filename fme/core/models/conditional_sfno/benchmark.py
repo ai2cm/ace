@@ -7,8 +7,8 @@ from fme.core.benchmark.timer import Timer
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.conditional_sfno.sfnonet import FourierNeuralOperatorBlock
-from fme.core.models.conditional_sfno.sht import InverseRealSHT, RealSHT
 from fme.core.typing_ import TensorDict
+from fme.sht_fix import InverseRealSHT, RealSHT
 
 
 def get_block_benchmark(filter_num_groups: int) -> type[BenchmarkABC]:

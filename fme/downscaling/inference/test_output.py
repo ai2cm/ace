@@ -1,10 +1,12 @@
 from unittest.mock import MagicMock
 
 import pytest
+import torch
 
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.downscaling.data import ClosedInterval
+from fme.downscaling.data import ClosedInterval, StaticInput, StaticInputs
+from fme.downscaling.data.utils import LatLonCoordinates
 from fme.downscaling.inference.output import (
     DownscalingOutput,
     DownscalingOutputConfig,
@@ -15,6 +17,19 @@ from fme.downscaling.predictors import PatchPredictionConfig
 from fme.downscaling.requirements import DataRequirements
 
 # Tests for OutputTargetConfig validation
+
+
+def _get_static_inputs(shape=(8, 8)):
+    return StaticInputs(
+        fields=[
+            StaticInput(
+                data=torch.ones(shape),
+                coords=LatLonCoordinates(
+                    lat=torch.ones(shape[0]), lon=torch.ones(shape[1])
+                ),
+            )
+        ]
+    )
 
 
 def test_single_xarray_config_accepts_single_config():
@@ -101,8 +116,10 @@ def test_event_config_build_creates_output_target_with_single_time(
         lat_extent=ClosedInterval(2.0, 6.0),
         lon_extent=ClosedInterval(2.0, 6.0),
     )
-
-    output_target = config.build(loader_config, requirements, patch_config)
+    static_inputs = _get_static_inputs((8, 8))
+    output_target = config.build(
+        loader_config, requirements, patch_config, static_inputs
+    )
 
     # Verify OutputTarget was created
     assert isinstance(output_target, DownscalingOutput)
@@ -130,8 +147,11 @@ def test_region_config_build_creates_output_target_with_time_range(
         n_ens=4,
         save_vars=["var0", "var1"],
     )
+    static_inputs = _get_static_inputs((8, 8))
 
-    output_target = config.build(loader_config, requirements, patch_config)
+    output_target = config.build(
+        loader_config, requirements, patch_config, static_inputs
+    )
 
     # Verify OutputTarget was created
     assert isinstance(output_target, DownscalingOutput)

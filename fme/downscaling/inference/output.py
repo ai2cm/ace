@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, DistributedSampler
 
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
@@ -165,8 +166,9 @@ class DownscalingOutputConfig(ABC):
 
     @staticmethod
     def _single_xarray_config(
-        coarse: list[XarrayDataConfig]
-        | Sequence[XarrayDataConfig | XarrayEnsembleDataConfig],
+        coarse: Sequence[
+            XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
+        ],
     ) -> list[XarrayDataConfig]:
         """
         Ensures that the data configuration is a single xarray config.
@@ -227,11 +229,10 @@ class DownscalingOutputConfig(ABC):
                 "Downscaling data loader only supports datasets with latlon coords."
             )
         dataset = loader_config.build_batchitem_dataset(xr_dataset, properties)
-        topography = loader_config.build_topography(
+        topography = loader_config.build_static_inputs(
             coords,
             requires_topography=requirements.use_fine_topography,
-            # TODO: update to support full list of static inputs
-            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+            static_inputs=static_inputs_from_checkpoint,
         )
         if topography is None:
             raise ValueError("Topography is required for downscaling generation.")
@@ -273,7 +274,7 @@ class DownscalingOutputConfig(ABC):
             all_times=xr_dataset.sample_start_times,
             dtype=slice_dataset.dtype,
             max_output_shape=slice_dataset.max_output_shape,
-            topography=topography,
+            static_inputs=topography,
         )
 
     def _build(

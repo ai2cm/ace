@@ -87,6 +87,10 @@ The top-level sub-configurations are:
    :show-inheritance:
    :noindex:
 
+.. autoclass:: fme.ace.TrainStepperConfig
+   :show-inheritance:
+   :noindex:
+
 .. autoclass:: fme.ace.StepSelector
    :show-inheritance:
    :noindex:

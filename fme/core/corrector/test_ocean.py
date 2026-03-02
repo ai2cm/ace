@@ -140,12 +140,12 @@ def test_ocean_corrector_has_negative_ocean_fraction():
     assert not (gen_data_corrected["sea_ice_fraction"] < 0.0).any()
 
 
-def test_sea_ice_thickness_correction():
+def test_zero_where_ice_free_names():
     config = OceanCorrectorConfig(
         sea_ice_fraction_correction=SeaIceFractionConfig(
             sea_ice_fraction_name="sea_ice_fraction",
             land_fraction_name="land_fraction",
-            sea_ice_thickness_name="HI",
+            zero_where_ice_free_names=["HI"],
         ),
     )
     ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
@@ -163,6 +163,61 @@ def test_sea_ice_thickness_correction():
     torch.testing.assert_close(
         torch.where(sea_ice_zero, thickness, 0.0), torch.zeros_like(thickness)
     )
+
+
+def test_zero_where_ice_free_names_multiple_variables():
+    config = OceanCorrectorConfig(
+        sea_ice_fraction_correction=SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            land_fraction_name="land_fraction",
+            zero_where_ice_free_names=["HI", "HS"],
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    input_data = {"land_fraction": torch.ones(IMG_SHAPE, device=DEVICE)}
+    input_data["land_fraction"][:3, :3] = torch.rand(3, 3, device=DEVICE)
+    gen_data = {
+        "sea_ice_fraction": torch.rand(IMG_SHAPE, device=DEVICE),
+        "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
+        "HS": torch.rand(IMG_SHAPE, device=DEVICE) * 5,
+    }
+    corrector = OceanCorrector(config, ops, None, timestep)
+    gen_data_corrected = corrector(input_data, gen_data, {})
+    sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
+    for name in ["HI", "HS"]:
+        values = gen_data_corrected[name]
+        torch.testing.assert_close(
+            torch.where(sea_ice_zero, values, 0.0), torch.zeros_like(values)
+        )
+
+
+def test_from_state_migrates_sea_ice_thickness_name():
+    state = {
+        "sea_ice_fraction_correction": {
+            "sea_ice_fraction_name": "ocean_sea_ice_fraction",
+            "land_fraction_name": "land_fraction",
+            "sea_ice_thickness_name": "HI",
+            "remove_negative_ocean_fraction": False,
+        },
+    }
+    config = OceanCorrectorConfig.from_state(state)
+    assert config.sea_ice_fraction_correction is not None
+    assert config.sea_ice_fraction_correction.zero_where_ice_free_names == ["HI"]
+
+
+def test_from_state_migrates_sea_ice_thickness_name_none():
+    state = {
+        "sea_ice_fraction_correction": {
+            "sea_ice_fraction_name": "ocean_sea_ice_fraction",
+            "land_fraction_name": "land_fraction",
+            "sea_ice_thickness_name": None,
+            "remove_negative_ocean_fraction": False,
+        },
+    }
+    config = OceanCorrectorConfig.from_state(state)
+    assert config.sea_ice_fraction_correction is not None
+    assert config.sea_ice_fraction_correction.zero_where_ice_free_names == []
 
 
 @pytest.mark.parametrize(
