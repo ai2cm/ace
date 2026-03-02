@@ -41,8 +41,8 @@ model:
   num_diffusion_generation_steps: 8
   churn: 0.0
   training_noise_distribution:
-    loc: -3.
-    scale: 4.
+    loc: -2.
+    scale: 3.
     alpha: 3.
     min: 0.01
     max: 200.0
