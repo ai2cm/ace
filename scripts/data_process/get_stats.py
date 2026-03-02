@@ -8,7 +8,7 @@ import os
 import shutil
 import tempfile
 import time
-from typing import Dict, List, Literal, Optional
+from typing import Literal, Optional
 
 import click
 import dacite
@@ -75,10 +75,10 @@ def copy(source: str, destination: str):
 class StatsConfig:
     output_directory: str
     data_type: ClimateDataType
-    exclude_runs: List[str] = dataclasses.field(default_factory=list)
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    beaker_dataset: Optional[str] = None
+    exclude_runs: list[str] = dataclasses.field(default_factory=list)
+    start_date: str | None = None
+    end_date: str | None = None
+    beaker_dataset: str | None = None
 
 
 def get_stats(
@@ -203,7 +203,7 @@ def get_stats(
 
 @dataclasses.dataclass
 class Config:
-    runs: Dict[str, str]
+    runs: dict[str, str]
     data_output_directory: str
     stats: StatsConfig
 
