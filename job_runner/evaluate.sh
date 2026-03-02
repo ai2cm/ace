@@ -202,7 +202,7 @@ while read TRAIN_EXPER; do
             "${CLUSTER_ARGS[@]}" \
             --workspace "$WORKSPACE" \
             --weka climate-default:/climate-default \
-            --env WANDB_USERNAME="$BEAKER_USERNAME" \
+            --env WANDB_USERNAME="$WANDB_USERNAME" \
             --env WANDB_NAME="$JOB_NAME" \
             --env WANDB_JOB_TYPE=inference \
             --env WANDB_RUN_GROUP="$JOB_GROUP" \
