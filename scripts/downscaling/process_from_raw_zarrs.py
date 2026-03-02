@@ -79,8 +79,10 @@ def _open_gcs_obstore(path: str) -> xr.Dataset:
     prefix = "/".join(prefix_parts)
 
     if not prefix:
-        raise ValueError(f"Invalid GCS path: {path}. Expected format 'gs://bucket/prefix'")
-    
+        raise ValueError(
+            f"Invalid GCS path: {path}. Expected format 'gs://bucket/prefix'"
+        )
+
     # open GCS store and dataset
     gcs_store = GCSStore(bucket, prefix=prefix)
     store = ObjectStore(gcs_store, read_only=True)
