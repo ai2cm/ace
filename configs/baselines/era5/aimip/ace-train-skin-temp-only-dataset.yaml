@@ -1,4 +1,4 @@
-vi experiment_dir: /results
+experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 120
