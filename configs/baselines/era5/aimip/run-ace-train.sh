@@ -2,15 +2,15 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-dataset-with-out-level0"
-JOB_GROUP="ace-aimip-dataset-with-out-level0"
-CONFIG_FILENAME="ace-train-no-strato-aimip-dataset.yaml"
+JOB_NAME_BASE="ace-aimip-dataset-temp7-skin-temp-only-1step"
+JOB_GROUP="ace-aimip-dataset-temp7-skin-temp-only-1step"
+CONFIG_FILENAME="ace-train-skin-temp-only-dataset.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
+N_GPUS=1
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
