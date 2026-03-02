@@ -178,7 +178,7 @@ run_gantry_training_job() {
             --retries "$RETRIES" \
             "${CLUSTER_ARGS[@]}" \
             --weka climate-default:/climate-default \
-            --env WANDB_USERNAME="$BEAKER_USERNAME" \
+            --env WANDB_USERNAME="$WANDB_USERNAME" \
             --env WANDB_NAME="$JOB_NAME" \
             --env WANDB_JOB_TYPE=training \
             --env WANDB_RUN_GROUP="$JOB_GROUP" \
@@ -285,11 +285,13 @@ init_script_environment() {
     REPO_ROOT=$(git rev-parse --show-toplevel)
     GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
     BEAKER_USERNAME=$(get_beaker_username)
+    WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 
     # Export so they're available to callers
     export REPO_ROOT
     export GIT_BRANCH
     export BEAKER_USERNAME
+    export WANDB_USERNAME
 }
 
 # Parse dry-run flag from arguments
