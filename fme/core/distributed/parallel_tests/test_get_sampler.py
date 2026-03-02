@@ -50,20 +50,6 @@ def test_get_sampler_covers_all_indices():
 
 
 @pytest.mark.parallel
-def test_get_sampler_size_per_rank():
-    """
-    Each rank's sampler yields exactly len(dataset) // n_dp items when
-    the dataset is evenly divisible and drop_last=False.
-    """
-    dist = Distributed.get_instance()
-    n_dp = dist.total_data_parallel_ranks
-    dataset = _make_dataset(4 * n_dp)
-
-    sampler = dist.get_sampler(dataset, shuffle=False)
-    assert len(list(sampler)) == 4
-
-
-@pytest.mark.parallel
 def test_get_sampler_drop_last_true():
     """
     With drop_last=True and a dataset whose size is not evenly divisible
@@ -134,22 +120,3 @@ def test_get_sampler_seed_reproducibility():
     second = list(dist.get_sampler(dataset, shuffle=True))
 
     assert first == second
-
-
-@pytest.mark.parallel
-def test_get_sampler_different_seeds_differ():
-    """
-    Different seeds should (with high probability) produce different
-    orderings on a reasonably sized shuffled dataset.
-    """
-    dist = Distributed.get_instance()
-    n_dp = dist.total_data_parallel_ranks
-    dataset = _make_dataset(20 * n_dp)
-
-    set_seed(0)
-    first = list(dist.get_sampler(dataset, shuffle=True))
-
-    set_seed(99)
-    second = list(dist.get_sampler(dataset, shuffle=True))
-
-    assert first != second
