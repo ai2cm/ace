@@ -11,7 +11,7 @@ logging:
 loader:
   start_indices:
     times:
-      - '1978-09-30T18:00:00'
+      - '1978-10-01T00:00:00'
   dataset:
     data_path: /climate-default
     file_pattern: 2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
