@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="ace2-era5-evaluator"
+JOB_NAME="ace2-era5-short-evaluator"
 JOB_GROUP="ace2-era5"
 EXISTING_RESULTS_DATASET="01K013CYF8HX12KJK91YJ8MM92"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-evaluator-config.yaml"
@@ -22,10 +22,9 @@ cd $REPO_ROOT && gantry run \
     --description 'Run ACE2-ERA5 evaluator' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
-    --not-preemptible \
-    --cluster ai2/saturn-cirrascale \
-    --cluster ai2/ceres-cirrascale \
+    --priority low \
+    --preemptible \
+    --cluster ai2/jupiter \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \

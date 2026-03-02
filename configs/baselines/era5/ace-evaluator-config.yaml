@@ -1,6 +1,6 @@
 experiment_dir: /results
-n_forward_steps: 14600
-forward_steps_in_memory: 50
+n_forward_steps: 12
+forward_steps_in_memory: 12
 checkpoint_path: /ckpt.tar
 logging:
   log_to_screen: true
@@ -18,5 +18,7 @@ loader:
 aggregator:
   log_zonal_mean_images: false
 data_writer:
-  save_prediction_files: false
+  save_prediction_files: true
   save_monthly_files: false
+  names:
+    - "TMP2m"
