@@ -347,7 +347,7 @@ def _force_conserve_ocean_heat_content(
     ) * timestep_seconds
 
     if method == "scaled_temperature":
-        _apply_scaled_heat_correction(
+        _apply_scaled_heat_correction(  # updates gen in-place
             gen,
             global_input_ocean_heat_content,
             expected_change_ocean_heat_content,
@@ -360,7 +360,7 @@ def _force_conserve_ocean_heat_content(
                 forcing,
                 vertical_coordinate,
             )
-        _apply_mld_heat_correction(
+        _apply_mld_heat_correction(  # updates gen in-place
             gen,
             global_input_ocean_heat_content,
             expected_change_ocean_heat_content,
@@ -378,7 +378,7 @@ def _force_conserve_ocean_heat_content(
                 vertical_coordinate,
                 tau=mld_soft_tau,
             )
-        _apply_mld_heat_correction(
+        _apply_mld_heat_correction(  # updates gen in-place
             gen,
             global_input_ocean_heat_content,
             expected_change_ocean_heat_content,
@@ -391,7 +391,7 @@ def _force_conserve_ocean_heat_content(
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean heat content conservation"
         )
-    return gen.data
+    return {k: tensor for k, tensor in gen.data.items() if k in gen_data}
 
 
 def _compute_energy_flux_global_mean(
@@ -519,7 +519,8 @@ def _force_conserve_ocean_salt_content(
     ) * timestep_seconds
 
     if method == "scaled_salinity":
-        return _apply_scaled_salt_correction(
+        mld_weights = None
+        _apply_scaled_salt_correction(  # updates gen in-place
             gen,
             global_input_salt_content,
             expected_change_salt_content,
@@ -531,7 +532,7 @@ def _force_conserve_ocean_salt_content(
             forcing,
             vertical_coordinate,
         )
-        _apply_mld_salt_correction(
+        _apply_mld_salt_correction(  # updates gen in-place
             gen,
             global_input_salt_content,
             expected_change_salt_content,
@@ -540,7 +541,6 @@ def _force_conserve_ocean_salt_content(
             vertical_coordinate,
             area_weighted_mean,
         )
-        return gen.data, mld_weights
     elif method == "mixed_layer_depth_soft":
         assert mld_soft_tau is not None
         mld_weights = compute_mld_soft_weights_from_ocean_data(
@@ -549,7 +549,7 @@ def _force_conserve_ocean_salt_content(
             vertical_coordinate,
             tau=mld_soft_tau,
         )
-        _apply_mld_salt_correction(
+        _apply_mld_salt_correction(  # updates gen in-place
             gen,
             global_input_salt_content,
             expected_change_salt_content,
@@ -558,11 +558,11 @@ def _force_conserve_ocean_salt_content(
             vertical_coordinate,
             area_weighted_mean,
         )
-        return gen.data, mld_weights
     else:
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean salt content conservation"
         )
+    return ({k: tensor for k, tensor in gen.data.items() if k in gen_data}, mld_weights)
 
 
 def _apply_scaled_salt_correction(
@@ -570,12 +570,11 @@ def _apply_scaled_salt_correction(
     global_input_salt_content: torch.Tensor,
     expected_change: torch.Tensor,
     global_gen_salt_content: torch.Tensor,
-) -> tuple[TensorDict, None]:
+) -> None:
     ratio = (global_input_salt_content + expected_change) / global_gen_salt_content
     n_levels = gen.sea_water_salinity.shape[-1]
     for k in range(n_levels):
         gen.data[f"so_{k}"] = gen.data[f"so_{k}"] * ratio
-    return gen.data, None
 
 
 def _apply_mld_salt_correction(

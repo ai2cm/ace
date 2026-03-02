@@ -1,6 +1,7 @@
 import datetime
 import logging
 from collections.abc import Callable, MutableMapping
+from warnings import warn
 
 import torch
 
@@ -143,6 +144,10 @@ def ocean_heat_content_tendency(
 ) -> torch.Tensor:
     """Compute the column-integrated ocean heat content tendency."""
     ohc = data.ocean_heat_content
+    try:
+        data.sea_floor_depth
+    except KeyError:
+        warn("sea_floor_depth not available when computing ocean_heat_content_tendency")
     ohc_tendency = torch.zeros_like(ohc)
     ohc_tendency[:, 1:] = torch.diff(ohc, n=1, dim=1) / timestep.total_seconds()
     return ohc_tendency
