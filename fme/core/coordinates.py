@@ -371,6 +371,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got idepth.shape: {self.idepth.shape} and mask.shape: "
                 f"{self.mask.shape}."
             )
+        self._dz: torch.Tensor | None = None
 
     def __len__(self):
         """The number of vertical layer interfaces."""
@@ -507,7 +508,10 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        dz = dz_from_idepth(self.idepth, sea_floor_depth)
+        if self._dz is None:
+            # avoid recomputing dz
+            self._dz = dz_from_idepth(self.idepth, sea_floor_depth)
+        dz = self._dz
         integral = (integrand * dz * self.mask).nansum(dim=-1)
         mask = self.get_mask_level(0).expand(integral.shape)
         return integral.where(mask > 0, float("nan"))
