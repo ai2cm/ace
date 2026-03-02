@@ -522,6 +522,11 @@ class _CheckpointModelConfigSelector:
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> DiffusionModelConfig:
+        noise = state.get("training_noise_distribution")
+        if isinstance(noise, dict) and "clamp_min" in noise:
+            noise["min"] = noise.pop("clamp_min")
+            noise["max"] = noise.pop("clamp_max")
+            noise.setdefault("max_resample_iters", 10)
         return dacite.from_dict(
             data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
         ).wrapper
@@ -560,7 +565,11 @@ class CheckpointModelConfig:
     @property
     def _checkpoint(self) -> Mapping[str, Any]:
         if not self._checkpoint_is_loaded:
-            checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
+            checkpoint_data = torch.load(
+                self.checkpoint_path,
+                weights_only=False,
+                map_location=torch.device("cpu"),
+            )
             checkpoint_data["model"]["config"]["in_names"] = [
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["in_names"]

@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-skewlog-events-18st"
+JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni0.02-events-18st"
 CONFIG_FILENAME="eval-100-to-3km-prmsl-output.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -19,7 +19,7 @@ NGPU=2
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET=01KJGPG0MR2M7CEYABSQDG9PCM  # skw log normal
+EXISTING_RESULTS_DATASET=01KJQR9PH6W407SHD2GA7DFJZP  # skw log normal
 wandb_group=""
 
 gantry run \
