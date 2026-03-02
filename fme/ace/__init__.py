@@ -20,6 +20,7 @@ from fme.ace.inference.evaluator import (
     InferenceDataLoaderConfig,
     InferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorConfig,
+    ValidationConfig,
     run_evaluator_from_config,
 )
 from fme.ace.inference.inference import (

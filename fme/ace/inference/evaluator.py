@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import logging
+import os
 from collections.abc import Callable, Mapping, Sequence
 
 import dacite
@@ -8,9 +9,11 @@ import numpy as np
 import torch
 
 import fme
+from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.data_loading.getters import get_inference_data
+from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
@@ -22,16 +25,23 @@ from fme.ace.stepper import (
     load_stepper,
     load_stepper_config,
 )
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import (
+    StepperConfig,
+    TrainStepper,
+    TrainStepperConfig,
+)
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.dataset_info import IncompatibleDatasetInfo
+from fme.core.dataset_info import DatasetInfo, IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
+from fme.core.loss import StepLossConfig
+from fme.core.optimization import NullOptimization
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.wandb import WandB
 
 
 def resolve_variable_metadata(
@@ -77,6 +87,35 @@ def resolve_variable_metadata(
         if name in resolved_metadata
     }
     return get_derived_variable_metadata() | resolved_metadata
+
+
+@dataclasses.dataclass
+class ValidationConfig:
+    """
+    Configuration for running one-step validation within an inference evaluator job.
+
+    This mirrors the validation loop performed at the end of each training epoch,
+    producing metrics like ``val/mean/weighted_rmse`` and ``val/mean/loss``.
+
+    Parameters:
+        loader: Data loader configuration for validation data. Uses the same
+            :class:`~fme.ace.data_loading.config.DataLoaderConfig` as training
+            data loaders.
+        n_forward_steps: Number of forward steps per validation batch. Defaults
+            to 1 for standard single-step validation.
+        aggregator: Configuration for the one-step validation aggregator.
+        loss: Loss function configuration used to compute the validation loss
+            metric. Defaults to MSE. Set this to match the training loss
+            configuration if you want ``val/mean/loss`` to be directly
+            comparable to training.
+    """
+
+    loader: DataLoaderConfig
+    n_forward_steps: int = 1
+    aggregator: OneStepAggregatorConfig = dataclasses.field(
+        default_factory=lambda: OneStepAggregatorConfig()
+    )
+    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
 
 
 @dataclasses.dataclass
@@ -127,6 +166,10 @@ class InferenceEvaluatorConfig:
             This should be used with caution, as it may allow the stepper to make
             scientifically invalid predictions, but it can allow running inference with
             incorrectly formatted or missing grid information.
+        validation: Optional configuration for running a one-step validation loop
+            before inference. When provided, validation runs first and produces
+            metrics prefixed with ``val/`` (e.g. ``val/mean/weighted_rmse``),
+            mirroring the validation done at the end of each training epoch.
     """
 
     experiment_dir: str
@@ -144,6 +187,7 @@ class InferenceEvaluatorConfig:
     )
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
+    validation: ValidationConfig | None = None
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -232,6 +276,73 @@ class _Deriver(DeriverABC):
         return data.remove_initial_condition(self._n_ic_timesteps)
 
 
+def run_validation(
+    stepper: Stepper,
+    validation_config: ValidationConfig,
+    stepper_config: StepperConfig,
+    dataset_info: DatasetInfo,
+    output_dir: str,
+) -> dict[str, float]:
+    """
+    Run a one-step validation loop, mirroring training's ``validate_one_epoch``.
+
+    Args:
+        stepper: The loaded stepper in eval mode.
+        validation_config: Validation configuration.
+        stepper_config: The stepper's configuration (for data requirements).
+        dataset_info: Dataset info with resolved variable metadata.
+        output_dir: Base experiment directory for writing diagnostics.
+
+    Returns:
+        Dictionary of validation metrics (keys prefixed with ``val/``).
+    """
+    timer = GlobalTimer.get_instance()
+    timer.start("validation")
+
+    logging.info("Initializing validation data loader")
+    data_requirements = stepper_config.get_evaluation_window_data_requirements(
+        n_forward_steps=validation_config.n_forward_steps
+    )
+    valid_data = get_gridded_data(
+        validation_config.loader,
+        requirements=data_requirements,
+        train=False,
+    )
+
+    logging.info("Building validation stepper and aggregator")
+    train_stepper_config = TrainStepperConfig(loss=validation_config.loss)
+    train_stepper = TrainStepper(stepper=stepper, config=train_stepper_config)
+
+    aggregator = validation_config.aggregator.build(
+        dataset_info=dataset_info,
+        loss_scaling=train_stepper.effective_loss_scaling,
+        save_diagnostics=True,
+        output_dir=os.path.join(output_dir, "validation"),
+        channel_mean_names=stepper.loss_names,
+    )
+
+    logging.info("Starting validation loop")
+    no_opt = NullOptimization()
+    for batch in valid_data.loader:
+        stepped = train_stepper.train_on_batch(
+            batch,
+            optimization=no_opt,
+            compute_derived_variables=True,
+        )
+        aggregator.record_batch(batch=stepped)
+
+    logging.info("Flushing validation diagnostics")
+    aggregator.flush_diagnostics()
+    val_logs = aggregator.get_logs(label="val")
+
+    wandb_instance = WandB.get_instance()
+    wandb_instance.log(val_logs, step=0)
+
+    timer.stop()
+    logging.info("Validation complete")
+    return val_logs
+
+
 def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
@@ -281,6 +392,18 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         stepper_all_names=stepper_config.all_names,
     )
     dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
+
+    if config.validation is not None:
+        timer.stop()
+        run_validation(
+            stepper=stepper,
+            validation_config=config.validation,
+            stepper_config=stepper_config,
+            dataset_info=dataset_info,
+            output_dir=config.experiment_dir,
+        )
+        timer.start("initialization")
+
     aggregator = aggregator_config.build(
         dataset_info=dataset_info,
         record_step_20=config.n_forward_steps >= 20,

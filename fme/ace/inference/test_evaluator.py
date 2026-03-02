@@ -16,6 +16,7 @@ import xarray as xr
 import yaml
 
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
@@ -27,6 +28,7 @@ from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
     StepperOverrideConfig,
+    ValidationConfig,
     main,
     resolve_variable_metadata,
 )
@@ -1292,3 +1294,93 @@ def test_evaluator_with_non_local_experiment_dir(
         assert fs.isdir(os.path.join(experiment_dir, directory))
 
     fs.rm(experiment_dir, recursive=True)
+
+
+def test_inference_with_validation(tmp_path: pathlib.Path):
+    """Test that validation runs before inference and produces val/ metrics."""
+    in_names = ["var"]
+    out_names = ["var"]
+    stepper_path = tmp_path / "stepper"
+    n_forward_steps = 2
+
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    # std=10.0 so the PlusOne model has nonzero errors (avoids edge cases
+    # with zero RMSE in the aggregator)
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=10.0,
+        data_shape=dim_sizes.shape_nd,
+        timestep=TIMESTEP,
+    )
+
+    all_names = list(set(in_names).union(out_names))
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        time_varying_values=[float(i) for i in range(dim_sizes.n_time)],
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+        save_vertical_coordinate=False,
+    )
+    validation_config = ValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(str(data.data_path)),
+            batch_size=1,
+        ),
+        n_forward_steps=1,
+    )
+
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=True,
+        ),
+        loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(log_video=False),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        forward_steps_in_memory=1,
+        allow_incompatible_dataset=True,
+        validation=validation_config,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+        wandb_logs = wandb.get_logs()
+
+    all_logged = {}
+    for log in wandb_logs:
+        all_logged.update(log)
+
+    for var in out_names:
+        assert (
+            f"val/mean/weighted_rmse/{var}" in all_logged
+        ), f"Expected val/mean/weighted_rmse/{var} in logged metrics"
+
+    assert "val/mean/loss" in all_logged
+
+    for var in out_names:
+        assert (
+            f"inference/mean/weighted_rmse/{var}" in all_logged
+        ), f"Inference metrics should still be present"
+
+    assert os.path.isdir(tmp_path / "validation")

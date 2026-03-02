@@ -205,6 +205,18 @@ loader:
     first: 0
     n_initial_conditions: 2
     interval: 1
+validation:
+  loader:
+    dataset:
+      data_path: '{valid_data_path}'
+      spatial_dimensions: latlon
+    batch_size: 2
+  n_forward_steps: 2
+  aggregator:
+    log_snapshots: false
+    log_mean_maps: false
+  loss:
+    type: "MSE"
 """
 
 
@@ -427,6 +439,18 @@ def test_train_and_inference(tmp_path, very_fast_only: bool):
         wandb.configure(log_to_wandb=True)
         inference_evaluator_main(yaml_config=inference_config)
         wandb_logs = wandb.get_logs()
+
+    all_inference_logs = {}
+    for log in wandb_logs:
+        all_inference_logs.update(log)
+
+    assert "val/mean/loss" in all_inference_logs
+    for var in ["sst", "thetao_0", "thetao_1"]:
+        assert (
+            f"val/mean/weighted_rmse/{var}" in all_inference_logs
+        ), f"Expected val/mean/weighted_rmse/{var} in inference logs"
+    validation_output_dir = results_dir / "validation"
+    assert validation_output_dir.exists()
 
     tm_logs = wandb_logs[-1]
     for name, metric in tm_logs.items():
