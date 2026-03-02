@@ -185,9 +185,15 @@ class OceanData:
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean salt content."
             )
-        return self._depth_coordinate.depth_integral(
-            self.sea_water_salinity * DENSITY_OF_WATER_CM4
-        )
+        try:
+            return self._depth_coordinate.depth_integral(
+                self.sea_water_salinity * DENSITY_OF_WATER_CM4,
+                sea_floor_depth=self.sea_floor_depth,
+            )
+        except KeyError:
+            return self._depth_coordinate.depth_integral(
+                self.sea_water_salinity * DENSITY_OF_WATER_CM4
+            )
 
     @property
     def water_flux_into_sea_water(self) -> torch.Tensor:
