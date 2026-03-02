@@ -252,8 +252,6 @@ class SingleModuleStepperConfig:
         """
         return StepperConfig(
             step=self._to_step_config(normalizer, loss_normalizer),
-            loss=self.loss,
-            parameter_init=self.parameter_init,
         )
 
     def _to_step_config(
@@ -500,49 +498,17 @@ class StepperConfig:
     """
     Configuration for a stepper.
 
-    The following fields are training concerns transferred to TrainStepperConfig
-    via get_train_stepper_config() and are not used directly by get_stepper():
-    ``loss``, ``optimize_last_step_only``, ``n_ensemble``,
-    ``parameter_init``, ``train_n_forward_steps``.
-
     Parameters:
         step: The step configuration.
-        loss: The loss configuration. Training only.
-        optimize_last_step_only: Whether to optimize only the last step.
-            Training only.
-        n_ensemble: The number of ensemble members evaluated for each training
-            batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
-            the default is 1. Must be 2 for EnsembleLoss to be valid. Training only.
-        parameter_init: The parameter initialization configuration.
-            Training only.
         input_masking: Config for masking step inputs.
-        train_n_forward_steps: The number of timesteps to train on and associated
-            sampling probabilities. By default, the stepper will train on the full
-            number of timesteps present in the training dataset samples. Values must
-            be less than or equal to the number of timesteps present
-            in the training dataset samples. Training only.
         derived_forcings: Configuration for deriving forcing variables.
     """
 
     step: StepSelector
-    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
-    optimize_last_step_only: bool = False
-    n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
-    parameter_init: ParameterInitializationConfig = dataclasses.field(
-        default_factory=lambda: ParameterInitializationConfig()
-    )
-    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
-    input_masking: StaticMaskingConfig | None = None  # inference
+    input_masking: StaticMaskingConfig | None = None
     derived_forcings: DerivedForcingsConfig = dataclasses.field(
         default_factory=lambda: DerivedForcingsConfig()
-    )  # inference
-
-    def __post_init__(self):
-        if self.n_ensemble == -1:
-            if self.loss.type == "EnsembleLoss":
-                self.n_ensemble = 2
-            else:
-                self.n_ensemble = 1
+    )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -610,9 +576,14 @@ class StepperConfig:
         step = self.step.get_step(
             dataset_info, init_weights=parameter_initializer.freeze_weights
         )
-        derive_func = dataset_info.vertical_coordinate.build_derive_function(
-            dataset_info.timestep
-        )
+        try:
+            derive_func = dataset_info.vertical_coordinate.build_derive_function(
+                dataset_info.timestep, dataset_info.horizontal_coordinates
+            )
+        except MissingDatasetInfo:
+            derive_func = dataset_info.vertical_coordinate.build_derive_function(
+                dataset_info.timestep
+            )
         if self.input_masking is None:
             input_masking = NullMasking()
         else:
@@ -714,8 +685,16 @@ class StepperConfig:
     @classmethod
     def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
-        if "crps_training" in state_copy:
-            del state_copy["crps_training"]  # training value, ok to break
+        for key in [
+            "crps_training",
+            "loss",
+            "optimize_last_step_only",
+            "n_ensemble",
+            "parameter_init",
+            "train_n_forward_steps",
+        ]:
+            if key in state_copy:
+                del state_copy[key]
         return state_copy
 
     def replace_ocean(self, ocean: OceanConfig | None):
@@ -767,15 +746,6 @@ class StepperConfig:
         state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
-
-    def get_train_stepper_config(self) -> "TrainStepperConfig":
-        return TrainStepperConfig(
-            loss=self.loss,
-            optimize_last_step_only=self.optimize_last_step_only,
-            n_ensemble=self.n_ensemble,
-            train_n_forward_steps=self.train_n_forward_steps,
-            parameter_init=self.parameter_init,
         )
 
 
