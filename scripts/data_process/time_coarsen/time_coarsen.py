@@ -2,6 +2,7 @@ import argparse
 import dataclasses
 import logging
 import os
+from typing import Literal, Mapping
 
 import dacite
 import xarray as xr
@@ -9,13 +10,7 @@ import yaml
 
 
 @dataclasses.dataclass
-class PathPair:
-    input: str
-    output: str
-
-
-@dataclasses.dataclass
-class Config:
+class TimeCoarsenConfig:
     """
     Configuration for time coarsening of a dataset.
 
@@ -31,18 +26,51 @@ class Config:
             modification. Raises an exception if any of these have a "time" dimension.
     """
 
-    paths: list[PathPair]
-    coarsen_factor: int
+    factor: int
+    data_output_directory: str
+    stats_output_directory: str
     snapshot_names: list[str]
     window_names: list[str]
-    constant_prefixes: list[str] = dataclasses.field(
-        default_factory=lambda: ["ak_", "bk_"]
+    constant_prefixes: list[str]
+
+
+ClimateDataType = Literal["FV3GFS", "E3SMV2", "ERA5", "CM4"]
+
+
+@dataclasses.dataclass
+class StatsConfig:
+    output_directory: str
+    data_type: ClimateDataType
+    exclude_runs: list[str] = dataclasses.field(default_factory=list)
+    start_date: str | None = None
+    end_date: str | None = None
+    beaker_dataset: str | None = None
+
+
+@dataclasses.dataclass
+class Config:
+    runs: Mapping[str, str]
+    data_output_directory: str
+    stats: StatsConfig
+    time_coarsen: TimeCoarsenConfig
+
+
+def main(config: Config, run: int, dry_run: bool = False):
+    logging.basicConfig(level=logging.INFO)
+    run_name = list(config.runs.keys())[run]
+    if config.data_output_directory.endswith("/"):
+        config.data_output_directory = config.data_output_directory[:-1]
+    input_zarr = config.data_output_directory + "/" + run_name + ".zarr"
+    output_zarr = config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
+    process_path_pair(
+        input_path=input_zarr,
+        output_path=output_zarr,
+        config=config.time_coarsen,
+        dry_run=dry_run,
     )
-
-
-def main(config: Config):
-    for paths in config.paths:
-        process_path_pair(paths, config)
+    if run_name in config.stats.exclude_runs:
+        logging.info(f"Skipping run {run_name}")
+        return
 
 
 def write_zarr(
@@ -64,12 +92,14 @@ def write_zarr(
     ds.to_zarr(path, mode="w", zarr_version=3)
 
 
-def process_path_pair(pair: PathPair, config: Config):
-    logging.info(f"Processing input: {pair.input} to output: {pair.output}")
-    if os.path.exists(pair.output):
-        logging.warning(f"Output path {pair.output} already exists. Skipping.")
+def process_path_pair(
+    input_path: str, output_path: str, config: TimeCoarsenConfig, dry_run: bool
+):
+    logging.info(f"Processing input: {input_path} to output: {output_path}")
+    if os.path.exists(output_path):
+        logging.warning(f"Output path {output_path} already exists. Skipping.")
         return
-    ds = xr.open_dataset(pair.input)
+    ds = xr.open_dataset(input_path)
     constant_names = [
         name
         for name in ds.data_vars
@@ -85,11 +115,11 @@ def process_path_pair(pair: PathPair, config: Config):
             )
     ds_constants = ds[constant_names]
     ds_snapshot = ds[config.snapshot_names].isel(
-        time=slice(config.coarsen_factor - 1, None, config.coarsen_factor)
+        time=slice(config.factor - 1, None, config.factor)
     )
     ds_window = (
         ds[config.window_names]
-        .coarsen(time=config.coarsen_factor, boundary="trim")
+        .coarsen(time=config.factor, boundary="trim")
         .mean()
         .drop("time")
     )  # use time of snapshots
@@ -98,26 +128,29 @@ def process_path_pair(pair: PathPair, config: Config):
     attributes["snapshot_names"] = config.snapshot_names
     attributes["window_names"] = config.window_names
     attributes["constant_prefixes"] = config.constant_prefixes
-    attributes["coarsen_factor"] = config.coarsen_factor
+    attributes["coarsen_factor"] = config.factor
     history_entry = (
-        f"Dataset coarsened by a factor of {config.coarsen_factor} "
+        f"Dataset coarsened by a factor of {config.factor} "
         "by scripts/time_coarsen/time_coarsen.py."
     )
-    write_zarr(
-        ds_coarsened,
-        original_attributes=attributes,
-        history_entry=history_entry,
-        path=pair.output,
-    )
+    if not dry_run:
+        write_zarr(
+            ds_coarsened,
+            original_attributes=attributes,
+            history_entry=history_entry,
+            path=output_path,
+        )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Time Coarsen Script")
     parser.add_argument("config_yaml", type=str, help="Path to configuration yaml file")
+    parser.add_argument("run", type=int, help="Run number")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="If set, do not write output zarr files."
+    )
     args = parser.parse_args()
     with open(args.config_yaml, "r") as f:
         config_dict = yaml.safe_load(f)
-    config = dacite.from_dict(
-        data_class=Config, data=config_dict, config=dacite.Config(strict=True)
-    )
-    main(config)
+    config = dacite.from_dict(data_class=Config, data=config_dict)
+    main(config, run=args.run, dry_run=args.dry_run)
