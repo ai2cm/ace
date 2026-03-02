@@ -14,6 +14,8 @@ Key design notes
   total_data_parallel_ranks so no padding occurs unless explicitly tested.
 """
 
+from typing import cast
+
 import pytest
 import torch
 
@@ -42,7 +44,8 @@ def test_get_sampler_covers_all_indices():
     all_indices = dist.gather_object(local_indices)
     if dist.is_root():
         assert all_indices is not None
-        flat = [idx for rank_indices in all_indices for idx in rank_indices]
+        gathered = cast(list[list[int]], all_indices)
+        flat = [idx for rank_indices in gathered for idx in rank_indices]
         assert sorted(flat) == list(range(len(dataset)))
 
 
@@ -91,7 +94,8 @@ def test_get_sampler_drop_last_true():
         all_indices = dist.gather_object(local_indices)
         if dist.is_root():
             assert all_indices is not None
-            flat = [idx for rank_indices in all_indices for idx in rank_indices]
+            gathered = cast(list[list[int]], all_indices)
+            flat = [idx for rank_indices in gathered for idx in rank_indices]
             # 3 * n_dp unique indices, all within dataset bounds, no duplicates
             assert len(flat) == 3 * n_dp
             assert len(set(flat)) == 3 * n_dp
