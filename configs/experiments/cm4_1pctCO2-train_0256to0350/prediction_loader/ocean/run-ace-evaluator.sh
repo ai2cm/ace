@@ -34,7 +34,6 @@ gantry run \
     --not-preemptible \
     --cluster ceres \
     --cluster jupiter \
-    --cluster saturn \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
