@@ -17,6 +17,7 @@ from fme.core.corrector.ocean import (
     OceanHeatContentBudgetConfig,
     OceanSaltContentBudgetConfig,
     SeaIceFractionConfig,
+    apply_geothermal_bottom_correction,
     dz_from_idepth,
 )
 from fme.core.gridded_ops import LatLonOperations
@@ -241,6 +242,46 @@ def test_from_state_migrates_sea_ice_thickness_name_none():
     config = OceanCorrectorConfig.from_state(state)
     assert config.sea_ice_fraction_correction is not None
     assert config.sea_ice_fraction_correction.zero_where_ice_free_names == []
+
+
+def test_apply_geothermal_bottom_correction_modifies_only_bottom():
+    """Geothermal correction should only warm the deepest wet layer."""
+    idepth = _VERTICAL_COORD.get_idepth()
+    dz = idepth.diff(dim=-1)
+
+    gen_data = {
+        f"thetao_{k}": torch.ones(IMG_SHAPE, device=DEVICE) * 10.0 for k in range(NZ)
+    }
+    gen_data.update(
+        {f"so_{k}": torch.ones(IMG_SHAPE, device=DEVICE) * 35.0 for k in range(NZ)}
+    )
+    gen_before = {k: v.clone() for k, v in gen_data.items()}
+
+    hfgeou = torch.ones(IMG_SHAPE, device=DEVICE) * 0.1
+    ssf = torch.ones(IMG_SHAPE, device=DEVICE)
+    forcing_data = {"hfgeou": hfgeou, "sea_surface_fraction": ssf}
+
+    gen = OceanData(gen_data, _VERTICAL_COORD)
+    forcing = OceanData(forcing_data)
+    dt = 5 * 86400.0
+    apply_geothermal_bottom_correction(gen, forcing, _VERTICAL_COORD, dt)
+
+    expected_dT = (
+        hfgeou * ssf * dt / (DENSITY_OF_WATER_CM4 * SPECIFIC_HEAT_OF_WATER_CM4)
+    )
+
+    # Top layer should be unchanged everywhere
+    torch.testing.assert_close(gen.data["thetao_0"], gen_before["thetao_0"])
+
+    # Bottom layer should be warmed at wet columns, unchanged at masked column
+    torch.testing.assert_close(
+        gen.data["thetao_1"][_LAT, _LON],
+        gen_before["thetao_1"][_LAT, _LON],
+    )
+    expected_bottom = gen_before["thetao_1"].clone()
+    expected_bottom += expected_dT / dz[1]
+    expected_bottom[_LAT, _LON] = gen_before["thetao_1"][_LAT, _LON]
+    torch.testing.assert_close(gen.data["thetao_1"], expected_bottom)
 
 
 @pytest.mark.parametrize(
@@ -731,7 +772,7 @@ def test_mld_weights_reused_from_salt_to_heat():
     with patch(
         "fme.core.corrector.ocean.compute_mld_weights_from_ocean_data",
         wraps=__import__(
-            "fme.core.corrector.ocean_mld",
+            "fme.core.corrector.ocean",
             fromlist=["compute_mld_weights_from_ocean_data"],
         ).compute_mld_weights_from_ocean_data,
     ) as mock_weights:

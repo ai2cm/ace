@@ -10,6 +10,7 @@ from fme.core.constants import (
     REFERENCE_SALINITY_PSU,
     SPECIFIC_HEAT_OF_WATER_CM4,
 )
+from fme.core.corrector.ocean_mld import compute_mld, jmd95_potential_density
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -63,6 +64,9 @@ class HasCellAreaInMetersSquared(Protocol):
 
     @property
     def area_weights_m2(self) -> torch.Tensor: ...
+
+
+_MISSING_DEPTH_COORD_MSG = "OceanData instance has no depth coordinate."
 
 
 class OceanData:
@@ -126,6 +130,18 @@ class OceanData:
         raise KeyError(name)
 
     @property
+    def depth_interface(self) -> torch.Tensor:
+        if self._depth_coordinate is None:
+            raise RuntimeError(_MISSING_DEPTH_COORD_MSG)
+        return self._depth_coordinate.get_idepth()
+
+    @property
+    def valid_mask(self) -> torch.Tensor:
+        if self._depth_coordinate is None:
+            raise RuntimeError(_MISSING_DEPTH_COORD_MSG)
+        return self._depth_coordinate.get_mask()
+
+    @property
     def sea_water_potential_temperature(self) -> torch.Tensor:
         """Returns all depth levels of potential temperature."""
         return self._stacker("sea_water_potential_temperature", self.data)
@@ -159,7 +175,7 @@ class OceanData:
     def ocean_heat_content(self) -> torch.Tensor:
         """Returns column-integrated ocean heat content."""
         if self._depth_coordinate is None:
-            raise ValueError(
+            raise RuntimeError(
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean heat content."
             )
@@ -181,7 +197,7 @@ class OceanData:
     def ocean_salt_content(self) -> torch.Tensor:
         """Returns column-integrated ocean salt content."""
         if self._depth_coordinate is None:
-            raise ValueError(
+            raise RuntimeError(
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean salt content."
             )
@@ -241,6 +257,15 @@ class OceanData:
         return self._get("sea_floor_depth")
 
     @property
+    def mixed_layer_depth(self) -> torch.Tensor:
+        """Returns the mixed layer depth in meters."""
+        if self._depth_coordinate is None:
+            raise RuntimeError(
+                "Depth coordinate must be provided to compute mixed layer depth."
+            )
+        return _compute_mld(self)
+
+    @property
     def net_energy_flux_into_ocean(self) -> torch.Tensor:
         return (
             self.net_downward_surface_heat_flux + self.geothermal_heat_flux
@@ -294,7 +319,7 @@ class OceanData:
             ValueError: If a cell area provider was not provided.
         """
         if self._cell_area_provider is None:
-            raise ValueError(
+            raise RuntimeError(
                 "A cell area provider must be provided to access cell area information."
             )
         return self._cell_area_provider.area_weights_m2
@@ -332,3 +357,18 @@ class OceanData:
     def sea_ice_volume(self) -> torch.Tensor:
         """Returns the sea ice volume."""
         return self._get("sea_ice_volume")
+
+
+def _compute_mld(ocean_data: "OceanData") -> torch.Tensor:
+    """Compute mixed layer depth from an OceanData instance.
+
+    Uses JMD95 potential density and a density-threshold criterion.
+    Requires ``sea_water_potential_temperature``, ``sea_water_salinity``,
+    ``sea_floor_depth``, and a depth coordinate on *ocean_data*.
+    """
+    theta = ocean_data.sea_water_potential_temperature
+    S = ocean_data.sea_water_salinity
+    density = jmd95_potential_density(S, theta)
+    idepth = ocean_data.depth_interface
+    mask = ocean_data.valid_mask
+    return compute_mld(density, idepth, ocean_data.sea_floor_depth, mask)

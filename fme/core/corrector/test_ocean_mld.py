@@ -4,15 +4,12 @@ import pytest
 import torch
 
 from fme import get_device
-from fme.core.constants import DENSITY_OF_WATER_CM4, SPECIFIC_HEAT_OF_WATER_CM4
 from fme.core.corrector.ocean_mld import (
-    apply_geothermal_bottom_correction,
     compute_mld,
     compute_mld_active_thickness,
     compute_mld_soft,
     jmd95_potential_density,
 )
-from fme.core.ocean_data import OceanData
 
 DEVICE = get_device()
 
@@ -105,67 +102,6 @@ def test_compute_mld_active_thickness_masked():
     h = compute_mld_active_thickness(mld_2d, idepth, mask)
     assert (h[:, 0, 0, :] == 0.0).all()
     assert (h[:, 1, 1, :] > 0.0).all()
-
-
-def test_apply_geothermal_bottom_correction_modifies_only_bottom():
-    nsamples, ny, nx, nz = 1, 2, 2, 3
-    idepth = torch.tensor([0.0, 10.0, 50.0, 200.0], device=DEVICE)
-    mask = torch.ones(nsamples, ny, nx, nz, device=DEVICE)
-    mask[:, 0, 0, 2] = 0.0  # column (0,0) has only 2 wet levels
-
-    from fme.core.coordinates import DepthCoordinate
-
-    depth_coord = DepthCoordinate(idepth, mask)
-
-    gen_data = {
-        f"thetao_{k}": torch.ones(nsamples, ny, nx, device=DEVICE) * 10.0
-        for k in range(nz)
-    }
-    gen_data.update(
-        {
-            f"so_{k}": torch.ones(nsamples, ny, nx, device=DEVICE) * 35.0
-            for k in range(nz)
-        }
-    )
-    gen_before = {k: v.clone() for k, v in gen_data.items()}
-
-    hfgeou = torch.ones(nsamples, ny, nx, device=DEVICE) * 0.1
-    ssf = torch.ones(nsamples, ny, nx, device=DEVICE)
-    forcing_data = {"hfgeou": hfgeou, "sea_surface_fraction": ssf}
-
-    gen = OceanData(gen_data, depth_coord)
-    forcing = OceanData(forcing_data)
-    dt = 5 * 86400.0
-    apply_geothermal_bottom_correction(gen, forcing, depth_coord, dt)
-
-    dz = idepth.diff(dim=-1)
-    expected_dT = (
-        hfgeou * ssf * dt / (DENSITY_OF_WATER_CM4 * SPECIFIC_HEAT_OF_WATER_CM4)
-    )
-
-    # Column (0,0): bottom wet is level 1 (mask[...,2]=0), dz=40
-    torch.testing.assert_close(
-        gen.data["thetao_0"][:, 0, 0],
-        gen_before["thetao_0"][:, 0, 0],
-    )
-    torch.testing.assert_close(
-        gen.data["thetao_1"][:, 0, 0],
-        gen_before["thetao_1"][:, 0, 0] + expected_dT[:, 0, 0] / dz[1],
-    )
-
-    # Column (1,1): bottom wet is level 2, dz=150
-    torch.testing.assert_close(
-        gen.data["thetao_0"][:, 1, 1],
-        gen_before["thetao_0"][:, 1, 1],
-    )
-    torch.testing.assert_close(
-        gen.data["thetao_1"][:, 1, 1],
-        gen_before["thetao_1"][:, 1, 1],
-    )
-    torch.testing.assert_close(
-        gen.data["thetao_2"][:, 1, 1],
-        gen_before["thetao_2"][:, 1, 1] + expected_dT[:, 1, 1] / dz[2],
-    )
 
 
 # --- compute_mld_soft tests ---

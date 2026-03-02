@@ -252,3 +252,11 @@ def hfds(
 ) -> torch.Tensor:
     """Compute the net downward surface heat flux."""
     return data.net_downward_surface_heat_flux
+
+
+@register(VariableMetadata("m", "Mixed layer depth"))
+def mixed_layer_depth(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    return data.mixed_layer_depth

@@ -13,9 +13,10 @@ from fme.core.constants import (
     SPECIFIC_HEAT_OF_WATER_CM4,
 )
 from fme.core.corrector.ocean_mld import (
-    apply_geothermal_bottom_correction,
-    compute_mld_soft_weights_from_ocean_data,
-    compute_mld_weights_from_ocean_data,
+    compute_mld,
+    compute_mld_active_thickness,
+    compute_mld_soft,
+    jmd95_potential_density,
 )
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
@@ -603,3 +604,106 @@ def _apply_mld_salt_correction(
     n_levels = gen.sea_water_salinity.shape[-1]
     for k in range(n_levels):
         gen.data[f"so_{k}"] = gen.data[f"so_{k}"] + dS[..., k]
+
+
+def compute_mld_weights_from_ocean_data(
+    gen: OceanData,
+    forcing: OceanData,
+    vertical_coordinate: HasOceanDepthIntegral,
+) -> torch.Tensor:
+    """Compute MLD active-thickness weights from generated ocean state.
+
+    Computes JMD95 potential density from ``gen`` temperature and salinity,
+    derives MLD, and returns the per-layer active thickness within the
+    mixed layer.
+
+    Args:
+        gen: Generated ocean data (must contain ``thetao`` and ``so``).
+        forcing: Forcing data (must contain ``deptho``).
+        vertical_coordinate: Provides interface depths and ocean mask.
+
+    Returns:
+        Active thickness tensor ``h`` with shape ``(B, Y, X, Z)``.
+    """
+    theta = gen.sea_water_potential_temperature  # (B, Y, X, Z)
+    S = gen.sea_water_salinity  # (B, Y, X, Z)
+    density = jmd95_potential_density(S, theta)
+
+    idepth = vertical_coordinate.get_idepth()
+    mask = vertical_coordinate.get_mask()
+    deptho = forcing.sea_floor_depth
+
+    mld_2d = compute_mld(density, idepth, deptho, mask)
+    return compute_mld_active_thickness(mld_2d, idepth, mask)
+
+
+def compute_mld_soft_weights_from_ocean_data(
+    gen: OceanData,
+    forcing: OceanData,
+    vertical_coordinate: HasOceanDepthIntegral,
+    tau: float,
+) -> torch.Tensor:
+    """Like :func:`compute_mld_weights_from_ocean_data` but differentiable.
+
+    Uses :func:`compute_mld_soft` instead of :func:`compute_mld`.
+
+    Args:
+        gen: Generated ocean data (must contain ``thetao`` and ``so``).
+        forcing: Forcing data (must contain ``deptho``).
+        vertical_coordinate: Provides interface depths and ocean mask.
+        tau: Sigmoid temperature for soft thresholding.
+
+    Returns:
+        Active thickness tensor ``h`` with shape ``(B, Y, X, Z)``.
+    """
+    theta = gen.sea_water_potential_temperature  # (B, Y, X, Z)
+    S = gen.sea_water_salinity  # (B, Y, X, Z)
+    density = jmd95_potential_density(S, theta)
+
+    idepth = vertical_coordinate.get_idepth()
+    mask = vertical_coordinate.get_mask()
+    deptho = forcing.sea_floor_depth
+
+    mld_2d = compute_mld_soft(density, idepth, deptho, mask, tau=tau)
+    return compute_mld_active_thickness(mld_2d, idepth, mask)
+
+
+def apply_geothermal_bottom_correction(
+    gen: OceanData,
+    forcing: OceanData,
+    vertical_coordinate: HasOceanDepthIntegral,
+    timestep_seconds: float,
+) -> None:
+    """Apply geothermal heat flux correction to the bottom ocean cell.
+
+    Modifies ``gen.data`` in place by adding a temperature increment to
+    each column's deepest valid layer proportional to the local
+    geothermal heat flux.
+
+    Args:
+        gen: Generated ocean data (modified in place).
+        forcing: Forcing data (must contain ``hfgeou`` and
+            ``sea_surface_fraction``).
+        vertical_coordinate: Provides interface depths and ocean mask.
+        timestep_seconds: Model timestep in seconds.
+    """
+    mask = vertical_coordinate.get_mask()  # broadcastable to (B, Y, X, Z)
+    dz = vertical_coordinate.get_idepth().diff(dim=-1)  # (Z,)
+
+    wet_count = mask.sum(dim=-1, keepdim=True)
+    cumulative = mask.cumsum(dim=-1)
+    bottom_mask = (cumulative == wet_count) & (mask > 0)
+
+    hfgeou = forcing.geothermal_heat_flux
+    ssf = forcing.sea_surface_fraction
+
+    dT_geo = (
+        (hfgeou * ssf).unsqueeze(-1)
+        * timestep_seconds
+        / (DENSITY_OF_WATER_CM4 * SPECIFIC_HEAT_OF_WATER_CM4 * dz)
+    )
+    dT_geo = dT_geo * bottom_mask
+
+    nlev = gen.sea_water_potential_temperature.shape[-1]
+    for k in range(nlev):
+        gen.data[f"thetao_{k}"] = gen.data[f"thetao_{k}"] + dT_geo[..., k]
