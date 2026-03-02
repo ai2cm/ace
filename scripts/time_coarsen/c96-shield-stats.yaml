@@ -1,0 +1,12 @@
+runs:
+  ic_0001: ""
+  ic_0002: ""
+data_output_directory: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset
+stats:
+  output_directory: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats
+  beaker_dataset: 2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset-stats
+  start_date: "1940-01-01"
+  end_date: "2021-12-31"
+  data_type: FV3GFS
+  exclude_runs:
+    - "ic_0002"
