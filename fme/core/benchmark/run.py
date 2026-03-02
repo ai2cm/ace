@@ -10,6 +10,7 @@ import sys
 import torch
 
 from fme.core.benchmark.benchmark import get_benchmarks
+from fme.core.distributed.distributed import Distributed
 from fme.core.wandb import WandB
 
 RESULTS_PATH = pathlib.Path(os.path.abspath(os.path.dirname(__file__))) / "results"
@@ -188,12 +189,12 @@ if __name__ == "__main__":
     else:
         output_dir = RESULTS_PATH
 
-    sys.exit(
-        main(
+    with Distributed.context():
+        return_code = main(
             benchmark_name=args.name,
             iters=args.iters,
             child=args.child,
             output_dir=output_dir,
             wandb_project=args.wandb_project,
         )
-    )
+    sys.exit(return_code)
