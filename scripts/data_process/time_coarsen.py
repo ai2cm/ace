@@ -122,8 +122,9 @@ def process_path_pair(
     attributes["coarsen_factor"] = config.factor
     history_entry = (
         f"Dataset coarsened by a factor of {config.factor} "
-        "by scripts/time_coarsen/time_coarsen.py."
+        "by scripts/data_process/time_coarsen.py."
     )
+    ds_coarsened.attrs = None  # clear attributes, we'll add them back in write_zarr
     if not dry_run:
         write_zarr(
             ds_coarsened,
