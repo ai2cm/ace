@@ -1,0 +1,72 @@
+experiment_dir: /results
+n_forward_steps: 58300
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '0211-01-03T12:00:00'
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+  num_data_workers: 4
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: true
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+validation:
+  loader:
+    batch_size: 8
+    num_data_workers: 4
+    prefetch_factor: 4
+    time_buffer: 10
+    dataset:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+  loss:
+    type: MSE
+    weights:
+      air_temperature_0: 0.5
+      air_temperature_1: 0.5
+      eastward_wind_0: 0.5
+      northward_wind_0: 0.5
+      specific_total_water_0: 0.5
+      specific_total_water_1: 0.25
+      specific_total_water_2: 0.5
+      PRATEsfc: 0.5
+      h500: 10
+      TMP850: 5
+      Q2m: 10
+      TMP2m: 10
+      UGRD10m: 2.5
+      VGRD10m: 2.5
+      DLWRFsfc: 2
+      ULWRFsfc: 5
+      USWRFsfc: 2
+      DSWRFsfc: 2
+      USWRFtoa: 2
+      tendency_of_total_water_path_due_to_advection: 0.5

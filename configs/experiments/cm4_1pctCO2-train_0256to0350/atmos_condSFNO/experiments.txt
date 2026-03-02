@@ -1,0 +1,3 @@
+group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
+
+cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs1|01KJ5XN6NRQQYGGQ4D192FBJMG|run_ICx1|best_inference_ckpt|high|--not-preemptible
