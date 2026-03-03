@@ -449,7 +449,12 @@ def _apply_mld_heat_correction(
 ) -> None:
     """Distribute energy deficit within the mixed layer (modifies *gen* in place)."""
     delta_E = global_input_ohc + expected_change - global_gen_ohc
-    dz = vertical_coordinate.get_idepth().diff(dim=-1)  # (Z,)
+    deptho: torch.Tensor | None
+    try:
+        deptho = gen.sea_floor_depth
+    except KeyError:
+        deptho = None
+    dz = dz_from_idepth(gen.depth_interface, deptho)
     total_active = mld_weights.sum(dim=-1)  # (B, Y, X)
     Ah_mean = area_weighted_mean(
         total_active,
@@ -589,7 +594,12 @@ def _apply_mld_salt_correction(
 ) -> None:
     """Distribute salt deficit within the mixed layer (modifies *gen* in place)."""
     delta_S = global_input_salt_content + expected_change - global_gen_salt_content
-    dz = vertical_coordinate.get_idepth().diff(dim=-1)  # (Z,)
+    deptho: torch.Tensor | None
+    try:
+        deptho = gen.sea_floor_depth
+    except KeyError:
+        deptho = None
+    dz = dz_from_idepth(gen.depth_interface, deptho)
     total_active = mld_weights.sum(dim=-1)  # (B, Y, X)
     Ah_mean = area_weighted_mean(
         total_active,
@@ -688,7 +698,12 @@ def apply_geothermal_bottom_correction(
         timestep_seconds: Model timestep in seconds.
     """
     mask = vertical_coordinate.get_mask()  # broadcastable to (B, Y, X, Z)
-    dz = vertical_coordinate.get_idepth().diff(dim=-1)  # (Z,)
+    deptho: torch.Tensor | None
+    try:
+        deptho = gen.sea_floor_depth
+    except KeyError:
+        deptho = None
+    dz = dz_from_idepth(gen.depth_interface, deptho)
 
     wet_count = mask.sum(dim=-1, keepdim=True)
     cumulative = mask.cumsum(dim=-1)
