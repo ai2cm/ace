@@ -4,7 +4,7 @@ set -e
 
 JOB_NAME="v1124-E3SMv3-piControl-100yr-coupled-ICx1-40yr"
 JOB_GROUP="v1124-ref"
-EXISTING_RESULTS_DATASET="01KJDH03MTDEKKJX3PND17EADV"  # this contains the checkpoint to use for inference
+EXISTING_RESULTS_DATASET="01KJNJFHZ988JKX3B4PTXMGCDW"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
