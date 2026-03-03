@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="label-foundation-model-era5-evaluator"
+JOB_NAME="label-foundation-model-c96-amip-evaluator"
 JOB_GROUP="foundation-model-era5"
 EXISTING_RESULTS_DATASET="01KJN6WN08MRYKAQ86W2CRTQ2H"  # this contains the checkpoint to use for inference
-CONFIG_FILENAME="ace-evaluator-config-era5.yaml"
+CONFIG_FILENAME="ace-evaluator-config-c96-amip.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
