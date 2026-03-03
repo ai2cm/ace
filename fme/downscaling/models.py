@@ -27,6 +27,7 @@ class ModelOutputs:
     target: TensorDict
     loss: torch.Tensor
     latent_steps: list[torch.Tensor] = dataclasses.field(default_factory=list)
+    channel_losses: TensorDict = dataclasses.field(default_factory=dict)
 
 
 def _rename_normalizer(
@@ -139,6 +140,11 @@ class DiffusionModelConfig:
         n_in_channels = len(self.in_names)
         if static_inputs is not None:
             n_in_channels += len(static_inputs.fields)
+        elif self.use_fine_topography:
+            # Old checkpoints may not have static inputs serialized, but if
+            # use_fine_topography is True, we still need to account for the topography
+            # channel, which was the only static input at the time
+            n_in_channels += 1
 
         module = self.module.build(
             n_in_channels=n_in_channels,
@@ -369,11 +375,18 @@ class DiffusionModel:
         denoised_norm = self.module(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
-        loss = torch.mean(
-            conditioned_target.weight * self.loss(denoised_norm, targets_norm)
+        weighted_loss = conditioned_target.weight * self.loss(
+            denoised_norm, targets_norm
         )
+        loss = torch.mean(weighted_loss)
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
+
+        with torch.no_grad():
+            channel_losses = {
+                name: torch.mean(weighted_loss[:, i, :, :])
+                for i, name in enumerate(self.out_packer.names)
+            }
 
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
@@ -383,7 +396,11 @@ class DiffusionModel:
             self.out_packer.unpack(denoised_norm, axis=self._channel_axis)
         )
         return ModelOutputs(
-            prediction=denoised, target=target, loss=loss, latent_steps=[]
+            prediction=denoised,
+            target=target,
+            loss=loss,
+            channel_losses=channel_losses,
+            latent_steps=[],
         )
 
     @torch.no_grad()

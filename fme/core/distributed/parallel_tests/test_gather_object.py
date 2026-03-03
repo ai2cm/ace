@@ -1,6 +1,9 @@
+import pytest
+
 from fme.core.distributed import Distributed
 
 
+@pytest.mark.parallel
 def test_gather_object_gathers_tuple():
     dist = Distributed.get_instance()
     n_dp = dist.total_data_parallel_ranks

@@ -25,7 +25,7 @@ from fme.ace.requirements import (
     PrognosticStateDataRequirements,
 )
 from fme.ace.stepper import TrainStepper
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
@@ -180,8 +180,10 @@ class TrainConfig:
         weather_evaluation: Configuration for weather evaluation.
             If None, no weather evaluation is run. Weather evaluation is not
             used to select checkpoints, but is used to provide metrics.
+        stepper_training: Training-specific configuration including loss, ensemble
+            settings, parameter initialization, and forward step scheduling.
         n_forward_steps: Number of forward steps during training. Cannot be given
-            at the same time as train_n_forward_steps in StepperConfig.
+            at the same time as train_n_forward_steps in stepper_training.
         train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
@@ -233,6 +235,9 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig | None
+    stepper_training: TrainStepperConfig = dataclasses.field(
+        default_factory=lambda: TrainStepperConfig()
+    )
     n_forward_steps: int | None = None
     train_aggregator: TrainAggregatorConfig = dataclasses.field(
         default_factory=lambda: TrainAggregatorConfig()
@@ -260,14 +265,13 @@ class TrainConfig:
 
     def __post_init__(self):
         if (
-            self.stepper.train_n_forward_steps is not None
+            self.stepper_training.train_n_forward_steps is not None
             and self.n_forward_steps is not None
         ):
             raise ValueError(
-                "stepper.train_n_forward_steps may not be given at the same time as "
-                "n_forward_steps at the top level"
+                "stepper_training.train_n_forward_steps may not be given at the same "
+                "time as n_forward_steps at the top level"
             )
-        self.train_stepper = self.stepper.get_train_stepper_config()
         if self.train_loader.using_labels != self.validation_loader.using_labels:
             raise ValueError(
                 "train_loader and validation_loader must both use labels or both not "
@@ -341,7 +345,7 @@ class TrainBuilders:
 
     def _get_n_forward_steps(self) -> int | IntSchedule:
         """Get n_forward_steps for data loading requirements."""
-        schedule = self.config.train_stepper.train_n_forward_steps_schedule
+        schedule = self.config.stepper_training.train_n_forward_steps_schedule
         if schedule is not None:
             return schedule.max_n_forward_steps
         assert isinstance(
@@ -409,7 +413,7 @@ class TrainBuilders:
         initialization.
 
         """
-        return self.config.train_stepper.get_train_stepper(
+        return self.config.stepper_training.get_train_stepper(
             stepper_config=self.config.stepper,
             dataset_info=dataset_info,
         )

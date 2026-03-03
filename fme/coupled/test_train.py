@@ -66,7 +66,7 @@ optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: Adam
-train_stepper:
+stepper_training:
   ocean:
     loss:
       type: MSE

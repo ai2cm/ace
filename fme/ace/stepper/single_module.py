@@ -33,7 +33,7 @@ from fme.core.coordinates import (
     SerializableVerticalCoordinate,
     VerticalCoordinate,
 )
-from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
@@ -252,8 +252,6 @@ class SingleModuleStepperConfig:
         """
         return StepperConfig(
             step=self._to_step_config(normalizer, loss_normalizer),
-            loss=self.loss,
-            parameter_init=self.parameter_init,
         )
 
     def _to_step_config(
@@ -500,49 +498,17 @@ class StepperConfig:
     """
     Configuration for a stepper.
 
-    The following fields are training concerns transferred to TrainStepperConfig
-    via get_train_stepper_config() and are not used directly by get_stepper():
-    ``loss``, ``optimize_last_step_only``, ``n_ensemble``,
-    ``parameter_init``, ``train_n_forward_steps``.
-
     Parameters:
         step: The step configuration.
-        loss: The loss configuration. Training only.
-        optimize_last_step_only: Whether to optimize only the last step.
-            Training only.
-        n_ensemble: The number of ensemble members evaluated for each training
-            batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
-            the default is 1. Must be 2 for EnsembleLoss to be valid. Training only.
-        parameter_init: The parameter initialization configuration.
-            Training only.
         input_masking: Config for masking step inputs.
-        train_n_forward_steps: The number of timesteps to train on and associated
-            sampling probabilities. By default, the stepper will train on the full
-            number of timesteps present in the training dataset samples. Values must
-            be less than or equal to the number of timesteps present
-            in the training dataset samples. Training only.
         derived_forcings: Configuration for deriving forcing variables.
     """
 
     step: StepSelector
-    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
-    optimize_last_step_only: bool = False
-    n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
-    parameter_init: ParameterInitializationConfig = dataclasses.field(
-        default_factory=lambda: ParameterInitializationConfig()
-    )
-    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
-    input_masking: StaticMaskingConfig | None = None  # inference
+    input_masking: StaticMaskingConfig | None = None
     derived_forcings: DerivedForcingsConfig = dataclasses.field(
         default_factory=lambda: DerivedForcingsConfig()
-    )  # inference
-
-    def __post_init__(self):
-        if self.n_ensemble == -1:
-            if self.loss.type == "EnsembleLoss":
-                self.n_ensemble = 2
-            else:
-                self.n_ensemble = 1
+    )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -610,9 +576,14 @@ class StepperConfig:
         step = self.step.get_step(
             dataset_info, init_weights=parameter_initializer.freeze_weights
         )
-        derive_func = dataset_info.vertical_coordinate.build_derive_function(
-            dataset_info.timestep
-        )
+        try:
+            derive_func = dataset_info.vertical_coordinate.build_derive_function(
+                dataset_info.timestep, dataset_info.horizontal_coordinates
+            )
+        except MissingDatasetInfo:
+            derive_func = dataset_info.vertical_coordinate.build_derive_function(
+                dataset_info.timestep
+            )
         if self.input_masking is None:
             input_masking = NullMasking()
         else:
@@ -714,8 +685,16 @@ class StepperConfig:
     @classmethod
     def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
-        if "crps_training" in state_copy:
-            del state_copy["crps_training"]  # training value, ok to break
+        for key in [
+            "crps_training",
+            "loss",
+            "optimize_last_step_only",
+            "n_ensemble",
+            "parameter_init",
+            "train_n_forward_steps",
+        ]:
+            if key in state_copy:
+                del state_copy[key]
         return state_copy
 
     def replace_ocean(self, ocean: OceanConfig | None):
@@ -762,20 +741,17 @@ class StepperConfig:
         self.derived_forcings.validate_replacement(derived_forcings)
         self.derived_forcings = derived_forcings
 
+    def replace_total_energy_budget_correction(
+        self, value: EnergyBudgetConfig | None
+    ) -> None:
+        """Replace total energy budget correction (e.g. turn off during evaluation)."""
+        self.step.replace_total_energy_budget_correction(value)
+
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
         state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
-
-    def get_train_stepper_config(self) -> "TrainStepperConfig":
-        return TrainStepperConfig(
-            loss=self.loss,
-            optimize_last_step_only=self.optimize_last_step_only,
-            n_ensemble=self.n_ensemble,
-            train_n_forward_steps=self.train_n_forward_steps,
-            parameter_init=self.parameter_init,
         )
 
 
@@ -991,6 +967,22 @@ class Stepper:
         """
         self._config.replace_derived_forcings(derived_forcings)
         self.forcing_deriver = derived_forcings.build(self._dataset_info)
+
+    def replace_total_energy_budget_correction(
+        self, value: EnergyBudgetConfig | None
+    ) -> None:
+        """
+        Replace the total energy budget correction (e.g. turn off during evaluation).
+
+        Args:
+            value: The new total energy budget correction config or None to disable.
+        """
+        self._config.replace_total_energy_budget_correction(value)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
 
     def get_base_weights(self) -> Weights | None:
         """
@@ -1782,12 +1774,15 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
+        total_energy_budget_correction: Total energy budget correction config to use
+            for the atmosphere corrector. Use ``None`` to turn off during evaluation.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+    total_energy_budget_correction: Literal["keep"] | EnergyBudgetConfig | None = "keep"
 
 
 def load_stepper_config(
@@ -1857,5 +1852,14 @@ def load_stepper(
         )
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
+        )
+
+    if override_config.total_energy_budget_correction != "keep":
+        logging.info(
+            "Overriding total_energy_budget_correction with %s.",
+            override_config.total_energy_budget_correction,
+        )
+        stepper.replace_total_energy_budget_correction(
+            override_config.total_energy_budget_correction
         )
     return stepper
