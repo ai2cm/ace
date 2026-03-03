@@ -201,8 +201,9 @@ def test_map_aggregator(n_steps: int):
     aggregator.get_wandb()
 
 
-def test_loss_vs_noise_aggregator_get_wandb():
-    aggregator = LossVsNoiseAggregator()
+@pytest.mark.parametrize("prefix", ["train", "validation"])
+def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
+    aggregator = LossVsNoiseAggregator(n_bins=8)
     outputs_a = ModelOutputs(
         prediction={},
         target={},
@@ -228,11 +229,16 @@ def test_loss_vs_noise_aggregator_get_wandb():
     aggregator.record_batch(outputs_a)
     aggregator.record_batch(outputs_b)
 
-    logs = aggregator.get_wandb(prefix="train")
+    # Binning happens in record_batch, not get_wandb.
+    assert int(aggregator._total_count.sum().item()) == 3
+    assert int(aggregator._channel_count["x"].sum().item()) == 3
+    assert int(aggregator._channel_count["y"].sum().item()) == 3
+
+    logs = aggregator.get_wandb(prefix=prefix)
     assert set(logs.keys()) == {
-        "train/metrics/loss_vs_noise/total",
-        "train/metrics/loss_vs_noise/x",
-        "train/metrics/loss_vs_noise/y",
+        f"{prefix}/metrics/loss_vs_noise/total",
+        f"{prefix}/metrics/loss_vs_noise/x",
+        f"{prefix}/metrics/loss_vs_noise/y",
     }
     for value in logs.values():
         assert hasattr(value, "savefig")
