@@ -51,12 +51,14 @@ dataset_computation:
       - TMP850
       - UGRD500
       - UGRD850
+      - UGRD1000
       - VGRD500
       - VGRD850
+      - VGRD1000
       - h50
-      - h200
       - h500
       - h850
+      - h1000
       - air_temperature_at_two_meters
       - eastward_wind_at_ten_meters
       - northward_wind_at_ten_meters
