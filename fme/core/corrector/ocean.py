@@ -283,6 +283,7 @@ def dz_from_idepth(
         z_bot = idepth[..., 1:]
         sea_floor_depth = sea_floor_depth.unsqueeze(-1)
         dz = torch.clamp(sea_floor_depth, min=z_top, max=z_bot) - z_top
+        dz = dz.where(dz > 0, float("nan"))
     else:
         dz = idepth.diff(dim=-1)
     return dz
