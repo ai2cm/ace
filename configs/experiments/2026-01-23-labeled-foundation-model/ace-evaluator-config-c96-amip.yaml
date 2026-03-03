@@ -9,6 +9,7 @@ logging:
   project: ace
   entity: ai2cm
 loader:
+  strict: false
   start_indices:
     times:
       - '1979-01-01T00:00:00'
@@ -30,6 +31,7 @@ validation:
     prefetch_factor: 2
     time_buffer: 4
     dataset:
+      strict: false
       data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/
       file_pattern: ic_0002.zarr
       engine: zarr
