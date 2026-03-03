@@ -1,2 +1,2 @@
 TOTAL_JOBS|GROUP|TAG|WANDB_PROJECT|WANDB_ID|STATUS|PRIORITY|CLUSTER|N_GPUS|SHARED_MEM|RETRIES|WORKSPACE|OVERRIDE_ARGS|EXISTING_RESULTS_DATASET|EXISTING_RESULTS_OCEAN_DATASET|EXISTING_RESULTS_ATMOS_DATASET
-fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP-40epochs||ace-samudra-coupled-e3smv3|x793ot6t|train|high|h100|8|800GiB|2|ai2/ace|max_epochs=40 resume_results.resume_wandb=False|01KJDH03MTDEKKJX3PND17EADV
+fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP-40epochs||ace-samudra-coupled-e3smv3|x793ot6t|train|high|h100|8|800GiB|2|ai2/ace|max_epochs=40 resume_results.resume_wandb=False|01KJNJFHZ988JKX3B4PTXMGCDW
