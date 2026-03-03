@@ -116,6 +116,48 @@ def test_module_serialization(tmp_path):
     )
 
 
+def test_from_state_backward_compat_fine_topography():
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    downscale_factor = 2
+    static_inputs = StaticInputs(
+        fields=[
+            StaticInput(
+                torch.ones(*fine_shape, device=get_device()),
+                LatLonCoordinates(
+                    lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
+                ),
+            )
+        ]
+    )
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        predict_residual=True,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+
+    # Simulate old checkpoint format: static_inputs not serialized
+    state = model.get_state()
+    state["static_inputs"] = None
+
+    # Should load correctly via the elif use_fine_topography branch (+1 channel)
+    model_from_old_state = DiffusionModel.from_state(state)
+    assert model_from_old_state.static_inputs is None
+    assert all(
+        torch.equal(p1, p2)
+        for p1, p2 in zip(
+            model.module.parameters(), model_from_old_state.module.parameters()
+        )
+    )
+
+    # At runtime, omitting static inputs must raise a clear error
+    batch = get_mock_paired_batch([2, *coarse_shape], [2, *fine_shape])
+    with pytest.raises(ValueError, match="Static inputs must be provided"):
+        model_from_old_state.generate_on_batch(batch, static_inputs=None)
+
+
 def _get_diffusion_model(
     coarse_shape,
     downscale_factor,
