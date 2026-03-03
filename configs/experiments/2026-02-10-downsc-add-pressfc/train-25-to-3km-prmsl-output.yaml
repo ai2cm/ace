@@ -1,3 +1,4 @@
+max_patches: 2900
 static_inputs:
   HGTsfc:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
@@ -54,7 +55,7 @@ ema:
 validate_using_ema: true
 train_data:
   sample_with_replacement: 320
-  batch_size: 40
+  batch_size: 120
   num_data_workers: 2
   fine:
   - merge:
@@ -92,7 +93,7 @@ train_data:
   #   stop:  16 #246.0
   strict_ensemble: false
 validation_data:
-  batch_size: 36
+  batch_size: 144
   num_data_workers: 4
   fine:
   - merge:

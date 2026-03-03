@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni0.02-200-events"
+JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni0.02-200-events-churn2"
 CONFIG_FILENAME="eval-100-to-3km-prmsl-output.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -22,12 +22,14 @@ IMAGE="$(cat latest_deps_only_image.txt)"
 EXISTING_RESULTS_DATASET=01KJTA9TSYPWZKCY6J2DZVM4A4
 wandb_group=""
 
+#--not-preemptible \
+
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
     --priority urgent \
-    --not-preemptible \
+    --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \

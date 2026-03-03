@@ -194,7 +194,7 @@ class Trainer:
         outputs = None
         for i, (batch, static_inputs) in enumerate(train_batch_generator):
             self.num_batches_seen += 1
-            if i % 10 == 0:
+            if i % 100 == 0:
                 logging.info(f"Training on batch {i+1}")
             outputs = self.model.train_on_batch(batch, static_inputs, self.optimization)
             self.ema(self.model.modules)
