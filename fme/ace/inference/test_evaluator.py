@@ -89,8 +89,6 @@ def save_plus_one_stepper(
         normalization_names = all_names
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
-    if total_energy_budget_correction is None:
-        total_energy_budget_correction = None
     with tempfile.TemporaryDirectory() as temp_dir:
         mean_filename = pathlib.Path(temp_dir) / "means.nc"
         std_filename = pathlib.Path(temp_dir) / "stds.nc"
