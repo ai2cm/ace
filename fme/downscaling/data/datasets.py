@@ -122,20 +122,8 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             )
 
         self._orig_coords: LatLonCoordinates = properties.horizontal_coordinates
-        lats = torch.tensor(
-            [
-                i
-                for i in range(len(self._orig_coords.lat))
-                if float(self._orig_coords.lat[i]) in self.lat_interval
-            ]
-        )
-        lons = torch.tensor(
-            [
-                i
-                for i in range(len(self._orig_coords.lon))
-                if float(self._orig_coords.lon[i]) in self.lon_interval
-            ]
-        )
+        lat_slice = self.lat_interval.slice_of(self._orig_coords.lat)
+        lon_slice = self.lon_interval.slice_of(self._orig_coords.lon)
 
         if (self.lon_interval.stop != float("inf")) and (
             torch.any(self._orig_coords.lon < self.lon_interval.stop - 360.0)
@@ -154,16 +142,18 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
                 f"expected lon_min < {self.lon_interval.start + 360.0}"
             )
 
-        assert lats.numel() > 0, "No latitudes found in the specified range."
-        assert lons.numel() > 0, "No longitudes found in the specified range."
+        assert (
+            lat_slice.start != lat_slice.stop
+        ), "No latitudes found in the specified range."
+        assert (
+            lon_slice.start != lon_slice.stop
+        ), "No longitudes found in the specified range."
 
-        self.mask_indices = LatLonCoordinates(
-            lat=lats,
-            lon=lons,
-        )
+        self._lat_slice = lat_slice
+        self._lon_slice = lon_slice
         self._latlon_coordinates = LatLonCoordinates(
-            lat=self._orig_coords.lat[self.mask_indices.lat],
-            lon=self._orig_coords.lon[self.mask_indices.lon],
+            lat=self._orig_coords.lat[lat_slice],
+            lon=self._orig_coords.lon[lon_slice],
         )
         self._area_weights = self._latlon_coordinates.area_weights
 
@@ -188,14 +178,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, key) -> DatasetItem:
         batch, times, _, epoch = self.dataset[key]
-        batch = {
-            k: v[
-                ...,
-                self.mask_indices.lat.unsqueeze(1),
-                self.mask_indices.lon.unsqueeze(0),
-            ]
-            for k, v in batch.items()
-        }
+        batch = {k: v[..., self._lat_slice, self._lon_slice] for k, v in batch.items()}
         return batch, times, self._properties.all_labels, epoch
 
 

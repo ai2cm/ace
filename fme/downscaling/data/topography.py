@@ -8,14 +8,6 @@ from fme.core.device import get_device
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 
 
-def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
-    mask = (coords >= range.start) & (coords <= range.stop)
-    indices = mask.nonzero(as_tuple=True)[0]
-    if indices.numel() == 0:
-        return slice(0, 0)
-    return slice(indices[0].item(), indices[-1].item() + 1)
-
-
 @dataclasses.dataclass
 class StaticInput:
     data: torch.Tensor
@@ -48,8 +40,8 @@ class StaticInput:
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
     ) -> "StaticInput":
-        lat_slice = _range_to_slice(self.coords.lat, lat_interval)
-        lon_slice = _range_to_slice(self.coords.lon, lon_interval)
+        lat_slice = lat_interval.slice_of(self.coords.lat)
+        lon_slice = lon_interval.slice_of(self.coords.lon)
         return self._latlon_index_slice(lat_slice=lat_slice, lon_slice=lon_slice)
 
     def to_device(self) -> "StaticInput":

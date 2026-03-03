@@ -3,7 +3,7 @@ import torch
 
 from fme.core.coordinates import LatLonCoordinates
 
-from .topography import StaticInput, StaticInputs, _range_to_slice
+from .topography import StaticInput, StaticInputs
 from .utils import ClosedInterval
 
 
@@ -26,13 +26,6 @@ from .utils import ClosedInterval
 def test_Topography_error_cases(init_args):
     with pytest.raises(ValueError):
         StaticInput(*init_args)
-
-
-def test__range_to_slice():
-    x = torch.arange(5)
-    assert torch.equal(
-        x[_range_to_slice(x, ClosedInterval(2, 4))], torch.tensor([2, 3, 4])
-    )
 
 
 def test_subset_latlon():

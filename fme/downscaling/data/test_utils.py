@@ -62,3 +62,8 @@ def test_scale_slice(input_slice, expected):
     scaled = scale_slice(input_slice, scale=2)
     assert scaled.start == expected.start
     assert scaled.stop == expected.stop
+
+
+def test_ClosedInterval_slice_of():
+    x = torch.arange(5)
+    assert torch.equal(x[ClosedInterval(2, 4).slice_of(x)], torch.tensor([2, 3, 4]))

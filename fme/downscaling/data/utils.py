@@ -27,6 +27,13 @@ class ClosedInterval:
     def __contains__(self, value: float):
         return self.start <= value <= self.stop
 
+    def slice_of(self, coords: torch.Tensor) -> slice:
+        mask = (coords >= self.start) & (coords <= self.stop)
+        indices = mask.nonzero(as_tuple=True)[0]
+        if indices.numel() == 0:
+            return slice(0, 0)
+        return slice(indices[0].item(), indices[-1].item() + 1)
+
 
 def scale_slice(slice_: slice, scale: int) -> slice:
     if slice_ == slice(None):

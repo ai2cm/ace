@@ -563,7 +563,7 @@ class PairedDataLoaderConfig:
 
         # TODO: horizontal subsetting should probably live in the XarrayDatast level
         # Subset to overall horizontal domain
-        # TODO: Follow up PR will remove topography from batch items
+
         dataset_fine_subset = HorizontalSubsetDataset(
             dataset_fine,
             properties=properties_fine,
