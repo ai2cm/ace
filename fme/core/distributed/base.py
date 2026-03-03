@@ -106,6 +106,10 @@ class DistributedBackend(ABC):
         """
         ...
 
+    def reduce_spatial_gradients(self, module: torch.nn.Module) -> None:
+        """All-reduce parameter gradients across spatial groups. No-op default."""
+        ...
+
     @abstractmethod
     def barrier(self): ...
 

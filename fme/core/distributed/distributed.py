@@ -375,6 +375,14 @@ class Distributed:
         """
         return self._distributed.wrap_module(module)
 
+    def reduce_spatial_gradients(self, module: torch.nn.Module) -> None:
+        """All-reduce parameter gradients across spatial process groups.
+
+        Must be called after loss.backward() and before optimizer.step()
+        when spatial parallelism is active. No-op otherwise.
+        """
+        self._distributed.reduce_spatial_gradients(module)
+
     def barrier(self):
         """
         Wait for all processes to reach this point.

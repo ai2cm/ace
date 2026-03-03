@@ -244,9 +244,10 @@ class ModelTorchDistributed(DistributedBackend):
     def wrap_module(self, module: torch.nn.Module) -> torch.nn.Module:
         """Wrap with DDP over the **data** process group.
 
-        For now, we assume spatial communication is expected to be handled
-        inside the model layers themselves. If we need to change course, we
-        can revisit...
+        DDP handles gradient all-reduce across data-parallel ranks only.
+        Spatial gradient synchronization across h/w ranks is handled
+        separately by reduce_spatial_gradients below, which must be called
+        after backward and before the optimizer step.
         """
         if any(p.requires_grad for p in module.parameters()):
             if using_gpu():
@@ -260,6 +261,23 @@ class ModelTorchDistributed(DistributedBackend):
                 process_group=self._data_group,
             )
         return DummyWrapper(module)
+
+    def reduce_spatial_gradients(self, module: torch.nn.Module) -> None:
+        """All-reduce parameter gradients across spatial (h, w) process groups.
+
+        After loss.backward(), each spatial rank holds partial parameter
+        gradients computed only from its local spatial slab. This method
+        sums those partial gradients across all spatial ranks so that every
+        rank has the full gradient before the optimizer step.
+        """
+        if self._h_size <= 1 and self._w_size <= 1:
+            return
+        for param in module.parameters():
+            if param.requires_grad and param.grad is not None:
+                if self._h_size > 1:
+                    torch.distributed.all_reduce(param.grad, group=self._h_group)
+                if self._w_size > 1:
+                    torch.distributed.all_reduce(param.grad, group=self._w_group)
 
     def barrier(self):
         """Global barrier across all ranks."""
