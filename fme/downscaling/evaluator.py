@@ -239,7 +239,9 @@ class EvaluatorConfig:
         evaluator_model: DiffusionModel | PatchPredictor
 
         dataset = event_config.get_paired_gridded_data(
-            base_data_config=self.data, requirements=self.model.data_requirements
+            base_data_config=self.data,
+            requirements=self.model.data_requirements,
+            static_inputs_from_checkpoint=model.static_inputs,
         )
 
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
@@ -301,4 +303,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    main(args.config_path)
+    with Distributed.context():
+        main(args.config_path)
