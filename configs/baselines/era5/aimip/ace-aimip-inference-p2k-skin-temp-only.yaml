@@ -1,0 +1,25 @@
+checkpoint_path: /ckpt.tar
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+experiment_dir: /results
+forward_steps_in_memory: 40
+n_forward_steps: 1400
+initial_condition:
+  path: /climate-default/2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
+  start_indices:
+    times:
+      - '1978-10-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
+    engine: zarr
+  num_data_workers: 8
+  perturbations:
+    sst:
+      - type: constant
+        config:
+          amplitude: 2.0
+logging:
+  project: ace
