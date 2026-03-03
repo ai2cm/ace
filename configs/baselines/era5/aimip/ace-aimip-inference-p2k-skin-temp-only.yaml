@@ -24,7 +24,7 @@ forcing_loader:
           amplitude: 2.0
 logging:
   project: ace
-override:
+stepper_override:
   ocean:
     surface_temperature_name: sea_surface_temperature
     ocean_fraction_name: mask_sea_surface_temperature
