@@ -19,7 +19,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     StaticInput,
     StaticInputs,
-    get_normalized_topography,
+    get_normalized_static_input,
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
@@ -616,7 +616,7 @@ class CheckpointModelConfig:
             )
         elif self.fine_topography_path is not None:
             # Fallback for old checkpoints without serialized static_inputs
-            topo = get_normalized_topography(self.fine_topography_path)
+            topo = get_normalized_static_input(self.fine_topography_path)
             static_inputs = StaticInputs([topo])
         else:
             static_inputs = None
@@ -659,6 +659,6 @@ class CheckpointModelConfig:
                     "Topography path must be provided for model configured "
                     "to use fine topography."
                 )
-            return get_normalized_topography(self.fine_topography_path).to_device()
+            return get_normalized_static_input(self.fine_topography_path).to_device()
         else:
             return None

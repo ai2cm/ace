@@ -11,8 +11,6 @@ from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 
 
 def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
-    # Ensure all tensors are on the same device for comparison
-    coords = coords.cpu()
     mask = (coords >= range.start) & (coords <= range.stop)
     indices = mask.nonzero(as_tuple=True)[0]
     if indices.numel() == 0:
@@ -24,6 +22,7 @@ def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
 class StaticInput:
     data: torch.Tensor
     coords: LatLonCoordinates
+    name: str | None = None
 
     def __post_init__(self):
         if len(self.data.shape) != 2:
@@ -99,11 +98,11 @@ class StaticInput:
         }
 
 
-def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
+def get_normalized_static_input(path: str, field_name: str = "HGTsfc"):
     if path.endswith(".zarr"):
-        topography = xr.open_zarr(path, mask_and_scale=False)[topography_name]
+        topography = xr.open_zarr(path, mask_and_scale=False)[field_name]
     else:
-        topography = xr.open_dataset(path, mask_and_scale=False)[topography_name]
+        topography = xr.open_dataset(path, mask_and_scale=False)[field_name]
     if "time" in topography.dims:
         topography = topography.isel(time=0).squeeze()
     if len(topography.shape) != 2:
