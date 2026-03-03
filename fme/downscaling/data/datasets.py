@@ -27,7 +27,6 @@ from fme.downscaling.data.utils import (
     check_leading_dim,
     expand_and_fold_tensor,
     get_offset,
-    null_generator,
     paired_shuffle,
     scale_tuple,
 )
@@ -461,6 +460,16 @@ class BatchData:
     def horizontal_shape(self) -> tuple[int, int]:
         return self._horizontal_shape
 
+    @property
+    def lat_interval(self) -> ClosedInterval:
+        lat = self.latlon_coordinates[0].lat
+        return ClosedInterval(start=lat.min().item(), stop=lat.max().item())
+
+    @property
+    def lon_interval(self) -> ClosedInterval:
+        lon = self.latlon_coordinates[0].lon
+        return ClosedInterval(start=lon.min().item(), stop=lon.max().item())
+
     @classmethod
     def from_sequence(
         cls,
@@ -733,7 +742,7 @@ def patched_batch_gen_from_loader(
     shuffle: bool = False,
 ) -> Iterator[tuple[BatchData, StaticInputs | None]]:
     for batch in loader:
-        coarse_patches, fine_patches = _get_paired_patches(
+        coarse_patches, _ = _get_paired_patches(
             coarse_yx_extent=coarse_yx_extent,
             coarse_yx_patch_extent=coarse_yx_patch_extent,
             coarse_overlap=coarse_overlap,
@@ -742,20 +751,28 @@ def patched_batch_gen_from_loader(
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
-    batch_data_patches = batch.generate_from_patches(coarse_patches)
-
-    if static_inputs is not None:
-        if fine_patches is None:
-            raise ValueError(
-                "Topography provided but downscale_factor is None, cannot "
-                "generate fine patches."
-            )
-        static_inputs_patches = static_inputs.generate_from_patches(fine_patches)
-    else:
-        static_inputs_patches = null_generator(len(coarse_patches))
-
-    # Combine outputs from both generators
-    yield from zip(batch_data_patches, static_inputs_patches)
+        for coarse_patch in batch.generate_from_patches(coarse_patches):
+            if static_inputs is not None:
+                if downscale_factor is None:
+                    raise ValueError(
+                        "Static inputs provided but downscale_factor is None, cannot "
+                        "subset for coarse coordinates."
+                    )
+                si = static_inputs.subset_for_coarse_coords(
+                    coarse_patch.latlon_coordinates[0], downscale_factor
+                )
+                expected_fine_shape = scale_tuple(
+                    coarse_patch.horizontal_shape, downscale_factor
+                )
+                if si.shape != expected_fine_shape:
+                    raise ValueError(
+                        f"Static inputs shape {si.shape} does not match "
+                        f"expected fine-grid shape {expected_fine_shape} after "
+                        "coordinate subsetting."
+                    )
+            else:
+                si = None
+            yield coarse_patch, si
 
 
 def patched_batch_gen_from_paired_loader(
@@ -779,17 +796,17 @@ def patched_batch_gen_from_paired_loader(
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
-        batch_data_patches = batch.generate_from_patches(coarse_patches, fine_patches)
-
-        if static_inputs is not None:
-            if fine_patches is None:
-                raise ValueError(
-                    "Static inputs provided but downscale_factor is None, cannot "
-                    "generate fine patches."
+        for data_patch in batch.generate_from_patches(coarse_patches, fine_patches):
+            if static_inputs is not None:
+                si = static_inputs.subset_latlon(
+                    data_patch.fine.lat_interval, data_patch.fine.lon_interval
                 )
-            static_inputs_patches = static_inputs.generate_from_patches(fine_patches)
-        else:
-            static_inputs_patches = null_generator(len(coarse_patches))
-
-        # Combine outputs from both generators
-        yield from zip(batch_data_patches, static_inputs_patches)
+                if si.shape != data_patch.fine.horizontal_shape:
+                    raise ValueError(
+                        f"Static inputs shape {si.shape} does not match "
+                        f"expected fine-grid shape {data_patch.fine.horizontal_shape} "
+                        "after coordinate subsetting."
+                    )
+            else:
+                si = None
+            yield data_patch, si

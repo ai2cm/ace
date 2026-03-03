@@ -5,7 +5,6 @@ import torch
 from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs, scale_tuple
 from fme.downscaling.data.patching import Patch, get_patches
-from fme.downscaling.data.utils import null_generator
 from fme.downscaling.models import DiffusionModel, ModelOutputs
 from fme.downscaling.predictors import CascadePredictor
 
@@ -119,17 +118,21 @@ class PatchPredictor:
         batch_generator = batch.generate_from_patches(
             coarse_patches=coarse_patches, fine_patches=fine_patches
         )
-        if static_inputs is not None:
-            static_inputs_generator = static_inputs.generate_from_patches(fine_patches)
-        else:
-            static_inputs_generator = null_generator(len(fine_patches))
-
-        for data_patch, static_inputs_patch in zip(
-            batch_generator, static_inputs_generator
-        ):
-            model_output = self.model.generate_on_batch(
-                data_patch, static_inputs_patch, n_samples
+        for data_patch in batch_generator:
+            si = (
+                static_inputs.subset_latlon(
+                    data_patch.fine.lat_interval, data_patch.fine.lon_interval
+                )
+                if static_inputs is not None
+                else None
             )
+            if si is not None and si.shape != data_patch.fine.horizontal_shape:
+                raise ValueError(
+                    f"Static inputs shape {si.shape} does not match "
+                    f"expected fine-grid shape {data_patch.fine.horizontal_shape} "
+                    "after coordinate subsetting."
+                )
+            model_output = self.model.generate_on_batch(data_patch, si, n_samples)
             predictions.append(model_output.prediction)
             loss = loss + model_output.loss
 
@@ -156,18 +159,28 @@ class PatchPredictor:
             coarse_yx_extent=coarse_yx_extent, fine_yx_extent=fine_yx_extent
         )
         predictions = []
-        batch_generator = batch.generate_from_patches(coarse_patches)
-        if static_inputs is not None:
-            static_inputs_generator = static_inputs.generate_from_patches(fine_patches)
-        else:
-            static_inputs_generator = null_generator(len(fine_patches))
-        for data_patch, static_inputs_patch in zip(
-            batch_generator, static_inputs_generator
-        ):
+        for data_patch in batch.generate_from_patches(coarse_patches):
+            si = (
+                static_inputs.subset_for_coarse_coords(
+                    data_patch.latlon_coordinates[0], self.downscale_factor
+                )
+                if static_inputs is not None
+                else None
+            )
+            if si is not None:
+                expected_fine_shape = scale_tuple(
+                    data_patch.horizontal_shape, self.downscale_factor
+                )
+                if si.shape != expected_fine_shape:
+                    raise ValueError(
+                        f"Static inputs shape {si.shape} does not match "
+                        f"expected fine-grid shape {expected_fine_shape} after "
+                        "coordinate subsetting."
+                    )
             predictions.append(
                 self.model.generate_on_batch_no_target(
                     batch=data_patch,
-                    static_inputs=static_inputs_patch,
+                    static_inputs=si,
                     n_samples=n_samples,
                 )
             )

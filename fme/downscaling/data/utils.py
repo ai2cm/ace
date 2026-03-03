@@ -93,11 +93,23 @@ def adjust_fine_coord_range(
 
     # The fine grid that exactly covers the coarse grid should have downscale_factor//2
     # fine points on either side of the min/max coarse coord gridpoints.
+    # At domain boundaries there may be fewer fine points outside the coarse range,
+    # in which case we clip to the domain boundary.
     n_half_fine = downscale_factor // 2
     coarse_min = full_coarse_coord[full_coarse_coord >= coord_range.start][0]
     coarse_max = full_coarse_coord[full_coarse_coord <= coord_range.stop][-1]
-    fine_min = full_fine_coord[full_fine_coord < coarse_min][-n_half_fine]
-    fine_max = full_fine_coord[full_fine_coord > coarse_max][n_half_fine - 1]
+    fine_before_min = full_fine_coord[full_fine_coord < coarse_min]
+    fine_min = (
+        fine_before_min[-n_half_fine]
+        if fine_before_min.numel() >= n_half_fine
+        else full_fine_coord[0]
+    )
+    fine_after_max = full_fine_coord[full_fine_coord > coarse_max]
+    fine_max = (
+        fine_after_max[n_half_fine - 1]
+        if fine_after_max.numel() >= n_half_fine
+        else full_fine_coord[-1]
+    )
 
     return ClosedInterval(start=fine_min, stop=fine_max)
 
