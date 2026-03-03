@@ -80,3 +80,5 @@ fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP-40epochs|||training|best_inferenc
 fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP-40epochs||01KJRJ2FK9QG0T4BF9J384X6NM|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP-40epochs||01KJTFYNHAVDH575ZBM9XT5K8D|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_fto-v1124-train-95yr-ebpeysbb-dso4ysdg-ft-AMIP||01KJTG3NY9AWW36GDQ24WWWYYJ|training|best_inference_ckpt|normal|--not-preemptible
