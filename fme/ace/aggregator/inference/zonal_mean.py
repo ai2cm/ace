@@ -34,12 +34,14 @@ class _RawData:
                 [[datum], [target_datum]],
                 diverging=self.diverging,
                 caption=self.caption,
+                roll_lon=False,  # this rolls time dimension which we dont want to roll
             )
         else:
             return plot_paneled_data(
                 [[datum]],
                 diverging=self.diverging,
                 caption=self.caption,
+                roll_lon=False,
             )
 
 

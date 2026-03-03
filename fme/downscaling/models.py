@@ -34,6 +34,8 @@ class ModelOutputs:
     loss: torch.Tensor
     latent_steps: list[torch.Tensor] = dataclasses.field(default_factory=list)
     channel_losses: TensorDict = dataclasses.field(default_factory=dict)
+    sigma: torch.Tensor | None = None
+    per_sample_channel_loss: TensorDict = dataclasses.field(default_factory=dict)
 
 
 def _rename_normalizer(
@@ -182,6 +184,11 @@ class DiffusionModelConfig:
         n_in_channels = len(self.in_names)
         if static_inputs is not None:
             n_in_channels += len(static_inputs.fields)
+        elif self.use_fine_topography:
+            # Old checkpoints may not have static inputs serialized, but if
+            # use_fine_topography is True, we still need to account for the topography
+            # channel, which was the only static input at the time
+            n_in_channels += 1
 
         module = self.module.build(
             n_in_channels=n_in_channels,
@@ -379,6 +386,11 @@ class DiffusionModel:
                 name: torch.mean(weighted_loss[:, i, :, :])
                 for i, name in enumerate(self.out_packer.names)
             }
+            per_sample_channel_loss = {
+                name: torch.mean(weighted_loss[:, i, :, :], dim=(-2, -1)).detach()
+                for i, name in enumerate(self.out_packer.names)
+            }
+            sigma = conditioned_target.sigma[:, 0, 0, 0].detach()
 
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
@@ -392,6 +404,8 @@ class DiffusionModel:
             target=target,
             loss=loss,
             channel_losses=channel_losses,
+            sigma=sigma,
+            per_sample_channel_loss=per_sample_channel_loss,
             latent_steps=[],
         )
 
