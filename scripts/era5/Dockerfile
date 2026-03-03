@@ -16,6 +16,6 @@ ENTRYPOINT [ "/opt/apache/beam/boot" ]
 ENV PATH /opt/conda/envs/env/bin:${PATH}
 # Normally this variable would be set by activating the conda environment, but
 # since we are not doing that here, we need to set it manually. It is required
-# for xesmf to be able to find esmf. See 
+# for xesmf to be able to find esmf. See
 # https://github.com/conda-forge/esmf-feedstock/issues/91#issuecomment-1387279692
 ENV ESMFMKFILE /opt/conda/envs/env/lib/esmf.mk
