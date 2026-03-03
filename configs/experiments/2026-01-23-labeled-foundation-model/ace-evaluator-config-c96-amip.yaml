@@ -13,8 +13,10 @@ loader:
     times:
       - '1979-01-01T00:00:00'
   dataset:
-    data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-    labels: ["era5"]
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/
+    file_pattern: ic_0002.zarr
+    engine: zarr
+    labels: ["c96-shield"]
   num_data_workers: 16
 aggregator:
   log_zonal_mean_images: false
