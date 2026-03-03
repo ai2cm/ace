@@ -62,26 +62,26 @@ logging:
   project: multivariate-downscaling
   entity: ai2cm
 events:
-# - name: NE_US_Quebec_20230206
-#   date: 2023-02-06T00:00
-#   lat_extent:
-#     start: 36
-#     stop: 52
-#   lon_extent:
-#     start: 283
-#     stop: 299
-#   save_generated_samples: true
-#   n_samples: 16
-# - name: WA_AR_20230101
-#   date: 2023-01-01T06:00
-#   lat_extent:
-#     start: 36
-#     stop: 52
-#   lon_extent:
-#     start: 228
-#     stop: 244
-#   save_generated_samples: true
-#   n_samples: 16
+- name: NE_US_Quebec_20230206
+  date: 2023-02-06T00:00
+  lat_extent:
+    start: 36
+    stop: 52
+  lon_extent:
+    start: 283
+    stop: 299
+  save_generated_samples: true
+  n_samples: 16
+- name: WA_AR_20230101
+  date: 2023-01-01T06:00
+  lat_extent:
+    start: 36
+    stop: 52
+  lon_extent:
+    start: 228
+    stop: 244
+  save_generated_samples: true
+  n_samples: 16
 - name: WPacific_hurricane_20230425
   date: 2023-04-25T18:00
   lat_extent:
@@ -132,16 +132,16 @@ events:
     stop: 18
   save_generated_samples: true
   n_samples: 16
-# - name: hindu_kush_20230122
-#   date: 2023-01-22T06:00
-#   lat_extent:
-#     start: 28
-#     stop: 44
-#   lon_extent:
-#     start: 60
-#     stop: 76
-#   save_generated_samples: true
-#   n_samples: 16
+- name: hindu_kush_20230122
+  date: 2023-01-22T06:00
+  lat_extent:
+    start: 28
+    stop: 44
+  lon_extent:
+    start: 60
+    stop: 76
+  save_generated_samples: true
+  n_samples: 16
 - name: WPac_tc_20230426T06
   date: 2023-04-26T06:00
   lat_extent:
