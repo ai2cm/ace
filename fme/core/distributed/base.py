@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TypeVar
 
 import torch
+
+T = TypeVar("T")
 
 
 class DistributedBackend(ABC):
@@ -78,7 +81,10 @@ class DistributedBackend(ABC):
         ...
 
     @abstractmethod
-    def gather_object(self, obj: object) -> list[object] | None: ...
+    def gather_object(self, obj: T) -> list[T] | None: ...
+
+    @abstractmethod
+    def scatter_object(self, obj: T) -> T: ...
 
     @abstractmethod
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:

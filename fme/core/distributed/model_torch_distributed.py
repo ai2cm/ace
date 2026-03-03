@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any, TypeVar
 
 import torch
 import torch.distributed
@@ -33,6 +34,9 @@ from .non_distributed import DummyWrapper
 from .torch_distributed import _gather_irregular
 
 logger = logging.getLogger(__name__)
+
+
+T = TypeVar("T")
 
 
 class ModelTorchDistributed(DistributedBackend):
@@ -214,18 +218,28 @@ class ModelTorchDistributed(DistributedBackend):
         )
         return gather_list if self._rank == 0 else None
 
-    def gather_object(self, obj: object) -> list[object] | None:
+    def gather_object(self, obj: T) -> list[T] | None:
         """Gather a picklable object over the data-parallel group."""
-        root_global_rank = torch.distributed.get_process_group_ranks(self._data_group)[
-            0
-        ]
-        gather_list: list[object] | None = (
-            [None for _ in range(self._data_size)] if self._data_rank == 0 else None
+        gather_list: list[Any] | None = (
+            [None for _ in range(self.total_ranks)] if self._data_rank == 0 else None
         )
-        torch.distributed.gather_object(
-            obj, gather_list, dst=root_global_rank, group=self._data_group
-        )
+        torch.distributed.gather_object(obj, gather_list)
         return gather_list if self._rank == 0 else None
+
+    def scatter_object(self, obj: T | None) -> T:
+        """Scatter a picklable object from the root process to all processes."""
+        if self._data_rank == 0:
+            if obj is None:
+                raise ValueError("Root process must provide an object to scatter")
+            object_list = [obj for _ in range(self.total_ranks)]
+        else:
+            object_list = None
+        output_list = [None]
+        torch.distributed.scatter_object_list(
+            scatter_object_output_list=output_list,
+            scatter_object_input_list=object_list,
+        )
+        return output_list[0]  # type: ignore[return-value]
 
     # For now, let's just borrow the same gather_irregular implementation
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:

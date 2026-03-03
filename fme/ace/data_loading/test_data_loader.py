@@ -36,7 +36,11 @@ from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConf
 from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
+from fme.core.distributed.distributed import Distributed
+from fme.core.testing.regression import validate_tensor_dict
 from fme.core.typing_ import Slice
+
+DATA_DIR = pathlib.Path(__file__).parent / "testdata"
 
 
 def _get_coords(dim_sizes, calendar, timestep_size=1, timestep_start=0):
@@ -63,7 +67,7 @@ def _save_netcdf(
     filename, dim_sizes, variable_names, calendar, timestep_size=1, timestep_start=0
 ):
     data_vars = {}
-    for name in variable_names:
+    for name in sorted(variable_names):
         if name == "constant_mask":
             data = np.ones(list(dim_sizes.values()))
         else:
@@ -82,6 +86,10 @@ def _save_netcdf(
     return ds
 
 
+N_LAT = 16
+N_LON = 32
+
+
 def _create_dataset_on_disk(
     data_dir: pathlib.Path,
     calendar: str = "proleptic_gregorian",
@@ -94,7 +102,7 @@ def _create_dataset_on_disk(
     timestep_start=0,
 ) -> pathlib.Path:
     if data_dim_sizes is None:
-        data_dim_sizes = {"time": n_times, "lat": 16, "lon": 32}
+        data_dim_sizes = {"time": n_times, "lat": N_LAT, "lon": N_LON}
     seed = 0
     np.random.seed(seed)
     mask_name = "mask"
@@ -190,21 +198,57 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
 
+@pytest.mark.parallel
 def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
-    _create_dataset_on_disk(tmp_path)
+    dist = Distributed.get_instance()
+    tmp_path = dist.scatter_object(tmp_path)  # get the root value
+    global_batch_size = 8
+    if dist.is_root():
+        # TODO: investigate why this test fails if we
+        # increment n_times below by 1 (so it's + 2)
+        _create_dataset_on_disk(tmp_path, n_times=global_batch_size + 1)
+    dist.barrier()  # make sure the data's there before we load it
+    local_batch_size = dist.local_batch_size(global_batch_size)
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(
             concat=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)]
         ),
-        batch_size=1,
+        batch_size=global_batch_size,
         num_data_workers=0,
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_gridded_data(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, False, requirements)  # type: ignore
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
+    first_batch = next(iter(data.loader))
+    assert first_batch.data["foo"].shape[0] == (local_batch_size)
+    gathered_data = {}
+    for name, tensor in sorted(first_batch.data.items()):
+        gathered_tensor = dist.gather_global(
+            tensor,
+            global_shape=(global_batch_size,)
+            + tuple(tensor.shape[1:-2])
+            + (N_LAT, N_LON),
+        )
+        if dist.is_root():
+            assert gathered_tensor is not None
+            # batch order is not guaranteed, so we need to sort
+            # for the regression test
+            batch_items = [gathered_tensor[i] for i in range(global_batch_size)]
+            gathered_tensor = torch.cat(
+                sorted(batch_items, key=lambda x: x[0, 0, 0].item()), dim=0
+            )
+        gathered_data[name] = gathered_tensor
+    if dist.is_root():
+        validate_tensor_dict(
+            gathered_data,
+            DATA_DIR / "test_xarray_loader_regression.pt",
+        )
+    # TODO: it would be very helpful to implement scatter_object or something
+    # similar to ensure other attributes like time, labels, horizontal_dims, epoch,
+    # and n_ensemble are identical (i.e. have the correct value) across ranks
 
 
 @pytest.mark.parametrize(

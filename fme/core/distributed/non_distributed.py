@@ -1,6 +1,10 @@
+from typing import TypeVar
+
 import torch
 
 from .base import DistributedBackend
+
+T = TypeVar("T")
 
 
 class DummyWrapper(torch.nn.Module):
@@ -71,8 +75,11 @@ class NonDistributed(DistributedBackend):
             return gather_list
         return [tensor]
 
-    def gather_object(self, obj: object) -> list[object] | None:
+    def gather_object(self, obj: T) -> list[T] | None:
         return [obj]
+
+    def scatter_object(self, obj: T) -> T:
+        return obj
 
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
         return [tensor]

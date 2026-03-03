@@ -268,7 +268,7 @@ class Distributed:
         """
         return self._distributed.reduce_max(tensor)
 
-    def gather_object(self, obj: object) -> list[object] | None:
+    def gather_object(self, obj: T) -> list[T] | None:
         """
         Gather a picklable object from all processes to the root process.
 
@@ -280,6 +280,21 @@ class Distributed:
                 from the i-th process.
         """
         return self._distributed.gather_object(obj)
+
+    def scatter_object(self, obj: T | None) -> T:
+        """
+        Scatter a picklable object from the root process to all processes.
+
+        Args:
+            obj: The object to scatter.
+
+        Returns:
+            The object scattered from the root process.
+        """
+        scattered = self._distributed.scatter_object(obj)
+        if scattered is None:  # necessary check due to mypy limitations
+            raise RuntimeError("scatter_object returned None")
+        return scattered
 
     def gather(self, tensor: T, gather_list: list[T] | None = None) -> list[T] | None:
         """
