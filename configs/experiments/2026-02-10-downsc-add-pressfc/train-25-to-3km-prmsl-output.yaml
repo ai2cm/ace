@@ -31,8 +31,8 @@ model:
     type: unet_diffusion_song_v2
   normalization:
     coarse:
-      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/centering-20260206.nc
-      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/scaling-full-field-20260206.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/centering-pressfc-renamed-to-prmsl.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/scaling-full-field-pressfc-renamed-to-prmsl.nc
     fine:
       global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering-20260206.nc
       global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260206.nc
@@ -44,11 +44,11 @@ model:
     #p_min: 0.02
     #p_max: 150.0
   predict_residual: true
-  sigma_max: 200.0
+  sigma_max: 325.0
   sigma_min: 0.002
   use_fine_topography: true
 optimization:
-  lr: 0.00005 #0.0001
+  lr:  0.0001
   optimizer_type: Adam
 ema:
   decay: 0.999
