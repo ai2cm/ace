@@ -18,7 +18,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicHistograms
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import ComparedDynamicHistogramsAdapter
 from fme.downscaling.data import PairedBatchData
@@ -48,6 +48,78 @@ def ensure_trailing_slash(key: str) -> str:
 
 def _tensor_mapping_to_numpy(data: TensorMapping) -> TensorMapping:
     return {k: v.cpu().numpy() for k, v in data.items()}
+
+
+class LossVsNoiseAggregator:
+    """
+    Aggregates per-sample diffusion loss as a function of sampled noise level.
+    """
+
+    def __init__(self, name: str = "metrics/loss_vs_noise") -> None:
+        self._name = ensure_trailing_slash(name)
+        self._sigmas: list[torch.Tensor] = []
+        self._per_sample_channel_losses: list[TensorDict] = []
+
+    @torch.no_grad()
+    def record_batch(self, outputs: ModelOutputs) -> None:
+        if outputs.sigma is None or not outputs.per_sample_channel_loss:
+            return
+        sigma = outputs.sigma.detach().flatten().cpu()
+        per_channel = {
+            name: loss.detach().flatten().cpu()
+            for name, loss in outputs.per_sample_channel_loss.items()
+        }
+        if any(loss.shape != sigma.shape for loss in per_channel.values()):
+            raise ValueError(
+                "Expected per-sample channel losses and sigma to share batch shape"
+            )
+        self._sigmas.append(sigma)
+        self._per_sample_channel_losses.append(per_channel)
+
+    def _plot_loss_vs_noise(
+        self, x_values: np.ndarray, y_values: np.ndarray, title: str
+    ) -> Any:
+        fig, ax = plt.subplots()
+        ax.scatter(x_values, y_values, s=4, alpha=0.25)
+        ax.set_xlabel("log10(sigma)")
+        ax.set_ylabel("weighted loss")
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        plt.close(fig)
+        return fig
+
+    def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
+        prefix = ensure_trailing_slash(prefix)
+        if not self._sigmas:
+            return {}
+
+        sigma = torch.cat(self._sigmas)
+        if torch.any(sigma <= 0):
+            raise ValueError("Sigma must be strictly positive for log10 plotting")
+
+        channel_names = sorted(self._per_sample_channel_losses[0].keys())
+        channel_loss = {
+            name: torch.cat([batch[name] for batch in self._per_sample_channel_losses])
+            for name in channel_names
+        }
+        total_loss = torch.stack([channel_loss[name] for name in channel_names], dim=-1)
+        total_loss = torch.mean(total_loss, dim=-1)
+
+        x_values = np.log10(sigma.numpy())
+        ret: dict[str, Any] = {
+            f"{prefix}{self._name}total": self._plot_loss_vs_noise(
+                x_values=x_values,
+                y_values=total_loss.numpy(),
+                title="Total weighted loss vs noise",
+            )
+        }
+        for name in channel_names:
+            ret[f"{prefix}{self._name}{name}"] = self._plot_loss_vs_noise(
+                x_values=x_values,
+                y_values=channel_loss[name].numpy(),
+                title=f"{name} weighted loss vs noise",
+            )
+        return ret
 
 
 def _get_spectrum_metrics(
@@ -798,6 +870,7 @@ class Aggregator:
 
         self.loss = Mean(torch.mean)
         self.channel_loss = Mean(torch.mean)
+        self.loss_vs_noise = LossVsNoiseAggregator()
         self._fine_latlon_coordinates: LatLonCoordinates | None = None
 
     @torch.no_grad()
@@ -841,6 +914,7 @@ class Aggregator:
         self.loss.record_batch({"loss": outputs.loss})
         if outputs.channel_losses:
             self.channel_loss.record_batch(outputs.channel_losses)
+        self.loss_vs_noise.record_batch(outputs)
 
     def get_wandb(
         self,
@@ -855,6 +929,7 @@ class Aggregator:
         ret.update(self.loss.get_wandb(prefix))
         if self.channel_loss._count > 0:
             ret.update(self.channel_loss.get_wandb(f"{prefix}channel_loss/"))
+        ret.update(self.loss_vs_noise.get_wandb(prefix))
         for comparison in self._comparisons:
             ret.update(comparison.get_wandb(prefix))
         for coarse_comparison in self._coarse_comparisons:

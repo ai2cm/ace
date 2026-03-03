@@ -13,6 +13,7 @@ from .. import metrics_and_maths
 from ..models import ModelOutputs
 from .generation import GenerationAggregator
 from .main import (
+    LossVsNoiseAggregator,
     Mean,
     MeanComparison,
     MeanMapAggregator,
@@ -198,6 +199,43 @@ def test_map_aggregator(n_steps: int):
         assert maps[f"maps/error/{var_name}"].shape == (height, width)
 
     aggregator.get_wandb()
+
+
+def test_loss_vs_noise_aggregator_get_wandb():
+    aggregator = LossVsNoiseAggregator()
+    outputs_a = ModelOutputs(
+        prediction={},
+        target={},
+        latent_steps=[],
+        loss=torch.tensor(0.0),
+        sigma=torch.tensor([0.1, 1.0]),
+        per_sample_channel_loss={
+            "x": torch.tensor([1.0, 2.0]),
+            "y": torch.tensor([2.0, 4.0]),
+        },
+    )
+    outputs_b = ModelOutputs(
+        prediction={},
+        target={},
+        latent_steps=[],
+        loss=torch.tensor(0.0),
+        sigma=torch.tensor([10.0]),
+        per_sample_channel_loss={
+            "x": torch.tensor([3.0]),
+            "y": torch.tensor([6.0]),
+        },
+    )
+    aggregator.record_batch(outputs_a)
+    aggregator.record_batch(outputs_b)
+
+    logs = aggregator.get_wandb(prefix="train")
+    assert set(logs.keys()) == {
+        "train/metrics/loss_vs_noise/total",
+        "train/metrics/loss_vs_noise/x",
+        "train/metrics/loss_vs_noise/y",
+    }
+    for value in logs.values():
+        assert hasattr(value, "savefig")
 
 
 @pytest.mark.parametrize("n_latent_steps", [0, 2])
