@@ -17,8 +17,8 @@ from fme.downscaling.data import (
     BatchData,
     LatLonCoordinates,
     PairedBatchData,
+    StaticInput,
     StaticInputs,
-    Topography,
     get_normalized_topography,
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
@@ -320,7 +320,7 @@ class DiffusionModel:
 
     def _get_static_input_for_batch(
         self, coarse_latlon: LatLonCoordinates
-    ) -> Topography | None:
+    ) -> StaticInput | None:
         """Get the subset topography for a batch from internal static inputs."""
         if not self.config.use_fine_topography or self.static_inputs is None:
             return None
@@ -649,7 +649,7 @@ class CheckpointModelConfig:
     def out_names(self):
         return self._checkpoint["model"]["config"]["out_names"]
 
-    def get_topography(self) -> Topography | None:
+    def get_topography(self) -> StaticInput | None:
         if self.data_requirements.use_fine_topography:
             if self.fine_topography_path is None:
                 raise ValueError(

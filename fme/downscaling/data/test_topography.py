@@ -4,7 +4,7 @@ import torch
 from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
 
-from .topography import StaticInputs, Topography, _range_to_slice
+from .topography import StaticInput, StaticInputs, _range_to_slice
 from .utils import ClosedInterval
 
 
@@ -26,7 +26,7 @@ from .utils import ClosedInterval
 )
 def test_Topography_error_cases(init_args):
     with pytest.raises(ValueError):
-        Topography(*init_args)
+        StaticInput(*init_args)
 
 
 def test__range_to_slice():
@@ -43,7 +43,7 @@ def test_subset_latlon():
     coords = LatLonCoordinates(
         lat=torch.linspace(0, 9, 10), lon=torch.linspace(0, 9, 10)
     )
-    topo = Topography(data=data, coords=coords)
+    topo = StaticInput(data=data, coords=coords)
     lat_interval = ClosedInterval(2, 5)
     lon_interval = ClosedInterval(3, 7)
     subset_topo = topo.subset_latlon(lat_interval, lon_interval)
@@ -67,7 +67,7 @@ def test_Topography_generate_from_patches():
             output_slice=output_slice,
         ),
     ]
-    topography = Topography(
+    topography = StaticInput(
         torch.arange(16).reshape(4, 4),
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
@@ -95,11 +95,11 @@ def test_StaticInputs_generate_from_patches():
         ),
     ]
     data = torch.arange(16).reshape(4, 4)
-    topography = Topography(
+    topography = StaticInput(
         data,
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
-    land_frac = Topography(
+    land_frac = StaticInput(
         data * -1.0,
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
@@ -126,11 +126,11 @@ def test_StaticInputs_generate_from_patches():
 
 def test_StaticInputs_serialize():
     data = torch.arange(16).reshape(4, 4)
-    topography = Topography(
+    topography = StaticInput(
         data,
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
-    land_frac = Topography(
+    land_frac = StaticInput(
         data * -1.0,
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
@@ -148,8 +148,8 @@ def test_StaticInputs_subset_for_coarse_coords():
     fine_coords = LatLonCoordinates(
         lat=torch.linspace(-45, 45, 8), lon=torch.linspace(-90, 90, 8)
     )
-    topography = Topography(data=fine_data, coords=fine_coords)
-    land_frac = Topography(data=fine_data * -1.0, coords=fine_coords)
+    topography = StaticInput(data=fine_data, coords=fine_coords)
+    land_frac = StaticInput(data=fine_data * -1.0, coords=fine_coords)
     static_inputs = StaticInputs([topography, land_frac])
 
     # Create coarse coordinates (4x4) that cover a subset of the domain
@@ -182,7 +182,7 @@ def test_StaticInputs_subset_for_coarse_coords_full_domain():
     # Create static inputs
     data = torch.arange(16).reshape(4, 4).float()
     coords = LatLonCoordinates(lat=torch.linspace(0, 9, 4), lon=torch.linspace(0, 9, 4))
-    topography = Topography(data=data, coords=coords)
+    topography = StaticInput(data=data, coords=coords)
     static_inputs = StaticInputs([topography])
 
     # Use the same coordinates as coarse coords with downscale_factor=1
@@ -202,8 +202,8 @@ def test_StaticInputs_get_topography_for_coarse_coords():
     fine_coords = LatLonCoordinates(
         lat=torch.linspace(-45, 45, 8), lon=torch.linspace(-90, 90, 8)
     )
-    topography = Topography(data=fine_data, coords=fine_coords)
-    land_frac = Topography(data=fine_data * -1.0, coords=fine_coords)
+    topography = StaticInput(data=fine_data, coords=fine_coords)
+    land_frac = StaticInput(data=fine_data * -1.0, coords=fine_coords)
     static_inputs = StaticInputs([topography, land_frac])
 
     # Create coarse coordinates
@@ -219,7 +219,7 @@ def test_StaticInputs_get_topography_for_coarse_coords():
     )
 
     # Should return a Topography object (the first field)
-    assert isinstance(result, Topography)
+    assert isinstance(result, StaticInput)
     assert result.shape == (4, 4)
 
 
