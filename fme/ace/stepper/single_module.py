@@ -1824,7 +1824,13 @@ def load_stepper(
         checkpoint_path, map_location=get_device(), weights_only=False
     )
     stepper = Stepper.from_state(checkpoint["stepper"])
+    apply_stepper_override(stepper, override_config)
+    return stepper
 
+
+def apply_stepper_override(
+    stepper: Stepper, override_config: StepperOverrideConfig
+) -> None:
     if override_config.ocean != "keep":
         logging.info(
             "Overriding training ocean configuration with a new ocean configuration."
@@ -1862,4 +1868,20 @@ def load_stepper(
         stepper.replace_total_energy_budget_correction(
             override_config.total_energy_budget_correction
         )
-    return stepper
+
+
+def apply_stepper_override_to_config(
+    stepper_config: StepperConfig, override_config: StepperOverrideConfig
+) -> None:
+    if override_config.ocean != "keep":
+        stepper_config.replace_ocean(override_config.ocean)
+    if override_config.derived_forcings != "keep":
+        stepper_config.replace_derived_forcings(override_config.derived_forcings)
+    if override_config.prescribed_prognostic_names != "keep":
+        stepper_config.replace_prescribed_prognostic_names(
+            override_config.prescribed_prognostic_names
+        )
+    if override_config.total_energy_budget_correction != "keep":
+        stepper_config.replace_total_energy_budget_correction(
+            override_config.total_energy_budget_correction
+        )
