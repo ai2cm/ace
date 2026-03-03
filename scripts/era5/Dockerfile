@@ -14,8 +14,8 @@ COPY --from=apache/beam_python3.11_sdk:2.71.0 /opt/apache/beam /opt/apache/beam
 ENTRYPOINT [ "/opt/apache/beam/boot" ]
 
 ENV PATH /opt/conda/envs/env/bin:${PATH}
-ENV CONDA_PREFIX /opt/conda/envs/env
-
-# Without following line, the following error occurs on import of pandas:
-# ImportError: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.29' not found
-RUN cp $CONDA_PREFIX/lib/libstdc++.so.6 /usr/lib/x86_64-linux-gnu/
+# Normally this variable would be set by activating the conda environment, but
+# since we are not doing that here, we need to set it manually. It is required
+# for xesmf to be able to find esmf. See 
+# https://github.com/conda-forge/esmf-feedstock/issues/91#issuecomment-1387279692
+ENV ESMFMKFILE /opt/conda/envs/env/lib/esmf.mk
