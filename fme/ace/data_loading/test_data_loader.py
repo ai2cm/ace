@@ -203,7 +203,7 @@ def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
     dist = Distributed.get_instance()
     tmp_path = dist.scatter_object(tmp_path)  # get the root value
-    global_batch_size = 8
+    global_batch_size = 6
     if dist.is_root():
         # TODO: investigate why this test fails if we
         # increment n_times below by 1 (so it's + 2)
