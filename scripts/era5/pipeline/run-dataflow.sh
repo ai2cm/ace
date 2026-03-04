@@ -3,22 +3,22 @@
 # Options,
 # DirectRunner - run pipeline locally, good for testing and debugging
 # DataflowRunner - run pipeline on Google Cloud Dataflow, good for large scale processing
-RUNNER=${1:-DirectRunner}
+RUNNER=${1:-DataflowRunner}
 
 # Common args shared by all runners
 COMMON_ARGS=(
-    gs://vcm-ml-scratch/oliwm/test-updated-era5-pipeline/era5-1deg-8layer-1940-2022.zarr
-    2022-12-30T00:00:00
-    2022-12-31T18:00:00
+    gs://vcm-ml-scratch/oliwm/test-updated-era5-pipeline/era5-1deg-8layer-2015-2025.zarr
+    2015-01-01T00:00:00
+    2025-12-31T18:00:00
     --output_grid F90
-    --output_time_chunksize 2
-    --output_time_shardsize 12
+    --output_time_chunksize 1
+    --output_time_shardsize 240
     --process_time_chunksize 2
     --runner="$RUNNER"
     --save_main_session
 )
 
-# DirectRunner-specific args. Without this, got a gRCP timeout error.
+# DirectRunner-specific args. Without this, got a gRPC timeout error.
 DIRECT_ARGS=(
     --job_server_timeout=3600
 )
