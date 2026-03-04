@@ -312,6 +312,9 @@ def _force_conserve_ocean_heat_content(
             "Net downward surface heat flux cannot be present in both gen_data and "
             "forcing_data."
         )
+    input_data = {k: v.double() for k, v in input_data.items()}
+    gen_data = {k: v.double() for k, v in gen_data.items()}
+    forcing_data = {k: v.double() for k, v in forcing_data.items()}
     input = OceanData(input_data, vertical_coordinate)
     if input.ocean_heat_content is None:
         raise ValueError(
@@ -393,7 +396,9 @@ def _force_conserve_ocean_heat_content(
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean heat content conservation"
         )
-    return {k: tensor for k, tensor in gen.data.items() if k in gen_data}
+    return {
+        k: tensor.to(torch.float32) for k, tensor in gen.data.items() if k in gen_data
+    }
 
 
 def _compute_energy_flux_global_mean(
