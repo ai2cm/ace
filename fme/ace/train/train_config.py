@@ -459,8 +459,9 @@ class TrainBuilders:
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
             aggregator = self.config.weather_evaluation.aggregator.build(
                 dataset_info=dataset_info,
-                n_ic_steps=n_ic_timesteps,
-                n_forward_steps=self.config.weather_evaluation.n_forward_steps,
+                n_timesteps=(
+                    n_ic_timesteps + self.config.weather_evaluation.n_forward_steps
+                ),
                 initial_time=data.initial_time,
                 normalize=normalize,
                 output_dir=output_dir,

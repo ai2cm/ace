@@ -99,8 +99,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         inference_config=config.inference_aggregator,
         dataset_info=train_data.dataset_info,
         initial_inference_time=initial_inference_times,
-        n_ic_steps=stepper.n_ic_timesteps,
-        n_forward_steps=config.inference_n_forward_steps,
+        n_timesteps=stepper.n_ic_timesteps + config.inference_n_forward_steps,
         variable_metadata=train_data.variable_metadata,
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.out_names,
@@ -141,8 +140,7 @@ class AggregatorBuilder(
         inference_config: InferenceEvaluatorAggregatorConfig,
         dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray,
-        n_ic_steps: int,
-        n_forward_steps: int,
+        n_timesteps: int,
         output_dir: str,
         normalize: Callable[[TensorMapping], TensorDict],
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
@@ -154,8 +152,7 @@ class AggregatorBuilder(
         self.inference_config = inference_config
         self.dataset_info = dataset_info
         self.initial_inference_time = initial_inference_time
-        self.n_ic_steps = n_ic_steps
-        self.n_forward_steps = n_forward_steps
+        self.n_timesteps = n_timesteps
         self.output_dir = output_dir
         self.variable_metadata = variable_metadata
         self.loss_scaling = loss_scaling
@@ -183,8 +180,7 @@ class AggregatorBuilder(
         return self.inference_config.build(
             dataset_info=self.dataset_info,
             initial_time=self.initial_inference_time,
-            n_ic_steps=self.n_ic_steps,
-            n_forward_steps=self.n_forward_steps,
+            n_timesteps=self.n_timesteps,
             channel_mean_names=self.channel_mean_names,
             normalize=self.normalize,
             save_diagnostics=self.save_per_epoch_diagnostics,

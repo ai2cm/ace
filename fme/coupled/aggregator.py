@@ -12,6 +12,7 @@ from fme.ace.aggregator.inference.main import (
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
+from fme.ace.aggregator.inference.main import StepMeanEntry
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
@@ -391,7 +392,9 @@ class InferenceEvaluatorAggregator(
                 log_global_mean_norm_time_series=log_global_mean_norm_time_series,
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
-                day_5_step=ocean_day_5,
+                log_step_means=[StepMeanEntry(ocean_day_5)]
+                if ocean_day_5 is not None
+                else [],
                 channel_mean_names=ocean_channel_mean_names,
                 normalize=ocean_normalize,
                 save_diagnostics=save_diagnostics,
@@ -414,7 +417,9 @@ class InferenceEvaluatorAggregator(
                 log_global_mean_norm_time_series=log_global_mean_norm_time_series,
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
-                day_5_step=atmosphere_day_5,
+                log_step_means=[StepMeanEntry(atmosphere_day_5)]
+                if atmosphere_day_5 is not None
+                else [],
                 channel_mean_names=atmosphere_channel_mean_names,
                 normalize=atmosphere_normalize,
                 save_diagnostics=save_diagnostics,

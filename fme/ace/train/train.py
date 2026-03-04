@@ -228,8 +228,7 @@ class AggregatorBuilder(
             return self.inference_config.build(
                 dataset_info=self.dataset_info,
                 initial_time=self.initial_inference_time,
-                n_ic_steps=self.n_ic_steps,
-                n_forward_steps=self.n_forward_steps,
+                n_timesteps=self.n_ic_steps + self.n_forward_steps,
                 channel_mean_names=self.channel_mean_names,
                 normalize=self.normalize,
                 save_diagnostics=self.save_per_epoch_diagnostics,
