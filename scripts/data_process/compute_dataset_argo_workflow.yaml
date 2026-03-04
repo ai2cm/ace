@@ -22,8 +22,10 @@ spec:
     - name: output_directory
     - name: runs_count_minus_one
     - name: compute_dataset
-      value: "true"  # default value, can be overridden
+      value: "false"  # default value, can be overridden
     - name: compute_time_coarsen
+      value: "false"  # default value, can be overridden
+    - name: compute_stats
       value: "false"  # default value, can be overridden
   templates:
     - name: compute-fme-dataset-ensemble
@@ -69,6 +71,7 @@ spec:
             start: "0"
             end: "{{workflow.parameters.runs_count_minus_one}}"
       - - name: get-stats
+          when: "{{workflow.parameters.compute_stats}} == true"
           template: get-stats
           arguments:
             parameters:
@@ -82,6 +85,7 @@ spec:
             start: "0"
             end: "{{workflow.parameters.runs_count_minus_one}}"
       - - name: combine-stats
+          when: "{{workflow.parameters.compute_stats}} == true"
           template: combine-stats
           arguments:
             parameters:
@@ -90,6 +94,7 @@ spec:
             - name: config
               value: "{{workflow.parameters.config}}"
       - - name: upload-beaker-stats
+          when: "{{workflow.parameters.compute_stats}} == true"
           template: upload-beaker-stats
           arguments:
             parameters:
