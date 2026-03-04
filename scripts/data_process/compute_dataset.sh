@@ -3,12 +3,14 @@
 set -e
 
 COMPUTE_DATASET=true
+COMPUTE_TIME_COARSEN=false
 
 while [[ "$#" -gt 0 ]]
 do case $1 in
     --config) CONFIG="$2"
     shift;;
     --stats-only) COMPUTE_DATASET=false;;
+    --time-coarsen) COMPUTE_TIME_COARSEN=true;;
     *) echo "Unknown parameter passed: $1"
     exit 1;;
 esac
@@ -30,10 +32,12 @@ runs_count_minus_one=$(($runs_count - 1))
 # Capture the output of the argo submit command
 output=$(argo submit compute_dataset_argo_workflow.yaml \
     -p compute_dataset=${COMPUTE_DATASET} \
+    -p compute_time_coarsen=${COMPUTE_TIME_COARSEN} \
     -p python_script="$(< compute_dataset.py)" \
     -p get_stats_script="$(< get_stats.py)" \
     -p combine_stats_script="$(< combine_stats.py)" \
     -p upload_stats_script="$(< upload_stats.py)" \
+    -p time_coarsen_script="$(< time_coarsen.py)" \
     -p config="$(< ${CONFIG})" \
     -p names="${names[*]}" \
     -p run_directories="${run_directories[*]}" \
