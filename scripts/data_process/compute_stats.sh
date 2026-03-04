@@ -1,3 +1,3 @@
 #!/bin/bash
 
-./compute_dataset.sh --stats-only "$@"
+./compute_dataset.sh --stats "$@"
