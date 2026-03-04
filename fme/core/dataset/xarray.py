@@ -104,6 +104,7 @@ def _get_vertical_coordinate(
 
     coordinate: VerticalCoordinate
     surface_mask = None
+    deptho = None
     if len(idepth_list) > 0:
         if "mask_0" in ds.data_vars:
             mask_layers = {
@@ -126,8 +127,17 @@ def _get_vertical_coordinate(
                 "mask set to 1 at all layers."
             )
             mask = torch.ones(len(idepth_list) - 1, dtype=dtype)
+        if "deptho" in ds.data_vars:
+            if "time" in ds["deptho"].dims:
+                raise ValueError("'deptho' must be time-independent.")
+            deptho = torch.as_tensor(ds["deptho"].values, dtype=dtype)
+        else:
+            logger.warning(
+                "Dataset does not have a variable named 'deptho' (sea floor depth). "
+                "The ocean depth integral will not account for partial bottom cells."
+            )
         coordinate = DepthCoordinate(
-            torch.as_tensor(idepth_list, dtype=dtype), mask, surface_mask
+            torch.as_tensor(idepth_list, dtype=dtype), mask, surface_mask, deptho
         )
     elif len(ak_list) > 0 and len(bk_list) > 0:
         coordinate = HybridSigmaPressureCoordinate(

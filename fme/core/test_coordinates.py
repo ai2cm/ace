@@ -8,6 +8,7 @@ from fme.core.coordinates import (
     HEALPixCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    dz_from_idepth,
 )
 from fme.core.mask_provider import MaskProvider
 
@@ -242,6 +243,83 @@ def test_healpix_ops_raises_value_error_with_mask():
     expected_msg = "HEALPixCoordinates does not support a mask"
     with pytest.raises(NotImplementedError, match=expected_msg):
         healpix_coords.get_gridded_operations(mask_provider=mask_provider)
+
+
+@pytest.mark.parametrize(
+    "idepth, deptho, expected",
+    [
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            None,
+            torch.tensor([10.0, 40.0, 50.0]),
+            id="no_deptho",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.tensor(50.0),
+            torch.tensor([10.0, 40.0, 0.0]),
+            id="deptho_at_interface",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.tensor(30.0),
+            torch.tensor([10.0, 20.0, 0.0]),
+            id="deptho_between_interfaces",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.tensor(100.0),
+            torch.tensor([10.0, 40.0, 50.0]),
+            id="deptho_at_bottom",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.tensor(101.0),
+            torch.tensor([10.0, 40.0, 50.0]),
+            id="deptho_below_bottom",
+        ),
+    ],
+)
+def test_dz_from_idepth(idepth, deptho, expected):
+    result = dz_from_idepth(idepth, deptho)
+    torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parametrize(
+    "leading_dims",
+    [(), (2,), (2, 3)],
+    ids=["no_leading", "batch", "batch_time"],
+)
+def test_depth_integral_with_deptho(leading_dims):
+    nlat, nlon = 2, 3
+    idepth = torch.tensor([0.0, 10.0, 50.0, 100.0])
+    nz = len(idepth) - 1
+    mask = torch.ones(nlat, nlon, nz)
+
+    deptho = torch.full((nlat, nlon), 100.0)
+    # cell (0, 0): deptho at intermediate interface -> layers below are zero-thickness
+    deptho[0, 0] = 50.0
+    # cell (0, 1): deptho between interfaces -> partial bottom cell
+    deptho[0, 1] = 30.0
+
+    coord = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
+
+    integrand = torch.ones(*leading_dims, nlat, nlon, nz)
+    result = coord.depth_integral(integrand)
+    assert result.shape == (*leading_dims, nlat, nlon)
+
+    # cell (0, 0): dz = [10, 40, 0] -> integral = 50
+    torch.testing.assert_close(
+        result[..., 0, 0], torch.tensor(50.0).expand(leading_dims)
+    )
+    # cell (0, 1): dz = [10, 20, 0] -> integral = 30
+    torch.testing.assert_close(
+        result[..., 0, 1], torch.tensor(30.0).expand(leading_dims)
+    )
+    # cell (1, 0): deptho = 100 (full depth), dz = [10, 40, 50] -> integral = 100
+    torch.testing.assert_close(
+        result[..., 1, 0], torch.tensor(100.0).expand(leading_dims)
+    )
 
 
 @pytest.mark.skipif(e2ghpx is None, reason="earth2grid is not available")
