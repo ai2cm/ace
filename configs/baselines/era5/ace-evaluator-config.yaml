@@ -25,5 +25,5 @@ data_writer:
       names:
         - TMP2m
       time_selection:
-        start_time: "1940-01-02T:00:00:00"
+        start_time: "1940-01-02T00:00:00"
 
