@@ -634,6 +634,15 @@ def _mld_input_gen_forcing(mask, *, gen_temp_surface=20.0, gen_temp_deep=5.0):
 def test_ocean_heat_content_correction_mld():
     depth_coordinate, ops, mask = _mld_test_fixtures()
     input_data, gen_data, forcing_data = _mld_input_gen_forcing(mask)
+    # Run this diagnostic in float64 to verify the MLD algorithm itself is
+    # mathematically consistent when precision is sufficiently high.
+    depth_coordinate = DepthCoordinate(
+        depth_coordinate.get_idepth().double(),
+        depth_coordinate.get_mask().double(),
+    )
+    input_data = {k: v.double() for k, v in input_data.items()}
+    gen_data = {k: v.double() for k, v in gen_data.items()}
+    forcing_data = {k: v.double() for k, v in forcing_data.items()}
 
     config = OceanCorrectorConfig(
         ocean_heat_content_correction=OceanHeatContentBudgetConfig(
