@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import xarray as xr
 from time_coarsen import TimeCoarsenConfig, process_path_pair
@@ -118,8 +120,10 @@ def test_process_path_pair() -> None:
     )
     assert ds_coarsened.attrs["history"] == expected_history
     assert ds_coarsened.attrs["other_attr"] == "other_value"
-    assert ds_coarsened.attrs["snapshot_names"] == config.snapshot_names
-    assert ds_coarsened.attrs["window_names"] == config.window_names
-    assert ds_coarsened.attrs["constant_prefixes"] == config.constant_prefixes
+    assert json.loads(ds_coarsened.attrs["snapshot_names"]) == config.snapshot_names
+    assert json.loads(ds_coarsened.attrs["window_names"]) == config.window_names
+    assert (
+        json.loads(ds_coarsened.attrs["constant_prefixes"]) == config.constant_prefixes
+    )
     assert ds_coarsened.attrs["coarsen_factor"] == config.factor
     assert len(ds_coarsened.attrs) == 6  # no unexpected attrs

@@ -1,5 +1,6 @@
 import argparse
 import dataclasses
+import json
 import logging
 import os
 import sys
@@ -116,9 +117,9 @@ def process_path_pair(
     )  # use time of snapshots
     ds_coarsened = xr.merge([ds_snapshot, ds_window, ds_constants])
     attributes = ds.attrs.copy()
-    attributes["snapshot_names"] = config.snapshot_names
-    attributes["window_names"] = config.window_names
-    attributes["constant_prefixes"] = config.constant_prefixes
+    attributes["snapshot_names"] = json.dumps(config.snapshot_names)
+    attributes["window_names"] = json.dumps(config.window_names)
+    attributes["constant_prefixes"] = json.dumps(config.constant_prefixes)
     attributes["coarsen_factor"] = config.factor
     history_entry = (
         f"Dataset coarsened by a factor of {config.factor} "
