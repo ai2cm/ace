@@ -508,11 +508,8 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        if self._dz is None:
-            # avoid recomputing dz
-            self._dz = dz_from_idepth(self.idepth, sea_floor_depth).double()
-        dz = self._dz
-        integral = (integrand * dz * self.mask).nansum(dim=-1)
+        dz = dz_from_idepth(self.idepth, sea_floor_depth).double()
+        integral = (integrand.double() * dz * self.mask).nansum(dim=-1)
         mask = self.get_mask_level(0).expand(integral.shape)
         return integral.where(mask > 0, float("nan")).to(torch.float32)
 
