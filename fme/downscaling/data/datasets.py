@@ -403,6 +403,7 @@ class PairedGriddedData:
         drop_partial_patches: bool = True,
         random_offset: bool = False,
         shuffle: bool = False,
+        max_patches: int | None = None,
     ) -> Iterator[tuple["PairedBatchData", StaticInputs | None]]:
         patched_generator = patched_batch_gen_from_paired_loader(
             self.loader,
@@ -414,6 +415,7 @@ class PairedGriddedData:
             drop_partial_patches=drop_partial_patches,
             random_offset=random_offset,
             shuffle=shuffle,
+            max_patches=max_patches,
         )
         return cast(
             Iterator[tuple[PairedBatchData, StaticInputs | None]],
@@ -687,6 +689,7 @@ def _get_paired_patches(
     random_offset: bool = False,
     shuffle: bool = False,
     drop_partial_patches: bool = True,
+    max_patches: int | None = None,
 ) -> tuple[list[Patch], list[Patch] | None]:
     coarse_y_offset = get_offset(
         random_offset, coarse_yx_extent[0], coarse_yx_patch_extent[0]
@@ -718,6 +721,10 @@ def _get_paired_patches(
             coarse_patches, fine_patches = paired_shuffle(coarse_patches, fine_patches)
     else:
         fine_patches = None
+    if max_patches is not None:
+        coarse_patches = coarse_patches[:max_patches]
+        if fine_patches is not None:
+            fine_patches = fine_patches[:max_patches]
     return coarse_patches, fine_patches
 
 
@@ -727,6 +734,7 @@ def patched_batch_gen_from_loader(
     coarse_yx_extent: tuple[int, int],
     coarse_yx_patch_extent: tuple[int, int],
     downscale_factor: int | None,
+    max_patches: int | None = None,
     coarse_overlap: int = 0,
     drop_partial_patches: bool = True,
     random_offset: bool = False,
@@ -741,6 +749,7 @@ def patched_batch_gen_from_loader(
             random_offset=random_offset,
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
+            max_patches=max_patches,
         )
     batch_data_patches = batch.generate_from_patches(coarse_patches)
 
@@ -768,6 +777,7 @@ def patched_batch_gen_from_paired_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
+    max_patches: int | None = None,
 ) -> Iterator[tuple[PairedBatchData, StaticInputs | None]]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
@@ -778,6 +788,7 @@ def patched_batch_gen_from_paired_loader(
             random_offset=random_offset,
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
+            max_patches=max_patches,
         )
         batch_data_patches = batch.generate_from_patches(coarse_patches, fine_patches)
 

@@ -19,8 +19,6 @@ Output Structure:
 
 import argparse
 
-from fme.core.distributed.distributed import Distributed
-
 from .inference import main
 
 
@@ -32,5 +30,4 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    with Distributed.context():
-        main(args.config_path)
+    main(args.config_path)
