@@ -1031,7 +1031,7 @@ def test__get_vertical_coordinate_depth_with_time_dependent_deptho():
         },
         coords={"time": np.array([1.0, 2.0])},
     )
-    with pytest.raises(ValueError, match="deptho must be time-independent"):
+    with pytest.raises(ValueError, match="'deptho' must be time-independent"):
         _get_vertical_coordinate(data, dtype=None)
 
 

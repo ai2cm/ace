@@ -359,9 +359,6 @@ class DepthCoordinate(VerticalCoordinate):
             it must be one shorter than idepth. The mask may have additional dimensions
             before the vertical, which are assumed to be broadcastable to match the
             integrand when computing integrals.
-        surface_mask: optional mask for 2D surface variables. When provided, it is
-            used instead of the first layer of ``mask`` for variables that do not
-            have a level suffix.
         deptho: optional sea floor depth in meters at each horizontal grid point.
             When provided, layer thicknesses account for partial bottom cells.
             Must be broadcastable to the spatial dimensions of ``mask``
