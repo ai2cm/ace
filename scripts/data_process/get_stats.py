@@ -8,7 +8,7 @@ import os
 import shutil
 import tempfile
 import time
-from typing import Dict, List, Literal, Optional
+from typing import Literal, Optional
 
 import click
 import dacite
@@ -75,16 +75,38 @@ def copy(source: str, destination: str):
 class StatsConfig:
     output_directory: str
     data_type: ClimateDataType
-    exclude_runs: List[str] = dataclasses.field(default_factory=list)
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    beaker_dataset: Optional[str] = None
+    exclude_runs: list[str] = dataclasses.field(default_factory=list)
+    start_date: str | None = None
+    end_date: str | None = None
+    beaker_dataset: str | None = None
+
+
+@dataclasses.dataclass
+class TimeCoarsenConfig:
+    """
+    Configuration for time coarsening of a dataset.
+
+    Attributes:
+        data_output_directory: Directory to save the coarsened datasets as zarr stores.
+        stats_output_directory: Directory to save the stats of the coarsened datasets.
+    """
+
+    data_output_directory: str
+    stats_output_directory: str
+
+
+@dataclasses.dataclass
+class Config:
+    runs: dict[str, str]
+    data_output_directory: str
+    stats: StatsConfig
+    time_coarsen: TimeCoarsenConfig | None = None
 
 
 def get_stats(
     config: StatsConfig,
     input_zarr: str,
-    run_name: str,
+    out_dir: str,
     debug: bool,
 ):
     # Import dask-related things here to enable testing in environments without dask.
@@ -157,7 +179,6 @@ def get_stats(
             f"Standard deviation computed over all variables: {all_var_stddev.values}"
         )
     else:
-        out_dir = config.output_directory + "/" + run_name
         if out_dir.startswith("gs:"):
             temp_dir = tempfile.TemporaryDirectory()
             local_dir = temp_dir.name
@@ -201,13 +222,6 @@ def get_stats(
     client = None
 
 
-@dataclasses.dataclass
-class Config:
-    runs: Dict[str, str]
-    data_output_directory: str
-    stats: StatsConfig
-
-
 @click.command()
 @click.argument("config_yaml", type=str)
 @click.argument("run", type=int)
@@ -237,12 +251,26 @@ def main(config_yaml: str, run: int, debug: bool):
     if config.data_output_directory.endswith("/"):
         config.data_output_directory = config.data_output_directory[:-1]
     input_zarr = config.data_output_directory + "/" + run_name + ".zarr"
+    out_dir = config.stats.output_directory + "/" + run_name
     get_stats(
         config=config.stats,
         input_zarr=input_zarr,
-        run_name=run_name,
+        out_dir=out_dir,
         debug=debug,
     )
+    if config.time_coarsen is not None:
+        time_coarsened_zarr = (
+            config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
+        )
+        time_coarsened_out_dir = (
+            config.time_coarsen.stats_output_directory + "/" + run_name
+        )
+        get_stats(
+            config=config.stats,
+            input_zarr=time_coarsened_zarr,
+            out_dir=time_coarsened_out_dir,
+            debug=debug,
+        )
 
 
 if __name__ == "__main__":
