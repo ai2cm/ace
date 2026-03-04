@@ -143,8 +143,8 @@ class InferenceEvaluatorAggregatorConfig:
             time series metrics.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
-        timestep_hours: Timestep of the data in hours, used for determining
-            which timestep corresponds to 5 days of evolution.
+        log_step_means: List of StepMeanEntry objects specifying steps at which
+            to log mean metrics.
     """
 
     log_histograms: bool = False
