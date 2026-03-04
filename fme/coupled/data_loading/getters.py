@@ -209,12 +209,15 @@ def get_inference_data(
         initial_time = (
             initial_condition.ocean_data.as_batch_data().time
         )  # used only if no ocean forcing is specified
+    dist = Distributed.get_instance()
     dataset = InferenceDataset(
         config,
         total_coupled_steps,
         window_requirements,
         dataset_info,
         initial_time,
+        rank=dist.rank,
+        world_size=dist.world_size,
     )
     properties = dataset.properties
 
