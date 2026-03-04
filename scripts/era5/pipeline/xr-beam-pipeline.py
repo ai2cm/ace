@@ -195,7 +195,7 @@ _REGRIDDER_CACHE = {}
 
 
 def _get_regridder(output_grid: str):
-    """Get or create a cached xESMF conservative regridder."""
+    """Get or create a cached xESMF regridder."""
     if output_grid not in _REGRIDDER_CACHE:
         src = _make_source_grid()
         dst = _make_target_grid(output_grid)
@@ -956,6 +956,6 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    logging.getLogger().setLevel(logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger().setLevel(logging.INFO)
     main()
