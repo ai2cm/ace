@@ -164,7 +164,8 @@ class InferenceEvaluatorAggregatorConfig:
     def build(
         self,
         dataset_info: DatasetInfo,
-        n_timesteps: int,
+        n_ic_steps: int,
+        n_forward_steps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
         output_dir: str | None = None,
@@ -187,7 +188,8 @@ class InferenceEvaluatorAggregatorConfig:
             )
         return InferenceEvaluatorAggregator(
             dataset_info=dataset_info,
-            n_timesteps=n_timesteps,
+            n_ic_steps=n_ic_steps,
+            n_forward_steps=n_forward_steps,
             initial_time=initial_time,
             output_dir=output_dir,
             log_histograms=self.log_histograms,
@@ -220,7 +222,8 @@ class InferenceEvaluatorAggregator(
     def __init__(
         self,
         dataset_info: DatasetInfo,
-        n_timesteps: int,
+        n_ic_steps: int,
+        n_forward_steps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
         log_zonal_mean_images: bool | int,
@@ -241,7 +244,8 @@ class InferenceEvaluatorAggregator(
         """
         Args:
             dataset_info: Dataset coordinates and metadata.
-            n_timesteps: Number of timesteps of inference that will be run.
+            n_ic_steps: Number of initial condition steps in the data.
+            n_forward_steps: Number of forward steps in the data.
             initial_time: Initial time for each sample.
             output_dir: Directory to save diagnostic output.
             normalize: Normalization function to use.
@@ -281,6 +285,8 @@ class InferenceEvaluatorAggregator(
         self._log_time_series = (
             log_global_mean_time_series or log_global_mean_norm_time_series
         )
+        self.n_ic_steps = n_ic_steps
+        n_timesteps = n_ic_steps + n_forward_steps
         if log_global_mean_time_series:
             self._aggregators["mean"] = MeanAggregator(
                 ops,
@@ -298,16 +304,18 @@ class InferenceEvaluatorAggregator(
         for step_mean_entry in log_step_means:
             step = step_mean_entry.step
             name = step_mean_entry.get_name()
-            if step < n_timesteps:  # strict less as at least one is IC step
+            # -1 because step 0 (after IC) is the first forward step
+            target_time = step + n_ic_steps - 1
+            if step < n_forward_steps:
                 self._aggregators[name] = OneStepMeanAggregator(
                     ops,
-                    target_time=step,
+                    target_time=target_time,
                     target="denorm",
                     log_loss=False,
                 )
                 self._aggregators[name + "_norm"] = OneStepMeanAggregator(
                     ops,
-                    target_time=step,
+                    target_time=target_time,
                     target="norm",
                     log_loss=False,
                     include_bias=False,
@@ -476,6 +484,10 @@ class InferenceEvaluatorAggregator(
             gen_data = target_data
             gen_data_norm = target_data_norm
             n_times = batch_data.time.shape[1]
+        if n_times != self.n_ic_steps:
+            raise ValueError(
+                f"Expected {self.n_ic_steps} initial condition steps, but got {n_times}"
+            )
         for aggregator_name in ["mean", "mean_norm"]:
             aggregator = self._aggregators.get(aggregator_name)
             if aggregator is not None:

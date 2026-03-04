@@ -33,7 +33,8 @@ def test_inference_evaluator_aggregator_channel_mean_names(
 
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_timesteps,
+        n_ic_steps=1,
+        n_forward_steps=n_timesteps - 1,
         initial_time=initial_time,
         log_step_means=[],
         normalize=lambda x: dict(x),

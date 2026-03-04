@@ -92,7 +92,8 @@ def test_logs_regression():
 
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_time,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
         initial_time=initial_time,
         log_step_means=[StepMeanEntry(step=20)],
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
@@ -178,7 +179,8 @@ def test_inference_logs_labels_exist():
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_time,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
         initial_time=initial_time,
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         log_step_means=[StepMeanEntry(step=20)],
@@ -232,7 +234,8 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        n_timesteps=window_len * n_windows,
+        n_ic_steps=1,
+        n_forward_steps=window_len * n_windows - 1,
         log_step_means=[StepMeanEntry(step=20)],
         initial_time=initial_time,
         normalize=lambda x: dict(x),
@@ -268,7 +271,8 @@ def test_flush_diagnostics(tmpdir):
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_time,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
         output_dir=tmpdir,
@@ -310,7 +314,8 @@ def test_agg_raises_without_output_dir():
         InferenceEvaluatorAggregator(
             dataset_info=ds_info,
             log_step_means=[],
-            n_timesteps=1,
+            n_ic_steps=1,
+            n_forward_steps=1,
             initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
             normalize=lambda x: dict(x),
             log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,

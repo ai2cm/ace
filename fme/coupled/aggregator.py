@@ -381,7 +381,8 @@ class InferenceEvaluatorAggregator(
         self._aggregators = {
             "ocean": InferenceEvaluatorAggregator_(
                 dataset_info=dataset_info.ocean,
-                n_timesteps=n_timesteps_ocean,
+                n_ic_steps=1,
+                n_forward_steps=n_timesteps_ocean - 1,
                 initial_time=initial_time,
                 log_histograms=log_histograms,
                 log_video=log_video,
@@ -406,7 +407,8 @@ class InferenceEvaluatorAggregator(
             ),
             "atmosphere": InferenceEvaluatorAggregator_(
                 dataset_info=dataset_info.atmosphere,
-                n_timesteps=n_timesteps_atmosphere,
+                n_ic_steps=1,
+                n_forward_steps=n_timesteps_atmosphere - 1,
                 initial_time=initial_time,
                 log_histograms=log_histograms,
                 log_video=log_video,

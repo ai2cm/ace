@@ -324,8 +324,7 @@ def inference_helper(
         loader=data.inference_data_loader_config,
         prediction_loader=prediction_data,
         aggregator=InferenceEvaluatorAggregatorConfig(
-            monthly_reference_data=monthly_reference_filename,
-            log_video=True,
+            monthly_reference_data=monthly_reference_filename, log_video=True
         ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
