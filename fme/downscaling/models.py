@@ -14,11 +14,13 @@ from fme.core.packer import Packer
 from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
-from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
+from fme.downscaling.metrics_and_maths import interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
+
+DEFAULT_LOG_TRANSFORM_FLOOR = 0.01 / 86400
 
 
 @dataclasses.dataclass
@@ -74,6 +76,12 @@ class PairedNormalizationConfig:
 
 
 @dataclasses.dataclass
+class LogTransform:
+    variable: str
+    floor: float | None = None
+
+
+@dataclasses.dataclass
 class DiffusionModelConfig:
     """
     This class implements or wraps the algorithms described in `EDM`_.
@@ -111,6 +119,7 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
+    log_transform: LogTransform | None = None
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -119,6 +128,17 @@ class DiffusionModelConfig:
                 "Fine topography can only be used when predicting on interpolated"
                 " coarse input"
             )
+        if self.log_transform is not None:
+            variable = self.log_transform.variable
+            if variable not in set(self.in_names).union(self.out_names):
+                raise ValueError(
+                    f"log_transform.variable='{variable}' requires '{variable}' to be "
+                    "in in_names or out_names."
+                )
+            if self.log_transform.floor is not None and self.log_transform.floor <= 0:
+                raise ValueError(
+                    "log_transform.floor must be greater than zero when provided."
+                )
 
     def build(
         self,
@@ -297,6 +317,29 @@ class DiffusionModel:
         self._channel_axis = -3
         self.static_inputs = static_inputs
 
+    def _model_field_mapping(
+        self, data: TensorMapping, names: list[str]
+    ) -> dict[str, torch.Tensor]:
+        mapped: dict[str, torch.Tensor] = {}
+        variable = (
+            self.config.log_transform.variable
+            if self.config.log_transform is not None
+            else None
+        )
+        floor = (
+            self.config.log_transform.floor or DEFAULT_LOG_TRANSFORM_FLOOR
+            if self.config.log_transform is not None
+            else None
+        )
+        for name in names:
+            if name in data:
+                if variable is not None and floor is not None and name == variable:
+                    mapped[name] = torch.log(torch.clamp(data[name], min=floor))
+                else:
+                    mapped[name] = data[name]
+            raise ValueError(f"Missing required model variable '{name}' in input data.")
+        return mapped
+
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
@@ -317,7 +360,7 @@ class DiffusionModel:
     def _get_input_from_coarse(
         self, coarse: TensorMapping, static_inputs: StaticInputs | None
     ) -> torch.Tensor:
-        inputs = filter_tensor_mapping(coarse, self.in_packer.names)
+        inputs = self._model_field_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
             self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
         )
@@ -352,16 +395,16 @@ class DiffusionModel:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data
         inputs_norm = self._get_input_from_coarse(coarse, static_inputs)
+        fine_targets = self._model_field_mapping(fine, self.out_packer.names)
         targets_norm = self.out_packer.pack(
-            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
+            self.normalizer.fine.normalize(fine_targets), axis=self._channel_axis
         )
 
         if self.config.predict_residual:
+            coarse_fields = self._model_field_mapping(coarse, self.out_packer.names)
             base_prediction = interpolate(
                 self.out_packer.pack(
-                    self.normalizer.coarse.normalize(
-                        {k: coarse[k] for k in self.out_packer.names}
-                    ),
+                    self.normalizer.coarse.normalize(coarse_fields),
                     axis=self._channel_axis,
                 ),
                 self.downscale_factor,
@@ -390,14 +433,12 @@ class DiffusionModel:
 
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
-
-        target = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
         denoised = self.normalizer.fine.denormalize(
             self.out_packer.unpack(denoised_norm, axis=self._channel_axis)
         )
         return ModelOutputs(
             prediction=denoised,
-            target=target,
+            target=fine_targets,
             loss=loss,
             channel_losses=channel_losses,
             latent_steps=[],
@@ -434,11 +475,12 @@ class DiffusionModel:
         )
 
         if self.config.predict_residual:
+            coarse_targets = self._model_field_mapping(
+                coarse_data, self.out_packer.names
+            )
             base_prediction = interpolate(
                 self.out_packer.pack(
-                    self.normalizer.coarse.normalize(
-                        {k: coarse_data[k] for k in self.out_packer.names}
-                    ),
+                    self.normalizer.coarse.normalize(coarse_targets),
                     axis=self._channel_axis,
                 ),
                 self.downscale_factor,
@@ -477,13 +519,13 @@ class DiffusionModel:
             coarse, static_inputs, n_samples
         )
 
+        fine_targets = self._model_field_mapping(fine, self.out_packer.names)
         targets_norm = self.out_packer.pack(
-            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
+            self.normalizer.fine.normalize(fine_targets), axis=self._channel_axis
         )
         targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
 
-        targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
-        targets = {k: v.unsqueeze(1) for k, v in targets.items()}
+        targets = {k: v.unsqueeze(1) for k, v in fine_targets.items()}
 
         loss = self.loss(generated_norm, targets_norm)
         return ModelOutputs(
