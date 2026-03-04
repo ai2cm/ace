@@ -59,9 +59,6 @@ def main(config: Config, run: int, dry_run: bool = False):
         config=config.time_coarsen,
         dry_run=dry_run,
     )
-    if run_name in config.stats.exclude_runs:
-        logging.info(f"Skipping run {run_name}")
-        return
 
 
 def write_zarr(
