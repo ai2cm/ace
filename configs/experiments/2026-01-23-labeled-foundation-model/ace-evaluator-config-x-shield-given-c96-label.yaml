@@ -1,0 +1,45 @@
+experiment_dir: /results
+n_forward_steps: 1400
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '2014-01-01T00:00:00'
+  dataset:
+    data_path: /climate-default
+    labels: ["c96-shield"]
+    file_pattern: 2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+    engine: zarr
+  num_data_workers: 16
+aggregator:
+  log_zonal_mean_images: false
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 4
+    prefetch_factor: 2
+    time_buffer: 4
+    dataset:
+      data_path: /climate-default
+      labels: ["c96-shield"]
+      file_pattern: 2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01'
+        stop_time: '2023-12-31'
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.5
+      energy_score_weight: 0.5
