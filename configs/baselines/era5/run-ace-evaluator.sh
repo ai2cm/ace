@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="ace2-era5-short-evaluator"
+JOB_NAME="ace2-era5-short-evaluator-subselect"
 JOB_GROUP="ace2-era5"
 EXISTING_RESULTS_DATASET="01K013CYF8HX12KJK91YJ8MM92"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-evaluator-config.yaml"

@@ -18,7 +18,12 @@ loader:
 aggregator:
   log_zonal_mean_images: false
 data_writer:
-  save_prediction_files: true
+  save_prediction_files: false
   save_monthly_files: false
-  names:
-    - "TMP2m"
+  files:
+    - label: tmp2m
+      names:
+        - TMP2m
+      time_selection:
+        start_time: "1940-01-02T:00:00:00"
+
