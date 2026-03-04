@@ -23,7 +23,12 @@ class ConditionedTarget:
     weight: torch.Tensor
 
 
+@dataclasses.dataclass
 class NoiseDistribution(abc.ABC):
+    min: float
+    max: float
+    max_resample_iters: int
+
     @abc.abstractmethod
     def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
         pass
