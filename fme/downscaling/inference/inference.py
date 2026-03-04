@@ -230,10 +230,10 @@ class InferenceConfig:
     logging: LoggingConfig
     patch: PatchPredictionConfig = field(default_factory=PatchPredictionConfig)
 
-    def configure_logging(self, log_filename: str, resumable: bool = False):
+    def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
         self.logging.configure_logging(
-            self.experiment_dir, log_filename, config=config, resumable=resumable
+            self.experiment_dir, log_filename, config=config, resumable=True
         )
 
     def build(self) -> Downscaler:
@@ -261,7 +261,7 @@ def main(config_path: str):
     )
     prepare_directory(generation_config.experiment_dir, config)
 
-    generation_config.configure_logging(log_filename="out.log", resumable=True)
+    generation_config.configure_logging(log_filename="out.log")
 
     logging.info("Starting downscaling generation...")
     downscaler = generation_config.build()

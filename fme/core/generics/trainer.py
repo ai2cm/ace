@@ -269,8 +269,6 @@ class Trainer:
 
         def on_terminate(signum, frame):
             dist = Distributed.get_instance()
-            # have all ranks check in to logs
-            dist.barrier()
             if (
                 self._current_epoch_num_batches_seen > 0
                 and self._should_save_checkpoints()
