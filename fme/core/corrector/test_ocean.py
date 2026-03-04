@@ -423,24 +423,22 @@ def test_ocean_heat_content_correction_dz_3d():
     deptho = torch.full((nsamples, nlat, nlon), 15.0)
     deptho[:, 0, 0] = 10.0
 
+    forcing_data_dict = {
+        "hfgeou": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": sea_surface_fraction,
+        "deptho": deptho,
+    }
     input_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon),
         "thetao_1": torch.ones(nsamples, nlat, nlon),
         "sst": torch.ones(nsamples, nlat, nlon) + 273.15,
-        "hfds": torch.ones(nsamples, nlat, nlon),
-        "hfgeou": torch.ones(nsamples, nlat, nlon),
-        "sea_surface_fraction": sea_surface_fraction,
-        "deptho": deptho,
+        **forcing_data_dict,
     }
     gen_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon) * 2,
         "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
         "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
-    }
-    forcing_data_dict = {
-        "hfgeou": torch.ones(nsamples, nlat, nlon),
-        "sea_surface_fraction": sea_surface_fraction,
-        "deptho": deptho,
+        "hfds": torch.ones(nsamples, nlat, nlon),
     }
 
     input_data = OceanData(input_data_dict, depth_coordinate)
@@ -455,6 +453,7 @@ def test_ocean_heat_content_correction_dz_3d():
     gen_ohc = gen_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
     torch.testing.assert_close(gen_ohc, input_ohc * 2, equal_nan=True)
 
+    # hfds + hfgeou + unaccounted_heating = 2.1
     ohc_change = 2.1 * timestep.total_seconds()
     corrector_ratio = (input_ohc + ohc_change) / gen_ohc
 
@@ -475,9 +474,18 @@ def test_ocean_heat_content_correction_dz_3d():
         {**expected_gen_data_dict, **forcing_data_dict}, depth_coordinate
     )
     gen_data_corrected = OceanData(gen_data_corrected_dict, depth_coordinate)
+
+    expected_ohc = expected_gen_data.ocean_heat_content
+    corrected_ohc = gen_data_corrected.ocean_heat_content
+
+    torch.testing.assert_close(corrected_ohc, expected_ohc, equal_nan=True)
+
+    ohc_tendency = (corrected_ohc - input_ohc) / timestep.total_seconds()
+    net_flux = gen_data_dict["hfds"] + forcing_data_dict["hfgeou"] + 0.1
+
     torch.testing.assert_close(
-        expected_gen_data.ocean_heat_content,
-        gen_data_corrected.ocean_heat_content,
+        ops.area_weighted_mean(ohc_tendency, name="ocean_heat_content"),
+        ops.area_weighted_mean(net_flux, name="ocean_heat_content"),
         equal_nan=True,
     )
 
@@ -577,14 +585,17 @@ _MLD_NLAT = 3
 _MLD_NLON = 3
 _MLD_TIMESTEP = datetime.timedelta(seconds=5 * 24 * 3600)
 _MLD_IDEPTH = torch.tensor([0.0, 10.0, 50.0, 200.0, 1000.0])
+_MLD_DEPTHO = torch.full((_MLD_NSAMPLES, _MLD_NLAT, _MLD_NLON), 1000.0)
+_MLD_DEPTHO[..., 1, 0] = 200.0
+_MLD_DEPTHO[..., 0, 1] = 300.0
 
 
 def _mld_test_fixtures():
     """Build depth coordinate, ops and masks for the 4-level MLD tests."""
     mask = torch.ones(_MLD_NSAMPLES, _MLD_NLAT, _MLD_NLON, _MLD_NZ)
     mask[:, 0, 0, :] = 0.0  # one fully masked column
-    masks = {f"mask_{k}": mask[:, :, :, k] for k in range(_MLD_NZ)}
-    masks["mask_2d"] = mask[:, :, :, 0]
+    masks = {f"mask_{k}": mask[..., k] for k in range(_MLD_NZ)}
+    masks["mask_2d"] = mask[..., 0]
     mask_provider = MaskProvider(masks)
     ops = LatLonOperations(torch.ones(size=[_MLD_NLAT, _MLD_NLON]), mask_provider)
     depth_coordinate = DepthCoordinate(_MLD_IDEPTH, mask)
@@ -594,20 +605,17 @@ def _mld_test_fixtures():
 def _mld_input_gen_forcing(mask, *, gen_temp_surface=20.0, gen_temp_deep=5.0):
     """Build input / gen / forcing dicts with a clear pycnocline in gen."""
     shape = (_MLD_NSAMPLES, _MLD_NLAT, _MLD_NLON)
-    ssf = mask[:, :, :, 0]
+    ssf = mask[..., 0]
 
     forcing_data = {
         "hfgeou": torch.ones(shape) * 0.05,
         "sea_surface_fraction": ssf,
-        "deptho": torch.full(shape, 15.0),
+        "deptho": _MLD_DEPTHO,
     }
-    forcing_data["deptho"][:, 0, 0] = 10.0
     input_data = {
         **{f"thetao_{k}": torch.ones(shape) for k in range(_MLD_NZ)},
         **{f"so_{k}": torch.ones(shape) * 35.0 for k in range(_MLD_NZ)},
         "sst": torch.ones(shape) + 273.15,
-        "hfds": torch.ones(shape),
-        "wfo": torch.ones(shape) * 0.5,
         **forcing_data,
     }
     gen_data = {
@@ -617,6 +625,8 @@ def _mld_input_gen_forcing(mask, *, gen_temp_surface=20.0, gen_temp_deep=5.0):
         "thetao_3": torch.ones(shape) * gen_temp_deep,
         **{f"so_{k}": torch.ones(shape) * 35.0 for k in range(_MLD_NZ)},
         "sst": torch.ones(shape) * gen_temp_surface + 273.15,
+        "hfds": torch.ones(shape),
+        "wfo": torch.ones(shape) * 0.5,
     }
     return input_data, gen_data, forcing_data
 
@@ -635,7 +645,7 @@ def test_ocean_heat_content_correction_mld():
     corrected = corrector(input_data, gen_data, forcing_data)
 
     # Check OHC conservation: corrected_ohc == input_ohc + flux * dt
-    corrected_ocean = OceanData(corrected, depth_coordinate)
+    corrected_ocean = OceanData({**forcing_data, **corrected}, depth_coordinate)
     input_ocean = OceanData(input_data, depth_coordinate)
     corrected_ohc = ops.area_weighted_mean(
         corrected_ocean.ocean_heat_content,
@@ -648,7 +658,7 @@ def test_ocean_heat_content_correction_mld():
         name="ocean_heat_content",
     )
     ssf = forcing_data["sea_surface_fraction"]
-    net_flux = (input_data["hfds"] + forcing_data["hfgeou"]) * ssf
+    net_flux = (gen_data["hfds"] + forcing_data["hfgeou"]) * ssf
     flux_mean = ops.area_weighted_mean(
         net_flux,
         keepdim=True,
@@ -656,6 +666,18 @@ def test_ocean_heat_content_correction_mld():
     )
     expected_ohc = input_ohc + (flux_mean + 0.1) * _MLD_TIMESTEP.total_seconds()
     torch.testing.assert_close(corrected_ohc, expected_ohc, atol=1e-3, rtol=1e-5)
+
+    ohc_tendency = (
+        corrected_ocean.ocean_heat_content - input_ocean.ocean_heat_content
+    ) / _MLD_TIMESTEP.total_seconds()
+    net_flux = gen_data["hfds"] + forcing_data["hfgeou"]
+    implied_advective_tendency = ops.area_weighted_mean(
+        ohc_tendency - net_flux, name="ocean_heat_content"
+    )
+    torch.testing.assert_close(
+        implied_advective_tendency,
+        torch.full_like(implied_advective_tendency, 0.1),
+    )
 
     # Deep layers (below MLD) should be unchanged
     torch.testing.assert_close(corrected["thetao_2"], gen_data["thetao_2"])
@@ -689,7 +711,7 @@ def test_ocean_heat_content_correction_mld_geo():
         name="ocean_heat_content",
     )
     ssf = forcing_data["sea_surface_fraction"]
-    net_flux = (input_data["hfds"] + forcing_data["hfgeou"]) * ssf
+    net_flux = (gen_data["hfds"] + forcing_data["hfgeou"]) * ssf
     flux_mean = ops.area_weighted_mean(
         net_flux,
         keepdim=True,
@@ -699,13 +721,14 @@ def test_ocean_heat_content_correction_mld_geo():
     torch.testing.assert_close(corrected_ohc, expected_ohc, atol=1e-3, rtol=1e-5)
 
     # Bottom layer should be warmed by geothermal (not just MLD correction)
-    dz_bottom = _MLD_IDEPTH[-1] - _MLD_IDEPTH[-2]  # 800 m
+    dz_bottom = _MLD_DEPTHO - _MLD_IDEPTH[-2]  # 800 m
+    dz_bottom = dz_bottom.where(dz_bottom > 0, float("nan"))
     expected_geo_dT = (
         forcing_data["hfgeou"]
         * ssf
         * _MLD_TIMESTEP.total_seconds()
         / (DENSITY_OF_WATER_CM4 * SPECIFIC_HEAT_OF_WATER_CM4 * dz_bottom)
-    )
+    ).nan_to_num()
     bottom_change = corrected["thetao_3"] - gen_data_before["thetao_3"]
     torch.testing.assert_close(
         bottom_change,
@@ -798,7 +821,7 @@ def test_mld_weights_reused_from_salt_to_heat():
         name="ocean_heat_content",
     )
     ssf = forcing_data["sea_surface_fraction"]
-    net_flux = (input_data["hfds"] + forcing_data["hfgeou"]) * ssf
+    net_flux = (gen_data["hfds"] + forcing_data["hfgeou"]) * ssf
     flux_mean = ops.area_weighted_mean(
         net_flux,
         keepdim=True,
