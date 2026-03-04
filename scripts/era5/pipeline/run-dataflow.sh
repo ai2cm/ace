@@ -7,9 +7,9 @@ RUNNER=${1:-DataflowRunner}
 
 # Common args shared by all runners
 COMMON_ARGS=(
-    gs://vcm-ml-scratch/oliwm/test-updated-era5-pipeline/era5-1deg-8layer-2015-2025.zarr
-    2015-01-01T00:00:00
-    2025-12-31T18:00:00
+    gs://vcm-ml-scratch/oliwm/test-updated-era5-pipeline/era5-1deg-8layer-2013-2022.zarr
+    2013-01-01T00:00:00
+    2022-12-31T18:00:00
     --output_grid F90
     --output_time_chunksize 1
     --output_time_shardsize 240
