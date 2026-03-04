@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import torch
-from torch.distributed import ProcessGroup
+import torch.nn as nn
 
 
 class DistributedBackend(ABC):
@@ -41,7 +41,7 @@ class DistributedBackend(ABC):
     def local_batch_size(self, batch_size: int) -> int: ...
 
     @abstractmethod
-    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None): ...
+    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None = None): ...
 
     @abstractmethod
     def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None: ...
@@ -113,49 +113,25 @@ class DistributedBackend(ABC):
     @abstractmethod
     def shutdown(self): ...
 
-    @property
-    def h_size(self) -> int:
-        return 1
+    def get_sht(
+        self, nlat: int, nlon: int, lmax: int, mmax: int, grid: str
+    ) -> nn.Module:
+        """Create a forward SHT (possibly distributed)."""
+        import torch_harmonics as th
 
-    @property
-    def w_size(self) -> int:
-        return 1
+        return th.RealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
 
-    @property
-    def h_rank(self) -> int:
-        return 0
+    def get_isht(
+        self, nlat: int, nlon: int, lmax: int, mmax: int, grid: str
+    ) -> nn.Module:
+        """Create an inverse SHT (possibly distributed)."""
+        import torch_harmonics as th
 
-    @property
-    def w_rank(self) -> int:
-        return 0
+        return th.InverseRealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
 
-    @property
-    def h_group(self) -> ProcessGroup | None:
+    def get_disco_conv_cls(self):
+        """Return the DistributedDiscreteContinuousConvS2 class, or None."""
         return None
-
-    @property
-    def w_group(self) -> ProcessGroup | None:
-        return None
-
-    @property
-    def is_spatial_parallel(self) -> bool:
-        return False
-
-    def get_spatial_slices(self, h: int, w: int) -> tuple[slice, slice]:
-        """Return ``(h_slice, w_slice)`` for the local spatial chunk.
-
-        Parameters
-        ----------
-        h, w : int
-            Global spatial dimensions.
-
-        Returns:
-        -------
-        tuple[slice, slice]
-            Slices into the global ``[..., h, w]`` tensor for this rank.
-            Non-spatial backends return ``(slice(None), slice(None))``.
-        """
-        return slice(None), slice(None)
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         """All-reduce sum across spatial (h, w) ranks. Identity for non-spatial."""

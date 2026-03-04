@@ -363,27 +363,21 @@ def test_load_is_required_for_path_config(
         get_step(config, img_shape)
 
 
-# TODO: move this to ModelTorchDistributed backend and add unit tests
 def scatter_spatial(data: TensorDict, img_shape: tuple[int, int]) -> TensorDict:
     """Slice global tensors to the local spatial chunk for this rank."""
-    h_slice, w_slice = Distributed.get_instance().get_spatial_slices(*img_shape)
-    return {k: v[..., h_slice, w_slice].contiguous() for k, v in data.items()}
+    slices = Distributed.get_instance().get_local_slices(img_shape)
+    return {k: v[(..., *slices)].contiguous() for k, v in data.items()}
 
 
-# TODO: move this to ModelTorchDistributed backend and add unit tests
 def gather_spatial(data: TensorDict, img_shape: tuple[int, int]) -> TensorDict:
     """Gather local spatial chunks back to global tensors via all-reduce."""
     dist = Distributed.get_instance()
-    if not dist.is_spatial_parallel:
-        return data
-    h_slice, w_slice = dist.get_spatial_slices(*img_shape)
+    slices = dist.get_local_slices(img_shape)
     result = {}
     for k, v in data.items():
-        global_shape = list(v.shape)
-        global_shape[-2] = img_shape[0]
-        global_shape[-1] = img_shape[1]
+        global_shape = (*v.shape[:-2], *img_shape)
         global_tensor = torch.zeros(global_shape, dtype=v.dtype, device=v.device)
-        global_tensor[..., h_slice, w_slice] = v
+        global_tensor[(..., *slices)] = v
         result[k] = dist.spatial_reduce_sum(global_tensor)
     return result
 

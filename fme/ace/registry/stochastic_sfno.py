@@ -4,7 +4,6 @@ from collections.abc import Callable
 from typing import Literal
 
 import torch
-import torch_harmonics.distributed as thd
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
@@ -27,7 +26,6 @@ def isotropic_noise(
     isht: Callable[[torch.Tensor], torch.Tensor],
     device: torch.device,
 ) -> torch.Tensor:
-    # TODO: is this happening at every rank? are ranks sharing the same seed?
     # --- draw independent N(0,1) parts --------------------------------------
     coeff_shape = (*leading_shape, lmax, mmax)
     real = torch.randn(coeff_shape, dtype=torch.float32, device=device)
@@ -43,13 +41,9 @@ def isotropic_noise(
     scale = math.sqrt(4.0 * math.pi) / lmax  # (Unsöld theorem ⇒ L = lmax)
     alm = (real + 1j * imag) * scale
 
-    # For distributed iSHT, slice to local spectral extent
-    if isinstance(isht, thd.DistributedInverseRealSHT):
-        l_start = sum(isht.l_shapes[: isht.comm_rank_polar])
-        l_local = isht.l_shapes[isht.comm_rank_polar]
-        m_start = sum(isht.m_shapes[: isht.comm_rank_azimuth])
-        m_local = isht.m_shapes[isht.comm_rank_azimuth]
-        alm = alm[..., l_start : l_start + l_local, m_start : m_start + m_local]
+    # --- for distributed iSHT, slice to local spectral extent --------------
+    l_slice, m_slice = Distributed.get_instance().get_local_slices((lmax, mmax))
+    alm = alm[..., l_slice, m_slice]
 
     return isht(alm)
 
@@ -93,11 +87,6 @@ class NoiseConditionedSFNO(torch.nn.Module):
         else:
             self.pos_embed = None
 
-    def _get_spatial_slices(self):
-        """Return (h_slice, w_slice) for the local spatial chunk."""
-        dist = Distributed.get_instance()
-        return dist.get_spatial_slices(*self.img_shape)
-
     def forward(
         self, x: torch.Tensor, labels: torch.Tensor | None = None
     ) -> torch.Tensor:
@@ -121,7 +110,7 @@ class NoiseConditionedSFNO(torch.nn.Module):
         else:
             raise ValueError(f"Invalid noise type: {self.noise_type}")
 
-        h_slice, w_slice = self._get_spatial_slices()
+        h_slice, w_slice = Distributed.get_instance().get_local_slices(self.img_shape)
 
         if self.pos_embed is not None:
             pos_local = self.pos_embed[..., h_slice, w_slice]

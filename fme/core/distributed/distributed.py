@@ -33,11 +33,6 @@ class Distributed:
 
     _entered: bool = False
 
-    @classmethod
-    def is_entered(cls) -> bool:
-        """Return whether a ``Distributed.context()`` is currently active."""
-        return cls._entered
-
     def __init__(
         self,
         force_non_distributed: bool = False,
@@ -230,7 +225,7 @@ class Distributed:
 
         Args:
             tensor_shape: the shape of the global tensor, which may or may not contain
-                a data parallel (batch) dimension.
+                a data parallel (batch) dimension. Assume last dims are (H, W).
             data_parallel_dim: the index of the data parallel dimension, if it exists.
                 by default, assumes the tensor does not have a data parallel dimension.
         """
@@ -312,6 +307,11 @@ class Distributed:
         """
         Gathers tensor data into a single tensor with the data from all ranks.
 
+        Each rank places its local portion (determined by :meth:`get_local_slices`)
+        into a zero tensor of ``global_shape``.  Spatial chunks are combined via
+        :meth:`spatial_reduce_sum`, then the data-parallel portions are gathered
+        to root via :meth:`gather`.
+
         Args:
             tensor: the tensor data to gather
             global_shape: the shape of the tensor containing data from all ranks
@@ -327,20 +327,38 @@ class Distributed:
         local_slices = self.get_local_slices(
             global_shape, data_parallel_dim=data_parallel_dim
         )
-        gathered_local_slices = self.gather_object(local_slices)
+        # Place local data into global-shaped zeros, then combine spatial chunks.
+        global_tensor = torch.zeros(
+            *global_shape, dtype=tensor.dtype, device=tensor.device
+        )
+        global_tensor[local_slices] = tensor
+        global_tensor = self.spatial_reduce_sum(global_tensor)
+        # Each dp rank now has the full spatial extent for its batch portion.
+        # Extract this rank's dp slice and gather across dp ranks to root.
+        dp_slices = self.get_local_slices(
+            global_shape, data_parallel_dim=data_parallel_dim
+        )
+        # Build dp-only slices (spatial dims are already reconstructed).
+        dp_only_list = list(dp_slices)
+        for i in range(len(dp_only_list)):
+            if i != data_parallel_dim:
+                dp_only_list[i] = slice(None)
+        dp_only = tuple(dp_only_list)
+        dp_local = global_tensor[dp_only]
+        gathered_dp_slices = self.gather_object(dp_only)
         if self.is_root():
-            if gathered_local_slices is None:
+            if gathered_dp_slices is None:
                 raise RuntimeError("gather_object returned None on root process")
             gathered_global = torch.zeros(
                 *global_shape, dtype=tensor.dtype, device=tensor.device
             )
             gather_list = []
             for i in range(self.total_data_parallel_ranks):
-                gather_list.append(gathered_global[gathered_local_slices[i]])
+                gather_list.append(gathered_global[gathered_dp_slices[i]])
         else:
             gather_list = None
             gathered_global = None
-        self.gather(tensor, gather_list=gather_list)
+        self.gather(dp_local, gather_list=gather_list)
         return gathered_global
 
     def gather_irregular(
@@ -398,37 +416,14 @@ class Distributed:
         """
         return self._seed
 
-    @property
-    def h_size(self) -> int:
-        return self._distributed.h_size
+    def get_sht(self, nlat, nlon, lmax, mmax, grid):
+        return self._distributed.get_sht(nlat, nlon, lmax, mmax, grid)
 
-    @property
-    def w_size(self) -> int:
-        return self._distributed.w_size
+    def get_isht(self, nlat, nlon, lmax, mmax, grid):
+        return self._distributed.get_isht(nlat, nlon, lmax, mmax, grid)
 
-    @property
-    def h_rank(self) -> int:
-        return self._distributed.h_rank
-
-    @property
-    def w_rank(self) -> int:
-        return self._distributed.w_rank
-
-    @property
-    def h_group(self):
-        return self._distributed.h_group
-
-    @property
-    def w_group(self):
-        return self._distributed.w_group
-
-    @property
-    def is_spatial_parallel(self) -> bool:
-        return self._distributed.is_spatial_parallel
-
-    def get_spatial_slices(self, h: int, w: int) -> tuple[slice, slice]:
-        """Return ``(h_slice, w_slice)`` for the local spatial chunk."""
-        return self._distributed.get_spatial_slices(h, w)
+    def get_disco_conv_cls(self):
+        return self._distributed.get_disco_conv_cls()
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return self._distributed.spatial_reduce_sum(tensor)

@@ -20,9 +20,9 @@ import torch
 import torch.nn as nn
 
 import torch_harmonics as th
-import torch_harmonics.distributed as thd
 
 from fme.core.benchmark.timer import NullTimer, Timer
+from fme.core.distributed.distributed import Distributed
 
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
@@ -169,16 +169,12 @@ class SpectralConvS2(nn.Module):
         assert self.inverse_transform.lmax == self.modes_lat
         assert self.inverse_transform.mmax == self.modes_lon
 
-        if isinstance(self.inverse_transform, thd.DistributedInverseRealSHT):
-            self.modes_lat_local = self.inverse_transform.lmax_local
-            self.modes_lon_local = self.inverse_transform.mmax_local
-            self.lpad_local = self.inverse_transform.lpad_local
-            self.mpad_local = self.inverse_transform.mpad_local
-        else:
-            self.modes_lat_local = self.modes_lat
-            self.modes_lon_local = self.modes_lon
-            self.lpad = 0
-            self.mpad = 0
+        dist = Distributed.get_instance()
+        l_slice, m_slice = dist.get_local_slices((self.modes_lat, self.modes_lon))
+        l_start, l_stop, _ = l_slice.indices(self.modes_lat)
+        m_start, m_stop, _ = m_slice.indices(self.modes_lon)
+        self.modes_lat_local = l_stop - l_start
+        self.modes_lon_local = m_stop - m_start
 
         if scale == "auto":
             scale = math.sqrt(1 / (in_channels)) * torch.ones(
@@ -233,6 +229,8 @@ class SpectralConvS2(nn.Module):
         # rewrite old checkpoints on load
         self.register_load_state_dict_pre_hook(self._add_singleton_group_dim)
         self.register_load_state_dict_pre_hook(self._reorder_weight_dims)
+        # TODO: this is hacky and should be replaced later, see comment on method def
+        self.register_load_state_dict_pre_hook(self._slice_for_distributed)
 
     @staticmethod
     def _reorder_weight_dims(
@@ -256,7 +254,7 @@ class SpectralConvS2(nn.Module):
             module.num_groups,
             module.in_channels // module.num_groups,
             module.out_channels // module.num_groups,
-            module.modes_lat_local,
+            module.modes_lat,
             2,
         ):
             # reorder to (group, nlat, out_channels // group, in_channels // group, 2)
@@ -272,7 +270,7 @@ class SpectralConvS2(nn.Module):
                 module.num_groups,
                 module.in_channels // module.num_groups,
                 module.lora_rank,
-                module.modes_lat_local,
+                module.modes_lat,
                 2,
             )
         ):
@@ -288,13 +286,12 @@ class SpectralConvS2(nn.Module):
                 module.num_groups,
                 module.lora_rank,
                 module.out_channels // module.num_groups,
-                module.modes_lat_local,
+                module.modes_lat,
                 2,
             )
         ):
             lora_B = lora_B.permute(0, 3, 2, 1, 4)
             state_dict[prefix + "lora_B"] = lora_B
-        self.register_load_state_dict_pre_hook(self._slice_for_distributed)
 
     @staticmethod
     def _add_singleton_group_dim(
@@ -323,6 +320,9 @@ class SpectralConvS2(nn.Module):
         if weight.shape == ungrouped_shape:
             state_dict[key] = weight.view(1, *ungrouped_shape)
 
+    # TODO: this is a bit hacky
+    # TODO: we should ideally save the state dict in the correct shape in the first place
+    # TODO: but this allows us to load old checkpoints without modification
     @staticmethod
     def _slice_for_distributed(
         module: "SpectralConvS2",
@@ -335,19 +335,18 @@ class SpectralConvS2(nn.Module):
         error_msgs: list[str],
     ) -> None:
         """Slice global spectral weights to local extent for distributed mode."""
-        if not isinstance(module.inverse_transform, thd.DistributedInverseRealSHT):
+        if module.modes_lat_local == module.modes_lat:
             return
-        isht = module.inverse_transform
-        l_start = sum(isht.l_shapes[: isht.comm_rank_polar])
-        l_local = isht.l_shapes[isht.comm_rank_polar]
+        dist = Distributed.get_instance()
+        l_slice, _ = dist.get_local_slices((module.modes_lat, module.modes_lon))
         for suffix in ("weight", "lora_A", "lora_B"):
             key = prefix + suffix
             if key not in state_dict:
                 continue
             tensor = state_dict[key]
-            # The spectral (l) dim is at index -2 for all these params
-            if tensor.shape[-2] != l_local:
-                state_dict[key] = tensor[..., l_start : l_start + l_local, :]
+            # After reorder, layout is (group, nlat, ..., 2) — nlat is dim 1
+            if tensor.shape[1] != module.modes_lat_local:
+                state_dict[key] = tensor[:, l_slice]
 
     def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype

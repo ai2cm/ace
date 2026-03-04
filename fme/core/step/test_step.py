@@ -499,7 +499,7 @@ def test_label_conditioned_step():
         ),
         wrapper=lambda x: x,
     )
-    h_sl, w_sl = dist.get_spatial_slices(*DEFAULT_IMG_SHAPE)
+    h_sl, w_sl = dist.get_local_slices(DEFAULT_IMG_SHAPE)
     local_h = DEFAULT_IMG_SHAPE[0] if h_sl == slice(None) else h_sl.stop - h_sl.start
     local_w = DEFAULT_IMG_SHAPE[1] if w_sl == slice(None) else w_sl.stop - w_sl.start
     assert output["diagnostic_main"].shape == (1, local_h, local_w)

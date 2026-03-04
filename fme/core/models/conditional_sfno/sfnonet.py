@@ -22,7 +22,6 @@ import torch.nn as nn
 
 # get spectral transforms from torch_harmonics
 import torch_harmonics as th
-import torch_harmonics.distributed as thd
 from torch.utils.checkpoint import checkpoint
 
 from fme.core.benchmark.timer import Timer, NullTimer
@@ -362,6 +361,21 @@ class NoLayerNorm(nn.Module):
         return x
 
 
+def _slice_len(s: slice, full: int) -> int:
+    start, stop, _ = s.indices(full)
+    return stop - start
+
+
+def _local_img_shape(transform: nn.Module) -> tuple[int, int]:
+    """Derive local (h, w) from an SHT transform via Distributed slices."""
+    dist = Distributed.get_instance()
+    h_slice, w_slice = dist.get_local_slices((transform.nlat, transform.nlon))
+    return (
+        _slice_len(h_slice, transform.nlat),
+        _slice_len(w_slice, transform.nlon),
+    )
+
+
 def get_lat_lon_sfnonet(
     params,
     in_chans: int,
@@ -385,65 +399,20 @@ def get_lat_lon_sfnonet(
     data_grid = params.data_grid if hasattr(params, "data_grid") else "equiangular"
 
     dist = Distributed.get_instance()
-    spatial = dist.is_spatial_parallel
 
-    if spatial:
-        if not thd.is_initialized():
-            thd.init(dist.h_group, dist.w_group)
-        # Ensure gloo backend can run distributed SHTs (needs all_to_all).
-        # TODO: move this to ModelTorchDistributed and do it once there
-        # TODO: we know we are limited to gloo or nccl, so we have to patch gloo
-        # TODO: if it's gloo. But we could be more robust to other backends by checking
-        # TODO: if all_to_all is implemented instead of checking the backend name.
-        # NOTE: the patch is pretty slow ... but only used in cpu testing...
-        # NOTE: we may want to consider an MPI impl at some point for inference, but can wait
-        from fme.core.distributed._gloo_patch import patch_gloo_alltoall
-
-        patch_gloo_alltoall()
-        SHTClass = thd.DistributedRealSHT
-        ISHTClass = thd.DistributedInverseRealSHT
-        disco_conv_cls = thd.DistributedDiscreteContinuousConvS2
-    else:
-        SHTClass = th.RealSHT
-        ISHTClass = th.InverseRealSHT
-        disco_conv_cls = None
-
-    def _add_local_attrs(transform):
-        """Add local extent attributes needed by SpectralConvS2."""
-        if isinstance(
-            transform, (thd.DistributedRealSHT, thd.DistributedInverseRealSHT)
-        ):
-            transform.lmax_local = transform.l_shapes[transform.comm_rank_polar]
-            transform.mmax_local = transform.m_shapes[transform.comm_rank_azimuth]
-            transform.lpad_local = 0
-            transform.mpad_local = 0
-
-    trans_down = SHTClass(
+    trans_down = dist.get_sht(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
-    ).float()
-    itrans_up = ISHTClass(
+    )
+    itrans_up = dist.get_isht(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
-    ).float()
-    trans = SHTClass(
+    )
+    trans = dist.get_sht(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
-    ).float()
-    itrans = ISHTClass(
-        h, w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
-    ).float()
+    )
+    itrans = dist.get_isht(h, w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss")
+    disco_conv_cls = dist.get_disco_conv_cls()
 
-    for t in (trans_down, itrans_up, trans, itrans):
-        _add_local_attrs(t)
-
-    spatial_h_slice, spatial_w_slice = dist.get_spatial_slices(h, w)
-
-    # Compute local image shape for block-level parameters.
-    if spatial:
-        local_img_shape = (
-            spatial_h_slice.stop - spatial_h_slice.start,
-            spatial_w_slice.stop - spatial_w_slice.start,
-        )
-    else:
-        local_img_shape = img_shape
+    local_img = _local_img_shape(trans_down)
 
     def get_pos_embed():
         pos_embed = nn.Parameter(torch.zeros(1, params.embed_dim, h, w))
@@ -454,7 +423,7 @@ def get_lat_lon_sfnonet(
     net = SphericalFourierNeuralOperatorNet(
         params,
         img_shape=img_shape,
-        local_img_shape=local_img_shape,
+        local_img_shape=local_img,
         in_chans=in_chans,
         out_chans=out_chans,
         context_config=context_config,
@@ -464,8 +433,6 @@ def get_lat_lon_sfnonet(
         itrans=itrans,
         get_pos_embed=get_pos_embed,
         disco_conv_cls=disco_conv_cls,
-        spatial_h_slice=spatial_h_slice,
-        spatial_w_slice=spatial_w_slice,
     )
     return net
 
@@ -626,12 +593,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         spectral_lora_rank: int = 0,
         spectral_lora_alpha: float | None = None,
         disco_conv_cls=None,
-        spatial_h_slice: slice | None = None,
-        spatial_w_slice: slice | None = None,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
-        self._spatial_h_slice = spatial_h_slice
-        self._spatial_w_slice = spatial_w_slice
 
         self.params = params
         self.filter_type = (
@@ -657,6 +620,12 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.local_img_shape = (
             local_img_shape if local_img_shape is not None else self.img_shape
         )
+        self._spatial_h_slice: slice | None = None
+        self._spatial_w_slice: slice | None = None
+        if self.local_img_shape != self.img_shape:
+            self._spatial_h_slice, self._spatial_w_slice = (
+                Distributed.get_instance().get_local_slices(self.img_shape)
+            )
         self.scale_factor = (
             params.scale_factor if hasattr(params, "scale_factor") else scale_factor
         )

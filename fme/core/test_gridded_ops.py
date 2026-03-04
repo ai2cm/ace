@@ -4,12 +4,7 @@ import pytest
 import torch
 
 from fme.core import get_device, set_seed
-from fme.core.gridded_ops import (
-    DistributedLatLonOperations,
-    GriddedOperations,
-    HEALPixOperations,
-    LatLonOperations,
-)
+from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorMapping
 
 
@@ -184,54 +179,6 @@ def test_healpix_sht_round_trip_face_ordering():
     torch.testing.assert_close(data_isht, data_isht_reconstructed, atol=0.1, rtol=40)
     rmse = torch.sqrt(torch.mean((data_isht - data_isht_reconstructed) ** 2))
     assert rmse < 0.002
-
-
-def test_distributed_latlon_area_weighted_mean_matches_latlon():
-    """DistributedLatLonOperations should match LatLonOperations on a single rank."""
-    area_weights = torch.rand(4).unsqueeze(-1).broadcast_to(4, 5)
-    latlon = LatLonOperations(area_weights=area_weights)
-    dist_ops = DistributedLatLonOperations(area_weights=area_weights)
-    data = torch.randn(2, 4, 5)
-    expected = latlon.area_weighted_mean(data)
-    result = dist_ops.area_weighted_mean(data)
-    torch.testing.assert_close(result, expected)
-
-
-def test_distributed_latlon_area_weighted_sum_matches_latlon():
-    """DistributedLatLonOperations should match LatLonOperations on a single rank."""
-    area_weights = torch.rand(4).unsqueeze(-1).broadcast_to(4, 5)
-    latlon = LatLonOperations(area_weights=area_weights)
-    dist_ops = DistributedLatLonOperations(area_weights=area_weights)
-    data = torch.randn(2, 4, 5)
-    expected = latlon.area_weighted_sum(data)
-    result = dist_ops.area_weighted_sum(data)
-    torch.testing.assert_close(result, expected)
-
-
-def test_distributed_latlon_skips_uniformity_check():
-    """DistributedLatLonOperations should accept non-uniform area weights."""
-    non_uniform = torch.rand(4, 5)  # not longitudinally uniform
-    with pytest.raises(ValueError, match="longitudinally uniform"):
-        LatLonOperations(area_weights=non_uniform)
-    # Should not raise
-    DistributedLatLonOperations(area_weights=non_uniform)
-
-
-def test_distributed_latlon_not_implemented_methods():
-    """Verify NotImplementedError for unimplemented methods."""
-    area_weights = torch.ones(4, 5)
-    ops = DistributedLatLonOperations(area_weights=area_weights)
-    data = torch.randn(2, 4, 5)
-    with pytest.raises(NotImplementedError):
-        ops.regional_area_weighted_mean(data, torch.ones(4, 5))
-    with pytest.raises(NotImplementedError):
-        ops.get_real_sht()
-    with pytest.raises(NotImplementedError):
-        ops.get_real_isht()
-    with pytest.raises(NotImplementedError):
-        ops.area_weighted_gradient_magnitude_percent_diff(data, data)
-    with pytest.raises(NotImplementedError):
-        ops.zonal_mean
 
 
 def test_latlon_grid_parameter_respected():

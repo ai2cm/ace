@@ -90,6 +90,7 @@ class ModelTorchDistributed(DistributedBackend):
         self._data_group = self._dm.get_mesh_group(mesh["data"])
         self._h_group = self._dm.get_mesh_group(mesh["h"])
         self._w_group = self._dm.get_mesh_group(mesh["w"])
+        self._spatial_group = self._dm.get_mesh_group(mesh["h", "w"])
 
         self._data_size = torch.distributed.get_world_size(group=self._data_group)
         self._data_rank = torch.distributed.get_rank(group=self._data_group)
@@ -106,6 +107,8 @@ class ModelTorchDistributed(DistributedBackend):
         if using_gpu():
             self._device_id = self._local_rank
             torch.cuda.set_device(self._device_id)
+
+        self._thd_initialized = False
 
         logger.info(
             "ModelTorchDistributed initialized: "
@@ -146,8 +149,33 @@ class ModelTorchDistributed(DistributedBackend):
         """Number of data-parallel ranks."""
         return self._data_size
 
-    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None):
-        """Return index slices for the data-parallel chunk."""
+    def _get_local_spatial_shape(self, h: int, w: int):
+        """Compute the local spatial slice for this rank.
+
+        Args:
+            h (int): Global height.
+            w (int): Global width.
+
+        Returns:
+            tuple[slice, slice]: Slices for the local height and width.
+        """
+        from torch_harmonics.distributed import compute_split_shapes
+
+        h_shapes = compute_split_shapes(h, self._h_size)
+        w_shapes = compute_split_shapes(w, self._w_size)
+        h_start = sum(h_shapes[: self._h_rank])
+        w_start = sum(w_shapes[: self._w_rank])
+        return (
+            slice(h_start, h_start + h_shapes[self._h_rank]),
+            slice(w_start, w_start + w_shapes[self._w_rank]),
+        )
+
+    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None = None):
+        """Return index slices for this rank's local chunk.
+
+        Slices the ``data_parallel_dim`` across data-parallel ranks and
+        the last two dimensions across spatial (h, w) model-parallel ranks.
+        """
         return_list = [slice(None, None) for _ in tensor_shape]
         if data_parallel_dim is not None:
             n_dp = self.total_data_parallel_ranks
@@ -161,6 +189,11 @@ class ModelTorchDistributed(DistributedBackend):
             per_rank = tensor_shape[data_parallel_dim] // n_dp
             return_list[data_parallel_dim] = slice(
                 self._data_rank * per_rank, (self._data_rank + 1) * per_rank
+            )
+        # Spatial slicing on the last two dimensions (H, W).
+        if len(tensor_shape) >= 2:
+            return_list[-2], return_list[-1] = self._get_local_spatial_shape(
+                tensor_shape[-2], tensor_shape[-1]
             )
         return tuple(return_list)
 
@@ -266,52 +299,44 @@ class ModelTorchDistributed(DistributedBackend):
         logger.debug("Barrier on rank %d", self._rank)
         torch.distributed.barrier(device_ids=self._device_ids)
 
-    @property
-    def h_size(self) -> int:
-        return self._h_size
-
-    @property
-    def w_size(self) -> int:
-        return self._w_size
-
-    @property
-    def h_rank(self) -> int:
-        return self._h_rank
-
-    @property
-    def w_rank(self) -> int:
-        return self._w_rank
-
-    @property
-    def h_group(self):
-        return self._h_group
-
-    @property
-    def w_group(self):
-        return self._w_group
-
-    @property
-    def is_spatial_parallel(self) -> bool:
-        return self._h_size > 1 or self._w_size > 1
-
-    def get_spatial_slices(self, h: int, w: int) -> tuple[slice, slice]:
-        from torch_harmonics.distributed import compute_split_shapes
-
-        h_shapes = compute_split_shapes(h, self._h_size)
-        w_shapes = compute_split_shapes(w, self._w_size)
-        h_start = sum(h_shapes[: self._h_rank])
-        w_start = sum(w_shapes[: self._w_rank])
-        return (
-            slice(h_start, h_start + h_shapes[self._h_rank]),
-            slice(w_start, w_start + w_shapes[self._w_rank]),
-        )
-
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
-        if self._h_size > 1:
-            torch.distributed.all_reduce(tensor, group=self._h_group)
-        if self._w_size > 1:
-            torch.distributed.all_reduce(tensor, group=self._w_group)
+        if self._h_size > 1 or self._w_size > 1:
+            torch.distributed.all_reduce(tensor, group=self._spatial_group)
         return tensor
+
+    def _ensure_thd_initialized(self):
+        """Lazily init torch_harmonics.distributed and gloo patch."""
+        if not self._thd_initialized:
+            import torch_harmonics.distributed as thd
+
+            if not thd.is_initialized():
+                thd.init(self._h_group, self._w_group)
+            from fme.core.distributed._gloo_patch import patch_gloo_alltoall
+
+            patch_gloo_alltoall()
+            self._thd_initialized = True
+
+    def get_sht(self, nlat, nlon, lmax, mmax, grid):
+        self._ensure_thd_initialized()
+        import torch_harmonics.distributed as thd
+
+        return thd.DistributedRealSHT(
+            nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
+        ).float()
+
+    def get_isht(self, nlat, nlon, lmax, mmax, grid):
+        self._ensure_thd_initialized()
+        import torch_harmonics.distributed as thd
+
+        return thd.DistributedInverseRealSHT(
+            nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
+        ).float()
+
+    def get_disco_conv_cls(self):
+        self._ensure_thd_initialized()
+        import torch_harmonics.distributed as thd
+
+        return thd.DistributedDiscreteContinuousConvS2
 
     def shutdown(self):
         self.barrier()
