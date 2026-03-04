@@ -421,6 +421,7 @@ def test_ocean_heat_content_correction_dz_3d():
 
     sea_surface_fraction = mask[:, :, :, 0]
     deptho = torch.full((nsamples, nlat, nlon), 15.0)
+    deptho[:, 0, 0] = 10.0
 
     input_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon),
@@ -598,8 +599,9 @@ def _mld_input_gen_forcing(mask, *, gen_temp_surface=20.0, gen_temp_deep=5.0):
     forcing_data = {
         "hfgeou": torch.ones(shape) * 0.05,
         "sea_surface_fraction": ssf,
-        "deptho": torch.full(shape, 1000.0),
+        "deptho": torch.full(shape, 15.0),
     }
+    forcing_data["deptho"][:, 0, 0] = 10.0
     input_data = {
         **{f"thetao_{k}": torch.ones(shape) for k in range(_MLD_NZ)},
         **{f"so_{k}": torch.ones(shape) * 35.0 for k in range(_MLD_NZ)},

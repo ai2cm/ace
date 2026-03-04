@@ -471,7 +471,7 @@ def _apply_mld_heat_correction(
             * SPECIFIC_HEAT_OF_WATER_CM4
             * dz
         )
-    )
+    ).nan_to_num()
     n_levels = gen.sea_water_potential_temperature.shape[-1]
     for k in range(n_levels):
         gen.data[f"thetao_{k}"] = gen.data[f"thetao_{k}"] + dT[..., k]
@@ -611,7 +611,7 @@ def _apply_mld_salt_correction(
         delta_S.unsqueeze(-1)
         * mld_weights
         / (Ah_mean.unsqueeze(-1) * DENSITY_OF_WATER_CM4 * dz)
-    )
+    ).nan_to_num()
     n_levels = gen.sea_water_salinity.shape[-1]
     for k in range(n_levels):
         gen.data[f"so_{k}"] = gen.data[f"so_{k}"] + dS[..., k]
@@ -717,7 +717,7 @@ def apply_geothermal_bottom_correction(
         (hfgeou * ssf).unsqueeze(-1)
         * timestep_seconds
         / (DENSITY_OF_WATER_CM4 * SPECIFIC_HEAT_OF_WATER_CM4 * dz)
-    )
+    ).nan_to_num()
     dT_geo = dT_geo * bottom_mask
 
     nlev = gen.sea_water_potential_temperature.shape[-1]
