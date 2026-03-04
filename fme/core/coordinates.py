@@ -17,7 +17,12 @@ from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
-from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
+from fme.core.gridded_ops import (
+    DistributedLatLonOperations,
+    GriddedOperations,
+    HEALPixOperations,
+    LatLonOperations,
+)
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
@@ -733,6 +738,16 @@ class LatLonCoordinates(HorizontalCoordinates):
     def get_gridded_operations(
         self, mask_provider: MaskProviderABC = NullMaskProvider
     ) -> LatLonOperations:
+        from fme.core.distributed.distributed import Distributed
+
+        dist = Distributed.get_instance()
+        if dist.is_spatial_parallel:
+            global_weights = self.area_weights
+            h_slice, w_slice = dist.get_spatial_slices(
+                global_weights.shape[-2], global_weights.shape[-1]
+            )
+            local_weights = global_weights[..., h_slice, w_slice]
+            return DistributedLatLonOperations(local_weights, mask_provider)
         return LatLonOperations(self.area_weights, mask_provider)
 
     @property

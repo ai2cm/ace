@@ -202,6 +202,15 @@ class ConditionalLayerNorm(nn.Module):
             self.W_scale_pos = None
             self.W_bias_pos = None
         if global_layer_norm:
+            from fme.core.distributed.distributed import Distributed
+
+            if (
+                Distributed.is_entered()
+                and Distributed.get_instance().is_spatial_parallel
+            ):
+                raise ValueError(
+                    "global_layer_norm=True is not supported with spatial parallelism"
+                )
             self.norm = nn.LayerNorm(
                 (self.n_channels, img_shape[0], img_shape[1]),
                 eps=epsilon,

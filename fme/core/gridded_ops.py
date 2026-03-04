@@ -287,17 +287,20 @@ class LatLonOperations(GriddedOperations):
         mask_provider: MaskProviderABC = NullMaskProvider,
         grid: str = "legendre-gauss",
     ):
-        # requires weights are longitudinally uniform
+        self._validate_area_weights(area_weights)
+        self._device_area = area_weights.to(get_device())
+        self._cpu_area = area_weights.to("cpu")
+        self._device_mask_provider = mask_provider.to(get_device())
+        self._cpu_mask_provider = mask_provider.to("cpu")
+        self._grid = grid
+
+    def _validate_area_weights(self, area_weights: torch.Tensor) -> None:
+        """Check that area weights are longitudinally uniform."""
         if not torch.allclose(area_weights, area_weights[..., :1]):
             raise ValueError(
                 "Area weights must be longitudinally uniform, "
                 "as assumed for zonal mean."
             )
-        self._device_area = area_weights.to(get_device())
-        self._cpu_area = area_weights.to("cpu")
-        self._device_mask_provider = mask_provider.to(get_device())
-        self._cpu_mask_provider = mask_provider.to("cpu")
-        self._grid = "legendre-gauss"
 
     @property
     def zonal_mean(self) -> Callable[[torch.Tensor], torch.Tensor]:
@@ -389,6 +392,126 @@ class LatLonOperations(GriddedOperations):
             nlon=self._cpu_area.shape[-1],
             grid=self._grid,
         ).to(get_device())
+
+    def get_initialization_kwargs(self) -> dict[str, Any]:
+        return {"area_weights": self._cpu_area}
+
+
+class DistributedLatLonOperations(LatLonOperations):
+    """LatLonOperations subclass that all-reduces across spatial ranks.
+
+    Area weights must be the LOCAL slice (for this rank's spatial chunk).
+    """
+
+    def __init__(
+        self,
+        area_weights: torch.Tensor,
+        mask_provider: MaskProviderABC = NullMaskProvider,
+        grid: str = "legendre-gauss",
+    ):
+        super().__init__(
+            area_weights=area_weights, mask_provider=mask_provider, grid=grid
+        )
+
+    def _validate_area_weights(self, area_weights: torch.Tensor) -> None:
+        # Skip longitudinal-uniformity check: the local slice may be a
+        # subset of longitudes.
+        pass
+
+    def _spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        from fme.core.distributed.distributed import Distributed
+
+        return Distributed.get_instance().spatial_reduce_sum(tensor)
+
+    def area_weighted_sum(
+        self,
+        data: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        area_weights = self._get_area_weights(data, name)
+        local_sum = metrics.weighted_sum(
+            data, area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
+        )
+        return self._spatial_reduce_sum(local_sum)
+
+    def area_weighted_mean(
+        self,
+        data: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        area_weights = self._get_area_weights(data, name)
+        expanded_weights = area_weights.expand(data.shape)
+        data_clean = data.where(expanded_weights != 0.0, 0.0)
+        local_weighted_sum = (data_clean * expanded_weights).sum(
+            dim=self.HORIZONTAL_DIMS, keepdim=keepdim
+        )
+        local_weight_sum = expanded_weights.sum(
+            dim=self.HORIZONTAL_DIMS, keepdim=keepdim
+        )
+        global_weighted_sum = self._spatial_reduce_sum(local_weighted_sum)
+        global_weight_sum = self._spatial_reduce_sum(local_weight_sum)
+        return global_weighted_sum / global_weight_sum
+
+    # TODO: implement the following methods by raising NotImplementedError for now
+    # TODO: we will likely need to implement them eventually
+    def regional_area_weighted_mean(
+        self,
+        data: torch.Tensor,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        # TODO: regional_weights is expected to have global spatial shape, but
+        # self._cpu_area / self._device_area hold only the local shard, so
+        # multiplying them in _get_area_weights would cause a shape mismatch.
+        # Implement by slicing regional_weights to the local shard and
+        # performing a spatial all-reduce, analogous to area_weighted_mean.
+        raise NotImplementedError(
+            "regional_area_weighted_mean is not supported for "
+            "DistributedLatLonOperations."
+        )
+
+    def get_real_sht(self) -> torch_harmonics.RealSHT:
+        # TODO: self._cpu_area holds only the local spatial shard, so
+        # its shape[-2] / shape[-1] are the local (not global) nlat/nlon.
+        # Constructing a RealSHT from those dimensions would be silently wrong.
+        # Implement by storing global nlat/nlon at construction time and
+        # returning a DistributedRealSHT.
+        raise NotImplementedError(
+            "get_real_sht is not supported for DistributedLatLonOperations."
+        )
+
+    def get_real_isht(self) -> torch_harmonics.InverseRealSHT:
+        # TODO: same as get_real_sht — local shard shape would produce an
+        # incorrectly-sized transform.  Implement via DistributedInverseRealSHT.
+        raise NotImplementedError(
+            "get_real_isht is not supported for DistributedLatLonOperations."
+        )
+
+    def area_weighted_gradient_magnitude_percent_diff(
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        # TODO: gradient_magnitude uses finite differences over the local shard,
+        # so boundary pixels have incorrect gradients (no halo exchange), and the
+        # subsequent weighted_nanmean is never all-reduced across ranks.
+        raise NotImplementedError(
+            "area_weighted_gradient_magnitude_percent_diff is not supported for "
+            "DistributedLatLonOperations."
+        )
+
+    @property
+    def zonal_mean(self) -> Callable[[torch.Tensor], torch.Tensor]:
+        # TODO: _zonal_mean calls data.nanmean(dim=-1) over the local longitude
+        # chunk only.  This is incorrect when w_size > 1 (W-parallel).
+        # Implement by all-reducing the longitude dimension across azimuth ranks.
+        raise NotImplementedError(
+            "zonal_mean is not supported for DistributedLatLonOperations."
+        )
 
     def get_initialization_kwargs(self) -> dict[str, Any]:
         return {"area_weights": self._cpu_area}

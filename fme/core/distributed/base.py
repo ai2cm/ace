@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import torch
+from torch.distributed import ProcessGroup
 
 
 class DistributedBackend(ABC):
@@ -111,3 +112,51 @@ class DistributedBackend(ABC):
 
     @abstractmethod
     def shutdown(self): ...
+
+    @property
+    def h_size(self) -> int:
+        return 1
+
+    @property
+    def w_size(self) -> int:
+        return 1
+
+    @property
+    def h_rank(self) -> int:
+        return 0
+
+    @property
+    def w_rank(self) -> int:
+        return 0
+
+    @property
+    def h_group(self) -> ProcessGroup | None:
+        return None
+
+    @property
+    def w_group(self) -> ProcessGroup | None:
+        return None
+
+    @property
+    def is_spatial_parallel(self) -> bool:
+        return False
+
+    def get_spatial_slices(self, h: int, w: int) -> tuple[slice, slice]:
+        """Return ``(h_slice, w_slice)`` for the local spatial chunk.
+
+        Parameters
+        ----------
+        h, w : int
+            Global spatial dimensions.
+
+        Returns:
+        -------
+        tuple[slice, slice]
+            Slices into the global ``[..., h, w]`` tensor for this rank.
+            Non-spatial backends return ``(slice(None), slice(None))``.
+        """
+        return slice(None), slice(None)
+
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        """All-reduce sum across spatial (h, w) ranks. Identity for non-spatial."""
+        return tensor

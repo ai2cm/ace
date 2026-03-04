@@ -294,6 +294,7 @@ class SpectralConvS2(nn.Module):
         ):
             lora_B = lora_B.permute(0, 3, 2, 1, 4)
             state_dict[prefix + "lora_B"] = lora_B
+        self.register_load_state_dict_pre_hook(self._slice_for_distributed)
 
     @staticmethod
     def _add_singleton_group_dim(
@@ -321,6 +322,32 @@ class SpectralConvS2(nn.Module):
 
         if weight.shape == ungrouped_shape:
             state_dict[key] = weight.view(1, *ungrouped_shape)
+
+    @staticmethod
+    def _slice_for_distributed(
+        module: "SpectralConvS2",
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict,
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        """Slice global spectral weights to local extent for distributed mode."""
+        if not isinstance(module.inverse_transform, thd.DistributedInverseRealSHT):
+            return
+        isht = module.inverse_transform
+        l_start = sum(isht.l_shapes[: isht.comm_rank_polar])
+        l_local = isht.l_shapes[isht.comm_rank_polar]
+        for suffix in ("weight", "lora_A", "lora_B"):
+            key = prefix + suffix
+            if key not in state_dict:
+                continue
+            tensor = state_dict[key]
+            # The spectral (l) dim is at index -2 for all these params
+            if tensor.shape[-2] != l_local:
+                state_dict[key] = tensor[..., l_start : l_start + l_local, :]
 
     def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype

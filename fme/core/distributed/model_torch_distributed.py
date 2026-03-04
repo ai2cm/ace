@@ -266,6 +266,53 @@ class ModelTorchDistributed(DistributedBackend):
         logger.debug("Barrier on rank %d", self._rank)
         torch.distributed.barrier(device_ids=self._device_ids)
 
+    @property
+    def h_size(self) -> int:
+        return self._h_size
+
+    @property
+    def w_size(self) -> int:
+        return self._w_size
+
+    @property
+    def h_rank(self) -> int:
+        return self._h_rank
+
+    @property
+    def w_rank(self) -> int:
+        return self._w_rank
+
+    @property
+    def h_group(self):
+        return self._h_group
+
+    @property
+    def w_group(self):
+        return self._w_group
+
+    @property
+    def is_spatial_parallel(self) -> bool:
+        return self._h_size > 1 or self._w_size > 1
+
+    def get_spatial_slices(self, h: int, w: int) -> tuple[slice, slice]:
+        from torch_harmonics.distributed import compute_split_shapes
+
+        h_shapes = compute_split_shapes(h, self._h_size)
+        w_shapes = compute_split_shapes(w, self._w_size)
+        h_start = sum(h_shapes[: self._h_rank])
+        w_start = sum(w_shapes[: self._w_rank])
+        return (
+            slice(h_start, h_start + h_shapes[self._h_rank]),
+            slice(w_start, w_start + w_shapes[self._w_rank]),
+        )
+
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self._h_size > 1:
+            torch.distributed.all_reduce(tensor, group=self._h_group)
+        if self._w_size > 1:
+            torch.distributed.all_reduce(tensor, group=self._w_group)
+        return tensor
+
     def shutdown(self):
         self.barrier()
         logger.debug("Shutting down rank %d", self._rank)

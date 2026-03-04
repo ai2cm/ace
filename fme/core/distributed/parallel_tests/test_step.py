@@ -26,6 +26,7 @@ from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -37,6 +38,8 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
+# TODO: consider making this a parameter
+# TODO: or adding a crazy big image like (1024, 2048) in a separate test?
 DEFAULT_IMG_SHAPE = (45, 90)
 
 DATA_DIR = pathlib.Path(__file__).parent / "testdata"
@@ -272,6 +275,8 @@ def test_step_applies_wrapper(config: StepSelector):
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
+    input_data = scatter_spatial(input_data, img_shape)
+    next_step_input_data = scatter_spatial(next_step_input_data, img_shape)
     multi_calls = 1
     if isinstance(config._step_config_instance, MultiCallStepConfig):
         if config._step_config_instance.config is not None:
@@ -358,6 +363,31 @@ def test_load_is_required_for_path_config(
         get_step(config, img_shape)
 
 
+# TODO: move this to ModelTorchDistributed backend and add unit tests
+def scatter_spatial(data: TensorDict, img_shape: tuple[int, int]) -> TensorDict:
+    """Slice global tensors to the local spatial chunk for this rank."""
+    h_slice, w_slice = Distributed.get_instance().get_spatial_slices(*img_shape)
+    return {k: v[..., h_slice, w_slice].contiguous() for k, v in data.items()}
+
+
+# TODO: move this to ModelTorchDistributed backend and add unit tests
+def gather_spatial(data: TensorDict, img_shape: tuple[int, int]) -> TensorDict:
+    """Gather local spatial chunks back to global tensors via all-reduce."""
+    dist = Distributed.get_instance()
+    if not dist.is_spatial_parallel:
+        return data
+    h_slice, w_slice = dist.get_spatial_slices(*img_shape)
+    result = {}
+    for k, v in data.items():
+        global_shape = list(v.shape)
+        global_shape[-2] = img_shape[0]
+        global_shape[-1] = img_shape[1]
+        global_tensor = torch.zeros(global_shape, dtype=v.dtype, device=v.device)
+        global_tensor[..., h_slice, w_slice] = v
+        result[k] = dist.spatial_reduce_sum(global_tensor)
+    return result
+
+
 def cache_step_input(
     step: StepABC,
     input_data: TensorDict,
@@ -368,7 +398,6 @@ def cache_step_input(
     if checkpoint_path.exists():
         checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
         step.load_state(checkpoint["step_state_dict"])
-        # TODO: we will need some kind of scatter here for it to work in parallel
         input_data = checkpoint["input_data"]
         next_step_input_data = checkpoint["next_step_input_data"]
         label_tensor = checkpoint["label_tensor"]
@@ -448,10 +477,18 @@ def test_step_regression(
         labels,
         DATA_DIR / f"{case_name}_input.pt",
     )
+    # Scatter global inputs to local spatial chunks
+    input_data = scatter_spatial(input_data, img_shape)
+    next_step_input_data = scatter_spatial(next_step_input_data, img_shape)
+
     output = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=labels
         ),
         wrapper=lambda x: x,
     )
+
+    # Gather local outputs back to global for comparison
+    output = gather_spatial(output, img_shape)
+
     cache_step_output(output, DATA_DIR / f"{case_name}_output.pt")

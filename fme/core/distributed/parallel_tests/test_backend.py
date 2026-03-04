@@ -243,3 +243,63 @@ def test_data_parallel_rank_within_total():
 def test_world_size_positive():
     dist = Distributed.get_instance()
     assert dist.world_size >= 1
+
+
+@pytest.mark.parallel
+def test_spatial_slices_cover_domain():
+    """Union of spatial slices from all ranks should cover the full (h, w) grid."""
+    dist = Distributed.get_instance()
+    h, w = 45, 90
+    h_slice, w_slice = dist.get_spatial_slices(h, w)
+    # Create a canvas, mark this rank's region, all-reduce to check coverage.
+    canvas = torch.zeros(h, w, device=get_device())
+    canvas[h_slice, w_slice] = 1.0
+    canvas = dist.spatial_reduce_sum(canvas)
+    torch.testing.assert_close(canvas, torch.ones(h, w, device=get_device()))
+
+
+@pytest.mark.parallel
+def test_spatial_slices_non_overlapping():
+    """Each rank should write to unique elements (no overlap)."""
+    dist = Distributed.get_instance()
+    h, w = 45, 90
+    h_slice, w_slice = dist.get_spatial_slices(h, w)
+    canvas = torch.zeros(h, w, device=get_device())
+    canvas[h_slice, w_slice] = 1.0
+    canvas = dist.spatial_reduce_sum(canvas)
+    # Every element should be exactly 1 (no overlap).
+    assert canvas.max().item() == 1.0
+
+
+@pytest.mark.parallel
+def test_is_spatial_parallel_consistency():
+    """is_spatial_parallel should be True iff h_size > 1 or w_size > 1."""
+    dist = Distributed.get_instance()
+    expected = dist.h_size > 1 or dist.w_size > 1
+    assert dist.is_spatial_parallel == expected
+
+
+@pytest.mark.parallel
+def test_all_to_all_works_after_gloo_patch():
+    """Verify the gloo all_to_all patch produces correct results."""
+    import torch.distributed as torch_dist
+
+    from fme.core.distributed._gloo_patch import patch_gloo_alltoall
+
+    patch_gloo_alltoall()
+    dist = Distributed.get_instance()
+    # Use the w_group (or h_group) as a test group; fall back to default.
+    group = dist.w_group
+    if group is None:
+        return  # non-spatial, nothing to test
+    size = torch_dist.get_world_size(group=group)
+    rank = torch_dist.get_rank(group=group)
+    # Each rank sends its rank index to every other rank.
+    input_list = [
+        torch.full((2,), float(rank), device=get_device()) for _ in range(size)
+    ]
+    output_list = [torch.zeros(2, device=get_device()) for _ in range(size)]
+    torch_dist.all_to_all(output_list, input_list, group=group)
+    for i in range(size):
+        expected = torch.full((2,), float(i), device=get_device())
+        torch.testing.assert_close(output_list[i], expected)
