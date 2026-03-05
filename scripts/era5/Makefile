@@ -5,7 +5,7 @@ LOCAL_ENVIRONMENT ?= era5-ingestion
 create_environment:
 	conda env create -f environment.yaml
 	conda run --no-capture-output -n era5-ingestion pip install -r dataflow-requirements.txt
-	conda run --no-capture-output -n era5-ingestion pip install metview jupyterlab matplotlib cfgrib
+	conda run --no-capture-output -n era5-ingestion pip install jupyterlab matplotlib
 
 build_dataflow:
 	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
