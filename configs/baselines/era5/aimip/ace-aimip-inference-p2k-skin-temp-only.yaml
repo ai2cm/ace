@@ -1,4 +1,5 @@
 checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
 data_writer:
   save_monthly_files: false
   save_prediction_files: false
