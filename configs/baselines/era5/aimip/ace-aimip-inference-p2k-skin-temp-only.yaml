@@ -28,3 +28,6 @@ stepper_override:
   ocean:
     surface_temperature_name: sea_surface_temperature
     ocean_fraction_name: mask_sea_surface_temperature
+    # Allow checkpoint trained without ocean; prescribed SST (e.g. perturbed) is
+    # injected into step output for next-step input. Hacky; for perturbation only.
+    allow_missing_in_model: true

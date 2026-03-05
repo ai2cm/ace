@@ -40,12 +40,19 @@ class OceanConfig:
             ocean-predicted surface temperature according to ocean_fraction. If False,
             only use ocean-predicted surface temperature where ocean_fraction>=0.5.
         slab: If provided, use a slab ocean model to predict surface temperature.
+        allow_missing_in_model: If True, allow building even when
+            surface_temperature_name is not in the checkpoint's in_names/out_names
+            (e.g. inference with prescribed SST perturbation on a model trained without
+            ocean). Only prescribed (non-slab) mode is supported. The prescribed SST is
+            injected into the step output for use as next-step input; ocean fraction
+            masking is not applied. Hacky; use only for perturbation experiments.
     """
 
     surface_temperature_name: str
     ocean_fraction_name: str
     interpolate: bool = False
     slab: SlabOceanConfig | None = None
+    allow_missing_in_model: bool = False
 
     def build(
         self,
@@ -53,14 +60,22 @@ class OceanConfig:
         out_names: list[str],
         timestep: datetime.timedelta,
     ) -> "Ocean":
-        if not (
-            self.surface_temperature_name in in_names
-            and self.surface_temperature_name in out_names
-        ):
-            raise ValueError(
-                "To use a surface ocean model, the surface temperature must be present"
-                f" in_names and out_names, but {self.surface_temperature_name} is not."
-            )
+        if not self.allow_missing_in_model:
+            if not (
+                self.surface_temperature_name in in_names
+                and self.surface_temperature_name in out_names
+            ):
+                raise ValueError(
+                    "To use a surface ocean model, the surface temperature must be"
+                    f"present in_names and out_names, but"
+                    f"{self.surface_temperature_name} is not."
+                )
+        else:
+            if self.slab is not None:
+                raise ValueError(
+                    "allow_missing_in_model only supports prescribed (non-slab) ocean; "
+                    "slab requires surface_temperature in the model."
+                )
         return Ocean(config=self, timestep=timestep)
 
     @property
@@ -84,6 +99,7 @@ class Ocean:
         """
         self.surface_temperature_name = config.surface_temperature_name
         self.ocean_fraction_name = config.ocean_fraction_name
+        self._allow_missing_in_model = config.allow_missing_in_model
         self.prescriber = Prescriber(
             prescribed_name=config.surface_temperature_name,
             mask_name=config.ocean_fraction_name,
@@ -129,6 +145,12 @@ class Ocean:
             )
         else:
             raise NotImplementedError(f"Ocean type={self.type} is not implemented")
+
+        # Hacky path: model was trained without ocean; inject prescribed SST into
+        # output so it is available as next-step input (e.g. for perturbation runs).
+        # Ocean fraction masking is not applied.
+        if self._allow_missing_in_model:
+            return {**gen_data, self.surface_temperature_name: next_step_temperature}
 
         return self.prescriber(
             target_data,
