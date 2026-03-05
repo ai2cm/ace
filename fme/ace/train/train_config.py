@@ -55,8 +55,8 @@ class WeatherEvaluationConfig:
     """
 
     loader: InferenceDataLoaderConfig
-    n_forward_steps: int = 2
-    forward_steps_in_memory: int = 2
+    n_forward_steps: int
+    forward_steps_in_memory: int
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
@@ -81,6 +81,17 @@ class WeatherEvaluationConfig:
             # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
+
+        for log_step_mean in self.aggregator.log_step_means:
+            if log_step_mean.step >= self.n_forward_steps:
+                raise ValueError(
+                    f"log_step_means contains step {log_step_mean.step} which is "
+                    f"greater than or equal to n_forward_steps {self.n_forward_steps}. "
+                    "Please ensure that all steps in log_step_means are less than "
+                    "n_forward_steps. If your run is less than 20 steps, you must pass "
+                    "a custom log_step_means configuration to override the default "
+                    "(e.g. log_step_means: [])."
+                )
 
     @property
     def using_labels(self) -> bool:
@@ -112,8 +123,8 @@ class InlineInferenceConfig:
     """
 
     loader: InferenceDataLoaderConfig
-    n_forward_steps: int = 2
-    forward_steps_in_memory: int = 2
+    n_forward_steps: int
+    forward_steps_in_memory: int
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
@@ -138,6 +149,17 @@ class InlineInferenceConfig:
             # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
+
+        for log_step_mean in self.aggregator.log_step_means:
+            if log_step_mean.step >= self.n_forward_steps:
+                raise ValueError(
+                    f"log_step_means contains step {log_step_mean.step} which is "
+                    f"greater than or equal to n_forward_steps {self.n_forward_steps}. "
+                    "Please ensure that all steps in log_step_means are less than "
+                    "n_forward_steps. If your run is less than 20 steps, you must pass "
+                    "a custom log_step_means configuration to override the default "
+                    "(e.g. log_step_means: [])."
+                )
 
     @property
     def using_labels(self) -> bool:

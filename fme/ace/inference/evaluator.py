@@ -134,8 +134,8 @@ class InferenceEvaluatorConfig:
     checkpoint_path: str
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
+    forward_steps_in_memory: int
     prediction_loader: InferenceDataLoaderConfig | None = None
-    forward_steps_in_memory: int = 1
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
     )
@@ -158,6 +158,16 @@ class InferenceEvaluatorConfig:
                         self.forward_steps_in_memory,
                         self.n_forward_steps,
                     )
+        for log_step_mean in self.aggregator.log_step_means:
+            if log_step_mean.step >= self.n_forward_steps:
+                raise ValueError(
+                    f"log_step_means contains step {log_step_mean.step} which is "
+                    f"greater than or equal to n_forward_steps {self.n_forward_steps}. "
+                    "Please ensure that all steps in log_step_means are less than "
+                    "n_forward_steps. If your run is less than 20 steps, you must pass "
+                    "a custom log_step_means configuration to override the default "
+                    "(e.g. log_step_means: [])."
+                )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)

@@ -112,7 +112,9 @@ class StepMeanEntry:
     Configuration for logging mean metrics at a particular step.
 
     Attributes:
-        step: Step at which to log mean metrics.
+        step: Number of forward steps after which to log mean metrics. For example,
+            step=20 will log mean metrics at the 20th forward step
+            (i.e. time index n_ic_steps + 19).
         name: Name to use for the logged metrics. If None, will use "mean_step_{step}".
     """
 
