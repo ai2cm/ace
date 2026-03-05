@@ -1,10 +1,9 @@
 import abc
 import dataclasses
 
-import numpy as np
 import torch
 
-from fme.core.rand import randn_like, log_normal_sample, log_uniform_sample
+from fme.core.rand import log_normal_sample, log_uniform_sample, randn_like
 
 
 @dataclasses.dataclass

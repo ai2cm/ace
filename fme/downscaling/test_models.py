@@ -430,7 +430,9 @@ def test_lognorm_noise_backwards_compatibility():
         use_fine_topography=False,
         predict_residual=True,
     )
-    assert model_config.noise_distribution == LogNormalNoiseDistribution(p_mean=-1.0, p_std=1.0)
+    assert model_config.noise_distribution == LogNormalNoiseDistribution(
+        p_mean=-1.0, p_std=1.0
+    )
     model = model_config.build(
         (32, 32),
         2,

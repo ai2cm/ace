@@ -153,7 +153,9 @@ class DiffusionModelConfig:
             )
 
     @property
-    def noise_distribution(self) -> LogNormalNoiseDistribution | LogUniformNoiseDistribution:
+    def noise_distribution(
+        self,
+    ) -> LogNormalNoiseDistribution | LogUniformNoiseDistribution:
         """
         Returns NoiseDistribution object to use for sampling noise in training.
         """
