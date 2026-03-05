@@ -231,12 +231,13 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     nx, ny = 4, 4
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
+    n_forward_steps = window_len * n_windows - 1
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         n_ic_steps=1,
-        n_forward_steps=window_len * n_windows - 1,
-        log_step_means=[StepMeanEntry(step=20)],
+        n_forward_steps=n_forward_steps,
+        log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         initial_time=initial_time,
         normalize=lambda x: dict(x),
         save_diagnostics=False,
