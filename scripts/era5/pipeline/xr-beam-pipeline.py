@@ -473,10 +473,8 @@ def _process_pressure_level_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset
 
 def process_pressure_level_data(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
     output = _process_pressure_level_data(ds, output_grid)
-    new_key = key.replace(
-        offsets={"time": key.offsets["time"], "latitude": 0, "longitude": 0},
-        vars=frozenset(output.keys()),
-    )
+    new_offsets = {dim: key.offsets[dim] for dim in output.dims if dim in key.offsets}
+    new_key = key.replace(offsets=new_offsets, vars=frozenset(output.keys()))
     return new_key, output
 
 
@@ -658,10 +656,8 @@ def process_model_level_data(
     output = _process_model_level_data(
         ds, ds_surface.sel(time=ds.time), ak, bk, output_grid, output_layer_indices
     )
-    new_key = key.replace(
-        offsets={"time": key.offsets["time"], "latitude": 0, "longitude": 0},
-        vars=frozenset(output.keys()),
-    )
+    new_offsets = {dim: key.offsets[dim] for dim in output.dims if dim in key.offsets}
+    new_key = key.replace(offsets=new_offsets, vars=frozenset(output.keys()))
     return new_key, output
 
 
