@@ -16,6 +16,12 @@ from zarr.storage import ObjectStore
 GRAVITY = 9.80665
 TIME_STEP = 6  # hours between output timesteps
 DEFAULT_OUTPUT_GRID = "F90"
+# The input data is on the L137 ECMWF grid. See
+# https://confluence.ecmwf.int/display/UDOC/L137+model+level+definitions.
+# The indices below are chosen for closest alignment with the ACE vertical
+# grid defined in Table 2 of https://arxiv.org/pdf/2310.02074.pdf except
+# that the uppermost layer uses the higher model top of ECMWF model.
+N_INPUT_LAYERS = 137  # this is the number of full layers, not interfaces
 N_INPUT_LAYERS = 137
 DEFAULT_OUTPUT_LAYER_INDICES = [0, 48, 67, 79, 90, 100, 109, 119, 137]
 
@@ -212,7 +218,7 @@ def _regrid(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
     ds = ds.rename({"latitude": "lat", "longitude": "lon"})
     # Ensure south-to-north
     if ds.lat.values[0] > ds.lat.values[-1]:
-        ds = ds.reindex(lat=ds.lat[::-1])
+        ds = ds.sortby("lat")
     regridded = regridder(ds)
     # Rename back to latitude/longitude for output consistency
     regridded = regridded.rename({"lat": "latitude", "lon": "longitude"})
@@ -225,6 +231,7 @@ def _regrid(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
 
 
 def _saturation_vapor_pressure(t: xr.DataArray) -> xr.DataArray:
+    """https://metview.readthedocs.io/en/latest/api/functions/saturation_vapour_pressure.html"""  # noqa: E501
     a1 = 611.21
     a2 = 273.16
     a3 = 17.502
@@ -235,6 +242,8 @@ def _saturation_vapor_pressure(t: xr.DataArray) -> xr.DataArray:
 def _specific_humidity_from_dewpoint(
     dewpoint: xr.DataArray, pressure: xr.DataArray
 ) -> xr.DataArray:
+    """https://metview.readthedocs.io/en/latest/api/functions/specific_humidity_from_dewpoint.html
+    https://metview.readthedocs.io/en/latest/api/functions/vapour_pressure.html"""
     ewsat = _saturation_vapor_pressure(dewpoint)
     eps = 0.621981
     result = eps * ewsat / (pressure - (1 - eps) * ewsat)
@@ -269,9 +278,8 @@ def open_full_37(variables, time_slice) -> xr.Dataset:
     """Open variables from the full_37 ARCO-ERA5 store."""
     ds = xr.open_zarr(_make_zarr_store(URL_FULL_37), chunks=None)
     ds = ds[variables]
-    if time_slice is not None:
-        _check_time_bounds(ds, time_slice)
-        ds = ds.sel(time=time_slice)
+    _check_time_bounds(ds, time_slice)
+    ds = ds.sel(time=time_slice)
     return ds
 
 
