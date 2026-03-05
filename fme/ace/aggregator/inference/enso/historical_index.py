@@ -1,6 +1,6 @@
 # Nino3.4 index anomaly from tropical SST average, 3-monthly centered running mean [K],
 # computed from the CMIP6 AMIP SST forcing data using the script in
-# `scripts/monthly_data/compute_enso_index.py`
+# `scripts/compute_enso_index/compute_enso_index.py`
 NINO34_INDEX = [
     ((1940, 1, 1), 1.013),
     ((1940, 4, 1), 0.696),
