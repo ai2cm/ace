@@ -445,3 +445,30 @@ def test_lognorm_noise_backwards_compatibility():
     assert model_from_state.config.noise_distribution == LogNormalNoiseDistribution(
         p_mean=-1.0, p_std=1.0
     )
+
+
+def test_noise_config_error():
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+
+    with pytest.raises(ValueError):
+        DiffusionModelConfig(
+            module=DiffusionModuleRegistrySelector(
+                "unet_diffusion_song", {"model_channels": 4}
+            ),
+            loss=LossConfig(type="MSE"),
+            in_names=["x"],
+            out_names=["x"],
+            normalization=normalizer,
+            p_mean=-1.0,
+            p_std=1.0,
+            sigma_min=0.1,
+            sigma_max=1.0,
+            churn=0.5,
+            num_diffusion_generation_steps=3,
+            training_noise_distribution=LogNormalNoiseDistribution(-1.0, 1.0),
+            use_fine_topography=False,
+            predict_residual=True,
+        )

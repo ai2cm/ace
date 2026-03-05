@@ -46,14 +46,18 @@ def randn(shape: torch.Size, **kwargs) -> torch.Tensor:
 
 
 def log_normal_sample(
-    p_mean: float, p_std: float, shape: torch.Size, **randn_kwargs
+    p_mean: float, p_std: float, shape: torch.Size, dtype: torch.dtype
 ) -> torch.Tensor:
-    rnd = randn(shape, **randn_kwargs)
+    rnd = randn(shape, dtype=dtype)
     return (rnd * p_std + p_mean).exp()
 
 
-def log_uniform_sample(p_min: float, p_max: float, shape: torch.Size) -> torch.Tensor:
-    return torch.exp(torch.empty(shape).uniform_(np.log(p_min), np.log(p_max)))
+def log_uniform_sample(
+    p_min: float, p_max: float, shape: torch.Size, dtype: torch.dtype
+) -> torch.Tensor:
+    return torch.exp(
+        torch.empty(shape, dtype=dtype).uniform_(np.log(p_min), np.log(p_max))
+    )
 
 
 @contextlib.contextmanager

@@ -35,7 +35,10 @@ class LogNormalNoiseDistribution(NoiseDistribution):
 
     def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
         return log_normal_sample(
-            p_mean=self.p_mean, p_std=self.p_std, shape=(batch_size, 1, 1, 1)
+            p_mean=self.p_mean,
+            p_std=self.p_std,
+            shape=(batch_size, 1, 1, 1),
+            dtype=torch.float32,
         ).to(device)
 
 
@@ -46,7 +49,10 @@ class LogUniformNoiseDistribution(NoiseDistribution):
 
     def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
         return log_uniform_sample(
-            p_min=self.p_min, p_max=self.p_max, shape=(batch_size, 1, 1, 1)
+            p_min=self.p_min,
+            p_max=self.p_max,
+            shape=(batch_size, 1, 1, 1),
+            dtype=torch.float32,
         ).to(device)
 
 

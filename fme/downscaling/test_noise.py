@@ -1,4 +1,5 @@
 import pytest
+import torch
 
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
@@ -15,9 +16,6 @@ from fme.downscaling.noise import (
 )
 def test_noise_distribution(noise_distribution):
     batch_size = 10
-    assert noise_distribution.sample(batch_size=batch_size, device="cpu").shape == (
-        batch_size,
-        1,
-        1,
-        1,
-    )
+    noise = noise_distribution.sample(batch_size=batch_size, device="cpu")
+    assert noise.shape == (batch_size, 1, 1, 1)
+    assert noise.dtype == torch.float32
