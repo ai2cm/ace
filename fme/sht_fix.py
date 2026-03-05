@@ -55,6 +55,7 @@ from fme.core.benchmark.timer import Timer
 from fme.core.device import get_device
 from fme.core.benchmark.benchmark import BenchmarkABC, register_benchmark
 from fme.core.typing_ import TensorDict
+from fme.fft import rfft, irfft
 
 class RealSHT(nn.Module):
     """
@@ -129,7 +130,7 @@ class RealSHT(nn.Module):
             x = x.float()
 
             # apply real fft in the longitudinal direction
-            x = 2.0 * torch.pi * torch.fft.rfft(x, dim=-1, norm="forward")
+            x = 2.0 * torch.pi * rfft(x, nmodes=self.mmax, dim=-1, norm="forward")
 
             x = x.transpose(-2, -1).contiguous()
             # do the Legendre-Gauss quadrature
@@ -220,7 +221,7 @@ class InverseRealSHT(nn.Module):
 
             # apply the inverse (real) FFT
             x = torch.view_as_complex(xs)
-            x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
+            x = irfft(x, n=self.nlon, dim=-1, norm="forward")
 
         return x
 
