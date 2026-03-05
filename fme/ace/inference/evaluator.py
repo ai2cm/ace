@@ -3,8 +3,10 @@ import datetime
 import logging
 from collections.abc import Callable, Mapping, Sequence
 
+import cftime
 import dacite
 import numpy as np
+import numpy.typing as npt
 import torch
 
 import fme
@@ -175,13 +177,14 @@ class InferenceEvaluatorConfig:
 
     def get_data_writer(
         self,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            n_initial_conditions=self.loader.n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,
             variable_metadata=variable_metadata,
@@ -292,6 +295,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     )
 
     writer = config.get_data_writer(
+        initial_condition_times=data.initial_time.to_numpy(),
         timestep=data.timestep,
         variable_metadata=variable_metadata,
         coords=data.coords,

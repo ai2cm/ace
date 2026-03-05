@@ -154,7 +154,6 @@ class InferenceConfig:
 
     def get_data_writer(
         self,
-        n_initial_conditions: int,
         data: InferenceGriddedData,
     ) -> CoupledPairedDataWriter:
         if self.data_writer.ocean.time_coarsen is not None:
@@ -186,7 +185,8 @@ class InferenceConfig:
         }
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            n_initial_conditions=n_initial_conditions,
+            atmosphere_initial_condition_times=data.atmosphere_initial_time.to_numpy(),
+            ocean_initial_condition_times=data.ocean_initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,
             n_timesteps_atmosphere=self.n_coupled_steps * data.n_inner_steps,
             ocean_timestep=data.ocean_timestep,
@@ -260,9 +260,7 @@ def run_inference_from_config(config: InferenceConfig):
         output_dir=config.experiment_dir,
     )
 
-    writer = config.get_data_writer(
-        n_initial_conditions=data.n_initial_conditions, data=data
-    )
+    writer = config.get_data_writer(data=data)
     timer.stop()
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")

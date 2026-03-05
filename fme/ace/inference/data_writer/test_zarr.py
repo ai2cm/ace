@@ -6,6 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.inference.data_writer.test_data_writer import get_initial_condition_times
 from fme.ace.inference.data_writer.zarr import (
     SeparateICZarrWriterAdapter,
     ZarrWriterAdapter,
@@ -44,11 +45,26 @@ def test__get_ace_time_coords(calendar):
     n_batch_times = 3
     n_timesteps = 6
     n_samples = 2
+    timestep = datetime.timedelta(hours=6)
+    start_time = (2020, 1, 1, 0, 0, 0)
+    calendar = "julian"
+    base_time = CALENDARS[calendar](*start_time) - timestep
+    base_time_tuple = (
+        base_time.year,
+        base_time.month,
+        base_time.day,
+        base_time.hour,
+        base_time.minute,
+        base_time.second,
+    )
+    initial_condition_times = get_initial_condition_times(
+        base_time_tuple, n_samples, ic_timedelta=timestep, calendar=calendar
+    )
     batch_time = get_batch_time(
         n_batch_times=n_batch_times, n_initial_conditions=n_samples, calendar=calendar
     )
     lead_times_coord, init_times_coord, valid_times_coord = _get_ace_time_coords(
-        batch_time, n_timesteps=n_timesteps
+        initial_condition_times, batch_time, n_timesteps=n_timesteps
     )
 
     assert lead_times_coord.dims == ("time",)
@@ -65,15 +81,12 @@ def test__get_ace_time_coords(calendar):
 
     start = CALENDARS[calendar](2020, 1, 1, 0)
     np.testing.assert_array_equal(
-        lead_times_coord.values, np.arange(n_timesteps) * 6 * 3600 * 1e6
+        lead_times_coord.values, np.arange(1, n_timesteps + 1) * 6 * 3600 * 1e6
     )
-    expected_init_times = [
-        start + datetime.timedelta(hours=6) * i for i in range(n_samples)
-    ]
     np.testing.assert_array_equal(
         init_times_coord.values,
         cftime.date2num(
-            expected_init_times,
+            initial_condition_times,
             units="microseconds since 1970-01-01",
             calendar=calendar,
         ),
@@ -96,6 +109,7 @@ def test__get_ace_time_coords(calendar):
 @pytest.mark.parametrize("writer_cls", [ZarrWriterAdapter, SeparateICZarrWriterAdapter])
 def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
     data = {"foo": torch.zeros((1, 2, 2, 2))}
+    initial_condition_times = np.array([cftime.datetime(2019, 12, 31)])
     time = xr.DataArray(
         [[cftime.datetime(2020, 1, 1), cftime.datetime(2020, 1, 2)]],
         dims=("sample", "time"),
@@ -113,7 +127,7 @@ def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
             }
         ),
         n_timesteps=2,
-        n_initial_conditions=1,
+        initial_condition_times=initial_condition_times,
     )
     adapter = writer_cls(**args)  # type: ignore
     adapter.append_batch(data, time)
@@ -125,6 +139,7 @@ def test_zarr_adapter_single_timestep_data(
     tmpdir,
 ):
     data = {"foo": torch.zeros((1, 1, 2, 2))}
+    initial_condition_times = np.array([cftime.datetime(2019, 12, 31)])
     time = xr.DataArray(
         [
             [
@@ -144,7 +159,7 @@ def test_zarr_adapter_single_timestep_data(
             }
         ),
         n_timesteps=1,
-        n_initial_conditions=1,
+        initial_condition_times=initial_condition_times,
     )
     adapter = ZarrWriterAdapter(**args)  # type: ignore
     adapter.append_batch(data, time)

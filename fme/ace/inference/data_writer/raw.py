@@ -29,6 +29,10 @@ INIT_TIME_UNITS = "microseconds since 1970-01-01 00:00:00"
 VALID_TIME = "valid_time"
 
 
+def infer_calendar(array: npt.NDArray[cftime.datetime]) -> str:
+    return array.ravel()[0].calendar
+
+
 @dataclasses.dataclass
 class NetCDFWriterConfig:
     name: Literal["netcdf"] = "netcdf"  # defined for yaml+dacite ease of use
@@ -45,7 +49,7 @@ class PairedRawDataWriter:
     def __init__(
         self,
         path: str,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -54,7 +58,7 @@ class PairedRawDataWriter:
         self._target_writer = RawDataWriter(
             path=path,
             label="autoregressive_target",
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -63,7 +67,7 @@ class PairedRawDataWriter:
         self._prediction_writer = RawDataWriter(
             path=path,
             label="autoregressive_predictions",
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -103,7 +107,7 @@ class RawDataWriter:
         self,
         path: str,
         label: str,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -113,8 +117,8 @@ class RawDataWriter:
         Args:
             path: Directory within which to write the file.
             label: Name of the file to write.
-            n_initial_conditions: Number of initial conditions / timeseries
-                to write to the file.
+            initial_condition_times: A 1D array of initial condition times of
+                the inference runs we are writing data for.
             save_names: Names of variables to save in the output file.
                 If None, all provided variables will be saved.
             variable_metadata: Metadata for each variable to be written to the file.
@@ -128,7 +132,10 @@ class RawDataWriter:
                 "non-local filesystem."
             )
         filename = str(Path(path) / f"{label}.nc")
+        calendar = infer_calendar(initial_condition_times)
+        n_initial_conditions = len(initial_condition_times)
         self._save_names = save_names
+        self._initial_condition_times = initial_condition_times
         self.variable_metadata = variable_metadata
         self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
@@ -138,8 +145,15 @@ class RawDataWriter:
         self.dataset.createDimension(IC_DIM, n_initial_conditions)
         self.dataset.createVariable(INIT_TIME, "i8", (IC_DIM,))
         self.dataset.variables[INIT_TIME].units = INIT_TIME_UNITS
+        self.dataset.variables[INIT_TIME].calendar = calendar
+        self.dataset.variables[INIT_TIME][:] = cftime.date2num(
+            initial_condition_times,
+            units=self.dataset.variables[INIT_TIME].units,
+            calendar=self.dataset.variables[INIT_TIME].calendar,
+        )
         self.dataset.createVariable(VALID_TIME, "i8", (IC_DIM, LEAD_TIME_DIM))
         self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
+        self.dataset.variables[VALID_TIME].calendar = calendar
         self._dataset_dims_created = False
         dataset_metadata = copy.copy(dataset_metadata)
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
@@ -223,32 +237,8 @@ class RawDataWriter:
                 :,
             ] = data_numpy
 
-        # handle time dimensions
-        if not hasattr(self.dataset.variables[INIT_TIME], "calendar"):
-            self.dataset.variables[INIT_TIME].calendar = batch_time.dt.calendar
-        if not hasattr(self.dataset.variables[VALID_TIME], "calendar"):
-            self.dataset.variables[VALID_TIME].calendar = batch_time.dt.calendar
-
-        if current_lead_time_size > 0:
-            init_times_numeric: np.ndarray = self.dataset.variables[INIT_TIME][:]
-            init_times_numeric = (
-                init_times_numeric.filled()
-            )  # convert masked array to ndarray
-            init_times: np.ndarray = cftime.num2date(
-                init_times_numeric,
-                units=self.dataset.variables[INIT_TIME].units,
-                calendar=self.dataset.variables[INIT_TIME].calendar,
-            )
-        else:
-            init_times = batch_time.isel(time=0).values
-            init_times_numeric = cftime.date2num(
-                init_times,
-                units=self.dataset.variables[INIT_TIME].units,
-                calendar=self.dataset.variables[INIT_TIME].calendar,
-            )
-            self.dataset.variables[INIT_TIME][:] = init_times_numeric
         lead_time_microseconds = get_batch_lead_time_microseconds(
-            init_times,
+            self._initial_condition_times,
             batch_time.values,
         )
         self.dataset.variables[LEAD_TIME_DIM][

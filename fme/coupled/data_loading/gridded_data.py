@@ -3,6 +3,7 @@ import logging
 from collections import namedtuple
 
 import torch
+import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
@@ -176,6 +177,8 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
             )
         else:
             self._initial_condition = initial_condition.to_device()
+        self._atmosphere_initial_time: xr.DataArray | None = None
+        self._ocean_initial_time: xr.DataArray | None = None
 
     @property
     def atmosphere_properties(self) -> DatasetProperties:
@@ -247,3 +250,23 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
     @property
     def coords(self) -> CoupledCoords:
         return self._properties.coords
+
+    @property
+    def atmosphere_initial_time(self) -> xr.DataArray:
+        if self._atmosphere_initial_time is None:
+            for batch in self.loader:
+                self._atmosphere_initial_time = batch.atmosphere_data.time.isel(time=0)
+                break
+            else:
+                raise ValueError("No data found in loader")
+        return self._atmosphere_initial_time
+
+    @property
+    def ocean_initial_time(self) -> xr.DataArray:
+        if self._ocean_initial_time is None:
+            for batch in self.loader:
+                self._ocean_initial_time = batch.ocean_data.time.isel(time=0)
+                break
+            else:
+                raise ValueError("No data found in loader")
+        return self._ocean_initial_time
