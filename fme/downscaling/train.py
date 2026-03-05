@@ -521,6 +521,7 @@ def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir
                 f"Existing results directory {resume_results_dir} does not exist."
             )
         shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
+        print(f"Resuming: Copied results from {resume_results_dir} to {experiment_dir}")
 
 
 def main(config_path: str):
