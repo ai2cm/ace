@@ -393,7 +393,10 @@ class CoupledStepperConfig:
         ocean_names = (
             self.ocean.stepper.output_names + self._ocean_forcing_exogenous_names
         )
-        return CoupledNames(ocean=ocean_names, atmosphere=atmosphere_names)
+        ocean_names_no_shared = list(
+            set(ocean_names).difference(atmosphere_names)
+        )
+        return CoupledNames(ocean=ocean_names_no_shared, atmosphere=atmosphere_names)
 
     @property
     def atmosphere_to_ocean_forcing_names(self) -> list[str]:
