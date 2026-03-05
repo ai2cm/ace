@@ -1,6 +1,6 @@
 experiment_dir: /results
-n_forward_steps: 14600
-forward_steps_in_memory: 50
+n_forward_steps: 12
+forward_steps_in_memory: 12
 checkpoint_path: /ckpt.tar
 logging:
   log_to_screen: true
@@ -20,3 +20,9 @@ aggregator:
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
+  files:
+    - label: tmp2m
+      names:
+        - TMP2m
+      time_selection:
+        start_time: "1940-01-02T00:00:00"
