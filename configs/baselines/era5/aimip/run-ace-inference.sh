@@ -61,7 +61,19 @@ launch_job () {
 }
 
 # same as above but use SST perturbed by +2K and +4K
-JOB_NAME="${JOB_NAME_BASE}-p4k"
+JOB_NAME="${JOB_NAME_BASE}-p4k-10-step"
 OVERRIDE=""
 echo "Launching job: $JOB_NAME"
 launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P4K_CONFIG_PATH" "$OVERRIDE"
+
+# same as above but use SST perturbed by +2K and +4K
+JOB_NAME="${JOB_NAME_BASE}-p2k-10-step"
+OVERRIDE=""
+echo "Launching job: $JOB_NAME"
+launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P2K_CONFIG_PATH" "$OVERRIDE"
+
+# same as above but use SST perturbed by +2K and +4K
+JOB_NAME="${JOB_NAME_BASE}-p0k-10-step"
+OVERRIDE=""
+echo "Launching job: $JOB_NAME"
+launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P0K_CONFIG_PATH" "$OVERRIDE"

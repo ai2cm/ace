@@ -5,7 +5,7 @@ data_writer:
   save_prediction_files: false
 experiment_dir: /results
 forward_steps_in_memory: 40
-n_forward_steps: 1400
+n_forward_steps: 10
 initial_condition:
   path: /climate-default/2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
   engine: zarr
