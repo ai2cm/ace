@@ -337,7 +337,10 @@ class DiffusionModel:
                     mapped[name] = torch.log(torch.clamp(data[name], min=floor))
                 else:
                     mapped[name] = data[name]
-            raise ValueError(f"Missing required model variable '{name}' in input data.")
+            else:
+                raise ValueError(
+                    f"Missing required model variable '{name}' in input data."
+                )
         return mapped
 
     @property
