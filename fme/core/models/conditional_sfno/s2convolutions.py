@@ -82,8 +82,8 @@ def _contract_lora_lowmem(
     """
     lora_A = torch.view_as_complex(lora_A)
     lora_B = torch.view_as_complex(lora_B)
-    tmp = torch.einsum("girx,bgixy->bgxry", lora_A, x)
-    out = torch.einsum("grox,bgxry->bgoxy", lora_B, tmp)
+    tmp = torch.einsum("gxri,bgixy->bgxry", lora_A, x)
+    out = torch.einsum("gxor,bgxry->bgoxy", lora_B, tmp)
     return out
 
 
