@@ -11,6 +11,8 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
+AIMIP_INFERENCE_P0K_CONFIG_FILENAME="ace-aimip-inference-p0k-skin-temp-only.yaml"
+AIMIP_INFERENCE_BASE_P0K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P0K_CONFIG_FILENAME
 AIMIP_INFERENCE_P2K_CONFIG_FILENAME="ace-aimip-inference-p2k-skin-temp-only.yaml"
 AIMIP_INFERENCE_BASE_P2K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P2K_CONFIG_FILENAME
 AIMIP_INFERENCE_P4K_CONFIG_FILENAME="ace-aimip-inference-p4k-skin-temp-only.yaml"
@@ -59,7 +61,7 @@ launch_job () {
 }
 
 # same as above but use SST perturbed by +2K and +4K
-JOB_NAME="${JOB_NAME_BASE}-p2k"
+JOB_NAME="${JOB_NAME_BASE}-p0k"
 OVERRIDE=""
 echo "Launching job: $JOB_NAME"
-launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P2K_CONFIG_PATH" "$OVERRIDE"
+launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P0K_CONFIG_PATH" "$OVERRIDE"
