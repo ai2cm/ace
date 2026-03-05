@@ -1,5 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
-ace-phuetnpl-energy-cons|rs1|01KFZ121Z9NZM3FJNDR3H7PSZC|done|best_inference_ckpt|high|--not-preemptible
-ACE-v1124-train-95yr-hp5rcl7w-from-AMIP||01KJ9G6D7ZBVQWJ79WWT4NJEF7|run_ICx5|best_inference_ckpt|high|--not-preemptible
-ACE-v1124-train-95yr-ebpeysbb-from-AMIP||01KJ6G1J4RNGFGX7HYDDGS0BBR|run_ICx5|best_inference_ckpt|high|--not-preemptible
-ACE-v1124-train-95yr-gvot5r9r-from-AMIP||01KHYDB3NYWXN3NVGYY0YF4BMZ|run_ICx5|best_inference_ckpt|high|--not-preemptible
+ace-phuetnpl-energy-cons|rs1|01KFZ121Z9NZM3FJNDR3H7PSZC|done|best_inference_ckpt|high|--not-preemptible||01KFZ121Z9NZM3FJNDR3H7PSZC||h100
+ACE-v1124-train-95yr-hp5rcl7w-from-AMIP||01KJ9G6D7ZBVQWJ79WWT4NJEF7|run_ICx5|best_inference_ckpt|high|--not-preemptible||01KJ9G6D7ZBVQWJ79WWT4NJEF7||h100
+ACE-v1124-train-95yr-ebpeysbb-from-AMIP||01KJ6G1J4RNGFGX7HYDDGS0BBR|run_ICx5|best_inference_ckpt|high|--not-preemptible||01KJ6G1J4RNGFGX7HYDDGS0BBR||h100
+ACE-v1124-train-95yr-gvot5r9r-from-AMIP||01KHYDB3NYWXN3NVGYY0YF4BMZ|run_ICx5|best_inference_ckpt|high|--not-preemptible||01KHYDB3NYWXN3NVGYY0YF4BMZ||h100
