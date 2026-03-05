@@ -60,7 +60,7 @@ class LossVsNoiseAggregator:
         name: str = "metrics/loss_vs_noise",
         n_bins: int = 40,
         log10_sigma_min: float = -3.0,
-        log10_sigma_max: float = 3.0,
+        log10_sigma_max: float = 3.3,
     ) -> None:
         if n_bins < 1:
             raise ValueError("n_bins must be >= 1")

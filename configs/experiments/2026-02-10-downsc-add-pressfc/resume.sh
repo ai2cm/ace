@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-prmsl-loguni-pmin0.02-pmax325-resume"
+JOB_NAME="xshield-downscaling-100km-to-3km-prmsl-loguni-pmin0.005-pmax2000-tune"
 CONFIG_FILENAME="resume-train-100-to-3km-prmsl-output-loguni.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -16,13 +16,13 @@ wandb_group=""
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4 # TODO: change to 8 after testing
+N_GPUS=8 # TODO: change to 8 after testing
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 
-PREVIOUS_RESULTS_DATASET="01KJTWBQEH2AVKNM8S0VNQKQ3K"
+PREVIOUS_RESULTS_DATASET="01KK01KA5KP98WZPBV0JATWV1S"
 
 
 gantry run \

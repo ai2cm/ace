@@ -582,7 +582,6 @@ class CheckpointModelConfig:
             checkpoint_data = torch.load(
                 self.checkpoint_path,
                 weights_only=False,
-                map_location=torch.device("cpu"),
             )
             checkpoint_data["model"]["config"]["in_names"] = [
                 self._rename.get(name, name)
