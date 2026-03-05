@@ -430,7 +430,7 @@ def test_lognorm_noise_backwards_compatibility():
         use_fine_topography=False,
         predict_residual=True,
     )
-    assert model_config.noise == LogNormalNoiseDistribution(p_mean=-1.0, p_std=1.0)
+    assert model_config.noise_distribution == LogNormalNoiseDistribution(p_mean=-1.0, p_std=1.0)
     model = model_config.build(
         (32, 32),
         2,
@@ -440,6 +440,6 @@ def test_lognorm_noise_backwards_compatibility():
     # test from_state on checkpoints saved prior to noise distribution classes
     del state["config"]["training_noise_distribution"]
     model_from_state = DiffusionModel.from_state(state)
-    assert model_from_state.config.noise == LogNormalNoiseDistribution(
+    assert model_from_state.config.noise_distribution == LogNormalNoiseDistribution(
         p_mean=-1.0, p_std=1.0
     )

@@ -91,7 +91,6 @@ class DiffusionModelConfig:
         in_names: The input variable names for the diffusion model.
         out_names: The output variable names for the diffusion model.
         normalization: The normalization configurations for the diffusion model.
-
         sigma_min: Min noise level for generation.
         sigma_max: Max noise level for generation.
         churn: The amount of stochasticity during generation.
@@ -154,7 +153,10 @@ class DiffusionModelConfig:
             )
 
     @property
-    def noise(self) -> LogNormalNoiseDistribution | LogUniformNoiseDistribution:
+    def noise_distribution(self) -> LogNormalNoiseDistribution | LogUniformNoiseDistribution:
+        """
+        Returns NoiseDistribution object to use for sampling noise in training.
+        """
         if self.training_noise_distribution is not None:
             return self.training_noise_distribution
         elif self.p_mean is not None and self.p_std is not None:
@@ -364,7 +366,7 @@ class DiffusionModel:
             targets_norm = targets_norm - base_prediction
 
         conditioned_target = condition_with_noise_for_training(
-            targets_norm, self.config.noise, self.sigma_data
+            targets_norm, self.config.noise_distribution, self.sigma_data
         )
 
         denoised_norm = self.module(

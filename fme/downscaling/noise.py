@@ -4,7 +4,7 @@ import dataclasses
 import numpy as np
 import torch
 
-from fme.core.rand import randn, randn_like
+from fme.core.rand import randn_like, log_normal_sample, log_uniform_sample
 
 
 @dataclasses.dataclass
@@ -35,10 +35,9 @@ class LogNormalNoiseDistribution(NoiseDistribution):
     p_std: float
 
     def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
-        rnd = randn([batch_size, 1, 1, 1], device=device)
-        # This is taken from EDM's original implementation in EDMLoss:
-        # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
-        return (rnd * self.p_std + self.p_mean).exp()
+        return log_normal_sample(
+            p_mean=self.p_mean, p_std=self.p_std, shape=(batch_size, 1, 1, 1)
+        ).to(device)
 
 
 @dataclasses.dataclass
@@ -47,10 +46,9 @@ class LogUniformNoiseDistribution(NoiseDistribution):
     p_max: float
 
     def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
-        sigma = np.exp(
-            np.random.uniform(np.log(self.p_min), np.log(self.p_max), batch_size)
-        )
-        return torch.tensor(sigma, device=device).reshape(batch_size, 1, 1, 1)
+        return log_uniform_sample(
+            p_min=self.p_min, p_max=self.p_max, shape=(batch_size, 1, 1, 1)
+        ).to(device)
 
 
 def condition_with_noise_for_training(
