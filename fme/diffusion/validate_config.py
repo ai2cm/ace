@@ -1,10 +1,10 @@
 import argparse
 
 import dacite
-import dacite.exceptions
 import yaml
 
 from fme.core.config import update_dict_with_dotlist
+from fme.core.distributed.distributed import Distributed
 from fme.diffusion.train_config import TrainConfig
 
 CONFIG_CHOICES = ["train"]
@@ -37,11 +37,12 @@ if __name__ == "__main__":
     config_data = update_dict_with_dotlist(config_data, args.override)
 
     if config_type == "train":
-        dacite.from_dict(
-            data_class=TrainConfig,
-            data=config_data,
-            config=dacite.Config(strict=True),
-        )
+        with Distributed.context():
+            dacite.from_dict(
+                data_class=TrainConfig,
+                data=config_data,
+                config=dacite.Config(strict=True),
+            )
     else:
         raise ValueError(
             f"Invalid config type: {config_type}, expected one of {CONFIG_CHOICES}"

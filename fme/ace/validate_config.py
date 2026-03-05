@@ -10,36 +10,12 @@ from fme.ace.inference.inference import InferenceConfig
 from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.train.train_config import TrainConfig
 from fme.core.config import update_dict_with_dotlist
+from fme.core.distributed.distributed import Distributed
 
 CONFIG_CHOICES = ["train", "inference", "evaluator"]
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "path", type=str, help="Path to the train or inference config file."
-    )
-    parser.add_argument(
-        "--inference",
-        action="store_true",
-        help=(
-            "Deprecated, use --config_type evaluator to validate an evaluator config."
-        ),
-    )
-    parser.add_argument(
-        "--config_type",
-        type=str,
-        choices=CONFIG_CHOICES,
-        default="train",
-        help=("Indicates the kind of configuration being validated."),
-    )
-    parser.add_argument(
-        "--override",
-        nargs="*",
-        help="A dotlist of key=value pairs to override the config. "
-        "For example, --override a.b=1 c=2, where a dot indicates nesting.",
-    )
-    args = parser.parse_args()
 
+def main(args):
     if args.inference:
         logging.warning(
             "The --inference flag is deprecated. "
@@ -85,3 +61,33 @@ if __name__ == "__main__":
         raise ValueError(
             f"Invalid config type: {config_type}, expected one of {CONFIG_CHOICES}"
         )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "path", type=str, help="Path to the train or inference config file."
+    )
+    parser.add_argument(
+        "--inference",
+        action="store_true",
+        help=(
+            "Deprecated, use --config_type evaluator to validate an evaluator config."
+        ),
+    )
+    parser.add_argument(
+        "--config_type",
+        type=str,
+        choices=CONFIG_CHOICES,
+        default="train",
+        help=("Indicates the kind of configuration being validated."),
+    )
+    parser.add_argument(
+        "--override",
+        nargs="*",
+        help="A dotlist of key=value pairs to override the config. "
+        "For example, --override a.b=1 c=2, where a dot indicates nesting.",
+    )
+    args = parser.parse_args()
+    with Distributed.context():  # dist is used for some initializations
+        main(args)
