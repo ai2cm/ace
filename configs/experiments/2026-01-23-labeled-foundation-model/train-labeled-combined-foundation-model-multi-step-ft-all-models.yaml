@@ -211,7 +211,7 @@ optimization:
   optimizer_type: FusedAdam
   kwargs:
     weight_decay: 0.01
-stepper:
+stepper_training:
   n_ensemble: 2
   train_n_forward_steps:
     outcomes:
@@ -231,6 +231,7 @@ stepper:
     kwargs:
       crps_weight: 0.5
       energy_score_weight: 0.5
+stepper:
   step:
     type: single_module
     config:
