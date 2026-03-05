@@ -221,7 +221,7 @@ class ModelTorchDistributed(DistributedBackend):
     def gather_object(self, obj: T) -> list[T] | None:
         """Gather a picklable object over the data-parallel group."""
         gather_list: list[Any] | None = (
-            [None for _ in range(self.total_ranks)] if self._data_rank == 0 else None
+            [None for _ in range(self.total_ranks)] if self._rank == 0 else None
         )
         torch.distributed.gather_object(obj, gather_list)
         return gather_list if self._rank == 0 else None
