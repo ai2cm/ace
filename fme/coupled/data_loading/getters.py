@@ -1,5 +1,6 @@
 import datetime
 import logging
+import os
 import warnings
 
 import torch
@@ -39,6 +40,19 @@ from fme.coupled.requirements import (
 )
 
 from .inference import ExplicitIndices
+
+_COUPLED_WORKER_DIST_CX = None
+
+
+def _coupled_forkserver_worker_init_fn(worker_id: int) -> None:
+    global _COUPLED_WORKER_DIST_CX
+    from fme.core.distributed import Distributed
+
+    if Distributed._entered:
+        return
+    os.environ.setdefault("FME_DISTRIBUTED_BACKEND", "none")
+    _COUPLED_WORKER_DIST_CX = Distributed.context()
+    _COUPLED_WORKER_DIST_CX.__enter__()
 
 
 class CollateFn:
@@ -203,6 +217,7 @@ def get_inference_data(
     window_requirements: CoupledDataRequirements,
     initial_condition: CoupledPrognosticState | CoupledPrognosticStateDataRequirements,
     dataset_info: CoupledDatasetInfo | None = None,
+    _force_forkserver: bool = False,
 ) -> InferenceGriddedData:
     initial_time = None
     if isinstance(initial_condition, CoupledPrognosticState):
@@ -218,14 +233,16 @@ def get_inference_data(
     )
     properties = dataset.properties
 
-    if config.zarr_engine_used:
+    if config.zarr_engine_used or _force_forkserver:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
         mp_context = "forkserver"
         persistent_workers = True
+        worker_init_fn = _coupled_forkserver_worker_init_fn
     else:
         mp_context = None
         persistent_workers = False
+        worker_init_fn = None
 
     logging.info(f"Multiprocessing inference context: {mp_context or 'fork'}")
 
@@ -238,6 +255,7 @@ def get_inference_data(
         pin_memory=using_gpu(),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
+        worker_init_fn=worker_init_fn,
     )
     inference_data = InferenceGriddedData(
         loader=loader,
