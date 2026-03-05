@@ -1,4 +1,5 @@
 checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
 data_writer:
   save_monthly_files: false
   save_prediction_files: false
@@ -7,6 +8,7 @@ forward_steps_in_memory: 40
 n_forward_steps: 1400
 initial_condition:
   path: /climate-default/2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
+  engine: zarr
   start_indices:
     times:
       - '1978-10-01T00:00:00'
@@ -23,3 +25,10 @@ forcing_loader:
           amplitude: 4.0
 logging:
   project: ace
+stepper_override:
+  ocean:
+    surface_temperature_name: sea_surface_temperature
+    ocean_fraction_name: mask_sea_surface_temperature
+    # Allow checkpoint trained without ocean; prescribed SST (e.g. perturbed) is
+    # injected into step output for next-step input. Hacky; for perturbation only.
+    allow_missing_in_model: true

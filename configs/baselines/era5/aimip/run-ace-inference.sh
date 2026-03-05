@@ -61,7 +61,7 @@ launch_job () {
 }
 
 # same as above but use SST perturbed by +2K and +4K
-JOB_NAME="${JOB_NAME_BASE}-p0k"
+JOB_NAME="${JOB_NAME_BASE}-p4k"
 OVERRIDE=""
 echo "Launching job: $JOB_NAME"
-launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P0K_CONFIG_PATH" "$OVERRIDE"
+launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P4K_CONFIG_PATH" "$OVERRIDE"
