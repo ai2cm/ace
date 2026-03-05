@@ -104,8 +104,8 @@ def test_lora_lowmem_is_faster():
     H = 180
     L = 360
     x = torch.randn(B, 1, C, H, L, dtype=torch.complex64, device=get_device())
-    lora_A = torch.randn(1, C, R, H, 2, dtype=torch.float32, device=get_device())
-    lora_B = torch.randn(1, R, C, H, 2, dtype=torch.float32, device=get_device())
+    lora_A = torch.randn(1, H, R, C, 2, dtype=torch.float32, device=get_device())
+    lora_B = torch.randn(1, H, C, R, 2, dtype=torch.float32, device=get_device())
 
     def contract():
         return _contract_lora(lora_A, lora_B, x)
@@ -123,8 +123,8 @@ def test_lora_lowmem_is_faster():
 
     assert lowmem_result.ms_per < 2 * theoretical_ratio * baseline_result.ms_per, (
         "Expected LoRA low-memory contraction to be faster than standard, but got "
-        f"{lowmem_result.ms_per:.6f} seconds for low-memory and "
-        f"{baseline_result.ms_per:.6f} seconds for standard."
+        f"{lowmem_result.ms_per:.6f} ms for low-memory and "
+        f"{baseline_result.ms_per:.6f} ms for standard."
     )
     assert lowmem_result.max_alloc < 0.75 * baseline_result.max_alloc, (
         "Expected LoRA low-memory contraction to use significantly less memory "
