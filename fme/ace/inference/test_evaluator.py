@@ -378,7 +378,7 @@ def inference_helper(
     decode_times = xr.coders.CFDatetimeCoder(use_cftime=True)
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc",
-        decode_timedelta=True,
+        decode_timedelta=False,
         decode_times=decode_times,
     )
 
