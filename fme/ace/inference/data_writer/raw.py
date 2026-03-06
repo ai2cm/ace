@@ -29,10 +29,6 @@ INIT_TIME_UNITS = "microseconds since 1970-01-01 00:00:00"
 VALID_TIME = "valid_time"
 
 
-def infer_calendar(array: npt.NDArray[cftime.datetime]) -> str:
-    return array.ravel()[0].calendar
-
-
 @dataclasses.dataclass
 class NetCDFWriterConfig:
     name: Literal["netcdf"] = "netcdf"  # defined for yaml+dacite ease of use
@@ -304,3 +300,18 @@ def get_batch_lead_time_microseconds(
     if not np.all(lead_time_microseconds == lead_time_microseconds[0, :]):
         raise ValueError("Lead times are not the same for each sample in the batch.")
     return lead_time_microseconds[0, :]
+
+
+def infer_calendar(array: npt.NDArray[cftime.datetime]) -> str:
+    """Infer the calendar of an array of cftime.datetime objects.
+
+    Assumes that all the datetime objects in the array have the same calendar,
+    and that the array is not empty.
+
+    Args:
+        array: Array of cftime.datetime objects.
+
+    Returns:
+        Calendar of the array.
+    """
+    return array.ravel()[0].calendar

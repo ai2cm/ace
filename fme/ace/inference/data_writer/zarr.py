@@ -39,10 +39,13 @@ def _get_encoded_lead_times(
     batch_time: xr.DataArray,
     n_timesteps: int,
 ) -> npt.NDArray[np.int64]:
-    times = np.insert(
+    # The batch_time does not include the initial condition time, so we manually
+    # prepend it. This allows us to use the same code path for inferring the
+    # timestep whether the batch includes multiple times or just one.
+    times_with_prepended_initial_condition = np.insert(
         batch_time.isel(sample=0).to_numpy(), 0, initial_condition_times[0]
     )
-    dt_timedelta = _get_timestep(times)
+    dt_timedelta = _get_timestep(times_with_prepended_initial_condition)
     dt_microseconds = encode_timestep(dt_timedelta)
     lead_times_microseconds = dt_microseconds * np.arange(1, n_timesteps + 1)
     return lead_times_microseconds

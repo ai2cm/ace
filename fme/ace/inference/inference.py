@@ -257,6 +257,7 @@ class InferenceConfig:
     ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
+            # each batch contains all samples, for different times
             initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,
