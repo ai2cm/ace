@@ -26,4 +26,5 @@ data_writer:
         - TMP2m
       time_selection:
         start_time: "1940-01-02T00:00:00"
-
+      format:
+        name: zarr
