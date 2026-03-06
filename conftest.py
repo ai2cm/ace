@@ -6,6 +6,7 @@ from unittest import mock
 import fasteners
 import pytest
 import torch
+import xdist
 
 from fme.core.distributed.distributed import Distributed
 
@@ -79,6 +80,16 @@ def _serialize_when_needed(
     else:
         with _rw_lock.read_lock():
             yield
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    # Only the controller should remove the file.
+    # In a non-xdist run, just remove it from the main process.
+    is_controller = not hasattr(
+        session.config, "workerinput"
+    ) or xdist.is_xdist_controller(session)
+    if is_controller:
+        _lock_path(session.config).unlink(missing_ok=True)
 
 
 @pytest.fixture
