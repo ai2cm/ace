@@ -70,6 +70,7 @@ def main(
     child: str | None = None,
     wandb_project: str | None = None,
     all_labels: bool = False,
+    ignore_benchmark_names: list[str] = [],
 ) -> int:
     output_dir.mkdir(exist_ok=True)
     device_name = get_device_name()
@@ -86,7 +87,9 @@ def main(
             return 1
         benchmarks_to_run = {benchmark_name: benchmarks[benchmark_name]}
     else:
-        benchmarks_to_run = benchmarks
+        benchmarks_to_run = {
+            k: v for k, v in benchmarks.items() if k not in ignore_benchmark_names
+        }
 
     def get_label(name):
         return f"{name} on {device_name} at commit {get_git_commit()}"
@@ -207,11 +210,26 @@ if __name__ == "__main__":
             "By default, logging to wandb is disabled."
         ),
     )
+    parser.add_argument(
+        "--ignore",
+        action="append",
+        nargs="+",
+        default=None,
+        help=(
+            "Benchmark names to skip. Can be provided multiple times, e.g. "
+            "--ignore benchmark_a benchmark_b --ignore benchmark_c."
+        ),
+    )
     args = parser.parse_args()
     if args.output_dir is not None:
         output_dir = pathlib.Path(args.output_dir)
     else:
         output_dir = RESULTS_PATH
+
+    if args.ignore is not None:
+        ignored = [name for group in args.ignore for name in group]
+    else:
+        ignored = []
 
     with Distributed.context():
         return_code = main(
@@ -221,5 +239,6 @@ if __name__ == "__main__":
             output_dir=output_dir,
             wandb_project=args.wandb_project,
             all_labels=args.all_labels,
+            ignore_benchmark_names=ignored,
         )
     sys.exit(return_code)
