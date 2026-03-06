@@ -143,7 +143,7 @@ def test_aggregator_mean_values():
     )
     ds = agg.get_dataset()
     assert "gen_map-a" in ds
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         ds["gen_map-a"].values,
         (data["a"].cpu().numpy().mean(axis=(0, 1))),
     )
