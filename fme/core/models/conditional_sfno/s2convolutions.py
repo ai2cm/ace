@@ -328,25 +328,21 @@ class SpectralConvS2(nn.Module):
         assert C % self.num_groups == 0
         x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
 
-        # Slice global weights to the local spectral partition.
-        weight_local = self.weight[:, self._l_slice]
         if self.lora_A is not None and self.lora_B is not None:
-            lora_A_local = self.lora_A[:, self._l_slice]
-            lora_B_local = self.lora_B[:, self._l_slice]
             with timer.child("lora_update"):
                 lora_update = _contract_lora(
-                    lora_A_local,
-                    lora_B_local,
-                    x[..., : self.modes_lat_local, : self.modes_lon_local],
+                    self.lora_A,
+                    self.lora_B,
+                    x[..., : self.modes_lat, : self.modes_lon],
                 )
         else:
             lora_update = 0.0
 
         with timer.child("dhconv"):
             xp = torch.zeros_like(x)
-            xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
-                x[..., : self.modes_lat_local, : self.modes_lon_local],
-                weight_local,
+            xp[..., : self.modes_lat, : self.modes_lon] = _contract_dhconv(
+                x[..., : self.modes_lat, : self.modes_lon],
+                self.weight,
             )
             xp = xp + self.lora_scaling * lora_update
             xp = xp.reshape(B, self.out_channels, H, W)
