@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni0.02-325-events"
+JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni5e-3-2000-events"
 CONFIG_FILENAME="eval-100-to-3km-prmsl-output.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -19,7 +19,7 @@ NGPU=2
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET=01KJWV8ANE3KD3FQCHD2W31ZJ9
+EXISTING_RESULTS_DATASET=01KK1ZH1KFJSHGR24W531AGKVE
 wandb_group=""
 
 #--not-preemptible \
