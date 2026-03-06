@@ -381,7 +381,7 @@ class LatLonOperations(GriddedOperations):
         nlon = self._cpu_area_global.shape[-1]
         return (
             Distributed.get_instance()
-            .get_sht(nlat, nlon, lmax=nlat, mmax=nlon // 2 + 1, grid=self._grid)
+            .get_sht(nlat, nlon, grid=self._grid)
             .to(get_device())
         )
 
@@ -390,7 +390,7 @@ class LatLonOperations(GriddedOperations):
         nlon = self._cpu_area_global.shape[-1]
         return (
             Distributed.get_instance()
-            .get_isht(nlat, nlon, lmax=nlat, mmax=nlon // 2 + 1, grid=self._grid)
+            .get_isht(nlat, nlon, grid=self._grid)
             .to(get_device())
         )
 
