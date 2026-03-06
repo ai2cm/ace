@@ -167,6 +167,7 @@ stepper:
 inference:
   aggregator:
     monthly_reference_data: {monthly_data_filename}
+    log_step_means: []
   loader:
     dataset:
       data_path: '{valid_data_path}'
@@ -188,6 +189,7 @@ data_writer:
   save_prediction_files: true
 aggregator:
   log_video: false
+  log_step_means: []
 logging:
   log_to_screen: true
   log_to_wandb: {log_to_wandb}
