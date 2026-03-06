@@ -114,7 +114,7 @@ class GlobalTimer:
         Only one inner timer can be active at a time.
         """
         if not self._active:
-            raise RuntimeError("start called outside of GlobalTimer context.")
+            return
         if self._current_category is not None:
             raise RuntimeError(
                 "GlobalTimer already has an active inner timer, "
@@ -133,15 +133,13 @@ class GlobalTimer:
             if category not in self._timers:
                 self._timers[category] = CumulativeTimer(category)
             self._timers[category].start()
-        else:
-            raise RuntimeError("start_outer called outside of GlobalTimer context.")
 
     def stop(self):
         """
         Stop the currently active inner timer.
         """
         if not self._active:
-            raise RuntimeError("stop called outside of GlobalTimer context.")
+            return
         if self._current_category is None:
             raise RuntimeError("GlobalTimer does not have a running timer")
         self.stop_outer(self._current_category)
@@ -155,8 +153,6 @@ class GlobalTimer:
         """
         if self._active:
             self._timers[category].stop()
-        else:
-            raise RuntimeError("stop_outer called outside of GlobalTimer context.")
 
     def get_duration(self, category: str) -> float:
         if self._active:
