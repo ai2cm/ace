@@ -8,6 +8,8 @@ model:
   checkpoint_path: /checkpoints/ema_ckpt.tar #best.ckpt
   model_updates:
    num_diffusion_generation_steps: 18
+   sigma_max: 2000.0
+   sigma_min: 0.005
    #churn: 2.0
 data:
   coarse:

@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni5e-3-2000-events-300ep-ema"
+JOB_NAME="eval-xshield-amip-100km-to-3km-prmsl-loguni5e-3-2000-events-match-tr-sigmas"
 CONFIG_FILENAME="eval-100-to-3km-prmsl-output.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
