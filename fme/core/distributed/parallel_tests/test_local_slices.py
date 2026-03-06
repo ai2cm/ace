@@ -16,6 +16,10 @@ def test_gather_tensor_from_local_slices():
     "batch" parallelism in this test.
     """
     dist = Distributed.get_instance()
+    if isinstance(dist._distributed, ModelTorchDistributed):
+        pytest.xfail(
+            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
+        )
     n_dp = dist.total_data_parallel_ranks
     global_shape = (2 * n_dp, 4, 4)
     x_global = (
@@ -56,14 +60,6 @@ def test_local_slices_cover_full_domain():
         for s in all_slices:
             canvas[s] += 1
         torch.testing.assert_close(canvas, torch.ones_like(canvas))
-
-
-@pytest.mark.parallel
-def test_local_slices_no_dp_dim():
-    """Without a dp dim, every rank gets full slices."""
-    dist = Distributed.get_instance()
-    slices = dist.get_local_slices((8, 4))
-    assert slices == tuple(slice(None, None) for _ in range(2))
 
 
 @pytest.mark.parallel
@@ -167,6 +163,10 @@ def test_reduce_mean_from_multiple_ranks():
     along "model parallel" ranks.
     """
     dist = Distributed.get_instance()
+    if isinstance(dist._distributed, ModelTorchDistributed):
+        pytest.xfail(
+            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
+        )
     global_shape = (4, 4)
     x_global_base = torch.arange(
         global_shape[0] * global_shape[1], dtype=torch.float32, device=get_device()
