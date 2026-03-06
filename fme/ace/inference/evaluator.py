@@ -134,8 +134,8 @@ class InferenceEvaluatorConfig:
     checkpoint_path: str
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
+    forward_steps_in_memory: int
     prediction_loader: InferenceDataLoaderConfig | None = None
-    forward_steps_in_memory: int = 1
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
     )
@@ -158,6 +158,8 @@ class InferenceEvaluatorConfig:
                         self.forward_steps_in_memory,
                         self.n_forward_steps,
                     )
+        for log_step_mean in self.aggregator.log_step_means:
+            log_step_mean.validate(self.n_forward_steps)
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -283,8 +285,8 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
     aggregator = aggregator_config.build(
         dataset_info=dataset_info,
-        record_step_20=config.n_forward_steps >= 20,
-        n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
+        n_ic_steps=stepper_config.n_ic_timesteps,
+        n_forward_steps=config.n_forward_steps,
         initial_time=initial_time,
         channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,

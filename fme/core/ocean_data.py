@@ -1,5 +1,5 @@
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Protocol
 
@@ -31,24 +31,10 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 
 
 class HasOceanDepthIntegral(Protocol):
-    def __len__(self) -> int: ...
-
-    def get_mask(self) -> torch.Tensor: ...
-
-    def get_mask_level(self, level: int) -> torch.Tensor: ...
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None: ...
-
-    def get_idepth(self) -> torch.Tensor: ...
-
     def depth_integral(
         self,
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
-
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
-
-    def to(self, device: str) -> "HasOceanDepthIntegral": ...
 
 
 class HasCellAreaInMetersSquared(Protocol):
