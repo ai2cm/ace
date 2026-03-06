@@ -181,6 +181,26 @@ def test_train_main_only(
         main(config_path=config_path)
 
 
+def test_train_main_with_loss_weights(
+    default_trainer_config, tmp_path, very_fast_only: bool
+):
+    """Check that training loop runs with per-variable loss weighting."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    config = _update_in_out_names(
+        default_trainer_config, ["var0", "var1"], ["var0", "var1"]
+    )
+    config["max_epochs"] = 1
+    config["loss_weights"] = {"weights": [{"var0": 2.0}, {"var1": 0.5}]}
+    config_path = _store_config(
+        tmp_path, config, filename="train-config-loss-weights.yaml"
+    )
+
+    with mock_wandb():
+        main(config_path=config_path)
+
+
 def test_train_main_logs(default_trainer_config, tmp_path, very_fast_only: bool):
     """Check that training loop records the appropriate logs."""
     if very_fast_only:

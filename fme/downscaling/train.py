@@ -87,6 +87,20 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
 
 
+@dataclasses.dataclass
+class LossWeights:
+    weights: list[dict[str, float]]
+
+    def get_weight_tensor(
+        self, variable_names: list[str], device: torch.device
+    ) -> torch.Tensor:
+        weight_map = {}
+        for mapping in self.weights:
+            weight_map.update(mapping)
+        weights = [weight_map.get(name, 1.0) for name in variable_names]
+        return torch.tensor(weights, device=device).reshape(1, -1, 1, 1)
+
+
 class Trainer:
     def __init__(
         self,
@@ -108,6 +122,15 @@ class Trainer:
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
         self.config = config
+        if config.loss_weights is None:
+            self.loss_weight_tensor = torch.ones(
+                1, len(self.model.out_packer.names), 1, 1, device=get_device()
+            )
+        else:
+            self.loss_weight_tensor = config.loss_weights.get_weight_tensor(
+                variable_names=self.model.out_packer.names,
+                device=get_device(),
+            )
         self.patch_data = (
             True
             if (config.coarse_patch_extent_lat and config.coarse_patch_extent_lon)
@@ -187,7 +210,12 @@ class Trainer:
             self.num_batches_seen += 1
             if i % 10 == 0:
                 logging.info(f"Training on batch {i+1}")
-            outputs = self.model.train_on_batch(batch, static_inputs, self.optimization)
+            outputs = self.model.train_on_batch(
+                batch,
+                static_inputs,
+                self.optimization,
+                loss_weights=self.loss_weight_tensor,
+            )
             self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -261,7 +289,10 @@ class Trainer:
             )
             for batch, static_inputs in validation_batch_generator:
                 outputs = self.model.train_on_batch(
-                    batch, static_inputs, self.null_optimization
+                    batch,
+                    static_inputs,
+                    self.null_optimization,
+                    loss_weights=self.loss_weight_tensor,
                 )
                 validation_aggregator.record_batch(
                     outputs=outputs,
@@ -405,6 +436,7 @@ class TrainerConfig:
     experiment_dir: str
     save_checkpoints: bool
     logging: LoggingConfig
+    loss_weights: LossWeights | None = None
     static_inputs: dict[str, str] | None = None
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False

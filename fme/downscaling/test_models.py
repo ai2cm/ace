@@ -224,7 +224,10 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
         [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
     optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
-    train_outputs = model.train_on_batch(batch, static_inputs, optimization)
+    loss_weights = torch.ones(1, len(model.out_packer.names), 1, 1, device=get_device())
+    train_outputs = model.train_on_batch(
+        batch, static_inputs, optimization, loss_weights=loss_weights
+    )
     assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
 
     n_generated_samples = 2

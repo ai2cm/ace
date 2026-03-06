@@ -352,6 +352,7 @@ class DiffusionModel:
         batch: PairedBatchData,
         static_inputs: StaticInputs | None,
         optimizer: Optimization | NullOptimization,
+        loss_weights: torch.Tensor,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data
@@ -382,6 +383,7 @@ class DiffusionModel:
         weighted_loss = conditioned_target.weight * self.loss(
             denoised_norm, targets_norm
         )
+        weighted_loss = weighted_loss * loss_weights
         loss = torch.mean(weighted_loss)
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
