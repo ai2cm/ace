@@ -324,7 +324,8 @@ class FileWriterConfig:
 
         Args:
             experiment_dir: The directory where experiment outputs are saved.
-            initial_condition_times: The initial condition times.
+            initial_condition_times: 1D array of initial condition times
+                (start time for each inference run).
             n_timesteps: Total number of inference forward steps.
             timestep: The time delta between each timestep.
             variable_metadata: Metadata for each variable.

@@ -113,8 +113,8 @@ class RawDataWriter:
         Args:
             path: Directory within which to write the file.
             label: Name of the file to write.
-            initial_condition_times: A 1D array of initial condition times of
-                the inference runs we are writing data for.
+            initial_condition_times: 1D array of initial condition times
+                (start time for each inference run).
             save_names: Names of variables to save in the output file.
                 If None, all provided variables will be saved.
             variable_metadata: Metadata for each variable to be written to the file.

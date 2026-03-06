@@ -145,7 +145,8 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         Args:
             path: Path to write netCDF file(s).
-            initial_condition_times: Times of the initial conditions.
+            initial_condition_times: 1D array of initial condition times
+                (start time for each inference run).
             n_timesteps: Number of timesteps to write to the file.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
@@ -330,7 +331,8 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         Args:
             path: Directory within which to write netCDF file(s).
-            initial_condition_times: Times of the initial conditions.
+            initial_condition_times: 1D array of initial condition times
+                (start time for each inference run).
             n_timesteps: Number of timesteps to write to the file.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
