@@ -80,21 +80,10 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-  scheduler:
-    schedulers:
-    - type: LinearLR
-      step_each_iteration: true
-      kwargs:
-        start_factor: 0.01
-        end_factor: 1
-        total_iters: 1800
-    - type: ConstantLR
-      step_each_iteration: true
-    milestones:
-    - 1800
-stepper:
+stepper_training:
   loss:
     type: MSE
+stepper:
   input_masking:
     mask_value: 0
     fill_value: 0

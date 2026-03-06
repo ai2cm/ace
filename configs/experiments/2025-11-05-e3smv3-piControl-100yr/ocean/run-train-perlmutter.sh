@@ -3,14 +3,14 @@
 set -x
 
 # wandb config
-export WANDB_NAME=PM-v1124-Samudra-piControl-100yr-train-95yr-rs2
+export WANDB_NAME=PM-v1124-Samudra-piControl-100yr-ft-8fws-dso4ysdg
 export WANDB_RUN_GROUP=v1124-no-smoothing
 
 export COMMIT=$(git rev-parse --short HEAD)
 
 export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset
 export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-11-24-E3SMv3-piControl-100yr-coupled-stats/ocean
-# export FINETUNE_CHECKPOINT_PATH=/pscratch/sd/e/elynnwu/fme-output/45110474/training_checkpoints
+export FINETUNE_CHECKPOINT_PATH=/pscratch/sd/e/elynnwu/fme-output/45110474/training_checkpoints
 # if resuming a failed job, provide its slurm job ID below and uncomment;
 # note that information entered above should be consistent with that of
 # the failed job
@@ -24,7 +24,7 @@ UUID=$(uuidgen)
 export CONFIG_DIR=${PSCRATCH}/fme-config/${UUID}
 mkdir -p $CONFIG_DIR
 if [ -z "${RESUME_JOB_ID}" ]; then
-  cp config-train.yaml $CONFIG_DIR/train-config.yaml
+  cp config-fine-tune-train.yaml $CONFIG_DIR/train-config.yaml
 else
   cp ${PSCRATCH}/fme-output/${RESUME_JOB_ID}/job_config/train-config.yaml $CONFIG_DIR/train-config.yaml
 fi
