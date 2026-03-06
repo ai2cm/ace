@@ -166,6 +166,8 @@ class ModelTorchDistributed(DistributedBackend):
             return_list[data_parallel_dim] = slice(
                 self._data_rank * per_rank, (self._data_rank + 1) * per_rank
             )
+        # TODO: Also needs to slice along spatial dimensions, which we could assume
+        # are the last two dimensions (H, W) for now
         return tuple(return_list)
 
     def local_batch_size(self, batch_size: int) -> int:

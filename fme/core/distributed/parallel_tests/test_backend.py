@@ -182,35 +182,6 @@ def test_local_batch_size_divisibility():
 
 
 @pytest.mark.parallel
-def test_local_slices_cover_full_domain():
-    """Union of slices from every rank should cover every element exactly once."""
-    dist = Distributed.get_instance()
-    n_dp = dist.total_data_parallel_ranks
-    rows = 4 * n_dp
-    global_shape = (rows, 6)
-    local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
-    # Collect one slice per data-parallel rank on root and verify full coverage.
-    # gather_object gathers over the data-parallel group, so all_slices has
-    # n_dp entries — one unique slice per dp rank, each covering a distinct
-    # portion of the domain.
-    all_slices = dist.gather_object(local_slices)
-    if dist.is_root():
-        assert all_slices is not None
-        canvas = torch.zeros(global_shape)
-        for s in all_slices:
-            canvas[s] += 1
-        torch.testing.assert_close(canvas, torch.ones_like(canvas))
-
-
-@pytest.mark.parallel
-def test_local_slices_no_dp_dim():
-    """Without a dp dim, every rank gets full slices."""
-    dist = Distributed.get_instance()
-    slices = dist.get_local_slices((8, 4))
-    assert slices == tuple(slice(None, None) for _ in range(2))
-
-
-@pytest.mark.parallel
 def test_wrap_module_preserves_underlying():
     """Wrapped module should expose .module pointing at the original."""
     dist = Distributed.get_instance()
