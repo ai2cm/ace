@@ -6,7 +6,7 @@ ema:
 max_epochs: 20
 n_forward_steps: 8
 inference:
-  n_forward_steps: 730
+  n_forward_steps: 876
   forward_steps_in_memory: 20
   loader:
     start_indices:
@@ -128,6 +128,7 @@ stepper:
           - 1
           norm: instance
           upscale_factor: 2
+          checkpoint_strategy: all
       normalization:
         network:
           global_means_path: FME_STATS_DIR/centering.nc
