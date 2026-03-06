@@ -1,4 +1,4 @@
-experiment_dir: /results
+experiment_dir: gs://vcm-ml-scratch/spencerc/2026-03-06-era5-zarr-evaluator-time-selection
 n_forward_steps: 12
 forward_steps_in_memory: 12
 checkpoint_path: /ckpt.tar
