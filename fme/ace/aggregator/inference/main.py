@@ -316,15 +316,11 @@ class InferenceEvaluatorAggregator(
                 variable_metadata=dataset_info.variable_metadata,
             )
         for step_mean_entry in log_step_means:
+            step_mean_entry.validate(n_forward_steps)
             step = step_mean_entry.step
             name = step_mean_entry.get_name()
             # -1 because step 0 (after IC) is the first forward step
             target_time = step + n_ic_steps - 1
-            if step > n_forward_steps:
-                raise ValueError(
-                    f"Cannot log mean at step {step} since it is greater than the "
-                    f"number of forward steps {n_forward_steps}"
-                )
             self._aggregators[name] = OneStepMeanAggregator(
                 ops,
                 target_time=target_time,
