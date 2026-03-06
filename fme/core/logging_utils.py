@@ -144,7 +144,7 @@ class LoggingConfig:
         # must ensure wandb.configure is called before wandb.init
         wandb = WandB.get_instance()
         wandb.configure(log_to_wandb=self.log_to_wandb)
-        notes = _get_beaker_url(_get_beaker_id())
+        notes = _get_wandb_notes(_get_beaker_id())
         wandb.init(
             config=config_copy,
             project=self.project,
@@ -164,13 +164,19 @@ def _get_beaker_id() -> str | None:
         return None
 
 
-def _get_beaker_url(beaker_id: str | None) -> str:
+def _get_wandb_notes(beaker_id: str | None) -> str | None:
     if beaker_id is not None:
-        return f"https://beaker.org/ex/{beaker_id}"
+        return _get_beaker_url(beaker_id)
     wandb_notes: str | None = os.environ.get("WANDB_NOTES")
     if wandb_notes is not None:
         return wandb_notes
-    return "No beaker URL."
+    return None
+
+
+def _get_beaker_url(beaker_id: str | None) -> str:
+    if beaker_id is None:
+        return "No beaker URL."
+    return f"https://beaker.org/ex/{beaker_id}"
 
 
 def log_versions():
