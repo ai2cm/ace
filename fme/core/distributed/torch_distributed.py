@@ -168,12 +168,22 @@ class TorchDistributed(DistributedBackend):
         torch.distributed.barrier(device_ids=self._device_ids)
 
     def get_sht(
-        self, nlat: int, nlon: int, lmax: int, mmax: int, grid: str
+        self,
+        nlat: int,
+        nlon: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        grid: str = "legendre-gauss",
     ) -> nn.Module:
         return th.RealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
 
     def get_isht(
-        self, nlat: int, nlon: int, lmax: int, mmax: int, grid: str
+        self,
+        nlat: int,
+        nlon: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        grid: str = "legendre-gauss",
     ) -> nn.Module:
         return th.InverseRealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
 

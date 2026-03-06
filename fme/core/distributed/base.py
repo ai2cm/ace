@@ -115,14 +115,24 @@ class DistributedBackend(ABC):
 
     @abstractmethod
     def get_sht(
-        self, nlat: int, nlon: int, lmax: int, mmax: int, grid: str
+        self,
+        nlat: int,
+        nlon: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        grid: str = "legendre-gauss",
     ) -> nn.Module:
         """Create a forward SHT (possibly distributed)."""
         ...
 
     @abstractmethod
     def get_isht(
-        self, nlat: int, nlon: int, lmax: int, mmax: int, grid: str
+        self,
+        nlat: int,
+        nlon: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        grid: str = "legendre-gauss",
     ) -> nn.Module:
         """Create an inverse SHT (possibly distributed)."""
         ...

@@ -416,10 +416,10 @@ class Distributed:
         """
         return self._seed
 
-    def get_sht(self, nlat, nlon, lmax, mmax, grid):
+    def get_sht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
         return self._distributed.get_sht(nlat, nlon, lmax, mmax, grid)
 
-    def get_isht(self, nlat, nlon, lmax, mmax, grid):
+    def get_isht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
         return self._distributed.get_isht(nlat, nlon, lmax, mmax, grid)
 
     def get_disco_conv_s2(self, *args, **kwargs):

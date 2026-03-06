@@ -169,7 +169,6 @@ class SpectralConvS2(nn.Module):
         assert self.inverse_transform.lmax == self.modes_lat
         assert self.inverse_transform.mmax == self.modes_lon
 
-
         if scale == "auto":
             scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
             # seemingly the first weight is not really complex, so we need to account for that

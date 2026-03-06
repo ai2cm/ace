@@ -341,12 +341,12 @@ class ModelTorchDistributed(DistributedBackend):
             "under spatial parallelism."
         )
 
-    def get_sht(self, nlat, nlon, lmax, mmax, grid):
+    def get_sht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
         return thd.DistributedRealSHT(
             nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
         ).float()
 
-    def get_isht(self, nlat, nlon, lmax, mmax, grid):
+    def get_isht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
         return thd.DistributedInverseRealSHT(
             nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
         ).float()
