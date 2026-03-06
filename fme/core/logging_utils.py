@@ -142,21 +142,18 @@ class LoggingConfig:
             wandb_dir = DEFAULT_TMP_DIR
 
         # must ensure wandb.configure is called before wandb.init
-        wandb = WandB.get_instance()
-        wandb.configure(log_to_wandb=self.log_to_wandb)
-        init_kwargs = dict(
+        wandb_instance = WandB.get_instance()
+        wandb_instance.configure(log_to_wandb=self.log_to_wandb)
+        notes = _get_beaker_url(_get_beaker_id())
+        wandb_instance.init(
             config=config_copy,
             project=self.project,
             entity=self.entity,
             experiment_dir=experiment_dir,
             resumable=resumable,
             dir=wandb_dir,
+            notes=notes,
         )
-        # Only set notes from Beaker when present; otherwise uses WANDB_NOTES
-        beaker_url = _get_beaker_url(_get_beaker_id())
-        if beaker_url != "No beaker URL.":
-            init_kwargs["notes"] = beaker_url
-        wandb.init(**init_kwargs)
 
 
 def _get_beaker_id() -> str | None:
@@ -168,9 +165,12 @@ def _get_beaker_id() -> str | None:
 
 
 def _get_beaker_url(beaker_id: str | None) -> str:
-    if beaker_id is None:
-        return "No beaker URL."
-    return f"https://beaker.org/ex/{beaker_id}"
+    if beaker_id is not None:
+        return f"https://beaker.org/ex/{beaker_id}"
+    wandb_notes: str | None = os.environ.get("WANDB_NOTES")
+    if wandb_notes is not None:
+        return wandb_notes
+    return "No beaker URL."
 
 
 def log_versions():
