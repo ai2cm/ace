@@ -169,6 +169,12 @@ class SpectralConvS2(nn.Module):
         assert self.inverse_transform.lmax == self.modes_lat
         assert self.inverse_transform.mmax == self.modes_lon
 
+        dist = Distributed.get_instance()
+        l_slice, _ = dist.get_local_slices((self.modes_lat, self.modes_lon))
+        l_start, l_stop, _ = l_slice.indices(self.modes_lat)
+        self.modes_lat_local = l_stop - l_start
+        self._l_slice = l_slice
+
         if scale == "auto":
             scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
             # seemingly the first weight is not really complex, so we need to account for that
@@ -327,6 +333,8 @@ class SpectralConvS2(nn.Module):
         assert C % self.num_groups == 0
         x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
 
+        # Slice global weights to the local spectral partition (lat only).
+        weight_local = self.weight[:, self._l_slice]
         if self.lora_A is not None and self.lora_B is not None:
             with timer.child("lora_update"):
                 lora_update = _contract_lora(
@@ -339,9 +347,9 @@ class SpectralConvS2(nn.Module):
 
         with timer.child("dhconv"):
             xp = torch.zeros_like(x)
-            xp[..., : self.modes_lat, : self.modes_lon] = _contract_dhconv(
-                x[..., : self.modes_lat, : self.modes_lon],
-                self.weight,
+            xp[..., : self.modes_lat_local, : self.modes_lon] = _contract_dhconv(
+                x[..., : self.modes_lat_local, : self.modes_lon],
+                weight_local,
             )
             xp = xp + self.lora_scaling * lora_update
             xp = xp.reshape(B, self.out_channels, H, W)
