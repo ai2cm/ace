@@ -5,7 +5,7 @@ comparing ensemble predictions against targets for each variable.
 
 This will work for saved event outputs from `fme.downscaling.evaluator`
 from a beaker experiment.  It downloads the experiment files to a temporary
-directory and then parses the filenames for <event_name>_YYYYMMDD.nc to look
+directory and then parses the filenames for any *YYYYMMDD*.nc pattern to look
 for single-event outputs.
 
 Usage:
@@ -25,8 +25,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
-# Matching for <event_name>_YYYYMMDD.nc
-_EVENT_FILE_RE = re.compile(r"(.+)_(\d{8})\.nc$")
+# Matching for *YYYYMMDD*.nc (date can appear anywhere in the filename)
+_EVENT_FILE_RE = re.compile(r"(.+?)[\._-]?(\d{8})[\._-]?(.*)\.nc$")
 
 
 def parse_args():
@@ -54,13 +54,15 @@ def fetch_beaker_dataset(dataset_id: str, target_dir: str) -> None:
 
 
 def find_event_files(directory: str) -> dict[str, Path]:
-    """Find netCDF files matching the event naming pattern, keyed by event name."""
+    """Find netCDF files matching the *YYYYMMDD*.nc pattern, keyed by event name."""
     event_files = {}
     for p in sorted(Path(directory).glob("*.nc")):
-        # extract event name
         matched = _EVENT_FILE_RE.match(p.name)
         if matched:
-            event_files[matched.group(1)] = p
+            prefix, date, suffix = matched.group(1), matched.group(2), matched.group(3)
+            parts = [s for s in (prefix, suffix) if s]
+            event_name = f"{'_'.join(parts)}_{date}"
+            event_files[event_name] = p
     return event_files
 
 
