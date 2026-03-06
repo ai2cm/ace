@@ -29,9 +29,24 @@ class StatsConfig:
 
 
 @dataclasses.dataclass
+class TimeCoarsenConfig:
+    """
+    Configuration for time coarsening of a dataset.
+
+    Attributes:
+        data_output_directory: Directory to save the coarsened datasets as zarr stores.
+        stats_output_directory: Directory to save the stats of the coarsened datasets.
+    """
+
+    data_output_directory: str
+    stats_output_directory: str
+
+
+@dataclasses.dataclass
 class Config:
     runs: Dict[str, str]
     stats: StatsConfig
+    time_coarsen: TimeCoarsenConfig | None = None
 
 
 def _make_history_string(config_filename: str, stats_output_dir: str):
@@ -147,6 +162,20 @@ def main(config_yaml: str):
         output_directory=config.stats.output_directory,
         history=_make_history_string(config_yaml, config.stats.output_directory),
     )
+
+    if config.time_coarsen is not None:
+        stats_roots = [
+            config.time_coarsen.stats_output_directory + "/" + run + "/"
+            for run in config.runs.keys()
+            if run not in config.stats.exclude_runs
+        ]
+        combine_stats(
+            stats_roots=stats_roots,
+            output_directory=config.time_coarsen.stats_output_directory,
+            history=_make_history_string(
+                config_yaml, config.time_coarsen.stats_output_directory
+            ),
+        )
 
 
 if __name__ == "__main__":
