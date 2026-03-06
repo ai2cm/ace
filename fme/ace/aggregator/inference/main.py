@@ -124,6 +124,18 @@ class StepMeanEntry:
     def get_name(self):
         return self.name or f"mean_step_{self.step}"
 
+    def validate(self, n_forward_steps: int):
+        if self.step > n_forward_steps:
+            raise ValueError(
+                f"Step {self.step} is "
+                f"greater than n_forward_steps {n_forward_steps}. "
+                "Please ensure that all steps in log_step_means are less than or "
+                "equal to "
+                "n_forward_steps. If your run is less than 20 steps, you must pass "
+                "a custom log_step_means configuration to override the default "
+                "(e.g. log_step_means: [])."
+            )
+
 
 @dataclasses.dataclass
 class InferenceEvaluatorAggregatorConfig:

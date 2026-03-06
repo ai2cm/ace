@@ -83,15 +83,7 @@ class WeatherEvaluationConfig:
             self.aggregator.log_global_mean_norm_time_series = False
 
         for log_step_mean in self.aggregator.log_step_means:
-            if log_step_mean.step >= self.n_forward_steps:
-                raise ValueError(
-                    f"log_step_means contains step {log_step_mean.step} which is "
-                    f"greater than or equal to n_forward_steps {self.n_forward_steps}. "
-                    "Please ensure that all steps in log_step_means are less than "
-                    "n_forward_steps. If your run is less than 20 steps, you must pass "
-                    "a custom log_step_means configuration to override the default "
-                    "(e.g. log_step_means: [])."
-                )
+            log_step_mean.validate(self.n_forward_steps)
 
     @property
     def using_labels(self) -> bool:
@@ -151,15 +143,7 @@ class InlineInferenceConfig:
             self.aggregator.log_global_mean_norm_time_series = False
 
         for log_step_mean in self.aggregator.log_step_means:
-            if log_step_mean.step >= self.n_forward_steps:
-                raise ValueError(
-                    f"log_step_means contains step {log_step_mean.step} which is "
-                    f"greater than or equal to n_forward_steps {self.n_forward_steps}. "
-                    "Please ensure that all steps in log_step_means are less than "
-                    "n_forward_steps. If your run is less than 20 steps, you must pass "
-                    "a custom log_step_means configuration to override the default "
-                    "(e.g. log_step_means: [])."
-                )
+            log_step_mean.validate(self.n_forward_steps)
 
     @property
     def using_labels(self) -> bool:
