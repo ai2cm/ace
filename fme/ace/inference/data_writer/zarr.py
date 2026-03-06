@@ -41,7 +41,12 @@ def _get_encoded_lead_times(
 ) -> npt.NDArray[np.int64]:
     # The batch_time does not include the initial condition time, so we manually
     # prepend it. This allows us to use the same code path for inferring the
-    # timestep whether the batch includes multiple times or just one.
+    # timestep whether the batch includes multiple times or just one. This
+    # approach is safe, because we currently do not support time subselection
+    # when using the zarr writer. A more robust approach would be to pass the
+    # timestep to the writer at initialization time, but that is maybe better
+    # saved for a future refactor, since it requires a little extra care around
+    # time coarsening.
     times_with_prepended_initial_condition = np.insert(
         batch_time.isel(sample=0).to_numpy(), 0, initial_condition_times[0]
     )
