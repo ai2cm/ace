@@ -6,4 +6,5 @@ ft_fto-v1124-pesvhsm3-vw7bwz18-lr-1e-5||||best_inference_ckpt|skip|high||8|800Gi
 ft_fto-v1124-pesvhsm3-rv0ike6m||||best_inference_ckpt|skip|high||8|800GiB|2||optimization.lr=0.0001|01KF256T3E4KW67A1YZXV45BDF
 ft_fto-v1124-phuetnpl-rv0ike6m||||best_inference_ckpt|skip|high||8|800GiB|2||optimization.lr=0.0001|01KG08VYKWMSX3VBY6D52JY8EM
 ft_fto-v1124-train-95yr-ebpeysbb-dso4ysdg-ft-AMIP||||best_inference_ckpt|skip|high|h100|8|800GiB|2||optimization.lr=0.0001|01KJMY6HMYMZ2TGRMA4GG2T2JE
-ft_fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP||||best_inference_ckpt|train|high|h100|8|800GiB|2||optimization.lr=0.0001|01KJVQGJZ0ZV06VYP55D031Z19
+ft_fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP||||best_inference_ckpt|skip|high|h100|8|800GiB|2||optimization.lr=0.0001|01KJVQGJZ0ZV06VYP55D031Z19
+ft_fto-v1124-train-95yr-gvot5r9r-dso4ysdg||||best_inference_ckpt|train|high|h100|8|800GiB|2||optimization.lr=0.0001|01KJKBB8540MMTK2W5QA6YD3QM
