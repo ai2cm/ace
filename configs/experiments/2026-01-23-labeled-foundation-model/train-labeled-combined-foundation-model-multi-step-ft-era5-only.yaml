@@ -80,6 +80,10 @@ optimization:
 stepper_training:
   parameter_init:
     weights_path: /pre-trained-weights/training_checkpoints/best_ckpt.tar
+    # Exclude label embedding: pretrained model has 6 labels, fine-tune uses 1 (era5).
+    # Loading would fail due to shape mismatch (6 vs 1); keep random init for 1-label embedding.
+    parameters:
+      - exclude: ["label_pos_embed"]
   n_ensemble: 2
   train_n_forward_steps:
     outcomes:
@@ -132,8 +136,8 @@ stepper:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
       corrector:
-        # conserve_dry_air: true
-        # moisture_budget_correction: advection_and_precipitation
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
         force_positive_names:
         - specific_total_water_0
         - specific_total_water_1
