@@ -113,6 +113,8 @@ class GlobalTimer:
 
         Only one inner timer can be active at a time.
         """
+        if not self._active:
+            return
         if self._current_category is not None:
             raise RuntimeError(
                 "GlobalTimer already has an active inner timer, "
@@ -136,6 +138,8 @@ class GlobalTimer:
         """
         Stop the currently active inner timer.
         """
+        if not self._active:
+            return
         if self._current_category is None:
             raise RuntimeError("GlobalTimer does not have a running timer")
         self.stop_outer(self._current_category)
