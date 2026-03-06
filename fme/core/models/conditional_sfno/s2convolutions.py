@@ -59,7 +59,9 @@ def _contract_lora(
     """
     lora_A = torch.view_as_complex(lora_A)
     lora_B = torch.view_as_complex(lora_B)
-    return torch.einsum("gxri,gxor,bgixy->bgoxy", lora_A, lora_B, x)
+    tmp = torch.einsum("gxri,bgixy->bgxry", lora_A, x)
+    out = torch.einsum("gxor,bgxry->bgoxy", lora_B, tmp)
+    return out
 
 
 @torch.jit.script
