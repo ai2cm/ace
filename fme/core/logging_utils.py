@@ -144,15 +144,19 @@ class LoggingConfig:
         # must ensure wandb.configure is called before wandb.init
         wandb = WandB.get_instance()
         wandb.configure(log_to_wandb=self.log_to_wandb)
-        wandb.init(
+        init_kwargs = dict(
             config=config_copy,
             project=self.project,
             entity=self.entity,
             experiment_dir=experiment_dir,
             resumable=resumable,
             dir=wandb_dir,
-            notes=_get_beaker_url(_get_beaker_id()),
         )
+        # Only set notes from Beaker when present; otherwise uses WANDB_NOTES
+        beaker_url = _get_beaker_url(_get_beaker_id())
+        if beaker_url != "No beaker URL.":
+            init_kwargs["notes"] = beaker_url
+        wandb.init(**init_kwargs)
 
 
 def _get_beaker_id() -> str | None:
