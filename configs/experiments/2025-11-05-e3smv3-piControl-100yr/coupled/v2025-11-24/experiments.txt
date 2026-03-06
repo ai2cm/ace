@@ -86,3 +86,5 @@ ft_fto-v1124-train-95yr-ebpeysbb-dso4ysdg-ft-AMIP||01KJTG3NY9AWW36GDQ24WWWYYJ|do
 fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP-IC-yr-apart||01KJDH03MTDEKKJX3PND17EADV|done|best_inference_ckpt|high|--not-preemptible||||h100
 
 ft_fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP||01KK00N80VRWFB65JQFMJR8E5X|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_fto-v1124-train-95yr-gvot5r9r-dso4ysdg||01KK0THF96WJJQW0V7GYPPC6EX|training|best_inference_ckpt|normal|--not-preemptible
