@@ -85,7 +85,7 @@ stepper_training:
     parameters:
       - exclude: ["label_pos_embed"]
       - frozen:
-        - exclude: ["label_pos_embed","module.conditional_model.blocks.0.norm0.W_scale_labels.weight","module.conditional_model.blocks.*.norm0.W_bias_labels.weight", "module.conditional_model.blocks.0.norm1.W_scale_labels.weight","module.conditional_model.blocks.*.norm1.W_bias_labels.weight"]
+        - exclude: ["label_pos_embed","module.conditional_model.blocks.0.norm0.W_scale_pos.weight","module.conditional_model.blocks.*.norm0.W_bias_pos.weight", "module.conditional_model.blocks.0.norm1.W_scale_pos.weight","module.conditional_model.blocks.*.norm1.W_bias_pos.weight"]
   n_ensemble: 2
   train_n_forward_steps:
     outcomes:
