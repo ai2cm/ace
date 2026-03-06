@@ -46,13 +46,10 @@ _COUPLED_WORKER_DIST_CX = None
 
 def _coupled_forkserver_worker_init_fn(worker_id: int) -> None:
     global _COUPLED_WORKER_DIST_CX
-    from fme.core.distributed import Distributed
-
-    if Distributed._entered:
-        return
-    os.environ.setdefault("FME_DISTRIBUTED_BACKEND", "none")
     _COUPLED_WORKER_DIST_CX = Distributed.context()
     _COUPLED_WORKER_DIST_CX.__enter__()
+    # don't need to exit the context on workers as they are not
+    # initialized/managed by torchrun
 
 
 class CollateFn:
