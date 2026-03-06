@@ -37,6 +37,7 @@ from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed.distributed import Distributed
+from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.typing_ import Slice
 
@@ -202,6 +203,10 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
     dist = Distributed.get_instance()
+    if isinstance(dist._distributed, ModelTorchDistributed):
+        pytest.xfail(
+            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
+        )
     tmp_path = dist.scatter_object(tmp_path)  # get the root value
     global_batch_size = 24
     if dist.is_root():

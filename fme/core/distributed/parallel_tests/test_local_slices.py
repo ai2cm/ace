@@ -104,6 +104,10 @@ def test_gather_global_tensor():
     Test that gather_object and gather_global produce consistent results.
     """
     dist = Distributed.get_instance()
+    if isinstance(dist._distributed, ModelTorchDistributed):
+        pytest.xfail(
+            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
+        )
     n_dp = dist.total_data_parallel_ranks
     global_shape = (2 * n_dp, 4, 4)
     x_global = torch.arange(np.prod(global_shape), device=get_device()).reshape(
@@ -126,6 +130,10 @@ def test_local_slices_match_gather_tensors():
     Test that gather_object and gather produce consistent results.
     """
     dist = Distributed.get_instance()
+    if isinstance(dist._distributed, ModelTorchDistributed):
+        pytest.xfail(
+            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
+        )
     n_dp = dist.total_data_parallel_ranks
     global_shape = (2 * n_dp, 4, 4)
     x_global = torch.arange(np.prod(global_shape), device=get_device()).reshape(

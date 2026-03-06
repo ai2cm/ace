@@ -168,6 +168,9 @@ class ModelTorchDistributed(DistributedBackend):
             )
         # TODO: Also needs to slice along spatial dimensions, which we could assume
         # are the last two dimensions (H, W) for now
+        raise NotImplementedError(
+            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
+        )
         return tuple(return_list)
 
     def local_batch_size(self, batch_size: int) -> int:
