@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 import math
-import re
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import Literal, TypeVar
@@ -328,9 +327,6 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         interface_pressure = self.interface_pressure(surface_pressure)
         pressure_thickness = interface_pressure.diff(dim=-1)
         return (integrand * pressure_thickness).sum(dim=-1) / GRAVITY
-
-
-LEVEL_PATTERN = re.compile(r"_(\d+)$")
 
 
 @dataclasses.dataclass

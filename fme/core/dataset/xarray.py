@@ -337,7 +337,7 @@ def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvide
     masks: dict[str, torch.Tensor] = {
         name: torch.as_tensor(ds[name].values, dtype=dtype)
         for name in ds.data_vars
-        if "mask_" in name
+        if name.startswith("mask_")
     }
     for name in masks:
         if "time" in ds[name].dims:
