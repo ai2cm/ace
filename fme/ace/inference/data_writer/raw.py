@@ -131,7 +131,7 @@ class RawDataWriter:
         calendar = infer_calendar(initial_condition_times)
         n_initial_conditions = len(initial_condition_times)
         self._save_names = save_names
-        self._initial_condition_times = initial_condition_times
+        self.initial_condition_times = initial_condition_times
         self.variable_metadata = variable_metadata
         self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
@@ -143,7 +143,7 @@ class RawDataWriter:
         self.dataset.variables[INIT_TIME].units = INIT_TIME_UNITS
         self.dataset.variables[INIT_TIME].calendar = calendar
         self.dataset.variables[INIT_TIME][:] = cftime.date2num(
-            initial_condition_times,
+            self.initial_condition_times,
             units=self.dataset.variables[INIT_TIME].units,
             calendar=self.dataset.variables[INIT_TIME].calendar,
         )
@@ -234,7 +234,7 @@ class RawDataWriter:
             ] = data_numpy
 
         lead_time_microseconds = get_batch_lead_time_microseconds(
-            self._initial_condition_times,
+            self.initial_condition_times,
             batch_time.values,
         )
         self.dataset.variables[LEAD_TIME_DIM][

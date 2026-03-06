@@ -126,8 +126,8 @@ class ZarrWriterAdapter:
         self.dims = dims
 
         self.n_timesteps = n_timesteps
-        self._initial_condition_times = initial_condition_times
-        self._n_initial_conditions = len(self._initial_condition_times)
+        self.initial_condition_times = initial_condition_times
+        self.n_initial_conditions = len(self.initial_condition_times)
         self._current_timestep = 0
         self.variable_metadata = _variable_metadata_to_dict(variable_metadata)
 
@@ -172,7 +172,7 @@ class ZarrWriterAdapter:
     def _initialize_writer(self, batch_time: xr.DataArray):
         # batch.time is dataarray with dims (sample, time) w/o coords
         lead_times_coord, init_times_coord, valid_times_coord = _get_ace_time_coords(
-            self._initial_condition_times, batch_time, self.n_timesteps
+            self.initial_condition_times, batch_time, self.n_timesteps
         )
         self._nondim_coords.update(
             {
@@ -183,7 +183,7 @@ class ZarrWriterAdapter:
         self._dim_coords = {
             **self._horizontal_coords,
             "time": lead_times_coord,
-            "sample": np.arange(self._n_initial_conditions),
+            "sample": np.arange(self.n_initial_conditions),
         }
         self._writer = ZarrWriter(
             path=self.path,
@@ -261,8 +261,8 @@ class SeparateICZarrWriterAdapter:
         # spatial coords are passed at init, time coords are read from first batch
         self.coords = data_coords
         self.n_timesteps = n_timesteps
-        self._initial_condition_times = initial_condition_times
-        self.n_initial_conditions = len(self._initial_condition_times)
+        self.initial_condition_times = initial_condition_times
+        self.n_initial_conditions = len(self.initial_condition_times)
         self._current_timestep = 0
         self.data_vars = data_vars
         self.chunks = chunks
@@ -298,12 +298,12 @@ class SeparateICZarrWriterAdapter:
     def _initialize_writers(self, first_batch_time: xr.DataArray):
         self._writers = []
         lead_time_microseconds = _get_encoded_lead_times(
-            self._initial_condition_times, first_batch_time, self.n_timesteps
+            self.initial_condition_times, first_batch_time, self.n_timesteps
         )
         for s in range(self.n_initial_conditions):
             _coords = copy.copy(self.coords)
             init_time_numeric = cftime.date2num(
-                self._initial_condition_times[s],
+                self.initial_condition_times[s],
                 units=DATETIME_ENCODING_UNITS,
                 calendar=first_batch_time.dt.calendar,
             )
