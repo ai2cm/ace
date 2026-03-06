@@ -1,7 +1,9 @@
 import gc
 import signal
+from pathlib import Path
 from unittest import mock
 
+import fasteners
 import pytest
 import torch
 
@@ -45,8 +47,38 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "parallel: mark test to work when run in parallel, e.g. with torchrun",
+        "parallel: mark test to work when run in parallel (e.g. torchrun)",
     )
+    config.addinivalue_line(
+        "markers",
+        "serial: test must run without interference from any other test process",
+    )
+
+
+def _lock_path(config: pytest.Config) -> Path:
+    # Must be a path shared by all xdist workers.
+    # Using the repo root is usually simplest.
+    return config.rootpath / ".pytest-serial.lock"
+
+
+@pytest.fixture(scope="session")
+def _rw_lock(pytestconfig: pytest.Config) -> fasteners.InterProcessReaderWriterLock:
+    return fasteners.InterProcessReaderWriterLock(str(_lock_path(pytestconfig)))
+
+
+@pytest.fixture(autouse=True)
+def _serialize_when_needed(
+    request: pytest.FixtureRequest,
+    _rw_lock: fasteners.InterProcessReaderWriterLock,
+):
+    is_serial = request.node.get_closest_marker("serial") is not None
+
+    if is_serial:
+        with _rw_lock.write_lock():
+            yield
+    else:
+        with _rw_lock.read_lock():
+            yield
 
 
 @pytest.fixture

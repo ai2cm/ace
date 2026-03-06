@@ -3,6 +3,7 @@ docs/available_steps.rst
 docs/_build
 
 .vscode
+*.pytest-serial.lock
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
