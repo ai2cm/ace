@@ -142,10 +142,10 @@ class LoggingConfig:
             wandb_dir = DEFAULT_TMP_DIR
 
         # must ensure wandb.configure is called before wandb.init
-        wandb_instance = WandB.get_instance()
-        wandb_instance.configure(log_to_wandb=self.log_to_wandb)
+        wandb = WandB.get_instance()
+        wandb.configure(log_to_wandb=self.log_to_wandb)
         notes = _get_beaker_url(_get_beaker_id())
-        wandb_instance.init(
+        wandb.init(
             config=config_copy,
             project=self.project,
             entity=self.entity,
