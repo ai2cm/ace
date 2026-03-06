@@ -41,8 +41,7 @@ class CoupledDataWriterConfig:
     def build_paired(
         self,
         experiment_dir: str,
-        atmosphere_initial_condition_times: npt.NDArray[cftime.datetime],
-        ocean_initial_condition_times: npt.NDArray[cftime.datetime],
+        initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
         ocean_timestep: datetime.timedelta,
@@ -58,7 +57,7 @@ class CoupledDataWriterConfig:
         return CoupledPairedDataWriter(
             ocean_writer=self.ocean.build_paired(
                 experiment_dir=ocean_dir,
-                initial_condition_times=ocean_initial_condition_times,
+                initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps_ocean,
                 timestep=ocean_timestep,
                 variable_metadata=variable_metadata,
@@ -67,7 +66,7 @@ class CoupledDataWriterConfig:
             ),
             atmosphere_writer=self.atmosphere.build_paired(
                 experiment_dir=atmos_dir,
-                initial_condition_times=atmosphere_initial_condition_times,
+                initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps_atmosphere,
                 timestep=atmosphere_timestep,
                 variable_metadata=variable_metadata,

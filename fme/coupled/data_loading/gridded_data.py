@@ -2,6 +2,7 @@ import datetime
 import logging
 from collections import namedtuple
 
+import numpy as np
 import torch
 import xarray as xr
 
@@ -177,8 +178,7 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
             )
         else:
             self._initial_condition = initial_condition.to_device()
-        self._atmosphere_initial_time: xr.DataArray | None = None
-        self._ocean_initial_time: xr.DataArray | None = None
+        self._initial_time: xr.DataArray | None = None
 
     @property
     def atmosphere_properties(self) -> DatasetProperties:
@@ -252,21 +252,19 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         return self._properties.coords
 
     @property
-    def atmosphere_initial_time(self) -> xr.DataArray:
-        if self._atmosphere_initial_time is None:
+    def initial_time(self) -> xr.DataArray:
+        if self._initial_time is None:
             for batch in self.loader:
-                self._atmosphere_initial_time = batch.atmosphere_data.time.isel(time=0)
+                atmosphere_initial_time = batch.atmosphere_data.time.isel(time=0)
+                ocean_initial_time = batch.ocean_data.time.isel(time=0)
+                err_msg = "Atmosphere and ocean initial times must be the same"
+                np.testing.assert_array_equal(
+                    atmosphere_initial_time,
+                    ocean_initial_time,
+                    err_msg=err_msg,
+                )
+                self._initial_time = atmosphere_initial_time
                 break
             else:
                 raise ValueError("No data found in loader")
-        return self._atmosphere_initial_time
-
-    @property
-    def ocean_initial_time(self) -> xr.DataArray:
-        if self._ocean_initial_time is None:
-            for batch in self.loader:
-                self._ocean_initial_time = batch.ocean_data.time.isel(time=0)
-                break
-            else:
-                raise ValueError("No data found in loader")
-        return self._ocean_initial_time
+        return self._initial_time

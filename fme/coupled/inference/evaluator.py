@@ -238,8 +238,7 @@ class InferenceEvaluatorConfig:
         }
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            atmosphere_initial_condition_times=data.atmosphere_initial_time.to_numpy(),
-            ocean_initial_condition_times=data.ocean_initial_time.to_numpy(),
+            initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,
             n_timesteps_atmosphere=self.n_coupled_steps * data.n_inner_steps,
             ocean_timestep=data.ocean_timestep,
