@@ -5,7 +5,7 @@ patch:
   composite_prediction: true
   coarse_horizontal_overlap: 1
 model:
-  checkpoint_path: /checkpoints/best.ckpt
+  checkpoint_path: /checkpoints/ema_ckpt.tar #best.ckpt
   model_updates:
    num_diffusion_generation_steps: 18
    #churn: 2.0
