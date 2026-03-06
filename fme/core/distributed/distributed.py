@@ -422,11 +422,54 @@ class Distributed:
     def get_isht(self, nlat, nlon, lmax, mmax, grid):
         return self._distributed.get_isht(nlat, nlon, lmax, mmax, grid)
 
-    def get_disco_conv_cls(self):
-        return self._distributed.get_disco_conv_cls()
+    def get_disco_conv_s2(self, *args, **kwargs):
+        return self._distributed.get_disco_conv_s2(*args, **kwargs)
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return self._distributed.spatial_reduce_sum(tensor)
+
+    def weighted_mean(
+        self,
+        data: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+        keepdim: bool = False,
+    ) -> torch.Tensor:
+        return self._distributed.weighted_mean(data, weights, dim=dim, keepdim=keepdim)
+
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        return self._distributed.zonal_mean(data)
+
+    def gradient_magnitude_percent_diff(
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+    ) -> torch.Tensor:
+        return self._distributed.gradient_magnitude_percent_diff(
+            truth, predicted, weights, dim
+        )
+
+    def scatter_spatial(
+        self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
+    ) -> dict[str, torch.Tensor]:
+        """Slice global tensors to the local spatial chunk for this rank."""
+        slices = self.get_local_slices(img_shape)
+        return {k: v[(..., *slices)].contiguous() for k, v in data.items()}
+
+    def gather_spatial(
+        self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
+    ) -> dict[str, torch.Tensor]:
+        """Gather local spatial chunks back to global tensors via all-reduce."""
+        slices = self.get_local_slices(img_shape)
+        result = {}
+        for k, v in data.items():
+            global_shape = (*v.shape[:-2], *img_shape)
+            global_tensor = torch.zeros(global_shape, dtype=v.dtype, device=v.device)
+            global_tensor[(..., *slices)] = v
+            result[k] = self.spatial_reduce_sum(global_tensor)
+        return result
 
     def shutdown(self):
         return self._distributed.shutdown()

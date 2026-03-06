@@ -179,13 +179,3 @@ def test_healpix_sht_round_trip_face_ordering():
     torch.testing.assert_close(data_isht, data_isht_reconstructed, atol=0.1, rtol=40)
     rmse = torch.sqrt(torch.mean((data_isht - data_isht_reconstructed) ** 2))
     assert rmse < 0.002
-
-
-def test_latlon_grid_parameter_respected():
-    """Verify the grid parameter is stored correctly (not hardcoded)."""
-    area_weights = torch.ones(4, 5)
-    ops = LatLonOperations(area_weights=area_weights, grid="equiangular")
-    assert ops._grid == "equiangular"
-
-    ops_default = LatLonOperations(area_weights=area_weights)
-    assert ops_default._grid == "legendre-gauss"

@@ -175,17 +175,16 @@ class SpectralConvS2(nn.Module):
         m_start, m_stop, _ = m_slice.indices(self.modes_lon)
         self.modes_lat_local = l_stop - l_start
         self.modes_lon_local = m_stop - m_start
+        self._l_slice = l_slice
 
         if scale == "auto":
-            scale = math.sqrt(1 / (in_channels)) * torch.ones(
-                self.modes_lat_local, 1, 1, 2
-            )
+            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
             # seemingly the first weight is not really complex, so we need to account for that
             scale[0, :] *= math.sqrt(2.0)
 
         weight_shape = [
             num_groups,
-            self.modes_lat_local,
+            self.modes_lat,
             out_channels // num_groups,
             in_channels // num_groups,
         ]
@@ -199,7 +198,7 @@ class SpectralConvS2(nn.Module):
                 scale
                 * torch.randn(
                     num_groups,
-                    self.modes_lat_local,
+                    self.modes_lat,
                     lora_rank,
                     in_channels // num_groups,
                     2,
@@ -208,7 +207,7 @@ class SpectralConvS2(nn.Module):
             self.lora_B = nn.Parameter(
                 torch.zeros(
                     num_groups,
-                    self.modes_lat_local,
+                    self.modes_lat,
                     out_channels // num_groups,
                     lora_rank,
                     2,
@@ -229,8 +228,6 @@ class SpectralConvS2(nn.Module):
         # rewrite old checkpoints on load
         self.register_load_state_dict_pre_hook(self._add_singleton_group_dim)
         self.register_load_state_dict_pre_hook(self._reorder_weight_dims)
-        # TODO: this is hacky and should be replaced later, see comment on method def
-        self.register_load_state_dict_pre_hook(self._slice_for_distributed)
 
     @staticmethod
     def _reorder_weight_dims(
@@ -313,40 +310,12 @@ class SpectralConvS2(nn.Module):
         ungrouped_shape = (
             module.in_channels,
             module.out_channels,
-            module.modes_lat_local,
+            module.modes_lat,
             2,
         )
 
         if weight.shape == ungrouped_shape:
             state_dict[key] = weight.view(1, *ungrouped_shape)
-
-    # TODO: this is a bit hacky
-    # TODO: we should ideally save the state dict in the correct shape in the first place
-    # TODO: but this allows us to load old checkpoints without modification
-    @staticmethod
-    def _slice_for_distributed(
-        module: "SpectralConvS2",
-        state_dict: dict[str, torch.Tensor],
-        prefix: str,
-        local_metadata: dict,
-        strict: bool,
-        missing_keys: list[str],
-        unexpected_keys: list[str],
-        error_msgs: list[str],
-    ) -> None:
-        """Slice global spectral weights to local extent for distributed mode."""
-        if module.modes_lat_local == module.modes_lat:
-            return
-        dist = Distributed.get_instance()
-        l_slice, _ = dist.get_local_slices((module.modes_lat, module.modes_lon))
-        for suffix in ("weight", "lora_A", "lora_B"):
-            key = prefix + suffix
-            if key not in state_dict:
-                continue
-            tensor = state_dict[key]
-            # After reorder, layout is (group, nlat, ..., 2) — nlat is dim 1
-            if tensor.shape[1] != module.modes_lat_local:
-                state_dict[key] = tensor[:, l_slice]
 
     def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
@@ -366,11 +335,15 @@ class SpectralConvS2(nn.Module):
         assert C % self.num_groups == 0
         x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
 
+        # Slice global weights to the local spectral partition.
+        weight_local = self.weight[:, self._l_slice]
         if self.lora_A is not None and self.lora_B is not None:
+            lora_A_local = self.lora_A[:, self._l_slice]
+            lora_B_local = self.lora_B[:, self._l_slice]
             with timer.child("lora_update"):
                 lora_update = _contract_lora(
-                    self.lora_A,
-                    self.lora_B,
+                    lora_A_local,
+                    lora_B_local,
                     x[..., : self.modes_lat_local, : self.modes_lon_local],
                 )
         else:
@@ -380,7 +353,7 @@ class SpectralConvS2(nn.Module):
             xp = torch.zeros_like(x)
             xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
                 x[..., : self.modes_lat_local, : self.modes_lon_local],
-                self.weight,
+                weight_local,
             )
             xp = xp + self.lora_scaling * lora_update
             xp = xp.reshape(B, self.out_channels, H, W)

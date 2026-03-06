@@ -2,6 +2,7 @@ import contextlib
 
 import torch
 
+from fme.core import metrics
 from fme.core.distributed import distributed
 
 
@@ -42,6 +43,25 @@ class MockDistributed:
         distributed calls.
         """
         return self.gather(tensor)  # this is single-process, can't be irregular
+
+    def get_local_slices(self, tensor_shape, data_parallel_dim=None):
+        return tuple(slice(None) for _ in tensor_shape)
+
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor
+
+    def weighted_mean(self, data, weights, dim, keepdim=False) -> torch.Tensor:
+        return metrics.weighted_mean(data, weights, dim=dim, keepdim=keepdim)
+
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        return data.nanmean(dim=-1)
+
+    def gradient_magnitude_percent_diff(
+        self, truth, predicted, weights, dim
+    ) -> torch.Tensor:
+        return metrics.gradient_magnitude_percent_diff(
+            truth, predicted, weights=weights, dim=dim
+        )
 
 
 @contextlib.contextmanager

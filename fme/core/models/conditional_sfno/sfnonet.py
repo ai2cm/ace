@@ -20,12 +20,11 @@ from typing import Any, Callable, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
-# get spectral transforms from torch_harmonics
-import torch_harmonics as th
 from torch.utils.checkpoint import checkpoint
 
+from fme.core.distributed import Distributed
+
 from fme.core.benchmark.timer import Timer, NullTimer
-from fme.core.distributed.distributed import Distributed
 
 from .initialization import trunc_normal_
 
@@ -61,11 +60,11 @@ def _compute_cutoff_radius(nlat, kernel_shape, basis_type):
 
 
 class DiscreteContinuousConvS2(nn.Module):
-    def __init__(self, *args, conv_cls=None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__()
-        if conv_cls is None:
-            conv_cls = th.DiscreteContinuousConvS2
-        self.conv = conv_cls(*args, **kwargs)
+
+        dist = Distributed.get_instance()
+        self.conv = dist.get_disco_conv_s2(*args, **kwargs)
 
     def forward(self, x, timer: Timer = NullTimer()):
         return self.conv(x), x
@@ -95,7 +94,6 @@ class SpectralFilterLayer(nn.Module):
         filter_residual=False,
         lora_rank: int = 0,
         lora_alpha: float | None = None,
-        disco_conv_cls=None,
     ):
         super(SpectralFilterLayer, self).__init__()
 
@@ -155,7 +153,6 @@ class SpectralFilterLayer(nn.Module):
                 grid_out=inverse_transform.grid,
                 bias=False,
                 theta_cutoff=theta_cutoff,
-                conv_cls=disco_conv_cls,
             )
         else:
             raise (NotImplementedError)
@@ -201,7 +198,6 @@ class FourierNeuralOperatorBlock(nn.Module):
         lora_alpha: float | None = None,
         spectral_lora_rank: int = 0,
         spectral_lora_alpha: float | None = None,
-        disco_conv_cls=None,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -238,7 +234,6 @@ class FourierNeuralOperatorBlock(nn.Module):
             num_groups=filter_num_groups,
             lora_rank=spectral_lora_rank,
             lora_alpha=spectral_lora_alpha,
-            disco_conv_cls=disco_conv_cls,
         )
 
         if inner_skip == "linear":
@@ -361,21 +356,6 @@ class NoLayerNorm(nn.Module):
         return x
 
 
-def _slice_len(s: slice, full: int) -> int:
-    start, stop, _ = s.indices(full)
-    return stop - start
-
-
-def _local_img_shape(transform: nn.Module) -> tuple[int, int]:
-    """Derive local (h, w) from an SHT transform via Distributed slices."""
-    dist = Distributed.get_instance()
-    h_slice, w_slice = dist.get_local_slices((transform.nlat, transform.nlon))
-    return (
-        _slice_len(h_slice, transform.nlat),
-        _slice_len(w_slice, transform.nlon),
-    )
-
-
 def get_lat_lon_sfnonet(
     params,
     in_chans: int,
@@ -410,9 +390,6 @@ def get_lat_lon_sfnonet(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
     )
     itrans = dist.get_isht(h, w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss")
-    disco_conv_cls = dist.get_disco_conv_cls()
-
-    local_img = _local_img_shape(trans_down)
 
     def get_pos_embed():
         pos_embed = nn.Parameter(torch.zeros(1, params.embed_dim, h, w))
@@ -423,7 +400,6 @@ def get_lat_lon_sfnonet(
     net = SphericalFourierNeuralOperatorNet(
         params,
         img_shape=img_shape,
-        local_img_shape=local_img,
         in_chans=in_chans,
         out_chans=out_chans,
         context_config=context_config,
@@ -432,7 +408,6 @@ def get_lat_lon_sfnonet(
         trans=trans,
         itrans=itrans,
         get_pos_embed=get_pos_embed,
-        disco_conv_cls=disco_conv_cls,
     )
     return net
 
@@ -561,7 +536,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             embed_dim_pos=0,
         ),
         global_layer_norm: bool = False,
-        local_img_shape: Optional[Tuple[int, int]] = None,
         num_layers: int = 12,
         use_mlp: int = True,
         mlp_ratio: float = 2.0,
@@ -592,7 +566,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         lora_alpha: float | None = None,
         spectral_lora_rank: int = 0,
         spectral_lora_alpha: float | None = None,
-        disco_conv_cls=None,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
@@ -617,15 +590,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             if hasattr(params, "img_shape_x") and hasattr(params, "img_shape_y")
             else img_shape
         )
-        self.local_img_shape = (
-            local_img_shape if local_img_shape is not None else self.img_shape
+        self._spatial_h_slice, self._spatial_w_slice = (
+            Distributed.get_instance().get_local_slices(self.img_shape)
         )
-        self._spatial_h_slice: slice | None = None
-        self._spatial_w_slice: slice | None = None
-        if self.local_img_shape != self.img_shape:
-            self._spatial_h_slice, self._spatial_w_slice = (
-                Distributed.get_instance().get_local_slices(self.img_shape)
-            )
         self.scale_factor = (
             params.scale_factor if hasattr(params, "scale_factor") else scale_factor
         )
@@ -670,7 +637,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             if hasattr(params, "encoder_layers")
             else encoder_layers
         )
-        self.pos_embed = params.pos_embed if hasattr(params, "pos_embed") else pos_embed
+        self._use_pos_embed = (
+            params.pos_embed if hasattr(params, "pos_embed") else pos_embed
+        )
         self.big_skip = params.big_skip if hasattr(params, "big_skip") else big_skip
         self.rank = params.rank if hasattr(params, "rank") else rank
         self.factorization = (
@@ -816,7 +785,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 forward_transform,
                 inverse_transform,
                 self.embed_dim,
-                img_shape=self.local_img_shape,
+                img_shape=self.img_shape,
                 context_config=context_config,
                 filter_type=block_filter_type,
                 operator_type=self.operator_type,
@@ -844,7 +813,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 lora_alpha=self.lora_alpha,
                 spectral_lora_rank=self.spectral_lora_rank,
                 spectral_lora_alpha=self.spectral_lora_alpha,
-                disco_conv_cls=disco_conv_cls,
             )
 
             self.blocks.append(block)
@@ -879,13 +847,15 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.decoder = nn.Sequential(*decoder_modules)
 
         # learned position embedding
-        if self.pos_embed:
+        if self._use_pos_embed:
             self.pos_embed = get_pos_embed()
+        else:
+            self.pos_embed = None
 
         if normalize_big_skip:
             self.norm_big_skip = ConditionalLayerNorm(
                 in_chans,
-                img_shape=self.local_img_shape,
+                img_shape=self.img_shape,
                 global_layer_norm=self.global_layer_norm,
                 context_config=context_config,
                 elementwise_affine=self.affine_norms,
@@ -918,11 +888,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         else:
             x = self.encoder(x)
 
-        if isinstance(getattr(self, "pos_embed", None), nn.Parameter):
-            pos: torch.Tensor = self.pos_embed
-            if self._spatial_h_slice is not None:
-                pos = pos[..., self._spatial_h_slice, self._spatial_w_slice]
-            x = x + pos
+        if self.pos_embed is not None:
+            x = x + self.pos_embed[..., self._spatial_h_slice, self._spatial_w_slice]
 
         # maybe clean the padding just in case
 

@@ -18,6 +18,7 @@ from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -474,9 +475,6 @@ def get_step(
 
 @pytest.mark.parallel
 def test_label_conditioned_step():
-    from fme.core.distributed.distributed import Distributed
-    from fme.core.distributed.parallel_tests.test_step import scatter_spatial
-
     dist = Distributed.get_instance()
     selector = get_label_conditioned_selector()
     step = get_step(selector, DEFAULT_IMG_SHAPE, all_labels={"a", "b"})
@@ -484,11 +482,8 @@ def test_label_conditioned_step():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples=1
     )
-    # Scatter to local spatial chunks when using spatial parallelism.
-    # TODO: use the scatter function from ModelTorchDistributed once it's
-    # TODO: implemented and tested there instead of duplicating the logic here.
-    input_data = scatter_spatial(input_data, DEFAULT_IMG_SHAPE)
-    next_step_input_data = scatter_spatial(next_step_input_data, DEFAULT_IMG_SHAPE)
+    input_data = dist.scatter_spatial(input_data, DEFAULT_IMG_SHAPE)
+    next_step_input_data = dist.scatter_spatial(next_step_input_data, DEFAULT_IMG_SHAPE)
     output = step.step(
         args=StepArgs(
             input=input_data,

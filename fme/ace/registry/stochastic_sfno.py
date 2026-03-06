@@ -18,7 +18,6 @@ from fme.core.models.conditional_sfno.sfnonet import (
 )
 
 
-# TODO: consider more distributed organization to avoid large allocation?
 def isotropic_noise(
     leading_shape: tuple[int, ...],
     lmax: int,  # length of the ℓ axis expected by isht (global)

@@ -9,6 +9,7 @@ from fme.core import metrics
 from fme.core.cuhpx.sht import SHT as CuHpxSHT
 from fme.core.cuhpx.sht import iSHT as CuHpxiSHT
 from fme.core.device import get_device
+from fme.core.distributed.distributed import Distributed
 from fme.core.hpx.reorder import get_reordering_xy_to_ring
 from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
 from fme.core.tensors import assert_dict_allclose
@@ -286,27 +287,14 @@ class LatLonOperations(GriddedOperations):
         mask_provider: MaskProviderABC = NullMaskProvider,
         grid: str = "legendre-gauss",
     ):
-        from fme.core.distributed.distributed import Distributed
-
-        self._dist = Distributed.get_instance()
-        if area_weights.ndim >= 2:
-            self._nlat = area_weights.shape[-2]
-            self._nlon = area_weights.shape[-1]
-            h_slice, w_slice = self._dist.get_local_slices((self._nlat, self._nlon))
-            local_weights = area_weights[..., h_slice, w_slice]
-            self._is_local = local_weights.shape != area_weights.shape
-        else:
-            self._nlat = 0
-            self._nlon = 0
-            local_weights = area_weights
-            self._is_local = False
-
-        if not self._is_local:
-            self._validate_area_weights(area_weights)
-
+        self._validate_area_weights(area_weights)
+        self._cpu_area_global = area_weights.to("cpu")
+        dist = Distributed.get_instance()
+        nlat, nlon = area_weights.shape[-2], area_weights.shape[-1]
+        h_slice, w_slice = dist.get_local_slices((nlat, nlon))
+        local_weights = area_weights[..., h_slice, w_slice]
         self._device_area = local_weights.to(get_device())
         self._cpu_area = local_weights.to("cpu")
-        self._cpu_area_global = area_weights.to("cpu")
         self._device_mask_provider = mask_provider.to(get_device())
         self._cpu_mask_provider = mask_provider.to("cpu")
         self._grid = grid
@@ -321,14 +309,7 @@ class LatLonOperations(GriddedOperations):
 
     @property
     def zonal_mean(self) -> Callable[[torch.Tensor], torch.Tensor]:
-        if self._is_local:
-            raise NotImplementedError(
-                "zonal_mean is not yet supported under spatial parallelism."
-            )
-        return self._zonal_mean
-
-    def _zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
-        return data.nanmean(dim=self.HORIZONTAL_DIMS[1])
+        return Distributed.get_instance().zonal_mean
 
     def _get_area_weights(
         self,
@@ -359,9 +340,7 @@ class LatLonOperations(GriddedOperations):
         local_sum = metrics.weighted_sum(
             data, area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
         )
-        if self._is_local:
-            return self._dist.spatial_reduce_sum(local_sum)
-        return local_sum
+        return Distributed.get_instance().spatial_reduce_sum(local_sum)
 
     def area_weighted_mean(
         self,
@@ -370,19 +349,7 @@ class LatLonOperations(GriddedOperations):
         name: str | None = None,
     ) -> torch.Tensor:
         area_weights = self._get_area_weights(data, name)
-        if self._is_local:
-            expanded_weights = area_weights.expand(data.shape)
-            data_clean = data.where(expanded_weights != 0.0, 0.0)
-            local_weighted_sum = (data_clean * expanded_weights).sum(
-                dim=self.HORIZONTAL_DIMS, keepdim=keepdim
-            )
-            local_weight_sum = expanded_weights.sum(
-                dim=self.HORIZONTAL_DIMS, keepdim=keepdim
-            )
-            global_weighted_sum = self._dist.spatial_reduce_sum(local_weighted_sum)
-            global_weight_sum = self._dist.spatial_reduce_sum(local_weight_sum)
-            return global_weighted_sum / global_weight_sum
-        return metrics.weighted_mean(
+        return Distributed.get_instance().weighted_mean(
             data, area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
         )
 
@@ -393,17 +360,9 @@ class LatLonOperations(GriddedOperations):
         keepdim: bool = False,
         name: str | None = None,
     ) -> torch.Tensor:
-        if self._is_local:
-            raise NotImplementedError(
-                "regional_area_weighted_mean is not yet supported "
-                "under spatial parallelism."
-            )
         regional_area_weights = self._get_area_weights(data, name, regional_weights)
-        return metrics.weighted_mean(
-            data,
-            regional_area_weights,
-            dim=self.HORIZONTAL_DIMS,
-            keepdim=keepdim,
+        return Distributed.get_instance().weighted_mean(
+            data, regional_area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
         )
 
     def area_weighted_gradient_magnitude_percent_diff(
@@ -412,36 +371,28 @@ class LatLonOperations(GriddedOperations):
         predicted: torch.Tensor,
         name: str | None = None,
     ):
-        if self._is_local:
-            raise NotImplementedError(
-                "area_weighted_gradient_magnitude_percent_diff is not yet "
-                "supported under spatial parallelism."
-            )
         area_weights = self._get_area_weights(truth, name)
-        return metrics.gradient_magnitude_percent_diff(
-            truth,
-            predicted,
-            weights=area_weights,
-            dim=self.HORIZONTAL_DIMS,
+        return Distributed.get_instance().gradient_magnitude_percent_diff(
+            truth, predicted, weights=area_weights, dim=self.HORIZONTAL_DIMS
         )
 
     def get_real_sht(self) -> nn.Module:
-        return self._dist.get_sht(
-            self._nlat,
-            self._nlon,
-            lmax=self._nlat,
-            mmax=self._nlon // 2 + 1,
-            grid=self._grid,
-        ).to(get_device())
+        nlat = self._cpu_area_global.shape[-2]
+        nlon = self._cpu_area_global.shape[-1]
+        return (
+            Distributed.get_instance()
+            .get_sht(nlat, nlon, lmax=nlat, mmax=nlon // 2 + 1, grid=self._grid)
+            .to(get_device())
+        )
 
     def get_real_isht(self) -> nn.Module:
-        return self._dist.get_isht(
-            self._nlat,
-            self._nlon,
-            lmax=self._nlat,
-            mmax=self._nlon // 2 + 1,
-            grid=self._grid,
-        ).to(get_device())
+        nlat = self._cpu_area_global.shape[-2]
+        nlon = self._cpu_area_global.shape[-1]
+        return (
+            Distributed.get_instance()
+            .get_isht(nlat, nlon, lmax=nlat, mmax=nlon // 2 + 1, grid=self._grid)
+            .to(get_device())
+        )
 
     def get_initialization_kwargs(self) -> dict[str, Any]:
         return {"area_weights": self._cpu_area_global}

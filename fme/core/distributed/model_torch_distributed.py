@@ -22,11 +22,14 @@ import os
 
 import torch
 import torch.distributed
+import torch.nn as nn
+import torch_harmonics.distributed as thd
 from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
 from fme.core.device import using_gpu, using_srun
 
+from ._gloo_patch import patch_gloo_alltoall
 from .base import DistributedBackend
 from .external.pnd_manager import DistributedManager
 from .non_distributed import DummyWrapper
@@ -57,7 +60,7 @@ class ModelTorchDistributed(DistributedBackend):
         w_size: int = 1,
         verbose: bool = False,
     ):
-        # Initialise PhysicsNeMo DistributedManager.
+        # Initialize PhysicsNeMo DistributedManager.
         DistributedManager.initialize()
         self._dm = DistributedManager()
 
@@ -108,7 +111,9 @@ class ModelTorchDistributed(DistributedBackend):
             self._device_id = self._local_rank
             torch.cuda.set_device(self._device_id)
 
-        self._thd_initialized = False
+        if not thd.is_initialized():
+            thd.init(self._h_group, self._w_group)
+        patch_gloo_alltoall()
 
         logger.info(
             "ModelTorchDistributed initialized: "
@@ -304,39 +309,50 @@ class ModelTorchDistributed(DistributedBackend):
             torch.distributed.all_reduce(tensor, group=self._spatial_group)
         return tensor
 
-    def _ensure_thd_initialized(self):
-        """Lazily init torch_harmonics.distributed and gloo patch."""
-        if not self._thd_initialized:
-            import torch_harmonics.distributed as thd
+    def weighted_mean(
+        self,
+        data: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+        keepdim: bool = False,
+    ) -> torch.Tensor:
+        from fme.core.metrics import weighted_sum
 
-            if not thd.is_initialized():
-                thd.init(self._h_group, self._w_group)
-            from fme.core.distributed._gloo_patch import patch_gloo_alltoall
+        local_weighted_sum = weighted_sum(data, weights, dim=dim, keepdim=keepdim)
+        local_weight_sum = weights.expand(data.shape).sum(dim=dim, keepdim=keepdim)
+        return self.spatial_reduce_sum(local_weighted_sum) / self.spatial_reduce_sum(
+            local_weight_sum
+        )
 
-            patch_gloo_alltoall()
-            self._thd_initialized = True
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError(
+            "zonal_mean is not yet supported under spatial parallelism."
+        )
+
+    def gradient_magnitude_percent_diff(
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+    ) -> torch.Tensor:
+        raise NotImplementedError(
+            "gradient_magnitude_percent_diff is not yet supported "
+            "under spatial parallelism."
+        )
 
     def get_sht(self, nlat, nlon, lmax, mmax, grid):
-        self._ensure_thd_initialized()
-        import torch_harmonics.distributed as thd
-
         return thd.DistributedRealSHT(
             nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
         ).float()
 
     def get_isht(self, nlat, nlon, lmax, mmax, grid):
-        self._ensure_thd_initialized()
-        import torch_harmonics.distributed as thd
-
         return thd.DistributedInverseRealSHT(
             nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
         ).float()
 
-    def get_disco_conv_cls(self):
-        self._ensure_thd_initialized()
-        import torch_harmonics.distributed as thd
-
-        return thd.DistributedDiscreteContinuousConvS2
+    def get_disco_conv_s2(self, *args, **kwargs) -> nn.Module:
+        return thd.DistributedDiscreteContinuousConvS2(*args, **kwargs)
 
     def shutdown(self):
         self.barrier()
