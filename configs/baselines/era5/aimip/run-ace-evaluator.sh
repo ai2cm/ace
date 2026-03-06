@@ -2,9 +2,9 @@
 
 set -e
 
-JOB_NAME="ace-aimip-inference-no-level0-aimip-dataset-trained-sst-forcing"
+JOB_NAME="ace-aimip-inference-skin-air-temp-7-only"
 JOB_GROUP="ace-aimip"
-EXISTING_RESULTS_DATASET="01KJPWEAA4ET75HMR81WFPMHZ0"  # this contains the checkpoint to use for inference
+EXISTING_RESULTS_DATASET="01KJZK9Y9XCSQA1WYCSRD7GJQ3"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="ace-evaluator-aimip-config-no-override.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
