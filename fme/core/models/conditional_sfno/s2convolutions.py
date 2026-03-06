@@ -169,13 +169,6 @@ class SpectralConvS2(nn.Module):
         assert self.inverse_transform.lmax == self.modes_lat
         assert self.inverse_transform.mmax == self.modes_lon
 
-        dist = Distributed.get_instance()
-        l_slice, m_slice = dist.get_local_slices((self.modes_lat, self.modes_lon))
-        l_start, l_stop, _ = l_slice.indices(self.modes_lat)
-        m_start, m_stop, _ = m_slice.indices(self.modes_lon)
-        self.modes_lat_local = l_stop - l_start
-        self.modes_lon_local = m_stop - m_start
-        self._l_slice = l_slice
 
         if scale == "auto":
             scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
