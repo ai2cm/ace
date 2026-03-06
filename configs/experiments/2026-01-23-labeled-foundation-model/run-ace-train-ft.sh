@@ -53,4 +53,5 @@ run_training() {
 }
 
 # run_training "train-labeled-combined-foundation-model-1step.yaml" "train-combined-foundation-with-era5-1step-n512-e5c5-all-datasets-1-ensemble-inline"
-run_training "train-labeled-combined-foundation-model-multi-step-ft-all-models.yaml" "train-combined-foundation-with-era5-1step-n512-e5c5-all-datasets-multi-step-FTv2" "place_holder" "01KJTABN7XJCCA6ME6X3T1MPWC"
+# run_training "train-labeled-combined-foundation-model-multi-step-ft-all-models.yaml" "train-combined-foundation-with-era5-1step-n512-e5c5-all-datasets-multi-step-FTv2" "place_holder" "01KJTABN7XJCCA6ME6X3T1MPWC"
+run_training "train-labeled-combined-foundation-model-multi-step-ft-era5-only.yaml" "train-combined-foundation-with-era5-1step-n512-e5c5-era5-only-correctors-multi-step-FTv2" "place_holder" "01KJTABN7XJCCA6ME6X3T1MPWC"
