@@ -113,13 +113,15 @@ def test_inactive_GlobalTimer_warning():
 @pytest.mark.filterwarnings("ignore:The GlobalTimer")
 def test_inactive_GlobalTimer_start():
     timer = GlobalTimer.get_instance()
-    timer.start("foo")
+    with pytest.raises(RuntimeError, match="outside of GlobalTimer context"):
+        timer.start("foo")
 
 
 @pytest.mark.filterwarnings("ignore:The GlobalTimer")
 def test_inactive_GlobalTimer_stop():
     timer = GlobalTimer.get_instance()
-    timer.stop()
+    with pytest.raises(RuntimeError, match="outside of GlobalTimer context"):
+        timer.stop()
 
 
 @pytest.mark.filterwarnings("ignore:The GlobalTimer")
