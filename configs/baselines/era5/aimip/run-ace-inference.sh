@@ -5,7 +5,7 @@ set -e
 JOB_NAME_BASE="ace-aimip-inference-aimip-skin-temp-only"
 JOB_GROUP="ace-aimip"
 # this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
-EXISTING_RESULTS_DATASET="01KJRJXX19R0NGR8BBY1BPT7DK"
+EXISTING_RESULTS_DATASET="01KJZK9Y9XCSQA1WYCSRD7GJQ3"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -61,19 +61,19 @@ launch_job () {
 }
 
 # same as above but use SST perturbed by +2K and +4K
-JOB_NAME="${JOB_NAME_BASE}-p4k-10-step"
+JOB_NAME="${JOB_NAME_BASE}-p4k-10-step-longer-training"
 OVERRIDE=""
 echo "Launching job: $JOB_NAME"
 launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P4K_CONFIG_PATH" "$OVERRIDE"
 
 # same as above but use SST perturbed by +2K and +4K
-JOB_NAME="${JOB_NAME_BASE}-p2k-10-step"
+JOB_NAME="${JOB_NAME_BASE}-p2k-10-step-longer-training"
 OVERRIDE=""
 echo "Launching job: $JOB_NAME"
 launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P2K_CONFIG_PATH" "$OVERRIDE"
 
 # same as above but use SST perturbed by +2K and +4K
-JOB_NAME="${JOB_NAME_BASE}-p0k-10-step"
+JOB_NAME="${JOB_NAME_BASE}-p0k-10-step-longer-training"
 OVERRIDE=""
 echo "Launching job: $JOB_NAME"
 launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P0K_CONFIG_PATH" "$OVERRIDE"
