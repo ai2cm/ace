@@ -18,6 +18,16 @@ def null_generator(num: int):
 
 @dataclasses.dataclass
 class ClosedInterval:
+    """
+    Defines a closed interval [start, stop] and provides utility methods for working
+    with coordinate tensors. The interval includes both the start and stop values
+    and stop must be greater than start.
+
+    Parameters:
+        start: The minimum value of the interval (inclusive).
+        stop: The maximum value of the interval (inclusive).
+    """
+
     start: float
     stop: float
 
@@ -26,6 +36,19 @@ class ClosedInterval:
 
     def __contains__(self, value: float):
         return self.start <= value <= self.stop
+
+    def __str__(self):
+        return f"ClosedInterval[{self.start}, {self.stop}]"
+
+    def slice_of(self, coords: torch.Tensor) -> slice:
+        mask = (coords >= self.start) & (coords <= self.stop)
+        if not mask.any():
+            raise ValueError(
+                f"Requested interval range {self} does not overlap with coordinate"
+                f" range [{coords.min().item()}, {coords.max().item()}]"
+            )
+        indices = mask.nonzero(as_tuple=True)[0]
+        return slice(indices[0].item(), indices[-1].item() + 1)
 
 
 def scale_slice(slice_: slice, scale: int) -> slice:
