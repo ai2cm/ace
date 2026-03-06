@@ -36,44 +36,33 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_initial_condition_times(
-    first_initial_condition_time: cftime.datetime,
+    batch_start_time: tuple[int, int, int, int, int, int],
+    calendar: str,
     n_initial_conditions: int,
-    ic_timedelta: datetime.timedelta = datetime.timedelta(hours=0),
+    separation_timedelta: datetime.timedelta = datetime.timedelta(hours=0),
+    model_timestep: datetime.timedelta = TIMESTEP,
 ) -> np.ndarray[cftime.datetime]:
     """Generate an array of initial condition times.
 
     Args:
-        first_initial_condition_time: The time of the first initial condition.
-        n_initial_conditions: The number of initial conditions.
-        ic_timedelta: The time between initial conditions.
+        batch_start_time: The start time of the first batch as a tuple of
+            year, month, day, hour, minute, second. The calendar is specified by
+            the calendar parameter. The first initial condition time will be the
+            batch_start_time minus the model timestep.
+        calendar: The calendar to use.
+        n_initial_conditions: The number of initial condition times to generate.
+        separation_timedelta: The time between initial condition times.
+        model_timestep: The timestep of the model.
 
     Returns:
         An array of initial condition times.
     """
-    return np.array(
-        [
-            first_initial_condition_time + ic_timedelta * i
-            for i in range(n_initial_conditions)
-        ]
-    )
-
-
-def get_first_initial_condition_time(
-    start_time: tuple[int, int, int, int, int, int], calendar: str
-) -> cftime.datetime:
-    """Get the first initial condition time for a given start time and calendar.
-
-    For the purposes of these tests, the first initial condition time is the
-    start time minus the timestep.
-
-    Args:
-        start_time: The start time.
-        calendar: The calendar to use.
-
-    Returns:
-        The first initial condition time.
-    """
-    return CALENDAR_CFTIME[calendar](*start_time) - TIMESTEP
+    base_datetime = CALENDAR_CFTIME[calendar](*batch_start_time)
+    initial_condition_times = []
+    for i in range(n_initial_conditions):
+        time = base_datetime + separation_timedelta * i - model_timestep
+        initial_condition_times.append(time)
+    return np.array(initial_condition_times)
 
 
 def test_data_writer_config_save_names():
@@ -214,11 +203,8 @@ class TestDataWriter:
     ):
         n_initial_conditions = 2
         start_time = (2020, 1, 1, 0, 0, 0)
-        first_initial_condition_time = get_first_initial_condition_time(
-            start_time, calendar
-        )
         initial_condition_times = get_initial_condition_times(
-            first_initial_condition_time, n_initial_conditions
+            start_time, calendar, n_initial_conditions
         )
         n_timesteps = 6
         writer = PairedDataWriter(
@@ -375,11 +361,8 @@ class TestDataWriter:
         n_samples = 2
         calendar = "julian"
         start_time = (2020, 1, 1, 0, 0, 0)
-        first_initial_condition_time = get_first_initial_condition_time(
-            start_time, calendar
-        )
         initial_condition_times = get_initial_condition_times(
-            first_initial_condition_time, n_samples
+            start_time, calendar, n_samples
         )
         writer = PairedDataWriter(
             str(tmp_path),
@@ -451,11 +434,8 @@ class TestDataWriter:
         n_samples = 2
         calendar = "julian"
         start_time = (2020, 1, 1, 0, 0, 0)
-        first_initial_condition_time = get_first_initial_condition_time(
-            start_time, calendar
-        )
         initial_condition_times = get_initial_condition_times(
-            first_initial_condition_time, n_samples
+            start_time, calendar, n_samples
         )
         writer = PairedDataWriter(
             str(tmp_path),
@@ -488,11 +468,8 @@ class TestDataWriter:
     def test_prediction_only_append_batch(self, sample_metadata, tmp_path, calendar):
         n_samples = 2
         start_time = (2020, 1, 1, 0, 0, 0)
-        first_initial_condition_time = get_first_initial_condition_time(
-            start_time, calendar
-        )
         initial_condition_times = get_initial_condition_times(
-            first_initial_condition_time, n_samples
+            start_time, calendar, n_samples
         )
         n_timesteps = 8
         coarsen_factor = 2
@@ -621,11 +598,8 @@ class TestDataWriter:
         n_samples = 2
         calendar = "julian"
         start_time = (2020, 1, 1, 0, 0, 0)
-        first_initial_condition_time = get_first_initial_condition_time(
-            start_time, calendar
-        )
         initial_condition_times = get_initial_condition_times(
-            first_initial_condition_time, n_samples, ic_timedelta=TIMESTEP
+            start_time, calendar, n_samples, separation_timedelta=TIMESTEP
         )
         n_timesteps = 8
         coarsen_factor = 2

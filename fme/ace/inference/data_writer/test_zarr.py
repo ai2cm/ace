@@ -6,10 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.inference.data_writer.test_data_writer import (
-    get_first_initial_condition_time,
-    get_initial_condition_times,
-)
+from fme.ace.inference.data_writer.test_data_writer import get_initial_condition_times
 from fme.ace.inference.data_writer.zarr import (
     SeparateICZarrWriterAdapter,
     ZarrWriterAdapter,
@@ -50,11 +47,8 @@ def test__get_ace_time_coords(calendar):
     n_samples = 2
     timestep = datetime.timedelta(hours=6)
     start_time = (2020, 1, 1, 0, 0, 0)
-    first_initial_condition_time = get_first_initial_condition_time(
-        start_time, calendar
-    )
     initial_condition_times = get_initial_condition_times(
-        first_initial_condition_time, n_samples, ic_timedelta=timestep
+        start_time, calendar, n_samples, separation_timedelta=timestep
     )
     batch_time = get_batch_time(
         n_batch_times=n_batch_times, n_initial_conditions=n_samples, calendar=calendar
