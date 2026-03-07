@@ -1,0 +1,2 @@
+
+fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP||01KJDH03MTDEKKJX3PND17EADV|run_ICx1-400yr|best_inference_ckpt|high|--not-preemptible||||h100

@@ -91,9 +91,9 @@ while read TRAIN_EXPER; do
     # Derive config tag and filename from STATUS
     # Example: if STATUS is "run_ICx1"
     # CURRENT_CONFIG_TAG becomes "ICx1"
-    # CURRENT_CONFIG_FILENAME becomes "evaluator-config-ICx1.yaml" (shared naming with eval workflow)
+    # CURRENT_CONFIG_FILENAME becomes "inference-config-ICx1.yaml" (shared naming with eval workflow)
     CURRENT_CONFIG_TAG=${STATUS#run_}
-    CURRENT_CONFIG_FILENAME="evaluator-config-${CURRENT_CONFIG_TAG}.yaml"
+    CURRENT_CONFIG_FILENAME="inference-config-${CURRENT_CONFIG_TAG}.yaml"
 
     JOB_GROUP="${JOB_GROUP}-inference_${CKPT}-${CURRENT_CONFIG_TAG}"
 
