@@ -32,7 +32,7 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - CLUSTER can be now be set for eval jobs
 - Add "a100" and "h100" as additional CLUSTER options
 - Allow use of `StandaloneComponentCheckpointsConfig` in eval
-- Update coupled config creation scripts for changes in [PR #814](https://github.com/ai2cm/ace/pull/814)
+- Update config creation scripts for changes in PRs [#814](https://github.com/ai2cm/ace/pull/814) and [#862](https://github.com/ai2cm/ace/pull/862)
 
 ### Fixed
 

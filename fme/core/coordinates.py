@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 import math
-import re
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import Literal, TypeVar
@@ -14,17 +13,12 @@ from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
 from fme.core.corrector.atmosphere import AtmosphereCorrector, AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrector, IceCorrectorConfig
-from fme.core.corrector.ocean import (
-    OceanCorrector,
-    OceanCorrectorConfig,
-    dz_from_idepth,
-)
+from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
-from fme.core.masking import StaticMasking
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -335,7 +329,17 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         return (integrand * pressure_thickness).sum(dim=-1) / GRAVITY
 
 
-LEVEL_PATTERN = re.compile(r"_(\d+)$")
+def dz_from_idepth(
+    idepth: torch.Tensor, deptho: torch.Tensor | None = None
+) -> torch.Tensor:
+    if deptho is not None:
+        z_top = idepth[..., :-1]
+        z_bot = idepth[..., 1:]
+        deptho = deptho.unsqueeze(-1)
+        dz = torch.clamp(deptho, min=z_top, max=z_bot) - z_top
+    else:
+        dz = idepth.diff(dim=-1)
+    return dz
 
 
 @dataclasses.dataclass
@@ -350,11 +354,15 @@ class DepthCoordinate(VerticalCoordinate):
             it must be one shorter than idepth. The mask may have additional dimensions
             before the vertical, which are assumed to be broadcastable to match the
             integrand when computing integrals.
+        deptho: optional sea floor depth in meters at each horizontal grid point.
+            When provided, layer thicknesses account for partial bottom cells.
+            Must be broadcastable to the spatial dimensions of ``mask``
+            (i.e. ``mask.shape[:-1]``).
     """
 
     idepth: torch.Tensor
     mask: torch.Tensor
-    surface_mask: torch.Tensor | None = None
+    deptho: torch.Tensor | None = None
 
     def __post_init__(self):
         if len(self.idepth.shape) != 1:
@@ -371,32 +379,15 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got idepth.shape: {self.idepth.shape} and mask.shape: "
                 f"{self.mask.shape}."
             )
-        self._dz: torch.Tensor | None = None
+        self._dz = dz_from_idepth(self.idepth, self.deptho)
+
+    @property
+    def dz(self) -> torch.Tensor:
+        return self._dz
 
     def __len__(self):
         """The number of vertical layer interfaces."""
         return len(self.idepth)
-
-    def get_mask(self) -> torch.Tensor:
-        return self.mask
-
-    def get_mask_level(self, level: int) -> torch.Tensor:
-        return self.mask.select(dim=-1, index=level)
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
-        match = LEVEL_PATTERN.search(name)
-        if match:
-            # 3D variable
-            level = int(match.group(1))
-            return self.get_mask_level(level)
-        else:
-            # 2D variable
-            if self.surface_mask is not None:
-                return self.surface_mask
-            return self.get_mask_level(0)
-
-    def get_idepth(self) -> torch.Tensor:
-        return self.idepth
 
     def build_corrector(
         self,
@@ -429,18 +420,6 @@ class DepthCoordinate(VerticalCoordinate):
     ) -> DeriveFnABC:
         return OceanDeriveFn(self, timestep, horizontal_coordinates)
 
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
-        """
-        Returns a StaticMasking object that fills in NaNs outside of mask
-        valid points, i.e. where the mask value is 0.
-
-        """
-        return StaticMasking(
-            mask_value=0,
-            fill_value=float("nan"),
-            mask=self,
-        )
-
     @property
     def dtype(self) -> torch.dtype:
         return self.idepth.dtype
@@ -454,14 +433,11 @@ class DepthCoordinate(VerticalCoordinate):
         return {"idepth": self.idepth.cpu().numpy()}
 
     def to(self, device: str) -> "DepthCoordinate":
-        idepth_on_device = self.idepth.to(device)
-        mask_on_device = self.mask.to(device)
-        if self.surface_mask is not None:
-            surface_mask_on_device = self.surface_mask.to(device)
-            return DepthCoordinate(
-                idepth_on_device, mask_on_device, surface_mask_on_device
-            )
-        return DepthCoordinate(idepth_on_device, mask_on_device)
+        return DepthCoordinate(
+            idepth=self.idepth.to(device),
+            mask=self.mask.to(device),
+            deptho=self.deptho.to(device) if self.deptho is not None else None,
+        )
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, DepthCoordinate):
@@ -471,13 +447,32 @@ class DepthCoordinate(VerticalCoordinate):
             torch.testing.assert_close(self.mask, other.mask)
         except AssertionError:
             return False
+        if (self.deptho is None) != (other.deptho is None):
+            return False
+        if self.deptho is not None and other.deptho is not None:
+            try:
+                torch.testing.assert_close(self.deptho, other.deptho)
+            except AssertionError:
+                return False
         return True
 
     def __repr__(self) -> str:
-        return f"DepthCoordinate(\n    idepth={self.idepth},\n    mask={self.mask}\n)"
+        parts = [
+            f"    idepth={self.idepth}",
+            f"    mask={self.mask}",
+        ]
+        if self.deptho is not None:
+            parts.append(f"    deptho={self.deptho}")
+        return "DepthCoordinate(\n" + ",\n".join(parts) + "\n)"
 
     def as_dict(self) -> TensorMapping:
-        return {"idepth": self.idepth, "mask": self.mask}
+        result: dict[str, torch.Tensor] = {
+            "idepth": self.idepth,
+            "mask": self.mask,
+        }
+        if self.deptho is not None:
+            result["deptho"] = self.deptho
+        return result
 
     def depth_integral(
         self,
@@ -508,10 +503,9 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        dz = dz_from_idepth(self.idepth, sea_floor_depth).double()
-        integral = (integrand.double() * dz * self.mask).nansum(dim=-1)
-        mask = self.get_mask_level(0).expand(integral.shape)
-        return integral.where(mask > 0, float("nan")).to(torch.float32)
+        integral = (integrand * self.dz * self.mask).nansum(dim=-1)
+        mask_0 = self.mask.select(dim=-1, index=0).expand(integral.shape)
+        return integral.where(mask_0 > 0, float("nan"))
 
 
 @dataclasses.dataclass

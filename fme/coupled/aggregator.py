@@ -12,6 +12,7 @@ from fme.ace.aggregator.inference.main import (
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
+from fme.ace.aggregator.inference.main import StepMeanEntry
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
@@ -370,10 +371,12 @@ class InferenceEvaluatorAggregator(
     ):
         self._record_ocean_step_20 = n_timesteps_ocean >= 20
         self._record_atmos_step_20 = n_timesteps_atmosphere >= 20
+
         self._aggregators = {
             "ocean": InferenceEvaluatorAggregator_(
                 dataset_info=dataset_info.ocean,
-                n_timesteps=n_timesteps_ocean,
+                n_ic_steps=1,
+                n_forward_steps=n_timesteps_ocean - 1,
                 initial_time=initial_time,
                 log_histograms=log_histograms,
                 log_video=log_video,
@@ -384,7 +387,9 @@ class InferenceEvaluatorAggregator(
                 log_global_mean_norm_time_series=log_global_mean_norm_time_series,
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
-                record_step_20=self._record_ocean_step_20,
+                log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
+                if self._record_ocean_step_20
+                else [],
                 channel_mean_names=ocean_channel_mean_names,
                 normalize=ocean_normalize,
                 save_diagnostics=save_diagnostics,
@@ -396,7 +401,8 @@ class InferenceEvaluatorAggregator(
             ),
             "atmosphere": InferenceEvaluatorAggregator_(
                 dataset_info=dataset_info.atmosphere,
-                n_timesteps=n_timesteps_atmosphere,
+                n_ic_steps=1,
+                n_forward_steps=n_timesteps_atmosphere - 1,
                 initial_time=initial_time,
                 log_histograms=log_histograms,
                 log_video=log_video,
@@ -407,7 +413,9 @@ class InferenceEvaluatorAggregator(
                 log_global_mean_norm_time_series=log_global_mean_norm_time_series,
                 monthly_reference_data=monthly_reference_data,
                 time_mean_reference_data=time_mean_reference_data,
-                record_step_20=self._record_atmos_step_20,
+                log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
+                if self._record_atmos_step_20
+                else [],
                 channel_mean_names=atmosphere_channel_mean_names,
                 normalize=atmosphere_normalize,
                 save_diagnostics=save_diagnostics,
@@ -479,11 +487,11 @@ class InferenceEvaluatorAggregator(
             + atmos_channel_mean * self._num_channels_atmos
         ) / (self._num_channels_ocean + self._num_channels_atmos)
         prefix = "mean_step_20_norm/weighted_rmse"
-        if self._record_atmos_step_20:
+        if f"{prefix}/channel_mean" in atmos_logs:
             atmos_logs[f"{prefix}/atmosphere_channel_mean"] = atmos_logs.pop(
                 f"{prefix}/channel_mean"
             )
-        if self._record_ocean_step_20:
+        if f"{prefix}/channel_mean" in ocean_logs:
             ocean_logs[f"{prefix}/ocean_channel_mean"] = ocean_logs.pop(
                 f"{prefix}/channel_mean"
             )

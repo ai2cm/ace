@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 from unittest.mock import patch
 
@@ -10,7 +11,7 @@ from fme.core.constants import (
     REFERENCE_SALINITY_PSU,
     SPECIFIC_HEAT_OF_WATER_CM4,
 )
-from fme.core.coordinates import DepthCoordinate
+from fme.core.coordinates import DepthCoordinate, dz_from_idepth
 from fme.core.corrector.ocean import (
     OceanCorrector,
     OceanCorrectorConfig,
@@ -18,7 +19,6 @@ from fme.core.corrector.ocean import (
     OceanSaltContentBudgetConfig,
     SeaIceFractionConfig,
     apply_geothermal_bottom_correction,
-    dz_from_idepth,
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.mask_provider import MaskProvider
@@ -32,42 +32,21 @@ NZ = 2
 _MASK = torch.ones(*IMG_SHAPE, NZ, device=DEVICE)
 _LAT, _LON = 2, 2
 _MASK[_LAT, _LON, :] = 0.0
+_IDEPTH = torch.Tensor([0, 5, 15], device=DEVICE)
 
 
+@dataclasses.dataclass
 class _MockDepth:
-    def __len__(self) -> int:
-        return len(self.get_idepth())
+    idepth: torch.Tensor = _IDEPTH
+    mask: torch.Tensor = _MASK
+    deptho: torch.Tensor | None = None
 
-    def get_mask(self) -> torch.Tensor:
-        return _MASK
+    @property
+    def dz(self) -> torch.Tensor:
+        return dz_from_idepth(self.idepth, self.deptho)
 
-    def get_mask_level(self, level: int):
-        return _MASK.select(-1, level)
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
-        if name.endswith("_1"):
-            return _MASK.select(-1, 1)
-        else:
-            return _MASK.select(-1, 0)
-
-    def get_idepth(self) -> torch.Tensor:
-        return torch.tensor([0, 5, 15], device=DEVICE)
-
-    def depth_integral(
-        self, integrand: torch.Tensor, sea_floor_depth: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        idepth = self.get_idepth()
-        dz = dz_from_idepth(idepth, sea_floor_depth)
-        return torch.nansum(_MASK * integrand * dz, dim=-1)
-
-    def build_output_masker(self):
-        raise NotImplementedError
-
-    def to(self, device: str) -> "_MockDepth":
-        return self
-
-
-_VERTICAL_COORD = _MockDepth()
+    def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
+        return torch.nansum(self.mask * integrand * self.dz, dim=-1)
 
 
 def test_ocean_corrector_raises_on_missing_forcing_keys_in_input():
@@ -88,7 +67,8 @@ def test_ocean_corrector_force_positive():
     config = OceanCorrectorConfig(force_positive_names=["so_0", "so_1"])
     ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
     timestep = datetime.timedelta(seconds=3600)
-    corrector = OceanCorrector(config, ops, _VERTICAL_COORD, timestep)
+    vertical_coord = _MockDepth()
+    corrector = OceanCorrector(config, ops, vertical_coord, timestep)
     input_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
     input_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
     gen_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
@@ -246,7 +226,8 @@ def test_from_state_migrates_sea_ice_thickness_name_none():
 
 def test_apply_geothermal_bottom_correction_modifies_only_bottom():
     """Geothermal correction should only warm the deepest wet layer."""
-    idepth = _VERTICAL_COORD.get_idepth()
+    vertical_coord = _MockDepth()
+    idepth = vertical_coord.idepth
     dz = idepth.diff(dim=-1)
 
     gen_data = {
@@ -261,10 +242,10 @@ def test_apply_geothermal_bottom_correction_modifies_only_bottom():
     ssf = torch.ones(IMG_SHAPE, device=DEVICE)
     forcing_data = {"hfgeou": hfgeou, "sea_surface_fraction": ssf}
 
-    gen = OceanData(gen_data, _VERTICAL_COORD)
+    gen = OceanData(gen_data, vertical_coord)
     forcing = OceanData(forcing_data)
     dt = 5 * 86400.0
-    apply_geothermal_bottom_correction(gen, forcing, _VERTICAL_COORD, dt)
+    apply_geothermal_bottom_correction(gen, forcing, vertical_coord, dt)
 
     expected_dT = (
         hfgeou * ssf * dt / (DENSITY_OF_WATER_CM4 * SPECIFIC_HEAT_OF_WATER_CM4)
@@ -416,12 +397,12 @@ def test_ocean_heat_content_correction_dz_3d():
     mask_provider = MaskProvider(masks)
     ops = LatLonOperations(torch.ones(size=[3, 3]), mask_provider)
 
-    idepth = torch.tensor([2.5, 10, 20])
-    depth_coordinate = DepthCoordinate(idepth, mask)
-
     sea_surface_fraction = mask[:, :, :, 0]
     deptho = torch.full((nsamples, nlat, nlon), 15.0)
     deptho[:, 0, 0] = 10.0
+
+    idepth = torch.tensor([2.5, 10, 20])
+    depth_coordinate = DepthCoordinate(idepth, mask, deptho)
 
     forcing_data_dict = {
         "hfgeou": torch.ones(nsamples, nlat, nlon),
@@ -598,7 +579,7 @@ def _mld_test_fixtures():
     masks["mask_2d"] = mask[..., 0]
     mask_provider = MaskProvider(masks)
     ops = LatLonOperations(torch.ones(size=[_MLD_NLAT, _MLD_NLON]), mask_provider)
-    depth_coordinate = DepthCoordinate(_MLD_IDEPTH, mask)
+    depth_coordinate = DepthCoordinate(_MLD_IDEPTH, mask, _MLD_DEPTHO)
     return depth_coordinate, ops, mask
 
 
@@ -637,8 +618,9 @@ def test_ocean_heat_content_correction_mld():
     # Run this diagnostic in float64 to verify the MLD algorithm itself is
     # mathematically consistent when precision is sufficiently high.
     depth_coordinate = DepthCoordinate(
-        depth_coordinate.get_idepth().double(),
-        depth_coordinate.get_mask().double(),
+        depth_coordinate.idepth.double(),
+        depth_coordinate.mask.double(),
+        depth_coordinate.deptho.double(),
     )
     input_data = {k: v.double() for k, v in input_data.items()}
     gen_data = {k: v.double() for k, v in gen_data.items()}

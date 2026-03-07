@@ -1,5 +1,5 @@
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Protocol
 
@@ -38,25 +38,22 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 
 
 class HasOceanDepthIntegral(Protocol):
-    def __len__(self) -> int: ...
+    @property
+    def idepth(self) -> torch.Tensor: ...
 
-    def get_mask(self) -> torch.Tensor: ...
+    @property
+    def mask(self) -> torch.Tensor: ...
 
-    def get_mask_level(self, level: int) -> torch.Tensor: ...
+    @property
+    def deptho(self) -> torch.Tensor | None: ...
 
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None: ...
-
-    def get_idepth(self) -> torch.Tensor: ...
+    @property
+    def dz(self) -> torch.Tensor: ...
 
     def depth_integral(
         self,
         integrand: torch.Tensor,
-        sea_floor_depth: torch.Tensor | None = None,
     ) -> torch.Tensor: ...
-
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
-
-    def to(self, device: str) -> "HasOceanDepthIntegral": ...
 
 
 class HasCellAreaInMetersSquared(Protocol):
@@ -133,13 +130,13 @@ class OceanData:
     def depth_interface(self) -> torch.Tensor:
         if self._depth_coordinate is None:
             raise RuntimeError(_MISSING_DEPTH_COORD_MSG)
-        return self._depth_coordinate.get_idepth()
+        return self._depth_coordinate.idepth
 
     @property
     def valid_mask(self) -> torch.Tensor:
         if self._depth_coordinate is None:
             raise RuntimeError(_MISSING_DEPTH_COORD_MSG)
-        return self._depth_coordinate.get_mask()
+        return self._depth_coordinate.mask
 
     @property
     def sea_water_potential_temperature(self) -> torch.Tensor:
@@ -179,19 +176,11 @@ class OceanData:
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean heat content."
             )
-        try:
-            return self._depth_coordinate.depth_integral(
-                self.sea_water_potential_temperature
-                * SPECIFIC_HEAT_OF_WATER_CM4
-                * DENSITY_OF_WATER_CM4,
-                sea_floor_depth=self.sea_floor_depth,
-            )
-        except KeyError:
-            return self._depth_coordinate.depth_integral(
-                self.sea_water_potential_temperature
-                * SPECIFIC_HEAT_OF_WATER_CM4
-                * DENSITY_OF_WATER_CM4,
-            )
+        return self._depth_coordinate.depth_integral(
+            self.sea_water_potential_temperature
+            * SPECIFIC_HEAT_OF_WATER_CM4
+            * DENSITY_OF_WATER_CM4
+        )
 
     @property
     def ocean_salt_content(self) -> torch.Tensor:
@@ -201,15 +190,9 @@ class OceanData:
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean salt content."
             )
-        try:
-            return self._depth_coordinate.depth_integral(
-                self.sea_water_salinity * DENSITY_OF_WATER_CM4,
-                sea_floor_depth=self.sea_floor_depth,
-            )
-        except KeyError:
-            return self._depth_coordinate.depth_integral(
-                self.sea_water_salinity * DENSITY_OF_WATER_CM4
-            )
+        return self._depth_coordinate.depth_integral(
+            self.sea_water_salinity * DENSITY_OF_WATER_CM4
+        )
 
     @property
     def water_flux_into_sea_water(self) -> torch.Tensor:

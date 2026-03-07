@@ -275,20 +275,6 @@ class AreaWeightedMean(Protocol):
     ) -> torch.Tensor: ...
 
 
-def dz_from_idepth(
-    idepth: torch.Tensor, sea_floor_depth: torch.Tensor | None = None
-) -> torch.Tensor:
-    if sea_floor_depth is not None:
-        z_top = idepth[..., :-1]
-        z_bot = idepth[..., 1:]
-        sea_floor_depth = sea_floor_depth.unsqueeze(-1)
-        dz = torch.clamp(sea_floor_depth, min=z_top, max=z_bot) - z_top
-        dz = dz.where(dz > 0, float("nan"))
-    else:
-        dz = idepth.diff(dim=-1)
-    return dz
-
-
 def _force_conserve_ocean_heat_content(
     input_data: TensorMapping,
     gen_data: TensorMapping,
@@ -455,12 +441,6 @@ def _apply_mld_heat_correction(
 ) -> None:
     """Distribute energy deficit within the mixed layer (modifies *gen* in place)."""
     delta_E = global_input_ohc + expected_change - global_gen_ohc
-    deptho: torch.Tensor | None
-    try:
-        deptho = gen.sea_floor_depth
-    except KeyError:
-        deptho = None
-    dz = dz_from_idepth(gen.depth_interface, deptho)
     total_active = mld_weights.sum(dim=-1)  # (B, Y, X)
     Ah_mean = area_weighted_mean(
         total_active,
@@ -474,7 +454,7 @@ def _apply_mld_heat_correction(
             Ah_mean.unsqueeze(-1)
             * DENSITY_OF_WATER_CM4
             * SPECIFIC_HEAT_OF_WATER_CM4
-            * dz
+            * vertical_coordinate.dz
         )
     ).nan_to_num()
     n_levels = gen.sea_water_potential_temperature.shape[-1]
@@ -600,12 +580,7 @@ def _apply_mld_salt_correction(
 ) -> None:
     """Distribute salt deficit within the mixed layer (modifies *gen* in place)."""
     delta_S = global_input_salt_content + expected_change - global_gen_salt_content
-    deptho: torch.Tensor | None
-    try:
-        deptho = gen.sea_floor_depth
-    except KeyError:
-        deptho = None
-    dz = dz_from_idepth(gen.depth_interface, deptho)
+    dz = vertical_coordinate.dz
     total_active = mld_weights.sum(dim=-1)  # (B, Y, X)
     Ah_mean = area_weighted_mean(
         total_active,
@@ -645,8 +620,8 @@ def compute_mld_weights_from_ocean_data(
     S = gen.sea_water_salinity  # (B, Y, X, Z)
     density = jmd95_potential_density(S, theta)
 
-    idepth = vertical_coordinate.get_idepth()
-    mask = vertical_coordinate.get_mask()
+    idepth = vertical_coordinate.idepth
+    mask = vertical_coordinate.mask
     deptho = forcing.sea_floor_depth
 
     mld_2d = compute_mld(density, idepth, deptho, mask)
@@ -676,8 +651,8 @@ def compute_mld_soft_weights_from_ocean_data(
     S = gen.sea_water_salinity  # (B, Y, X, Z)
     density = jmd95_potential_density(S, theta)
 
-    idepth = vertical_coordinate.get_idepth()
-    mask = vertical_coordinate.get_mask()
+    idepth = vertical_coordinate.idepth
+    mask = vertical_coordinate.mask
     deptho = forcing.sea_floor_depth
 
     mld_2d = compute_mld_soft(density, idepth, deptho, mask, tau=tau)
@@ -703,13 +678,8 @@ def apply_geothermal_bottom_correction(
         vertical_coordinate: Provides interface depths and ocean mask.
         timestep_seconds: Model timestep in seconds.
     """
-    mask = vertical_coordinate.get_mask()  # broadcastable to (B, Y, X, Z)
-    deptho: torch.Tensor | None
-    try:
-        deptho = gen.sea_floor_depth
-    except KeyError:
-        deptho = None
-    dz = dz_from_idepth(gen.depth_interface, deptho)
+    mask = vertical_coordinate.mask
+    dz = vertical_coordinate.dz
 
     wet_count = mask.sum(dim=-1, keepdim=True)
     cumulative = mask.cumsum(dim=-1)
