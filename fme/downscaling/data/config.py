@@ -23,7 +23,7 @@ from fme.downscaling.data.datasets import (
     PairedBatchData,
     PairedGriddedData,
 )
-from fme.downscaling.data.topography import (
+from fme.downscaling.data.static import (
     StaticInputs,
     get_normalized_topography,
     get_topography_downscale_factor,
