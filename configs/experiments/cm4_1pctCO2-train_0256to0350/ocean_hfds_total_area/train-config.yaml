@@ -80,6 +80,7 @@ optimization:
 stepper_training:
   loss:
     type: MSE
+stepper:
   input_masking:
     mask_value: 0
     fill_value: 0.0
@@ -95,7 +96,6 @@ stepper_training:
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
       - total_frozen_precipitation_rate
-stepper:
   step:
     type: single_module
     config:
