@@ -6,7 +6,13 @@ from typing import Any, Literal, Protocol
 import dacite
 import torch
 
-from fme.core.constants import FREEZING_TEMPERATURE_KELVIN
+from fme.core.atmosphere_data import AtmosphereData
+from fme.core.constants import (
+    FREEZING_TEMPERATURE_KELVIN,
+    LATENT_HEAT_OF_VAPORIZATION,
+    SPECIFIC_HEAT_OF_LIQUID_WATER_CM4,
+    SPECIFIC_HEAT_OF_WATER_CM4,
+)
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
@@ -79,11 +85,29 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
+@dataclasses.dataclass
+class SurfaceEnergyFluxCorrectionConfig:
+    """Configuration for correcting the generated hfds using a residual
+    prediction approach with atmosphere-derived surface energy fluxes.
+
+    The correction is: corrected_hfds = gen_hfds + ocean_fraction * net_flux,
+    where net_flux is the net surface energy flux computed from atmospheric
+    forcing variables and generated SST. The ocean_fraction naturally zeroes
+    out the correction on land and reduces it under sea ice.
+
+    Parameters:
+        method: Method to use. The available option is "residual_prediction".
+    """
+
+    method: Literal["residual_prediction"]
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig:
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
+    surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
 
     @classmethod
@@ -141,6 +165,8 @@ class OceanCorrector(CorrectorABC):
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.sea_ice_fraction_correction is not None:
             gen_data = self._config.sea_ice_fraction_correction(gen_data, input_data)
+        if self._config.surface_energy_flux_correction is not None:
+            gen_data = _correct_hfds_residual(input_data, gen_data, forcing_data)
         if self._config.ocean_heat_content_correction is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
@@ -158,6 +184,57 @@ class OceanCorrector(CorrectorABC):
                 self._config.ocean_heat_content_correction.constant_unaccounted_heating,
             )
         return dict(gen_data)
+
+
+def _compute_ocean_net_surface_energy_flux(
+    forcing_data: TensorMapping,
+    sst: torch.Tensor,
+) -> torch.Tensor:
+    """Compute the net surface energy flux into the ocean from atmospheric
+    forcing variables and the sea surface temperature.
+
+    This extends the atmosphere net surface energy flux with SST-dependent
+    heat transport by precipitation and evaporation.
+    """
+    atmos = AtmosphereData(forcing_data)
+    base_flux = atmos.net_surface_energy_flux
+    precip_heat_flux_ocean = (
+        SPECIFIC_HEAT_OF_WATER_CM4
+        * atmos.precipitation_rate
+        * (sst - FREEZING_TEMPERATURE_KELVIN)
+    )
+    evap_heat_flux = (
+        SPECIFIC_HEAT_OF_LIQUID_WATER_CM4
+        * (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
+        * (sst - FREEZING_TEMPERATURE_KELVIN)
+    )
+    return base_flux + precip_heat_flux_ocean - evap_heat_flux
+
+
+def _correct_hfds_residual(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    forcing_data: TensorMapping,
+) -> TensorDict:
+    """Apply residual prediction correction to the generated hfds.
+
+    corrected_hfds = gen_hfds + ocean_fraction * net_surface_energy_flux
+
+    The ocean_fraction naturally zeroes the correction on land and reduces
+    it under sea ice.
+    """
+    input = OceanData(input_data)
+    ocean_fraction = input.ocean_fraction
+    net_flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data, input.sea_surface_temperature
+    )
+    out = dict(gen_data)
+    if "hfds" in gen_data:
+        hfds_name = "hfds"
+    else:
+        hfds_name = "hfds_total_area"
+    out[hfds_name] = gen_data[hfds_name] + ocean_fraction * net_flux
+    return out
 
 
 class AreaWeightedMean(Protocol):

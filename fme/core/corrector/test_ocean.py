@@ -10,6 +10,8 @@ from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     SeaIceFractionConfig,
+    SurfaceEnergyFluxCorrectionConfig,
+    _compute_ocean_net_surface_energy_flux,
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.mask_provider import MaskProvider
@@ -195,6 +197,63 @@ def test_from_state_migrates_sea_ice_thickness_name_none():
     config = OceanCorrectorConfig.from_state(state)
     assert config.sea_ice_fraction_correction is not None
     assert config.sea_ice_fraction_correction.zero_where_ice_free_names == []
+
+
+def _make_atmos_forcing_data(shape, device=DEVICE):
+    """Build atmosphere forcing tensors needed for the surface energy flux
+    correction tests."""
+    return {
+        "DSWRFsfc": torch.full(shape, 200.0, device=device),
+        "USWRFsfc": torch.full(shape, 50.0, device=device),
+        "DLWRFsfc": torch.full(shape, 300.0, device=device),
+        "ULWRFsfc": torch.full(shape, 350.0, device=device),
+        "LHTFLsfc": torch.full(shape, 100.0, device=device),
+        "SHTFLsfc": torch.full(shape, 20.0, device=device),
+        "PRATEsfc": torch.full(shape, 1e-4, device=device),
+        "total_frozen_precipitation_rate": torch.full(shape, 1e-5, device=device),
+    }
+
+
+def test_surface_energy_flux_correction():
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="residual_prediction"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = OceanCorrector(config, ops, None, timestep)
+
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    sea_ice_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    sea_ice_fraction[0, :] = 0.3
+    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    land_fraction[-1, :] = 1.0
+
+    gen_data = {
+        "sst": sst,
+        "hfds": gen_hfds,
+        "sea_ice_fraction": sea_ice_fraction,
+    }
+    forcing_data = {
+        "land_fraction": land_fraction,
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {**forcing_data, **gen_data}
+
+    ocean_fraction = 1 - land_fraction - sea_ice_fraction
+    expected_net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
+    expected_hfds = gen_hfds + ocean_fraction * expected_net_flux
+
+    corrected = corrector(input_data, gen_data, forcing_data)
+    torch.testing.assert_close(corrected["hfds"], expected_hfds)
+    # on land ocean_fraction is 0, so hfds is unchanged
+    torch.testing.assert_close(corrected["hfds"][-1, :], gen_hfds[-1, :])
+    # with sea ice, correction is reduced relative to ice-free rows
+    ice_row_correction = (corrected["hfds"][0, 0] - gen_hfds[0, 0]).abs()
+    open_row_correction = (corrected["hfds"][1, 0] - gen_hfds[1, 0]).abs()
+    assert ice_row_correction < open_row_correction
 
 
 @pytest.mark.parametrize(
