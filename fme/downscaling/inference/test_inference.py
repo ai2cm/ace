@@ -279,7 +279,9 @@ def checkpointed_model_config(
     topography_path = (
         f"{loader_config.coarse[0].data_path.replace('coarse', 'fine')}/data.nc"
     )
-    static_inputs = StaticInputs([get_normalized_static_input(topography_path)])
+    static_inputs = StaticInputs(
+        [get_normalized_static_input(topography_path, "HGTsfc")]
+    )
     model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"

@@ -87,7 +87,7 @@ class StaticInput:
         }
 
 
-def get_normalized_static_input(path: str, field_name: str = "HGTsfc"):
+def get_normalized_static_input(path: str, field_name: str):
     if path.endswith(".zarr"):
         static_input = xr.open_zarr(path, mask_and_scale=False)[field_name]
     else:

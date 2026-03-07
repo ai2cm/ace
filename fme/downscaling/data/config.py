@@ -535,11 +535,11 @@ class PairedDataLoaderConfig:
                         f"'{first_config.data_path}/{first_config.file_pattern}'."
                     )
                 fine_topography = StaticInputs(
-                    fields=[get_normalized_static_input(raw_paths[0])]
+                    fields=[get_normalized_static_input(raw_paths[0], "HGTsfc")],
                 )
             else:
                 fine_topography = StaticInputs(
-                    fields=[get_normalized_static_input(self.topography)]
+                    fields=[get_normalized_static_input(self.topography, "HGTsfc")]
                 )
 
             fine_topography = fine_topography.to_device()
