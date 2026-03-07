@@ -112,3 +112,9 @@ class DummyDataset(DatasetABC):
     def set_epoch(self, epoch: int):
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(epoch))
         self._epoch = epoch
+        # Keep dummy data shape in sync with sample_n_times (schedule may vary by epoch)
+        shape = tuple(s.size for s in self._horizontal_size)
+        full_shape = (self.sample_n_times,) + shape
+        self._dummy_dict = {
+            "__dummy__": torch.zeros(full_shape, device=torch.device("cpu"))
+        }
