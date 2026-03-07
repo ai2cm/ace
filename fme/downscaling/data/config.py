@@ -202,6 +202,12 @@ class DataLoaderConfig:
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
+        if self.topography is not None:
+            raise ValueError(
+                "The `topography` field on DataLoaderConfig is deprecated and will be "
+                "removed in a future release. Pass static_inputs via the trainer "
+                "configuration's `static_inputs` field instead."
+            )
 
     @property
     def full_config(self) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
@@ -422,6 +428,12 @@ class PairedDataLoaderConfig:
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
+        if self.topography is not None:
+            raise ValueError(
+                "The `topography` field on PairedDataLoaderConfig is deprecated and "
+                "will be removed in a future release. The data loader will "
+                "automatically load topography from the first fine data file instead."
+            )
 
     def _first_data_config(
         self,
