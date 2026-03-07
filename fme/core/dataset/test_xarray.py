@@ -981,32 +981,58 @@ def test__get_vertical_coordinate_hybrid_sigma_pressure():
     assert vertical_coordinate.bk[0] == 0.5
 
 
-def test__get_vertical_coordinate_depth_no_mask():
-    data = xr.Dataset({"idepth_0": 1.0, "idepth_1": 2.0})
+@pytest.mark.parametrize("has_deptho", [False, True], ids=["no_deptho", "with_deptho"])
+def test__get_vertical_coordinate_depth_no_mask(has_deptho):
+    data_vars: dict = {"idepth_0": 1.0, "idepth_1": 2.0}
+    if has_deptho:
+        data_vars["deptho"] = 1.5
+    data = xr.Dataset(data_vars)
     vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
     assert isinstance(vertical_coordinate, DepthCoordinate)
     assert vertical_coordinate.idepth[0] == 1.0
     assert vertical_coordinate.mask[0] == 1.0
+    if has_deptho:
+        assert vertical_coordinate.deptho is not None
+        assert float(vertical_coordinate.deptho) == 1.5
+    else:
+        assert vertical_coordinate.deptho is None
 
 
-def test__get_vertical_coordinate_depth_with_lat_dependent_mask():
-    data = xr.Dataset(
-        data_vars={
-            "idepth_0": 1.0,
-            "idepth_1": 2.0,
-            "idepth_2": 3.0,
-            "mask_0": ("lat", np.array([1.0, 1.0])),
-            "mask_1": ("lat", np.array([0.0, 1.0])),
-        },
-        coords={
-            "lat": np.array([1.0, 2.0]),
-        },
-    )
+@pytest.mark.parametrize("has_deptho", [False, True], ids=["no_deptho", "with_deptho"])
+def test__get_vertical_coordinate_depth_with_lat_dependent_mask(has_deptho):
+    data_vars: dict = {
+        "idepth_0": 1.0,
+        "idepth_1": 2.0,
+        "idepth_2": 3.0,
+        "mask_0": ("lat", np.array([1.0, 1.0])),
+        "mask_1": ("lat", np.array([0.0, 1.0])),
+    }
+    if has_deptho:
+        data_vars["deptho"] = ("lat", np.array([2.5, 3.0]))
+    data = xr.Dataset(data_vars, coords={"lat": np.array([1.0, 2.0])})
     vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
     assert isinstance(vertical_coordinate, DepthCoordinate)
     assert vertical_coordinate.idepth[0] == 1.0
     assert vertical_coordinate.idepth.shape == (3,)
     assert vertical_coordinate.mask.shape == (2, 2)
+    if has_deptho:
+        assert vertical_coordinate.deptho is not None
+        assert vertical_coordinate.deptho.shape == (2,)
+    else:
+        assert vertical_coordinate.deptho is None
+
+
+def test__get_vertical_coordinate_depth_with_time_dependent_deptho():
+    data = xr.Dataset(
+        data_vars={
+            "idepth_0": 1.0,
+            "idepth_1": 2.0,
+            "deptho": ("time", np.array([1.5, 1.5])),
+        },
+        coords={"time": np.array([1.0, 2.0])},
+    )
+    with pytest.raises(ValueError, match="'deptho' must be time-independent"):
+        _get_vertical_coordinate(data, dtype=None)
 
 
 def test__get_vertical_coordinate_depth_with_time_dependent_mask():
