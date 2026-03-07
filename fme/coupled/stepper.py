@@ -1262,12 +1262,14 @@ class CoupledStepper:
         Predict multiple steps forward given initial condition and reference data.
         """
         gen_data = self._predict(initial_condition, forcing, compute_derived_variables)
+        n_ocean_times = gen_data.ocean_data.n_timesteps + self.ocean.n_ic_timesteps
+        n_atmos_times = (
+            gen_data.atmosphere_data.n_timesteps + self.atmosphere.n_ic_timesteps
+        )
         forcing_sliced = CoupledBatchData(
-            ocean_data=forcing.ocean_data.select_time_slice(
-                slice(0, gen_data.ocean_data.n_timesteps)
-            ),
+            ocean_data=forcing.ocean_data.select_time_slice(slice(0, n_ocean_times)),
             atmosphere_data=forcing.atmosphere_data.select_time_slice(
-                slice(0, gen_data.atmosphere_data.n_timesteps)
+                slice(0, n_atmos_times)
             ),
         )
         atmos_forward_data = self.atmosphere.get_forward_data(
