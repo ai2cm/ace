@@ -22,7 +22,7 @@ class StaticInput:
             self.coords.lon
         ):
             raise ValueError(
-                f"Topography data shape {self.data.shape} does not match "
+                f"Topography data shape {self.data.shape} does not match lat/lon"
                 f"coordinates shape {(len(self.coords.lat), len(self.coords.lon))}"
             )
 
@@ -111,32 +111,6 @@ def get_normalized_static_input(path: str, field_name: str):
         data=torch.tensor(static_input_normalized.values, dtype=torch.float32),
         coords=coords,
     )
-
-
-def get_field_downscale_factor(
-    field_shape: tuple[int, ...], data_coords_shape: tuple[int, ...]
-):
-    if len(field_shape) != 2 or len(data_coords_shape) != 2:
-        raise ValueError(
-            f"Expected 2D shapes for field shape (got {field_shape}) and "
-            f"data coordinates shape (got {data_coords_shape})."
-        )
-    if (
-        field_shape[0] % data_coords_shape[0] != 0
-        or field_shape[1] % data_coords_shape[1] != 0
-    ):
-        raise ValueError(
-            f"Field shape {field_shape} must be evenly "
-            f"divisible by horizontal shape {data_coords_shape}"
-        )
-    field_downscale_factor_0 = field_shape[0] // data_coords_shape[0]
-    field_downscale_factor_1 = field_shape[1] // data_coords_shape[1]
-    if field_downscale_factor_0 != field_downscale_factor_1:
-        raise ValueError(
-            f"Field shape {field_shape} must have the same scale factor "
-            "between lat and lon dimensions."
-        )
-    return field_downscale_factor_0
 
 
 @dataclasses.dataclass

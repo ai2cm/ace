@@ -23,11 +23,7 @@ from fme.downscaling.data.datasets import (
     PairedBatchData,
     PairedGriddedData,
 )
-from fme.downscaling.data.static import (
-    StaticInputs,
-    get_field_downscale_factor,
-    get_normalized_static_input,
-)
+from fme.downscaling.data.static import StaticInputs, get_normalized_static_input
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
 
@@ -134,6 +130,18 @@ def _full_configs(
         else:
             all_configs.append(config)
     return all_configs
+
+
+def _check_fine_res_static_input_compatibility(
+    static_input_shape: tuple[int, int], data_coords_shape: tuple[int, int]
+) -> None:
+    for static, coord in zip(static_input_shape, data_coords_shape):
+        if static != coord:
+            raise ValueError(
+                f"Static input shape {static_input_shape} is not compatible with "
+                f"data coordinates shape {data_coords_shape}. Static input dimensions "
+                "must match fine resolution coordinate dimensions."
+            )
 
 
 @dataclasses.dataclass
@@ -543,18 +551,10 @@ class PairedDataLoaderConfig:
                 )
 
             fine_topography = fine_topography.to_device()
-            if (
-                get_field_downscale_factor(
-                    fine_topography.shape,
-                    properties_fine.horizontal_coordinates.shape,
-                )
-                != 1
-            ):
-                raise ValueError(
-                    f"Fine topography shape {fine_topography.shape} does not match "
-                    f"fine data shape {properties_fine.horizontal_coordinates.shape}."
-                )
-
+            _check_fine_res_static_input_compatibility(
+                fine_topography.shape,
+                properties_fine.horizontal_coordinates.shape,
+            )
             fine_topography = fine_topography.subset_latlon(
                 lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
             )
