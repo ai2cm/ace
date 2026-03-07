@@ -1,6 +1,6 @@
 experiment_dir: /results
-n_coupled_steps: 73
-coupled_steps_in_memory: 5
+n_coupled_steps: 29200
+coupled_steps_in_memory: 20
 checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
@@ -8,7 +8,7 @@ data_writer:
     save_monthly_files: false
     names:
       - sst
-      - sea_ice_fraction
+      - ocean_sea_ice_fraction
       - sea_ice_volume
   atmosphere:
     save_prediction_files: false
