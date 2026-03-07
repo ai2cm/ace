@@ -25,8 +25,8 @@ from fme.downscaling.data.datasets import (
 )
 from fme.downscaling.data.static import (
     StaticInputs,
-    get_normalized_topography,
-    get_topography_downscale_factor,
+    get_field_downscale_factor,
+    get_normalized_static_input,
 )
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
@@ -535,16 +535,16 @@ class PairedDataLoaderConfig:
                         f"'{first_config.data_path}/{first_config.file_pattern}'."
                     )
                 fine_topography = StaticInputs(
-                    fields=[get_normalized_topography(raw_paths[0])]
+                    fields=[get_normalized_static_input(raw_paths[0])]
                 )
             else:
                 fine_topography = StaticInputs(
-                    fields=[get_normalized_topography(self.topography)]
+                    fields=[get_normalized_static_input(self.topography)]
                 )
 
             fine_topography = fine_topography.to_device()
             if (
-                get_topography_downscale_factor(
+                get_field_downscale_factor(
                     fine_topography.shape,
                     properties_fine.horizontal_coordinates.shape,
                 )

@@ -87,57 +87,56 @@ class StaticInput:
         }
 
 
-def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
+def get_normalized_static_input(path: str, field_name: str = "HGTsfc"):
     if path.endswith(".zarr"):
-        topography = xr.open_zarr(path, mask_and_scale=False)[topography_name]
+        static_input = xr.open_zarr(path, mask_and_scale=False)[field_name]
     else:
-        topography = xr.open_dataset(path, mask_and_scale=False)[topography_name]
-    if "time" in topography.dims:
-        topography = topography.isel(time=0).squeeze()
-    if len(topography.shape) != 2:
+        static_input = xr.open_dataset(path, mask_and_scale=False)[field_name]
+    if "time" in static_input.dims:
+        static_input = static_input.isel(time=0).squeeze()
+    if len(static_input.shape) != 2:
         raise ValueError(
-            f"unexpected shape {topography.shape} for topography."
-            "Currently, only lat/lon topography is supported."
+            f"unexpected shape {static_input.shape} for static input."
+            "Currently, only lat/lon static input is supported."
         )
-    lat_name, lon_name = topography.dims[-2:]
+    lat_name, lon_name = static_input.dims[-2:]
     coords = LatLonCoordinates(
-        lon=torch.tensor(topography[lon_name].values),
-        lat=torch.tensor(topography[lat_name].values),
+        lon=torch.tensor(static_input[lon_name].values),
+        lat=torch.tensor(static_input[lat_name].values),
     )
 
-    topography_normalized = (topography - topography.mean()) / topography.std()
+    static_input_normalized = (static_input - static_input.mean()) / static_input.std()
 
     return StaticInput(
-        data=torch.tensor(topography_normalized.values, dtype=torch.float32),
+        data=torch.tensor(static_input_normalized.values, dtype=torch.float32),
         coords=coords,
     )
 
 
-def get_topography_downscale_factor(
-    topography_shape: tuple[int, ...], data_coords_shape: tuple[int, ...]
+def get_field_downscale_factor(
+    field_shape: tuple[int, ...], data_coords_shape: tuple[int, ...]
 ):
-    if len(topography_shape) != 2 or len(data_coords_shape) != 2:
+    if len(field_shape) != 2 or len(data_coords_shape) != 2:
         raise ValueError(
-            f"Expected 2D shapes for topography {topography_shape} and "
-            f"data coordinates {data_coords_shape}, got {len(topography_shape)}D "
-            f"and {len(data_coords_shape)}D."
+            f"Expected 2D shapes for field shape (got {field_shape}) and "
+            f"data coordinates shape (got {data_coords_shape})."
         )
     if (
-        topography_shape[0] % data_coords_shape[0] != 0
-        or topography_shape[1] % data_coords_shape[1] != 0
+        field_shape[0] % data_coords_shape[0] != 0
+        or field_shape[1] % data_coords_shape[1] != 0
     ):
         raise ValueError(
-            f"Topography shape {topography_shape} must be evenly "
+            f"Field shape {field_shape} must be evenly "
             f"divisible by horizontal shape {data_coords_shape}"
         )
-    topography_downscale_factor = topography_shape[0] // data_coords_shape[0]
-    if topography_downscale_factor != topography_shape[1] // data_coords_shape[1]:
+    field_downscale_factor_0 = field_shape[0] // data_coords_shape[0]
+    field_downscale_factor_1 = field_shape[1] // data_coords_shape[1]
+    if field_downscale_factor_0 != field_downscale_factor_1:
         raise ValueError(
-            f"Topography shape {topography_shape} must have the same scale factor "
-            "between lat and lon dimensions as data coordinates "
-            f"shape {data_coords_shape}"
+            f"Field shape {field_shape} must have the same scale factor "
+            "between lat and lon dimensions."
         )
-    return topography_downscale_factor
+    return field_downscale_factor_0
 
 
 @dataclasses.dataclass

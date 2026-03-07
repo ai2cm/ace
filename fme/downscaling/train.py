@@ -25,7 +25,7 @@ from fme.downscaling.data import (
     PairedDataLoaderConfig,
     PairedGriddedData,
     StaticInputs,
-    get_normalized_topography,
+    get_normalized_static_input,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
 
@@ -436,7 +436,7 @@ class TrainerConfig:
         static_inputs_fields = self.static_inputs or {}
         static_inputs = StaticInputs(
             fields=[
-                get_normalized_topography(path, topography_name=key)
+                get_normalized_static_input(path, field_name=key)
                 for key, path in static_inputs_fields.items()
             ]
         )
