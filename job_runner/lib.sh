@@ -66,6 +66,7 @@ build_cluster_args() {
             --cluster saturn
         )
     elif [[ "$CLUSTER" == "b200" ]]; then
+        WORKSPACE=ai2/climate-titan
         CLUSTER_ARGS=(
             --workspace ai2/climate-titan
             --cluster titan
