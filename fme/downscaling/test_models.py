@@ -19,6 +19,7 @@ from fme.downscaling.models import (
     _separate_interleaved_samples,
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.noise import LogNormalNoiseDistribution
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -114,6 +115,48 @@ def test_module_serialization(tmp_path):
     assert torch.equal(
         loaded_static_inputs.fields[0].data, static_inputs.fields[0].data
     )
+
+
+def test_from_state_backward_compat_fine_topography():
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    downscale_factor = 2
+    static_inputs = StaticInputs(
+        fields=[
+            StaticInput(
+                torch.ones(*fine_shape, device=get_device()),
+                LatLonCoordinates(
+                    lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
+                ),
+            )
+        ]
+    )
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        predict_residual=True,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+
+    # Simulate old checkpoint format: static_inputs not serialized
+    state = model.get_state()
+    state["static_inputs"] = None
+
+    # Should load correctly via the elif use_fine_topography branch (+1 channel)
+    model_from_old_state = DiffusionModel.from_state(state)
+    assert model_from_old_state.static_inputs is None
+    assert all(
+        torch.equal(p1, p2)
+        for p1, p2 in zip(
+            model.module.parameters(), model_from_old_state.module.parameters()
+        )
+    )
+
+    # At runtime, omitting static inputs must raise a clear error
+    batch = get_mock_paired_batch([2, *coarse_shape], [2, *fine_shape])
+    with pytest.raises(ValueError, match="Static inputs must be provided"):
+        model_from_old_state.generate_on_batch(batch, static_inputs=None)
 
 
 def _get_diffusion_model(
@@ -402,4 +445,72 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
             batch_size,
             n_ensemble,
             *fine_shape,
+        )
+
+
+def test_lognorm_noise_backwards_compatibility():
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+
+    model_config = DiffusionModelConfig(
+        module=DiffusionModuleRegistrySelector(
+            "unet_diffusion_song", {"model_channels": 4}
+        ),
+        loss=LossConfig(type="MSE"),
+        in_names=["x"],
+        out_names=["x"],
+        normalization=normalizer,
+        p_mean=-1.0,
+        p_std=1.0,
+        sigma_min=0.1,
+        sigma_max=1.0,
+        churn=0.5,
+        num_diffusion_generation_steps=3,
+        training_noise_distribution=None,
+        use_fine_topography=False,
+        predict_residual=True,
+    )
+    assert model_config.noise_distribution == LogNormalNoiseDistribution(
+        p_mean=-1.0, p_std=1.0
+    )
+    model = model_config.build(
+        (32, 32),
+        2,
+    )
+    state = model.get_state()
+
+    # test from_state on checkpoints saved prior to noise distribution classes
+    del state["config"]["training_noise_distribution"]
+    model_from_state = DiffusionModel.from_state(state)
+    assert model_from_state.config.noise_distribution == LogNormalNoiseDistribution(
+        p_mean=-1.0, p_std=1.0
+    )
+
+
+def test_noise_config_error():
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+
+    with pytest.raises(ValueError):
+        DiffusionModelConfig(
+            module=DiffusionModuleRegistrySelector(
+                "unet_diffusion_song", {"model_channels": 4}
+            ),
+            loss=LossConfig(type="MSE"),
+            in_names=["x"],
+            out_names=["x"],
+            normalization=normalizer,
+            p_mean=-1.0,
+            p_std=1.0,
+            sigma_min=0.1,
+            sigma_max=1.0,
+            churn=0.5,
+            num_diffusion_generation_steps=3,
+            training_noise_distribution=LogNormalNoiseDistribution(-1.0, 1.0),
+            use_fine_topography=False,
+            predict_residual=True,
         )

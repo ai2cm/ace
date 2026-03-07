@@ -55,8 +55,8 @@ class WeatherEvaluationConfig:
     """
 
     loader: InferenceDataLoaderConfig
-    n_forward_steps: int = 2
-    forward_steps_in_memory: int = 2
+    n_forward_steps: int
+    forward_steps_in_memory: int
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
@@ -81,6 +81,9 @@ class WeatherEvaluationConfig:
             # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
+
+        for log_step_mean in self.aggregator.log_step_means:
+            log_step_mean.validate(self.n_forward_steps)
 
     @property
     def using_labels(self) -> bool:
@@ -112,8 +115,8 @@ class InlineInferenceConfig:
     """
 
     loader: InferenceDataLoaderConfig
-    n_forward_steps: int = 2
-    forward_steps_in_memory: int = 2
+    n_forward_steps: int
+    forward_steps_in_memory: int
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
@@ -138,6 +141,9 @@ class InlineInferenceConfig:
             # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
+
+        for log_step_mean in self.aggregator.log_step_means:
+            log_step_mean.validate(self.n_forward_steps)
 
     @property
     def using_labels(self) -> bool:
@@ -459,12 +465,11 @@ class TrainBuilders:
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
             aggregator = self.config.weather_evaluation.aggregator.build(
                 dataset_info=dataset_info,
-                n_timesteps=self.config.weather_evaluation.n_forward_steps
-                + n_ic_timesteps,
+                n_ic_steps=n_ic_timesteps,
+                n_forward_steps=self.config.weather_evaluation.n_forward_steps,
                 initial_time=data.initial_time,
                 normalize=normalize,
                 output_dir=output_dir,
-                record_step_20=self.config.weather_evaluation.n_forward_steps >= 20,
                 channel_mean_names=channel_mean_names,
                 save_diagnostics=save_diagnostics,
             )

@@ -116,6 +116,15 @@ def pytest_runtest_call(item):
 
 
 @pytest.fixture(autouse=True)
+def reset_global_timer():
+    import fme.core.timing
+
+    fme.core.timing.singleton = None
+    yield
+    fme.core.timing.singleton = None
+
+
+@pytest.fixture(autouse=True)
 def mock_gc_collect(monkeypatch):
     def mock_collect(*args, **kwargs):
         pass
