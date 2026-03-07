@@ -13,6 +13,7 @@ This is a Python machine learning project for atmospheric modeling (ACE - AI2 Cl
 - Configuration uses YAML files in `configs/`
 - The project uses PyTorch for ML components
 - The default conda environment for the repo is named `fme`
+- Pre-commit hooks enforce ruff (linting/formatting) and mypy (type checking with `--ignore-missing-imports --check-untyped-defs`), configured in `.pre-commit-config.yaml`
 
 ### Common Commands
 
