@@ -60,11 +60,15 @@ build_cluster_args() {
             --cluster jupiter
             --cluster saturn
         )
-    elif [[ -z "$CLUSTER" || "$CLUSTER" == "a100" ]]; then
-        # Default: h100
+    elif [[ "$CLUSTER" == "a100" ]]; then
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
             --cluster saturn
+        )
+    elif [[ "$CLUSTER" == "b200" ]]; then
+        CLUSTER_ARGS=(
+            --workspace ai2/climate-titan
+            --cluster titan
         )
     elif [[ -z "$CLUSTER" || "$CLUSTER" == "h100" ]]; then
         # Default: h100
