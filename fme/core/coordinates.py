@@ -474,11 +474,7 @@ class DepthCoordinate(VerticalCoordinate):
             result["deptho"] = self.deptho
         return result
 
-    def depth_integral(
-        self,
-        integrand: torch.Tensor,
-        sea_floor_depth: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
         """Compute the depth integral of the integrand.
 
         ∫ x dz
@@ -488,7 +484,6 @@ class DepthCoordinate(VerticalCoordinate):
 
         Args:
             integrand: A tensor whose last dimension is the vertical.
-            sea_floor_depth: Optional 2D sea floor depth tensor.
 
         Returns:
             A tensor of same shape as integrand but without the last dimension.

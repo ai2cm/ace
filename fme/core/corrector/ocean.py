@@ -6,18 +6,7 @@ from typing import Any, Literal, Protocol
 import dacite
 import torch
 
-from fme.core.constants import (
-    DENSITY_OF_WATER_CM4,
-    FREEZING_TEMPERATURE_KELVIN,
-    REFERENCE_SALINITY_PSU,
-    SPECIFIC_HEAT_OF_WATER_CM4,
-)
-from fme.core.corrector.ocean_mld import (
-    compute_mld,
-    compute_mld_active_thickness,
-    compute_mld_soft,
-    jmd95_potential_density,
-)
+from fme.core.constants import FREEZING_TEMPERATURE_KELVIN
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
@@ -74,17 +63,10 @@ class OceanHeatContentBudgetConfig:
     """Configuration for ocean heat content budget correction.
 
     Parameters:
-        method: Method to use for OHC budget correction. Options:
-            "scaled_temperature" enforces conservation by scaling the predicted
-            potential temperature by a vertically and horizontally uniform
-            correction factor. "mixed_layer_depth" distributes the energy
-            deficit within the mixed layer using JMD95-derived MLD weights.
-            "mixed_layer_depth_geo" first applies a geothermal heat flux
-            correction to the bottom ocean cell and then distributes the
-            remaining deficit via MLD weights. "mixed_layer_depth_soft" and
-            "mixed_layer_depth_soft_geo" are differentiable variants that use
-            soft-thresholded MLD (requires ``mld_soft_threshold`` on the
-            parent ``OceanCorrectorConfig``).
+        method: Method to use for OHC budget correction. The available option is
+            "scaled_temperature", which enforces conservation of heat content
+            by scaling the predicted potential temperature by a vertically and
+            horizontally uniform correction factor.
         constant_unaccounted_heating: Area-weighted global mean
             column-integrated heating in W/m**2 to be added to the energy flux
             into the ocean when conserving the heat content. This can be useful
@@ -93,44 +75,8 @@ class OceanHeatContentBudgetConfig:
 
     """
 
-    method: Literal[
-        "scaled_temperature",
-        "mixed_layer_depth",
-        "mixed_layer_depth_geo",
-        "mixed_layer_depth_soft",
-        "mixed_layer_depth_soft_geo",
-    ]
+    method: Literal["scaled_temperature"]
     constant_unaccounted_heating: float = 0.0
-
-
-@dataclasses.dataclass
-class OceanSaltContentBudgetConfig:
-    """Configuration for ocean salt content budget correction.
-
-    Parameters:
-        method: Method to use for salt content budget correction. Options:
-            "scaled_salinity" enforces conservation by scaling the predicted
-            salinity by a vertically and horizontally uniform correction factor.
-            "mixed_layer_depth" distributes the salt deficit within the mixed
-            layer using JMD95-derived MLD weights. "mixed_layer_depth_soft"
-            is a differentiable variant using soft-thresholded MLD (requires
-            ``mld_soft_threshold`` on the parent ``OceanCorrectorConfig``).
-        constant_unaccounted_salt_flux: Area-weighted global mean
-            column-integrated salt flux in g/m**2/s to be added to the virtual
-            salt flux when conserving the salt content. This can be useful for
-            correcting errors in salt budget in target data.
-    """
-
-    method: Literal["scaled_salinity", "mixed_layer_depth", "mixed_layer_depth_soft"]
-    constant_unaccounted_salt_flux: float = 0.0
-
-
-_SOFT_MLD_METHODS = frozenset(
-    {
-        "mixed_layer_depth_soft",
-        "mixed_layer_depth_soft_geo",
-    }
-)
 
 
 @CorrectorSelector.register("ocean_corrector")
@@ -139,26 +85,6 @@ class OceanCorrectorConfig:
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
-    ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
-    mld_soft_threshold: float | None = None
-
-    def __post_init__(self) -> None:
-        methods = set()
-        if self.ocean_heat_content_correction is not None:
-            methods.add(str(self.ocean_heat_content_correction.method))
-        if self.ocean_salt_content_correction is not None:
-            methods.add(str(self.ocean_salt_content_correction.method))
-        uses_soft = bool(methods & _SOFT_MLD_METHODS)
-        if uses_soft and self.mld_soft_threshold is None:
-            raise ValueError(
-                "mld_soft_threshold must be set when using a soft MLD method "
-                f"({methods & _SOFT_MLD_METHODS})."
-            )
-        if self.mld_soft_threshold is not None and not uses_soft:
-            raise ValueError(
-                "mld_soft_threshold is set but no budget correction uses a "
-                "soft MLD method."
-            )
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
@@ -181,14 +107,6 @@ class OceanCorrectorConfig:
                 )
             else:
                 state_copy["ocean_heat_content_correction"] = None
-        elif (
-            "ocean_heat_content_correction" in state_copy
-            and "method" in state_copy["ocean_heat_content_correction"]
-            and state_copy["ocean_heat_content_correction"]["method"]
-            == "constant_temperature"
-        ):
-            # FIXME: don't merge!
-            state_copy["ocean_heat_content_correction"]["method"] = "scaled_temperature"
         if "sea_ice_fraction_correction" in state_copy:
             sif = state_copy["sea_ice_fraction_correction"]
             if isinstance(sif, dict) and "sea_ice_thickness_name" in sif:
@@ -219,35 +137,10 @@ class OceanCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
     ) -> TensorDict:
-        missing = set(forcing_data) - set(input_data)
-        if missing:
-            raise RuntimeError(
-                f"input_data is missing keys that are present in forcing_data: "
-                f"{sorted(missing)}. Forcing variables must be included in "
-                f"input_data for the ocean corrector to work correctly."
-            )
         if len(self._config.force_positive_names) > 0:
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.sea_ice_fraction_correction is not None:
             gen_data = self._config.sea_ice_fraction_correction(gen_data, input_data)
-        mld_weights: torch.Tensor | None = None
-        if self._config.ocean_salt_content_correction is not None:
-            if self._vertical_coordinate is None:
-                raise ValueError(
-                    "Ocean salt content correction is turned on, but no vertical "
-                    "coordinate is available."
-                )
-            gen_data, mld_weights = _force_conserve_ocean_salt_content(
-                input_data,
-                gen_data,
-                forcing_data,
-                self._gridded_operations.area_weighted_mean,
-                self._vertical_coordinate,
-                self._timestep.total_seconds(),
-                self._config.ocean_salt_content_correction.method,
-                self._config.ocean_salt_content_correction.constant_unaccounted_salt_flux,
-                mld_soft_tau=self._config.mld_soft_threshold,
-            )
         if self._config.ocean_heat_content_correction is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
@@ -263,8 +156,6 @@ class OceanCorrector(CorrectorABC):
                 self._timestep.total_seconds(),
                 self._config.ocean_heat_content_correction.method,
                 self._config.ocean_heat_content_correction.constant_unaccounted_heating,
-                mld_weights=mld_weights,
-                mld_soft_tau=self._config.mld_soft_threshold,
             )
         return dict(gen_data)
 
@@ -282,41 +173,25 @@ def _force_conserve_ocean_heat_content(
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
-    method: Literal[
-        "scaled_temperature",
-        "mixed_layer_depth",
-        "mixed_layer_depth_geo",
-        "mixed_layer_depth_soft",
-        "mixed_layer_depth_soft_geo",
-    ] = "scaled_temperature",
+    method: Literal["scaled_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
-    mld_weights: torch.Tensor | None = None,
-    mld_soft_tau: float | None = None,
 ) -> TensorDict:
+    if method != "scaled_temperature":
+        raise NotImplementedError(
+            f"Method {method!r} not implemented for ocean heat content conservation"
+        )
     if "hfds" in gen_data and "hfds" in forcing_data:
         raise ValueError(
             "Net downward surface heat flux cannot be present in both gen_data and "
             "forcing_data."
         )
-    input_data = {k: v.double() for k, v in input_data.items()}
-    gen_data = {k: v.double() for k, v in gen_data.items()}
-    forcing_data = {k: v.double() for k, v in forcing_data.items()}
     input = OceanData(input_data, vertical_coordinate)
     if input.ocean_heat_content is None:
         raise ValueError(
             "ocean_heat_content is required to force ocean heat content conservation"
         )
-    gen = OceanData({**gen_data, **forcing_data}, vertical_coordinate)
+    gen = OceanData(gen_data, vertical_coordinate)
     forcing = OceanData(forcing_data)
-
-    if method in ("mixed_layer_depth_geo", "mixed_layer_depth_soft_geo"):
-        apply_geothermal_bottom_correction(
-            gen,
-            forcing,
-            vertical_coordinate,
-            timestep_seconds,
-        )
-
     global_gen_ocean_heat_content = area_weighted_mean(
         gen.ocean_heat_content,
         keepdim=True,
@@ -327,374 +202,41 @@ def _force_conserve_ocean_heat_content(
         keepdim=True,
         name="ocean_heat_content",
     )
-    energy_flux_global_mean = _compute_energy_flux_global_mean(
-        input,
-        gen,
-        forcing,
-        area_weighted_mean,
-    )
-    expected_change_ocean_heat_content = (
-        energy_flux_global_mean + unaccounted_heating
-    ) * timestep_seconds
-
-    if method == "scaled_temperature":
-        _apply_scaled_heat_correction(  # updates gen in-place
-            gen,
-            global_input_ocean_heat_content,
-            expected_change_ocean_heat_content,
-            global_gen_ocean_heat_content,
-        )
-    elif method in ("mixed_layer_depth", "mixed_layer_depth_geo"):
-        if mld_weights is None:
-            mld_weights = compute_mld_weights_from_ocean_data(
-                gen,
-                forcing,
-                vertical_coordinate,
-            )
-        _apply_mld_heat_correction(  # updates gen in-place
-            gen,
-            global_input_ocean_heat_content,
-            expected_change_ocean_heat_content,
-            global_gen_ocean_heat_content,
-            mld_weights,
-            vertical_coordinate,
-            area_weighted_mean,
-        )
-    elif method in ("mixed_layer_depth_soft", "mixed_layer_depth_soft_geo"):
-        assert mld_soft_tau is not None
-        if mld_weights is None:
-            mld_weights = compute_mld_soft_weights_from_ocean_data(
-                gen,
-                forcing,
-                vertical_coordinate,
-                tau=mld_soft_tau,
-            )
-        _apply_mld_heat_correction(  # updates gen in-place
-            gen,
-            global_input_ocean_heat_content,
-            expected_change_ocean_heat_content,
-            global_gen_ocean_heat_content,
-            mld_weights,
-            vertical_coordinate,
-            area_weighted_mean,
-        )
-    else:
-        raise NotImplementedError(
-            f"Method {method!r} not implemented for ocean heat content conservation"
-        )
-    return {
-        k: tensor.to(torch.float32) for k, tensor in gen.data.items() if k in gen_data
-    }
-
-
-def _compute_energy_flux_global_mean(
-    input: OceanData,
-    gen: OceanData,
-    forcing: OceanData,
-    area_weighted_mean: AreaWeightedMean,
-) -> torch.Tensor:
     try:
+        # First priority: pre-weighted heat flux in gen_data
         net_energy_flux_into_ocean = (
             gen.net_downward_surface_heat_flux_total_area
             + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
         )
     except KeyError:
         try:
+            # Second priority: standard heat flux in gen_data
             net_energy_flux_into_ocean = (
                 gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
             ) * forcing.sea_surface_fraction
         except KeyError:
+            # Third priority: standard heat flux in input_data
             net_energy_flux_into_ocean = (
                 input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
             ) * forcing.sea_surface_fraction
-    return area_weighted_mean(
+    energy_flux_global_mean = area_weighted_mean(
         net_energy_flux_into_ocean,
         keepdim=True,
         name="ocean_heat_content",
     )
-
-
-def _apply_scaled_heat_correction(
-    gen: OceanData,
-    global_input_ohc: torch.Tensor,
-    expected_change: torch.Tensor,
-    global_gen_ohc: torch.Tensor,
-) -> None:
-    ratio = (global_input_ohc + expected_change) / global_gen_ohc
-    n_levels = gen.sea_water_potential_temperature.shape[-1]
-    for k in range(n_levels):
-        gen.data[f"thetao_{k}"] = gen.data[f"thetao_{k}"] * ratio
-    if "sst" in gen.data:
-        gen.data["sst"] = (
-            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
-        ) * ratio + FREEZING_TEMPERATURE_KELVIN
-
-
-def _apply_mld_heat_correction(
-    gen: OceanData,
-    global_input_ohc: torch.Tensor,
-    expected_change: torch.Tensor,
-    global_gen_ohc: torch.Tensor,
-    mld_weights: torch.Tensor,
-    vertical_coordinate: HasOceanDepthIntegral,
-    area_weighted_mean: AreaWeightedMean,
-) -> None:
-    """Distribute energy deficit within the mixed layer (modifies *gen* in place)."""
-    delta_E = global_input_ohc + expected_change - global_gen_ohc
-    total_active = mld_weights.sum(dim=-1)  # (B, Y, X)
-    Ah_mean = area_weighted_mean(
-        total_active,
-        keepdim=True,
-        name="ocean_heat_content",
-    )
-    dT = (
-        delta_E.unsqueeze(-1)
-        * mld_weights
-        / (
-            Ah_mean.unsqueeze(-1)
-            * DENSITY_OF_WATER_CM4
-            * SPECIFIC_HEAT_OF_WATER_CM4
-            * vertical_coordinate.dz
-        )
-    ).nan_to_num()
-    n_levels = gen.sea_water_potential_temperature.shape[-1]
-    for k in range(n_levels):
-        gen.data[f"thetao_{k}"] = gen.data[f"thetao_{k}"] + dT[..., k]
-    if "sst" in gen.data:
-        gen.data["sst"] = gen.data["sst"] + dT[..., 0]
-
-
-def _force_conserve_ocean_salt_content(
-    input_data: TensorMapping,
-    gen_data: TensorMapping,
-    forcing_data: TensorMapping,
-    area_weighted_mean: AreaWeightedMean,
-    vertical_coordinate: HasOceanDepthIntegral,
-    timestep_seconds: float,
-    method: Literal[
-        "scaled_salinity", "mixed_layer_depth", "mixed_layer_depth_soft"
-    ] = "scaled_salinity",
-    unaccounted_salt_flux: float = 0.0,
-    mld_soft_tau: float | None = None,
-) -> tuple[TensorDict, torch.Tensor | None]:
-    if "wfo" in gen_data and "wfo" in forcing_data:
-        raise ValueError(
-            "Water flux into sea water cannot be present in both gen_data and "
-            "forcing_data."
-        )
-    input = OceanData(input_data, vertical_coordinate)
-    gen = OceanData({**gen_data, **forcing_data}, vertical_coordinate)
-    forcing = OceanData(forcing_data)
-
-    global_gen_salt_content = area_weighted_mean(
-        gen.ocean_salt_content,
-        keepdim=True,
-        name="ocean_salt_content",
-    )
-    global_input_salt_content = area_weighted_mean(
-        input.ocean_salt_content,
-        keepdim=True,
-        name="ocean_salt_content",
-    )
-    try:
-        wfo = gen.water_flux_into_sea_water
-    except KeyError:
-        wfo = input.water_flux_into_sea_water
-    virtual_salt_flux = -REFERENCE_SALINITY_PSU * wfo * forcing.sea_surface_fraction
-    salt_flux_global_mean = area_weighted_mean(
-        virtual_salt_flux,
-        keepdim=True,
-        name="ocean_salt_content",
-    )
-    expected_change_salt_content = (
-        salt_flux_global_mean + unaccounted_salt_flux
+    expected_change_ocean_heat_content = (
+        energy_flux_global_mean + unaccounted_heating
     ) * timestep_seconds
-
-    if method == "scaled_salinity":
-        mld_weights = None
-        _apply_scaled_salt_correction(  # updates gen in-place
-            gen,
-            global_input_salt_content,
-            expected_change_salt_content,
-            global_gen_salt_content,
-        )
-    elif method == "mixed_layer_depth":
-        mld_weights = compute_mld_weights_from_ocean_data(
-            gen,
-            forcing,
-            vertical_coordinate,
-        )
-        _apply_mld_salt_correction(  # updates gen in-place
-            gen,
-            global_input_salt_content,
-            expected_change_salt_content,
-            global_gen_salt_content,
-            mld_weights,
-            vertical_coordinate,
-            area_weighted_mean,
-        )
-    elif method == "mixed_layer_depth_soft":
-        assert mld_soft_tau is not None
-        mld_weights = compute_mld_soft_weights_from_ocean_data(
-            gen,
-            forcing,
-            vertical_coordinate,
-            tau=mld_soft_tau,
-        )
-        _apply_mld_salt_correction(  # updates gen in-place
-            gen,
-            global_input_salt_content,
-            expected_change_salt_content,
-            global_gen_salt_content,
-            mld_weights,
-            vertical_coordinate,
-            area_weighted_mean,
-        )
-    else:
-        raise NotImplementedError(
-            f"Method {method!r} not implemented for ocean salt content conservation"
-        )
-    return ({k: tensor for k, tensor in gen.data.items() if k in gen_data}, mld_weights)
-
-
-def _apply_scaled_salt_correction(
-    gen: OceanData,
-    global_input_salt_content: torch.Tensor,
-    expected_change: torch.Tensor,
-    global_gen_salt_content: torch.Tensor,
-) -> None:
-    ratio = (global_input_salt_content + expected_change) / global_gen_salt_content
-    n_levels = gen.sea_water_salinity.shape[-1]
+    heat_content_correction_ratio = (
+        global_input_ocean_heat_content + expected_change_ocean_heat_content
+    ) / global_gen_ocean_heat_content
+    # apply same temperature correction to all vertical layers
+    n_levels = gen.sea_water_potential_temperature.shape[-1]
     for k in range(n_levels):
-        gen.data[f"so_{k}"] = gen.data[f"so_{k}"] * ratio
-
-
-def _apply_mld_salt_correction(
-    gen: OceanData,
-    global_input_salt_content: torch.Tensor,
-    expected_change: torch.Tensor,
-    global_gen_salt_content: torch.Tensor,
-    mld_weights: torch.Tensor,
-    vertical_coordinate: HasOceanDepthIntegral,
-    area_weighted_mean: AreaWeightedMean,
-) -> None:
-    """Distribute salt deficit within the mixed layer (modifies *gen* in place)."""
-    delta_S = global_input_salt_content + expected_change - global_gen_salt_content
-    dz = vertical_coordinate.dz
-    total_active = mld_weights.sum(dim=-1)  # (B, Y, X)
-    Ah_mean = area_weighted_mean(
-        total_active,
-        keepdim=True,
-        name="ocean_salt_content",
-    )
-    dS = (
-        delta_S.unsqueeze(-1)
-        * mld_weights
-        / (Ah_mean.unsqueeze(-1) * DENSITY_OF_WATER_CM4 * dz)
-    ).nan_to_num()
-    n_levels = gen.sea_water_salinity.shape[-1]
-    for k in range(n_levels):
-        gen.data[f"so_{k}"] = gen.data[f"so_{k}"] + dS[..., k]
-
-
-def compute_mld_weights_from_ocean_data(
-    gen: OceanData,
-    forcing: OceanData,
-    vertical_coordinate: HasOceanDepthIntegral,
-) -> torch.Tensor:
-    """Compute MLD active-thickness weights from generated ocean state.
-
-    Computes JMD95 potential density from ``gen`` temperature and salinity,
-    derives MLD, and returns the per-layer active thickness within the
-    mixed layer.
-
-    Args:
-        gen: Generated ocean data (must contain ``thetao`` and ``so``).
-        forcing: Forcing data (must contain ``deptho``).
-        vertical_coordinate: Provides interface depths and ocean mask.
-
-    Returns:
-        Active thickness tensor ``h`` with shape ``(B, Y, X, Z)``.
-    """
-    theta = gen.sea_water_potential_temperature  # (B, Y, X, Z)
-    S = gen.sea_water_salinity  # (B, Y, X, Z)
-    density = jmd95_potential_density(S, theta)
-
-    idepth = vertical_coordinate.idepth
-    mask = vertical_coordinate.mask
-    deptho = forcing.sea_floor_depth
-
-    mld_2d = compute_mld(density, idepth, deptho, mask)
-    return compute_mld_active_thickness(mld_2d, idepth, mask)
-
-
-def compute_mld_soft_weights_from_ocean_data(
-    gen: OceanData,
-    forcing: OceanData,
-    vertical_coordinate: HasOceanDepthIntegral,
-    tau: float,
-) -> torch.Tensor:
-    """Like :func:`compute_mld_weights_from_ocean_data` but differentiable.
-
-    Uses :func:`compute_mld_soft` instead of :func:`compute_mld`.
-
-    Args:
-        gen: Generated ocean data (must contain ``thetao`` and ``so``).
-        forcing: Forcing data (must contain ``deptho``).
-        vertical_coordinate: Provides interface depths and ocean mask.
-        tau: Sigmoid temperature for soft thresholding.
-
-    Returns:
-        Active thickness tensor ``h`` with shape ``(B, Y, X, Z)``.
-    """
-    theta = gen.sea_water_potential_temperature  # (B, Y, X, Z)
-    S = gen.sea_water_salinity  # (B, Y, X, Z)
-    density = jmd95_potential_density(S, theta)
-
-    idepth = vertical_coordinate.idepth
-    mask = vertical_coordinate.mask
-    deptho = forcing.sea_floor_depth
-
-    mld_2d = compute_mld_soft(density, idepth, deptho, mask, tau=tau)
-    return compute_mld_active_thickness(mld_2d, idepth, mask)
-
-
-def apply_geothermal_bottom_correction(
-    gen: OceanData,
-    forcing: OceanData,
-    vertical_coordinate: HasOceanDepthIntegral,
-    timestep_seconds: float,
-) -> None:
-    """Apply geothermal heat flux correction to the bottom ocean cell.
-
-    Modifies ``gen.data`` in place by adding a temperature increment to
-    each column's deepest valid layer proportional to the local
-    geothermal heat flux.
-
-    Args:
-        gen: Generated ocean data (modified in place).
-        forcing: Forcing data (must contain ``hfgeou`` and
-            ``sea_surface_fraction``).
-        vertical_coordinate: Provides interface depths and ocean mask.
-        timestep_seconds: Model timestep in seconds.
-    """
-    mask = vertical_coordinate.mask
-    dz = vertical_coordinate.dz
-
-    wet_count = mask.sum(dim=-1, keepdim=True)
-    cumulative = mask.cumsum(dim=-1)
-    bottom_mask = (cumulative == wet_count) & (mask > 0)
-
-    hfgeou = forcing.geothermal_heat_flux
-    ssf = forcing.sea_surface_fraction
-
-    dT_geo = (
-        (hfgeou * ssf).unsqueeze(-1)
-        * timestep_seconds
-        / (DENSITY_OF_WATER_CM4 * SPECIFIC_HEAT_OF_WATER_CM4 * dz)
-    ).nan_to_num()
-    dT_geo = dT_geo * bottom_mask
-
-    nlev = gen.sea_water_potential_temperature.shape[-1]
-    for k in range(nlev):
-        gen.data[f"thetao_{k}"] = gen.data[f"thetao_{k}"] + dT_geo[..., k]
+        name = f"thetao_{k}"
+        gen.data[name] = gen.data[name] * heat_content_correction_ratio
+    if "sst" in gen.data:
+        gen.data["sst"] = (  # assuming sst in Kelvin
+            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
+        ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    return gen.data

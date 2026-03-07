@@ -1,7 +1,6 @@
 import datetime
 import logging
 from collections.abc import Callable, MutableMapping
-from warnings import warn
 
 import torch
 
@@ -144,10 +143,6 @@ def ocean_heat_content_tendency(
 ) -> torch.Tensor:
     """Compute the column-integrated ocean heat content tendency."""
     ohc = data.ocean_heat_content
-    try:
-        data.sea_floor_depth
-    except KeyError:
-        warn("sea_floor_depth not available when computing ocean_heat_content_tendency")
     ohc_tendency = torch.zeros_like(ohc)
     ohc_tendency[:, 1:] = torch.diff(ohc, n=1, dim=1) / timestep.total_seconds()
     return ohc_tendency
@@ -170,45 +165,6 @@ def implied_tendency_of_ocean_heat_content_due_to_advection(
     flux_through_vertical_boundaries = data.net_energy_flux_into_ocean
     implied_column_heating = column_energy_tendency - flux_through_vertical_boundaries
     return implied_column_heating
-
-
-@register(VariableMetadata("g/m**2", "Column-integrated ocean salt content"))
-def ocean_salt_content(
-    data: OceanData,
-    timestep: datetime.timedelta,
-) -> torch.Tensor:
-    return data.ocean_salt_content
-
-
-@register(
-    VariableMetadata("g/m**2/s", "Tendency of column-integrated ocean salt content")
-)
-def ocean_salt_content_tendency(
-    data: OceanData,
-    timestep: datetime.timedelta,
-) -> torch.Tensor:
-    osc = data.ocean_salt_content
-    osc_tendency = torch.zeros_like(osc)
-    osc_tendency[:, 1:] = torch.diff(osc, n=1, dim=1) / timestep.total_seconds()
-    return osc_tendency
-
-
-@register(
-    VariableMetadata(
-        "g/m**2/s",
-        "Implied advective tendency of ocean salt content assuming closed budget",
-    )
-)
-def implied_tendency_of_ocean_salt_content_due_to_advection(
-    data: OceanData,
-    timestep: datetime.timedelta,
-) -> torch.Tensor:
-    """Implied tendency of ocean salt content due to advection.
-    This is computed as a residual from the column salt budget.
-    """
-    column_salt_tendency = ocean_salt_content_tendency(data, timestep)
-    flux_through_surface = data.net_virtual_salt_flux_into_ocean
-    return column_salt_tendency - flux_through_surface
 
 
 @register(
@@ -252,11 +208,3 @@ def hfds(
 ) -> torch.Tensor:
     """Compute the net downward surface heat flux."""
     return data.net_downward_surface_heat_flux
-
-
-@register(VariableMetadata("m", "Mixed layer depth"))
-def mixed_layer_depth(
-    data: OceanData,
-    timestep: datetime.timedelta,
-) -> torch.Tensor:
-    return data.mixed_layer_depth
