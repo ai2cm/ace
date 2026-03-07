@@ -196,31 +196,6 @@ def test_depth_integral_3d_data():
     torch.testing.assert_close(result, expected)
 
 
-@pytest.mark.parametrize(
-    "name, level",
-    [
-        ("sfc_level", 0),
-        ("depth_0", 0),
-        ("depth_3", 3),
-    ],
-)
-def test_depth_get_mask_tensor_for(name, level):
-    idepth = torch.arange(end=5)
-    mask = torch.arange(end=4)
-    coord = DepthCoordinate(idepth, mask)
-    assert coord.get_mask_tensor_for(name) == level
-
-
-def test_depth_returns_surface_mask_if_specified():
-    idepth = torch.arange(end=5)
-    mask = torch.arange(end=4)
-    surface_mask = torch.tensor([4])
-    coord_sfc_mask = DepthCoordinate(idepth, mask, surface_mask)
-    coord_no_sfc_mask = DepthCoordinate(idepth, mask)
-    assert coord_sfc_mask.get_mask_tensor_for("sfc_level") == surface_mask[0]
-    assert coord_no_sfc_mask.get_mask_tensor_for("sfc_level") == mask[0]
-
-
 def test_masked_lat_lon_ops_from_coords():
     lat = torch.tensor([0.0, 0.0, 0.0])
     lon = torch.tensor([0.0])

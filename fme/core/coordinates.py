@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 import math
-import re
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import Literal, TypeVar
@@ -20,7 +19,6 @@ from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
-from fme.core.masking import StaticMasking
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -331,9 +329,6 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         return (integrand * pressure_thickness).sum(dim=-1) / GRAVITY
 
 
-LEVEL_PATTERN = re.compile(r"_(\d+)$")
-
-
 def dz_from_idepth(
     idepth: torch.Tensor, deptho: torch.Tensor | None = None
 ) -> torch.Tensor:
@@ -367,7 +362,6 @@ class DepthCoordinate(VerticalCoordinate):
 
     idepth: torch.Tensor
     mask: torch.Tensor
-    surface_mask: torch.Tensor | None = None
     deptho: torch.Tensor | None = None
 
     def __post_init__(self):
@@ -394,27 +388,6 @@ class DepthCoordinate(VerticalCoordinate):
     def __len__(self):
         """The number of vertical layer interfaces."""
         return len(self.idepth)
-
-    def get_mask(self) -> torch.Tensor:
-        return self.mask
-
-    def get_mask_level(self, level: int) -> torch.Tensor:
-        return self.mask.select(dim=-1, index=level)
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
-        match = LEVEL_PATTERN.search(name)
-        if match:
-            # 3D variable
-            level = int(match.group(1))
-            return self.get_mask_level(level)
-        else:
-            # 2D variable
-            if self.surface_mask is not None:
-                return self.surface_mask
-            return self.get_mask_level(0)
-
-    def get_idepth(self) -> torch.Tensor:
-        return self.idepth
 
     def build_corrector(
         self,
@@ -447,18 +420,6 @@ class DepthCoordinate(VerticalCoordinate):
     ) -> DeriveFnABC:
         return OceanDeriveFn(self, timestep, horizontal_coordinates)
 
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
-        """
-        Returns a StaticMasking object that fills in NaNs outside of mask
-        valid points, i.e. where the mask value is 0.
-
-        """
-        return StaticMasking(
-            mask_value=0,
-            fill_value=float("nan"),
-            mask=self,
-        )
-
     @property
     def dtype(self) -> torch.dtype:
         return self.idepth.dtype
@@ -475,9 +436,6 @@ class DepthCoordinate(VerticalCoordinate):
         return DepthCoordinate(
             idepth=self.idepth.to(device),
             mask=self.mask.to(device),
-            surface_mask=(
-                self.surface_mask.to(device) if self.surface_mask is not None else None
-            ),
             deptho=self.deptho.to(device) if self.deptho is not None else None,
         )
 
@@ -541,8 +499,8 @@ class DepthCoordinate(VerticalCoordinate):
                 f"{self.idepth.shape}."
             )
         integral = (integrand * self.dz * self.mask).nansum(dim=-1)
-        mask = self.get_mask_level(0).expand(integral.shape)
-        return integral.where(mask > 0, float("nan"))
+        mask_0 = self.mask.select(dim=-1, index=0).expand(integral.shape)
+        return integral.where(mask_0 > 0, float("nan"))
 
 
 @dataclasses.dataclass
