@@ -1230,17 +1230,25 @@ class CoupledStepper:
         gen_data = self._process_prediction_generator_list(output_list, forcing)
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
-                gen_data = (
-                    gen_data.prepend(initial_condition)
-                    .compute_derived_variables(
-                        ocean_derive_func=self.ocean.derive_func,
-                        atmosphere_derive_func=self.atmosphere.derive_func,
-                        forcing_data=forcing,
-                    )
-                    .remove_initial_condition(
-                        n_ic_timesteps_ocean=self.ocean.n_ic_timesteps,
-                        n_ic_timesteps_atmosphere=self.atmosphere.n_ic_timesteps,
-                    )
+                gen_data_prepended = gen_data.prepend(initial_condition)
+                # Slice forcing to match gen_data time (gen_data may be shorter when
+                # e.g. ocean window was truncated); compute_derived_variables requires
+                # exact time alignment.
+                forcing_sliced = CoupledBatchData(
+                    ocean_data=forcing.ocean_data.select_time_slice(
+                        slice(0, gen_data_prepended.ocean_data.n_timesteps)
+                    ),
+                    atmosphere_data=forcing.atmosphere_data.select_time_slice(
+                        slice(0, gen_data_prepended.atmosphere_data.n_timesteps)
+                    ),
+                )
+                gen_data = gen_data_prepended.compute_derived_variables(
+                    ocean_derive_func=self.ocean.derive_func,
+                    atmosphere_derive_func=self.atmosphere.derive_func,
+                    forcing_data=forcing_sliced,
+                ).remove_initial_condition(
+                    n_ic_timesteps_ocean=self.ocean.n_ic_timesteps,
+                    n_ic_timesteps_atmosphere=self.atmosphere.n_ic_timesteps,
                 )
         return gen_data
 
