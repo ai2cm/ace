@@ -99,7 +99,7 @@ stepper_training:
     type: MSE
     weights:
       sst: 2
-stepper:      
+stepper:
   input_masking:
     mask_value: 0
     fill_value: 0
