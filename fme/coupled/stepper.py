@@ -1188,15 +1188,28 @@ class CoupledStepper:
         output_list: list[ComponentStepPrediction],
         forcing_data: CoupledBatchData,
     ) -> CoupledBatchData:
+        n_atmos_steps = len([x for x in output_list if x.realm == "atmosphere"])
+        n_ocean_steps = len([x for x in output_list if x.realm == "ocean"])
+        # Slice time to match actual output length (forcing may have more times, e.g.
+        # last window with truncated ocean or variable-length batches).
+        atmos_time = forcing_data.atmosphere_data.time[
+            :,
+            self.atmosphere.n_ic_timesteps : self.atmosphere.n_ic_timesteps
+            + n_atmos_steps,
+        ]
+        ocean_time = forcing_data.ocean_data.time[
+            :,
+            self.ocean.n_ic_timesteps : self.ocean.n_ic_timesteps + n_ocean_steps,
+        ]
         atmos_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "atmosphere"],
-            time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
+            time=atmos_time,
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
             labels=forcing_data.atmosphere_data.labels,
         )
         ocean_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "ocean"],
-            time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
+            time=ocean_time,
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
             labels=forcing_data.ocean_data.labels,
         )
