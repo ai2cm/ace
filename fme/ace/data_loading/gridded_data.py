@@ -182,7 +182,6 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             )
         else:
             self._initial_condition = initial_condition.to_device()
-        self._initial_time: xr.DataArray | None = None
 
     @property
     def loader(self) -> DataLoader[BatchData]:
@@ -243,13 +242,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
 
     @property
     def initial_time(self) -> xr.DataArray:
-        if self._initial_time is None:
-            for batch in self.loader:
-                self._initial_time = batch.time.isel(time=0)
-                break
-            else:
-                raise ValueError("No data found in loader")
-        return self._initial_time
+        return self.initial_condition.as_batch_data().time.isel(time=0)
 
 
 class PSType:
