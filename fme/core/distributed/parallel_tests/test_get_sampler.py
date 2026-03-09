@@ -94,8 +94,11 @@ def test_get_sampler_drop_last_true():
             assert all_indices is not None
             gathered = cast(list[list[int]], all_indices)
             flat = [idx for rank_indices in gathered for idx in rank_indices]
-            # 3 * n_dp unique indices, all within dataset bounds, no duplicates
-            assert len(flat) == 3 * n_dp
+            # Spatial co-ranks share the same sampler indices, so flat
+            # contains duplicates when spatial_size > 1.  The number of
+            # *unique* indices must equal 3 * n_dp.
+            spatial_size = dist.world_size // n_dp
+            assert len(flat) == 3 * n_dp * spatial_size
             assert len(set(flat)) == 3 * n_dp
             assert all(0 <= i < len(dataset) for i in flat)
 
