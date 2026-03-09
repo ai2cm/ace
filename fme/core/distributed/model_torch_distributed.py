@@ -185,6 +185,27 @@ class ModelTorchDistributed(DistributedBackend):
         Slices the ``data_parallel_dim`` across data-parallel ranks and
         the last two dimensions across spatial (h, w) model-parallel ranks.
         """
+        if len(tensor_shape) < 2:
+            raise ValueError(
+                "expected tensor_shape with at least 2 dimensions for "
+                "spatial slicing, "
+                f"got shape {tensor_shape}"
+            )
+        if len(tensor_shape) == 2 and data_parallel_dim is not None:
+            raise ValueError(
+                "data_parallel_dim cannot be specified for 2D tensors, since the "
+                "spatial slicing would consume both dimensions; got shape "
+                f"{tensor_shape}"
+            )
+        if data_parallel_dim is not None and (
+            data_parallel_dim in (-1, -2) or data_parallel_dim >= len(tensor_shape) - 2
+        ):
+            raise ValueError(
+                "data_parallel_dim must be a non-negative integer less than "
+                "the last two dimensions (reserved for spatial slicing), "
+                f"got data_parallel_dim={data_parallel_dim} and shape "
+                f"{tensor_shape}"
+            )
         return_list = [slice(None, None) for _ in tensor_shape]
         if data_parallel_dim is not None:
             n_dp = self.total_data_parallel_ranks
