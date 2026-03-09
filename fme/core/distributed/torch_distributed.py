@@ -2,6 +2,7 @@ import logging
 import os
 from collections.abc import Callable
 from datetime import timedelta
+from typing import Any, TypeVar
 
 import torch.distributed
 import torch.nn as nn
@@ -17,6 +18,8 @@ from .base import DistributedBackend
 from .non_distributed import DummyWrapper
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 class TorchDistributed(DistributedBackend):
@@ -129,12 +132,28 @@ class TorchDistributed(DistributedBackend):
         torch.distributed.gather(tensor, gather_list)
         return gather_list
 
-    def gather_object(self, obj: object) -> list[object] | None:
-        gather_list: list[object] | None = (
-            [None for _ in range(self.world_size)] if self.rank == 0 else None
+    def gather_object(self, obj: T) -> list[T] | None:
+        """Gather a picklable object over all ranks."""
+        gather_list: list[Any] | None = (
+            [None for _ in range(self.total_ranks)] if self.rank == 0 else None
         )
         torch.distributed.gather_object(obj, gather_list)
-        return gather_list
+        return gather_list if self._rank == 0 else None
+
+    def scatter_object(self, obj: T | None) -> T:
+        """Scatter a picklable object from the root process to all processes."""
+        if self.rank == 0:
+            if obj is None:
+                raise ValueError("Root process must provide an object to scatter")
+            object_list = [obj for _ in range(self.total_ranks)]
+        else:
+            object_list = None
+        output_list = [None]
+        torch.distributed.scatter_object_list(
+            scatter_object_output_list=output_list,
+            scatter_object_input_list=object_list,
+        )
+        return output_list[0]  # type: ignore[return-value]
 
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
         return _gather_irregular(
