@@ -558,23 +558,19 @@ class Trainer:
             f"{self._epochs_trained} epochs"
         )
         self.valid_data.set_epoch(self._epochs_trained)
-        self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_validation_aggregator()
         logging.info("Starting loop over validation data")
-        with torch.no_grad(), self.validation_context(), GlobalTimer():
-            for batch in self.valid_data.loader:
-                stepped = self.stepper.train_on_batch(
-                    batch,
-                    optimization=NullOptimization(),
-                    compute_derived_variables=True,
-                )
-                aggregator.record_batch(
-                    batch=stepped,
-                )
+        logs = run_validation(
+            stepper=self.stepper,
+            valid_data=self.valid_data,
+            aggregator=aggregator,
+            ema=self._ema,
+            validate_using_ema=self.config.validate_using_ema,
+        )
         logging.info("Starting flush of reduced diagnostics to disk")
         aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
         logging.info("Getting validation aggregator logs")
-        return aggregator.get_logs(label="val")
+        return logs
 
     def inference_one_epoch(
         self,
@@ -705,6 +701,47 @@ class Trainer:
             )
             logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
             self.save_checkpoint(epoch_checkpoint_path)
+
+
+def run_validation(
+    stepper: TrainStepperABC,
+    valid_data: GriddedDataABC,
+    aggregator: AggregatorABC,
+    ema: EMATracker | None,
+    validate_using_ema: bool,
+) -> dict[str, float]:
+    """
+    Run validation on the given data and return logs.
+
+    This is the core validation loop extracted from Trainer.validate_one_epoch.
+    It does NOT call aggregator.flush_diagnostics — the caller is responsible
+    for flushing if needed.
+
+    Args:
+        stepper: The train stepper to evaluate.
+        valid_data: The validation dataset.
+        aggregator: The aggregator to record batch results into.
+        ema: The EMA tracker, or None if EMA is not used.
+        validate_using_ema: Whether to use EMA parameters during validation.
+
+    Returns:
+        Validation logs dict (e.g. {"val/mean/loss": ...}).
+    """
+    stepper.set_eval()
+    ema_context: contextlib.AbstractContextManager = (
+        ema.applied_params(stepper.modules)
+        if validate_using_ema and ema is not None
+        else contextlib.nullcontext()
+    )
+    with torch.no_grad(), ema_context, GlobalTimer():
+        for batch in valid_data.loader:
+            stepped = stepper.train_on_batch(
+                batch,
+                optimization=NullOptimization(),
+                compute_derived_variables=True,
+            )
+            aggregator.record_batch(batch=stepped)
+    return aggregator.get_logs(label="val")
 
 
 def inference_one_epoch(
