@@ -184,7 +184,9 @@ class StaticInputs:
         )
 
 
-def load_static_inputs(static_inputs_config: dict[str, str]) -> StaticInputs:
+def load_static_inputs(static_inputs_config: dict[str, str]) -> StaticInputs | None:
+    if not static_inputs_config:
+        return None
     return StaticInputs(
         fields=[
             get_normalized_static_input(path, field_name)

@@ -165,7 +165,7 @@ class DataLoaderConfig:
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
         topography: Deprecated field for specifying the topography dataset. Now
-            provided via build method's `static`_inputs argument.
+            provided via build method's `static_inputs` argument.
         lat_extent: The latitude extent to use for the dataset specified in
             degrees, limited to (-88.0, 88.0). The extent is inclusive, so the start and
             stop values are included in the extent. Defaults to [-66, 70] which

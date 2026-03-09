@@ -110,7 +110,7 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
         fine_names=["var0"],
         coarse_names=["var0"],
         n_timesteps=1,
-        use_fine_topography=True,
+        use_fine_topography=False,
     )
     n_sample = 3
     data_config = PairedDataLoaderConfig(
@@ -216,7 +216,7 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         fine_names=["var0"],
         coarse_names=["var0"],
         n_timesteps=1,
-        use_fine_topography=True,
+        use_fine_topography=False,
     )
     fine_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = [
         XarrayDataConfig(paths.fine),
