@@ -20,7 +20,7 @@ from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.generics.data import SizedMap
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.data.patching import Patch, get_patches
-from fme.downscaling.data.topography import StaticInputs
+from fme.downscaling.data.static import StaticInputs
 from fme.downscaling.data.utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,
