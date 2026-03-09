@@ -100,6 +100,16 @@ def test_gather_global_tensor():
 
 
 @pytest.mark.parallel
+def test_local_slices_no_data_parallel_dim():
+    """Without a dp dim, the data-parallel dims are untouched."""
+    dist = Distributed.get_instance()
+    shape = (8, 6, 8)  # (batch, H, W) — 3D so batch is separate from spatial
+    slices = dist.get_local_slices(shape)
+    # batch dim should be full (no dp dim specified)
+    assert slices[0] == slice(None, None)
+
+
+@pytest.mark.parallel
 def test_local_slices_match_gather_tensors():
     """
     Test that gather_object and gather produce consistent results.
