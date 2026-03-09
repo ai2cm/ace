@@ -367,6 +367,7 @@ def test_generation_main(generation_config_path, skip_slow):
     (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
     reason="Skipping multi-GPU test: less than 2 GPUs available.",
 )
+@pytest.mark.serial
 def test_generation_entrypoint(generation_config_path, skip_slow):
     """Test the main generation process end-to-end."""
     if skip_slow:

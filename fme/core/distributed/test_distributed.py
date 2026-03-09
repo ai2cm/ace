@@ -75,6 +75,7 @@ def run_gather_test(rank, worldsize):
             assert torch.allclose(gathered[i].cpu(), torch.ones(2, 5) * i)
 
 
+@pytest.mark.serial
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires multi-GPU machine")
 def test_distributed_gather():
     world_size = 2
