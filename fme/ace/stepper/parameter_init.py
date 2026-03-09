@@ -7,6 +7,7 @@ from typing import Any
 import torch
 from torch import nn
 
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.training_history import TrainingHistory
 from fme.core.weight_ops import overwrite_weights
@@ -117,10 +118,16 @@ class ParameterInitializationConfig:
             close to zero
         exclude_parameters: deprecated, kept for backwards compatibility
         frozen_parameters: deprecated, kept for backwards compatibility
+        pretrain_labels: Optional list of label names in the order used by the
+            pre-trained checkpoint (first dimension of label_pos_embed). When
+            provided and the fine-tune dataset has fewer labels, the learned
+            embeddings for the fine-tune labels are copied from the checkpoint.
+            Must match the pretrain dataset's label order (e.g. sorted(all_labels)).
     """
 
     weights_path: str | None = None
     parameters: list[ParameterClassification] = dataclasses.field(default_factory=list)
+    pretrain_labels: list[str] | None = None
     alpha: float = 0.0
     beta: float = 0.0
     exclude_parameters: list[str] | None = None
@@ -171,6 +178,7 @@ class ParameterInitializer:
 
     def __post_init__(self):
         self._base_weights: Weights | None = None
+        self._base_weights_for_regularizer: Weights | None = None
         self._training_history: TrainingHistory | None = None
 
     @property
@@ -195,26 +203,76 @@ class ParameterInitializer:
             for _ in range(n_modules - len(self.config.parameters))
         ]
 
+    def _slice_label_pos_embed(
+        self,
+        from_embed: torch.Tensor,
+        to_n_labels: int,
+        target_labels: list[str],
+    ) -> torch.Tensor:
+        """Copy rows from from_embed for each target label using pretrain_labels."""
+        pretrain = self.config.pretrain_labels
+        if pretrain is None or len(pretrain) != from_embed.shape[0]:
+            return from_embed
+        out = from_embed.new_zeros(to_n_labels, *from_embed.shape[1:])
+        for i, label in enumerate(target_labels):
+            if label in pretrain:
+                j = pretrain.index(label)
+                out[i].copy_(from_embed[j])
+        return out
+
     def apply_weights(
         self,
         modules: list[nn.Module],
+        dataset_info: DatasetInfo | None = None,
     ) -> None:
         """
         Apply the weight initialization from a base model to a module.
 
         Args:
             modules: a list of nn.Modules to initialize
+            dataset_info: optional dataset info for the current (e.g. fine-tune)
+                run. When provided with pretrain_labels, enables slice-loading
+                of label_pos_embed so learned embeddings for the current labels
+                are kept from the checkpoint.
         """
         filled_parameters = self._filled_parameters(len(modules))
-        if self.base_weights is not None:
-            for module, state_dict, classification in zip(
-                modules, self.base_weights, filled_parameters
+        if self.base_weights is None:
+            return
+        pretrain_labels = self.config.pretrain_labels
+        target_labels = (
+            sorted(dataset_info.all_labels) if dataset_info is not None else None
+        )
+        modified_weights: Weights | None = None
+        if pretrain_labels is not None and target_labels is not None:
+            modified_weights = []
+        for module, state_dict, classification in zip(
+            modules, self.base_weights, filled_parameters
+        ):
+            state_to_use = dict(state_dict)
+            if (
+                "label_pos_embed" in state_to_use
+                and pretrain_labels is not None
+                and target_labels is not None
             ):
-                overwrite_weights(
-                    state_dict,
-                    module,
-                    exclude_parameters=classification.exclude,
-                )
+                from_embed = state_to_use["label_pos_embed"]
+                try:
+                    to_param = module.get_parameter("label_pos_embed")
+                except AttributeError:
+                    to_param = None
+                if to_param is not None and from_embed.shape[0] > to_param.shape[0]:
+                    sliced = self._slice_label_pos_embed(
+                        from_embed, to_param.shape[0], target_labels
+                    )
+                    state_to_use["label_pos_embed"] = sliced
+            if modified_weights is not None:
+                modified_weights.append(state_to_use)
+            overwrite_weights(
+                state_to_use,
+                module,
+                exclude_parameters=classification.exclude,
+            )
+        if modified_weights is not None:
+            self._base_weights_for_regularizer = modified_weights
 
     def freeze_weights(self, modules: list[nn.Module]):
         """
@@ -252,7 +310,11 @@ class ParameterInitializer:
         """
         device = get_device()
         filled_parameters = self._filled_parameters(len(modules))
-        base_weights = self.base_weights
+        base_weights = (
+            self._base_weights_for_regularizer
+            if self._base_weights_for_regularizer is not None
+            else self.base_weights
+        )
         if base_weights is not None and (
             self.config.alpha != 0 or self.config.beta != 0
         ):

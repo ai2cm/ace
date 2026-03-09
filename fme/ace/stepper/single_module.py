@@ -807,6 +807,7 @@ class Stepper:
 
         self._parameter_initializer.apply_weights(
             step.modules,
+            dataset_info=dataset_info,
         )
 
         self._l2_sp_tuning_regularizer = (
