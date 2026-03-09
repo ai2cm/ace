@@ -6,8 +6,10 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+import cftime
 import dacite
 import numpy as np
+import numpy.typing as npt
 import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
@@ -248,7 +250,7 @@ class InferenceConfig:
 
     def get_data_writer(
         self,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         timestep: datetime.timedelta,
         coords: Mapping[str, np.ndarray],
         variable_metadata: Mapping[str, VariableMetadata],
@@ -256,7 +258,7 @@ class InferenceConfig:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,
             variable_metadata=variable_metadata,
@@ -343,7 +345,7 @@ def run_inference_from_config(config: InferenceConfig):
         )
 
         writer = config.get_data_writer(
-            n_initial_conditions=data.n_initial_conditions,
+            initial_condition_times=data.initial_time.to_numpy(),
             timestep=data.timestep,
             coords=data.coords,
             variable_metadata=variable_metadata,
