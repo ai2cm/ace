@@ -1,6 +1,7 @@
 import dataclasses
 import os
 import pathlib
+from math import ceil
 
 import numpy as np
 import pytest
@@ -50,7 +51,9 @@ def _setup(
     # create_coupled_data_on_disk already accounts for one initial condition
     atmos_steps_per_ocean_step = 2
     n_extra_initial_conditions = n_initial_conditions - 1
-    n_forward_times_ocean = n_coupled_steps + n_extra_initial_conditions
+    n_windows = ceil(n_coupled_steps / coupled_steps_in_memory)
+    padded_coupled_steps = n_windows * coupled_steps_in_memory
+    n_forward_times_ocean = padded_coupled_steps + n_extra_initial_conditions
     n_forward_times_atmos = n_forward_times_ocean * atmos_steps_per_ocean_step
     mock_data = create_coupled_data_on_disk(
         data_dir,
@@ -220,15 +223,22 @@ def test_inference(
         1,
     ],
 )
+@pytest.mark.parametrize(
+    ("n_coupled_steps", "coupled_steps_in_memory"),
+    [
+        (2, 2),
+        (4, 3),
+    ],
+)
 def test_inference_with_empty_ocean_forcing(
     tmp_path: pathlib.Path,
     atmosphere_times_offset: int,
+    n_coupled_steps: int,
+    coupled_steps_in_memory: int,
     very_fast_only: bool,
 ):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
-    n_coupled_steps = 2
-    coupled_steps_in_memory = 2
     n_initial_conditions = 3
     ocean_in_names = ["o_prog", "sst", "a_diag"]
     ocean_out_names = ["o_prog", "sst", "o_diag"]
