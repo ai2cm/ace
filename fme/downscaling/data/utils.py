@@ -18,6 +18,16 @@ def null_generator(num: int):
 
 @dataclasses.dataclass
 class ClosedInterval:
+    """
+    Defines a closed interval [start, stop] and provides utility methods for working
+    with coordinate tensors. The interval includes both the start and stop values
+    and stop must be greater than start.
+
+    Parameters:
+        start: The minimum value of the interval (inclusive).
+        stop: The maximum value of the interval (inclusive).
+    """
+
     start: float
     stop: float
 
@@ -26,6 +36,32 @@ class ClosedInterval:
 
     def __contains__(self, value: float):
         return self.start <= value <= self.stop
+
+    def slice_of(self, coords: torch.Tensor) -> slice:
+        """
+        Return a slice that selects all elements of `coords` within this
+        specified interval. This assumes `coords` is monotonically increasing.
+
+        Args:
+            coords: A 1-D tensor of coordinate values. Must be monotonically
+                increasing. Values must be in the same units as `self.start`
+                and `self.stop`.
+
+        Returns:
+            A `slice` object suitable for indexing `coords` or any tensor whose
+            corresponding dimension aligns with `coords`.
+
+        Raises:
+            ValueError: If no element of `coords` falls within this interval.
+        """
+        mask = (coords >= self.start) & (coords <= self.stop)
+        if not mask.any():
+            raise ValueError(
+                f"Requested interval range {self} does not overlap with coordinate"
+                f" range [{coords.min().item()}, {coords.max().item()}]"
+            )
+        indices = mask.nonzero(as_tuple=True)[0]
+        return slice(indices[0].item(), indices[-1].item() + 1)
 
 
 def scale_slice(slice_: slice, scale: int) -> slice:
