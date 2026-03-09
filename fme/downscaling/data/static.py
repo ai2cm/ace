@@ -182,3 +182,12 @@ class StaticInputs:
                 for field_state in state["fields"]
             ]
         )
+
+
+def load_static_inputs(static_inputs_config: dict[str, str]) -> StaticInputs:
+    return StaticInputs(
+        fields=[
+            get_normalized_static_input(path, field_name)
+            for field_name, path in static_inputs_config.items()
+        ]
+    )

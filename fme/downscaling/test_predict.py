@@ -2,15 +2,13 @@ import os
 
 import pytest
 import torch
-import xarray as xr
 import yaml
 
-from fme.core.coordinates import LatLonCoordinates
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
-from fme.downscaling.data import StaticInput, StaticInputs
+from fme.downscaling.data import load_static_inputs
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
@@ -114,27 +112,14 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
     )
     model_config = get_model_config(coarse_shape, downscale_factor=downscale_factor)
     model = model_config.build(
-        coarse_shape=coarse_shape, downscale_factor=downscale_factor
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        static_inputs=load_static_inputs({"HGTsfc": fine_data_path}),
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
     os.makedirs(
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
-    )
-
-    # ensure model static inputs shape is consistent with the test data
-    fine_data = xr.load_dataset(fine_data_path)
-    topo_data = fine_data["HGTsfc"]
-    model.static_inputs = StaticInputs(
-        [
-            StaticInput(
-                data=torch.randn(topo_data.shape[-2:]),
-                coords=LatLonCoordinates(
-                    lat=torch.tensor(topo_data.lat.values),
-                    lon=torch.tensor(topo_data.lon.values),
-                ),
-            )
-        ]
     )
 
     torch.save(
