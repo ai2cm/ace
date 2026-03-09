@@ -178,7 +178,6 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
             )
         else:
             self._initial_condition = initial_condition.to_device()
-        self._initial_time: xr.DataArray | None = None
 
     @property
     def atmosphere_properties(self) -> DatasetProperties:
@@ -253,18 +252,13 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
 
     @property
     def initial_time(self) -> xr.DataArray:
-        if self._initial_time is None:
-            for batch in self.loader:
-                atmosphere_initial_time = batch.atmosphere_data.time.isel(time=0)
-                ocean_initial_time = batch.ocean_data.time.isel(time=0)
-                err_msg = "Atmosphere and ocean initial times must be the same"
-                np.testing.assert_array_equal(
-                    atmosphere_initial_time,
-                    ocean_initial_time,
-                    err_msg=err_msg,
-                )
-                self._initial_time = atmosphere_initial_time
-                break
-            else:
-                raise ValueError("No data found in loader")
-        return self._initial_time
+        atmosphere_data = self.initial_condition.as_batch_data().atmosphere_data
+        ocean_data = self.initial_condition.as_batch_data().ocean_data
+        atmosphere_initial_time = atmosphere_data.time.isel(time=0)
+        ocean_initial_time = ocean_data.time.isel(time=0)
+        np.testing.assert_array_equal(
+            atmosphere_initial_time,
+            ocean_initial_time,
+            err_msg="Atmosphere and ocean initial times must be the same",
+        )
+        return atmosphere_initial_time
