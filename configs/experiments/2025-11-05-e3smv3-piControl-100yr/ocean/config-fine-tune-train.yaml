@@ -97,6 +97,8 @@ stepper_training:
     weights_path: FINETUNE_CHECKPOINT_PATH/best_inference_ckpt.tar
   loss:
     type: MSE
+    weights:
+      sst: 2
 stepper:
   input_masking:
     mask_value: 0

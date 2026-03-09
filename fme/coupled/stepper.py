@@ -1188,15 +1188,28 @@ class CoupledStepper:
         output_list: list[ComponentStepPrediction],
         forcing_data: CoupledBatchData,
     ) -> CoupledBatchData:
+        n_atmos_steps = len([x for x in output_list if x.realm == "atmosphere"])
+        n_ocean_steps = len([x for x in output_list if x.realm == "ocean"])
+        # Slice time to match actual output length (forcing may have more times, e.g.
+        # last window with truncated ocean or variable-length batches).
+        atmos_time = forcing_data.atmosphere_data.time[
+            :,
+            self.atmosphere.n_ic_timesteps : self.atmosphere.n_ic_timesteps
+            + n_atmos_steps,
+        ]
+        ocean_time = forcing_data.ocean_data.time[
+            :,
+            self.ocean.n_ic_timesteps : self.ocean.n_ic_timesteps + n_ocean_steps,
+        ]
         atmos_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "atmosphere"],
-            time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
+            time=atmos_time,
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
             labels=forcing_data.atmosphere_data.labels,
         )
         ocean_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "ocean"],
-            time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
+            time=ocean_time,
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
             labels=forcing_data.ocean_data.labels,
         )
@@ -1217,17 +1230,25 @@ class CoupledStepper:
         gen_data = self._process_prediction_generator_list(output_list, forcing)
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
-                gen_data = (
-                    gen_data.prepend(initial_condition)
-                    .compute_derived_variables(
-                        ocean_derive_func=self.ocean.derive_func,
-                        atmosphere_derive_func=self.atmosphere.derive_func,
-                        forcing_data=forcing,
-                    )
-                    .remove_initial_condition(
-                        n_ic_timesteps_ocean=self.ocean.n_ic_timesteps,
-                        n_ic_timesteps_atmosphere=self.atmosphere.n_ic_timesteps,
-                    )
+                gen_data_prepended = gen_data.prepend(initial_condition)
+                # Slice forcing to match gen_data time (gen_data may be shorter when
+                # e.g. ocean window was truncated); compute_derived_variables requires
+                # exact time alignment.
+                forcing_sliced = CoupledBatchData(
+                    ocean_data=forcing.ocean_data.select_time_slice(
+                        slice(0, gen_data_prepended.ocean_data.n_timesteps)
+                    ),
+                    atmosphere_data=forcing.atmosphere_data.select_time_slice(
+                        slice(0, gen_data_prepended.atmosphere_data.n_timesteps)
+                    ),
+                )
+                gen_data = gen_data_prepended.compute_derived_variables(
+                    ocean_derive_func=self.ocean.derive_func,
+                    atmosphere_derive_func=self.atmosphere.derive_func,
+                    forcing_data=forcing_sliced,
+                ).remove_initial_condition(
+                    n_ic_timesteps_ocean=self.ocean.n_ic_timesteps,
+                    n_ic_timesteps_atmosphere=self.atmosphere.n_ic_timesteps,
                 )
         return gen_data
 
@@ -1241,11 +1262,23 @@ class CoupledStepper:
         Predict multiple steps forward given initial condition and reference data.
         """
         gen_data = self._predict(initial_condition, forcing, compute_derived_variables)
+        n_ocean_times = gen_data.ocean_data.n_timesteps + self.ocean.n_ic_timesteps
+        n_atmos_times = (
+            gen_data.atmosphere_data.n_timesteps + self.atmosphere.n_ic_timesteps
+        )
+        forcing_sliced = CoupledBatchData(
+            ocean_data=forcing.ocean_data.select_time_slice(slice(0, n_ocean_times)),
+            atmosphere_data=forcing.atmosphere_data.select_time_slice(
+                slice(0, n_atmos_times)
+            ),
+        )
         atmos_forward_data = self.atmosphere.get_forward_data(
-            forcing.atmosphere_data, compute_derived_variables=compute_derived_variables
+            forcing_sliced.atmosphere_data,
+            compute_derived_variables=compute_derived_variables,
         )
         ocean_forward_data = self.ocean.get_forward_data(
-            forcing.ocean_data, compute_derived_variables=compute_derived_variables
+            forcing_sliced.ocean_data,
+            compute_derived_variables=compute_derived_variables,
         )
         return (
             CoupledPairedData.from_coupled_batch_data(

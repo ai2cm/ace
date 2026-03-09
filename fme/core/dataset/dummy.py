@@ -107,8 +107,18 @@ class DummyDataset(DatasetABC):
         """
         time_slice = slice(idx, idx + self.sample_n_times)
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
-        return (self._dummy_dict, time, self._labels, self._epoch)
+        n_times = len(time)
+        # Slice dummy data to match current sample_n_times so returned shapes are
+        # always consistent (e.g. after set_epoch or when _dummy_dict is stale).
+        data = {k: v[:n_times].clone() for k, v in self._dummy_dict.items()}
+        return (data, time, self._labels, self._epoch)
 
     def set_epoch(self, epoch: int):
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(epoch))
         self._epoch = epoch
+        # Keep dummy data shape in sync with sample_n_times (schedule may vary by epoch)
+        shape = tuple(s.size for s in self._horizontal_size)
+        full_shape = (self.sample_n_times,) + shape
+        self._dummy_dict = {
+            "__dummy__": torch.zeros(full_shape, device=torch.device("cpu"))
+        }

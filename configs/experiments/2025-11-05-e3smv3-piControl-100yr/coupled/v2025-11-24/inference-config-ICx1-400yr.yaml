@@ -1,0 +1,36 @@
+experiment_dir: /results
+n_coupled_steps: 29200
+coupled_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: true
+    save_monthly_files: false
+    names:
+      - sst
+      - ocean_sea_ice_fraction
+      - sea_ice_volume
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-e3smv3
+  entity: ai2cm
+forcing_loader:
+  atmosphere:
+    dataset:
+      data_path: /climate-default/2025-11-24-E3SMv3-piControl-100yr-coupled-IC
+      file_pattern: atmosphere-forcing-1yr.nc
+      n_repeats: 401
+  num_data_workers: 1
+initial_condition:
+  ocean:
+    path: /climate-default/2025-11-24-E3SMv3-piControl-100yr-coupled-IC/0401-01_ocean_ic.nc
+  atmosphere:
+    path: /climate-default/2025-11-24-E3SMv3-piControl-100yr-coupled-IC/0401-01_atmosphere_ic.nc
+  start_indices:
+    first: 0
+    n_initial_conditions: 1
