@@ -83,10 +83,10 @@ stepper_training:
     # Exclude label embedding: pretrained model has 6 labels, fine-tune uses 1 (era5).
     # Loading would fail due to shape mismatch (6 vs 1); keep random init for 1-label embedding.
     parameters:
-      - exclude: ["label_pos_embed"]
+      - exclude: ["label_pos_embed","module.conditional_model.blocks.*.norm0.W_scale_pos.weight","module.conditional_model.blocks.*.norm0.W_bias_pos.weight", "module.conditional_model.blocks.*.norm1.W_scale_pos.weight","module.conditional_model.blocks.*.norm1.W_bias_pos.weight"]
       - frozen:
           # include: []
-          exclude: ["label_pos_embed","module.conditional_model.blocks.0.norm0.W_scale_pos.weight","module.conditional_model.blocks.*.norm0.W_bias_pos.weight", "module.conditional_model.blocks.0.norm1.W_scale_pos.weight","module.conditional_model.blocks.*.norm1.W_bias_pos.weight"]
+          exclude: ["label_pos_embed","module.conditional_model.blocks.*.norm0.W_scale_pos.weight","module.conditional_model.blocks.*.norm0.W_bias_pos.weight", "module.conditional_model.blocks.*.norm1.W_scale_pos.weight","module.conditional_model.blocks.*.norm1.W_bias_pos.weight"]
   n_ensemble: 2
   train_n_forward_steps:
     outcomes:
