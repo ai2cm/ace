@@ -15,7 +15,7 @@ from fme.downscaling.data import (
     LatLonCoordinates,
     StaticInput,
     StaticInputs,
-    get_normalized_static_input,
+    load_static_inputs,
 )
 from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
 from fme.downscaling.inference.inference import Downscaler, InferenceConfig, main
@@ -266,7 +266,7 @@ def get_generate_model_config():
 @pytest.fixture
 def checkpointed_model_config(
     tmp_path,
-    loader_config,
+    data_paths,
 ):
     """Create and return a path to a checkpointed model for testing."""
     model_config = get_generate_model_config()
@@ -276,12 +276,7 @@ def checkpointed_model_config(
 
     # loader_config is passed in to add static inputs into model
     # that correspond to the dataset coordinates
-    topography_path = (
-        f"{loader_config.coarse[0].data_path.replace('coarse', 'fine')}/data.nc"
-    )
-    static_inputs = StaticInputs(
-        [get_normalized_static_input(topography_path, "HGTsfc")]
-    )
+    static_inputs = load_static_inputs({"HGTsfc": data_paths.fine})
     model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"

@@ -613,6 +613,7 @@ class CheckpointModelConfig:
     def build(
         self,
     ) -> DiffusionModel:
+        static_inputs: StaticInputs | None
         if self._checkpoint["model"]["static_inputs"] is not None:
             if self.static_inputs is not None:
                 raise ValueError(
