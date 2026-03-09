@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Iterable
 from unittest.mock import patch
 
+import cftime
 import dacite
 import fsspec
 import numpy as np
@@ -377,11 +378,19 @@ def inference_helper(
             assert dim_name in initial_condition_ds.data_vars[example_output_var].dims
             assert dim_name in initial_condition_ds.coords
 
+    decode_times = xr.coders.CFDatetimeCoder(use_cftime=True)
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc",
         decode_timedelta=False,
-        decode_times=False,
+        decode_times=decode_times,
     )
+
+    # Regression test for GitHub issue #886; ensure the init_time is properly
+    # propagated from the initial conditions to the prediction outputs.
+    expected_init_time = cftime.DatetimeProlepticGregorian(2000, 1, 1)
+    result_init_time = prediction_ds["init_time"].squeeze("sample").item()
+    assert result_init_time == expected_init_time
+
     assert len(prediction_ds["time"]) == config.n_forward_steps
     for i in range(config.n_forward_steps - 1):
         np.testing.assert_allclose(

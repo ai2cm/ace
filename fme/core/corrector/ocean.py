@@ -87,19 +87,26 @@ class OceanHeatContentBudgetConfig:
 
 @dataclasses.dataclass
 class SurfaceEnergyFluxCorrectionConfig:
-    """Configuration for correcting the generated hfds using a residual
-    prediction approach with atmosphere-derived surface energy fluxes.
+    """Configuration for correcting the generated hfds using
+    atmosphere-derived surface energy fluxes and ocean_fraction.
 
-    The correction is: corrected_hfds = gen_hfds + ocean_fraction * net_flux,
-    where net_flux is the net surface energy flux computed from atmospheric
+    The net_flux is the net surface energy flux computed from atmospheric
     forcing variables and generated SST. The ocean_fraction naturally zeroes
     out the correction on land and reduces it under sea ice.
 
+    Available options are:
+      - "residual_prediction": corrected_hfds = gen_hfds + ocean_fraction * net_flux.
+        The network predicts a residual that is added to the forcing-derived flux.
+      - "prescribed": corrected_hfds = net_flux * ocean_fraction + gen_hfds *
+        (1 - ocean_fraction). Open-ocean hfds is prescribed from forcings; the
+        network prediction is retained under sea ice and on land.
+
     Parameters:
-        method: Method to use. The available option is "residual_prediction".
+        method: Method to use for the correction.
+
     """
 
-    method: Literal["residual_prediction"]
+    method: Literal["residual_prediction", "prescribed"]
 
 
 @CorrectorSelector.register("ocean_corrector")
@@ -166,7 +173,12 @@ class OceanCorrector(CorrectorABC):
         if self._config.sea_ice_fraction_correction is not None:
             gen_data = self._config.sea_ice_fraction_correction(gen_data, input_data)
         if self._config.surface_energy_flux_correction is not None:
-            gen_data = _correct_hfds_residual(input_data, gen_data, forcing_data)
+            gen_data = _correct_hfds(
+                input_data,
+                gen_data,
+                forcing_data,
+                method=self._config.surface_energy_flux_correction.method,
+            )
         if self._config.ocean_heat_content_correction is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
@@ -211,17 +223,20 @@ def _compute_ocean_net_surface_energy_flux(
     return base_flux + precip_heat_flux_ocean - evap_heat_flux
 
 
-def _correct_hfds_residual(
+def _correct_hfds(
     input_data: TensorMapping,
     gen_data: TensorMapping,
     forcing_data: TensorMapping,
+    method: Literal["residual_prediction", "prescribed"],
 ) -> TensorDict:
-    """Apply residual prediction correction to the generated hfds.
-
-    corrected_hfds = gen_hfds + ocean_fraction * net_surface_energy_flux
+    """Apply surface energy flux correction to the generated hfds.
 
     The ocean_fraction naturally zeroes the correction on land and reduces
     it under sea ice.
+
+    Methods:
+        residual_prediction: gen_hfds + ocean_fraction * net_flux
+        prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
     """
     input = OceanData(input_data)
     ocean_fraction = input.ocean_fraction
@@ -233,7 +248,15 @@ def _correct_hfds_residual(
         hfds_name = "hfds"
     else:
         hfds_name = "hfds_total_area"
-    out[hfds_name] = gen_data[hfds_name] + ocean_fraction * net_flux
+    gen_hfds = gen_data[hfds_name]
+    if method == "residual_prediction":
+        out[hfds_name] = gen_hfds + ocean_fraction * net_flux
+    elif method == "prescribed":
+        out[hfds_name] = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
+    else:
+        raise NotImplementedError(
+            f"Method {method!r} not implemented for surface energy flux correction"
+        )
     return out
 
 

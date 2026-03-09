@@ -50,7 +50,7 @@ input_datasets:
     zarr_path: /climate-default/2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
     time_chunk_size: 25
     extra_fields:
-      names_and_prefixes: ["idepth_", "mask_"]
+      names_and_prefixes: ["idepth_", "mask_", "deptho"]
   stats:
     atmosphere_dir: /climate-default/2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-stats/combined
     ocean_dir: /climate-default/2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing-stats

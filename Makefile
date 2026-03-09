@@ -10,6 +10,7 @@ FME_FORCE_CPU ?= 0
 FME_DISTRIBUTED_BACKEND ?= torch
 FME_DISTRIBUTED_H ?= 1
 FME_DISTRIBUTED_W ?= 1
+TEST_PATH ?= .
 
 ifeq ($(shell uname), Linux)
 	CONDA_PACKAGES=gxx_linux-64 pip
@@ -59,24 +60,47 @@ create_environment:
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -r analysis-deps.txt
 
 test:
-	pytest -n 4 --durations 40 .
+	pytest -n 4 --durations 40 $(TEST_PATH)
 
 test_parallel:
 	FME_FORCE_CPU=$(FME_FORCE_CPU) \
 	FME_DISTRIBUTED_BACKEND=$(FME_DISTRIBUTED_BACKEND) \
 	FME_DISTRIBUTED_H=$(FME_DISTRIBUTED_H) \
 	FME_DISTRIBUTED_W=$(FME_DISTRIBUTED_W) \
-	torchrun --nproc-per-node $(NPROC) -m pytest -m parallel .
+	torchrun --nproc-per-node $(NPROC) -m pytest -m parallel $(TEST_PATH)
+
+# matrix for parallel tests
+# | backend | WS | H | W |
+# | ------- | -- | - | - |
+# | torch   |  2 | 1 | 1 |
+# | torch   |  3 | 1 | 1 |
+# | model   |  3 | 1 | 1 |
+# | model   |  2 | 2 | 1 |
+# | model   |  2 | 1 | 2 |
+# | model   |  3 | 3 | 1 |
+# | model   |  3 | 1 | 3 |
+# | model   |  4 | 2 | 2 |
+# | model   |  4 | 2 | 1 |
+# | model   |  8 | 2 | 2 |
+cpu_test_all_parallel:
+	FME_FORCE_CPU=1 NPROC=2 FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=1 make test_parallel
+	FME_FORCE_CPU=1 NPROC=2 FME_DISTRIBUTED_BACKEND=torch FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=1 make test_parallel
+	FME_FORCE_CPU=1 NPROC=3 FME_DISTRIBUTED_BACKEND=torch FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=1 make test_parallel
+	FME_FORCE_CPU=1 NPROC=3 FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=1 make test_parallel
+	FME_FORCE_CPU=1 NPROC=2 FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=2 make test_parallel
+	FME_FORCE_CPU=1 NPROC=4 FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=2 make test_parallel
+	FME_FORCE_CPU=1 NPROC=4 FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=1 make test_parallel
+	FME_FORCE_CPU=1 NPROC=8 FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=2 make test_parallel
 
 # --cov must come  after pytest args to use the sources defined by config
 test_cov:
-	pytest -n 4 --durations 40 --cov --cov-report=term-missing:skip-covered --cov-config=pyproject.toml .
+	pytest -n 4 --durations 40 --cov --cov-report=term-missing:skip-covered --cov-config=pyproject.toml $(TEST_PATH)
 
 test_fast:
-	pytest -n 4 --durations 40 --fast .
+	pytest -n 4 --durations 40 --fast $(TEST_PATH)
 
 test_very_fast:
-	pytest --durations 40 --very-fast .
+	pytest --durations 40 --very-fast $(TEST_PATH)
 
 # For maintainer use only
 # requires fme[deploy] to be installed
