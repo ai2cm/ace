@@ -1,5 +1,3 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-1pct_nosmooth_0256to0350-hfds_resid|rs0|train|urgent|b200|4|500GiB|3||seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='residual_prediction'
-1pct_nosmooth_0256to0350-hfds_resid|rs1|train|high|b200|4|500GiB|3||seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='residual_prediction'
-1pct_nosmooth_0256to0350-hfds_resid|rs2|train|high|a100+h100|4|500GiB|3||seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='residual_prediction'
+1pct_nosmooth_0256to0350-hfds_prescribed|rs0|train|urgent|b200|4|500GiB|3||seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
