@@ -20,12 +20,11 @@ from fme.ace.inference.data_writer.utils import (
 )
 from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.writer import DATETIME_ENCODING_UNITS, TIMEDELTA_ENCODING_UNITS
 
 LEAD_TIME_DIM = "time"
-LEAD_TIME_UNITS = "microseconds"
 IC_DIM = "sample"
 INIT_TIME = "init_time"
-INIT_TIME_UNITS = "microseconds since 1970-01-01 00:00:00"
 VALID_TIME = "valid_time"
 
 
@@ -128,7 +127,7 @@ class RawDataWriter:
                 "non-local filesystem."
             )
         filename = str(Path(path) / f"{label}.nc")
-        calendar = infer_calendar(initial_condition_times)
+        calendar = _infer_calendar(initial_condition_times)
         n_initial_conditions = len(initial_condition_times)
         self._save_names = save_names
         self.initial_condition_times = initial_condition_times
@@ -137,10 +136,10 @@ class RawDataWriter:
         self.dataset = Dataset(filename, "w", format="NETCDF4")
         self.dataset.createDimension(LEAD_TIME_DIM, None)  # unlimited dimension
         self.dataset.createVariable(LEAD_TIME_DIM, "i8", (LEAD_TIME_DIM,))
-        self.dataset.variables[LEAD_TIME_DIM].units = LEAD_TIME_UNITS
+        self.dataset.variables[LEAD_TIME_DIM].units = TIMEDELTA_ENCODING_UNITS
         self.dataset.createDimension(IC_DIM, n_initial_conditions)
         self.dataset.createVariable(INIT_TIME, "i8", (IC_DIM,))
-        self.dataset.variables[INIT_TIME].units = INIT_TIME_UNITS
+        self.dataset.variables[INIT_TIME].units = DATETIME_ENCODING_UNITS
         self.dataset.variables[INIT_TIME].calendar = calendar
         self.dataset.variables[INIT_TIME][:] = cftime.date2num(
             self.initial_condition_times,
@@ -148,7 +147,7 @@ class RawDataWriter:
             calendar=self.dataset.variables[INIT_TIME].calendar,
         )
         self.dataset.createVariable(VALID_TIME, "i8", (IC_DIM, LEAD_TIME_DIM))
-        self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
+        self.dataset.variables[VALID_TIME].units = DATETIME_ENCODING_UNITS
         self.dataset.variables[VALID_TIME].calendar = calendar
         self._dataset_dims_created = False
         dataset_metadata = copy.copy(dataset_metadata)
@@ -302,7 +301,7 @@ def get_batch_lead_time_microseconds(
     return lead_time_microseconds[0, :]
 
 
-def infer_calendar(array: npt.NDArray[cftime.datetime]) -> str:
+def _infer_calendar(array: npt.NDArray[cftime.datetime]) -> str:
     """Infer the calendar of an array of cftime.datetime objects.
 
     Assumes that all the datetime objects in the array have the same calendar,

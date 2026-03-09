@@ -3,6 +3,7 @@ from typing import NamedTuple
 
 import cftime
 import numpy as np
+import numpy.typing as npt
 import pytest
 import torch
 import xarray as xr
@@ -41,7 +42,7 @@ def get_initial_condition_times(
     n_initial_conditions: int,
     separation_timedelta: datetime.timedelta = datetime.timedelta(hours=0),
     model_timestep: datetime.timedelta = TIMESTEP,
-) -> np.ndarray[cftime.datetime]:
+) -> npt.NDArray[cftime.datetime]:
     """Generate an array of initial condition times.
 
     Args:
@@ -255,7 +256,7 @@ class TestDataWriter:
         # Open the file and check the data
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
         assert dataset["time"].units == "microseconds"
-        assert dataset["init_time"].units == "microseconds since 1970-01-01 00:00:00"
+        assert dataset["init_time"].units == "microseconds since 1970-01-01"
         assert dataset["init_time"].calendar == calendar
         assert "source.inference_version" in dataset.ncattrs()
         assert dataset.getncattr("source.inference_version") == "1.0"
