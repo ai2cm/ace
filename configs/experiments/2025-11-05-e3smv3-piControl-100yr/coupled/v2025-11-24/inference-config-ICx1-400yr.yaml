@@ -23,7 +23,6 @@ forcing_loader:
   atmosphere:
     dataset:
       data_path: /climate-default/2025-11-24-E3SMv3-piControl-100yr-coupled-IC/atmosphere-forcing-1yr.nc
-      engine: zarr
       n_repeats: 401
   num_data_workers: 1
 initial_condition:
