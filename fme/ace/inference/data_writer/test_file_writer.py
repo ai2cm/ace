@@ -623,7 +623,9 @@ def test_netcdf_file_writer_with_non_local_experiment_dir(
         pytest.param(ZarrWriterConfig(), id="Zarr"),
     ],
 )
-def test_coarsened_file_writer(tmpdir, format: NetCDFWriterConfig | ZarrWriterConfig):
+def test_coarsened_file_writer_time_coordinates(
+    tmpdir, format: NetCDFWriterConfig | ZarrWriterConfig
+):
     initial_condition_times = np.array([cftime.DatetimeGregorian(2020, 1, 1)])
     n_initial_conditions = len(initial_condition_times)
     n_timesteps = 4
@@ -661,10 +663,36 @@ def test_coarsened_file_writer(tmpdir, format: NetCDFWriterConfig | ZarrWriterCo
         "1 days 12:00:00", periods=expected_n_timesteps, freq=f"{coarsen_factor}D"
     )
     expected_time = xr.DataArray(expected_lead_times, dims="time")
+
+    expected_init_time = xr.DataArray(
+        [cftime.DatetimeGregorian(2020, 1, 1)], dims="sample"
+    )
+    expected_valid_time = xr.DataArray(
+        [
+            [
+                cftime.DatetimeGregorian(2020, 1, 2, 12, 0, 0),
+                cftime.DatetimeGregorian(2020, 1, 4, 12, 0, 0),
+            ]
+        ],
+        dims=["sample", "time"],
+    )
+    expected_valid_time = expected_valid_time.assign_coords(
+        time=expected_lead_times,
+        init_time=expected_init_time,
+        valid_time=expected_valid_time,
+    )
+
+    coding_kwargs = {
+        "decode_times": xr.coders.CFDatetimeCoder(use_cftime=True),
+        "decode_timedelta": True,
+    }
     if isinstance(format, NetCDFWriterConfig):
-        ds = xr.open_dataset(tmpdir / "test.nc", decode_timedelta=True)
+        ds = xr.open_dataset(tmpdir / "test.nc", **coding_kwargs)
     elif isinstance(format, ZarrWriterConfig):
-        ds = xr.open_zarr(tmpdir / "test.zarr", decode_timedelta=True)
+        ds = xr.open_zarr(tmpdir / "test.zarr", **coding_kwargs)
+        # Zarr writer includes an additional "sample" coordinate.
+        expected_valid_time = expected_valid_time.assign_coords(sample=[0.0])
     assert ds.temperature.dims == ("sample", "time", "lat", "lon")
     assert ds.temperature.shape == (n_initial_conditions, expected_n_timesteps, 2, 2)
     xr.testing.assert_equal(ds.time, expected_time)
+    xr.testing.assert_equal(ds.valid_time, expected_valid_time)
