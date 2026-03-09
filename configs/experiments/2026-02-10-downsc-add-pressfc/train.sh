@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-0weight-prate"
-CONFIG_FILENAME="train-100-to-3km-prmsl-output-loguni.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-0weight-prate-clamp-loss-weight"
+CONFIG_FILENAME="train-100-to-3km-prmsl-clamp-loss-weight.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
