@@ -356,6 +356,7 @@ class DiffusionModel:
         optimizer: Optimization | NullOptimization,
         loss_weights: torch.Tensor,
         max_loss_weight: float | None = None,
+        loss_weight_exponent: float = 1.0,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data
@@ -381,6 +382,7 @@ class DiffusionModel:
             self.config.noise_distribution,
             self.sigma_data,
             max_loss_weight=max_loss_weight,
+            loss_weight_exponent=loss_weight_exponent,
         )
 
         denoised_norm = self.module(
