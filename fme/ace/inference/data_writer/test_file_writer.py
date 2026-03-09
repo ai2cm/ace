@@ -617,6 +617,13 @@ def test_netcdf_file_writer_with_non_local_experiment_dir(
 
 
 @pytest.mark.parametrize(
+    "n_timesteps",
+    [
+        pytest.param(2, id="steps-in-memory-equal-to-coarsen-factor"),
+        pytest.param(4, id="steps-in-memory-greater-than-coarsen-factor"),
+    ],
+)
+@pytest.mark.parametrize(
     "format",
     [
         pytest.param(NetCDFWriterConfig(), id="netCDF"),
@@ -624,11 +631,10 @@ def test_netcdf_file_writer_with_non_local_experiment_dir(
     ],
 )
 def test_coarsened_file_writer_time_coordinates(
-    tmpdir, format: NetCDFWriterConfig | ZarrWriterConfig
+    tmpdir, n_timesteps: int, format: NetCDFWriterConfig | ZarrWriterConfig
 ):
     initial_condition_times = np.array([cftime.DatetimeGregorian(2020, 1, 1)])
     n_initial_conditions = len(initial_condition_times)
-    n_timesteps = 4
     coarsen_factor = 2
     timestep = datetime.timedelta(days=1)
 
@@ -667,14 +673,17 @@ def test_coarsened_file_writer_time_coordinates(
     expected_init_time = xr.DataArray(
         [cftime.DatetimeGregorian(2020, 1, 1)], dims="sample"
     )
-    expected_valid_time = xr.DataArray(
-        [
+    if n_timesteps == 2:
+        expected_valid_time_values = [[cftime.DatetimeGregorian(2020, 1, 2, 12, 0, 0)]]
+    elif n_timesteps == 4:
+        expected_valid_time_values = [
             [
                 cftime.DatetimeGregorian(2020, 1, 2, 12, 0, 0),
                 cftime.DatetimeGregorian(2020, 1, 4, 12, 0, 0),
             ]
-        ],
-        dims=["sample", "time"],
+        ]
+    expected_valid_time = xr.DataArray(
+        expected_valid_time_values, dims=["sample", "time"]
     )
     expected_valid_time = expected_valid_time.assign_coords(
         time=expected_lead_times,
