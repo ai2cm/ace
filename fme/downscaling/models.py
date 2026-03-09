@@ -13,7 +13,12 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
+from fme.downscaling.data import (
+    BatchData,
+    PairedBatchData,
+    StaticInputs,
+    load_static_inputs,
+)
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import (
@@ -284,9 +289,8 @@ class DiffusionModel:
                 coarse to fine.
             sigma_data: The standard deviation of the data, used for diffusion
                 model preconditioning.
-            static_inputs: Optional static inputs to the model that may be loaded
-                from saved checkpoint. If required by the model but not passed at
-                init, they are expected to be provided in the loaded dataset.
+            static_inputs: Static inputs to the model, loaded from the trainer
+                config or checkpoint. Must be set when use_fine_topography is True.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
@@ -547,9 +551,11 @@ class CheckpointModelConfig:
     Parameters:
         checkpoint_path: The path to the checkpoint file.
         rename: Optional mapping of {old: new} model input/output names to rename.
-        fine_topography_path: Optional path to the fine topography file, if needed.
-            This is useful when no fine res data is used during evaluation but the
-            model still needs fine res static input data.
+        static_inputs: Optional mapping of {field_name: path} for static inputs to
+            the model. Useful when no fine res data is available during evaluation
+            but the model requires static input data. Raises an error if the
+            checkpoint already has static inputs from training.
+        fine_topography_path: Deprecated. Use static_inputs instead.
         model_updates: Optional mapping of {key: new_value} model config updates to
             apply when loading the model. This is useful for running evaluation with
             updated parameters than at training time. Use with caution; not all
@@ -558,6 +564,7 @@ class CheckpointModelConfig:
 
     checkpoint_path: str
     rename: dict[str, str] | None = None
+    static_inputs: dict[str, str] | None = None
     fine_topography_path: str | None = None
     model_updates: dict[str, Any] | None = None
 
@@ -568,6 +575,18 @@ class CheckpointModelConfig:
         self._rename = self.rename or {}
         if "module" in (self.model_updates or {}):
             raise ValueError("'module' cannot be updated in model_updates.")
+        if self.fine_topography_path is not None:
+            warnings.warn(
+                "fine_topography_path is deprecated. Use static_inputs instead, "
+                "e.g. static_inputs: {HGTsfc: <path>}.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if self.static_inputs is not None:
+                raise ValueError(
+                    "Cannot specify both fine_topography_path and static_inputs."
+                )
+            self.static_inputs = {"HGTsfc": self.fine_topography_path}
 
     @property
     def _checkpoint(self) -> Mapping[str, Any]:
@@ -595,9 +614,16 @@ class CheckpointModelConfig:
         self,
     ) -> DiffusionModel:
         if self._checkpoint["model"]["static_inputs"] is not None:
+            if self.static_inputs is not None:
+                raise ValueError(
+                    "Cannot override static_inputs: the checkpoint already has "
+                    "static inputs from training."
+                )
             static_inputs = StaticInputs.from_state(
                 self._checkpoint["model"]["static_inputs"]
             )
+        elif self.static_inputs is not None:
+            static_inputs = load_static_inputs(self.static_inputs)
         else:
             static_inputs = None
         model = _CheckpointModelConfigSelector.from_state(
