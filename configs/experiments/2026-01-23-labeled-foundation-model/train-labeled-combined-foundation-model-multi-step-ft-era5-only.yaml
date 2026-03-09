@@ -80,13 +80,22 @@ optimization:
 stepper_training:
   parameter_init:
     weights_path: /pre-trained-weights/training_checkpoints/best_ckpt.tar
+    # Pretrain used 6 labels; fine-tune uses 1 (era5). Order must match pretrain
+    # (e.g. sorted union of labels from train-labeled-combined-foundation-model-1step).
+    pretrain_labels:
+      - c96-shield
+      - cm4
+      - era5
+      - e3smv3
+      - scream
+      - x-shield
     # Exclude label embedding: pretrained model has 6 labels, fine-tune uses 1 (era5).
     # Loading would fail due to shape mismatch (6 vs 1); keep random init for 1-label embedding.
-    parameters:
-      - exclude: ["label_pos_embed","module.conditional_model.blocks.*.norm0.W_scale_pos.weight","module.conditional_model.blocks.*.norm0.W_bias_pos.weight", "module.conditional_model.blocks.*.norm1.W_scale_pos.weight","module.conditional_model.blocks.*.norm1.W_bias_pos.weight"]
-      - frozen:
-          # include: []
-          exclude: ["label_pos_embed","module.conditional_model.blocks.*.norm0.W_scale_pos.weight","module.conditional_model.blocks.*.norm0.W_bias_pos.weight", "module.conditional_model.blocks.*.norm1.W_scale_pos.weight","module.conditional_model.blocks.*.norm1.W_bias_pos.weight"]
+    # parameters:
+    #   - exclude: ["label_pos_embed","module.conditional_model.blocks.*.norm0.W_scale_pos.weight","module.conditional_model.blocks.*.norm0.W_bias_pos.weight", "module.conditional_model.blocks.*.norm1.W_scale_pos.weight","module.conditional_model.blocks.*.norm1.W_bias_pos.weight"]
+    #   - frozen:
+    #       # include: []
+    #       exclude: ["label_pos_embed","module.conditional_model.blocks.*.norm0.W_scale_pos.weight","module.conditional_model.blocks.*.norm0.W_bias_pos.weight", "module.conditional_model.blocks.*.norm1.W_scale_pos.weight","module.conditional_model.blocks.*.norm1.W_bias_pos.weight"]
   n_ensemble: 2
   train_n_forward_steps:
     outcomes:
