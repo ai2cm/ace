@@ -5,6 +5,8 @@ from unittest import mock
 import pytest
 import torch
 
+from fme.core.distributed.distributed import Distributed
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -80,6 +82,12 @@ def no_timeout(request):
     return request.config.getoption("--no-timeout")
 
 
+@pytest.fixture(autouse=True, scope="session")
+def distributed_context():
+    with Distributed.context():
+        yield
+
+
 @pytest.fixture(autouse=True, scope="function")
 def enforce_timeout(skip_slow, very_fast_only, pdb_enabled, no_timeout):
     if pdb_enabled or no_timeout:
@@ -105,6 +113,15 @@ def pytest_runtest_call(item):
         yield
     except TimeoutException:
         pytest.fail("Test failed due to timeout")
+
+
+@pytest.fixture(autouse=True)
+def reset_global_timer():
+    import fme.core.timing
+
+    fme.core.timing.singleton = None
+    yield
+    fme.core.timing.singleton = None
 
 
 @pytest.fixture(autouse=True)

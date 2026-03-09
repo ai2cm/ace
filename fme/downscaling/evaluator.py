@@ -193,10 +193,10 @@ class EvaluatorConfig:
     )
     events: list[PairedEventConfig] | None = None
 
-    def configure_logging(self, log_filename: str, resumable: bool = False):
+    def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
         self.logging.configure_logging(
-            self.experiment_dir, log_filename, config=config, resumable=resumable
+            self.experiment_dir, log_filename, config=config, resumable=True
         )
 
     def _build_default_evaluator(self) -> Evaluator:
@@ -239,7 +239,9 @@ class EvaluatorConfig:
         evaluator_model: DiffusionModel | PatchPredictor
 
         dataset = event_config.get_paired_gridded_data(
-            base_data_config=self.data, requirements=self.model.data_requirements
+            base_data_config=self.data,
+            requirements=self.model.data_requirements,
+            static_inputs_from_checkpoint=model.static_inputs,
         )
 
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
@@ -282,7 +284,7 @@ def main(config_path: str):
     )
     prepare_directory(evaluator_config.experiment_dir, config)
 
-    evaluator_config.configure_logging(log_filename="out.log", resumable=True)
+    evaluator_config.configure_logging(log_filename="out.log")
 
     logging.info("Starting downscaling model evaluation")
     evaluators = evaluator_config.build()
@@ -301,4 +303,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    main(args.config_path)
+    with Distributed.context():
+        main(args.config_path)

@@ -47,7 +47,10 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.weight_ops import strip_leading_module
 from fme.diffusion.loss import WeightedMappingLossConfig
 from fme.diffusion.registry import ModuleSelector
-from fme.downscaling.models import condition_with_noise_for_training
+from fme.downscaling.models import (
+    LogNormalNoiseDistribution,
+    condition_with_noise_for_training,
+)
 from fme.downscaling.modules.physicsnemo_unets_v1 import Linear, PositionalEmbedding
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -956,7 +959,11 @@ class DiffusionStepper(
         target_norm = self.normalizer.normalize(target)
         target_tensor = self.out_packer.pack(target_norm, axis=self.CHANNEL_DIM)
         conditioned = condition_with_noise_for_training(
-            target_tensor, self._config.p_std, self._config.p_mean, sigma_data=1.0
+            target_tensor,
+            LogNormalNoiseDistribution(
+                p_std=self._config.p_std, p_mean=self._config.p_mean
+            ),
+            sigma_data=1.0,
         )
         output_tensor = self.module(
             conditioned.latents, input_tensor, conditioned.sigma

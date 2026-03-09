@@ -16,6 +16,7 @@ import xarray as xr
 import yaml
 
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference.main import StepMeanEntry
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
@@ -324,7 +325,9 @@ def inference_helper(
         loader=data.inference_data_loader_config,
         prediction_loader=prediction_data,
         aggregator=InferenceEvaluatorAggregatorConfig(
-            monthly_reference_data=monthly_reference_filename, log_video=True
+            monthly_reference_data=monthly_reference_filename,
+            log_video=True,
+            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
@@ -503,6 +506,9 @@ def test_inference_writer_boundaries(
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
+        ),
         forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -658,6 +664,9 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -803,6 +812,9 @@ def test_derived_metrics_run_without_errors(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
@@ -923,6 +935,9 @@ def test_inference_override(tmp_path: pathlib.Path):
             save_monthly_files=False,
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
+        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
@@ -1184,6 +1199,9 @@ def test_evaluator_with_derived_forcings(
             log_to_file=False,
             log_to_wandb=False,
         ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_monthly_files=False,
@@ -1256,6 +1274,9 @@ def test_evaluator_with_non_local_experiment_dir(
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,

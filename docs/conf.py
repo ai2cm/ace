@@ -20,6 +20,8 @@
 import os
 import sys
 
+from fme.core.distributed.distributed import Distributed
+
 sys.path.insert(0, os.path.abspath(".."))
 
 import fme  # noqa
@@ -252,3 +254,22 @@ def remove_excluded_lines_from_docstring(app, what, name, obj, options, lines):
 def setup(app):
     """Register the docstring processor."""
     app.connect("autodoc-process-docstring", remove_excluded_lines_from_docstring)
+    # need distributed context for code examples that call distributed code
+    app.connect("builder-inited", _enter_distributed_context)
+    app.connect("build-finished", _exit_distributed_context)
+
+
+_dist_ctx = None
+
+
+def _enter_distributed_context(app):
+    global _dist_ctx
+    _dist_ctx = Distributed.context()
+    _dist_ctx.__enter__()
+
+
+def _exit_distributed_context(app, exc):
+    global _dist_ctx
+    if _dist_ctx is not None:
+        _dist_ctx.__exit__(None, None, None)
+        _dist_ctx = None

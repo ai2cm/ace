@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 import math
-import re
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import Literal, TypeVar
@@ -9,11 +8,6 @@ from typing import Literal, TypeVar
 import dacite
 import numpy as np
 import torch
-
-try:
-    from earth2grid import healpix as e2ghpx
-except ImportError:
-    e2ghpx = None
 
 from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
@@ -25,13 +19,21 @@ from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
-from fme.core.masking import StaticMasking
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
 HC = TypeVar("HC", bound="HorizontalCoordinates")
+
+e2ghpx = None
+
+
+def get_e2ghpx():
+    global e2ghpx
+    if e2ghpx is None:
+        from earth2grid import healpix as e2ghpx
+    return e2ghpx
 
 
 class DeriveFnABC(abc.ABC):
@@ -327,9 +329,6 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         return (integrand * pressure_thickness).sum(dim=-1) / GRAVITY
 
 
-LEVEL_PATTERN = re.compile(r"_(\d+)$")
-
-
 @dataclasses.dataclass
 class DepthCoordinate(VerticalCoordinate):
     """
@@ -346,7 +345,6 @@ class DepthCoordinate(VerticalCoordinate):
 
     idepth: torch.Tensor
     mask: torch.Tensor
-    surface_mask: torch.Tensor | None = None
 
     def __post_init__(self):
         if len(self.idepth.shape) != 1:
@@ -367,27 +365,6 @@ class DepthCoordinate(VerticalCoordinate):
     def __len__(self):
         """The number of vertical layer interfaces."""
         return len(self.idepth)
-
-    def get_mask(self) -> torch.Tensor:
-        return self.mask
-
-    def get_mask_level(self, level: int) -> torch.Tensor:
-        return self.mask.select(dim=-1, index=level)
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
-        match = LEVEL_PATTERN.search(name)
-        if match:
-            # 3D variable
-            level = int(match.group(1))
-            return self.get_mask_level(level)
-        else:
-            # 2D variable
-            if self.surface_mask is not None:
-                return self.surface_mask
-            return self.get_mask_level(0)
-
-    def get_idepth(self) -> torch.Tensor:
-        return self.idepth
 
     def build_corrector(
         self,
@@ -420,18 +397,6 @@ class DepthCoordinate(VerticalCoordinate):
     ) -> DeriveFnABC:
         return OceanDeriveFn(self, timestep, horizontal_coordinates)
 
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
-        """
-        Returns a StaticMasking object that fills in NaNs outside of mask
-        valid points, i.e. where the mask value is 0.
-
-        """
-        return StaticMasking(
-            mask_value=0,
-            fill_value=float("nan"),
-            mask=self,
-        )
-
     @property
     def dtype(self) -> torch.dtype:
         return self.idepth.dtype
@@ -447,11 +412,6 @@ class DepthCoordinate(VerticalCoordinate):
     def to(self, device: str) -> "DepthCoordinate":
         idepth_on_device = self.idepth.to(device)
         mask_on_device = self.mask.to(device)
-        if self.surface_mask is not None:
-            surface_mask_on_device = self.surface_mask.to(device)
-            return DepthCoordinate(
-                idepth_on_device, mask_on_device, surface_mask_on_device
-            )
         return DepthCoordinate(idepth_on_device, mask_on_device)
 
     def __eq__(self, other) -> bool:
@@ -496,8 +456,8 @@ class DepthCoordinate(VerticalCoordinate):
             )
         layer_thickness = self.idepth.diff(dim=-1)
         ohc = (integrand * layer_thickness * self.mask).nansum(dim=-1)
-        mask = self.get_mask_level(0).expand(ohc.shape)
-        return ohc.where(mask > 0, float("nan"))
+        mask_0 = self.mask.select(dim=-1, index=0).expand(ohc.shape)
+        return ohc.where(mask_0 > 0, float("nan"))
 
 
 @dataclasses.dataclass
@@ -859,6 +819,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
     @property
     def xyz(self) -> tuple[float, float, float]:
         level = int(math.log2(len(self.width)))
+        e2ghpx = get_e2ghpx()
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
         lats = lats.reshape(len(self.face), len(self.width), len(self.height))
@@ -921,6 +882,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
         # We'll return a 3D (face, width, height) tensor representing the lat-lon
         # coordinates of this grid.
         level = int(math.log2(len(self.width)))
+        e2ghpx = get_e2ghpx()
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
         lats = lats.reshape(self.shape)

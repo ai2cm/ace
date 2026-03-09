@@ -36,12 +36,30 @@ class MeanAggregator:
         include_grad_mag_percent_diff: bool = True,
         target: Literal["norm", "denorm"] = "denorm",
         channel_mean_names: Sequence[str] | None = None,
+        log_loss: bool = True,
     ):
+        """
+        Args:
+            gridded_operations: GriddedOperations object for computing metrics.
+            target_time: Time index to compute metrics at, where 0 corresponds to the
+                first timestep of the initial condition. For example, target_time=1 will
+                compute metrics at the first timestep of the forward trajectory if there
+                is 1 initial condition step.
+            include_bias: Whether to include bias metrics.
+            include_grad_mag_percent_diff: Whether to include gradient magnitude percent
+                difference metrics.
+            target: Whether to compute metrics on normalized ("norm") or denormalized
+                ("denorm") data.
+            channel_mean_names: Names to include in channel-mean metrics. If None,
+                channel means will not be logged.
+            log_loss: Whether to log the mean loss across batches.
+        """
         self._gridded_operations = gridded_operations
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
         self._target_time = target_time
         self._target = target
+        self._log_loss = log_loss
         self._dist = Distributed.get_instance()
 
         device = get_device()
@@ -107,7 +125,9 @@ class MeanAggregator:
     def _get_data(self):
         if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
-        data: dict[str, torch.Tensor] = {"loss": self._loss / self._n_batches}
+        data: dict[str, torch.Tensor] = {}
+        if self._log_loss:
+            data["loss"] = self._loss / self._n_batches
         for name, metric in self._variable_metrics.items():
             metric_results = metric.get()
             for key in metric_results:
