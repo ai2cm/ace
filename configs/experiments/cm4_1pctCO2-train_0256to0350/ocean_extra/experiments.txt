@@ -26,10 +26,10 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 
 1pct_nosmooth_0256to0350-ocean_extra-ft_MLDgeo_OHC-dz_3d|rs0|01KJNND1Z74HDBPH2G6SEM5HYR|trained|best_inference_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_resid|rs0|01KK3BP1FEFFFDJCDD7P5ZNH05|run_140yr|best_inference_ckpt|high|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_resid|rs0|01KK3BP1FEFFFDJCDD7P5ZNH05|trained|best_inference_ckpt|high|--not-preemptible
 
 1pct_nosmooth_0256to0350-hfds_resid|rs1|01KK3BPDDJ3NNYVC51KEC904SY|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-hfds_resid|rs2|01KK3BPSW07GQEH03GX5XA6R7X|training|best_inference_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|01KK88F65PKVZ6MM2BBFW47VGG|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|01KK88F65PKVZ6MM2BBFW47VGG|run_140yr|best_inference_ckpt|normal|--not-preemptible
