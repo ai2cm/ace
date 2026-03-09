@@ -156,10 +156,11 @@ def test_gather_global_reconstructs_arange():
     dist = Distributed.get_instance()
     n_dp = dist.total_data_parallel_ranks
     batch = 4 * n_dp  # evenly divisible
-    global_shape = (batch, 3)
-    x_global = torch.arange(
-        batch * 3, dtype=torch.float32, device=get_device()
-    ).reshape(global_shape)
+    global_shape = (batch, 4, 6)  # 3D so dp dim 0 is separate from spatial (H, W)
+    n_elem = batch * 4 * 6
+    x_global = torch.arange(n_elem, dtype=torch.float32, device=get_device()).reshape(
+        global_shape
+    )
     x_local = x_global[dist.get_local_slices(global_shape, data_parallel_dim=0)]
     reconstructed = dist.gather_global(
         x_local, global_shape=global_shape, data_parallel_dim=0
@@ -187,27 +188,29 @@ def test_local_slices_cover_full_domain():
     dist = Distributed.get_instance()
     n_dp = dist.total_data_parallel_ranks
     rows = 4 * n_dp
-    global_shape = (rows, 6)
+    global_shape = (rows, 6, 8)
     local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
-    # Collect one slice per data-parallel rank on root and verify full coverage.
-    # gather_object gathers over the data-parallel group, so all_slices has
-    # n_dp entries — one unique slice per dp rank, each covering a distinct
-    # portion of the domain.
-    all_slices = dist.gather_object(local_slices)
-    if dist.is_root():
-        assert all_slices is not None
-        canvas = torch.zeros(global_shape)
-        for s in all_slices:
-            canvas[s] += 1
-        torch.testing.assert_close(canvas, torch.ones_like(canvas))
+    canvas = torch.zeros(global_shape, device=get_device())
+    canvas[local_slices] += 1.0
+    # Combine spatial contributions then data-parallel contributions
+    canvas = dist.spatial_reduce_sum(canvas)
+    canvas = dist.reduce_sum(canvas)
+    # The entire domain should be covered exactly once
+    torch.testing.assert_close(canvas, torch.ones_like(canvas))
 
 
 @pytest.mark.parallel
 def test_local_slices_no_dp_dim():
-    """Without a dp dim, every rank gets full slices."""
+    """Without a dp dim, the data-parallel dims are untouched."""
     dist = Distributed.get_instance()
-    slices = dist.get_local_slices((8, 4))
-    assert slices == tuple(slice(None, None) for _ in range(2))
+    shape = (8, 6, 8)  # (batch, H, W) — 3D so batch is separate from spatial
+    slices = dist.get_local_slices(shape)
+    # batch dim should be full (no dp dim specified)
+    assert slices[0] == slice(None, None)
+    # spatial dims should produce a valid sub-tensor
+    local = torch.zeros(shape, device=get_device())[slices]
+    assert local.shape[0] == shape[0]  # batch untouched
+    assert local.numel() > 0  # local portion is non-empty
 
 
 @pytest.mark.parallel
@@ -243,3 +246,54 @@ def test_data_parallel_rank_within_total():
 def test_world_size_positive():
     dist = Distributed.get_instance()
     assert dist.world_size >= 1
+
+
+@pytest.mark.parallel
+def test_gloo_all_to_all_patch():
+    """Gloo all_to_all should fail without the patch and succeed with it."""
+    import torch.distributed as torch_dist
+
+    if not torch_dist.is_initialized():
+        pytest.skip("Requires distributed process group")
+
+    import fme.core.distributed._gloo_patch as gloo_patch
+    from fme.core.distributed._gloo_patch import patch_gloo_alltoall
+
+    backend = torch_dist.get_backend()
+    if backend != "gloo":
+        pytest.skip("Only relevant for gloo backend")
+
+    size = torch_dist.get_world_size()
+    rank = torch_dist.get_rank()
+
+    def _make_buffers():
+        inputs = [
+            torch.full((2,), float(rank), device=get_device()) for _ in range(size)
+        ]
+        outputs = [torch.zeros(2, device=get_device()) for _ in range(size)]
+        return inputs, outputs
+
+    # Temporarily remove the patch (if already applied) to test the unpatched path.
+    saved_original = gloo_patch._original_all_to_all
+    saved_current = torch_dist.all_to_all
+    try:
+        if saved_original is not None:
+            # Restore the real (unpatched) all_to_all.
+            torch_dist.all_to_all = saved_original
+            gloo_patch._original_all_to_all = None
+
+        inputs, outputs = _make_buffers()
+        with pytest.raises(RuntimeError):
+            torch_dist.all_to_all(outputs, inputs)
+
+        # Now apply the patch and verify it works.
+        patch_gloo_alltoall()
+        inputs, outputs = _make_buffers()
+        torch_dist.all_to_all(outputs, inputs)
+        for i in range(size):
+            expected = torch.full((2,), float(i), device=get_device())
+            torch.testing.assert_close(outputs[i], expected)
+    finally:
+        # Restore whatever state was in place before.
+        torch_dist.all_to_all = saved_current
+        gloo_patch._original_all_to_all = saved_original
