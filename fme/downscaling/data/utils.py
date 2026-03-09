@@ -37,9 +37,6 @@ class ClosedInterval:
     def __contains__(self, value: float):
         return self.start <= value <= self.stop
 
-    def __repr__(self):
-        return f"ClosedInterval[{self.start}, {self.stop}]"
-
     def slice_of(self, coords: torch.Tensor) -> slice:
         mask = (coords >= self.start) & (coords <= self.stop)
         if not mask.any():
