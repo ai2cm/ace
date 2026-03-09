@@ -225,7 +225,7 @@ class Distributed:
 
         Args:
             tensor_shape: the shape of the global tensor, which may or may not contain
-                a data parallel (batch) dimension.
+                a data parallel (batch) dimension. Assume last dims are (H, W).
             data_parallel_dim: the index of the data parallel dimension, if it exists.
                 by default, assumes the tensor does not have a data parallel dimension.
         """
@@ -322,6 +322,11 @@ class Distributed:
         """
         Gathers tensor data into a single tensor with the data from all ranks.
 
+        Each rank places its local portion (determined by :meth:`get_local_slices`)
+        into a zero tensor of ``global_shape``.  Spatial chunks are combined via
+        :meth:`spatial_reduce_sum`, then the data-parallel portions are gathered
+        to root via :meth:`gather`.
+
         Args:
             tensor: the tensor data to gather
             global_shape: the shape of the tensor containing data from all ranks
@@ -337,20 +342,38 @@ class Distributed:
         local_slices = self.get_local_slices(
             global_shape, data_parallel_dim=data_parallel_dim
         )
-        gathered_local_slices = self.gather_object(local_slices)
+        # Place local data into global-shaped zeros, then combine spatial chunks.
+        global_tensor = torch.zeros(
+            *global_shape, dtype=tensor.dtype, device=tensor.device
+        )
+        global_tensor[local_slices] = tensor
+        global_tensor = self.spatial_reduce_sum(global_tensor)
+        # Each dp rank now has the full spatial extent for its batch portion.
+        # Extract this rank's dp slice and gather across dp ranks to root.
+        dp_slices = self.get_local_slices(
+            global_shape, data_parallel_dim=data_parallel_dim
+        )
+        # Build dp-only slices (spatial dims are already reconstructed).
+        dp_only_list = list(dp_slices)
+        for i in range(len(dp_only_list)):
+            if i != data_parallel_dim:
+                dp_only_list[i] = slice(None)
+        dp_only = tuple(dp_only_list)
+        dp_local = global_tensor[dp_only]
+        gathered_dp_slices = self.gather_object(dp_only)
         if self.is_root():
-            if gathered_local_slices is None:
+            if gathered_dp_slices is None:
                 raise RuntimeError("gather_object returned None on root process")
             gathered_global = torch.zeros(
                 *global_shape, dtype=tensor.dtype, device=tensor.device
             )
             gather_list = []
             for i in range(self.total_data_parallel_ranks):
-                gather_list.append(gathered_global[gathered_local_slices[i]])
+                gather_list.append(gathered_global[gathered_dp_slices[i]])
         else:
             gather_list = None
             gathered_global = None
-        self.gather(tensor, gather_list=gather_list)
+        self.gather(dp_local, gather_list=gather_list)
         return gathered_global
 
     def gather_irregular(
@@ -407,6 +430,61 @@ class Distributed:
         Get the random seed.
         """
         return self._seed
+
+    def get_sht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
+        return self._distributed.get_sht(nlat, nlon, lmax, mmax, grid)
+
+    def get_isht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
+        return self._distributed.get_isht(nlat, nlon, lmax, mmax, grid)
+
+    def get_disco_conv_s2(self, *args, **kwargs):
+        return self._distributed.get_disco_conv_s2(*args, **kwargs)
+
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        return self._distributed.spatial_reduce_sum(tensor)
+
+    def weighted_mean(
+        self,
+        data: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+        keepdim: bool = False,
+    ) -> torch.Tensor:
+        return self._distributed.weighted_mean(data, weights, dim=dim, keepdim=keepdim)
+
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        return self._distributed.zonal_mean(data)
+
+    def gradient_magnitude_percent_diff(
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+    ) -> torch.Tensor:
+        return self._distributed.gradient_magnitude_percent_diff(
+            truth, predicted, weights, dim
+        )
+
+    def scatter_spatial(
+        self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
+    ) -> dict[str, torch.Tensor]:
+        """Slice global tensors to the local spatial chunk for this rank."""
+        slices = self.get_local_slices(img_shape)
+        return {k: v[(..., *slices)].contiguous() for k, v in data.items()}
+
+    def gather_spatial(
+        self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
+    ) -> dict[str, torch.Tensor]:
+        """Gather local spatial chunks back to global tensors via all-reduce."""
+        slices = self.get_local_slices(img_shape)
+        result = {}
+        for k, v in data.items():
+            global_shape = (*v.shape[:-2], *img_shape)
+            global_tensor = torch.zeros(global_shape, dtype=v.dtype, device=v.device)
+            global_tensor[(..., *slices)] = v
+            result[k] = self.spatial_reduce_sum(global_tensor)
+        return result
 
     def shutdown(self):
         return self._distributed.shutdown()

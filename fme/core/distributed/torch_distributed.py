@@ -5,10 +5,13 @@ from datetime import timedelta
 from typing import Any, TypeVar
 
 import torch.distributed
+import torch.nn as nn
+import torch_harmonics as th
 from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
+from fme.core import metrics
 from fme.core.device import get_device, using_gpu, using_srun
 
 from .base import DistributedBackend
@@ -85,7 +88,7 @@ class TorchDistributed(DistributedBackend):
     def total_data_parallel_ranks(self) -> int:
         return self.total_ranks  # no model parallelism
 
-    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None):
+    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None = None):
         return_list = [slice(None, None) for _ in tensor_shape]
         if data_parallel_dim is not None:
             if tensor_shape[data_parallel_dim] % self.total_data_parallel_ranks != 0:
@@ -182,6 +185,55 @@ class TorchDistributed(DistributedBackend):
     def barrier(self):
         logger.debug(f"Barrier on rank {self.rank}")
         torch.distributed.barrier(device_ids=self._device_ids)
+
+    def get_sht(
+        self,
+        nlat: int,
+        nlon: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        grid: str = "legendre-gauss",
+    ) -> nn.Module:
+        return th.RealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
+
+    def get_isht(
+        self,
+        nlat: int,
+        nlon: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        grid: str = "legendre-gauss",
+    ) -> nn.Module:
+        return th.InverseRealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
+
+    def get_disco_conv_s2(self, *args, **kwargs) -> nn.Module:
+        return th.DiscreteContinuousConvS2(*args, **kwargs).float()
+
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor
+
+    def weighted_mean(
+        self,
+        data: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+        keepdim: bool = False,
+    ) -> torch.Tensor:
+        return metrics.weighted_mean(data, weights, dim=dim, keepdim=keepdim)
+
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        return data.nanmean(dim=-1)
+
+    def gradient_magnitude_percent_diff(
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+    ) -> torch.Tensor:
+        return metrics.gradient_magnitude_percent_diff(
+            truth, predicted, weights=weights, dim=dim
+        )
 
     def shutdown(self):
         logger.debug(f"Shutting down rank {self.rank}")

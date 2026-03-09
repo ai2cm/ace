@@ -161,10 +161,11 @@ def test_gather_global_reconstructs_arange():
         )
     n_dp = dist.total_data_parallel_ranks
     batch = 4 * n_dp  # evenly divisible
-    global_shape = (batch, 3)
-    x_global = torch.arange(
-        batch * 3, dtype=torch.float32, device=get_device()
-    ).reshape(global_shape)
+    global_shape = (batch, 4, 6)  # 3D so dp dim 0 is separate from spatial (H, W)
+    n_elem = batch * 4 * 6
+    x_global = torch.arange(n_elem, dtype=torch.float32, device=get_device()).reshape(
+        global_shape
+    )
     x_local = x_global[dist.get_local_slices(global_shape, data_parallel_dim=0)]
     reconstructed = dist.gather_global(
         x_local, global_shape=global_shape, data_parallel_dim=0
@@ -219,3 +220,54 @@ def test_data_parallel_rank_within_total():
 def test_world_size_positive():
     dist = Distributed.get_instance()
     assert dist.world_size >= 1
+
+
+@pytest.mark.parallel
+def test_gloo_all_to_all_patch():
+    """Gloo all_to_all should fail without the patch and succeed with it."""
+    import torch.distributed as torch_dist
+
+    if not torch_dist.is_initialized():
+        pytest.skip("Requires distributed process group")
+
+    import fme.core.distributed._gloo_patch as gloo_patch
+    from fme.core.distributed._gloo_patch import patch_gloo_alltoall
+
+    backend = torch_dist.get_backend()
+    if backend != "gloo":
+        pytest.skip("Only relevant for gloo backend")
+
+    size = torch_dist.get_world_size()
+    rank = torch_dist.get_rank()
+
+    def _make_buffers():
+        inputs = [
+            torch.full((2,), float(rank), device=get_device()) for _ in range(size)
+        ]
+        outputs = [torch.zeros(2, device=get_device()) for _ in range(size)]
+        return inputs, outputs
+
+    # Temporarily remove the patch (if already applied) to test the unpatched path.
+    saved_original = gloo_patch._original_all_to_all
+    saved_current = torch_dist.all_to_all
+    try:
+        if saved_original is not None:
+            # Restore the real (unpatched) all_to_all.
+            torch_dist.all_to_all = saved_original
+            gloo_patch._original_all_to_all = None
+
+        inputs, outputs = _make_buffers()
+        with pytest.raises(RuntimeError):
+            torch_dist.all_to_all(outputs, inputs)
+
+        # Now apply the patch and verify it works.
+        patch_gloo_alltoall()
+        inputs, outputs = _make_buffers()
+        torch_dist.all_to_all(outputs, inputs)
+        for i in range(size):
+            expected = torch.full((2,), float(i), device=get_device())
+            torch.testing.assert_close(outputs[i], expected)
+    finally:
+        # Restore whatever state was in place before.
+        torch_dist.all_to_all = saved_current
+        gloo_patch._original_all_to_all = saved_original
