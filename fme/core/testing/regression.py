@@ -1,4 +1,5 @@
 import os
+import pathlib
 
 import pytest
 import torch
@@ -38,7 +39,6 @@ def _assert_close(x: NestedTensorDict, y: NestedTensorDict, **assert_close_kwarg
             torch.testing.assert_close(
                 v,
                 y_val.to(v.device),
-                msg=f"Mismatch at key {k}",
                 **assert_close_kwargs,
             )
         else:
@@ -48,7 +48,7 @@ def _assert_close(x: NestedTensorDict, y: NestedTensorDict, **assert_close_kwarg
 
 def validate_tensor_dict(
     x: NestedTensorDict,
-    filename: str,
+    filename: str | pathlib.Path,
     **assert_close_kwargs,
 ):
     if not os.path.exists(filename):
