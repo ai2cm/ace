@@ -171,7 +171,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                 continue
             i_window_start = i_start + self._start_indices[i_member]
             samples.append(self._dataset[i_window_start])
-        return CoupledBatchData.collate_fn(
+        result = CoupledBatchData.collate_fn(
             samples,
             ocean_horizontal_dims=list(
                 self.properties.horizontal_coordinates.ocean.dims
@@ -181,6 +181,16 @@ class InferenceDataset(torch.utils.data.Dataset):
             ),
             ocean_label_encoding=None,
             atmosphere_label_encoding=None,
+        )
+        ocean_n_times = result.ocean_data.n_timesteps
+        expected_atmos_n_times = (
+            ocean_n_times - 1
+        ) * self._properties.n_inner_steps + 1
+        return CoupledBatchData(
+            ocean_data=result.ocean_data,
+            atmosphere_data=result.atmosphere_data.select_time_slice(
+                slice(0, expected_atmos_n_times)
+            ),
         )
 
     def __getitem__(self, index) -> CoupledBatchData:

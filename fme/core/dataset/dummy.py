@@ -107,7 +107,8 @@ class DummyDataset(DatasetABC):
         """
         time_slice = slice(idx, idx + self.sample_n_times)
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
-        return (self._dummy_dict, time, self._labels, self._epoch)
+        data = {k: v[: len(time)] for k, v in self._dummy_dict.items()}
+        return (data, time, self._labels, self._epoch)
 
     def set_epoch(self, epoch: int):
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(epoch))
