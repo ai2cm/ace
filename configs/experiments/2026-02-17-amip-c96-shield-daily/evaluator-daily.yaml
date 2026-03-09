@@ -1,0 +1,34 @@
+experiment_dir: /results
+n_forward_steps: 20
+forward_steps_in_memory: 5
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '1986-01-01T00:00:00'
+      - '1987-04-01T00:00:00'
+      - '1988-07-01T00:00:00'
+      - '1989-10-01T00:00:00'
+      - '1991-01-01T00:00:00'
+      - '1992-04-01T00:00:00'
+      - '1993-07-01T00:00:00'
+      - '1994-10-01T00:00:00'
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-daily-shield-amip-ensemble-dataset
+    file_pattern: ic_0002.zarr
+    engine: zarr
+  num_data_workers: 8
+aggregator:
+  log_histograms: true
+  log_step_means:
+    - step: 5
+      name: day_5_step_means
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
