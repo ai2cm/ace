@@ -20,7 +20,6 @@ import pytest
 import torch
 
 from fme.core.distributed import Distributed
-from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
 from fme.core.rand import set_seed
 
 
@@ -36,10 +35,6 @@ def test_get_sampler_covers_all_indices():
     exactly once.
     """
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     n_dp = dist.total_data_parallel_ranks
     dataset = _make_dataset(4 * n_dp)
 

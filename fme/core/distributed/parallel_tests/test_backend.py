@@ -14,7 +14,6 @@ import torch
 
 from fme.core import get_device
 from fme.core.distributed import Distributed
-from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
 
 
 @pytest.mark.parallel
@@ -155,10 +154,6 @@ def test_gather_global_reconstructs_arange():
     gather_global reconstructs the original.
     """
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     n_dp = dist.total_data_parallel_ranks
     batch = 4 * n_dp  # evenly divisible
     global_shape = (batch, 4, 6)  # 3D so dp dim 0 is separate from spatial (H, W)

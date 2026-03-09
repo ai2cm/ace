@@ -4,7 +4,6 @@ import torch
 
 from fme.core import get_device
 from fme.core.distributed import Distributed
-from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
 
 
 @pytest.mark.parallel
@@ -16,10 +15,6 @@ def test_gather_tensor_from_local_slices():
     "batch" parallelism in this test.
     """
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     n_dp = dist.total_data_parallel_ranks
     global_shape = (2 * n_dp, 4, 4)
     x_global = (
@@ -41,10 +36,6 @@ def test_gather_tensor_from_local_slices():
 def test_local_slices_cover_full_domain():
     """Union of slices from every rank should cover every element exactly once."""
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     n_dp = dist.total_data_parallel_ranks
     rows = 4 * n_dp
     global_shape = (rows, 6)
@@ -74,10 +65,6 @@ def test_local_slices_subdivide_domain():
     "batch" parallelism in this test.
     """
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     n_dp = dist.total_data_parallel_ranks
     global_shape = (2 * n_dp, 4, 4)
     canvas = torch.zeros(global_shape, device=get_device())
@@ -96,10 +83,6 @@ def test_gather_global_tensor():
     Test that gather_object and gather_global produce consistent results.
     """
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     n_dp = dist.total_data_parallel_ranks
     global_shape = (2 * n_dp, 4, 4)
     x_global = torch.arange(np.prod(global_shape), device=get_device()).reshape(
@@ -122,10 +105,6 @@ def test_local_slices_match_gather_tensors():
     Test that gather_object and gather produce consistent results.
     """
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     n_dp = dist.total_data_parallel_ranks
     global_shape = (2 * n_dp, 4, 4)
     x_global = torch.arange(np.prod(global_shape), device=get_device()).reshape(
@@ -159,10 +138,6 @@ def test_reduce_mean_from_multiple_ranks():
     along "model parallel" ranks.
     """
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     global_shape = (4, 4)
     x_global_base = torch.arange(
         global_shape[0] * global_shape[1], dtype=torch.float32, device=get_device()
