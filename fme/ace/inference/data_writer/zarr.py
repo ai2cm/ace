@@ -40,12 +40,12 @@ def _get_encoded_lead_times(
     n_timesteps: int,
 ) -> npt.NDArray[np.int64]:
     # Note the first lead time is a special case, because in the context of time
-    # coarsening, it will be equal to the coarse timestep plus half the model
-    # timestep. Since we only have access to the coarse timestep in this context
-    # we will infer it from the difference between the first batch time and the
-    # initial condition time. All subsequent lead times will be coarse timestep
-    # increments on top of that. This is safe to do, because we do not support
-    # time subselection when using the zarr writer.
+    # coarsening, it will be equal to half the coarse timestep plus half the
+    # model timestep. Since we only have access to the coarse timestep in this
+    # context we will infer it from the difference between the first batch time
+    # and the initial condition time. All subsequent lead times will be coarse
+    # timestep increments on top of that. This is safe to do, because we do not
+    # support time subselection when using the zarr writer.
     first_lead_time = (
         batch_time.isel(sample=0, time=0).item() - initial_condition_times[0]
     )
