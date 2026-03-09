@@ -54,7 +54,7 @@ def test__get_ace_time_coords(calendar):
         n_batch_times=n_batch_times, n_initial_conditions=n_samples, calendar=calendar
     )
     lead_times_coord, init_times_coord, valid_times_coord = _get_ace_time_coords(
-        initial_condition_times, batch_time, n_timesteps=n_timesteps
+        initial_condition_times, batch_time, timestep, n_timesteps=n_timesteps
     )
 
     assert lead_times_coord.dims == ("time",)
@@ -99,6 +99,7 @@ def test__get_ace_time_coords(calendar):
 @pytest.mark.parametrize("writer_cls", [ZarrWriterAdapter, SeparateICZarrWriterAdapter])
 def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
     data = {"foo": torch.zeros((1, 2, 2, 2))}
+    timestep = datetime.timedelta(days=1)
     initial_condition_times = np.array([cftime.datetime(2019, 12, 31)])
     time = xr.DataArray(
         [[cftime.datetime(2020, 1, 1), cftime.datetime(2020, 1, 2)]],
@@ -116,6 +117,7 @@ def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
                 "ak": xr.DataArray([0, 1], dims=["z_interface"]),
             }
         ),
+        timestep=timestep,
         n_timesteps=2,
         initial_condition_times=initial_condition_times,
     )
@@ -129,6 +131,7 @@ def test_zarr_adapter_single_timestep_data(
     tmpdir,
 ):
     data = {"foo": torch.zeros((1, 1, 2, 2))}
+    timestep = datetime.timedelta(days=1)
     initial_condition_times = np.array([cftime.datetime(2019, 12, 31)])
     time = xr.DataArray(
         [
@@ -148,6 +151,7 @@ def test_zarr_adapter_single_timestep_data(
                 "ak": xr.DataArray([0, 1], dims=["z_interface"]),
             }
         ),
+        timestep=timestep,
         n_timesteps=1,
         initial_condition_times=initial_condition_times,
     )

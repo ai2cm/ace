@@ -642,7 +642,7 @@ def test_coarsened_file_writer(tmpdir, format: NetCDFWriterConfig | ZarrWriterCo
         n_timesteps=n_timesteps,
         timestep=timestep,
         variable_metadata={},
-        coords={},
+        coords={"lat": np.linspace(-90, 90, 2), "lon": np.linspace(-180, 180, 2)},
         dataset_metadata=DatasetMetadata(),
     )
     data = {"temperature": torch.ones(n_initial_conditions, n_timesteps, 2, 2)}
@@ -662,9 +662,9 @@ def test_coarsened_file_writer(tmpdir, format: NetCDFWriterConfig | ZarrWriterCo
     )
     expected_time = xr.DataArray(expected_lead_times, dims="time")
     if isinstance(format, NetCDFWriterConfig):
-        ds = xr.open_dataset(tmpdir / "test.nc")
+        ds = xr.open_dataset(tmpdir / "test.nc", decode_timedelta=True)
     elif isinstance(format, ZarrWriterConfig):
-        ds = xr.open_zarr(tmpdir / "test.zarr")
+        ds = xr.open_zarr(tmpdir / "test.zarr", decode_timedelta=True)
     assert ds.temperature.dims == ("sample", "time", "lat", "lon")
     assert ds.temperature.shape == (n_initial_conditions, expected_n_timesteps, 2, 2)
     xr.testing.assert_equal(ds.time, expected_time)

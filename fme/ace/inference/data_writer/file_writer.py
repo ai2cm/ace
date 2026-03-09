@@ -377,8 +377,10 @@ class FileWriterConfig:
         if isinstance(self.format, ZarrWriterConfig):
             if isinstance(self.time_coarsen, TimeCoarsenConfig):
                 n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
+                timestep_write = self.time_coarsen.coarsen_factor * timestep
             else:
                 n_timesteps_write = n_timesteps
+                timestep_write = timestep
 
             zarr_writer_cls: type[SeparateICZarrWriterAdapter | ZarrWriterAdapter]
 
@@ -392,6 +394,7 @@ class FileWriterConfig:
                 path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                 dims=dims,
                 data_coords=ensure_numpy_coords(subselect_coords_),
+                timestep=timestep_write,
                 n_timesteps=n_timesteps_write,
                 initial_condition_times=initial_condition_times,
                 data_vars=self.names,
