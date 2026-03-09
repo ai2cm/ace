@@ -27,7 +27,7 @@ inference:
       - data_path: /pscratch/sd/e/elynnwu/fme-dataset
         file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
         engine: zarr
-    num_data_workers: 4
+    num_data_workers: 2
   aggregator:
     log_histograms: true
 logging:
@@ -38,8 +38,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 4
-  prefetch_factor: 2
+  num_data_workers: 2
+  prefetch_factor: 1
   dataset:
     merge:
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
@@ -56,8 +56,8 @@ train_loader:
         stop_time: '0496-01-01'
 validation_loader:
   batch_size: 16
-  num_data_workers: 4
-  prefetch_factor: 2
+  num_data_workers: 2
+  prefetch_factor: 1
   dataset:
     merge:
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
@@ -74,7 +74,7 @@ validation_loader:
         stop_time: '0499-12-31'
 optimization:
   use_gradient_accumulation: true
-  enable_automatic_mixed_precision: false
+  enable_automatic_mixed_precision: true
   lr: 0.0001
   optimizer_type: AdamW
   kwargs:
@@ -97,9 +97,7 @@ stepper_training:
     weights_path: FINETUNE_CHECKPOINT_PATH/best_inference_ckpt.tar
   loss:
     type: MSE
-    weights:
-      sst: 2
-stepper:      
+stepper:
   input_masking:
     mask_value: 0
     fill_value: 0
