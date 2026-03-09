@@ -7,9 +7,9 @@ import torch
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.generics.data import GriddedDataABC
+from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainStepperABC
-from fme.core.generics.trainer import run_validation
-from fme.core.optimization import Optimization
+from fme.core.generics.validation import run_validation
 
 
 @dataclasses.dataclass
@@ -43,9 +43,9 @@ class LRTuningConfig:
 def run_lr_tuning_trial(
     train_data: GriddedDataABC,
     valid_data: GriddedDataABC,
-    optimization: Optimization,
+    optimization: OptimizationABC,
     copy_stepper: Callable[[], TrainStepperABC],
-    build_optimization: Callable[[torch.nn.ModuleList], Optimization],
+    build_optimization: Callable[[torch.nn.ModuleList], OptimizationABC],
     copy_ema: Callable[[torch.nn.ModuleList], EMATracker],
     config: LRTuningConfig,
     current_lr: float,
@@ -70,9 +70,9 @@ def run_lr_tuning_trial(
             current stepper's state. Called twice (baseline and candidate).
             The caller is responsible for ensuring proper deep copy semantics
             (e.g. using get_state/load_state rather than copy.deepcopy).
-        build_optimization: Factory to build a fresh Optimization for a
+        build_optimization: Factory to build a fresh optimization for a
             given ModuleList.
-        copy_ema: Factory that returns a new EMATracker initialized from the
+        copy_ema: Factory that returns a new EMA tracker initialized from the
             current EMA state but tracking the given modules. Called twice.
         config: The LR tuning configuration.
         current_lr: The current learning rate.
