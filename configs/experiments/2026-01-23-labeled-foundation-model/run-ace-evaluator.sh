@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="label-foundation-model-x-shield-evaluator-given-c96-ic"
+JOB_NAME="label-foundation-model-multi-step-FT-c96-amip"
 JOB_GROUP="foundation-model-era5"
-EXISTING_RESULTS_DATASET="01KJN6WN08MRYKAQ86W2CRTQ2H"  # this contains the checkpoint to use for inference
-CONFIG_FILENAME="ace-evaluator-config-c96-given-x-shield-label.yaml"
+EXISTING_RESULTS_DATASET="01KK5ZKY0P3QE36KHN63FQ4CNN"  # this contains the checkpoint to use for inference
+CONFIG_FILENAME="ace-evaluator-config-c96-amip.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
