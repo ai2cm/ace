@@ -204,6 +204,10 @@ class Optimization(OptimizationABC):
         }
         return state
 
+    def set_learning_rate(self, lr: float):
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = lr
+
     def load_state(self, state):
         """
         Loads state from a serializable data structure.
@@ -292,6 +296,9 @@ class NullOptimization(OptimizationABC):
     @property
     def learning_rate(self) -> float:
         return float("nan")
+
+    def set_learning_rate(self, lr: float):
+        pass
 
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return module
