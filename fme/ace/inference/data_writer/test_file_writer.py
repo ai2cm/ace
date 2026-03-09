@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import cftime
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 import xarray as xr
@@ -613,3 +614,57 @@ def test_netcdf_file_writer_with_non_local_experiment_dir(
             coords={},
             dataset_metadata=DatasetMetadata(),
         )
+
+
+@pytest.mark.parametrize(
+    "format",
+    [
+        pytest.param(NetCDFWriterConfig(), id="netCDF"),
+        pytest.param(ZarrWriterConfig(), id="Zarr"),
+    ],
+)
+def test_coarsened_file_writer(tmpdir, format: NetCDFWriterConfig | ZarrWriterConfig):
+    initial_condition_times = np.array([cftime.DatetimeGregorian(2020, 1, 1)])
+    n_initial_conditions = len(initial_condition_times)
+    n_timesteps = 4
+    coarsen_factor = 2
+    timestep = datetime.timedelta(days=1)
+
+    config = FileWriterConfig(
+        label="test",
+        names=["temperature"],
+        time_coarsen=TimeCoarsenConfig(coarsen_factor=coarsen_factor),
+        format=format,
+    )
+    writer = config.build(
+        experiment_dir=str(tmpdir),
+        initial_condition_times=initial_condition_times,
+        n_timesteps=n_timesteps,
+        timestep=timestep,
+        variable_metadata={},
+        coords={},
+        dataset_metadata=DatasetMetadata(),
+    )
+    data = {"temperature": torch.ones(n_initial_conditions, n_timesteps, 2, 2)}
+    batch_time = xr.DataArray(
+        xr.date_range(
+            "2020-01-02", periods=n_timesteps, freq=timestep, use_cftime=True
+        ),
+        dims="time",
+    )
+    batch_time = batch_time.expand_dims("sample", axis=0)
+    writer.append_batch(data, batch_time=batch_time)
+    writer.finalize()
+
+    expected_n_timesteps = n_timesteps // coarsen_factor
+    expected_lead_times = pd.timedelta_range(
+        "1 days 12:00:00", periods=expected_n_timesteps, freq=f"{coarsen_factor}D"
+    )
+    expected_time = xr.DataArray(expected_lead_times, dims="time")
+    if isinstance(format, NetCDFWriterConfig):
+        ds = xr.open_dataset(tmpdir / "test.nc")
+    elif isinstance(format, ZarrWriterConfig):
+        ds = xr.open_zarr(tmpdir / "test.zarr")
+    assert ds.temperature.dims == ("sample", "time", "lat", "lon")
+    assert ds.temperature.shape == (n_initial_conditions, expected_n_timesteps, 2, 2)
+    xr.testing.assert_equal(ds.time, expected_time)
