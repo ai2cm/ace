@@ -38,7 +38,7 @@ def test_local_slices_cover_full_domain():
     dist = Distributed.get_instance()
     n_dp = dist.total_data_parallel_ranks
     rows = 4 * n_dp
-    global_shape = (rows, 6)
+    global_shape = (rows, 8, 6)
     local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
     # Collect one slice per data-parallel rank on root and verify full coverage.
     # gather_object gathers over the data-parallel group, so all_slices has
