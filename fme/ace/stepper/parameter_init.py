@@ -203,22 +203,45 @@ class ParameterInitializer:
             for _ in range(n_modules - len(self.config.parameters))
         ]
 
-    def _slice_label_pos_embed(
+    def _slice_param_by_labels(
         self,
-        from_embed: torch.Tensor,
-        to_n_labels: int,
+        from_param: torch.Tensor,
+        to_shape: tuple[int, ...],
         target_labels: list[str],
-    ) -> torch.Tensor:
-        """Copy rows from from_embed for each target label using pretrain_labels."""
+    ) -> torch.Tensor | None:
+        """
+        Slice from_param to to_shape when one dimension is label-sized.
+
+        If from_param has a dimension of size len(pretrain_labels) and to_shape
+        has the same dimension of size len(target_labels), copies the
+        corresponding slices (by label index). Returns None if no such dimension.
+        """
         pretrain = self.config.pretrain_labels
-        if pretrain is None or len(pretrain) != from_embed.shape[0]:
-            return from_embed
-        out = from_embed.new_zeros(to_n_labels, *from_embed.shape[1:])
-        for i, label in enumerate(target_labels):
-            if label in pretrain:
-                j = pretrain.index(label)
-                out[i].copy_(from_embed[j])
-        return out
+        if pretrain is None or len(pretrain) == 0:
+            return None
+        n_pretrain = len(pretrain)
+        n_target = len(target_labels)
+        if from_param.shape != to_shape:
+            for dim in range(min(len(from_param.shape), len(to_shape))):
+                if from_param.shape[dim] == n_pretrain and to_shape[dim] == n_target:
+                    out = from_param.new_zeros(to_shape)
+                    for i, label in enumerate(target_labels):
+                        if label in pretrain:
+                            j = pretrain.index(label)
+                            if dim == 0:
+                                out[i].copy_(from_param[j])
+                            elif dim == 1:
+                                out[:, i].copy_(from_param[:, j])
+                            else:
+                                idx_from: list[slice | int] = [
+                                    slice(None)
+                                ] * from_param.dim()
+                                idx_from[dim] = j
+                                idx_to: list[slice | int] = [slice(None)] * out.dim()
+                                idx_to[dim] = i
+                                out[tuple(idx_to)].copy_(from_param[tuple(idx_from)])
+                    return out
+        return None
 
     def apply_weights(
         self,
@@ -249,21 +272,21 @@ class ParameterInitializer:
             modules, self.base_weights, filled_parameters
         ):
             state_to_use = dict(state_dict)
-            if (
-                "label_pos_embed" in state_to_use
-                and pretrain_labels is not None
-                and target_labels is not None
-            ):
-                from_embed = state_to_use["label_pos_embed"]
-                try:
-                    to_param = module.get_parameter("label_pos_embed")
-                except AttributeError:
-                    to_param = None
-                if to_param is not None and from_embed.shape[0] > to_param.shape[0]:
-                    sliced = self._slice_label_pos_embed(
-                        from_embed, to_param.shape[0], target_labels
-                    )
-                    state_to_use["label_pos_embed"] = sliced
+            if pretrain_labels is not None and target_labels is not None:
+                for name in list(state_to_use.keys()):
+                    if any(wildcard_match(p, name) for p in classification.exclude):
+                        continue
+                    try:
+                        to_param = module.get_parameter(name)
+                    except AttributeError:
+                        continue
+                    from_param = state_to_use[name]
+                    if from_param.shape != to_param.shape:
+                        sliced = self._slice_param_by_labels(
+                            from_param, to_param.shape, target_labels
+                        )
+                        if sliced is not None:
+                            state_to_use[name] = sliced
             if modified_weights is not None:
                 modified_weights.append(state_to_use)
             overwrite_weights(
