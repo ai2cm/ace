@@ -329,6 +329,19 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         return (integrand * pressure_thickness).sum(dim=-1) / GRAVITY
 
 
+def dz_from_idepth(
+    idepth: torch.Tensor, deptho: torch.Tensor | None = None
+) -> torch.Tensor:
+    if deptho is not None:
+        z_top = idepth[..., :-1]
+        z_bot = idepth[..., 1:]
+        deptho = deptho.unsqueeze(-1)
+        dz = torch.clamp(deptho, min=z_top, max=z_bot) - z_top
+    else:
+        dz = idepth.diff(dim=-1)
+    return dz
+
+
 @dataclasses.dataclass
 class DepthCoordinate(VerticalCoordinate):
     """
@@ -341,10 +354,15 @@ class DepthCoordinate(VerticalCoordinate):
             it must be one shorter than idepth. The mask may have additional dimensions
             before the vertical, which are assumed to be broadcastable to match the
             integrand when computing integrals.
+        deptho: optional sea floor depth in meters at each horizontal grid point.
+            When provided, layer thicknesses account for partial bottom cells.
+            Must be broadcastable to the spatial dimensions of ``mask``
+            (i.e. ``mask.shape[:-1]``).
     """
 
     idepth: torch.Tensor
     mask: torch.Tensor
+    deptho: torch.Tensor | None = None
 
     def __post_init__(self):
         if len(self.idepth.shape) != 1:
@@ -361,6 +379,11 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got idepth.shape: {self.idepth.shape} and mask.shape: "
                 f"{self.mask.shape}."
             )
+        self._dz = dz_from_idepth(self.idepth, self.deptho)
+
+    @property
+    def dz(self) -> torch.Tensor:
+        return self._dz
 
     def __len__(self):
         """The number of vertical layer interfaces."""
@@ -410,9 +433,11 @@ class DepthCoordinate(VerticalCoordinate):
         return {"idepth": self.idepth.cpu().numpy()}
 
     def to(self, device: str) -> "DepthCoordinate":
-        idepth_on_device = self.idepth.to(device)
-        mask_on_device = self.mask.to(device)
-        return DepthCoordinate(idepth_on_device, mask_on_device)
+        return DepthCoordinate(
+            idepth=self.idepth.to(device),
+            mask=self.mask.to(device),
+            deptho=self.deptho.to(device) if self.deptho is not None else None,
+        )
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, DepthCoordinate):
@@ -422,13 +447,32 @@ class DepthCoordinate(VerticalCoordinate):
             torch.testing.assert_close(self.mask, other.mask)
         except AssertionError:
             return False
+        if (self.deptho is None) != (other.deptho is None):
+            return False
+        if self.deptho is not None and other.deptho is not None:
+            try:
+                torch.testing.assert_close(self.deptho, other.deptho)
+            except AssertionError:
+                return False
         return True
 
     def __repr__(self) -> str:
-        return f"DepthCoordinate(\n    idepth={self.idepth},\n    mask={self.mask}\n)"
+        parts = [
+            f"    idepth={self.idepth}",
+            f"    mask={self.mask}",
+        ]
+        if self.deptho is not None:
+            parts.append(f"    deptho={self.deptho}")
+        return "DepthCoordinate(\n" + ",\n".join(parts) + "\n)"
 
     def as_dict(self) -> TensorMapping:
-        return {"idepth": self.idepth, "mask": self.mask}
+        result: dict[str, torch.Tensor] = {
+            "idepth": self.idepth,
+            "mask": self.mask,
+        }
+        if self.deptho is not None:
+            result["deptho"] = self.deptho
+        return result
 
     def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
         """Compute the depth integral of the integrand.
@@ -454,10 +498,9 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        layer_thickness = self.idepth.diff(dim=-1)
-        ohc = (integrand * layer_thickness * self.mask).nansum(dim=-1)
-        mask_0 = self.mask.select(dim=-1, index=0).expand(ohc.shape)
-        return ohc.where(mask_0 > 0, float("nan"))
+        integral = (integrand * self.dz * self.mask).nansum(dim=-1)
+        mask_0 = self.mask.select(dim=-1, index=0).expand(integral.shape)
+        return integral.where(mask_0 > 0, float("nan"))
 
 
 @dataclasses.dataclass
