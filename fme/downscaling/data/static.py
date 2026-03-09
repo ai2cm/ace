@@ -22,7 +22,7 @@ class StaticInput:
             self.coords.lon
         ):
             raise ValueError(
-                f"Topography data shape {self.data.shape} does not match lat/lon"
+                f"Topography data shape {self.data.shape} does not match lat/lon "
                 f"coordinates shape {(len(self.coords.lat), len(self.coords.lon))}"
             )
 
