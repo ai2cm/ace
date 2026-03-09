@@ -322,11 +322,6 @@ class Distributed:
         """
         Gathers tensor data into a single tensor with the data from all ranks.
 
-        Each rank places its local portion (determined by :meth:`get_local_slices`)
-        into a zero tensor of ``global_shape``.  Spatial chunks are combined via
-        :meth:`spatial_reduce_sum`, then the data-parallel portions are gathered
-        to root via :meth:`gather`.
-
         Args:
             tensor: the tensor data to gather
             global_shape: the shape of the tensor containing data from all ranks
@@ -342,38 +337,20 @@ class Distributed:
         local_slices = self.get_local_slices(
             global_shape, data_parallel_dim=data_parallel_dim
         )
-        # Place local data into global-shaped zeros, then combine spatial chunks.
-        global_tensor = torch.zeros(
-            *global_shape, dtype=tensor.dtype, device=tensor.device
-        )
-        global_tensor[local_slices] = tensor
-        global_tensor = self.spatial_reduce_sum(global_tensor)
-        # Each dp rank now has the full spatial extent for its batch portion.
-        # Extract this rank's dp slice and gather across dp ranks to root.
-        dp_slices = self.get_local_slices(
-            global_shape, data_parallel_dim=data_parallel_dim
-        )
-        # Build dp-only slices (spatial dims are already reconstructed).
-        dp_only_list = list(dp_slices)
-        for i in range(len(dp_only_list)):
-            if i != data_parallel_dim:
-                dp_only_list[i] = slice(None)
-        dp_only = tuple(dp_only_list)
-        dp_local = global_tensor[dp_only]
-        gathered_dp_slices = self.gather_object(dp_only)
+        gathered_local_slices = self.gather_object(local_slices)
+        gathered_tensors = self.gather(tensor.contiguous())
         if self.is_root():
-            if gathered_dp_slices is None:
-                raise RuntimeError("gather_object returned None on root process")
+            if gathered_local_slices is None or gathered_tensors is None:
+                raise RuntimeError(
+                    "gather_object or gather returned None on root process"
+                )
             gathered_global = torch.zeros(
                 *global_shape, dtype=tensor.dtype, device=tensor.device
             )
-            gather_list = []
-            for i in range(self.total_data_parallel_ranks):
-                gather_list.append(gathered_global[gathered_dp_slices[i]])
+            for i in range(len(gathered_local_slices)):
+                gathered_global[gathered_local_slices[i]] = gathered_tensors[i]
         else:
-            gather_list = None
             gathered_global = None
-        self.gather(dp_local, gather_list=gather_list)
         return gathered_global
 
     def gather_irregular(

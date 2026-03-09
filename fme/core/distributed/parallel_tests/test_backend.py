@@ -118,13 +118,18 @@ def test_reduce_max_selects_largest_rank():
 
 @pytest.mark.parallel
 def test_gather_produces_correct_count():
-    """Root should receive one tensor per dp-rank; others get None."""
+    """Root should receive one tensor per global rank; others get None."""
     dist = Distributed.get_instance()
-    t = torch.full((2, 3), float(dist.data_parallel_rank), device=get_device())
+    t = torch.full((2, 3), float(dist.rank), device=get_device())
     gathered = dist.gather(t)
     if dist.is_root():
         assert gathered is not None
-        assert len(gathered) == dist.total_data_parallel_ranks
+        assert len(gathered) == dist.world_size
+        for i, g in enumerate(gathered):
+            torch.testing.assert_close(
+                g.to(get_device()),
+                torch.full((2, 3), float(i), device=get_device()),
+            )
     else:
         assert gathered is None
 
@@ -133,11 +138,11 @@ def test_gather_produces_correct_count():
 def test_gather_irregular_matching_shapes():
     """gather_irregular with identical shapes works like gather."""
     dist = Distributed.get_instance()
-    t = torch.full((4,), float(dist.data_parallel_rank), device=get_device())
+    t = torch.full((4,), float(dist.rank), device=get_device())
     gathered = dist.gather_irregular(t)
     if dist.is_root():
         assert gathered is not None
-        assert len(gathered) == dist.total_data_parallel_ranks
+        assert len(gathered) == dist.world_size
         for i, g in enumerate(gathered):
             torch.testing.assert_close(
                 g.to(get_device()),

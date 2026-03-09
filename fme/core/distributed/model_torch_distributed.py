@@ -259,26 +259,16 @@ class ModelTorchDistributed(DistributedBackend):
         tensor: torch.Tensor,
         gather_list: list[torch.Tensor] | None = None,
     ) -> list[torch.Tensor] | None:
-        # NOTE: gather is performed over the data-parallel group only, like reductions
-        # NOTE: dst must be a *global* rank that belongs to the data group.
-        # data_rank=0 corresponds to the first entry in the group's rank list.
-        root_global_rank = torch.distributed.get_process_group_ranks(self._data_group)[
-            0
-        ]
-        if gather_list is None and self._data_rank == 0:
+        # NOTE: gather is performed globally, unlike reductions
+        if gather_list is None and self.rank == 0:
             gather_list = [tensor] + [
-                torch.empty_like(tensor) for _ in range(self._data_size - 1)
+                torch.empty_like(tensor) for _ in range(self.total_ranks - 1)
             ]
-        torch.distributed.gather(
-            tensor,
-            gather_list,
-            dst=root_global_rank,
-            group=self._data_group,
-        )
-        return gather_list if self._rank == 0 else None
+        torch.distributed.gather(tensor, gather_list)
+        return gather_list
 
     def gather_object(self, obj: T) -> list[T] | None:
-        """Gather a picklable object over the data-parallel group."""
+        """Gather a picklable object globally."""
         gather_list: list[Any] | None = (
             [None for _ in range(self.total_ranks)] if self._rank == 0 else None
         )
