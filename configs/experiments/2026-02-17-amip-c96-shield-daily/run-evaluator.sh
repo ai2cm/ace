@@ -11,24 +11,22 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
-
 run_evaluator() {
     local config_filename="$1"
     local dataset_id="$2"
     local job_name="$3"
     local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
+    python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 
     cd $REPO_ROOT && gantry run \
         --name $job_name \
         --task-name $job_name \
         --description 'Run ace evaluator' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/ace \
-        --priority normal \
+        --workspace ai2/climate-titan \
+        --priority urgent \
         --not-preemptible \
-        --cluster ai2/saturn-cirrascale \
-        --cluster ai2/ceres-cirrascale \
+        --cluster ai2/titan \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
         --env WANDB_JOB_TYPE=inference \
@@ -42,6 +40,7 @@ run_evaluator() {
         --weka climate-default:/climate-default \
         --budget ai2/climate \
         --system-python \
+        --allow-dirty \
         --install "pip install --no-deps ." \
         -- python -I -m fme.ace.evaluator $CONFIG_PATH
 }
