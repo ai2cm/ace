@@ -28,33 +28,10 @@ _MASK[_LAT, _LON, :] = 0.0
 
 
 class _MockDepth:
-    def __len__(self) -> int:
-        return len(self.get_idepth())
-
-    def get_mask(self) -> torch.Tensor:
-        return _MASK
-
-    def get_mask_level(self, level: int):
-        return _MASK.select(-1, level)
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
-        if name.endswith("_1"):
-            return _MASK.select(-1, 1)
-        else:
-            return _MASK.select(-1, 0)
-
-    def get_idepth(self) -> torch.Tensor:
-        return torch.tensor([0, 5, 15], device=DEVICE)
-
     def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
-        thickness = self.get_idepth().diff(dim=-1)
+        idepth = torch.tensor([0, 5, 15], device=DEVICE)
+        thickness = idepth.diff(dim=-1)
         return torch.nansum(_MASK * integrand * thickness, dim=-1)
-
-    def build_output_masker(self):
-        raise NotImplementedError
-
-    def to(self, device: str) -> "_MockDepth":
-        return self
 
 
 _VERTICAL_COORD = _MockDepth()

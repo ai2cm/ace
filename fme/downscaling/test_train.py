@@ -137,8 +137,7 @@ def default_trainer_config(
     model_config_kwargs = {
         "num_diffusion_generation_steps": 2,
         "churn": 0.0,
-        "p_mean": -1.2,
-        "p_std": 1.2,
+        "training_noise_distribution": {"p_mean": -1.2, "p_std": 1.2},
         "predict_residual": True,
         "sigma_max": 80.0,
         "sigma_min": 0.002,
