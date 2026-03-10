@@ -23,6 +23,7 @@ from typing import Any, TypeVar
 
 import torch
 import torch.distributed
+import torch.distributed.nn.functional as dist_nn_f
 import torch.nn as nn
 import torch_harmonics.distributed as thd
 from torch.nn import SyncBatchNorm
@@ -331,7 +332,7 @@ class ModelTorchDistributed(DistributedBackend):
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         if self._h_size > 1 or self._w_size > 1:
-            torch.distributed.all_reduce(tensor, group=self._spatial_group)
+            return dist_nn_f.all_reduce(tensor, group=self._spatial_group)
         return tensor
 
     def weighted_mean(
