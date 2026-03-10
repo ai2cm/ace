@@ -5,7 +5,9 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import TypeAlias, TypeGuard, Union
 
+import cftime
 import numpy as np
+import numpy.typing as npt
 import torch
 import xarray as xr
 
@@ -270,7 +272,7 @@ class FileWriterConfig:
     def build_paired(
         self,
         experiment_dir: str,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
@@ -284,7 +286,7 @@ class FileWriterConfig:
             prediction_label = f"{self.label}_{prediction_suffix}"
             reference_writer = dataclasses.replace(self, label=reference_label).build(
                 experiment_dir=experiment_dir,
-                n_initial_conditions=n_initial_conditions,
+                initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps,
                 timestep=timestep,
                 variable_metadata=variable_metadata,
@@ -296,7 +298,7 @@ class FileWriterConfig:
             reference_writer = None
         prediction_writer = dataclasses.replace(self, label=prediction_label).build(
             experiment_dir=experiment_dir,
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             timestep=timestep,
             variable_metadata=variable_metadata,
@@ -310,7 +312,7 @@ class FileWriterConfig:
     def build(
         self,
         experiment_dir: str,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
@@ -322,7 +324,8 @@ class FileWriterConfig:
 
         Args:
             experiment_dir: The directory where experiment outputs are saved.
-            n_initial_conditions: The number of initial conditions or ensemble members.
+            initial_condition_times: 1D array of initial condition times
+                (start time for each inference run).
             n_timesteps: Total number of inference forward steps.
             timestep: The time delta between each timestep.
             variable_metadata: Metadata for each variable.
@@ -334,6 +337,8 @@ class FileWriterConfig:
             spatial_dims = DIM_INFO_HEALPIX
         else:
             spatial_dims = DIM_INFO_LATLON
+
+        n_initial_conditions = len(initial_condition_times)
 
         if (self.lat_extent and LAT_NAME not in coords) or (
             self.lon_extent and LON_NAME not in coords
@@ -372,8 +377,10 @@ class FileWriterConfig:
         if isinstance(self.format, ZarrWriterConfig):
             if isinstance(self.time_coarsen, TimeCoarsenConfig):
                 n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
+                timestep_write = self.time_coarsen.coarsen_factor * timestep
             else:
                 n_timesteps_write = n_timesteps
+                timestep_write = timestep
 
             zarr_writer_cls: type[SeparateICZarrWriterAdapter | ZarrWriterAdapter]
 
@@ -387,8 +394,9 @@ class FileWriterConfig:
                 path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                 dims=dims,
                 data_coords=ensure_numpy_coords(subselect_coords_),
+                timestep=timestep_write,
                 n_timesteps=n_timesteps_write,
-                n_initial_conditions=n_initial_conditions,
+                initial_condition_times=initial_condition_times,
                 data_vars=self.names,
                 variable_metadata=variable_metadata,
                 dataset_metadata=dataset_metadata,
@@ -415,7 +423,7 @@ class FileWriterConfig:
                 raw_writer = RawDataWriter(
                     path=experiment_dir,
                     label=self.label,
-                    n_initial_conditions=n_initial_conditions,
+                    initial_condition_times=initial_condition_times,
                     save_names=self.names,
                     variable_metadata=variable_metadata,
                     coords=subselect_coords_,

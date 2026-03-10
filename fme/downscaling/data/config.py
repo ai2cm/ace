@@ -23,11 +23,7 @@ from fme.downscaling.data.datasets import (
     PairedBatchData,
     PairedGriddedData,
 )
-from fme.downscaling.data.topography import (
-    StaticInputs,
-    get_normalized_topography,
-    get_topography_downscale_factor,
-)
+from fme.downscaling.data.static import StaticInputs, get_normalized_static_input
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
 
@@ -134,6 +130,18 @@ def _full_configs(
         else:
             all_configs.append(config)
     return all_configs
+
+
+def _check_fine_res_static_input_compatibility(
+    static_input_shape: tuple[int, int], data_coords_shape: tuple[int, int]
+) -> None:
+    for static, coord in zip(static_input_shape, data_coords_shape):
+        if static != coord:
+            raise ValueError(
+                f"Static input shape {static_input_shape} is not compatible with "
+                f"data coordinates shape {data_coords_shape}. Static input dimensions "
+                "must match fine resolution coordinate dimensions."
+            )
 
 
 @dataclasses.dataclass
@@ -523,7 +531,7 @@ class PairedDataLoaderConfig:
 
         if requirements.use_fine_topography:
             if static_inputs is not None:
-                fine_topography = static_inputs
+                static_inputs = static_inputs
             elif self.topography is None:
                 first_config = self._first_data_config(self.fine[0])
                 raw_paths = get_raw_paths(
@@ -534,32 +542,24 @@ class PairedDataLoaderConfig:
                         f"No files found matching "
                         f"'{first_config.data_path}/{first_config.file_pattern}'."
                     )
-                fine_topography = StaticInputs(
-                    fields=[get_normalized_topography(raw_paths[0])]
+                static_inputs = StaticInputs(
+                    fields=[get_normalized_static_input(raw_paths[0], "HGTsfc")],
                 )
             else:
-                fine_topography = StaticInputs(
-                    fields=[get_normalized_topography(self.topography)]
+                static_inputs = StaticInputs(
+                    fields=[get_normalized_static_input(self.topography, "HGTsfc")]
                 )
 
-            fine_topography = fine_topography.to_device()
-            if (
-                get_topography_downscale_factor(
-                    fine_topography.shape,
-                    properties_fine.horizontal_coordinates.shape,
-                )
-                != 1
-            ):
-                raise ValueError(
-                    f"Fine topography shape {fine_topography.shape} does not match "
-                    f"fine data shape {properties_fine.horizontal_coordinates.shape}."
-                )
-
-            fine_topography = fine_topography.subset_latlon(
+            static_inputs = static_inputs.to_device()
+            _check_fine_res_static_input_compatibility(
+                static_inputs.shape,
+                properties_fine.horizontal_coordinates.shape,
+            )
+            static_inputs = static_inputs.subset_latlon(
                 lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
             )
         else:
-            fine_topography = None
+            static_inputs = None
 
         # TODO: horizontal subsetting should probably live in the XarrayDatast level
         # Subset to overall horizontal domain
@@ -619,7 +619,7 @@ class PairedDataLoaderConfig:
 
         return PairedGriddedData(
             _loader=dataloader,
-            static_inputs=fine_topography,
+            static_inputs=static_inputs,
             coarse_shape=example.coarse.horizontal_shape,
             downscale_factor=example.downscale_factor,
             dims=example.fine.latlon_coordinates.dims,

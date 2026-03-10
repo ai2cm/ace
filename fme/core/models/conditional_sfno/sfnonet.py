@@ -20,9 +20,9 @@ from typing import Any, Callable, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
-# get spectral transforms from torch_harmonics
-import torch_harmonics as th
 from torch.utils.checkpoint import checkpoint
+
+from fme.core.distributed import Distributed
 
 from fme.core.benchmark.timer import Timer, NullTimer
 
@@ -62,7 +62,9 @@ def _compute_cutoff_radius(nlat, kernel_shape, basis_type):
 class DiscreteContinuousConvS2(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
-        self.conv = th.DiscreteContinuousConvS2(*args, **kwargs)
+
+        dist = Distributed.get_instance()
+        self.conv = dist.get_disco_conv_s2(*args, **kwargs)
 
     def forward(self, x, timer: Timer = NullTimer()):
         return self.conv(x), x
@@ -375,18 +377,19 @@ def get_lat_lon_sfnonet(
     modes_lat = int(h * hard_thresholding_fraction)
     modes_lon = int((w // 2 + 1) * hard_thresholding_fraction)
     data_grid = params.data_grid if hasattr(params, "data_grid") else "equiangular"
-    trans_down = th.RealSHT(
+
+    dist = Distributed.get_instance()
+
+    trans_down = dist.get_sht(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
-    ).float()
-    itrans_up = th.InverseRealSHT(
+    )
+    itrans_up = dist.get_isht(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
-    ).float()
-    trans = th.RealSHT(
+    )
+    trans = dist.get_sht(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
-    ).float()
-    itrans = th.InverseRealSHT(
-        h, w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
-    ).float()
+    )
+    itrans = dist.get_isht(h, w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss")
 
     def get_pos_embed():
         pos_embed = nn.Parameter(torch.zeros(1, params.embed_dim, h, w))
@@ -394,7 +397,7 @@ def get_lat_lon_sfnonet(
         trunc_normal_(pos_embed, std=0.02)
         return pos_embed
 
-    return SphericalFourierNeuralOperatorNet(
+    net = SphericalFourierNeuralOperatorNet(
         params,
         img_shape=img_shape,
         in_chans=in_chans,
@@ -406,6 +409,7 @@ def get_lat_lon_sfnonet(
         itrans=itrans,
         get_pos_embed=get_pos_embed,
     )
+    return net
 
 
 class SphericalFourierNeuralOperatorNet(torch.nn.Module):
@@ -587,6 +591,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             if hasattr(params, "img_shape_x") and hasattr(params, "img_shape_y")
             else img_shape
         )
+        self._spatial_h_slice, self._spatial_w_slice = (
+            Distributed.get_instance().get_local_slices(self.img_shape)
+        )
         self.scale_factor = (
             params.scale_factor if hasattr(params, "scale_factor") else scale_factor
         )
@@ -631,7 +638,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             if hasattr(params, "encoder_layers")
             else encoder_layers
         )
-        self.pos_embed = params.pos_embed if hasattr(params, "pos_embed") else pos_embed
+        self._use_pos_embed = (
+            params.pos_embed if hasattr(params, "pos_embed") else pos_embed
+        )
         self.big_skip = params.big_skip if hasattr(params, "big_skip") else big_skip
         self.rank = params.rank if hasattr(params, "rank") else rank
         self.factorization = (
@@ -837,8 +846,10 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.decoder = nn.Sequential(*decoder_modules)
 
         # learned position embedding
-        if self.pos_embed:
+        if self._use_pos_embed:
             self.pos_embed = get_pos_embed()
+        else:
+            self.pos_embed = None
 
         if normalize_big_skip:
             self.norm_big_skip = ConditionalLayerNorm(
@@ -883,9 +894,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         else:
             x = self.encoder(x)
 
-        if hasattr(self, "pos_embed"):
-            # old way of treating unequally shaped weights
-            x = x + self.pos_embed
+        if self.pos_embed is not None:
+            x = x + self.pos_embed[..., self._spatial_h_slice, self._spatial_w_slice]
 
         # maybe clean the padding just in case
 

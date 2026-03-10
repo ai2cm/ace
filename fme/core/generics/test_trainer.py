@@ -19,6 +19,7 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
 )
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
+from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
@@ -232,6 +233,7 @@ class Config:
     segment_epochs: int | None = None
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    lr_tuning: LRTuningConfig | None = None
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
@@ -338,6 +340,7 @@ def get_trainer(
     scheduler_config: SchedulerConfig | None = None,
     n_validation_batches: int = 5,
     save_checkpoint: bool = True,
+    lr_tuning: LRTuningConfig | None = None,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -413,6 +416,7 @@ def get_trainer(
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         save_checkpoint=save_checkpoint,
+        lr_tuning=lr_tuning,
     )
     aggregator_builder = AggregatorBuilder(
         train_losses=train_losses,
@@ -1184,3 +1188,164 @@ def test_ema_state_preserved_after_resume(tmp_path: str):
             resumed_ema_state["ema_params"][key],
             ema_state["ema_params"][key],
         )
+
+
+def test_lr_tuning_disabled_by_default(tmp_path: str):
+    """When lr_tuning is None, training proceeds normally."""
+    with mock_wandb():
+        config, trainer = get_trainer(
+            tmp_path,
+            max_epochs=2,
+            lr_tuning=None,
+        )
+        initial_lr = trainer.optimization.learning_rate
+        trainer.train()
+        # LR should only change if the scheduler changes it, not LR tuning
+        assert trainer.optimization.learning_rate == initial_lr
+
+
+def test_lr_tuning_runs_and_keeps_lr(tmp_path: str):
+    """When the candidate doesn't win, the LR stays the same."""
+    max_epochs = 2
+    # epoch_frequency=1, max_epochs=2:
+    # Epoch 0 tune: _last_val_loss=None → validate(0.8), trial(0.7, 0.75)
+    #   baseline improvement=0.1, candidate improvement=0.05 → baseline wins
+    # Epoch 0: train + validate(0.6)
+    # Epoch 1 tune: trial(0.5, 0.55)
+    #   baseline improvement=0.1, candidate improvement=0.05 → baseline wins
+    # Epoch 1: train + validate(0.4)
+    validation_losses = np.array([0.8, 0.7, 0.75, 0.6, 0.5, 0.55, 0.4])
+    with mock_wandb():
+        config, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            validation_losses=validation_losses,
+            lr_tuning=LRTuningConfig(
+                epoch_frequency=1,
+                lr_factor=0.5,
+                num_batches=2,
+                improvement_threshold=0.1,
+            ),
+        )
+        initial_lr = trainer.optimization.learning_rate
+        trainer.train()
+        assert trainer.optimization.learning_rate == initial_lr
+
+
+def test_lr_tuning_adopts_candidate_lr(tmp_path: str):
+    """When the candidate wins, the LR is updated."""
+    max_epochs = 2
+    # Epoch 0 tune: _last_val_loss=None → validate(1.0), trial(0.9, 0.3)
+    #   baseline improvement=0.1, candidate improvement=0.7 → candidate wins
+    # Epoch 0: train + validate(0.5)
+    # Epoch 1 tune: trial(0.45, 0.44)
+    #   baseline improvement=0.05, candidate improvement=0.06
+    #   candidate needs > 0.055 → 0.06 > 0.055 → wins again
+    # Epoch 1: train + validate(0.3)
+    validation_losses = np.array([1.0, 0.9, 0.3, 0.5, 0.45, 0.44, 0.3])
+    with mock_wandb():
+        config, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            validation_losses=validation_losses,
+            lr_tuning=LRTuningConfig(
+                epoch_frequency=1,
+                lr_factor=0.5,
+                num_batches=2,
+                improvement_threshold=0.1,
+            ),
+        )
+        initial_lr = trainer.optimization.learning_rate
+        trainer.train()
+        # Candidate won at both epochs
+        assert trainer.optimization.learning_rate == initial_lr * 0.5 * 0.5
+
+
+def test_lr_tuning_respects_epoch_frequency(tmp_path: str):
+    """LR tuning only runs on epochs matching the frequency."""
+    max_epochs = 4
+    # epoch_frequency=2, so tuning runs at epoch 0 and 2
+    # Epoch 0 tune: needs _last_val_loss=None → runs validate_one_epoch first
+    #   validate_one_epoch: 0.8
+    #   trial baseline: 0.7, trial candidate: 0.3 → candidate wins
+    # Epoch 0 train + validate: 0.6
+    # Epoch 1: no tuning. train + validate: 0.5
+    # Epoch 2 tune:
+    #   trial baseline: 0.4, trial candidate: 0.1 → candidate wins
+    # Epoch 2 train + validate: 0.3
+    # Epoch 3: no tuning. train + validate: 0.2
+    validation_losses = np.array(
+        [
+            0.8,  # _maybe_tune_lr validate_one_epoch at epoch 0
+            0.7,
+            0.3,  # trial at epoch 0 (baseline, candidate)
+            0.6,  # epoch 0 validate
+            0.5,  # epoch 1 validate
+            0.4,
+            0.1,  # trial at epoch 2 (baseline, candidate)
+            0.3,  # epoch 2 validate
+            0.2,  # epoch 3 validate
+        ]
+    )
+    with mock_wandb():
+        config, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            train_losses=np.zeros(max_epochs),
+            validation_losses=validation_losses,
+            inference_losses=np.zeros(max_epochs),
+            stepper_module_values=np.zeros(max_epochs),
+            lr_tuning=LRTuningConfig(
+                epoch_frequency=2,
+                lr_factor=0.5,
+                num_batches=2,
+                improvement_threshold=0.1,
+            ),
+        )
+        initial_lr = trainer.optimization.learning_rate
+        trainer.train()
+        # Tuning ran at epoch 0 and 2, candidate won both times
+        assert trainer.optimization.learning_rate == initial_lr * 0.5 * 0.5
+
+
+def test_lr_tuning_with_evaluate_before_training(tmp_path: str):
+    """When evaluate_before_training=True, the pre-training validation
+    loss is used as _last_val_loss so _maybe_tune_lr doesn't re-validate."""
+    max_epochs = 2
+    # evaluate_before_training: val=0.9
+    # epoch 0 tune (uses _last_val_loss=0.9):
+    #   trial baseline: 0.8, candidate: 0.3 → candidate wins
+    # epoch 0 train + validate: 0.5
+    # epoch 1 tune (uses _last_val_loss=0.5):
+    #   trial baseline: 0.4 (improvement=0.1), candidate: 0.45 (improvement=0.05)
+    #   candidate worse than baseline → baseline wins
+    # epoch 1 train + validate: 0.3
+    validation_losses = np.array(
+        [
+            0.9,  # evaluate_before_training
+            0.8,
+            0.3,  # trial at epoch 0
+            0.5,  # epoch 0 validate
+            0.4,
+            0.45,  # trial at epoch 1 (baseline wins)
+            0.3,  # epoch 1 validate
+        ]
+    )
+    with mock_wandb():
+        config, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            validation_losses=validation_losses,
+            inference_losses=np.zeros(max_epochs + 1),
+            evaluate_before_training=True,
+            lr_tuning=LRTuningConfig(
+                epoch_frequency=1,
+                lr_factor=0.5,
+                num_batches=2,
+                improvement_threshold=0.1,
+            ),
+        )
+        initial_lr = trainer.optimization.learning_rate
+        trainer.train()
+        # Only epoch 0 candidate won
+        assert trainer.optimization.learning_rate == initial_lr * 0.5

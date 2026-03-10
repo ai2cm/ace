@@ -7,6 +7,7 @@ import torch
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed.distributed import Distributed
 from fme.core.models.conditional_sfno.sfnonet import (
     Context,
     ContextConfig,
@@ -19,8 +20,8 @@ from fme.core.models.conditional_sfno.sfnonet import (
 
 def isotropic_noise(
     leading_shape: tuple[int, ...],
-    lmax: int,  # length of the ℓ axis expected by isht
-    mmax: int,  # length of the m axis expected by isht
+    lmax: int,  # length of the ℓ axis expected by isht (global)
+    mmax: int,  # length of the m axis expected by isht (global)
     isht: Callable[[torch.Tensor], torch.Tensor],
     device: torch.device,
 ) -> torch.Tensor:
@@ -39,6 +40,10 @@ def isotropic_noise(
     scale = math.sqrt(4.0 * math.pi) / lmax  # (Unsöld theorem ⇒ L = lmax)
     alm = (real + 1j * imag) * scale
 
+    # --- for distributed iSHT, slice to local spectral extent --------------
+    l_slice, m_slice = Distributed.get_instance().get_local_slices((lmax, mmax))
+    alm = alm[..., l_slice, m_slice]
+
     return isht(alm)
 
 
@@ -56,6 +61,7 @@ class NoiseConditionedSFNO(torch.nn.Module):
         self.conditional_model = conditional_model
         self.embed_dim = embed_dim_noise
         self.noise_type = noise_type
+        self.img_shape = img_shape
         self.label_pos_embed: torch.nn.Parameter | None = None
         # register pos embed if pos_embed_dim != 0
         if embed_dim_pos != 0:
@@ -103,11 +109,15 @@ class NoiseConditionedSFNO(torch.nn.Module):
         else:
             raise ValueError(f"Invalid noise type: {self.noise_type}")
 
+        h_slice, w_slice = Distributed.get_instance().get_local_slices(self.img_shape)
+
         if self.pos_embed is not None:
-            embedding_pos = self.pos_embed.repeat(noise.shape[0], 1, 1, 1)
+            pos_local = self.pos_embed[..., h_slice, w_slice]
+            embedding_pos = pos_local.repeat(noise.shape[0], 1, 1, 1)
             if self.label_pos_embed is not None and labels is not None:
+                label_local = self.label_pos_embed[..., h_slice, w_slice]
                 label_embedding_pos = torch.einsum(
-                    "bl, lpxy -> bpxy", labels, self.label_pos_embed
+                    "bl, lpxy -> bpxy", labels, label_local
                 )
                 embedding_pos = embedding_pos + label_embedding_pos
         else:

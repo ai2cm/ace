@@ -5,7 +5,9 @@ import warnings
 from collections.abc import Mapping, Sequence
 from typing import TypeAlias
 
+import cftime
 import numpy as np
+import numpy.typing as npt
 import torch
 import xarray as xr
 
@@ -76,7 +78,7 @@ class DataWriterConfig:
     def build_paired(
         self,
         experiment_dir: str,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
@@ -85,7 +87,7 @@ class DataWriterConfig:
     ) -> "PairedDataWriter":
         return PairedDataWriter(
             path=experiment_dir,
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             timestep=timestep,
             variable_metadata=variable_metadata,
@@ -101,7 +103,7 @@ class DataWriterConfig:
     def build(
         self,
         experiment_dir: str,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
@@ -110,7 +112,7 @@ class DataWriterConfig:
     ) -> "DataWriter":
         return DataWriter(
             path=experiment_dir,
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -128,7 +130,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
         path: str,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -143,7 +145,8 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         Args:
             path: Path to write netCDF file(s).
-            n_initial_conditions: Number of ICs/ensemble members to write to the file.
+            initial_condition_times: 1D array of initial condition times
+                (start time for each inference run).
             n_timesteps: Number of timesteps to write to the file.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
@@ -170,12 +173,14 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 return time_coarsen.build_paired(data_writer)
             return data_writer
 
+        n_samples = len(initial_condition_times)
+
         if enable_prediction_netcdfs:
             self._writers.append(
                 _time_coarsen_builder(
                     PairedRawDataWriter(
                         path=path,
-                        n_initial_conditions=n_initial_conditions,
+                        initial_condition_times=initial_condition_times,
                         save_names=save_names,
                         variable_metadata=variable_metadata,
                         coords=coords,
@@ -187,7 +192,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             self._writers.append(
                 PairedMonthlyDataWriter(
                     path=path,
-                    n_samples=n_initial_conditions,
+                    n_samples=n_samples,
                     n_timesteps=n_timesteps,
                     timestep=timestep,
                     save_names=save_names,
@@ -201,7 +206,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 self._writers.append(
                     writer_config.build_paired(
                         experiment_dir=path,
-                        n_initial_conditions=n_initial_conditions,
+                        initial_condition_times=initial_condition_times,
                         n_timesteps=n_timesteps,
                         timestep=timestep,
                         variable_metadata=variable_metadata,
@@ -311,7 +316,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
         path: str,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -326,8 +331,8 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         Args:
             path: Directory within which to write netCDF file(s).
-            n_initial_conditions: Number of initial conditions / timeseries
-                to write to the file.
+            initial_condition_times: 1D array of initial condition times
+                (start time for each inference run).
             n_timesteps: Number of timesteps to write to the file.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
@@ -352,13 +357,15 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 return time_coarsen.build(data_writer)
             return data_writer
 
+        n_initial_conditions = len(initial_condition_times)
+
         if enable_prediction_netcdfs:
             self._writers.append(
                 _time_coarsen_builder(
                     RawDataWriter(
                         path=path,
                         label="autoregressive_predictions",
-                        n_initial_conditions=n_initial_conditions,
+                        initial_condition_times=initial_condition_times,
                         save_names=save_names,
                         variable_metadata=variable_metadata,
                         coords=coords,
@@ -385,7 +392,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 self._writers.append(
                     writer_config.build(
                         experiment_dir=path,
-                        n_initial_conditions=n_initial_conditions,
+                        initial_condition_times=initial_condition_times,
                         n_timesteps=n_timesteps,
                         timestep=timestep,
                         variable_metadata=variable_metadata,

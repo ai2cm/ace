@@ -95,6 +95,13 @@ class OptimizationABC(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def set_learning_rate(self, lr: float):
+        """
+        Set the learning rate for all parameter groups.
+        """
+        ...
+
+    @abc.abstractmethod
     def load_state(self, state):
         """
         Loads state from a serializable data structure.

@@ -17,6 +17,7 @@ from fme.ace.train.train_config import InlineInferenceConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
@@ -114,6 +115,7 @@ class TrainConfig:
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
