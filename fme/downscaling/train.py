@@ -432,9 +432,7 @@ class TrainerConfig:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
-        static_inputs = (
-            load_static_inputs(self.static_inputs) if self.static_inputs else None
-        )
+        static_inputs = load_static_inputs(self.static_inputs)
 
         train_data: PairedGriddedData = self.train_data.build(
             train=True,

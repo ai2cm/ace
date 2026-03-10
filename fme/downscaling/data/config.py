@@ -540,8 +540,9 @@ class PairedDataLoaderConfig:
         if requirements.use_fine_topography:
             if static_inputs is None:
                 raise ValueError(
-                    "Model requires fine topography, but no static inputs were provided"
-                    " to the data loader's build method."
+                    "Model requires static inputs (use_fine_topography=True),"
+                    " but no static inputs were provided to the data loader's"
+                    " build method."
                 )
 
             static_inputs = static_inputs.to_device()

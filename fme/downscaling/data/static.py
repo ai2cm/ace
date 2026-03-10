@@ -87,7 +87,7 @@ class StaticInput:
         }
 
 
-def get_normalized_static_input(path: str, field_name: str):
+def _get_normalized_static_input(path: str, field_name: str):
     """
     Load a static input field from a given file path and field name and
     normalize it.
@@ -192,9 +192,12 @@ class StaticInputs:
         )
 
 
-def load_static_inputs(static_inputs_config: dict[str, str]) -> StaticInputs | None:
+def load_static_inputs(
+    static_inputs_config: dict[str, str] | None,
+) -> StaticInputs | None:
     """
     Load normalized static inputs from a mapping of field names to file paths.
+    Returns None if the input config is empty.
     """
     # TODO: consolidate/simplify empty StaticInputs vs. None handling in
     #       downscaling code
@@ -202,7 +205,7 @@ def load_static_inputs(static_inputs_config: dict[str, str]) -> StaticInputs | N
         return None
     return StaticInputs(
         fields=[
-            get_normalized_static_input(path, field_name)
+            _get_normalized_static_input(path, field_name)
             for field_name, path in static_inputs_config.items()
         ]
     )
