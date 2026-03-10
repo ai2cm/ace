@@ -10,14 +10,16 @@ CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-declare -A MODELS=( [cm4_like_am4_random_co2_stochastic_sii_ec-rs0-intermediate]="01KESF06C9VFB0R2T21RQXE2ZN" [cm4_like_am4_random_co2_stochastic_sii_ec-rs1-intermediate]="01KESF1H6R15GGFM25Y5VMR70V" [cm4_like_am4_random_co2_stochastic_lsii_ec-rs0-intermediate]="01KESEWEBDE8ABXSR72CFAZJSS" [cm4_like_am4_random_co2_stochastic_lsii_ec-rs1-intermediate]="01KESEVQJ13RFMB901B8J21E20" )
-
+declare -A MODELS=( \
+    [cm4_like_am4_random_co2_stochastic_ec-rs0]="01KK45DND8CMN5C5ZVV6ZW33YW" \
+    [cm4_like_am4_random_co2_stochastic_ec_rs1]="01KK3C8GP4QEFY9K105B283ZS0" \
+)
 for climate in 1xCO2 2xCO2 4xCO2; do
     case=ramped-sst-${climate}-random-perturbation-ic_0003
     config_path=${SCRIPT_PATH}/ace-random-CO2-${climate}-evaluator-config.yaml
     python -m fme.ace.validate_config --config_type evaluator ${config_path}
     for name in "${!MODELS[@]}"; do
-        job_name="2026-01-12-$case-evaluator-$name"
+        job_name="2026-03-10-$case-evaluator-$name"
         existing_results_dataset=${MODELS[$name]}
         gantry run \
                 --name $job_name \
