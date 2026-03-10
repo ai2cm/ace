@@ -5,7 +5,7 @@ comparing ensemble predictions against targets for each variable.
 
 This will work for saved event outputs from `fme.downscaling.evaluator`
 from a beaker experiment.  It downloads the experiment files to a temporary
-directory and then parses the filenames for <event_name>_YYYYMMDD.nc to look
+directory and then parses the filenames for <event_name>_YYYYMMDD*.nc to look
 for single-event outputs.
 
 Usage:
@@ -25,8 +25,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
-# Matching for <event_name>_YYYYMMDD.nc
-_EVENT_FILE_RE = re.compile(r"(.+)_(\d{8})\.nc$")
+# Matching for <event_name>_YYYYMMDD*.nc
+_EVENT_FILE_RE = re.compile(r"(.+)_(\d{8}).*\.nc$")
 
 
 def parse_args():
