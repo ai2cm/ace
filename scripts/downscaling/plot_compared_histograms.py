@@ -142,6 +142,23 @@ def plot_comparison_histogram(
     plt.close(fig)
 
 
+def add_wind_speed(ds: xr.Dataset) -> xr.Dataset:
+    variables = detect_variable_pairs(ds)
+    if (
+        "eastward_wind_at_ten_meters" in variables
+        and "northward_wind_at_ten_meters" in variables
+    ):
+        ds["wind_speed_target"] = np.sqrt(
+            ds.eastward_wind_at_ten_meters_target**2
+            + ds.northward_wind_at_ten_meters_target**2
+        )
+        ds["wind_speed_predicted"] = np.sqrt(
+            ds.eastward_wind_at_ten_meters_predicted**2
+            + ds.northward_wind_at_ten_meters_predicted**2
+        )
+    return ds
+
+
 def main():
     args = parse_args()
     dataset_ids = args.beaker_dataset_ids
@@ -175,7 +192,9 @@ def main():
         for event_name in sorted_events:
             opened_datasets = []
             for ef in event_files_per_dataset:
-                opened_datasets.append(xr.open_dataset(ef[event_name]))
+                event_ds = xr.open_dataset(ef[event_name])
+                event_ds = add_wind_speed(event_ds)
+                opened_datasets.append(event_ds)
 
             all_var_sets = [set(detect_variable_pairs(ds)) for ds in opened_datasets]
             common_vars = sorted(set.intersection(*all_var_sets))
