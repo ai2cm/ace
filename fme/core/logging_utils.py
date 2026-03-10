@@ -144,6 +144,7 @@ class LoggingConfig:
         # must ensure wandb.configure is called before wandb.init
         wandb = WandB.get_instance()
         wandb.configure(log_to_wandb=self.log_to_wandb)
+        notes = _get_wandb_notes(_get_beaker_id())
         wandb.init(
             config=config_copy,
             project=self.project,
@@ -151,7 +152,7 @@ class LoggingConfig:
             experiment_dir=experiment_dir,
             resumable=resumable,
             dir=wandb_dir,
-            notes=_get_beaker_url(_get_beaker_id()),
+            notes=notes,
         )
 
 
@@ -161,6 +162,15 @@ def _get_beaker_id() -> str | None:
     except KeyError:
         logging.warning("Beaker Experiment ID not found.")
         return None
+
+
+def _get_wandb_notes(beaker_id: str | None) -> str | None:
+    if beaker_id is not None:
+        return _get_beaker_url(beaker_id)
+    wandb_notes: str | None = os.environ.get("WANDB_NOTES")
+    if wandb_notes is not None:
+        return wandb_notes
+    return None
 
 
 def _get_beaker_url(beaker_id: str | None) -> str:

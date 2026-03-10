@@ -15,7 +15,7 @@ from fme.downscaling.data import (
     LatLonCoordinates,
     StaticInput,
     StaticInputs,
-    get_normalized_topography,
+    get_normalized_static_input,
 )
 from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
 from fme.downscaling.inference.inference import Downscaler, InferenceConfig, main
@@ -279,7 +279,9 @@ def checkpointed_model_config(
     topography_path = (
         f"{loader_config.coarse[0].data_path.replace('coarse', 'fine')}/data.nc"
     )
-    static_inputs = StaticInputs([get_normalized_topography(topography_path)])
+    static_inputs = StaticInputs(
+        [get_normalized_static_input(topography_path, "HGTsfc")]
+    )
     model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"
@@ -367,6 +369,7 @@ def test_generation_main(generation_config_path, skip_slow):
     (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
     reason="Skipping multi-GPU test: less than 2 GPUs available.",
 )
+@pytest.mark.serial
 def test_generation_entrypoint(generation_config_path, skip_slow):
     """Test the main generation process end-to-end."""
     if skip_slow:

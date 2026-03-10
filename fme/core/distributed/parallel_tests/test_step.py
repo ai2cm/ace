@@ -26,6 +26,7 @@ from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -272,6 +273,9 @@ def test_step_applies_wrapper(config: StepSelector):
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
+    dist = Distributed.get_instance()
+    input_data = dist.scatter_spatial(input_data, img_shape)
+    next_step_input_data = dist.scatter_spatial(next_step_input_data, img_shape)
     multi_calls = 1
     if isinstance(config._step_config_instance, MultiCallStepConfig):
         if config._step_config_instance.config is not None:
@@ -368,7 +372,6 @@ def cache_step_input(
     if checkpoint_path.exists():
         checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
         step.load_state(checkpoint["step_state_dict"])
-        # TODO: we will need some kind of scatter here for it to work in parallel
         input_data = checkpoint["input_data"]
         next_step_input_data = checkpoint["next_step_input_data"]
         label_tensor = checkpoint["label_tensor"]
@@ -423,6 +426,7 @@ def test_step_regression(
     decomposition, as well as catching any unintended changes to the
     step's behavior.
     """
+    dist = Distributed.get_instance()
     torch.manual_seed(0)
     img_shape = (20, 40)
     n_samples = 2
@@ -448,10 +452,18 @@ def test_step_regression(
         labels,
         DATA_DIR / f"{case_name}_input.pt",
     )
+    # Scatter global inputs to local spatial chunks
+    input_data = dist.scatter_spatial(input_data, img_shape)
+    next_step_input_data = dist.scatter_spatial(next_step_input_data, img_shape)
+
     output = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=labels
         ),
         wrapper=lambda x: x,
     )
+
+    # Gather local outputs back to global for comparison
+    output = dist.gather_spatial(output, img_shape)
+
     cache_step_output(output, DATA_DIR / f"{case_name}_output.pt")

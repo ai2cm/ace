@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Iterable
 from unittest.mock import patch
 
+import cftime
 import dacite
 import fsspec
 import numpy as np
@@ -16,6 +17,7 @@ import xarray as xr
 import yaml
 
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference.main import StepMeanEntry
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -326,7 +328,9 @@ def inference_helper(
         loader=data.inference_data_loader_config,
         prediction_loader=prediction_data,
         aggregator=InferenceEvaluatorAggregatorConfig(
-            monthly_reference_data=monthly_reference_filename, log_video=True
+            monthly_reference_data=monthly_reference_filename,
+            log_video=True,
+            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
@@ -376,11 +380,19 @@ def inference_helper(
             assert dim_name in initial_condition_ds.data_vars[example_output_var].dims
             assert dim_name in initial_condition_ds.coords
 
+    decode_times = xr.coders.CFDatetimeCoder(use_cftime=True)
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc",
         decode_timedelta=False,
-        decode_times=False,
+        decode_times=decode_times,
     )
+
+    # Regression test for GitHub issue #886; ensure the init_time is properly
+    # propagated from the initial conditions to the prediction outputs.
+    expected_init_time = cftime.DatetimeProlepticGregorian(2000, 1, 1)
+    result_init_time = prediction_ds["init_time"].squeeze("sample").item()
+    assert result_init_time == expected_init_time
+
     assert len(prediction_ds["time"]) == config.n_forward_steps
     for i in range(config.n_forward_steps - 1):
         np.testing.assert_allclose(
@@ -504,6 +516,9 @@ def test_inference_writer_boundaries(
             save_monthly_files=False,
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
+        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
@@ -660,6 +675,9 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -805,6 +823,9 @@ def test_derived_metrics_run_without_errors(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
@@ -925,6 +946,9 @@ def test_inference_override(tmp_path: pathlib.Path):
             save_monthly_files=False,
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
+        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
@@ -1186,6 +1210,9 @@ def test_evaluator_with_derived_forcings(
             log_to_file=False,
             log_to_wandb=False,
         ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_monthly_files=False,
@@ -1258,6 +1285,9 @@ def test_evaluator_with_non_local_experiment_dir(
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
