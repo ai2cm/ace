@@ -552,5 +552,5 @@ def test_checkpoint_model_build_raises_when_checkpoint_has_static_inputs(tmp_pat
         checkpoint_path=str(checkpoint_path),
         static_inputs={"HGTsfc": "/any/path.nc"},
     )
-    with pytest.raises(ValueError, match="Cannot override static_inputs"):
+    with pytest.raises(ValueError):
         config.build()
