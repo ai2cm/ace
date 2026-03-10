@@ -341,7 +341,7 @@ def dz_from_idepth(
     else:
         deptho_expanded = deptho.unsqueeze(-1)
     dz = torch.clamp(deptho_expanded, min=z_top, max=z_bot) - z_top
-    return dz.where(mask > 0, float("nan"))
+    return dz.nan_to_num() * mask
 
 
 @dataclasses.dataclass
@@ -453,7 +453,7 @@ class DepthCoordinate(VerticalCoordinate):
             return False
         if self.deptho is not None and other.deptho is not None:
             try:
-                torch.testing.assert_close(self.deptho, other.deptho)
+                torch.testing.assert_close(self.deptho, other.deptho, equal_nan=True)
             except AssertionError:
                 return False
         return True

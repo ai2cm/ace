@@ -112,13 +112,13 @@ def save_ocean_nd_netcdf(
         dims=horizontal_dims,
         coords=horizontal_coords,
     )
-    ds["deptho"] = xr.where(ds["mask_2d"] > 0, deptho, interface_depths[0])
+    ds["deptho"] = xr.where(ds["mask_2d"] > 0, deptho, float("nan"))
 
     # Build physically plausible ocean state so OHC correction remains well-scaled.
     for i in range(nz_levels):
         theta_name = f"thetao_{i}"
         if theta_name in ds:
-            theta_baseline = 286.0 - 3.0 * i
+            theta_baseline = 12.85 - 3.0 * i  # degC
             theta = xr.DataArray(
                 theta_baseline + rng.normal(scale=0.5, size=ds[theta_name].shape),
                 dims=ds[theta_name].dims,
@@ -130,7 +130,7 @@ def save_ocean_nd_netcdf(
 
     if "sst" in ds:
         sst = xr.DataArray(
-            286.5 + rng.normal(scale=0.3, size=ds["sst"].shape),
+            286.5 + rng.normal(scale=0.3, size=ds["sst"].shape),  # K
             dims=ds["sst"].dims,
             coords=ds["sst"].coords,
         )
