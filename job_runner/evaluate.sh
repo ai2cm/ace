@@ -198,7 +198,6 @@ while read TRAIN_EXPER; do
             $MIN_RUNTIME \
             --no-auto-resume \
             "${CLUSTER_ARGS[@]}" \
-            --workspace "$WORKSPACE" \
             --weka climate-default:/climate-default \
             --env WANDB_USERNAME="$WANDB_USERNAME" \
             --env WANDB_NAME="$JOB_NAME" \
