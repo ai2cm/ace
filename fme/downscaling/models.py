@@ -580,7 +580,6 @@ class CheckpointModelConfig:
                 "fine_topography_path is deprecated. Use static_inputs instead, "
                 "e.g. static_inputs: {HGTsfc: <path>}.",
                 DeprecationWarning,
-                stacklevel=2,
             )
             if self.static_inputs is not None:
                 raise ValueError(
