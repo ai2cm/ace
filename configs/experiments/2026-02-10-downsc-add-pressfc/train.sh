@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-winds-prmsl-only-0.5sigmaexp-tropics"
+JOB_NAME="xshield-downscaling-100km-to-3km-winds-prmsl-only-tropics"
 CONFIG_FILENAME="train-100-to-3km-prmsl-winds-only.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -26,9 +26,10 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km multivar training' \
     --workspace ai2/climate-titan \
-    --priority urgent \
+    --priority low \
     --preemptible \
     --cluster ai2/titan \
+    --cluster ai2/jupiter \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
