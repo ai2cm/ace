@@ -1,3 +1,5 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
-1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|ace-samudra-cm4|0dfk7wyg|best_ckpt|train|urgent|b200|4|500GiB|3||stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' max_epochs=25 seed=0
+1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC|rs0|ace-samudra-cm4|e1trm8ih|best_ckpt|train|urgent|b200|4|500GiB|3||stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' max_epochs=2 seed=0
+
+1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|ace-samudra-cm4|0dfk7wyg|best_ckpt|skip|urgent|b200|4|500GiB|3||stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' max_epochs=25 seed=0
