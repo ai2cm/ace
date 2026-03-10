@@ -500,7 +500,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        integral = (integrand * self.dz * self.mask).nansum(dim=-1)
+        integral = (integrand * self.dz).nansum(dim=-1)
         mask_0 = self.mask.select(dim=-1, index=0).expand(integral.shape)
         return integral.where(mask_0 > 0, float("nan"))
 
