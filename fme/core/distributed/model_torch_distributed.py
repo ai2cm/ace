@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any, TypeVar
 
 import torch
 import torch.distributed
@@ -36,6 +37,9 @@ from .non_distributed import DummyWrapper
 from .torch_distributed import _gather_irregular
 
 logger = logging.getLogger(__name__)
+
+
+T = TypeVar("T")
 
 
 class ModelTorchDistributed(DistributedBackend):
@@ -181,6 +185,27 @@ class ModelTorchDistributed(DistributedBackend):
         Slices the ``data_parallel_dim`` across data-parallel ranks and
         the last two dimensions across spatial (h, w) model-parallel ranks.
         """
+        if len(tensor_shape) < 2:
+            raise ValueError(
+                "expected tensor_shape with at least 2 dimensions for "
+                "spatial slicing, "
+                f"got shape {tensor_shape}"
+            )
+        if len(tensor_shape) == 2 and data_parallel_dim is not None:
+            raise ValueError(
+                "data_parallel_dim cannot be specified for 2D tensors, since the "
+                "spatial slicing would consume both dimensions; got shape "
+                f"{tensor_shape}"
+            )
+        if data_parallel_dim is not None and (
+            data_parallel_dim in (-1, -2) or data_parallel_dim >= len(tensor_shape) - 2
+        ):
+            raise ValueError(
+                "data_parallel_dim must be a non-negative integer less than "
+                "the last two dimensions (reserved for spatial slicing), "
+                f"got data_parallel_dim={data_parallel_dim} and shape "
+                f"{tensor_shape}"
+            )
         return_list = [slice(None, None) for _ in tensor_shape]
         if data_parallel_dim is not None:
             n_dp = self.total_data_parallel_ranks
@@ -234,36 +259,36 @@ class ModelTorchDistributed(DistributedBackend):
         tensor: torch.Tensor,
         gather_list: list[torch.Tensor] | None = None,
     ) -> list[torch.Tensor] | None:
-        # NOTE: gather is performed over the data-parallel group only, like reductions
-        # NOTE: dst must be a *global* rank that belongs to the data group.
-        # data_rank=0 corresponds to the first entry in the group's rank list.
-        root_global_rank = torch.distributed.get_process_group_ranks(self._data_group)[
-            0
-        ]
-        if gather_list is None and self._data_rank == 0:
+        # NOTE: gather is performed globally, unlike reductions
+        if gather_list is None and self.rank == 0:
             gather_list = [tensor] + [
-                torch.empty_like(tensor) for _ in range(self._data_size - 1)
+                torch.empty_like(tensor) for _ in range(self.total_ranks - 1)
             ]
-        torch.distributed.gather(
-            tensor,
-            gather_list,
-            dst=root_global_rank,
-            group=self._data_group,
+        torch.distributed.gather(tensor, gather_list)
+        return gather_list
+
+    def gather_object(self, obj: T) -> list[T] | None:
+        """Gather a picklable object globally."""
+        gather_list: list[Any] | None = (
+            [None for _ in range(self.total_ranks)] if self._rank == 0 else None
         )
+        torch.distributed.gather_object(obj, gather_list)
         return gather_list if self._rank == 0 else None
 
-    def gather_object(self, obj: object) -> list[object] | None:
-        """Gather a picklable object over the data-parallel group."""
-        root_global_rank = torch.distributed.get_process_group_ranks(self._data_group)[
-            0
-        ]
-        gather_list: list[object] | None = (
-            [None for _ in range(self._data_size)] if self._data_rank == 0 else None
+    def scatter_object(self, obj: T | None) -> T:
+        """Scatter a picklable object from the root process to all processes."""
+        if self._data_rank == 0:
+            if obj is None:
+                raise ValueError("Root process must provide an object to scatter")
+            object_list = [obj for _ in range(self.total_ranks)]
+        else:
+            object_list = None
+        output_list = [None]
+        torch.distributed.scatter_object_list(
+            scatter_object_output_list=output_list,
+            scatter_object_input_list=object_list,
         )
-        torch.distributed.gather_object(
-            obj, gather_list, dst=root_global_rank, group=self._data_group
-        )
-        return gather_list if self._rank == 0 else None
+        return output_list[0]  # type: ignore[return-value]
 
     # For now, let's just borrow the same gather_irregular implementation
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:

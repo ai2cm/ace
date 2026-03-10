@@ -34,29 +34,7 @@ jobs:
         run: |
           source .venv/bin/activate
           make test_cov
-          # matrix for parallel tests
-          # | backend | WS | H | W |
-          # | ------- | -- | - | - |
-          # | torch   |  2 | 1 | 1 |
-          # | torch   |  3 | 1 | 1 |
-          # | model   |  3 | 1 | 1 |
-          # | model   |  2 | 2 | 1 |
-          # | model   |  2 | 1 | 2 |
-          # | model   |  3 | 3 | 1 |
-          # | model   |  3 | 1 | 3 |
-          # | model   |  4 | 2 | 2 |
-          # | model   |  4 | 2 | 1 |
-          # | model   |  8 | 2 | 2 |
-          NPROC=2  FME_DISTRIBUTED_BACKEND=torch FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=1 make test_parallel
-          NPROC=3  FME_DISTRIBUTED_BACKEND=torch FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=1 make test_parallel
-          NPROC=3  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=1 make test_parallel
-          NPROC=2  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=1 make test_parallel
-          NPROC=2  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=2 make test_parallel
-          NPROC=3  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=3 FME_DISTRIBUTED_W=1 make test_parallel
-          NPROC=3  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=1 FME_DISTRIBUTED_W=3 make test_parallel
-          NPROC=4  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=2 make test_parallel
-          NPROC=4  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=1 make test_parallel
-          NPROC=8  FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=2 make test_parallel
+          make cpu_test_all_parallel
   cpu-very-fast-no-healpix:
     runs-on: ubuntu-latest
     steps:

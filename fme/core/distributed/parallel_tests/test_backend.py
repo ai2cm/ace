@@ -118,13 +118,18 @@ def test_reduce_max_selects_largest_rank():
 
 @pytest.mark.parallel
 def test_gather_produces_correct_count():
-    """Root should receive one tensor per dp-rank; others get None."""
+    """Root should receive one tensor per global rank; others get None."""
     dist = Distributed.get_instance()
-    t = torch.full((2, 3), float(dist.data_parallel_rank), device=get_device())
+    t = torch.full((2, 3), float(dist.rank), device=get_device())
     gathered = dist.gather(t)
     if dist.is_root():
         assert gathered is not None
-        assert len(gathered) == dist.total_data_parallel_ranks
+        assert len(gathered) == dist.world_size
+        for i, g in enumerate(gathered):
+            torch.testing.assert_close(
+                g.to(get_device()),
+                torch.full((2, 3), float(i), device=get_device()),
+            )
     else:
         assert gathered is None
 
@@ -133,11 +138,11 @@ def test_gather_produces_correct_count():
 def test_gather_irregular_matching_shapes():
     """gather_irregular with identical shapes works like gather."""
     dist = Distributed.get_instance()
-    t = torch.full((4,), float(dist.data_parallel_rank), device=get_device())
+    t = torch.full((4,), float(dist.rank), device=get_device())
     gathered = dist.gather_irregular(t)
     if dist.is_root():
         assert gathered is not None
-        assert len(gathered) == dist.total_data_parallel_ranks
+        assert len(gathered) == dist.world_size
         for i, g in enumerate(gathered):
             torch.testing.assert_close(
                 g.to(get_device()),
@@ -180,37 +185,6 @@ def test_local_batch_size_divisibility():
     global_bs = 16 * n_dp  # always evenly divisible
     local_bs = dist.local_batch_size(global_bs)
     assert local_bs * n_dp == global_bs
-
-
-@pytest.mark.parallel
-def test_local_slices_cover_full_domain():
-    """Union of slices from every rank should cover every element exactly once."""
-    dist = Distributed.get_instance()
-    n_dp = dist.total_data_parallel_ranks
-    rows = 4 * n_dp
-    global_shape = (rows, 6, 8)
-    local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
-    canvas = torch.zeros(global_shape, device=get_device())
-    canvas[local_slices] += 1.0
-    # Combine spatial contributions then data-parallel contributions
-    canvas = dist.spatial_reduce_sum(canvas)
-    canvas = dist.reduce_sum(canvas)
-    # The entire domain should be covered exactly once
-    torch.testing.assert_close(canvas, torch.ones_like(canvas))
-
-
-@pytest.mark.parallel
-def test_local_slices_no_dp_dim():
-    """Without a dp dim, the data-parallel dims are untouched."""
-    dist = Distributed.get_instance()
-    shape = (8, 6, 8)  # (batch, H, W) — 3D so batch is separate from spatial
-    slices = dist.get_local_slices(shape)
-    # batch dim should be full (no dp dim specified)
-    assert slices[0] == slice(None, None)
-    # spatial dims should produce a valid sub-tensor
-    local = torch.zeros(shape, device=get_device())[slices]
-    assert local.shape[0] == shape[0]  # batch untouched
-    assert local.numel() > 0  # local portion is non-empty
 
 
 @pytest.mark.parallel

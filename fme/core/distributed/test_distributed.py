@@ -82,6 +82,17 @@ def test_distributed_gather():
     mp.spawn(run_gather_test, args=(world_size,), nprocs=world_size, join=True)
 
 
+@pytest.mark.parallel
+def test_scatter_object():
+    dist = Distributed()
+    if dist.is_root():
+        obj = {"key": "value"}
+    else:
+        obj = None
+    scattered = dist.scatter_object(obj)
+    assert scattered == {"key": "value"}
+
+
 def test_non_distributed_gather():
     dist = Distributed()
     assert not dist.is_distributed()
