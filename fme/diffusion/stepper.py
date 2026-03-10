@@ -1083,7 +1083,7 @@ class DiffusionStepper(
             "normalizer": self.normalizer.get_state(),
             "img_shape": self._img_shape,
             "config": self._config.get_state(),
-            "gridded_operations": self._gridded_operations.to_state(),
+            "gridded_operations": self._gridded_operations.get_state(),
             "vertical_coordinate": self.vertical_coordinate.as_dict(),
             "encoded_timestep": encode_timestep(self.timestep),
             "loss_normalizer": self.loss_normalizer.get_state(),

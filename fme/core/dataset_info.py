@@ -216,9 +216,9 @@ class DatasetInfo:
             all_labels=self._all_labels,
         )
 
-    def to_state(self) -> dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         if self._gridded_operations is not None:
-            gridded_operations = self._gridded_operations.to_state()
+            gridded_operations = self._gridded_operations.get_state()
         else:
             gridded_operations = None
         if self._img_shape is not None:
@@ -228,7 +228,7 @@ class DatasetInfo:
         if self._horizontal_coordinates is None:
             horizontal_coordinates = None
         else:
-            horizontal_coordinates = self._horizontal_coordinates.to_state()
+            horizontal_coordinates = self._horizontal_coordinates.get_state()
         if self._vertical_coordinate is None:
             vertical_coordinate = None
         else:
@@ -236,7 +236,7 @@ class DatasetInfo:
         if self._mask_provider is None:
             mask_provider = None
         else:
-            mask_provider = self._mask_provider.to_state()
+            mask_provider = self._mask_provider.get_state()
         if self._timestep is None:
             timestep = None
         else:

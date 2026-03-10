@@ -28,7 +28,7 @@ class MaskProviderABC(abc.ABC):
     def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
 
     @abc.abstractmethod
-    def to_state(self) -> dict[str, Any]: ...
+    def get_state(self) -> dict[str, Any]: ...
 
 
 class _NullMaskProvider(MaskProviderABC):
@@ -47,7 +47,7 @@ class _NullMaskProvider(MaskProviderABC):
     def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
         return NullMasking()
 
-    def to_state(self) -> dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         return {"masks": {}}
 
 
@@ -175,7 +175,7 @@ class MaskProvider(MaskProviderABC):
             except AssertionError:
                 raise AssertionError(f"mask values differ for '{name}'")
 
-    def to_state(self) -> dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         return {"masks": self.masks}
 
     @classmethod
