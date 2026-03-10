@@ -33,6 +33,10 @@ from fme.ace.stepper.single_module import (
     TrainStepper,
     TrainStepperConfig,
 )
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLengthProbabilities,
+    TimeLengthSchedule,
+)
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
@@ -115,7 +119,7 @@ class ValidationConfig:
     """
 
     loader: DataLoaderConfig
-    n_forward_steps: int = 1
+    n_forward_steps: int | None = None
     aggregator: OneStepAggregatorConfig = dataclasses.field(
         default_factory=lambda: OneStepAggregatorConfig()
     )
@@ -130,6 +134,12 @@ class ValidationConfig:
                 "inference evaluator jobs. Ignoring..."
             )
         self.stepper_training.parameter_init = ParameterInitializationConfig()
+        if isinstance(self.stepper_training.train_n_forward_steps, TimeLengthSchedule):
+            raise ValueError(
+                "stepper_training.train_n_forward_steps may not be a "
+                "TimeLengthSchedule for validation within inference evaluator jobs. "
+                "Use TimeLengthProbabilities or an int instead."
+            )
         if (
             self.stepper_training.train_n_forward_steps is not None
             and self.n_forward_steps is not None
@@ -138,6 +148,23 @@ class ValidationConfig:
                 "stepper_training.train_n_forward_steps may not be given at the same "
                 "time as n_forward_steps at the top level"
             )
+
+    def get_n_forward_steps(self) -> int:
+        """Resolve the effective number of forward steps for validation.
+
+        Returns the top-level ``n_forward_steps`` if set, otherwise derives
+        the value from ``stepper_training.train_n_forward_steps``.  If neither
+        is configured, defaults to 1 for standard single-step validation.
+        """
+        train_n = self.stepper_training.train_n_forward_steps
+        if train_n is not None:
+            if isinstance(train_n, int):
+                return train_n
+            assert isinstance(train_n, TimeLengthProbabilities)  # already validated
+            return train_n.max_n_forward_steps
+        if self.n_forward_steps is not None:
+            return self.n_forward_steps
+        return 1
 
 
 @dataclasses.dataclass
@@ -355,7 +382,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         timer.stop()
         logging.info("Initializing validation data loader")
         data_requirements = stepper_config.get_evaluation_window_data_requirements(
-            n_forward_steps=config.validation.n_forward_steps
+            n_forward_steps=config.validation.get_n_forward_steps()
         )
         valid_data = get_gridded_data(
             config.validation.loader,
