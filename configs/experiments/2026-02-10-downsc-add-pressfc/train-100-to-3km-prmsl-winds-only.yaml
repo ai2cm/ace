@@ -1,4 +1,4 @@
-#resume_results_dir: /previous_results
+resume_results_dir: /previous_results
 static_inputs:
   HGTsfc:  /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
@@ -6,7 +6,7 @@ static_inputs:
 #  weights:
 #  - PRATEsfc: 0.0
 #max_loss_weight: 10.0
-loss_weight_exponent: 0.5
+loss_weight_exponent: 0.75
 model:
   use_amp_bf16: true
   out_names:
@@ -146,7 +146,7 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 150
+max_epochs: 900
 validate_interval: 15
 experiment_dir: /results #/climate-default/home/annak/scratch/2026-02-10-downsc-add-pressfc/3km_bf16
 save_checkpoints: false
