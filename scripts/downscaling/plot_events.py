@@ -1,3 +1,21 @@
+#!/usr/bin/env python
+"""
+Fetch netCDF event files from a beaker dataset and generate map and histogram
+plots for each variable (coarse, target, and predicted ensemble samples).
+
+This works with saved event outputs from `fme.downscaling.evaluator` from a
+beaker experiment. It downloads the experiment files to a temporary directory,
+parses filenames for *YYYYMMDD*.nc event outputs, and optionally merges in
+coarse data for map comparison.
+
+Usage:
+    python plot_events.py <beaker_dataset_id> [--output-dir <path>]
+        [--coarse-data <path>] [--variables VAR1 VAR2 ...]
+
+Requires:
+    beaker CLI to be installed and authenticated (https://github.com/allenai/beaker).
+"""
+
 import argparse
 import math
 import re
