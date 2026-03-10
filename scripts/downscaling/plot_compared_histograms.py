@@ -96,6 +96,9 @@ def plot_comparison_histogram(
     bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
     target_counts, _ = np.histogram(target_data.values.ravel(), bins=bin_edges)
+    ylim_min = 0.1
+    ylim_max = 10 ** (np.log10(max(np.max(target_counts), 1)) + 1)
+
     ax.step(
         bin_centers,
         target_counts,
@@ -105,19 +108,55 @@ def plot_comparison_histogram(
         label="Target",
     )
 
+    target_lower = np.percentile(target_data.values, 0.01)
+    target_upper = np.percentile(target_data.values, 99.99)
+    ax.axvline(
+        target_lower,
+        color="black",
+        linestyle="dashed",
+        linewidth=1,
+        label="Target 0.01%",
+    )
+    ax.axvline(
+        target_upper,
+        color="black",
+        linestyle="dashed",
+        linewidth=1,
+        label="Target 99.99%",
+    )
+
     for i, (pred_data, label) in enumerate(zip(predicted_per_dataset, labels)):
         if pred_data.ndim != 3:
             raise ValueError(
                 f"Expected predicted data to be 3D (samples, lat, lon), "
                 f"got shape {pred_data.shape} for dataset '{label}'"
             )
+        color = COLORS[i % len(COLORS)]
+
+        lower_bounds = np.percentile(pred_data, 0.01, axis=(1, 2))
+        upper_bounds = np.percentile(pred_data, 99.99, axis=(1, 2))
+        ax.fill_betweenx(
+            [ylim_min, ylim_max],
+            np.percentile(upper_bounds, 2.5),
+            np.percentile(upper_bounds, 97.5),
+            color=color,
+            alpha=0.15,
+            label=f"{label} tail 95% CI",
+        )
+        ax.fill_betweenx(
+            [ylim_min, ylim_max],
+            np.percentile(lower_bounds, 2.5),
+            np.percentile(lower_bounds, 97.5),
+            color=color,
+            alpha=0.15,
+        )
+
         sample_counts = []
         for s in range(pred_data.shape[0]):
             counts, _ = np.histogram(pred_data[s].ravel(), bins=bin_edges)
             sample_counts.append(counts)
         avg_counts = np.mean(sample_counts, axis=0)
 
-        color = COLORS[i % len(COLORS)]
         ax.step(
             bin_centers,
             avg_counts,
@@ -131,8 +170,7 @@ def plot_comparison_histogram(
     ax.set_xlabel(var_label)
     ax.set_ylabel("Count")
     ax.set_yscale("log")
-    ylim_max = 10 ** (np.log10(max(np.max(target_counts), 1)) + 1)
-    ax.set_ylim(0.1, ylim_max)
+    ax.set_ylim(ylim_min, ylim_max)
     ax.grid(which="major", linestyle="--", linewidth=0.5, alpha=0.5)
     ax.set_title(f"{event_name} — {var_label}")
     ax.legend()
