@@ -10,9 +10,9 @@ from xarray.coders import CFDatetimeCoder
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
+    _get_encoded_valid_time,
     add_data,
     find_boundary,
-    get_days_since_reference,
 )
 from fme.core.dataset.data_typing import VariableMetadata
 
@@ -136,47 +136,44 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
 
 @pytest.mark.parametrize("num_years", [2, 500])
 @pytest.mark.parametrize("calendar", ["proleptic_gregorian", "noleap"])
-def test_get_days_since_reference(num_years, calendar):
+def test__get_encoded_valid_time(num_years, calendar):
     first_year = 2020
     final_year = first_year + num_years - 1
     years = np.array([i for i in range(first_year, final_year + 1)])
     months = np.zeros((num_years,), dtype=int)
     # For last year set month to 1
     months[-1] = 1
-    if calendar == "proleptic_gregorian":
-        reference_date = cftime.DatetimeProlepticGregorian(2020, 1, 1)
-    else:
-        reference_date = cftime.DatetimeNoLeap(2020, 1, 1)
+    units = "days since 2020-01-01"
     n_months = 3
-    days = get_days_since_reference(years, months, reference_date, n_months, calendar)
+    days = _get_encoded_valid_time(years, months, n_months, units, calendar)
     assert days.shape == (num_years, 3)
     # 2020 is a leap year in proleptic_gregorian
     if calendar == "proleptic_gregorian":
-        assert days[0, 0] == 0
-        assert days[0, 1] == 31
-        assert days[0, 2] == 31 + 29
+        assert days[0, 0] == 0 + 14
+        assert days[0, 1] == 31 + 14
+        assert days[0, 2] == 31 + 29 + 14
         if num_years == 2:
-            assert days[1, 0] == 366 + 31
-            assert days[1, 1] == 366 + 31 + 28
-            assert days[1, 2] == 366 + 31 + 28 + 31
+            assert days[1, 0] == 366 + 31 + 14
+            assert days[1, 1] == 366 + 31 + 28 + 14
+            assert days[1, 2] == 366 + 31 + 28 + 31 + 14
         if num_years == 500:
             # 121 is number of leap days
-            assert days[499, 0] == 182135 + 121 + 31
-            assert days[499, 1] == 182135 + 121 + 31 + 28
+            assert days[499, 0] == 182135 + 121 + 31 + 14
+            assert days[499, 1] == 182135 + 121 + 31 + 28 + 14
     if calendar == "noleap":
-        assert days[0, 0] == 0
-        assert days[0, 1] == 31
-        assert days[0, 2] == 31 + 28
+        assert days[0, 0] == 0 + 14
+        assert days[0, 1] == 31 + 14
+        assert days[0, 2] == 31 + 28 + 14
         if num_years == 2:
-            assert days[1, 0] == 365 + 31
-            assert days[1, 1] == 365 + 31 + 28
-            assert days[1, 2] == 365 + 31 + 28 + 31
+            assert days[1, 0] == 365 + 31 + 14
+            assert days[1, 1] == 365 + 31 + 28 + 14
+            assert days[1, 2] == 365 + 31 + 28 + 31 + 14
         if num_years == 500:
-            assert days[499, 0] == 182135 + 31
-            assert days[499, 1] == 182135 + 31 + 28
+            assert days[499, 0] == 182135 + 31 + 14
+            assert days[499, 1] == 182135 + 31 + 28 + 14
 
 
-def test_days_since_reference_with_month_offset():
+def test__get_encoded_valid_time_with_month_offset():
     calendar = "noleap"
     month_offset = 2
     offset_n_months = 3
@@ -184,17 +181,11 @@ def test_days_since_reference_with_month_offset():
 
     years = np.array([2020, 2021])
     months = np.zeros((2,), dtype=int)
-    reference_date = cftime.DatetimeNoLeap(2020, 1, 1)
-
-    full = get_days_since_reference(years, months, reference_date, n_months, calendar)
+    units = "days since 2020-01-01"
+    full = _get_encoded_valid_time(years, months, n_months, units, calendar)
     expected = full[:, month_offset:]
-    result = get_days_since_reference(
-        years,
-        months,
-        reference_date,
-        offset_n_months,
-        calendar,
-        month_offset=month_offset,
+    result = _get_encoded_valid_time(
+        years, months, offset_n_months, units, calendar, month_offset=month_offset
     )
     np.testing.assert_equal(result, expected)
 

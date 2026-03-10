@@ -27,7 +27,6 @@ ENSEMBLE_DIM = "sample"
 INIT_TIME = "init_time"
 VALID_TIME = "valid_time"
 COUNTS = "counts"
-VALID_TIME_ENCODING_UNITS = DATETIME_ENCODING_UNITS.replace("microseconds", "days")
 
 
 class PairedMonthlyDataWriter:
@@ -146,7 +145,7 @@ class MonthlyDataWriter:
                 LEAD_TIME_DIM,
             ),
         )
-        self.dataset.variables[VALID_TIME].units = VALID_TIME_ENCODING_UNITS
+        self.dataset.variables[VALID_TIME].units = DATETIME_ENCODING_UNITS
         self.dataset.variables[VALID_TIME].calendar = calendar
         dataset_metadata = copy.copy(dataset_metadata)
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
@@ -202,18 +201,14 @@ class MonthlyDataWriter:
         n_months = new_size - old_size
         if n_months > 0:
             valid_time = self.dataset.variables[VALID_TIME]
-            calendar = valid_time.calendar
-            reference_date = cftime.datetime(1970, 1, 1, calendar=calendar)
-            days_since_reference = get_days_since_reference(
+            valid_time[:, old_size:new_size] = _get_encoded_valid_time(
                 years=self._init_years,
                 months=self._init_months,
                 n_months=n_months,
-                reference_date=reference_date,
-                calendar=calendar,
+                units=valid_time.units,
+                calendar=valid_time.calendar,
                 month_offset=old_size,
             )
-            # use the 15th of each month, which is 14 days into the month
-            valid_time[:, old_size:new_size] = days_since_reference + 14
 
     def _extend_variable(
         self,
@@ -392,43 +387,48 @@ def find_boundary(month_array, start_month) -> int:
     return np.searchsorted(month_array, start_month, side="right")
 
 
-def get_days_since_reference(
+def _get_encoded_valid_time(
     years: np.ndarray,
     months: np.ndarray,
-    reference_date: cftime.datetime,
     n_months: int,
+    units: str,
     calendar: str,
     month_offset: int = 0,
-) -> np.ndarray:
+) -> npt.NDArray[np.int64]:
     """
-    Get the days since a reference date for each month.
+    Compute the encoded valid time for a sequence of n_months, starting at the
+    year and month for each sample provided in the input arrays, potentially
+    offset by a month_offset number of months.
+
+    During monthly coarsening, the valid time is assumed to be the 15th of each
+    month. Any encoding units can be used, but typically we will use units of
+    "microseconds since 1970-01-01".
 
     Args:
         years: Array of years, of shape [n_samples].
         months: Array of months, of shape [n_samples], zero-indexed.
-        reference_date: Reference date for the calendar.
         n_months: Number of months to compute starting at each sample (year, month).
+        units: Units to use for encoding the time.
         calendar: Calendar to use.
-        month_offset: Optional offset to enable computing days since the reference for
+        month_offset: Optional offset to enable computing the valid time for
             a range of elapsed months that does not start at zero (default 0).
+
+    Returns:
+        Encoded valid time for each month, of shape [n_samples, n_months].
     """
     months_elapsed = np.arange(month_offset, month_offset + n_months)
     calendar_month = (months[:, None] + months_elapsed[None, :]) % 12
     calendar_year = years[:, None] + (months[:, None] + months_elapsed[None, :]) // 12
-    days_since_reference = np.zeros_like(calendar_month, dtype=np.int64)
+    valid_time = np.empty_like(calendar_month, dtype=object)
     for i in range(calendar_month.shape[0]):
-        dates_sample = xr.date_range(
-            cftime.datetime(
-                calendar_year[i, 0], calendar_month[i, 0] + 1, 1, calendar=calendar
-            ),
-            cftime.datetime(
-                calendar_year[i, -1], calendar_month[i, -1] + 1, 1, calendar=calendar
-            ),
-            freq="MS",
-            calendar=calendar,
-            use_cftime=True,
+        start_year, end_year = calendar_year[i, 0], calendar_year[i, -1]
+        start_month, end_month = calendar_month[i, 0] + 1, calendar_month[i, -1] + 1
+        start_date = f"{start_year:04d}-{start_month:02d}-01"
+        end_date = f"{end_year:04d}-{end_month:02d}-01"
+        valid_time_sample = xr.date_range(
+            start_date, end_date, freq="MS", calendar=calendar, use_cftime=True
         )
-        days_since_reference[i, :] = (
-            dates_sample.values - reference_date
-        ) // datetime.timedelta(days=1)
-    return days_since_reference
+        valid_time[i, :] = valid_time_sample.to_numpy()
+    # use the 15th of each month, which is 14 days into the month
+    valid_time = valid_time + datetime.timedelta(days=14)
+    return cftime.date2num(valid_time, units=units, calendar=calendar)
