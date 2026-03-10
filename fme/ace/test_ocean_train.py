@@ -331,8 +331,6 @@ validation:
   aggregator:
     log_snapshots: false
     log_mean_maps: false
-  loss:
-    type: "MSE"
 """
 
 
