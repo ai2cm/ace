@@ -38,7 +38,11 @@ from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import Stepper, TrainOutput
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLengthProbabilities,
+    TimeLengthProbability,
+)
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import (
@@ -1326,7 +1330,27 @@ def test_evaluator_with_non_local_experiment_dir(
     fs.rm(experiment_dir, recursive=True)
 
 
-def test_inference_with_validation(tmp_path: pathlib.Path):
+@pytest.mark.parametrize(
+    "validation_config_kwargs",
+    [
+        pytest.param(dict(n_forward_steps=1), id="n_forward_steps"),
+        pytest.param(
+            dict(stepper_training=TrainStepperConfig(train_n_forward_steps=1)),
+            id="stepper_training_int",
+        ),
+        pytest.param(
+            dict(
+                stepper_training=TrainStepperConfig(
+                    train_n_forward_steps=TimeLengthProbabilities(
+                        outcomes=[TimeLengthProbability(steps=1, probability=1.0)]
+                    )
+                )
+            ),
+            id="stepper_training_probabilities",
+        ),
+    ],
+)
+def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwargs):
     """Test that validation runs before inference and produces val/ metrics."""
     in_names = ["var"]
     out_names = ["var"]
@@ -1365,7 +1389,7 @@ def test_inference_with_validation(tmp_path: pathlib.Path):
             dataset=XarrayDataConfig(str(data.data_path)),
             batch_size=1,
         ),
-        n_forward_steps=1,
+        **validation_config_kwargs,
     )
 
     config = InferenceEvaluatorConfig(
