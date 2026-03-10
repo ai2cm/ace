@@ -30,6 +30,7 @@ from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.optimization import Optimization, OptimizationConfig, SchedulerConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
@@ -467,3 +468,149 @@ def test_step_regression(
     output = dist.gather_spatial(output, img_shape)
 
     cache_step_output(output, DATA_DIR / f"{case_name}_output.pt")
+
+def _run_step_optimization_backward(
+    img_shape: tuple[int, int],
+    n_samples: int,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """
+    Run a single forward + backward through a Step using Optimization,
+    and return:
+      - scalar loss on this rank
+      - gradients for all parameters (CPU tensors)
+    """
+    device = fme.get_device()
+    dist = Distributed.get_instance()
+
+    selector = get_single_module_noise_conditioned_selector(None)
+    step = get_step(selector, img_shape)
+
+    modules = nn.ModuleList(step.modules)
+    opt_config = OptimizationConfig(
+        optimizer_type="Adam",
+        lr=1e-3,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+    )
+    optimization = opt_config.build(modules, max_epochs=1)
+    optimization.set_mode(modules)
+
+    # Global inputs; Distributed backend decides what scatter_spatial does
+    input_data: TensorDict = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_input_data: TensorDict = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+
+    # Use the same scatter pattern as the step tests; in serial this is a no-op
+    input_data = dist.scatter_spatial(input_data, img_shape)
+    next_input_data = dist.scatter_spatial(next_input_data, img_shape)
+
+    # Forward
+    out = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_input_data,
+            labels=None,
+        ),
+        wrapper=lambda x: x,
+    )
+
+    # Use the real training loss from the step output
+    if isinstance(out, dict) and "loss" in out:
+        loss = out["loss"]
+    else:
+        raise RuntimeError(
+            "Step output does not contain 'loss'; "
+            "wire this test to the real training loss output."
+        )
+
+    # Route loss through Optimization, but only run backward (no step/zero yet)
+    optimization.accumulate_loss(loss)
+    total_loss = optimization.get_accumulated_loss()
+    optimization._backward(total_loss)
+
+    # Collect parameter grads
+    grads: dict[str, torch.Tensor] = {}
+    for name, p in step.named_parameters():
+        if p.grad is not None:
+            grads[name] = p.grad.detach().cpu().clone()
+
+    return total_loss.detach().cpu(), grads
+
+
+@pytest.mark.parallel
+def test_step_optimization_backward_matches_baseline():
+    """
+    Regression test for Step+Optimization backward under spatial parallelism.
+
+    Uses the same forward/Optimization path in both serial and spatial
+    backends; serial run is used to create the baseline. Spatial backends
+    must reproduce the baseline loss and parameter gradients element-wise.
+    """
+    DATA_DIR = pathlib.Path(__file__).parent / "testdata"
+    BASELINE_FILE = DATA_DIR / "backward_with_opt_baseline.pt"
+
+    dist = Distributed.get_instance()
+    torch.manual_seed(0)
+
+    img_shape = (20, 40)
+    n_samples = 2
+
+    loss, grads = _run_step_optimization_backward(img_shape, n_samples)
+
+    # Only root rank writes/compares baseline
+    if not dist.is_root():
+        return
+
+    if not BASELINE_FILE.exists():
+        BASELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "img_shape": img_shape,
+                "n_samples": n_samples,
+                "loss": loss,
+                "grads": grads,
+            },
+            BASELINE_FILE,
+        )
+        raise AssertionError(
+            f"Baseline created at {BASELINE_FILE}. "
+            "Re-run the test to perform regression check."
+        )
+
+    baseline = torch.load(BASELINE_FILE, map_location="cpu")
+    assert tuple(baseline["img_shape"]) == tuple(img_shape)
+    assert baseline["n_samples"] == n_samples
+
+    baseline_loss = baseline["loss"]
+    baseline_grads: dict[str, torch.Tensor] = baseline["grads"]
+
+    # 1) Loss finite and close to baseline.
+    assert torch.isfinite(loss), "Loss is not finite on this rank"
+
+    actual_loss = loss.item()
+    expected_loss = baseline_loss.item()
+    rel_loss = abs(actual_loss - expected_loss) / max(abs(expected_loss), 1e-12)
+    assert rel_loss < 1e-6, (
+        f"Loss deviates from baseline: "
+        f"actual={actual_loss:.8e}, expected={expected_loss:.8e}, "
+        f"rel_diff={rel_loss:.3e}"
+    )
+
+    # 2) Parameter gradients match baseline element-wise.
+    # Require same parameter set as baseline
+    assert set(grads.keys()) == set(
+        baseline_grads.keys()
+    ), "Parameter set changed since baseline generation"
+
+    for name in sorted(grads.keys()):
+        g = grads[name]
+        g_ref = baseline_grads[name]
+        assert g.shape == g_ref.shape, f"Shape mismatch for grad '{name}'"
+        diff = (g - g_ref).abs()
+        max_abs = diff.max().item()
+        max_rel = (diff / g_ref.abs().clamp_min(1e-12)).max().item()
+        assert torch.allclose(g, g_ref, rtol=1e-6, atol=1e-7), (
+            f"Gradient for '{name}' deviates from baseline: "
+            f"max_abs={max_abs:.3e}, max_rel={max_rel:.3e}"
+        )

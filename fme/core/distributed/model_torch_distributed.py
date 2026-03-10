@@ -23,7 +23,7 @@ from typing import Any, TypeVar
 
 import torch
 import torch.distributed
-import torch.distributed.nn.functional as dist_nn_f
+import torch.distributed as pt_dist
 import torch.nn as nn
 import torch_harmonics.distributed as thd
 from torch.nn import SyncBatchNorm
@@ -41,6 +41,21 @@ logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T")
+
+
+class SpatialReplicatedSum(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, group):
+        ctx.group = group
+        y = x.clone()
+        pt_dist.all_reduce(y, op=pt_dist.ReduceOp.SUM, group=group)
+        return y
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        # Important: do NOT all-reduce again here.
+        # The forward result is a replicated view of one logical global value.
+        return grad_output, None
 
 
 class ModelTorchDistributed(DistributedBackend):
@@ -332,7 +347,7 @@ class ModelTorchDistributed(DistributedBackend):
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         if self._h_size > 1 or self._w_size > 1:
-            return dist_nn_f.all_reduce(tensor, group=self._spatial_group)
+            return SpatialReplicatedSum.apply(tensor, self._spatial_group)
         return tensor
 
     def weighted_mean(
@@ -342,6 +357,7 @@ class ModelTorchDistributed(DistributedBackend):
         dim: tuple[int, ...],
         keepdim: bool = False,
     ) -> torch.Tensor:
+
         from fme.core.metrics import weighted_sum
 
         local_weighted_sum = weighted_sum(data, weights, dim=dim, keepdim=keepdim)

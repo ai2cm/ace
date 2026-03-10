@@ -1,140 +1,135 @@
+import pathlib
+
 import numpy as np
 import pytest
 import torch
-from torch import nn
 
 import fme
 from fme.core.distributed.distributed import Distributed
-from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.optimization import OptimizationConfig
 from fme.core.typing_ import TensorDict
 
-
-class TinyConvNet(nn.Module):
-    """
-    Very small conv net that operates on [batch, channels, nlat, nlon].
-    This is just to ensure gradients propagate through a nontrivial model.
-    """
-
-    def __init__(self, n_channels: int = 2):
-        super().__init__()
-        self.conv1 = nn.Conv2d(n_channels, 4, kernel_size=3, padding=1)
-        self.act = nn.GELU()
-        self.conv2 = nn.Conv2d(4, n_channels, kernel_size=3, padding=1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.conv2(self.act(self.conv1(x)))
+DATA_DIR = pathlib.Path(__file__).parent / "testdata"
+BASELINE_FILE = DATA_DIR / "backward_step_baseline.pt"
 
 
-def _build_latlon_ops(img_shape: tuple[int, int]) -> LatLonOperations:
-    """
-    Build LatLonOperations with simple area weights.
-    In spatial-parallel mode, this will slice per-rank tiles internally.
-    """
-    nlat, nlon = img_shape
-    # Use cos(lat) weights (approx) just to be realistic; could also use ones.
-    lat = torch.linspace(-np.pi / 2, np.pi / 2, nlat, device="cpu")
-    area_weights = torch.cos(lat).clamp_min(1e-3).unsqueeze(-1).expand(nlat, nlon)
-    return LatLonOperations(area_weights=area_weights)
-
-
-def _build_model_and_optimizer(
+def _run_forward_backward(
     img_shape: tuple[int, int],
-) -> tuple[nn.Module, torch.optim.Optimizer, LatLonOperations]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Build a DDP-wrapped TinyConvNet under ModelTorchDistributed and
-    a simple optimizer. Also returns LatLonOperations for computing a global loss.
+    Run a single forward + backward step and return:
+      - loss on this rank
+      - global gradient
     """
     dist = Distributed.get_instance()
-    assert isinstance(dist._distributed, ModelTorchDistributed)
 
-    model = TinyConvNet(n_channels=2).to(fme.get_device())
-    # Wrap with DDP over the data group only; spatial model parallelism is
-    # handled by the model/layers and the backend.
-    wrapped_model = dist._distributed.wrap_module(model)
+    batch_size = 4
+    n_channels = 2
+    nlat, nlon = img_shape
 
-    # Simple Adam optimizer via OptimizationConfig, to go through the same codepath
-    # as real training.
-    opt_config = OptimizationConfig(
-        optimizer_type="Adam",
-        lr=1e-3,
-        enable_automatic_mixed_precision=False,
+    # Build 2D weights with correct spatial shape
+    lat = torch.linspace(-np.pi / 2, np.pi / 2, nlat, device=fme.get_device())
+    area_weights_lat = torch.cos(lat).clamp_min(1e-3)  # (nlat,)
+    area_weights_global = area_weights_lat.unsqueeze(-1).repeat(1, nlon)  # (nlat, nlon)
+
+    global_ops = LatLonOperations(area_weights=area_weights_global)
+
+    # Global tensors
+    torch.manual_seed(0)
+    x_global = torch.randn(
+        batch_size, n_channels, nlat, nlon, device=fme.get_device(), requires_grad=True
     )
-    optimization = opt_config.build(
-        modules=torch.nn.ModuleList([wrapped_model]),
-        max_epochs=1,
-    )
+    y_global = torch.randn_like(x_global)
 
-    gridded_ops = _build_latlon_ops(img_shape)
-    return wrapped_model, optimization, gridded_ops
+    global_inputs: TensorDict = {
+        "x": x_global,
+        "y": y_global,
+    }
+    local_inputs = dist.scatter_spatial(global_inputs, img_shape=(nlat, nlon))
+
+    x_local = local_inputs["x"]
+    y_local = local_inputs["y"]
+    x_local.retain_grad()
+
+    sht = global_ops.get_real_sht().to(fme.get_device())
+    isht = global_ops.get_real_isht().to(fme.get_device())
+    # Forward: x -> sht -> isht -> y_pred
+    y_hat_local = sht(x_local)
+    y_pred_local = isht(y_hat_local)
+
+    mse = (y_pred_local - y_local) ** 2
+    # Global, area-weighted MSE over spatial dims via LatLonOperations
+    mse_spatial = global_ops.area_weighted_mean(mse)
+    loss = mse_spatial.mean()
+
+    loss.backward()
+    # Gather grad_x back to global grid
+    grad_local = x_local.grad.detach()
+    grad_global_dict = dist.gather_spatial({"x": grad_local}, img_shape=img_shape)
+    grad_x_global = grad_global_dict["x"]
+
+    return loss.detach().cpu(), grad_x_global.cpu()
 
 
 @pytest.mark.parametrize("img_shape", [(16, 32)])
 @pytest.mark.parallel
 def test_spatial_parallel_backward_step(img_shape):
     """
-    Test: run forward + backward + optimizer step under
+    Test: run forward + backward under
     ModelTorchDistributed with spatial parallelism.
 
     Asserts:
-      - Loss is finite.
-      - All data-parallel ranks see the same loss.
-      - Parameter gradients are finite and data-parallel-consistent.
+      - Loss is same with sp decomp compared with NonDistributed baseline
+      - Gradient is element-wise same with sp decomp compared with NonDistributed baseline
     """
     dist = Distributed.get_instance()
-    if not isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.skip("ModelTorchDistributed backend is required for this test")
-
     torch.manual_seed(0)
 
-    model, optimization, gridded_ops = _build_model_and_optimizer(img_shape)
+    # Run forwards/backwards
+    loss, grad = _run_forward_backward(img_shape)
 
-    batch_size = 4
-    n_channels = 2
-    nlat, nlon = img_shape
+    # Only root does I/O
+    if not dist.is_root():
+        return
 
-    # Global tensors
-    x_global = torch.randn(batch_size, n_channels, nlat, nlon, device=fme.get_device())
-    y_global = torch.randn_like(x_global)
+    if not BASELINE_FILE.exists():
+        # Baseline generation mode: expect non-distributed backend here.
+        # Save loss and grads for later regression.
+        BASELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "img_shape": img_shape,
+                "loss": loss,
+                "grad": grad,
+            },
+            BASELINE_FILE,
+        )
+        return
 
-    global_inputs: TensorDict = {"x": x_global, "y": y_global}
-    local_inputs = dist.scatter_spatial(global_inputs, img_shape=(nlat, nlon))
+    # Regression mode: compare against existing baseline.
+    baseline = torch.load(BASELINE_FILE, map_location="cpu")
+    assert tuple(baseline["img_shape"]) == tuple(img_shape)
 
-    x_local = local_inputs["x"]
-    y_local = local_inputs["y"]
+    baseline_loss = baseline["loss"].item()
+    baseline_grad = baseline["grad"]
 
-    # Forward pass + loss
-    model.train()
-    optimization.optimizer.zero_grad()
+    # 1) Loss finite and close to baseline.
+    assert torch.isfinite(loss), "Loss is not finite on this rank"
 
-    with optimization.autocast():
-        y_pred_local = model(x_local)
-
-        # Compute a global, area-weighted MSE over [batch, channels, lat, lon],
-        mse = (y_pred_local - y_local) ** 2
-        mse_spatial = gridded_ops.area_weighted_mean(mse)
-        loss = mse_spatial.mean()
-
-    # Backward + optimizer step
-    optimization.accumulate_loss(loss)
-    loss_before_step = optimization.get_accumulated_loss().detach().clone()
-    optimization.step_weights()
-
-    # 1) Loss finite and the same on all data-parallel ranks.
-    assert torch.isfinite(loss_before_step), "Loss is not finite on this rank"
-
-    # Reduce mean loss across data group and broadcast to root for inspection.
-    # ModelTorchDistributed.reduce_mean reduces over data group only.
-    loss_reduced = dist.reduce_mean(loss_before_step.detach().clone())
-    if dist.is_root():
-        assert torch.isfinite(loss_reduced), "Reduced loss is not finite"
-
-    # 2) Gradients finite and consistent across data-parallel ranks.
-    # For a DDP-wrapped model, parameters are identical across data group,
-    # so their gradients should also be identical after backward.
-    for param in model.parameters():
-        if not param.requires_grad:
-            continue
-        if param.grad is not None:
-            assert torch.isfinite(param.grad).all(), "Non-finite gradient detected"
+    # Compare loss (scalar) with a small relative tolerance
+    actual_loss = loss.item()
+    rel_loss = abs(actual_loss - baseline_loss) / max(abs(baseline_loss), 1e-12)
+    assert rel_loss < 1e-6, (
+        f"Loss deviates from baseline: "
+        f"actual={actual_loss:.8f}, expected={baseline_loss:.8f}, rel_diff={rel_loss:.3e}"
+    )
+    max_rel = (
+        ((grad - baseline_grad).abs() / baseline_grad.abs().clamp_min(1e-12))
+        .max()
+        .item()
+    )
+    assert torch.allclose(grad, baseline_grad, rtol=1e-6, atol=1e-7), (
+        f"grad_x differs from baseline: "
+        f"max_abs={(grad - baseline_grad).abs().max().item():.3e}, "
+        f"max_rel={max_rel:.3e}"
+    )
