@@ -1378,7 +1378,10 @@ def test_inference_with_validation(tmp_path: pathlib.Path):
             log_to_wandb=True,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(log_video=False),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_video=False,
+            log_step_means=[],
+        ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
