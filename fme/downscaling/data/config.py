@@ -202,8 +202,8 @@ class DataLoaderConfig:
         if self.topography is not None:
             raise ValueError(
                 "The `topography` field on DataLoaderConfig is deprecated and will be "
-                "removed in a future release. Pass static_inputs via the trainer "
-                "configuration's `static_inputs` field instead."
+                "removed in a future release. Pass static_inputs via build's "
+                "`static_inputs` argument instead."
             )
 
     @property

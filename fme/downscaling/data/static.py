@@ -88,6 +88,14 @@ class StaticInput:
 
 
 def get_normalized_static_input(path: str, field_name: str):
+    """
+    Load a static input field from a given file path and field name and
+    normalize it.
+
+    Only supports 2D lat/lon static inputs. If the input has a time dimension, it is
+    squeezed by taking the first time step. The lat/lon coordinates are
+    assumed to be the last two dimensions of the loaded dataset dimensions.
+    """
     if path.endswith(".zarr"):
         static_input = xr.open_zarr(path, mask_and_scale=False)[field_name]
     else:
@@ -185,6 +193,11 @@ class StaticInputs:
 
 
 def load_static_inputs(static_inputs_config: dict[str, str]) -> StaticInputs | None:
+    """
+    Load normalized static inputs from a mapping of field names to file paths.
+    """
+    # TODO: consolidate/simplify empty StaticInputs vs. None handling in
+    #       downscaling code
     if not static_inputs_config:
         return None
     return StaticInputs(
