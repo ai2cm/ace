@@ -79,6 +79,7 @@ while read TRAIN_EXPER; do
     CLUSTER=$(echo "$TRAIN_EXPER" | cut -d"|" -f11)
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f12)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f13)
+    SHARED_MEM=$(echo "$TRAIN_EXPER" | cut -d"|" -f14)
 
     # Check if STATUS starts with "run_" (but not "run_inf_", which is for inference)
     if [[ ! "$STATUS" =~ ^run_ ]] || [[ "$STATUS" =~ ^run_inf_ ]]; then
@@ -147,10 +148,13 @@ while read TRAIN_EXPER; do
         )
     fi
 
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM="20GiB"
+    fi
+
     # Set dummy variables for print functions
     GROUP="$JOB_GROUP"
     N_GPUS=1
-    SHARED_MEM="20GiB"
     FME_MODULE="$FME_MODULE_EVALUATOR"
 
     build_cluster_args "$CLUSTER" "$WORKSPACE"
@@ -209,7 +213,7 @@ while read TRAIN_EXPER; do
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${CHECKPOINT_DATASET_ARGS[@]}" \
             --gpus 1 \
-            --shared-memory 20GiB \
+            --shared-memory $SHARED_MEM \
             --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
