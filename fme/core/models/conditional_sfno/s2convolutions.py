@@ -20,9 +20,9 @@ import torch
 import torch.nn as nn
 
 import torch_harmonics as th
-import torch_harmonics.distributed as thd
 
 from fme.core.benchmark.timer import NullTimer, Timer
+from fme.core.distributed.distributed import Distributed
 
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
@@ -169,27 +169,20 @@ class SpectralConvS2(nn.Module):
         assert self.inverse_transform.lmax == self.modes_lat
         assert self.inverse_transform.mmax == self.modes_lon
 
-        if isinstance(self.inverse_transform, thd.DistributedInverseRealSHT):
-            self.modes_lat_local = self.inverse_transform.lmax_local
-            self.modes_lon_local = self.inverse_transform.mmax_local
-            self.lpad_local = self.inverse_transform.lpad_local
-            self.mpad_local = self.inverse_transform.mpad_local
-        else:
-            self.modes_lat_local = self.modes_lat
-            self.modes_lon_local = self.modes_lon
-            self.lpad = 0
-            self.mpad = 0
+        dist = Distributed.get_instance()
+        l_slice, _ = dist.get_local_slices((self.modes_lat, self.modes_lon))
+        l_start, l_stop, _ = l_slice.indices(self.modes_lat)
+        self.modes_lat_local = l_stop - l_start
+        self._l_slice = l_slice
 
         if scale == "auto":
-            scale = math.sqrt(1 / (in_channels)) * torch.ones(
-                self.modes_lat_local, 1, 1, 2
-            )
+            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
             # seemingly the first weight is not really complex, so we need to account for that
             scale[0, :] *= math.sqrt(2.0)
 
         weight_shape = [
             num_groups,
-            self.modes_lat_local,
+            self.modes_lat,
             out_channels // num_groups,
             in_channels // num_groups,
         ]
@@ -203,7 +196,7 @@ class SpectralConvS2(nn.Module):
                 scale
                 * torch.randn(
                     num_groups,
-                    self.modes_lat_local,
+                    self.modes_lat,
                     lora_rank,
                     in_channels // num_groups,
                     2,
@@ -212,7 +205,7 @@ class SpectralConvS2(nn.Module):
             self.lora_B = nn.Parameter(
                 torch.zeros(
                     num_groups,
-                    self.modes_lat_local,
+                    self.modes_lat,
                     out_channels // num_groups,
                     lora_rank,
                     2,
@@ -256,7 +249,7 @@ class SpectralConvS2(nn.Module):
             module.num_groups,
             module.in_channels // module.num_groups,
             module.out_channels // module.num_groups,
-            module.modes_lat_local,
+            module.modes_lat,
             2,
         ):
             # reorder to (group, nlat, out_channels // group, in_channels // group, 2)
@@ -272,7 +265,7 @@ class SpectralConvS2(nn.Module):
                 module.num_groups,
                 module.in_channels // module.num_groups,
                 module.lora_rank,
-                module.modes_lat_local,
+                module.modes_lat,
                 2,
             )
         ):
@@ -288,7 +281,7 @@ class SpectralConvS2(nn.Module):
                 module.num_groups,
                 module.lora_rank,
                 module.out_channels // module.num_groups,
-                module.modes_lat_local,
+                module.modes_lat,
                 2,
             )
         ):
@@ -315,7 +308,7 @@ class SpectralConvS2(nn.Module):
         ungrouped_shape = (
             module.in_channels,
             module.out_channels,
-            module.modes_lat_local,
+            module.modes_lat,
             2,
         )
 
@@ -340,21 +333,23 @@ class SpectralConvS2(nn.Module):
         assert C % self.num_groups == 0
         x = x.reshape(B, self.num_groups, C // self.num_groups, H, W)
 
+        # Slice global weights to the local spectral partition (lat only).
+        weight_local = self.weight[:, self._l_slice]
         if self.lora_A is not None and self.lora_B is not None:
             with timer.child("lora_update"):
                 lora_update = _contract_lora(
                     self.lora_A,
                     self.lora_B,
-                    x[..., : self.modes_lat_local, : self.modes_lon_local],
+                    x[..., : self.modes_lat, : self.modes_lon],
                 )
         else:
             lora_update = 0.0
 
         with timer.child("dhconv"):
             xp = torch.zeros_like(x)
-            xp[..., : self.modes_lat_local, : self.modes_lon_local] = _contract_dhconv(
-                x[..., : self.modes_lat_local, : self.modes_lon_local],
-                self.weight,
+            xp[..., : self.modes_lat_local, : self.modes_lon] = _contract_dhconv(
+                x[..., : self.modes_lat_local, : self.modes_lon],
+                weight_local,
             )
             xp = xp + self.lora_scaling * lora_update
             xp = xp.reshape(B, self.out_channels, H, W)

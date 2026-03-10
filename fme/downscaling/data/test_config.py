@@ -10,7 +10,7 @@ from fme.downscaling.data.config import (
     PairedDataLoaderConfig,
     XarrayEnsembleDataConfig,
 )
-from fme.downscaling.data.topography import StaticInput, StaticInputs
+from fme.downscaling.data.static import StaticInput, StaticInputs
 from fme.downscaling.data.utils import ClosedInterval, LatLonCoordinates
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.test_utils import data_paths_helper
