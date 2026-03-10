@@ -14,6 +14,7 @@ from obstore.store import from_url
 from zarr.storage import ObjectStore
 
 GRAVITY = 9.80665
+DENSITY_OF_LIQUID_WATER = 1000.0  # kg/m**3
 TIME_STEP = 6  # hours between output timesteps
 DEFAULT_OUTPUT_GRID = "F90"
 # The input data is on the L137 ECMWF grid. See
@@ -22,21 +23,21 @@ DEFAULT_OUTPUT_GRID = "F90"
 # grid defined in Table 2 of https://arxiv.org/pdf/2310.02074.pdf except
 # that the uppermost layer uses the higher model top of ECMWF model.
 N_INPUT_LAYERS = 137  # this is the number of full layers, not interfaces
-N_INPUT_LAYERS = 137
 DEFAULT_OUTPUT_LAYER_INDICES = [0, 48, 67, 79, 90, 100, 109, 119, 137]
 
-OUTPUT_PRESSURE_LEVELS = [850, 500, 200]
-OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL = [1000, 850, 700, 500, 300, 250, 200]
+OUTPUT_PRESSURE_LEVELS = [1000, 850, 700, 500, 250, 200, 100, 50]
+OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL = [1000, 850, 700, 500, 300, 250, 200, 100, 50]
 
 # Gaussian grid specs: name -> N (grid number; nlat=2N, nlon=4N)
 GAUSSIAN_GRID_N = {
+    "F22.5": 22.5,
     "F90": 90,
     "F360": 360,
 }
 
 URL_FULL_37 = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 URL_MODEL_LEVEL = "gs://gcp-public-data-arco-era5/ar/model-level-1h-0p25deg.zarr-v1"
-URL_CO2 = "gs://vcm-ml-raw-flexible-retention/2024-11-11-co2-annual-mean-for-era5.zarr"
+URL_CO2 = "gs://vcm-ml-raw-flexible-retention/2026-03-12-co2-annual-mean-for-era5.zarr"
 
 # Variables to read from each source
 FULL_37_MEAN_FLUX_VARS = [
@@ -51,6 +52,19 @@ FULL_37_MEAN_FLUX_VARS = [
     "mean_surface_latent_heat_flux",
     "mean_total_precipitation_rate",
     "mean_vertically_integrated_moisture_divergence",
+    "mean_snowfall_rate",
+    "mean_top_net_short_wave_radiation_flux_clear_sky",
+    "mean_top_net_long_wave_radiation_flux_clear_sky",
+    "mean_surface_downward_short_wave_radiation_flux_clear_sky",
+    "mean_surface_net_short_wave_radiation_flux_clear_sky",
+    "mean_surface_downward_long_wave_radiation_flux_clear_sky",
+    "mean_surface_net_long_wave_radiation_flux_clear_sky",
+    "mean_snowfall_rate",
+    "mean_runoff_rate",
+    "mean_eastward_gravity_wave_surface_stress",
+    "mean_eastward_turbulent_surface_stress",
+    "mean_northward_gravity_wave_surface_stress",
+    "mean_northward_turbulent_surface_stress",
 ]
 
 FULL_37_SURFACE_ANALYSIS_VARS = [
@@ -59,11 +73,21 @@ FULL_37_SURFACE_ANALYSIS_VARS = [
     "volumetric_soil_water_layer_2",
     "volumetric_soil_water_layer_3",
     "volumetric_soil_water_layer_4",
+    "soil_temperature_level_1",
+    "soil_temperature_level_2",
+    "soil_temperature_level_3",
+    "soil_temperature_level_4",
+    "snow_depth",
+    "snow_density",
+    "sea_surface_temperature",
+    "skin_temperature",
+    "significant_height_of_combined_wind_waves_and_swell",
 ]
 
 FULL_37_INVARIANT_VARS = [
     "land_sea_mask",
     "geopotential_at_surface",
+    "soil_type",
 ]
 
 FULL_37_PRESSURE_LEVEL_VARS = [
@@ -86,12 +110,28 @@ MODEL_LEVEL_3D_VARS = [
 ]
 FULL_37_MODEL_LEVEL_SURFACE_VARS = [
     "surface_pressure",
+    "mean_sea_level_pressure",
     "skin_temperature",
     "2m_temperature",
     "2m_dewpoint_temperature",
     "10m_u_component_of_wind",
     "10m_v_component_of_wind",
 ]
+
+# Soil type definitions from the ECMWF documentation: https://codes.ecmwf.int/grib/param-db/43
+# undefined is not part of the defintions, but it appears to be the fill value.
+# Some cells with land_fraction > 0 have this value, so it still seems relevant
+# to track.
+SOIL_TYPES = {
+    "undefined": 0,
+    "coarse": 1,
+    "medium": 2,
+    "medium_fine": 3,
+    "fine": 4,
+    "very_fine": 5,
+    "organic": 6,
+    "tropical_organic": 7,
+}
 
 RENAME_PRESSURE_LEVEL = {
     **{f"specific_humidity_{p}": f"Q{p}" for p in OUTPUT_PRESSURE_LEVELS},
@@ -115,6 +155,30 @@ DESIRED_ATTRS = {
         "units": "W/m**2",
     },
     "ULWRFsfc": {"long_name": "Upward LW radiative flux at surface", "units": "W/m**2"},
+    "UCSWRFtoa": {
+        "long_name": "Upward SW radiative flux at TOA assuming clear sky",
+        "units": "W/m**2",
+    },
+    "UCLWRFtoa": {
+        "long_name": "Upward LW radiative flux at TOA assuming clear sky",
+        "units": "W/m**2",
+    },
+    "DCSWRFsfc": {
+        "long_name": "Downward SW radiative flux at surface assuming clear sky",
+        "units": "W/m**2",
+    },
+    "UCSWRFsfc": {
+        "long_name": "Upward SW radiative flux at surface assuming clear sky",
+        "units": "W/m**2",
+    },
+    "DCLWRFsfc": {
+        "long_name": "Downward LW radiative flux at surface assuming clear sky",
+        "units": "W/m**2",
+    },
+    "UCLWRFsfc": {
+        "long_name": "Upward LW radiative flux at surface assuming clear sky",
+        "units": "W/m**2",
+    },
     "LHTFLsfc": {"long_name": "Latent heat flux", "units": "W/m**2"},
     "SHTFLsfc": {"long_name": "Sensible heat flux", "units": "W/m**2"},
     "PRATEsfc": {"long_name": "Surface precipitation rate", "units": "kg/m**2/s"},
@@ -132,6 +196,34 @@ DESIRED_ATTRS = {
     "DPT2m": {"long_name": "2m dewpoint temperature", "units": "K"},
     "UGRD10m": {"long_name": "10m U component of wind", "units": "m/s"},
     "VGRD10m": {"long_name": "10m V component of wind", "units": "m/s"},
+    "runoff_flux": {"long_name": "Runoff flux", "units": "kg/m**2/s"},
+    "total_frozen_precipitation_rate": {
+        "long_name": "Total frozen precipitation rate",
+        "units": "kg/m**2/s",
+    },
+    "eastward_surface_stress": {
+        "long_name": "Eastward surface stress",
+        "units": "N/m**2",
+    },
+    "northward_surface_stress": {
+        "long_name": "Northward surface stress",
+        "units": "N/m**2",
+    },
+    "merged_sea_surface_and_skin_temperature": {
+        "long_name": "Merged sea surface and skin temperature",
+        "units": "K",
+    },
+    "surface_snow_amount": {
+        "long_name": "Surface snow amount",
+        "units": "kg/m**2",
+    },
+    **{
+        f"{soil_type}_soil_type_fraction": {
+            "long_name": f"Fraction of {soil_type} soil type",
+            "units": "fraction",
+        }
+        for soil_type in SOIL_TYPES.keys()
+    },
 }
 
 
@@ -147,7 +239,7 @@ def _cell_bounds(centers: np.ndarray, lo: float, hi: float) -> np.ndarray:
     return bounds
 
 
-def _gaussian_latitudes(n: int) -> np.ndarray:
+def _gaussian_latitudes(n: int | float) -> np.ndarray:
     """Compute Gaussian grid latitudes for grid number N (2N latitudes).
 
     Returns latitudes in degrees, sorted south-to-north.
@@ -155,7 +247,8 @@ def _gaussian_latitudes(n: int) -> np.ndarray:
     """
     from numpy.polynomial.legendre import leggauss
 
-    x, _ = leggauss(2 * n)
+    nlat = round(2 * n)
+    x, _ = leggauss(nlat)
     lat = np.degrees(np.arcsin(x))
     return np.sort(lat)
 
@@ -164,7 +257,7 @@ def _make_target_grid(output_grid: str) -> xr.Dataset:
     """Create Gaussian target grid dataset for xESMF regridding."""
     n = GAUSSIAN_GRID_N[output_grid]
     lat = _gaussian_latitudes(n)
-    nlon = 4 * n
+    nlon = round(4 * n)
     dlon = 360.0 / nlon
     # Longitude centers offset by half a grid spacing (matching old pipeline)
     lon = np.linspace(dlon / 2, 360 - dlon / 2, nlon)
@@ -211,7 +304,9 @@ def _get_regridder(output_grid: str):
     return _REGRIDDER_CACHE[output_grid]
 
 
-def _regrid(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
+def _regrid(
+    ds: xr.Dataset, output_grid: str, keep_attrs: bool = True, **other_regridder_kwargs
+) -> xr.Dataset:
     """Regrid a dataset from 0.25° regular lat-lon to a Gaussian target grid."""
     regridder = _get_regridder(output_grid)
     # Rename coords to lat/lon for xESMF
@@ -219,7 +314,7 @@ def _regrid(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
     # Ensure south-to-north
     if ds.lat.values[0] > ds.lat.values[-1]:
         ds = ds.sortby("lat")
-    regridded = regridder(ds)
+    regridded = regridder(ds, keep_attrs=keep_attrs, **other_regridder_kwargs)
     # Rename back to latitude/longitude for output consistency
     regridded = regridded.rename({"lat": "latitude", "lon": "longitude"})
     return regridded
@@ -258,6 +353,95 @@ def _to_geopotential_height(geopotential: xr.DataArray) -> xr.DataArray:
         "units": "m",
         "standard_name": "geopotential_height",
     }
+    return output
+
+
+def _to_merged_sea_surface_and_skin_temperature(
+    sea_surface_temperature: xr.DataArray,
+    skin_temperature: xr.DataArray,
+    ocean_fraction: xr.DataArray,
+) -> xr.DataArray:
+    """Merge the sea surface and skin temperature into a single variable.
+
+    Note this is meant to be called after regridding, which is the only time we
+    define an ocean_fraction. Our criteria for merging is based on how we merge
+    the prescribed SST and land and sea ice temperature in ACE using
+    interpolate=False. If the ocean fraction is less than 0.5, we use the skin
+    temperature. If the ocean fraction is greater than or equal to 0.5, we use
+    the sea surface temperature. There are some edge cases where the ocean
+    fraction is greater than or equal to 0.5, but the sea surface temperature is
+    undefined; in those circumstances, we fall back to using the skin
+    temperature.
+    """
+    land_and_sea_ice_mask = (ocean_fraction < 0.5) | sea_surface_temperature.isnull()
+    output = xr.where(land_and_sea_ice_mask, skin_temperature, sea_surface_temperature)
+    output.attrs = {
+        "long_name": "Merged sea surface and skin temperature",
+        "units": "K",
+    }
+    return output
+
+
+def _to_surface_snow_amount(snow_depth: xr.DataArray) -> xr.DataArray:
+    """Convert the snow depth to a surface snow amount in kg/m**2.
+
+    The snow depth in ERA5 is in meters of liquid water equivalent; we convert
+    it to a mass per unit area by multiplying by the density of liquid water.
+    See this page for more information: https://codes.ecmwf.int/grib/param-db/141
+    """
+    output = DENSITY_OF_LIQUID_WATER * snow_depth
+    output.attrs = {"long_name": "Surface snow amount", "units": "kg/m**2"}
+    return output
+
+
+def _to_surface_snow_area_fraction(
+    snow_depth: xr.DataArray, snow_density: xr.DataArray
+) -> xr.DataArray:
+    """See Guidelines Section 11 on this page for the ERA5 formula for the
+    surface snow area fraction: https://confluence.ecmwf.int/display/CKB/ERA5%3A+data+documentation#heading-Parameterlistings"""
+    output = (DENSITY_OF_LIQUID_WATER * snow_depth / snow_density) / 0.1
+    output = xr.where(output > 1, 1, output)
+    output.attrs = {"long_name": "Surface snow area fraction", "units": "fraction"}
+    return output
+
+
+def _to_surface_snow_thickness(
+    surface_snow_amount: xr.DataArray,
+    snow_density: xr.DataArray,
+    surface_snow_area_fraction: xr.DataArray,
+) -> xr.DataArray:
+    """See Guidelines Section 11 on this page for the ERA5 formula for the
+    physical depth of snow: https://confluence.ecmwf.int/display/CKB/ERA5%3A+data+documentation#heading-Parameterlistings"""
+    output = surface_snow_amount / (snow_density * surface_snow_area_fraction)
+    output = output.fillna(0.0)
+    output.attrs = {"long_name": "Surface snow thickness", "units": "m"}
+    return output
+
+
+def _isclose(
+    a: xr.DataArray | int | float, b: xr.DataArray | int | float, **kwargs
+) -> xr.DataArray:
+    """Check if inputs are close, with optional keyword arguments.
+
+    Accepts the same keyword arguments as np.isclose.
+    """
+    return xr.apply_ufunc(
+        np.isclose, a, b, kwargs=kwargs, dask="parallelized", output_dtypes=[bool]
+    )
+
+
+def _to_soil_type_fractions(soil_type: xr.DataArray) -> xr.Dataset:
+    """Convert the soil type to a dataset of fractions via one-hot encoding.
+
+    We use an abolute tolerance of 1.0e-3 due to floating point imprecision.
+    """
+    output = xr.Dataset()
+    for soil_type_name, soil_type_id in SOIL_TYPES.items():
+        name = f"{soil_type_name}_soil_type_fraction"
+        output[name] = _isclose(soil_type, soil_type_id, atol=1.0e-3, rtol=0.0).astype(
+            np.float32
+        )
+        output[name].attrs = DESIRED_ATTRS[name]
     return output
 
 
@@ -322,6 +506,8 @@ def _process_mean_flux(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
     logging.info("Processing mean flux data")
     xr.set_options(keep_attrs=True)
     output = xr.Dataset()
+
+    # All-sky radiative fluxes
     output["DSWRFtoa"] = ds["mean_top_downward_short_wave_radiation_flux"]
     output["USWRFtoa"] = (
         ds["mean_top_downward_short_wave_radiation_flux"]
@@ -338,12 +524,43 @@ def _process_mean_flux(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
         ds["mean_surface_downward_long_wave_radiation_flux"]
         - ds["mean_surface_net_long_wave_radiation_flux"]
     )
+
+    # Clear-sky radiative fluxes
+    output["UCSWRFtoa"] = (
+        ds["mean_top_downward_short_wave_radiation_flux"]
+        - ds["mean_top_net_short_wave_radiation_flux_clear_sky"]
+    )
+    output["UCLWRFtoa"] = -ds["mean_top_net_long_wave_radiation_flux_clear_sky"]
+    output["DCSWRFsfc"] = ds[
+        "mean_surface_downward_short_wave_radiation_flux_clear_sky"
+    ]
+    output["UCSWRFsfc"] = (
+        ds["mean_surface_downward_short_wave_radiation_flux_clear_sky"]
+        - ds["mean_surface_net_short_wave_radiation_flux_clear_sky"]
+    )
+    output["DCLWRFsfc"] = ds["mean_surface_downward_long_wave_radiation_flux_clear_sky"]
+    output["UCLWRFsfc"] = (
+        ds["mean_surface_downward_long_wave_radiation_flux_clear_sky"]
+        - ds["mean_surface_net_long_wave_radiation_flux_clear_sky"]
+    )
+
     output["SHTFLsfc"] = -ds["mean_surface_sensible_heat_flux"]
     output["LHTFLsfc"] = -ds["mean_surface_latent_heat_flux"]
     output["PRATEsfc"] = ds["mean_total_precipitation_rate"]
+    output["total_frozen_precipitation_rate"] = ds["mean_snowfall_rate"]
+    output["runoff_flux"] = ds["mean_runoff_rate"]
     output["tendency_of_total_water_path_due_to_advection"] = -ds[
         "mean_vertically_integrated_moisture_divergence"
     ]
+
+    output["eastward_surface_stress"] = (
+        ds["mean_eastward_gravity_wave_surface_stress"]
+        + ds["mean_eastward_turbulent_surface_stress"]
+    )
+    output["northward_surface_stress"] = (
+        ds["mean_northward_gravity_wave_surface_stress"]
+        + ds["mean_northward_turbulent_surface_stress"]
+    )
 
     for name, attrs in DESIRED_ATTRS.items():
         if name in output:
@@ -385,11 +602,13 @@ def process_mean_flux(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
 
 
 def _process_invariant(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
-    """Process invariant fields (land_sea_mask, geopotential_at_surface)."""
+    """Process invariant fields (land_sea_mask, geopotential_at_surface, soil_type)."""
     logging.info("Processing invariant data")
     output = xr.Dataset()
     output["HGTsfc"] = ds["geopotential_at_surface"] / GRAVITY
     output["land_fraction"] = ds["land_sea_mask"]
+    soil_type_fractions = _to_soil_type_fractions(ds["soil_type"])
+    output = output.merge(soil_type_fractions)
     regridded = _regrid(output, output_grid)
     return regridded
 
@@ -402,12 +621,40 @@ def _process_surface_analysis(
     xr.set_options(keep_attrs=True)
     output = xr.Dataset()
     output["sea_ice_fraction"] = ds["sea_ice_cover"].fillna(0.0)
+
     output["soil_moisture_0"] = ds["volumetric_soil_water_layer_1"]
     output["soil_moisture_1"] = ds["volumetric_soil_water_layer_2"]
     output["soil_moisture_2"] = ds["volumetric_soil_water_layer_3"]
     output["soil_moisture_3"] = ds["volumetric_soil_water_layer_4"]
+    output["soil_temperature_0"] = ds["soil_temperature_level_1"]
+    output["soil_temperature_1"] = ds["soil_temperature_level_2"]
+    output["soil_temperature_2"] = ds["soil_temperature_level_3"]
+    output["soil_temperature_3"] = ds["soil_temperature_level_4"]
+
+    output["surface_snow_amount"] = _to_surface_snow_amount(ds["snow_depth"])
+    output["surface_snow_area_fraction"] = _to_surface_snow_area_fraction(
+        ds["snow_depth"], ds["snow_density"]
+    )
+    output["surface_snow_thickness"] = _to_surface_snow_thickness(
+        output["surface_snow_amount"],
+        ds["snow_density"],
+        output["surface_snow_area_fraction"],
+    )
 
     regridded = _regrid(output, output_grid)
+
+    # Handle regridding the sea surface temperature and wave heights using
+    # adaptive masking to ensure coastal points have a defined value.
+    regridded["sea_surface_temperature"] = _regrid(
+        ds["sea_surface_temperature"], output_grid, skipna=True, na_thres=1.0
+    )
+    regridded["significant_height_of_combined_wind_waves_and_swell"] = _regrid(
+        ds["significant_height_of_combined_wind_waves_and_swell"],
+        output_grid,
+        skipna=True,
+        na_thres=1.0,
+    )
+
     regridded = regridded.drop_vars(["latitude", "longitude"])
     invariant_ds = invariant_ds.drop_vars(["latitude", "longitude"])
 
@@ -423,6 +670,14 @@ def _process_surface_analysis(
     for name in ["ocean_fraction", "sea_ice_fraction"]:
         regridded[name] = regridded[name].assign_attrs(DESIRED_ATTRS[name])
 
+    regridded_skin_temperature = _regrid(ds["skin_temperature"], output_grid)
+    regridded["merged_sea_surface_and_skin_temperature"] = (
+        _to_merged_sea_surface_and_skin_temperature(
+            regridded["sea_surface_temperature"],
+            regridded_skin_temperature,
+            regridded["ocean_fraction"],
+        )
+    )
     return regridded
 
 
@@ -495,6 +750,14 @@ def _get_ak_bk(ds_model_level: xr.Dataset) -> tuple:
         raise ValueError("No variable with GRIB_pv attribute found in model-level data")
     ak = np.array(pv[: N_INPUT_LAYERS + 1])
     bk = np.array(pv[N_INPUT_LAYERS + 1 :])
+
+    # Treat the top-most layer interface as the midpoint between the top-most
+    # and second-to-top-most model-native levels to avoid an implicit model top
+    # pressure of 0.0 Pa. This comes out to essentially setting the model top
+    # pressure to 1.0 Pa. The IFS does not use a finite-volume vertical
+    # coordinate so these vertical coordinates have somewhat of an artificial
+    # meaning to begin with.
+    ak[0] = (ak[0] + ak[1]) / 2.0
     return ak, bk
 
 
@@ -610,6 +873,7 @@ def _process_model_level_data(
 
     # Add surface fields (already 2D)
     output_2d["PRESsfc"] = surface_pressure
+    output_2d["PRMSL"] = ds_surface["mean_sea_level_pressure"]
     output_2d["skt"] = ds_surface["skin_temperature"]
     output_2d["t2m"] = ds_surface["2m_temperature"]
     output_2d["d2m"] = ds_surface["2m_dewpoint_temperature"]
