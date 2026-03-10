@@ -102,6 +102,7 @@ jobs:
             source .venv/bin/activate
             export PATH=/usr/local/nvidia/bin:${PATH}
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+            python3 fme/require_gpu.py
             # matrix for parallel tests
             # | backend | WS | H | W |
             # | ------- | -- | - | - |
