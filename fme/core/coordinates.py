@@ -381,7 +381,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got idepth.shape: {self.idepth.shape} and mask.shape: "
                 f"{self.mask.shape}."
             )
-        self._dz = dz_from_idepth(self.idepth, self.mask)  # , self.deptho)
+        self._dz = dz_from_idepth(self.idepth, self.mask, self.deptho)
 
     @property
     def dz(self) -> torch.Tensor:
