@@ -269,6 +269,7 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
         "it's testing speed of SFNO blocks on GPU."
     ),
 )  # noqa: E501
+@pytest.mark.serial
 def test_block_speed():
     ungrouped = get_block_benchmark(filter_num_groups=1).run_benchmark(
         iters=5, warmup=1
