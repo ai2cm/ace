@@ -147,15 +147,6 @@ while read TRAIN_EXPER; do
         )
     fi
 
-
-    if [[ -z "$WORKSPACE" ]]; then
-        WORKSPACE=ai2/ace
-    fi
-
-    if [[ -z "$CLUSTER" ]]; then
-        CLUSTER="a100+h100"
-    fi
-
     # Set dummy variables for print functions
     GROUP="$JOB_GROUP"
     N_GPUS=1
