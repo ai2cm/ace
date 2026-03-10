@@ -276,7 +276,7 @@ def checkpointed_model_config(
 
     # loader_config is passed in to add static inputs into model
     # that correspond to the dataset coordinates
-    static_inputs = load_static_inputs({"HGTsfc": data_paths.fine})
+    static_inputs = load_static_inputs({"HGTsfc": f"{data_paths.fine}/data.nc"})
     model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"
@@ -330,7 +330,6 @@ def generation_config_path(generation_config):
     return config_path
 
 
-@pytest.mark.parametrize("loader_config", [False], indirect=True)
 def test_generation_main(generation_config_path, skip_slow):
     """Test the main generation process end-to-end."""
     if skip_slow:
@@ -359,7 +358,6 @@ def test_generation_main(generation_config_path, skip_slow):
     assert event["var0"].sizes[TIME_NAME] == 1
 
 
-@pytest.mark.parametrize("loader_config", [False], indirect=True)
 @pytest.mark.skipif(
     (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
     reason="Skipping multi-GPU test: less than 2 GPUs available.",
