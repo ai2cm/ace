@@ -244,9 +244,11 @@ class CoupledStepperConfig:
         self._validate_component_configs()
 
         atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
-        # this was already checked in _validate_component_configs, so an
-        # assertion will do fine here to appease mypy
-        assert atmosphere_ocean_config is not None
+        if atmosphere_ocean_config is None:
+            raise RuntimeError(
+                "atmosphere ocean config is None after validation; "
+                "this should not happen"
+            )
         self._atmosphere_ocean_config = atmosphere_ocean_config
 
         # set timesteps
