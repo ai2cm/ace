@@ -256,13 +256,21 @@ class DatasetInfo:
     def from_state(cls, state: dict[str, Any]) -> "DatasetInfo":
         if state.get("gridded_operations") is not None:
             # this is for backwards compatibility with older serialized states
-            assert state.get("horizontal_coordinates") is None
+            if state.get("horizontal_coordinates") is not None:
+                raise ValueError(
+                    "Cannot have both 'gridded_operations' and "
+                    "'horizontal_coordinates' in state."
+                )
             gridded_ops = GriddedOperations.from_state(state["gridded_operations"])
         else:
             gridded_ops = None
         if state.get("img_shape") is not None:
             # this is for backwards compatibility with older serialized states
-            assert state.get("horizontal_coordinates") is None
+            if state.get("horizontal_coordinates") is not None:
+                raise ValueError(
+                    "Cannot have both 'img_shape' and "
+                    "'horizontal_coordinates' in state."
+                )
             img_shape = state["img_shape"]
         else:
             img_shape = None
