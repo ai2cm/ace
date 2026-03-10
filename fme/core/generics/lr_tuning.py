@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import logging
 from collections.abc import Callable
@@ -84,7 +85,7 @@ def run_lr_tuning_trial(
         The candidate learning rate if the candidate wins, otherwise None.
     """
     candidate_lr = current_lr * config.lr_factor
-    optimization_state = optimization.get_state()
+    optimization_state = copy.deepcopy(optimization.get_state())
 
     baseline_stepper = copy_stepper()
     candidate_stepper = copy_stepper()

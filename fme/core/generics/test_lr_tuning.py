@@ -139,16 +139,22 @@ def _build_optimization(modules: torch.nn.ModuleList) -> Optimization:
     )
 
 
-def _copy_ema(modules: torch.nn.ModuleList) -> EMATracker:
-    """For tests, a fresh EMA is sufficient since we don't have prior state."""
-    return EMATracker(modules, decay=0.9999)
+def _make_copy_ema(ema: EMATracker):
+    """Return a callable that creates a copy of the EMA via state APIs,
+    matching the real Trainer._copy_ema pattern."""
+
+    def copy_ema(modules: torch.nn.ModuleList) -> EMATracker:
+        return EMATracker.from_state(ema.get_state(), modules)
+
+    return copy_ema
 
 
 def _make_copy_stepper(stepper: _Stepper):
-    """Return a callable that creates a copy of the stepper via state APIs."""
+    """Return a callable that creates a copy of the stepper via state APIs,
+    matching the real Trainer._copy_stepper pattern (deepcopy + load_state)."""
 
     def copy_stepper() -> _Stepper:
-        new = _Stepper()
+        new = copy.deepcopy(stepper)
         new.load_state(copy.deepcopy(stepper.get_state()))
         return new
 
@@ -186,7 +192,7 @@ def test_candidate_wins():
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
-        copy_ema=_copy_ema,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
         pre_trial_val_loss=1.0,
@@ -218,7 +224,7 @@ def test_candidate_below_threshold():
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
-        copy_ema=_copy_ema,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
         pre_trial_val_loss=1.0,
@@ -249,7 +255,7 @@ def test_candidate_worsens():
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
-        copy_ema=_copy_ema,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
         pre_trial_val_loss=1.0,
@@ -280,7 +286,7 @@ def test_both_worsen():
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
-        copy_ema=_copy_ema,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
         pre_trial_val_loss=1.0,
@@ -312,7 +318,7 @@ def test_baseline_worsens_candidate_improves():
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
-        copy_ema=_copy_ema,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
         pre_trial_val_loss=1.0,
@@ -345,7 +351,7 @@ def test_does_not_mutate_original_stepper():
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
-        copy_ema=_copy_ema,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
         pre_trial_val_loss=1.0,
@@ -378,7 +384,7 @@ def test_uses_subset_loader_with_num_batches():
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
-        copy_ema=_copy_ema,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
         pre_trial_val_loss=1.0,
@@ -409,7 +415,7 @@ def test_with_ema_validation():
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
-        copy_ema=_copy_ema,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
         pre_trial_val_loss=1.0,
@@ -418,3 +424,128 @@ def test_with_ema_validation():
     )
 
     assert result == 0.01 * 0.5
+
+
+def test_trial_does_not_mutate_original_ema_num_updates():
+    """The original EMA's num_updates must not be modified by the trial."""
+    stepper = _Stepper()
+    ema = EMATracker(stepper.modules, decay=0.9999)
+    # Simulate some prior training updates
+    for _ in range(5):
+        ema(stepper.modules)
+    original_num_updates = ema.num_updates.clone()
+
+    train_data = _TrainData(n_batches=5)
+    valid_data = _TrainData(n_batches=3)
+    optimization = _build_optimization(stepper.modules)
+    config = LRTuningConfig(
+        epoch_frequency=1,
+        lr_factor=0.5,
+        num_batches=3,
+        improvement_threshold=0.1,
+    )
+
+    run_lr_tuning_trial(
+        train_data=train_data,
+        valid_data=valid_data,
+        optimization=optimization,
+        copy_stepper=_make_copy_stepper(stepper),
+        build_optimization=_build_optimization,
+        copy_ema=_make_copy_ema(ema),
+        config=config,
+        current_lr=0.01,
+        pre_trial_val_loss=1.0,
+        get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
+        validate_using_ema=False,
+    )
+
+    assert torch.equal(ema.num_updates, original_num_updates)
+
+
+def test_trial_does_not_mutate_original_ema_params():
+    """The original EMA's tracked parameters must not be modified by the trial."""
+    stepper = _Stepper()
+    ema = EMATracker(stepper.modules, decay=0.9999)
+    for _ in range(5):
+        ema(stepper.modules)
+    original_ema_params = {
+        name: param.clone() for name, param in ema._ema_params.items()
+    }
+
+    train_data = _TrainData(n_batches=5)
+    valid_data = _TrainData(n_batches=3)
+    optimization = _build_optimization(stepper.modules)
+    config = LRTuningConfig(
+        epoch_frequency=1,
+        lr_factor=0.5,
+        num_batches=3,
+        improvement_threshold=0.1,
+    )
+
+    run_lr_tuning_trial(
+        train_data=train_data,
+        valid_data=valid_data,
+        optimization=optimization,
+        copy_stepper=_make_copy_stepper(stepper),
+        build_optimization=_build_optimization,
+        copy_ema=_make_copy_ema(ema),
+        config=config,
+        current_lr=0.01,
+        pre_trial_val_loss=1.0,
+        get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
+        validate_using_ema=False,
+    )
+
+    for name in original_ema_params:
+        assert torch.equal(ema._ema_params[name], original_ema_params[name])
+
+
+def test_trial_does_not_mutate_original_optimizer_state():
+    """The original optimizer's momentum buffers must not be modified by the trial."""
+    stepper = _Stepper()
+    ema = EMATracker(stepper.modules, decay=0.9999)
+    optimization = _build_optimization(stepper.modules)
+
+    # Train a few batches to populate optimizer momentum buffers
+    train_data = _TrainData(n_batches=5)
+    for batch in train_data.loader:
+        stepper.train_on_batch(batch, optimization)
+
+    original_state = copy.deepcopy(optimization.get_state())
+
+    valid_data = _TrainData(n_batches=3)
+    config = LRTuningConfig(
+        epoch_frequency=1,
+        lr_factor=0.5,
+        num_batches=3,
+        improvement_threshold=0.1,
+    )
+
+    run_lr_tuning_trial(
+        train_data=train_data,
+        valid_data=valid_data,
+        optimization=optimization,
+        copy_stepper=_make_copy_stepper(stepper),
+        build_optimization=_build_optimization,
+        copy_ema=_make_copy_ema(ema),
+        config=config,
+        current_lr=0.01,
+        pre_trial_val_loss=1.0,
+        get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
+        validate_using_ema=False,
+    )
+
+    current_state = optimization.get_state()
+    for key in original_state["optimizer_state_dict"]["state"]:
+        for buf_name, buf in original_state["optimizer_state_dict"]["state"][
+            key
+        ].items():
+            if isinstance(buf, torch.Tensor):
+                assert torch.equal(
+                    buf,
+                    current_state["optimizer_state_dict"]["state"][key][buf_name],
+                ), f"Optimizer state[{key}][{buf_name}] was mutated by the trial"
+            else:
+                assert (
+                    buf == current_state["optimizer_state_dict"]["state"][key][buf_name]
+                ), f"Optimizer state[{key}][{buf_name}] was mutated by the trial"
