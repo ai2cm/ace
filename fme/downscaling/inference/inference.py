@@ -7,6 +7,7 @@ import torch
 import yaml
 
 from fme.core.cli import prepare_directory
+from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
 from ..data import DataLoaderConfig, StaticInputs
@@ -17,7 +18,6 @@ from ..predictors import (
     PatchPredictionConfig,
     PatchPredictor,
 )
-from ..train import count_parameters
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
 
