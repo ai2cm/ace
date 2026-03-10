@@ -27,6 +27,7 @@ from fme.ace.stepper import (
     load_stepper,
     load_stepper_config,
 )
+from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.ace.stepper.single_module import (
     StepperConfig,
     TrainStepper,
@@ -40,7 +41,6 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
-from fme.core.loss import StepLossConfig
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -93,10 +93,13 @@ def resolve_variable_metadata(
 @dataclasses.dataclass
 class ValidationConfig:
     """
-    Configuration for running one-step validation within an inference evaluator job.
+    Configuration for running "validation" within an inference evaluator job.
 
-    This mirrors the validation loop performed at the end of each training epoch,
-    producing metrics like ``val/mean/weighted_rmse`` and ``val/mean/loss``.
+    This mirrors the validation loop performed at the end of each training
+    epoch, producing metrics like ``val/mean/weighted_rmse`` and
+    ``val/mean/loss``. A possible use case is to configure ``loader`` so that it
+    matches the validation data loader used during training, but other periods or
+    datasets that are compatible with the checkpoint may also be used.
 
     Parameters:
         loader: Data loader configuration for validation data. Uses the same
@@ -105,10 +108,10 @@ class ValidationConfig:
         n_forward_steps: Number of forward steps per validation batch. Defaults
             to 1 for standard single-step validation.
         aggregator: Configuration for the one-step validation aggregator.
-        loss: Loss function configuration used to compute the validation loss
-            metric. Defaults to MSE. Set this to match the training loss
-            configuration if you want ``val/mean/loss`` to be directly
-            comparable to training.
+        stepper_training: Training-specific configuration including loss, ensemble
+            settings, and forward step scheduling. Set this to match the training
+            configuration if you want ``val/mean/loss`` to be directly comparable.
+
     """
 
     loader: DataLoaderConfig
@@ -116,7 +119,25 @@ class ValidationConfig:
     aggregator: OneStepAggregatorConfig = dataclasses.field(
         default_factory=lambda: OneStepAggregatorConfig()
     )
-    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
+    stepper_training: TrainStepperConfig = dataclasses.field(
+        default_factory=lambda: TrainStepperConfig()
+    )
+
+    def __post_init__(self):
+        if self.stepper_training.parameter_init.weights_path is not None:
+            logging.warning(
+                "stepper_training.parameter_init is not used for validation within "
+                "inference evaluator jobs. Ignoring..."
+            )
+        self.stepper_training.parameter_init = ParameterInitializationConfig()
+        if (
+            self.stepper_training.train_n_forward_steps is not None
+            and self.n_forward_steps is not None
+        ):
+            raise ValueError(
+                "stepper_training.train_n_forward_steps may not be given at the same "
+                "time as n_forward_steps at the top level"
+            )
 
 
 @dataclasses.dataclass
@@ -343,7 +364,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         )
 
         logging.info("Building validation stepper and aggregator")
-        train_stepper_config = TrainStepperConfig(loss=config.validation.loss)
+        train_stepper_config = config.validation.stepper_training
         train_stepper = TrainStepper(stepper=stepper, config=train_stepper_config)
 
         aggregator = config.validation.aggregator.build(
