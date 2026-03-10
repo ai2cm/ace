@@ -611,7 +611,8 @@ class CheckpointModelConfig:
         if self._checkpoint["model"]["static_inputs"] is not None:
             if self.static_inputs is not None:
                 raise ValueError(
-                    "Cannot override static_inputs: the checkpoint already has "
+                    "The model checkpoint already has static inputs from training. "
+                    "static_inputs should not be provided in checkpoint model config."
                     "static inputs from training."
                 )
             static_inputs = StaticInputs.from_state(
