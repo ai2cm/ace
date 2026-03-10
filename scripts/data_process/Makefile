@@ -312,7 +312,7 @@ xshield_amip_plus_4K_dataset_and_stats:
 
 .PHONY: shield_c96_ramped_climSST_random_CO2_ensemble_dataset
 shield_c96_ramped_climSST_random_CO2_ensemble_dataset:
-	./compute_dataset.sh --config configs/shield-ramped-climSST-random-CO2-ensemble-c96-1deg-$(LAYERS).yaml
+	./compute_dataset.sh --dataset --stats --config configs/shield-ramped-climSST-random-CO2-ensemble-c96-$(RESOLUTION)deg-$(LAYERS).yaml
 
 .PHONY: build_atmosphere_processing_image
 build_atmosphere_processing_image:
@@ -350,7 +350,7 @@ e3smv3_piControl_100yr_coupled:
 
 .PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
 cm4_like_am4_random_co2_ensemble_atmosphere:
-	./compute_dataset.sh --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)deg-8layer.yaml
 
 .PHONY:
 cm4_like_am4_random_co2_ensemble_coupled:
