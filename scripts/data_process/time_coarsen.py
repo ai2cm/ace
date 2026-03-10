@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import time
 from typing import Mapping
 
 import dacite
@@ -12,6 +13,14 @@ import yaml
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from get_stats import StatsConfig
+
+try:
+    import dask  # noqa: F401
+    import xpartition  # noqa: F401
+
+    _HAS_XPARTITION = True
+except ImportError:
+    _HAS_XPARTITION = False
 
 
 @dataclasses.dataclass
@@ -29,6 +38,12 @@ class TimeCoarsenConfig:
             coarsened by averaging over each factor times.
         constant_prefixes: List of prefixes for constant data variables to copy without
             modification. Raises an exception if any of these have a "time" dimension.
+        n_split: Number of partitions to split the write into when using xpartition.
+            Only used when dask and xpartition are available.
+        chunking: Mapping of dimension names to inner chunk sizes for the output
+            zarr store. Defaults to {"time": 1, "lat": -1, "lon": -1}.
+        sharding: Mapping of dimension names to shard sizes. If None, an unsharded
+            zarr store is written with chunks as specified in ``chunking``.
     """
 
     factor: int
@@ -37,6 +52,13 @@ class TimeCoarsenConfig:
     snapshot_names: list[str]
     window_names: list[str]
     constant_prefixes: list[str]
+    n_split: int = 1
+    chunking: dict[str, int] = dataclasses.field(
+        default_factory=lambda: {"time": 1, "lat": -1, "lon": -1}
+    )
+    sharding: dict[str, int] | None = dataclasses.field(
+        default_factory=lambda: {"time": 360, "lat": -1, "lon": -1}
+    )
 
 
 @dataclasses.dataclass
@@ -62,40 +84,46 @@ def main(config: Config, run: int, dry_run: bool = False):
     )
 
 
-def write_zarr(
-    ds: xr.Dataset, original_attributes: dict | None, history_entry: str, path: str
+def _set_attributes(
+    ds: xr.Dataset, original_attributes: dict, config: TimeCoarsenConfig
 ) -> None:
-    if len(ds.attrs) > 0 and original_attributes is not None:
-        raise ValueError(
-            "Dataset already has attributes, cannot overwrite original "
-            "attributes. Instead copy over any original attributes you want "
-            "onto ds.attrs, and then pass original_attributes=None."
-        )
-    if original_attributes is not None:
-        ds.attrs = original_attributes
-    attributes = ds.attrs
+    """Set coarsening metadata and history on the dataset attributes in-place."""
+    attributes = original_attributes.copy()
+    attributes["snapshot_names"] = json.dumps(config.snapshot_names)
+    attributes["window_names"] = json.dumps(config.window_names)
+    attributes["constant_prefixes"] = json.dumps(config.constant_prefixes)
+    attributes["coarsen_factor"] = config.factor
+    history_entry = (
+        f"Dataset coarsened by a factor of {config.factor} "
+        "by scripts/data_process/time_coarsen.py."
+    )
     if "history" in attributes:
         attributes["history"] = attributes["history"] + " " + history_entry
     else:
         attributes["history"] = history_entry
-    ds.to_zarr(path, mode="w", zarr_version=3)
+    ds.attrs = attributes
 
 
-def process_path_pair(
-    input_path: str, output_path: str, config: TimeCoarsenConfig, dry_run: bool
-):
-    logging.info(f"Processing input: {input_path} to output: {output_path}")
-    if os.path.exists(output_path):
-        logging.warning(f"Output path {output_path} already exists. Skipping.")
-        return
-    ds = xr.open_dataset(input_path)
+def coarsen(ds: xr.Dataset, config: TimeCoarsenConfig) -> xr.Dataset:
+    """Apply time coarsening to a dataset.
+
+    Works with both eager (numpy) and lazy (dask) arrays.
+    """
     constant_names = [
         name
         for name in ds.data_vars
         if any(name.startswith(prefix) for prefix in config.constant_prefixes)
     ]
-    assert set(constant_names).intersection(set(config.snapshot_names)) == set()
-    assert set(constant_names).intersection(set(config.window_names)) == set()
+    if set(constant_names).intersection(set(config.snapshot_names)):
+        raise ValueError(
+            "Constant names overlap with snapshot names: "
+            f"{set(constant_names).intersection(set(config.snapshot_names))}"
+        )
+    if set(constant_names).intersection(set(config.window_names)):
+        raise ValueError(
+            "Constant names overlap with window names: "
+            f"{set(constant_names).intersection(set(config.window_names))}"
+        )
     for name in constant_names:
         if "time" in ds[name].dims:
             raise ValueError(
@@ -113,23 +141,64 @@ def process_path_pair(
         .drop("time")
     )  # use time of snapshots
     ds_coarsened = xr.merge([ds_snapshot, ds_window, ds_constants])
-    attributes = ds.attrs.copy()
-    attributes["snapshot_names"] = json.dumps(config.snapshot_names)
-    attributes["window_names"] = json.dumps(config.window_names)
-    attributes["constant_prefixes"] = json.dumps(config.constant_prefixes)
-    attributes["coarsen_factor"] = config.factor
-    history_entry = (
-        f"Dataset coarsened by a factor of {config.factor} "
-        "by scripts/data_process/time_coarsen.py."
-    )
-    ds_coarsened.attrs = None  # clear attributes, we'll add them back in write_zarr
-    if not dry_run:
-        write_zarr(
-            ds_coarsened,
-            original_attributes=attributes,
-            history_entry=history_entry,
-            path=output_path,
+    _set_attributes(ds_coarsened, ds.attrs, config)
+    return ds_coarsened
+
+
+def _write_eager(ds: xr.Dataset, path: str) -> None:
+    """Write dataset eagerly using xarray's to_zarr."""
+    ds.to_zarr(path, mode="w", zarr_version=3)
+
+
+def _write_xpartition(ds: xr.Dataset, path: str, config: TimeCoarsenConfig) -> None:
+    """Write dataset lazily using xpartition for chunked parallel writes."""
+    import xpartition  # noqa: F401
+
+    if config.sharding is None:
+        outer_chunks = config.chunking
+    else:
+        outer_chunks = config.sharding
+
+    ds = ds.chunk(outer_chunks)
+
+    if config.sharding is None:
+        inner_chunks = None
+    else:
+        inner_chunks = config.chunking
+
+    ds.partition.initialize_store(path, inner_chunks=inner_chunks)
+    for i in range(config.n_split):
+        segment_number = f"{i + 1} / {config.n_split}"
+        logging.info(f"Writing segment {segment_number}")
+        segment_time = time.time()
+        ds.partition.write(
+            path,
+            config.n_split,
+            ["time"],
+            i,
+            collect_variable_writes=True,
         )
+        segment_time = time.time() - segment_time
+        logging.info(f"Segment {segment_number} time: {segment_time:0.2f} seconds")
+
+
+def process_path_pair(
+    input_path: str, output_path: str, config: TimeCoarsenConfig, dry_run: bool
+):
+    logging.info(f"Processing input: {input_path} to output: {output_path}")
+    if os.path.exists(output_path):
+        logging.warning(f"Output path {output_path} already exists. Skipping.")
+        return
+    if _HAS_XPARTITION:
+        ds = xr.open_zarr(input_path)
+    else:
+        ds = xr.open_dataset(input_path)
+    ds_coarsened = coarsen(ds, config)
+    if not dry_run:
+        if _HAS_XPARTITION:
+            _write_xpartition(ds_coarsened, output_path, config)
+        else:
+            _write_eager(ds_coarsened, output_path)
 
 
 if __name__ == "__main__":
