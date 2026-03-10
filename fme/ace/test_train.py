@@ -888,6 +888,7 @@ def test_restore_checkpoint(
             )
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 @pytest.mark.skipif(
     fme.get_device().type == "mps", reason="MPS does not support multi-device training."
