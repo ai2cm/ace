@@ -4,7 +4,7 @@ import torch
 from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
 
-from .topography import StaticInput, StaticInputs
+from .static import StaticInput, StaticInputs
 from .utils import ClosedInterval
 
 
