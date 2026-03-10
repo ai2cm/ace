@@ -1,6 +1,7 @@
 """This file contains unit tests related to creating torch Datasets from climate
 data (e.g. netCDF files)."""
 
+import datetime
 import math
 import os
 import pathlib
@@ -20,6 +21,7 @@ from fme.ace.data_loading.getters import (
     get_gridded_data,
     get_inference_data,
 )
+from fme.ace.data_loading.gridded_data import _scatter_properties
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -30,14 +32,20 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed.distributed import Distributed
-from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
+from fme.core.mask_provider import MaskProvider
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.typing_ import Slice
 
@@ -203,10 +211,6 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     tmp_path = dist.scatter_object(tmp_path)  # get the root value
     global_batch_size = 24
     if dist.is_root():
@@ -1173,3 +1177,51 @@ def test_pinned_memory(tmp_path, time_buffer: int):
     for batch in loader:
         tensor = next(iter(batch.data.values()))
         assert tensor.is_pinned() is using_gpu()
+
+
+@pytest.mark.parallel
+def test_scatter_properties():
+    """Verify _scatter_properties slices coords and masks correctly."""
+    dist = Distributed.get_instance()
+    n_lat, n_lon = N_LAT, N_LON
+    lat = torch.linspace(-90.0, 90.0, n_lat)
+    lon = torch.linspace(0.0, 360.0, n_lon)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    mask_tensor = torch.arange(n_lat * n_lon, dtype=torch.float32).reshape(
+        1, n_lat, n_lon
+    )
+    mask_provider = MaskProvider(masks={"mask_test": mask_tensor})
+    timestep = datetime.timedelta(hours=6)
+    metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
+    vertical = NullVerticalCoordinate()
+    props = DatasetProperties(
+        variable_metadata=metadata,
+        vertical_coordinate=vertical,
+        horizontal_coordinates=coords,
+        mask_provider=mask_provider,
+        timestep=timestep,
+        is_remote=False,
+        all_labels=None,
+    )
+
+    scattered = _scatter_properties(props)
+
+    # Unchanged fields
+    assert scattered.variable_metadata is metadata
+    assert scattered.vertical_coordinate is vertical
+    assert scattered.timestep == timestep
+
+    # Coordinates are sliced
+    h_slice, w_slice = dist.get_local_slices((n_lat, n_lon))
+    expected_lat = lat[h_slice]
+    expected_lon = lon[w_slice]
+    assert isinstance(scattered.horizontal_coordinates, LatLonCoordinates)
+    torch.testing.assert_close(scattered.horizontal_coordinates.lat, expected_lat)
+    torch.testing.assert_close(scattered.horizontal_coordinates.lon, expected_lon)
+
+    # Masks are sliced
+    assert isinstance(scattered.mask_provider, MaskProvider)
+    expected_mask = mask_tensor[..., h_slice, w_slice].contiguous()
+    torch.testing.assert_close(
+        scattered.mask_provider.masks["mask_test"], expected_mask
+    )

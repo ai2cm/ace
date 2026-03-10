@@ -50,7 +50,7 @@ def _get_sampler(
     dist = Distributed.get_instance()
     if sample_with_replacement_dataset_size is not None:
         local_sample_with_replacement_dataset_size = (
-            sample_with_replacement_dataset_size // dist.world_size
+            sample_with_replacement_dataset_size // dist.total_data_parallel_ranks
         )
         sampler = torch.utils.data.RandomSampler(
             dataset,
