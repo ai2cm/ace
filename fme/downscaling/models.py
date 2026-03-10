@@ -576,16 +576,11 @@ class CheckpointModelConfig:
         if "module" in (self.model_updates or {}):
             raise ValueError("'module' cannot be updated in model_updates.")
         if self.fine_topography_path is not None:
-            warnings.warn(
-                "fine_topography_path is deprecated. Use static_inputs instead, "
-                "e.g. static_inputs: {HGTsfc: <path>}.",
-                DeprecationWarning,
+            raise ValueError(
+                "fine_topography_path is deprecated and will be removed in "
+                "a future release. Use static_inputs instead, "
+                "e.g., static_inputs: {HGTsfc: <path>}.",
             )
-            if self.static_inputs is not None:
-                raise ValueError(
-                    "Cannot specify both fine_topography_path and static_inputs."
-                )
-            self.static_inputs = {"HGTsfc": self.fine_topography_path}
 
     @property
     def _checkpoint(self) -> Mapping[str, Any]:

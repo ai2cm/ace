@@ -517,12 +517,11 @@ def test_noise_config_error():
         )
 
 
-def test_checkpoint_config_topography_and_static_inputs_raises():
-    with pytest.raises(ValueError, match="Cannot specify both"):
+def test_checkpoint_config_topography_raises():
+    with pytest.raises(ValueError):
         CheckpointModelConfig(
             checkpoint_path="/any/path.ckpt",
             fine_topography_path="/topo/path.nc",
-            static_inputs={"HGTsfc": "/other/path.nc"},
         )
 
 
