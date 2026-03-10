@@ -6,7 +6,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=spencerc_ai2
 REPO_ROOT=$(git rev-parse --show-toplevel)
-CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
+CHECKPOINT_PATH=training_checkpoints/best_ckpt.tar
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -19,7 +19,7 @@ for climate in 1xCO2 2xCO2 4xCO2; do
     config_path=${SCRIPT_PATH}/ace-random-CO2-${climate}-evaluator-config.yaml
     python -m fme.ace.validate_config --config_type evaluator ${config_path}
     for name in "${!MODELS[@]}"; do
-        job_name="2026-03-10-$case-evaluator-$name"
+        job_name="2026-03-10-$case-evaluator-best-ckpt-$name"
         existing_results_dataset=${MODELS[$name]}
         gantry run \
                 --name $job_name \
