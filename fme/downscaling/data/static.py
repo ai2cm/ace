@@ -80,10 +80,10 @@ class StaticInput:
         for patch in patches:
             yield self._apply_patch(patch)
 
-    def to_state(self) -> dict:
+    def get_state(self) -> dict:
         return {
             "data": self.data.cpu(),
-            "coords": self.coords.to_state(),
+            "coords": self.coords.get_state(),
         }
 
 
@@ -163,9 +163,9 @@ class StaticInputs:
                 fields=[field._apply_patch(patch) for field in self.fields]
             )
 
-    def to_state(self) -> dict:
+    def get_state(self) -> dict:
         return {
-            "fields": [field.to_state() for field in self.fields],
+            "fields": [field.get_state() for field in self.fields],
         }
 
     @classmethod

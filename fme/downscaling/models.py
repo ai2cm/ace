@@ -496,7 +496,7 @@ class DiffusionModel:
 
     def get_state(self) -> Mapping[str, Any]:
         if self.static_inputs is not None:
-            static_inputs_state = self.static_inputs.to_state()
+            static_inputs_state = self.static_inputs.get_state()
         else:
             static_inputs_state = None
 

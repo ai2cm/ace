@@ -21,7 +21,7 @@ class GriddedOperations(abc.ABC):
         if not isinstance(other, GriddedOperations):
             return False
         try:
-            assert_dict_allclose(self.to_state(), other.to_state())
+            assert_dict_allclose(self.get_state(), other.get_state())
         except AssertionError:
             return False
         return True
@@ -207,7 +207,7 @@ class GriddedOperations(abc.ABC):
         self,
     ) -> nn.Module: ...
 
-    def to_state(self) -> dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         return {
             "type": self.__class__.__name__,
             "state": self.get_initialization_kwargs(),
