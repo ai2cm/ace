@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# import FactorizedTensor from tensorly for tensorized operations
 import math
 import torch
 import torch.nn as nn
@@ -22,10 +21,8 @@ import torch.nn as nn
 from fme.core.benchmark.timer import NullTimer, Timer
 from fme.core.distributed.distributed import Distributed
 
-# import convenience functions for factorized tensors
 from .activations import ComplexReLU
 
-# for the experimental module
 from .contractions import (
     compl_exp_mul2d_fwd,
     compl_exp_muladd2d_fwd,
