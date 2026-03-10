@@ -17,17 +17,15 @@ Requires:
 """
 
 import argparse
+import shutil
 import tempfile
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from plot_beaker_histograms import (
-    detect_variable_pairs,
-    fetch_beaker_dataset,
-    find_event_files,
-)
+from plot_beaker_histograms import detect_variable_pairs
+from utils import fetch_beaker_dataset, find_event_files
 
 COLORS = [
     "C0",
@@ -257,8 +255,6 @@ def main():
             for ds in opened_datasets:
                 ds.close()
     finally:
-        import shutil
-
         for td in temp_dirs:
             shutil.rmtree(td, ignore_errors=True)
 

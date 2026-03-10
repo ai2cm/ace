@@ -19,7 +19,6 @@ Requires:
 import argparse
 import math
 import re
-import subprocess
 import tempfile
 import warnings
 from pathlib import Path
@@ -33,14 +32,21 @@ import xarray as xr
 from cartopy.feature import ShapelyFeature
 from cartopy.io import shapereader
 from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
+from utils import fetch_beaker_dataset, find_event_files
 
 warnings.filterwarnings("ignore")
 
 from plot_beaker_histograms import plot_histogram_lines
 
+# default time subselection for coarse data
 TIME_SEL = slice(cftime.DatetimeJulian(2023, 1, 1), None)
-# Matching for *YYYYMMDD*.nc (date can appear anywhere in the filename)
-_EVENT_FILE_RE = re.compile(r"(.+?)[\._-]?(\d{8})[\._-]?(.*)\.nc$")
+UNITS = {
+    "PRMSL": "hPa",
+    "PRATEsfc": "kg/m^2/s",
+    "eastward_wind_at_ten_meters": "m/s",
+    "northward_wind_at_ten_meters": "m/s",
+    "wind_speed": "m/s",
+}
 
 
 def parse_args():
@@ -120,17 +126,16 @@ def get_coarse_data(path: str | None, time_sel: slice | None = TIME_SEL) -> xr.D
     if path is not None:
         return xr.open_zarr(path)
     else:
-        winds = xr.open_zarr(
-            "gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control/instantaneous_physics_fields.zarr"
-        ).sel(time=time_sel)[
-            ["eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"]
+        gcs_root = "gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control"
+        winds = xr.open_zarr(f"{gcs_root}/instantaneous_physics_fields.zarr").sel(
+            time=time_sel
+        )[["eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"]]
+        prate = xr.open_zarr(f"{gcs_root}/fluxes_2d.zarr").sel(time=time_sel)[
+            "PRATEsfc"
         ]
-        prate = xr.open_zarr(
-            "gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control/fluxes_2d.zarr"
-        ).sel(time=time_sel)["PRATEsfc"]
-        pres = xr.open_zarr(
-            "gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control/column_integrated_dynamical_fields.zarr"
-        ).sel(time=time_sel)["PRESsfc"]
+        pres = xr.open_zarr(f"{gcs_root}/column_integrated_dynamical_fields.zarr").sel(
+            time=time_sel
+        )["PRESsfc"]
         # in training, PRESsfc is used as input for outputting PRMSL
         prmsl = pres.rename("PRMSL")
         return xr.merge([winds, prate, pres, prmsl])
@@ -169,8 +174,8 @@ def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
         ax.set_visible(False)
 
     suffixes = ["coarse", "target", "predicted"]
-    vars = [f"{var_name}_{suffix}" for suffix in suffixes]
-    ds_ = ds[vars]
+    var_names_with_suffixes = [f"{var_name}_{suffix}" for suffix in suffixes]
+    ds_ = ds[var_names_with_suffixes]
 
     if sel:
         ds_ = ds_.sel(sel)
@@ -181,17 +186,26 @@ def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
     if var_name == "PRMSL":
         # fill PRMSL_coarse with nans
         ds_["PRMSL_coarse"].values[:] = np.nan
+        # For colorbar range, use only target and predicted (coarse is hidden)
+        arr = ds_[["PRMSL_target", "PRMSL_predicted"]].to_array()
+    else:
+        arr = ds_.to_array()
 
-    vmax = ds_.to_array().max()
-    if ds_.to_array().min() < -0.2:
+    vals = arr.values
+    if hasattr(vals, "compute"):
+        vals = vals.compute()
+    data_min = np.nanmin(vals)
+    data_max = np.nanmax(vals)
+    if data_min < -0.2:
         plot_kwargs["cmap"] = "RdBu_r"
     else:
         plot_kwargs["cmap"] = "turbo"
-        plot_kwargs["vmin"] = min(0, ds_.to_array().min())
+        plot_kwargs["vmin"] = max(0, data_min)
+    vmax = data_max
     if "vmax" not in plot_kwargs:
         plot_kwargs["vmax"] = vmax
     # coarse and target
-    for i, var in enumerate(vars[:2]):
+    for i, var in enumerate(var_names_with_suffixes[:2]):
         ax = axes[i]
 
         da = ds_[var]
@@ -213,7 +227,7 @@ def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
 
     for i, s in enumerate(samples):
         ax = axes[2 + i]
-        da = ds_[vars[-1]].isel(sample=s)
+        da = ds_[var_names_with_suffixes[-1]].isel(sample=s)
 
         img = da.plot(ax=ax, add_colorbar=False, **plot_kwargs)
         ax.set_title(f"predicted {s}", fontsize=10)
@@ -229,32 +243,9 @@ def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
         )
     cbar_ax = fig.add_axes([0.99, 0.25, 0.01, 0.5])  # [left, bottom, width, height]
     cbar = fig.colorbar(img, cax=cbar_ax)
-    cbar.set_label(f"{var_name} [m/s]")
-    # plt.tight_layout()
+    cbar.set_label(f"{var_name} [{UNITS.get(var_name, '')}]")
 
     return fig, axes
-
-
-def fetch_beaker_dataset(dataset_id: str, target_dir: str) -> None:
-    """Fetch a beaker dataset to the specified directory."""
-    subprocess.run(
-        ["beaker", "dataset", "fetch", dataset_id, "--output", target_dir],
-        check=True,
-    )
-
-
-def find_event_files(directory: str) -> dict[str, Path]:
-    """Find netCDF files matching the event naming pattern, keyed by event name."""
-    event_files = {}
-    for p in sorted(Path(directory).glob("*.nc")):
-        # extract event name
-        matched = _EVENT_FILE_RE.match(p.name)
-        if matched:
-            prefix, date, suffix = matched.group(1), matched.group(2), matched.group(3)
-            parts = [s for s in (prefix, suffix) if s]
-            event_name = f"{'_'.join(parts)}_{date}"
-            event_files[event_name] = p
-    return event_files
 
 
 def detect_variable_pairs(ds: xr.Dataset) -> list[str]:
