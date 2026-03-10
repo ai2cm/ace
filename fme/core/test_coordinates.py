@@ -49,6 +49,18 @@ except ImportError:
             DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
             DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
         ),
+        (
+            DepthCoordinate(
+                idepth=torch.tensor([0.0, 10.0, 50.0]),
+                mask=torch.tensor([1.0, 0.0]),
+                deptho=torch.tensor([float("nan"), 10.0]),
+            ),
+            DepthCoordinate(
+                idepth=torch.tensor([0.0, 10.0, 50.0]),
+                mask=torch.tensor([1.0, 0.0]),
+                deptho=torch.tensor([float("nan"), 10.0]),
+            ),
+        ),
     ],
 )
 def test_equality(first, second):
