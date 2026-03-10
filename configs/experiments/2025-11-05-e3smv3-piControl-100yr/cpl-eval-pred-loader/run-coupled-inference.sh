@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="v1124-E3SMv3-piControl-100yr-coupled-ICx1-40yr"
+JOB_NAME="v1124-E3SMv3-piControl-100yr-coupled-ICx1-100yr"
 JOB_GROUP="v1124-ref"
 EXISTING_RESULTS_DATASET="01KJNJFHZ988JKX3B4PTXMGCDW"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="config.yaml"
