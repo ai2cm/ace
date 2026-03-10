@@ -6,8 +6,9 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-0weight-prate-resume"
-CONFIG_FILENAME="train-100-to-3km-prmsl-output-loguni.yaml"
+JOB_NAME="
+xshield-downscaling-100km-to-3km-winds-prmsl-only-0.5sigmaexp-tropics-resume"
+CONFIG_FILENAME="train-100-to-3km-prmsl-winds-only.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -22,7 +23,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 
-PREVIOUS_RESULTS_DATASET="01KK4SG3X0VBJ7MG7JMT2J7TJX"
+PREVIOUS_RESULTS_DATASET="01KKAGKBKK3CPX9TACNA9WA9JM"
 
 
 gantry run \
