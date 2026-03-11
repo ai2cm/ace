@@ -387,5 +387,4 @@ class SeparatedModuleStep(StepABC):
 
     def load_state(self, state: dict[str, Any]) -> None:
         self.module.load_state(state["module"])
-        if "secondary_decoder" in state:
-            self.secondary_decoder.load_module_state(state["secondary_decoder"])
+        self.secondary_decoder.load_module_state(state["secondary_decoder"])

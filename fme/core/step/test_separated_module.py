@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 
 import pytest
 import torch
@@ -14,7 +15,7 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 
 IMG_SHAPE = (16, 32)
-TIMESTEP = __import__("datetime").timedelta(hours=6)
+TIMESTEP = datetime.timedelta(hours=6)
 
 
 def _get_dataset_info():
@@ -483,7 +484,7 @@ class TestSeparatedVsSingleModuleEquivalence:
 
         return single_step, separated_step, in_names
 
-    def test_equivalence(self):
+    def test_equivalence_with_single_step(self):
         torch.manual_seed(0)
         single_step, separated_step, in_names = self._build_equivalent_steps()
 
