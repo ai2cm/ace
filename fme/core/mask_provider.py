@@ -139,9 +139,7 @@ class MaskProvider(MaskProviderABC):
         dist = Distributed.get_instance()
         example_mask = next(iter(self._masks.values()))
         img_shape = example_mask.shape[-2:]
-        slices = dist.get_local_slices(img_shape)
-        return MaskProvider(
-            {k: v[(..., *slices)].contiguous() for k, v in self._masks.items()}
+            {k: v[dist.get_local_slices(v.shape)].contiguous() for k, v in self._masks.items()}
         )
 
     def update(self, other: "MaskProvider") -> None:
