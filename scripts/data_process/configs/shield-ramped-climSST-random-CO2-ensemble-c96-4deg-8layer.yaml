@@ -20,6 +20,9 @@ stats:
     - ramped-sst-2xCO2-random-perturbation-ic_0003
     - ramped-sst-4xCO2-random-perturbation-ic_0003
 dataset_computation:
+  sharding:
+    time_dim: 3600
+  n_split: 3
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
   vertical_coarsening_indices:
     - [0, 11]
