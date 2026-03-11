@@ -48,8 +48,6 @@ validation:
             start_time: '0251-01-03T12:00:00'
             stop_time: '0255-12-29T12:00:00'
   stepper_training:
-    parameter_init:
-      weights_path: /ckpt.tar
     n_ensemble: 2
     train_n_forward_steps:
       outcomes:
