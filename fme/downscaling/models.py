@@ -383,12 +383,9 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
-        # Ignore the passed static_inputs; subset self.static_inputs using fine batch
-        # coordinates. The caller-provided value is kept for signature compatibility.
         _static_inputs = self._subset_static_inputs(
             batch.fine.lat_interval, batch.fine.lon_interval
         )
@@ -452,8 +449,8 @@ class DiffusionModel:
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        # static_inputs receives an internally-subsetted value from the calling method;
-        # external callers should use generate_on_batch / generate_on_batch_no_target.
+        # Internal method; external callers should use generate_on_batch /
+        # generate_on_batch_no_target.
         inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
         # expand samples and fold to
         # [batch * n_samples, output_channels, height, width]
@@ -503,11 +500,8 @@ class DiffusionModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         n_samples: int = 1,
     ) -> TensorDict:
-        # Ignore the passed static_inputs; derive the fine lat/lon interval from coarse
-        # batch coordinates via adjust_fine_coord_range, then subset self.static_inputs.
         if self.config.use_fine_topography:
             if self.static_inputs is None:
                 raise ValueError(
@@ -540,11 +534,8 @@ class DiffusionModel:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         n_samples: int = 1,
     ) -> ModelOutputs:
-        # Ignore the passed static_inputs; subset self.static_inputs using fine batch
-        # coordinates. The caller-provided value is kept for signature compatibility.
         _static_inputs = self._subset_static_inputs(
             batch.fine.lat_interval, batch.fine.lon_interval
         )

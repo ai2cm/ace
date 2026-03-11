@@ -20,14 +20,12 @@ from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.generics.data import SizedMap
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.data.patching import Patch, get_patches
-from fme.downscaling.data.static import StaticInputs
 from fme.downscaling.data.utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,
     check_leading_dim,
     expand_and_fold_tensor,
     get_offset,
-    null_generator,
     paired_shuffle,
     scale_tuple,
 )
@@ -298,7 +296,6 @@ class GriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
-    static_inputs: StaticInputs | None
 
     @property
     def loader(self) -> DataLoader[BatchItem]:
@@ -307,27 +304,9 @@ class GriddedData:
 
         return SizedMap(on_device, self._loader)
 
-    @property
-    def topography_downscale_factor(self) -> int | None:
-        if self.static_inputs:
-            if (
-                self.static_inputs.shape[0] % self.shape[0] != 0
-                or self.static_inputs.shape[1] % self.shape[1] != 0
-            ):
-                raise ValueError(
-                    "Static inputs shape must be evenly divisible by data shape. "
-                    f"Got static inputs with shape {self.static_inputs.shape} "
-                    f"and data with shape {self.shape}"
-                )
-            return self.static_inputs.shape[0] // self.shape[0]
-        else:
-            return None
-
-    def get_generator(
-        self,
-    ) -> Iterator[tuple["BatchData", StaticInputs | None]]:
+    def get_generator(self) -> Iterator["BatchData"]:
         for batch in self.loader:
-            yield (batch, self.static_inputs)
+            yield batch
 
     def get_patched_generator(
         self,
@@ -335,20 +314,18 @@ class GriddedData:
         overlap: int = 0,
         drop_partial_patches: bool = True,
         random_offset: bool = False,
-    ) -> Iterator[tuple["BatchData", StaticInputs | None]]:
+    ) -> Iterator["BatchData"]:
         patched_generator = patched_batch_gen_from_loader(
             loader=self.loader,
-            static_inputs=self.static_inputs,
             coarse_yx_extent=self.shape,
             coarse_yx_patch_extent=yx_patch_extent,
-            downscale_factor=self.topography_downscale_factor,
             coarse_overlap=overlap,
             drop_partial_patches=drop_partial_patches,
             random_offset=random_offset,
         )
 
         return cast(
-            Iterator[tuple[BatchData, StaticInputs | None]],
+            Iterator[BatchData],
             patched_generator,
         )
 
@@ -361,7 +338,6 @@ class PairedGriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
-    static_inputs: StaticInputs | None
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:
@@ -370,11 +346,9 @@ class PairedGriddedData:
 
         return SizedMap(on_device, self._loader)
 
-    def get_generator(
-        self,
-    ) -> Iterator[tuple["PairedBatchData", StaticInputs | None]]:
+    def get_generator(self) -> Iterator["PairedBatchData"]:
         for batch in self.loader:
-            yield (batch, self.static_inputs)
+            yield batch
 
     def get_patched_generator(
         self,
@@ -383,10 +357,9 @@ class PairedGriddedData:
         drop_partial_patches: bool = True,
         random_offset: bool = False,
         shuffle: bool = False,
-    ) -> Iterator[tuple["PairedBatchData", StaticInputs | None]]:
+    ) -> Iterator["PairedBatchData"]:
         patched_generator = patched_batch_gen_from_paired_loader(
             self.loader,
-            self.static_inputs,
             coarse_yx_extent=self.coarse_shape,
             coarse_yx_patch_extent=coarse_yx_patch_extent,
             downscale_factor=self.downscale_factor,
@@ -396,7 +369,7 @@ class PairedGriddedData:
             shuffle=shuffle,
         )
         return cast(
-            Iterator[tuple[PairedBatchData, StaticInputs | None]],
+            Iterator[PairedBatchData],
             patched_generator,
         )
 
@@ -713,44 +686,28 @@ def _get_paired_patches(
 
 def patched_batch_gen_from_loader(
     loader: DataLoader[BatchItem],
-    static_inputs: StaticInputs | None,
     coarse_yx_extent: tuple[int, int],
     coarse_yx_patch_extent: tuple[int, int],
-    downscale_factor: int | None,
     coarse_overlap: int = 0,
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
-) -> Iterator[tuple[BatchData, StaticInputs | None]]:
+) -> Iterator[BatchData]:
     for batch in loader:
-        coarse_patches, fine_patches = _get_paired_patches(
+        coarse_patches, _ = _get_paired_patches(
             coarse_yx_extent=coarse_yx_extent,
             coarse_yx_patch_extent=coarse_yx_patch_extent,
             coarse_overlap=coarse_overlap,
-            downscale_factor=downscale_factor,
+            downscale_factor=None,
             random_offset=random_offset,
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
-    batch_data_patches = batch.generate_from_patches(coarse_patches)
-
-    if static_inputs is not None:
-        if fine_patches is None:
-            raise ValueError(
-                "Topography provided but downscale_factor is None, cannot "
-                "generate fine patches."
-            )
-        static_inputs_patches = static_inputs.generate_from_patches(fine_patches)
-    else:
-        static_inputs_patches = null_generator(len(coarse_patches))
-
-    # Combine outputs from both generators
-    yield from zip(batch_data_patches, static_inputs_patches)
+        yield from batch.generate_from_patches(coarse_patches)
 
 
 def patched_batch_gen_from_paired_loader(
     loader: DataLoader[PairedBatchItem],
-    static_inputs: StaticInputs | None,
     coarse_yx_extent: tuple[int, int],
     coarse_yx_patch_extent: tuple[int, int],
     downscale_factor: int,
@@ -758,7 +715,7 @@ def patched_batch_gen_from_paired_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
-) -> Iterator[tuple[PairedBatchData, StaticInputs | None]]:
+) -> Iterator[PairedBatchData]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
             coarse_yx_extent=coarse_yx_extent,
@@ -769,17 +726,4 @@ def patched_batch_gen_from_paired_loader(
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
-        batch_data_patches = batch.generate_from_patches(coarse_patches, fine_patches)
-
-        if static_inputs is not None:
-            if fine_patches is None:
-                raise ValueError(
-                    "Static inputs provided but downscale_factor is None, cannot "
-                    "generate fine patches."
-                )
-            static_inputs_patches = static_inputs.generate_from_patches(fine_patches)
-        else:
-            static_inputs_patches = null_generator(len(coarse_patches))
-
-        # Combine outputs from both generators
-        yield from zip(batch_data_patches, static_inputs_patches)
+        yield from batch.generate_from_patches(coarse_patches, fine_patches)

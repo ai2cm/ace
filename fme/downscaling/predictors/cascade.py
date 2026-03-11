@@ -3,26 +3,14 @@ import math
 
 import torch
 
-from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.tensors import unfold_ensemble_dim
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import (
-    BatchData,
-    ClosedInterval,
-    PairedBatchData,
-    StaticInputs,
-    adjust_fine_coord_range,
-    scale_tuple,
-)
+from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, ModelOutputs
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
-
-
-def _closed_interval_from_coord(coord: torch.Tensor) -> ClosedInterval:
-    return ClosedInterval(start=coord.min().item(), stop=coord.max().item())
 
 
 @dataclasses.dataclass
@@ -46,9 +34,6 @@ class CascadePredictorConfig:
             self._models = [cfg.build() for cfg in self.cascade_model_checkpoints]
         return self._models
 
-    def get_static_inputs(self) -> list[StaticInputs | None]:
-        return [model.static_inputs for model in self.models]
-
     def build(self):
         for m in range(len(self.models) - 1):
             output_shape = scale_tuple(
@@ -63,9 +48,7 @@ class CascadePredictorConfig:
                     f"input shape {input_shape_next_step} of model at step {m+1}. "
                 )
 
-        return CascadePredictor(
-            models=self.models, static_inputs=self.get_static_inputs()
-        )
+        return CascadePredictor(models=self.models)
 
     @property
     def data_requirements(self) -> DataRequirements:
@@ -87,11 +70,8 @@ def _restore_batch_and_sample_dims(data: TensorMapping, n_samples: int):
 
 
 class CascadePredictor:
-    def __init__(
-        self, models: list[DiffusionModel], static_inputs: list[StaticInputs | None]
-    ):
+    def __init__(self, models: list[DiffusionModel]):
         self.models = models
-        self._static_inputs = static_inputs
         self.out_packer = self.models[-1].out_packer
         self.normalizer = FineResCoarseResPair(
             coarse=self.models[0].normalizer.coarse,
@@ -120,10 +100,9 @@ class CascadePredictor:
         self,
         coarse: TensorMapping,
         n_samples: int,
-        static_inputs: list[StaticInputs | None],
     ):
         current_coarse = coarse
-        for i, (model, fine_topography) in enumerate(zip(self.models, static_inputs)):
+        for i, model in enumerate(self.models):
             sample_data = next(iter(current_coarse.values()))
             batch_size = sample_data.shape[0]
             # n_samples are generated for the first step, and subsequent models
@@ -131,7 +110,7 @@ class CascadePredictor:
             n_samples_cascade_step = n_samples if i == 0 else 1
 
             generated, generated_norm, latent_steps = model.generate(
-                current_coarse, fine_topography, n_samples_cascade_step
+                current_coarse, n_samples=n_samples_cascade_step
             )
             generated = {
                 k: v.reshape(batch_size * n_samples_cascade_step, *v.shape[-2:])
@@ -145,28 +124,18 @@ class CascadePredictor:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> TensorDict:
-        subset_static_inputs = self._get_subset_static_inputs(
-            coarse_coords=batch.latlon_coordinates[0]
-        )
-        generated, _, _ = self.generate(batch.data, n_samples, subset_static_inputs)
+        generated, _, _ = self.generate(batch.data, n_samples)
         return generated
 
     @torch.no_grad()
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: list[StaticInputs | None],
         n_samples: int = 1,
     ) -> ModelOutputs:
-        static_inputs = self._get_subset_static_inputs(
-            coarse_coords=batch.coarse.latlon_coordinates[0]
-        )
-        generated, _, latent_steps = self.generate(
-            batch.coarse.data, n_samples, static_inputs
-        )
+        generated, _, latent_steps = self.generate(batch.coarse.data, n_samples)
         targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
@@ -176,43 +145,3 @@ class CascadePredictor:
             loss=torch.tensor(float("inf"), device=get_device()),
             latent_steps=latent_steps,
         )
-
-    def _get_subset_static_inputs(
-        self,
-        coarse_coords: LatLonCoordinates,
-    ) -> list[StaticInputs | None]:
-        # Intermediate topographies are loaded as full range and need to be subset
-        # to the matching lat/lon range for each batch.
-        # TODO: Will eventually move subsetting into checkpoint model.
-        subset_static_inputs: list[StaticInputs | None] = []
-        _coarse_coords = coarse_coords
-        lat_range = _closed_interval_from_coord(_coarse_coords.lat)
-        lon_range = _closed_interval_from_coord(_coarse_coords.lon)
-
-        for i, full_intermediate_static_inputs in enumerate(self._static_inputs):
-            if full_intermediate_static_inputs is not None:
-                _adjusted_lat_range = adjust_fine_coord_range(
-                    lat_range,
-                    _coarse_coords.lat,
-                    full_intermediate_static_inputs.coords.lat,
-                    downscale_factor=self.models[i].downscale_factor,
-                )
-                _adjusted_lon_range = adjust_fine_coord_range(
-                    lon_range,
-                    _coarse_coords.lon,
-                    full_intermediate_static_inputs.coords.lon,
-                    downscale_factor=self.models[i].downscale_factor,
-                )
-                subset_interm_static_inputs = (
-                    full_intermediate_static_inputs.subset_latlon(
-                        lat_interval=_adjusted_lat_range,
-                        lon_interval=_adjusted_lon_range,
-                    )
-                )
-                _coarse_coords = subset_interm_static_inputs.coords
-                lat_range = _closed_interval_from_coord(_coarse_coords.lat)
-                lon_range = _closed_interval_from_coord(_coarse_coords.lon)
-            else:
-                subset_interm_static_inputs = None
-            subset_static_inputs.append(subset_interm_static_inputs)
-        return subset_static_inputs

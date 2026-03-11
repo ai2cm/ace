@@ -10,7 +10,7 @@ from fme.core.cli import prepare_directory
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig, StaticInputs
+from ..data import DataLoaderConfig, adjust_fine_coord_range
 from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import (
     CascadePredictor,
@@ -55,7 +55,7 @@ class Downscaler:
 
     def _get_generation_model(
         self,
-        static_inputs: StaticInputs,
+        fine_shape: tuple[int, int],
         output: DownscalingOutput,
     ) -> DiffusionModel | PatchPredictor | CascadePredictor:
         """
@@ -66,7 +66,7 @@ class Downscaler:
         generations.
         """
         model_patch_shape = self.model.fine_shape
-        actual_shape = tuple(static_inputs.shape)
+        actual_shape = fine_shape
 
         if model_patch_shape == actual_shape:
             # short circuit, no patching necessary
@@ -77,8 +77,8 @@ class Downscaler:
         ):
             # we don't support generating regions smaller than the model patch size
             raise ValueError(
-                f"Model coarse shape {model_patch_shape} is larger than "
-                f"actual topography shape {actual_shape} for output {output.name}."
+                f"Model fine shape {model_patch_shape} is larger than "
+                f"actual fine shape {actual_shape} for output {output.name}."
             )
         elif output.patch.needs_patch_predictor:
             # Use a patch predictor
@@ -97,8 +97,8 @@ class Downscaler:
             )
 
     def _on_device_generator(self, loader):
-        for loaded_item, topography in loader:
-            yield loaded_item.to_device(), topography.to_device()
+        for loaded_item in loader:
+            yield loaded_item.to_device()
 
     def run_output_generation(self, output: DownscalingOutput):
         """Execute the generation loop for this output."""
@@ -107,22 +107,40 @@ class Downscaler:
         # initialize writer and model in loop for coord info
         model = None
         writer = None
+        fine_static_inputs = None
         total_batches = len(output.data.loader)
 
         loaded_item: LoadedSliceWorkItem
-        static_inputs: StaticInputs
-        for i, (loaded_item, static_inputs) in enumerate(output.data.get_generator()):
+        for i, loaded_item in enumerate(output.data.get_generator()):
             if writer is None:
+                coarse_lat = loaded_item.batch.latlon_coordinates.lat[0]
+                coarse_lon = loaded_item.batch.latlon_coordinates.lon[0]
+                fine_lat_interval = adjust_fine_coord_range(
+                    loaded_item.batch.lat_interval,
+                    full_coarse_coord=coarse_lat,
+                    full_fine_coord=self.model.static_inputs.coords.lat,
+                    downscale_factor=self.model.downscale_factor,
+                )
+                fine_lon_interval = adjust_fine_coord_range(
+                    loaded_item.batch.lon_interval,
+                    full_coarse_coord=coarse_lon,
+                    full_fine_coord=self.model.static_inputs.coords.lon,
+                    downscale_factor=self.model.downscale_factor,
+                )
+                fine_static_inputs = self.model.static_inputs.subset_latlon(
+                    fine_lat_interval,
+                    fine_lon_interval,
+                )
                 writer = output.get_writer(
-                    latlon_coords=static_inputs.coords,
+                    latlon_coords=fine_static_inputs.coords,
                     output_dir=self.output_dir,
                 )
                 writer.initialize_store(
-                    static_inputs.fields[0].data.cpu().numpy().dtype
+                    fine_static_inputs.fields[0].data.cpu().numpy().dtype
                 )
             if model is None:
                 model = self._get_generation_model(
-                    static_inputs=static_inputs, output=output
+                    fine_shape=fine_static_inputs.shape, output=output
                 )
 
             logging.info(
@@ -132,7 +150,6 @@ class Downscaler:
 
             output_data = model.generate_on_batch_no_target(
                 loaded_item.batch,
-                static_inputs=static_inputs,
                 n_samples=loaded_item.n_ens,
             )
             output_np = {key: value.cpu().numpy() for key, value in output_data.items()}
@@ -243,7 +260,7 @@ class InferenceConfig:
                 loader_config=self.data,
                 requirements=self.model.data_requirements,
                 patch=self.patch,
-                static_inputs_from_checkpoint=model.static_inputs,
+                fine_shape=model.fine_shape,
             )
             for output_cfg in self.outputs
         ]

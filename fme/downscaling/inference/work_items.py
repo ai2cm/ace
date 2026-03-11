@@ -10,7 +10,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.generics.data import SizedMap
 
-from ..data import BatchData, StaticInputs
+from ..data import BatchData
 from ..data.config import BatchItemDatasetAdapter
 from .constants import ENSEMBLE_NAME, TIME_NAME
 
@@ -297,7 +297,6 @@ class SliceWorkItemGriddedData:
     all_times: xr.CFTimeIndex
     dtype: torch.dtype
     max_output_shape: tuple[int, ...]
-    static_inputs: StaticInputs
 
     # TODO: currently no protocol or ABC for gridded data objects
     #       if we want to unify, we will need one and just raise
@@ -310,7 +309,7 @@ class SliceWorkItemGriddedData:
 
         return SizedMap(on_device, self._loader)
 
-    def get_generator(self) -> Iterator[tuple[LoadedSliceWorkItem, StaticInputs]]:
+    def get_generator(self) -> Iterator[LoadedSliceWorkItem]:
         work_item: LoadedSliceWorkItem
         for work_item in self.loader:
-            yield work_item, self.static_inputs
+            yield work_item

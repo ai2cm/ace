@@ -12,6 +12,7 @@ import yaml
 from fme.core.dataset.time import TimeSlice
 from fme.core.logging_utils import LoggingConfig
 from fme.downscaling.data import (
+    ClosedInterval,
     LatLonCoordinates,
     StaticInput,
     StaticInputs,
@@ -92,7 +93,6 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
     Test _get_generation_model returns model unchanged when shapes match exactly.
     """
     mock_model.fine_shape = (16, 16)
-    static_inputs = get_static_inputs(shape=(16, 16))
 
     downscaler = Downscaler(
         model=mock_model,
@@ -100,7 +100,7 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
     )
 
     result = downscaler._get_generation_model(
-        static_inputs=static_inputs,
+        fine_shape=(16, 16),
         output=mock_output_target,
     )
 
@@ -116,7 +116,6 @@ def test_get_generation_model_raises_when_domain_too_small(
     smaller than model.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_static_inputs(shape=topo_shape)
 
     downscaler = Downscaler(
         model=mock_model,
@@ -125,7 +124,7 @@ def test_get_generation_model_raises_when_domain_too_small(
 
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
-            static_inputs=topo,
+            fine_shape=topo_shape,
             output=mock_output_target,
         )
 
@@ -138,7 +137,6 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
     large domains with patching.
     """
     mock_model.fine_shape = (16, 16)
-    static_inputs = get_static_inputs(shape=(32, 32))  # Larger than model
 
     patch_config = PatchPredictionConfig(
         divide_generation=True,
@@ -152,7 +150,7 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
     )
 
     model = downscaler._get_generation_model(
-        static_inputs=static_inputs,
+        fine_shape=(32, 32),
         output=mock_output_target,
     )
 
@@ -168,7 +166,6 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
     not configured.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_static_inputs(shape=(32, 32))  # Larger than model
     mock_output_target.patch = PatchPredictionConfig(divide_generation=False)
 
     downscaler = Downscaler(
@@ -178,7 +175,7 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
 
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
-            static_inputs=topo,
+            fine_shape=(32, 32),
             output=mock_output_target,
         )
 
@@ -192,15 +189,33 @@ def test_run_target_generation_skips_padding_items(
     mock_work_item = MagicMock()
     mock_work_item.is_padding = True
     mock_work_item.n_ens = 4
-    mock_work_item.batch = MagicMock()
+    # to_device() should return self so batch coords are preserved
+    mock_work_item.to_device.return_value = mock_work_item
 
-    static_inputs = get_static_inputs(shape=(16, 16))
+    # Set up proper batch coordinates for adjust_fine_coord_range to work.
+    # Coarse coords are interior so fine can have buffer on each side.
+    coarse_lat = torch.arange(1, 9).float()  # 8 values: 1..8
+    coarse_lon = torch.arange(1, 9).float()
+    mock_latlon = MagicMock()
+    mock_latlon.lat = coarse_lat.unsqueeze(0)
+    mock_latlon.lon = coarse_lon.unsqueeze(0)
+    mock_work_item.batch.latlon_coordinates = mock_latlon
+    mock_work_item.batch.lat_interval = ClosedInterval(1.0, 8.0)
+    mock_work_item.batch.lon_interval = ClosedInterval(1.0, 8.0)
+
+    fine_static_inputs = get_static_inputs(shape=(16, 16))
+    fine_lat = torch.arange(0, 18).float()  # 18 values: 0..17
+    fine_lon = torch.arange(0, 18).float()
+    mock_model.static_inputs.coords.lat = fine_lat
+    mock_model.static_inputs.coords.lon = fine_lon
+    mock_model.static_inputs.subset_latlon.return_value = fine_static_inputs
+    mock_model.downscale_factor = 2
+    mock_model.fine_shape = (16, 16)
 
     mock_gridded_data = SliceWorkItemGriddedData(
-        [mock_work_item], {}, [0], torch.float32, (1, 4, 16, 16), static_inputs
+        [mock_work_item], {}, [0], torch.float32, (1, 4, 16, 16)
     )
     mock_output_target.data = mock_gridded_data
-    mock_model.fine_shape = (16, 16)
 
     mock_output = {
         "var1": torch.randn(1, 4, 16, 16),

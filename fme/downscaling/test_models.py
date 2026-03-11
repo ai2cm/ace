@@ -206,7 +206,7 @@ def test_from_state_backward_compat_fine_topography():
     # At runtime, omitting static inputs must raise a clear error
     batch = get_mock_paired_batch([2, *coarse_shape], [2, *fine_shape])
     with pytest.raises(ValueError, match="Static inputs must be provided"):
-        model_from_old_state.generate_on_batch(batch, static_inputs=None)
+        model_from_old_state.generate_on_batch(batch)
 
 
 def _get_diffusion_model(
@@ -265,13 +265,12 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
     assert model._get_fine_shape(coarse_shape) == fine_shape
 
     optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
-    train_outputs = model.train_on_batch(batch, static_inputs, optimization)
+    train_outputs = model.train_on_batch(batch, optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
 
     n_generated_samples = 2
     generated_outputs = [
-        model.generate_on_batch(batch, static_inputs)
-        for _ in range(n_generated_samples)
+        model.generate_on_batch(batch) for _ in range(n_generated_samples)
     ]
 
     for generated_output in generated_outputs:
@@ -392,7 +391,7 @@ def test_model_error_cases():
     # missing fine topography when model requires it
     batch.fine.topography = None
     with pytest.raises(ValueError):
-        model.generate_on_batch(batch, static_inputs=None)
+        model.generate_on_batch(batch)
 
 
 def test_DiffusionModel_generate_on_batch_no_target():
@@ -417,7 +416,6 @@ def test_DiffusionModel_generate_on_batch_no_target():
 
     samples = model.generate_on_batch_no_target(
         coarse_batch,
-        static_inputs=static_inputs,
         n_samples=n_generated_samples,
     )
 
@@ -457,9 +455,7 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
         coarse_batch = make_batch_data(
             (batch_size, *alternative_input_shape), coarse_lat, coarse_lon
         )
-        samples = model.generate_on_batch_no_target(
-            coarse_batch, n_samples=n_ensemble, static_inputs=None
-        )
+        samples = model.generate_on_batch_no_target(coarse_batch, n_samples=n_ensemble)
 
         assert samples["x"].shape == (
             batch_size,
