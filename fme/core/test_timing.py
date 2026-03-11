@@ -188,12 +188,66 @@ def test_GlobalTimer_nested_outer_context():
         timer = GlobalTimer.get_instance()
         with timer.outer_context("foo"):
             with timer.context("bar"):
-                pass
+                time.sleep(0.01)
+    assert timer.get_duration("foo") > 0.01
+    assert timer.get_duration("foo/bar") > 0.01
 
 
-def test_GlobalTimer_double_nested_outer_context():
+def test_GlobalTimer_double_nested_outer_context_error():
+    with pytest.raises(
+        RuntimeError, match="GlobalTimer already has an active outer timer"
+    ):
+        with GlobalTimer():
+            timer = GlobalTimer.get_instance()
+            with timer.outer_context("foo"):
+                with timer.outer_context("bar"):
+                    pass
+
+
+def test_GlobalTimer_inner_keys_namespaced_under_outer():
     with GlobalTimer():
         timer = GlobalTimer.get_instance()
-        with timer.outer_context("foo"):
-            with timer.outer_context("bar"):
-                pass
+        with timer.outer_context("phase"):
+            with timer.context("step_a"):
+                time.sleep(0.01)
+            with timer.context("step_b"):
+                time.sleep(0.01)
+    durations = timer.get_durations()
+    assert "phase" in durations
+    assert "phase/step_a" in durations
+    assert "phase/step_b" in durations
+    assert "step_a" not in durations
+    assert "step_b" not in durations
+    assert durations["phase/step_a"] > 0.01
+    assert durations["phase/step_b"] > 0.01
+    assert durations["phase"] >= durations["phase/step_a"] + durations["phase/step_b"]
+
+
+def test_GlobalTimer_inner_keys_flat_without_outer():
+    with GlobalTimer():
+        timer = GlobalTimer.get_instance()
+        with timer.context("step_a"):
+            time.sleep(0.01)
+        with timer.context("step_b"):
+            time.sleep(0.01)
+    durations = timer.get_durations()
+    assert "step_a" in durations
+    assert "step_b" in durations
+    assert durations["step_a"] > 0.01
+    assert durations["step_b"] > 0.01
+
+
+def test_GlobalTimer_sequential_outer_timers():
+    with GlobalTimer():
+        timer = GlobalTimer.get_instance()
+        with timer.outer_context("first"):
+            with timer.context("work"):
+                time.sleep(0.01)
+        with timer.outer_context("second"):
+            with timer.context("work"):
+                time.sleep(0.01)
+    durations = timer.get_durations()
+    assert "first" in durations
+    assert "first/work" in durations
+    assert "second" in durations
+    assert "second/work" in durations

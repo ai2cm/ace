@@ -41,6 +41,15 @@ class CumulativeTimer:
 class GlobalTimer:
     """
     A singleton class to make timing inference code easier.
+
+    Supports a two-level hierarchy of timers:
+
+    - **Outer timer**: at most one active at a time. Tracks total wall time for
+      a top-level phase (e.g. ``"inference"``).
+    - **Inner timers**: at most one active at a time within an outer timer.
+      When an outer timer is active, inner timer keys are automatically
+      qualified as ``"{outer}/{inner}"``; without an outer timer they remain
+      flat.
     """
 
     @classmethod
@@ -71,13 +80,28 @@ class GlobalTimer:
     def __init__(self):
         self._timers: dict[str, CumulativeTimer] = {}
         self._active = False
-        self._current_category: str | None = None
+        self._current_outer: str | None = None
+        self._current_inner: str | None = None
+
+    def _inner_key(self, category: str) -> str:
+        if self._current_outer is not None:
+            return f"{self._current_outer}/{category}"
+        return category
+
+    def _start_timer(self, key: str):
+        if key not in self._timers:
+            self._timers[key] = CumulativeTimer(key)
+        self._timers[key].start()
+
+    def _stop_timer(self, key: str):
+        self._timers[key].stop()
 
     def outer_context(self, category: str) -> contextlib.AbstractContextManager:
         """
-        Context manager for timing a block of code.
+        Context manager for timing a top-level phase.
 
-        May be active at the same time as other timers.
+        Only one outer timer can be active at a time.  Inner timers started
+        within this context are automatically namespaced under *category*.
         """
 
         @contextlib.contextmanager
@@ -94,7 +118,8 @@ class GlobalTimer:
         """
         Context manager for timing a block of code.
 
-        Only one inner timer can be active at a time.
+        Only one inner timer can be active at a time.  If an outer timer is
+        active, the key is qualified as ``"{outer}/{category}"``.
         """
 
         @contextlib.contextmanager
@@ -111,28 +136,35 @@ class GlobalTimer:
         """
         Start an inner timer for the given category.
 
-        Only one inner timer can be active at a time.
+        Only one inner timer can be active at a time.  If an outer timer is
+        active, the stored key is ``"{outer}/{category}"``.
         """
         if not self._active:
             return
-        if self._current_category is not None:
+        if self._current_inner is not None:
             raise RuntimeError(
                 "GlobalTimer already has an active inner timer, "
-                f"{self._current_category}"
+                f"{self._current_inner}"
             )
-        self.start_outer(category)
-        self._current_category = category
+        key = self._inner_key(category)
+        self._start_timer(key)
+        self._current_inner = key
 
     def start_outer(self, category: str):
         """
-        Start a timer for the given category.
+        Start an outer timer for the given category.
 
-        May be active at the same time as other timers.
+        Only one outer timer can be active at a time.
         """
-        if self._active:
-            if category not in self._timers:
-                self._timers[category] = CumulativeTimer(category)
-            self._timers[category].start()
+        if not self._active:
+            return
+        if self._current_outer is not None:
+            raise RuntimeError(
+                "GlobalTimer already has an active outer timer, "
+                f"{self._current_outer!r}"
+            )
+        self._current_outer = category
+        self._start_timer(category)
 
     def stop(self):
         """
@@ -140,19 +172,24 @@ class GlobalTimer:
         """
         if not self._active:
             return
-        if self._current_category is None:
+        if self._current_inner is None:
             raise RuntimeError("GlobalTimer does not have a running timer")
-        self.stop_outer(self._current_category)
-        self._current_category = None
+        self._stop_timer(self._current_inner)
+        self._current_inner = None
 
     def stop_outer(self, category: str):
         """
-        Stop the timer for the given category.
-
-        Does not change the currently active inner timer.
+        Stop the outer timer for the given category.
         """
-        if self._active:
-            self._timers[category].stop()
+        if not self._active:
+            return
+        if self._current_outer != category:
+            raise RuntimeError(
+                f"Cannot stop outer timer {category!r}; "
+                f"active outer timer is {self._current_outer!r}"
+            )
+        self._stop_timer(category)
+        self._current_outer = None
 
     def get_duration(self, category: str) -> float:
         if self._active:

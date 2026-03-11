@@ -396,7 +396,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         config.n_coupled_steps * stepper.n_inner_steps
     ) * config.loader.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
