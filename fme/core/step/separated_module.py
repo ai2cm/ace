@@ -69,6 +69,8 @@ class SeparatedModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
+        if len(self.prognostic_names_) == 0:
+            raise ValueError("prognostic_names_ must not be empty")
         all_names = self.forcing_names + self.prognostic_names_ + self.diagnostic_names
         if len(all_names) != len(set(all_names)):
             seen: dict[str, str] = {}
@@ -328,22 +330,19 @@ class SeparatedModuleStep(StepABC):
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         def network_call(input_norm: TensorDict) -> TensorDict:
-            forcing = self.forcing_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            prognostic_in = self.prognostic_packer.pack(
+                input_norm, axis=self.CHANNEL_DIM
+            )
 
-            # Get a reference tensor for shape/device info
-            ref = forcing
-
-            if len(self.prognostic_packer.names) > 0:
-                prognostic_in = self.prognostic_packer.pack(
-                    input_norm, axis=self.CHANNEL_DIM
-                )
+            if len(self.forcing_packer.names) > 0:
+                forcing = self.forcing_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             else:
-                prognostic_in = torch.zeros(
-                    *ref.shape[:-3],
+                forcing = torch.zeros(
+                    *prognostic_in.shape[:-3],
                     0,
-                    *ref.shape[-2:],
-                    dtype=ref.dtype,
-                    device=ref.device,
+                    *prognostic_in.shape[-2:],
+                    dtype=prognostic_in.dtype,
+                    device=prognostic_in.device,
                 )
 
             prog_out, diag_out = self.module.wrap_module(wrapper)(
@@ -351,10 +350,9 @@ class SeparatedModuleStep(StepABC):
             )
 
             output_dict: TensorDict = {}
-            if len(self.prognostic_packer.names) > 0:
-                output_dict.update(
-                    self.prognostic_packer.unpack(prog_out, axis=self.CHANNEL_DIM)
-                )
+            output_dict.update(
+                self.prognostic_packer.unpack(prog_out, axis=self.CHANNEL_DIM)
+            )
             if len(self.diagnostic_packer.names) > 0:
                 output_dict.update(
                     self.diagnostic_packer.unpack(diag_out, axis=self.CHANNEL_DIM)

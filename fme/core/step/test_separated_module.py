@@ -97,6 +97,22 @@ class TestSeparatedModuleStepConfig:
                 next_step_forcing_names=["p"],
             )
 
+    def test_empty_prognostic_names_raises(self):
+        normalization = _get_normalization(["f", "d"])
+        with pytest.raises(ValueError, match="prognostic_names_ must not be empty"):
+            SeparatedModuleStepConfig(
+                builder=SeparatedModuleSelector(
+                    type="legacy",
+                    config={
+                        "legacy_builder": {"type": "MLP", "config": {}},
+                    },
+                ),
+                forcing_names=["f"],
+                prognostic_names_=[],
+                diagnostic_names=["d"],
+                normalization=normalization,
+            )
+
     def test_input_output_names(self):
         normalization = _get_normalization(["f1", "f2", "p1", "p2", "d1"])
         config = SeparatedModuleStepConfig(
@@ -269,6 +285,135 @@ class TestSeparatedModuleStep:
 
         assert "p1" in output
         assert "d1" in output
+
+    def test_step_no_forcings(self):
+        prognostic_names = ["p1", "p2"]
+        diagnostic_names = ["d1"]
+        all_names = prognostic_names + diagnostic_names
+        normalization = _get_normalization(all_names)
+
+        config = SeparatedModuleStepConfig(
+            builder=SeparatedModuleSelector(
+                type="legacy",
+                config={
+                    "legacy_builder": {
+                        "type": "SphericalFourierNeuralOperatorNet",
+                        "config": {
+                            "scale_factor": 1,
+                            "embed_dim": 4,
+                            "num_layers": 2,
+                        },
+                    },
+                },
+            ),
+            forcing_names=[],
+            prognostic_names_=prognostic_names,
+            diagnostic_names=diagnostic_names,
+            normalization=normalization,
+        )
+
+        dataset_info = _get_dataset_info()
+        step = config.get_step(dataset_info, lambda _: None)
+        input_data = _get_tensor_dict(step.input_names)
+        next_step_data = _get_tensor_dict(step.next_step_input_names)
+
+        output = step.step(
+            StepArgs(
+                input=input_data,
+                next_step_input_data=next_step_data,
+                labels=None,
+            )
+        )
+
+        for name in prognostic_names + diagnostic_names:
+            assert name in output
+            assert output[name].shape == (2, *IMG_SHAPE)
+
+    def test_step_no_diagnostics(self):
+        forcing_names = ["f1"]
+        prognostic_names = ["p1", "p2"]
+        all_names = forcing_names + prognostic_names
+        normalization = _get_normalization(all_names)
+
+        config = SeparatedModuleStepConfig(
+            builder=SeparatedModuleSelector(
+                type="legacy",
+                config={
+                    "legacy_builder": {
+                        "type": "SphericalFourierNeuralOperatorNet",
+                        "config": {
+                            "scale_factor": 1,
+                            "embed_dim": 4,
+                            "num_layers": 2,
+                        },
+                    },
+                },
+            ),
+            forcing_names=forcing_names,
+            prognostic_names_=prognostic_names,
+            diagnostic_names=[],
+            normalization=normalization,
+        )
+
+        dataset_info = _get_dataset_info()
+        step = config.get_step(dataset_info, lambda _: None)
+        input_data = _get_tensor_dict(step.input_names)
+        next_step_data = _get_tensor_dict(step.next_step_input_names)
+
+        output = step.step(
+            StepArgs(
+                input=input_data,
+                next_step_input_data=next_step_data,
+                labels=None,
+            )
+        )
+
+        for name in prognostic_names:
+            assert name in output
+            assert output[name].shape == (2, *IMG_SHAPE)
+        assert len(output) == len(prognostic_names)
+
+    def test_step_no_forcings_no_diagnostics(self):
+        prognostic_names = ["p1", "p2"]
+        normalization = _get_normalization(prognostic_names)
+
+        config = SeparatedModuleStepConfig(
+            builder=SeparatedModuleSelector(
+                type="legacy",
+                config={
+                    "legacy_builder": {
+                        "type": "SphericalFourierNeuralOperatorNet",
+                        "config": {
+                            "scale_factor": 1,
+                            "embed_dim": 4,
+                            "num_layers": 2,
+                        },
+                    },
+                },
+            ),
+            forcing_names=[],
+            prognostic_names_=prognostic_names,
+            diagnostic_names=[],
+            normalization=normalization,
+        )
+
+        dataset_info = _get_dataset_info()
+        step = config.get_step(dataset_info, lambda _: None)
+        input_data = _get_tensor_dict(step.input_names)
+        next_step_data = _get_tensor_dict(step.next_step_input_names)
+
+        output = step.step(
+            StepArgs(
+                input=input_data,
+                next_step_input_data=next_step_data,
+                labels=None,
+            )
+        )
+
+        for name in prognostic_names:
+            assert name in output
+            assert output[name].shape == (2, *IMG_SHAPE)
+        assert len(output) == len(prognostic_names)
 
 
 class TestSeparatedVsSingleModuleEquivalence:
