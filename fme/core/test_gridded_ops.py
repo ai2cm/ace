@@ -41,7 +41,7 @@ def test_gridded_operations_from_state(
     ops = GriddedOperations.from_state(state)
     assert isinstance(ops, expected_class)
 
-    recovered_state = ops.to_state()
+    recovered_state = ops.get_state()
     assert recovered_state == state
 
     with pytest.raises(RuntimeError):
