@@ -27,7 +27,7 @@ from fme.core.generics.data import (
 from fme.core.mask_provider import MaskProvider
 
 
-def _scatter_properties(properties: DatasetProperties) -> DatasetProperties:
+def _localize_properties(properties: DatasetProperties) -> DatasetProperties:
     """Slice horizontal coordinates and masks to the local spatial chunk."""
     dist = Distributed.get_instance()
     coords = properties.horizontal_coordinates
@@ -36,6 +36,10 @@ def _scatter_properties(properties: DatasetProperties) -> DatasetProperties:
         coords = LatLonCoordinates(
             lat=coords.lat[h_slice],
             lon=coords.lon[w_slice],
+        )
+    else:
+        dist.require_no_spatial_parallelism(
+            "Only LatLonCoordinates is supported with spatial parallelism."
         )
     mask_provider = properties.mask_provider
     if isinstance(mask_provider, MaskProvider) and mask_provider.masks:
@@ -87,7 +91,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._loader = loader
         img_shape = properties.horizontal_coordinates.shape
         self._global_img_shape: tuple[int, int] = (img_shape[-2], img_shape[-1])
-        self._properties = _scatter_properties(properties.to_device())
+        self._properties = _localize_properties(properties.to_device())
         self._timestep = self._properties.timestep
         self._vertical_coordinate = self._properties.vertical_coordinate
         self._mask_provider = self._properties.mask_provider
@@ -218,7 +222,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         self._loader = loader
         img_shape = properties.horizontal_coordinates.shape
         self._global_img_shape: tuple[int, int] = (img_shape[-2], img_shape[-1])
-        self._properties = _scatter_properties(properties.to_device())
+        self._properties = _localize_properties(properties.to_device())
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
             self._initial_condition: PrognosticState = get_initial_condition(

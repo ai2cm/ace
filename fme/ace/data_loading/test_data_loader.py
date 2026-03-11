@@ -21,7 +21,7 @@ from fme.ace.data_loading.getters import (
     get_gridded_data,
     get_inference_data,
 )
-from fme.ace.data_loading.gridded_data import _scatter_properties
+from fme.ace.data_loading.gridded_data import _localize_properties
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -1180,8 +1180,8 @@ def test_pinned_memory(tmp_path, time_buffer: int):
 
 
 @pytest.mark.parallel
-def test_scatter_properties():
-    """Verify _scatter_properties slices coords and masks correctly."""
+def test_localize_properties():
+    """Verify _localize_properties partitions coords and masks across ranks."""
     dist = Distributed.get_instance()
     n_lat, n_lon = N_LAT, N_LON
     lat = torch.linspace(-90.0, 90.0, n_lat)
@@ -1204,24 +1204,40 @@ def test_scatter_properties():
         all_labels=None,
     )
 
-    scattered = _scatter_properties(props)
+    local = _localize_properties(props)
 
     # Unchanged fields
-    assert scattered.variable_metadata is metadata
-    assert scattered.vertical_coordinate is vertical
-    assert scattered.timestep == timestep
+    assert local.variable_metadata is metadata
+    assert local.vertical_coordinate is vertical
+    assert local.timestep == timestep
 
-    # Coordinates are sliced
+    # Gather local coordinates to root and verify full, non-overlapping coverage.
+    assert isinstance(local.horizontal_coordinates, LatLonCoordinates)
+    local_lat = local.horizontal_coordinates.lat.tolist()
+    local_lon = local.horizontal_coordinates.lon.tolist()
+    all_lats = dist.gather_object(local_lat)
+    all_lons = dist.gather_object(local_lon)
+    if dist.is_root():
+        assert all_lats is not None and all_lons is not None
+        # Spatial co-ranks (same data_parallel_rank) should have distinct
+        # lat/lon slices whose union covers the global coordinates exactly.
+        combined_lat = sorted(set(v for rank_lat in all_lats for v in rank_lat))
+        combined_lon = sorted(set(v for rank_lon in all_lons for v in rank_lon))
+        assert combined_lat == lat.tolist(), "lat coverage incomplete or has gaps"
+        assert combined_lon == lon.tolist(), "lon coverage incomplete or has gaps"
+
+    # Gather local masks to root and verify they tile to the global mask.
+    assert isinstance(local.mask_provider, MaskProvider)
+    local_mask = local.mask_provider.masks["mask_test"]
     h_slice, w_slice = dist.get_local_slices((n_lat, n_lon))
-    expected_lat = lat[h_slice]
-    expected_lon = lon[w_slice]
-    assert isinstance(scattered.horizontal_coordinates, LatLonCoordinates)
-    torch.testing.assert_close(scattered.horizontal_coordinates.lat, expected_lat)
-    torch.testing.assert_close(scattered.horizontal_coordinates.lon, expected_lon)
-
-    # Masks are sliced
-    assert isinstance(scattered.mask_provider, MaskProvider)
-    expected_mask = mask_tensor[..., h_slice, w_slice].contiguous()
-    torch.testing.assert_close(
-        scattered.mask_provider.masks["mask_test"], expected_mask
-    )
+    all_slices = dist.gather_object((h_slice, w_slice))
+    all_masks = dist.gather_object(local_mask.tolist())
+    if dist.is_root():
+        assert all_slices is not None and all_masks is not None
+        canvas = torch.zeros_like(mask_tensor)
+        for (hs, ws), mask_data in zip(all_slices, all_masks):
+            canvas[..., hs, ws] += torch.tensor(mask_data)
+        # Each cell should be covered once per data-parallel rank (spatial
+        # co-ranks have distinct slices, data-parallel ranks have identical ones).
+        expected_count = dist.total_data_parallel_ranks
+        torch.testing.assert_close(canvas, mask_tensor * expected_count)

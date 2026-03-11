@@ -183,6 +183,15 @@ class Distributed:
         """
         return self._distributed.total_ranks
 
+    def require_no_spatial_parallelism(self, msg: str) -> None:
+        """Raise NotImplementedError if spatial parallelism is active.
+
+        Use this to guard code paths that are known to be incorrect
+        when spatial co-ranks exist (world_size > total_data_parallel_ranks).
+        """
+        if self.world_size != self.total_data_parallel_ranks:
+            raise NotImplementedError(msg)
+
     def get_sampler(
         self,
         dataset: torch.utils.data.Dataset,
