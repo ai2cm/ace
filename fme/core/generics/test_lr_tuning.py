@@ -17,7 +17,7 @@ from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.optimization import Optimization
 from fme.core.scheduler import SchedulerConfig
 from fme.core.training_history import TrainingJob
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import Slice, TensorDict
 
 
 class _TrainOutput(TrainOutputABC):
@@ -172,20 +172,20 @@ def _make_aggregator_factory(*losses: float):
 
 
 def test_candidate_wins():
-    """Candidate wins when its improvement exceeds the threshold."""
+    """Candidate wins when its loss is below baseline - threshold * pre_trial."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.1,
     )
 
-    # pre_trial=1.0, baseline->0.8 (improvement=0.2), candidate->0.5 (improvement=0.5)
-    # candidate_improvement (0.5) > baseline_improvement * 1.1 (0.22) → candidate wins
+    # pre_trial=1.0, baseline=0.8, candidate=0.5
+    # threshold = 0.8 - 0.1*1.0 = 0.7; candidate 0.5 < 0.7 → candidate wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -204,20 +204,20 @@ def test_candidate_wins():
 
 
 def test_candidate_below_threshold():
-    """Candidate improves but not enough to exceed the threshold."""
+    """Candidate improves but not enough to beat the threshold."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.5,
     )
 
-    # pre_trial=1.0, baseline->0.8 (improvement=0.2), candidate->0.75 (improvement=0.25)
-    # candidate_improvement (0.25) < baseline_improvement * 1.5 (0.3) → baseline wins
+    # pre_trial=1.0, baseline=0.8, candidate=0.75
+    # threshold = 0.8 - 0.5*1.0 = 0.3; candidate 0.75 > 0.3 → baseline wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -236,19 +236,20 @@ def test_candidate_below_threshold():
 
 
 def test_candidate_worsens():
-    """Candidate worsens validation loss → baseline wins."""
+    """Candidate worsens validation loss -> baseline wins."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.1,
     )
 
-    # pre_trial=1.0, baseline->0.9 (improvement=0.1), candidate->1.1 (improvement=-0.1)
+    # pre_trial=1.0, baseline=0.9, candidate=1.1
+    # threshold = 0.9 - 0.1*1.0 = 0.8; candidate 1.1 > 0.8 → baseline wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -267,19 +268,20 @@ def test_candidate_worsens():
 
 
 def test_both_worsen():
-    """Both worsen → baseline wins."""
+    """Both worsen -> baseline wins."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.1,
     )
 
-    # pre_trial=1.0, baseline->1.2, candidate->1.3
+    # pre_trial=1.0, baseline=1.2, candidate=1.3
+    # threshold = 1.2 - 0.1*1.0 = 1.1; candidate 1.3 > 1.1 → baseline wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -298,20 +300,20 @@ def test_both_worsen():
 
 
 def test_baseline_worsens_candidate_improves():
-    """Baseline worsens but candidate improves → still returns None
-    (requirement: both must improve)."""
+    """Baseline worsens but candidate improves enough -> candidate wins."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.1,
     )
 
-    # pre_trial=1.0, baseline->1.1 (worsens), candidate->0.5 (improves)
+    # pre_trial=1.0, baseline=1.1, candidate=0.5
+    # threshold = 1.1 - 0.1*1.0 = 1.0; candidate 0.5 < 1.0 → candidate wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -326,7 +328,7 @@ def test_baseline_worsens_candidate_improves():
         validate_using_ema=False,
     )
 
-    assert result is None
+    assert result == 0.01 * 0.5
 
 
 def test_does_not_mutate_original_stepper():
@@ -339,7 +341,7 @@ def test_does_not_mutate_original_stepper():
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.1,
@@ -372,7 +374,7 @@ def test_uses_subset_loader_with_num_batches():
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=4,
         improvement_threshold=0.1,
@@ -402,7 +404,7 @@ def test_with_ema_validation():
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.1,
@@ -439,7 +441,7 @@ def test_trial_does_not_mutate_original_ema_num_updates():
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.1,
@@ -476,7 +478,7 @@ def test_trial_does_not_mutate_original_ema_params():
     valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.1,
@@ -550,7 +552,7 @@ def test_trial_does_not_mutate_original_optimizer_state():
 
     valid_data = _TrainData(n_batches=3)
     config = LRTuningConfig(
-        epoch_frequency=1,
+        epochs=Slice(),
         lr_factor=0.5,
         num_batches=3,
         improvement_threshold=0.1,
