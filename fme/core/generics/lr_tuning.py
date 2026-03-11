@@ -95,11 +95,11 @@ def run_lr_tuning_trial(
     candidate_stepper = copy_stepper()
 
     baseline_opt = build_optimization(baseline_stepper.modules)
-    baseline_opt.load_state(optimization_state)
+    baseline_opt.load_state(copy.deepcopy(optimization_state))
     baseline_opt.set_learning_rate(current_lr)
 
     candidate_opt = build_optimization(candidate_stepper.modules)
-    candidate_opt.load_state(optimization_state)
+    candidate_opt.load_state(copy.deepcopy(optimization_state))
     candidate_opt.set_learning_rate(candidate_lr)
 
     baseline_ema = copy_ema(baseline_stepper.modules)
