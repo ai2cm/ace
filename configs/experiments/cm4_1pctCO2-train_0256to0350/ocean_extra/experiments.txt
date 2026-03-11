@@ -32,22 +32,8 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 
 1pct_nosmooth_0256to0350-hfds_resid|rs2|01KK3BPSW07GQEH03GX5XA6R7X|training|best_inference_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|01KK88F65PKVZ6MM2BBFW47VGG|run_140yr|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_prescribed|rs0|01KKA692A9ACSB9HA8SVA0E4RB|run_140yr|best_inference_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|01KKA4TVZ1V8PNR31MRNEVTQGR|training|best_inference_ckpt|normal|--not-preemptible
-
-1pct_nosmooth_0256to0350-hfds_prescribed|rs0|01KKA692A9ACSB9HA8SVA0E4RB|training|best_inference_ckpt|normal|--not-preemptible
-
-1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC|rs0|01KKAST1KRJBEV888PH602CNS3|training|best_inference_ckpt|normal|--not-preemptible
-
-1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC|rs0||training|best_inference_ckpt|normal|--not-preemptible
-
-1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC-dz_3d_from_mask|rs0||training|best_inference_ckpt|normal|--not-preemptible
-
-1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC-dz_3d_from_mask|rs0|01KKCC3EFX66X4P9R8EMZ58RQT|training|best_inference_ckpt|normal|--not-preemptible
-
-1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC|rs0|01KKCC8HP4VVVF9A3V84EJ52V5|training|best_inference_ckpt|normal|--not-preemptible
-
-1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|01KKCSCFVA1ECA8CWBPPY04BC4|training|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|01KKCSCFVA1ECA8CWBPPY04BC4|run_140yr|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|training|best_inference_ckpt|normal|--not-preemptible
