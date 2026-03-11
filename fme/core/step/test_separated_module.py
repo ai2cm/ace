@@ -8,10 +8,10 @@ import fme
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
-from fme.core.registry import ModuleSelector, SeparatedModuleSelector
+from fme.core.registry import SeparatedModuleSelector
+from fme.core.registry.test_separated_module import SimpleSeparatedBuilder  # noqa: F401
 from fme.core.step.args import StepArgs
 from fme.core.step.separated_module import SeparatedModuleStepConfig
-from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 
 IMG_SHAPE = (16, 32)
@@ -53,10 +53,8 @@ class TestSeparatedModuleStepConfig:
         with pytest.raises(ValueError, match="appears in both"):
             SeparatedModuleStepConfig(
                 builder=SeparatedModuleSelector(
-                    type="legacy",
-                    config={
-                        "legacy_builder": {"type": "MLP", "config": {}},
-                    },
+                    type="test_simple",
+                    config={},
                 ),
                 forcing_names=["a"],
                 prognostic_names=["a"],
@@ -69,10 +67,8 @@ class TestSeparatedModuleStepConfig:
         with pytest.raises(ValueError, match="prescribed_prognostic_name"):
             SeparatedModuleStepConfig(
                 builder=SeparatedModuleSelector(
-                    type="legacy",
-                    config={
-                        "legacy_builder": {"type": "MLP", "config": {}},
-                    },
+                    type="test_simple",
+                    config={},
                 ),
                 forcing_names=["f"],
                 prognostic_names=["p"],
@@ -86,10 +82,8 @@ class TestSeparatedModuleStepConfig:
         with pytest.raises(ValueError, match="next_step_forcing_name"):
             SeparatedModuleStepConfig(
                 builder=SeparatedModuleSelector(
-                    type="legacy",
-                    config={
-                        "legacy_builder": {"type": "MLP", "config": {}},
-                    },
+                    type="test_simple",
+                    config={},
                 ),
                 forcing_names=["f"],
                 prognostic_names=["p"],
@@ -103,10 +97,8 @@ class TestSeparatedModuleStepConfig:
         with pytest.raises(ValueError, match="prognostic_names must not be empty"):
             SeparatedModuleStepConfig(
                 builder=SeparatedModuleSelector(
-                    type="legacy",
-                    config={
-                        "legacy_builder": {"type": "MLP", "config": {}},
-                    },
+                    type="test_simple",
+                    config={},
                 ),
                 forcing_names=["f"],
                 prognostic_names=[],
@@ -118,10 +110,8 @@ class TestSeparatedModuleStepConfig:
         normalization = _get_normalization(["f1", "f2", "p1", "p2", "d1"])
         config = SeparatedModuleStepConfig(
             builder=SeparatedModuleSelector(
-                type="legacy",
-                config={
-                    "legacy_builder": {"type": "MLP", "config": {}},
-                },
+                type="test_simple",
+                config={},
             ),
             forcing_names=["f1", "f2"],
             prognostic_names=["p1", "p2"],
@@ -136,10 +126,8 @@ class TestSeparatedModuleStepConfig:
         normalization = _get_normalization(["f", "p", "d"])
         config = SeparatedModuleStepConfig(
             builder=SeparatedModuleSelector(
-                type="legacy",
-                config={
-                    "legacy_builder": {"type": "MLP", "config": {}},
-                },
+                type="test_simple",
+                config={},
             ),
             forcing_names=["f"],
             prognostic_names=["p"],
@@ -166,17 +154,8 @@ class TestSeparatedModuleStep:
             config=dataclasses.asdict(
                 SeparatedModuleStepConfig(
                     builder=SeparatedModuleSelector(
-                        type="legacy",
-                        config={
-                            "legacy_builder": {
-                                "type": "SphericalFourierNeuralOperatorNet",
-                                "config": {
-                                    "scale_factor": 1,
-                                    "embed_dim": 4,
-                                    "num_layers": 2,
-                                },
-                            },
-                        },
+                        type="test_simple",
+                        config={},
                     ),
                     forcing_names=forcing_names,
                     prognostic_names=prognostic_names,
@@ -211,17 +190,8 @@ class TestSeparatedModuleStep:
 
         config = SeparatedModuleStepConfig(
             builder=SeparatedModuleSelector(
-                type="legacy",
-                config={
-                    "legacy_builder": {
-                        "type": "SphericalFourierNeuralOperatorNet",
-                        "config": {
-                            "scale_factor": 1,
-                            "embed_dim": 4,
-                            "num_layers": 2,
-                        },
-                    },
-                },
+                type="test_simple",
+                config={},
             ),
             forcing_names=forcing_names,
             prognostic_names=prognostic_names,
@@ -252,17 +222,8 @@ class TestSeparatedModuleStep:
 
         config = SeparatedModuleStepConfig(
             builder=SeparatedModuleSelector(
-                type="legacy",
-                config={
-                    "legacy_builder": {
-                        "type": "SphericalFourierNeuralOperatorNet",
-                        "config": {
-                            "scale_factor": 1,
-                            "embed_dim": 4,
-                            "num_layers": 2,
-                        },
-                    },
-                },
+                type="test_simple",
+                config={},
             ),
             forcing_names=forcing_names,
             prognostic_names=prognostic_names,
@@ -295,17 +256,8 @@ class TestSeparatedModuleStep:
 
         config = SeparatedModuleStepConfig(
             builder=SeparatedModuleSelector(
-                type="legacy",
-                config={
-                    "legacy_builder": {
-                        "type": "SphericalFourierNeuralOperatorNet",
-                        "config": {
-                            "scale_factor": 1,
-                            "embed_dim": 4,
-                            "num_layers": 2,
-                        },
-                    },
-                },
+                type="test_simple",
+                config={},
             ),
             forcing_names=[],
             prognostic_names=prognostic_names,
@@ -338,17 +290,8 @@ class TestSeparatedModuleStep:
 
         config = SeparatedModuleStepConfig(
             builder=SeparatedModuleSelector(
-                type="legacy",
-                config={
-                    "legacy_builder": {
-                        "type": "SphericalFourierNeuralOperatorNet",
-                        "config": {
-                            "scale_factor": 1,
-                            "embed_dim": 4,
-                            "num_layers": 2,
-                        },
-                    },
-                },
+                type="test_simple",
+                config={},
             ),
             forcing_names=forcing_names,
             prognostic_names=prognostic_names,
@@ -380,17 +323,8 @@ class TestSeparatedModuleStep:
 
         config = SeparatedModuleStepConfig(
             builder=SeparatedModuleSelector(
-                type="legacy",
-                config={
-                    "legacy_builder": {
-                        "type": "SphericalFourierNeuralOperatorNet",
-                        "config": {
-                            "scale_factor": 1,
-                            "embed_dim": 4,
-                            "num_layers": 2,
-                        },
-                    },
-                },
+                type="test_simple",
+                config={},
             ),
             forcing_names=[],
             prognostic_names=prognostic_names,
@@ -415,139 +349,3 @@ class TestSeparatedModuleStep:
             assert name in output
             assert output[name].shape == (2, *IMG_SHAPE)
         assert len(output) == len(prognostic_names)
-
-
-class TestSeparatedVsSingleModuleEquivalence:
-    """Verify that SeparatedModuleStep with legacy adapter produces the same
-    output as SingleModuleStep when given the same weights and input."""
-
-    def _build_equivalent_steps(self, residual_prediction=False):
-        """Build a SingleModuleStep and SeparatedModuleStep with the same
-        architecture and weights."""
-        forcing_names = ["f1", "f2"]
-        prognostic_names = ["p1", "p2"]
-        diagnostic_names = ["d1"]
-        in_names = forcing_names + prognostic_names
-        out_names = prognostic_names + diagnostic_names
-        all_names = forcing_names + prognostic_names + diagnostic_names
-        normalization = _get_normalization(all_names)
-
-        sfno_config = {
-            "scale_factor": 1,
-            "embed_dim": 4,
-            "num_layers": 2,
-        }
-
-        single_config = SingleModuleStepConfig(
-            builder=ModuleSelector(
-                type="SphericalFourierNeuralOperatorNet",
-                config=sfno_config,
-            ),
-            in_names=in_names,
-            out_names=out_names,
-            normalization=normalization,
-            residual_prediction=residual_prediction,
-        )
-
-        separated_config = SeparatedModuleStepConfig(
-            builder=SeparatedModuleSelector(
-                type="legacy",
-                config={
-                    "legacy_builder": {
-                        "type": "SphericalFourierNeuralOperatorNet",
-                        "config": sfno_config,
-                    },
-                },
-            ),
-            forcing_names=forcing_names,
-            prognostic_names=prognostic_names,
-            diagnostic_names=diagnostic_names,
-            normalization=normalization,
-            residual_prediction=residual_prediction,
-        )
-
-        dataset_info = _get_dataset_info()
-
-        torch.manual_seed(42)
-        single_step = single_config.get_step(dataset_info, lambda _: None)
-
-        torch.manual_seed(42)
-        separated_step = separated_config.get_step(dataset_info, lambda _: None)
-
-        # Copy weights from single to separated at the inner module level.
-        # SingleModuleStep wraps as DummyWrapper(SFNO) while
-        # SeparatedModuleStep wraps as DummyWrapper(LegacyWrapper(SFNO)),
-        # so we copy at the SFNO level to avoid key prefix mismatches.
-        single_sfno = single_step.module.torch_module.module
-        separated_sfno = separated_step.module.torch_module.module.inner
-        separated_sfno.load_state_dict(single_sfno.state_dict())
-
-        return single_step, separated_step, in_names
-
-    def test_equivalence_with_single_step(self):
-        torch.manual_seed(0)
-        single_step, separated_step, in_names = self._build_equivalent_steps()
-
-        input_data = _get_tensor_dict(in_names)
-        next_step_data_single = _get_tensor_dict(single_step.next_step_input_names)
-        next_step_data_separated = _get_tensor_dict(
-            separated_step.next_step_input_names
-        )
-
-        single_output = single_step.step(
-            StepArgs(
-                input=input_data,
-                next_step_input_data=next_step_data_single,
-                labels=None,
-            )
-        )
-        separated_output = separated_step.step(
-            StepArgs(
-                input=input_data,
-                next_step_input_data=next_step_data_separated,
-                labels=None,
-            )
-        )
-
-        for name in single_output:
-            assert name in separated_output, f"Missing output: {name}"
-            torch.testing.assert_close(
-                single_output[name],
-                separated_output[name],
-                msg=f"Output mismatch for {name}",
-            )
-
-    def test_equivalence_with_residual_prediction(self):
-        torch.manual_seed(0)
-        single_step, separated_step, in_names = self._build_equivalent_steps(
-            residual_prediction=True
-        )
-
-        input_data = _get_tensor_dict(in_names)
-        next_step_data_single = _get_tensor_dict(single_step.next_step_input_names)
-        next_step_data_separated = _get_tensor_dict(
-            separated_step.next_step_input_names
-        )
-
-        single_output = single_step.step(
-            StepArgs(
-                input=input_data,
-                next_step_input_data=next_step_data_single,
-                labels=None,
-            )
-        )
-        separated_output = separated_step.step(
-            StepArgs(
-                input=input_data,
-                next_step_input_data=next_step_data_separated,
-                labels=None,
-            )
-        )
-
-        for name in single_output:
-            assert name in separated_output, f"Missing output: {name}"
-            torch.testing.assert_close(
-                single_output[name],
-                separated_output[name],
-                msg=f"Output mismatch for {name}",
-            )

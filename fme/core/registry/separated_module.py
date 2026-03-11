@@ -12,7 +12,6 @@ from torch import nn
 from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels, LabelEncoding
 
-from .module import CONDITIONAL_BUILDERS, ModuleSelector
 from .registry import Registry
 
 
@@ -22,8 +21,14 @@ class SeparatedModuleConfig(abc.ABC):
     Builds an nn.Module that takes separate forcing and prognostic tensors
     as input, and returns separate prognostic and diagnostic tensors as output.
 
-    The built nn.Module must have the forward signature:
-        forward(forcing: Tensor, prognostic: Tensor) -> tuple[Tensor, Tensor]
+    The built nn.Module must have the forward signature::
+
+        forward(
+            forcing: Tensor,
+            prognostic: Tensor,
+            labels: Tensor | None = None,
+        ) -> tuple[Tensor, Tensor]
+
     where the return value is (prognostic_out, diagnostic_out).
     """
 
@@ -77,16 +82,11 @@ class SeparatedModule:
         prognostic: torch.Tensor,
         labels: BatchLabels | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if labels is not None and self._label_encoding is None:
-            raise TypeError("Labels are not allowed for unconditional models")
-
-        if self._label_encoding is not None:
-            if labels is None:
-                raise TypeError("Labels are required for conditional models")
+        if labels is not None and self._label_encoding is not None:
             encoded_labels = labels.conform_to_encoding(self._label_encoding)
             return self._module(forcing, prognostic, labels=encoded_labels.tensor)
         else:
-            return self._module(forcing, prognostic)
+            return self._module(forcing, prognostic, labels=None)
 
     @property
     def torch_module(self) -> nn.Module:
@@ -133,12 +133,10 @@ class SeparatedModuleSelector:
     Parameters:
         type: the type of the SeparatedModuleConfig
         config: data for a SeparatedModuleConfig instance of the indicated type
-        conditional: whether to condition the predictions on batch labels.
     """
 
     type: str
     config: Mapping[str, Any]
-    conditional: bool = False
     registry: ClassVar[Registry[SeparatedModuleConfig]] = Registry[
         SeparatedModuleConfig
     ]()
@@ -147,11 +145,6 @@ class SeparatedModuleSelector:
         if not isinstance(self.registry, Registry):
             raise ValueError(
                 "SeparatedModuleSelector.registry should not be set manually"
-            )
-        if self.conditional and self.type not in CONDITIONAL_BUILDERS:
-            raise ValueError(
-                "Conditional predictions require a conditional builder, "
-                f"got {self.type} (available: {CONDITIONAL_BUILDERS})"
             )
         self._instance = self.registry.get(self.type, self.config)
 
@@ -185,9 +178,7 @@ class SeparatedModuleSelector:
         Returns:
             a SeparatedModule object
         """
-        if self.conditional and len(dataset_info.all_labels) == 0:
-            raise ValueError("Conditional predictions require labels")
-        if self.conditional:
+        if len(dataset_info.all_labels) > 0:
             label_encoding = LabelEncoding(sorted(list(dataset_info.all_labels)))
         else:
             label_encoding = None
@@ -202,70 +193,3 @@ class SeparatedModuleSelector:
     @classmethod
     def get_available_types(cls):
         return cls.registry._types.keys()
-
-
-class LegacyWrapper(nn.Module):
-    """Wraps an old-style (single tensor in/out) module for the separated
-    channel interface.
-
-    Input channels are ordered as [forcing, prognostic] and output channels
-    are ordered as [prognostic, diagnostic]. The inner module receives a
-    single concatenated input and produces a single concatenated output.
-    """
-
-    def __init__(
-        self,
-        inner: nn.Module,
-        n_prognostic_channels: int,
-    ):
-        super().__init__()
-        self.inner = inner
-        self._n_prognostic_channels = n_prognostic_channels
-
-    def forward(
-        self, forcing: torch.Tensor, prognostic: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        combined = torch.cat([forcing, prognostic], dim=-3)
-        output = self.inner(combined)
-        n = self._n_prognostic_channels
-        prog_out = output.narrow(-3, 0, n)
-        diag_out = output.narrow(-3, n, output.shape[-3] - n)
-        return prog_out, diag_out
-
-
-@SeparatedModuleSelector.register("legacy")
-@dataclasses.dataclass
-class LegacyModuleAdapter(SeparatedModuleConfig):
-    """
-    Adapter that wraps a legacy ModuleSelector module for the separated
-    channel interface.
-
-    Input channels are ordered as [forcing, prognostic] and output channels
-    are ordered as [prognostic, diagnostic].
-
-    Parameters:
-        legacy_builder: The legacy ModuleSelector for building the inner module.
-    """
-
-    legacy_builder: ModuleSelector
-
-    def build(
-        self,
-        n_forcing_channels: int,
-        n_prognostic_channels: int,
-        n_diagnostic_channels: int,
-        dataset_info: DatasetInfo,
-    ) -> nn.Module:
-        n_in = n_forcing_channels + n_prognostic_channels
-        n_out = n_prognostic_channels + n_diagnostic_channels
-
-        legacy_module = self.legacy_builder.build(
-            n_in_channels=n_in,
-            n_out_channels=n_out,
-            dataset_info=dataset_info,
-        )
-
-        return LegacyWrapper(
-            inner=legacy_module.torch_module,
-            n_prognostic_channels=n_prognostic_channels,
-        )

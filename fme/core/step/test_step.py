@@ -23,6 +23,7 @@ from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector, SeparatedModuleSelector
+from fme.core.registry.test_separated_module import SimpleSeparatedBuilder  # noqa: F401
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
@@ -392,17 +393,8 @@ def get_separated_module_selector(
         config=dataclasses.asdict(
             SeparatedModuleStepConfig(
                 builder=SeparatedModuleSelector(
-                    type="legacy",
-                    config={
-                        "legacy_builder": {
-                            "type": "SphericalFourierNeuralOperatorNet",
-                            "config": {
-                                "scale_factor": 1,
-                                "embed_dim": 4,
-                                "num_layers": 2,
-                            },
-                        },
-                    },
+                    type="test_simple",
+                    config={},
                 ),
                 forcing_names=["forcing_shared", "forcing_rad"],
                 prognostic_names=["prog_main"],
@@ -430,17 +422,8 @@ def get_separated_module_with_prognostics_selector(
         config=dataclasses.asdict(
             SeparatedModuleStepConfig(
                 builder=SeparatedModuleSelector(
-                    type="legacy",
-                    config={
-                        "legacy_builder": {
-                            "type": "SphericalFourierNeuralOperatorNet",
-                            "config": {
-                                "scale_factor": 1,
-                                "embed_dim": 4,
-                                "num_layers": 2,
-                            },
-                        },
-                    },
+                    type="test_simple",
+                    config={},
                 ),
                 forcing_names=["forcing_a"],
                 prognostic_names=["prog_a", "prog_b"],
