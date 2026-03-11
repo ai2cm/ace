@@ -6,6 +6,7 @@ from typing import Any, TypeVar
 
 import torch
 
+from fme.core.distributed import Distributed
 from fme.core.masking import NullMasking, StaticMasking
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -28,6 +29,11 @@ class MaskProviderABC(abc.ABC):
     def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
 
     @abc.abstractmethod
+    def localize(self: SelfType) -> SelfType:
+        """Return a copy with masks sliced to the local spatial chunk."""
+        ...
+
+    @abc.abstractmethod
     def get_state(self) -> dict[str, Any]: ...
 
 
@@ -36,6 +42,9 @@ class _NullMaskProvider(MaskProviderABC):
         return None
 
     def to(self, device: str) -> "_NullMaskProvider":
+        return self
+
+    def localize(self) -> "_NullMaskProvider":
         return self
 
     def update(self, other: MaskProviderABC) -> None:
@@ -122,6 +131,17 @@ class MaskProvider(MaskProviderABC):
     def to(self, device: str) -> "MaskProvider":
         return MaskProvider(
             {name: tensor.to(device) for name, tensor in self.masks.items()}
+        )
+
+    def localize(self) -> "MaskProvider":
+        if not self._masks:
+            return self
+        dist = Distributed.get_instance()
+        example_mask = next(iter(self._masks.values()))
+        img_shape = example_mask.shape[-2:]
+        slices = dist.get_local_slices(img_shape)
+        return MaskProvider(
+            {k: v[(..., *slices)].contiguous() for k, v in self._masks.items()}
         )
 
     def update(self, other: "MaskProvider") -> None:

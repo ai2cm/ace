@@ -9,55 +9,16 @@ from fme.ace.data_loading.augmentation import BatchModifierABC, NullModifier
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.dataloader import DataLoaderABC
 from fme.ace.requirements import PrognosticStateDataRequirements
-from fme.core.coordinates import (
-    HorizontalCoordinates,
-    LatLonCoordinates,
-    VerticalCoordinate,
-)
+from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
-from fme.core.distributed import Distributed
 from fme.core.generics.data import (
     DataLoader,
     GriddedDataABC,
     InferenceDataABC,
     SizedMap,
 )
-from fme.core.mask_provider import MaskProvider
-
-
-def _localize_properties(properties: DatasetProperties) -> DatasetProperties:
-    """Slice horizontal coordinates and masks to the local spatial chunk."""
-    dist = Distributed.get_instance()
-    coords = properties.horizontal_coordinates
-    if isinstance(coords, LatLonCoordinates):
-        h_slice, w_slice = dist.get_local_slices(coords.shape)
-        coords = LatLonCoordinates(
-            lat=coords.lat[h_slice],
-            lon=coords.lon[w_slice],
-        )
-    else:
-        dist.require_no_spatial_parallelism(
-            "Only LatLonCoordinates is supported with spatial parallelism."
-        )
-    mask_provider = properties.mask_provider
-    if isinstance(mask_provider, MaskProvider) and mask_provider.masks:
-        example_mask = next(iter(mask_provider.masks.values()))
-        img_shape = example_mask.shape[-2:]
-        slices = dist.get_local_slices(img_shape)
-        mask_provider = MaskProvider(
-            {k: v[(..., *slices)].contiguous() for k, v in mask_provider.masks.items()}
-        )
-    return DatasetProperties(
-        properties.variable_metadata,
-        properties.vertical_coordinate,
-        coords,
-        mask_provider,
-        properties.timestep,
-        properties.is_remote,
-        properties.all_labels,
-    )
 
 
 class GriddedData(GriddedDataABC[BatchData]):
@@ -89,9 +50,9 @@ class GriddedData(GriddedDataABC[BatchData]):
             will be on the current device.
         """
         self._loader = loader
-        img_shape = properties.horizontal_coordinates.shape
-        self._global_img_shape: tuple[int, int] = (img_shape[-2], img_shape[-1])
-        self._properties = _localize_properties(properties.to_device())
+        shape = properties.horizontal_coordinates.shape
+        self._global_img_shape: tuple[int, int] = (shape[-2], shape[-1])
+        self._properties = properties.to_device().localize()
         self._timestep = self._properties.timestep
         self._vertical_coordinate = self._properties.vertical_coordinate
         self._mask_provider = self._properties.mask_provider
@@ -112,13 +73,9 @@ class GriddedData(GriddedDataABC[BatchData]):
     def _get_gpu_loader(
         self, base_loader: DataLoader[BatchData]
     ) -> DataLoader[BatchData]:
-        dist = Distributed.get_instance()
-        img_shape = self._global_img_shape
-
         def modify_and_on_device(batch: BatchData) -> BatchData:
             batch = self._modifier(batch)
-            batch.data = dist.scatter_spatial(dict(batch.data), img_shape)
-            return batch.to_device()
+            return batch.to_device().scatter_spatial(self._global_img_shape)
 
         return SizedMap(modify_and_on_device, base_loader)
 
@@ -220,9 +177,9 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             will be on the current device.
         """
         self._loader = loader
-        img_shape = properties.horizontal_coordinates.shape
-        self._global_img_shape: tuple[int, int] = (img_shape[-2], img_shape[-1])
-        self._properties = _localize_properties(properties.to_device())
+        shape = properties.horizontal_coordinates.shape
+        self._global_img_shape: tuple[int, int] = (shape[-2], shape[-1])
+        self._properties = properties.to_device().localize()
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
             self._initial_condition: PrognosticState = get_initial_condition(
@@ -233,12 +190,8 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
 
     @property
     def loader(self) -> DataLoader[BatchData]:
-        dist = Distributed.get_instance()
-        img_shape = self._global_img_shape
-
         def scatter_and_on_device(batch: BatchData) -> BatchData:
-            batch.data = dist.scatter_spatial(dict(batch.data), img_shape)
-            return batch.to_device()
+            return batch.to_device().scatter_spatial(self._global_img_shape)
 
         return SizedMap(scatter_and_on_device, self._loader)
 

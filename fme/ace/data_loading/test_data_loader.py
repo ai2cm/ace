@@ -21,7 +21,6 @@ from fme.ace.data_loading.getters import (
     get_gridded_data,
     get_inference_data,
 )
-from fme.ace.data_loading.gridded_data import _localize_properties
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -1181,7 +1180,7 @@ def test_pinned_memory(tmp_path, time_buffer: int):
 
 @pytest.mark.parallel
 def test_localize_properties():
-    """Verify _localize_properties partitions coords and masks across ranks."""
+    """Verify DatasetProperties.localize() partitions coords and masks across ranks."""
     dist = Distributed.get_instance()
     n_lat, n_lon = N_LAT, N_LON
     lat = torch.linspace(-90.0, 90.0, n_lat)
@@ -1204,7 +1203,7 @@ def test_localize_properties():
         all_labels=None,
     )
 
-    local = _localize_properties(props)
+    local = props.localize()
 
     # Unchanged fields
     assert local.variable_metadata is metadata
