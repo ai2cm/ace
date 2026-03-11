@@ -86,6 +86,9 @@ def _create_config_dict(
 
     experiment_dir = tmp_path / "output"
     experiment_dir.mkdir()
+    config["static_inputs"] = {
+        "HGTsfc": str(train_paths.fine) + "/data.nc",
+    }
     config["train_data"]["fine"] = [{"data_path": str(train_paths.fine)}]
     config["train_data"]["coarse"] = [{"data_path": str(train_paths.coarse)}]
     config["validation_data"]["fine"] = [
@@ -134,8 +137,7 @@ def default_trainer_config(
     model_config_kwargs = {
         "num_diffusion_generation_steps": 2,
         "churn": 0.0,
-        "p_mean": -1.2,
-        "p_std": 1.2,
+        "training_noise_distribution": {"p_mean": -1.2, "p_std": 1.2},
         "predict_residual": True,
         "sigma_max": 80.0,
         "sigma_min": 0.002,
@@ -285,6 +287,7 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
             mock.assert_called()
 
 
+@pytest.mark.serial
 def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""

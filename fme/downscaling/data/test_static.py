@@ -4,7 +4,7 @@ import torch
 from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
 
-from .topography import StaticInputs, Topography, _range_to_slice
+from .static import StaticInput, StaticInputs
 from .utils import ClosedInterval
 
 
@@ -26,14 +26,7 @@ from .utils import ClosedInterval
 )
 def test_Topography_error_cases(init_args):
     with pytest.raises(ValueError):
-        Topography(*init_args)
-
-
-def test__range_to_slice():
-    x = torch.arange(5)
-    assert torch.equal(
-        x[_range_to_slice(x, ClosedInterval(2, 4))], torch.tensor([2, 3, 4])
-    )
+        StaticInput(*init_args)
 
 
 def test_subset_latlon():
@@ -43,7 +36,7 @@ def test_subset_latlon():
     coords = LatLonCoordinates(
         lat=torch.linspace(0, 9, 10), lon=torch.linspace(0, 9, 10)
     )
-    topo = Topography(data=data, coords=coords)
+    topo = StaticInput(data=data, coords=coords)
     lat_interval = ClosedInterval(2, 5)
     lon_interval = ClosedInterval(3, 7)
     subset_topo = topo.subset_latlon(lat_interval, lon_interval)
@@ -67,7 +60,7 @@ def test_Topography_generate_from_patches():
             output_slice=output_slice,
         ),
     ]
-    topography = Topography(
+    topography = StaticInput(
         torch.arange(16).reshape(4, 4),
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
@@ -95,11 +88,11 @@ def test_StaticInputs_generate_from_patches():
         ),
     ]
     data = torch.arange(16).reshape(4, 4)
-    topography = Topography(
+    topography = StaticInput(
         data,
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
-    land_frac = Topography(
+    land_frac = StaticInput(
         data * -1.0,
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
@@ -126,16 +119,16 @@ def test_StaticInputs_generate_from_patches():
 
 def test_StaticInputs_serialize():
     data = torch.arange(16).reshape(4, 4)
-    topography = Topography(
+    topography = StaticInput(
         data,
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
-    land_frac = Topography(
+    land_frac = StaticInput(
         data * -1.0,
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
     static_inputs = StaticInputs([topography, land_frac])
-    state = static_inputs.to_state()
+    state = static_inputs.get_state()
     static_inputs_reconstructed = StaticInputs.from_state(state)
     assert static_inputs_reconstructed[0].data.equal(static_inputs[0].data)
     assert static_inputs_reconstructed[1].data.equal(static_inputs[1].data)

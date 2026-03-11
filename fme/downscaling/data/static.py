@@ -10,17 +10,8 @@ from fme.downscaling.data.patching import Patch
 from fme.downscaling.data.utils import ClosedInterval
 
 
-def _range_to_slice(coords: torch.Tensor, range: ClosedInterval) -> slice:
-    mask = (coords >= range.start) & (coords <= range.stop)
-    indices = mask.nonzero(as_tuple=True)[0]
-    if indices.numel() == 0:
-        return slice(0, 0)
-    return slice(indices[0].item(), indices[-1].item() + 1)
-
-
-# TODO: rename to StaticInput, make _apply_patch public
 @dataclasses.dataclass
-class Topography:
+class StaticInput:
     data: torch.Tensor
     coords: LatLonCoordinates
 
@@ -31,7 +22,7 @@ class Topography:
             self.coords.lon
         ):
             raise ValueError(
-                f"Topography data shape {self.data.shape} does not match "
+                f"Static inputs data shape {self.data.shape} does not match lat/lon "
                 f"coordinates shape {(len(self.coords.lat), len(self.coords.lon))}"
             )
 
@@ -47,14 +38,14 @@ class Topography:
         self,
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
-    ) -> "Topography":
-        lat_slice = _range_to_slice(self.coords.lat, lat_interval)
-        lon_slice = _range_to_slice(self.coords.lon, lon_interval)
+    ) -> "StaticInput":
+        lat_slice = lat_interval.slice_of(self.coords.lat)
+        lon_slice = lon_interval.slice_of(self.coords.lon)
         return self._latlon_index_slice(lat_slice=lat_slice, lon_slice=lon_slice)
 
-    def to_device(self) -> "Topography":
+    def to_device(self) -> "StaticInput":
         device = get_device()
-        return Topography(
+        return StaticInput(
             data=self.data.to(device),
             coords=LatLonCoordinates(
                 lat=self.coords.lat.to(device),
@@ -71,13 +62,13 @@ class Topography:
         self,
         lat_slice: slice,
         lon_slice: slice,
-    ) -> "Topography":
+    ) -> "StaticInput":
         sliced_data = self.data[lat_slice, lon_slice]
         sliced_latlon = LatLonCoordinates(
             lat=self.coords.lat[lat_slice],
             lon=self.coords.lon[lon_slice],
         )
-        return Topography(
+        return StaticInput(
             data=sliced_data,
             coords=sliced_latlon,
         )
@@ -85,73 +76,54 @@ class Topography:
     def generate_from_patches(
         self,
         patches: list[Patch],
-    ) -> Generator["Topography", None, None]:
+    ) -> Generator["StaticInput", None, None]:
         for patch in patches:
             yield self._apply_patch(patch)
 
-    def to_state(self) -> dict:
+    def get_state(self) -> dict:
         return {
             "data": self.data.cpu(),
-            "coords": self.coords.to_state(),
+            "coords": self.coords.get_state(),
         }
 
 
-def get_normalized_topography(path: str, topography_name: str = "HGTsfc"):
+def _get_normalized_static_input(path: str, field_name: str):
+    """
+    Load a static input field from a given file path and field name and
+    normalize it.
+
+    Only supports 2D lat/lon static inputs. If the input has a time dimension, it is
+    squeezed by taking the first time step. The lat/lon coordinates are
+    assumed to be the last two dimensions of the loaded dataset dimensions.
+    """
     if path.endswith(".zarr"):
-        topography = xr.open_zarr(path, mask_and_scale=False)[topography_name]
+        static_input = xr.open_zarr(path, mask_and_scale=False)[field_name]
     else:
-        topography = xr.open_dataset(path, mask_and_scale=False)[topography_name]
-    if "time" in topography.dims:
-        topography = topography.isel(time=0).squeeze()
-    if len(topography.shape) != 2:
+        static_input = xr.open_dataset(path, mask_and_scale=False)[field_name]
+    if "time" in static_input.dims:
+        static_input = static_input.isel(time=0).squeeze()
+    if len(static_input.shape) != 2:
         raise ValueError(
-            f"unexpected shape {topography.shape} for topography."
-            "Currently, only lat/lon topography is supported."
+            f"unexpected shape {static_input.shape} for static input."
+            "Currently, only lat/lon static input is supported."
         )
-    lat_name, lon_name = topography.dims[-2:]
+    lat_name, lon_name = static_input.dims[-2:]
     coords = LatLonCoordinates(
-        lon=torch.tensor(topography[lon_name].values),
-        lat=torch.tensor(topography[lat_name].values),
+        lon=torch.tensor(static_input[lon_name].values),
+        lat=torch.tensor(static_input[lat_name].values),
     )
 
-    topography_normalized = (topography - topography.mean()) / topography.std()
+    static_input_normalized = (static_input - static_input.mean()) / static_input.std()
 
-    return Topography(
-        data=torch.tensor(topography_normalized.values, dtype=torch.float32),
+    return StaticInput(
+        data=torch.tensor(static_input_normalized.values, dtype=torch.float32),
         coords=coords,
     )
 
 
-def get_topography_downscale_factor(
-    topography_shape: tuple[int, ...], data_coords_shape: tuple[int, ...]
-):
-    if len(topography_shape) != 2 or len(data_coords_shape) != 2:
-        raise ValueError(
-            f"Expected 2D shapes for topography {topography_shape} and "
-            f"data coordinates {data_coords_shape}, got {len(topography_shape)}D "
-            f"and {len(data_coords_shape)}D."
-        )
-    if (
-        topography_shape[0] % data_coords_shape[0] != 0
-        or topography_shape[1] % data_coords_shape[1] != 0
-    ):
-        raise ValueError(
-            f"Topography shape {topography_shape} must be evenly "
-            f"divisible by horizontal shape {data_coords_shape}"
-        )
-    topography_downscale_factor = topography_shape[0] // data_coords_shape[0]
-    if topography_downscale_factor != topography_shape[1] // data_coords_shape[1]:
-        raise ValueError(
-            f"Topography shape {topography_shape} must have the same scale factor "
-            "between lat and lon dimensions as data coordinates "
-            f"shape {data_coords_shape}"
-        )
-    return topography_downscale_factor
-
-
 @dataclasses.dataclass
 class StaticInputs:
-    fields: list[Topography]
+    fields: list[StaticInput]
 
     def __post_init__(self):
         for i, field in enumerate(self.fields[1:]):
@@ -163,13 +135,6 @@ class StaticInputs:
 
     def __getitem__(self, index: int):
         return self.fields[index]
-
-    @property
-    def input_tensors(self) -> list[torch.Tensor]:
-        if len(self.fields) > 0:
-            return [field.data for field in self.fields]
-        else:
-            return torch.tensor([])
 
     @property
     def coords(self) -> LatLonCoordinates:
@@ -206,16 +171,16 @@ class StaticInputs:
                 fields=[field._apply_patch(patch) for field in self.fields]
             )
 
-    def to_state(self) -> dict:
+    def get_state(self) -> dict:
         return {
-            "fields": [field.to_state() for field in self.fields],
+            "fields": [field.get_state() for field in self.fields],
         }
 
     @classmethod
     def from_state(cls, state: dict) -> "StaticInputs":
         return cls(
             fields=[
-                Topography(
+                StaticInput(
                     data=field_state["data"],
                     coords=LatLonCoordinates(
                         lat=field_state["coords"]["lat"],
@@ -225,3 +190,22 @@ class StaticInputs:
                 for field_state in state["fields"]
             ]
         )
+
+
+def load_static_inputs(
+    static_inputs_config: dict[str, str] | None,
+) -> StaticInputs | None:
+    """
+    Load normalized static inputs from a mapping of field names to file paths.
+    Returns None if the input config is empty.
+    """
+    # TODO: consolidate/simplify empty StaticInputs vs. None handling in
+    #       downscaling code
+    if not static_inputs_config:
+        return None
+    return StaticInputs(
+        fields=[
+            _get_normalized_static_input(path, field_name)
+            for field_name, path in static_inputs_config.items()
+        ]
+    )

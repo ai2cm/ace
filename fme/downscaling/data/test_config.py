@@ -1,6 +1,7 @@
 import dataclasses
 
 import pytest
+import torch
 
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
@@ -9,9 +10,23 @@ from fme.downscaling.data.config import (
     PairedDataLoaderConfig,
     XarrayEnsembleDataConfig,
 )
-from fme.downscaling.data.utils import ClosedInterval
+from fme.downscaling.data.static import StaticInput, StaticInputs
+from fme.downscaling.data.utils import ClosedInterval, LatLonCoordinates
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.test_utils import data_paths_helper
+
+
+def get_static_inputs(shape=(8, 8)):
+    return StaticInputs(
+        fields=[
+            StaticInput(
+                data=torch.ones(shape),
+                coords=LatLonCoordinates(
+                    lat=torch.ones(shape[0]), lon=torch.ones(shape[1])
+                ),
+            )
+        ]
+    )
 
 
 @pytest.mark.parametrize(
@@ -60,11 +75,12 @@ def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
         batch_size=2,
         num_data_workers=1,
         strict_ensemble=False,
-        topography=f"{paths.fine}/data.nc",
         lat_extent=ClosedInterval(1, 4),
         lon_extent=ClosedInterval(0, 3),
     )
-    data = data_config.build(requirements=requirements)
+    data = data_config.build(
+        requirements=requirements, static_inputs=get_static_inputs(shape=(8, 8))
+    )
     batch = next(iter(data.loader))
     # lat/lon midpoints are on (0.5, 1.5, ...)
     assert batch.data["var0"].shape == (2, 3, 3)
@@ -94,7 +110,7 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
         fine_names=["var0"],
         coarse_names=["var0"],
         n_timesteps=1,
-        use_fine_topography=True,
+        use_fine_topography=False,
     )
     n_sample = 3
     data_config = PairedDataLoaderConfig(
@@ -103,7 +119,6 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
         batch_size=1,
         num_data_workers=1,
         strict_ensemble=False,
-        topography=f"{paths.fine}/data.nc",
         lat_extent=ClosedInterval(1, 4),
         lon_extent=ClosedInterval(0, 3),
         sample_with_replacement=n_sample,
@@ -133,11 +148,13 @@ def test_DataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         batch_size=2,
         num_data_workers=0,
         strict_ensemble=False,
-        topography=f"{paths.fine}/data.nc",
         lat_extent=ClosedInterval(1, 4),
         lon_extent=ClosedInterval(0, 3),
     )
-    data = data_config.build(requirements=requirements)
+
+    data = data_config.build(
+        requirements=requirements, static_inputs=get_static_inputs(shape=(8, 8))
+    )
     # XarrayDataConfig + MergeNoConcatDatasetConfig each
     # contribute 4 timesteps = 8 total
     assert len(data.loader) == 4  # 8 samples / batch_size 2
@@ -163,9 +180,31 @@ def test_paired_config_raise_error_on_invalid_lat_extent():
             batch_size=1,
             num_data_workers=1,
             strict_ensemble=False,
-            topography=f"data.nc",
             lat_extent=ClosedInterval(-90, 90),
             lon_extent=ClosedInterval(0, 3),
+        )
+
+
+def test_config_raise_error_on_deprecated_topography():
+    with pytest.raises(ValueError, match="deprecated"):
+        DataLoaderConfig(
+            coarse=[XarrayDataConfig("coarse_dataset_path")],
+            batch_size=1,
+            num_data_workers=1,
+            strict_ensemble=False,
+            topography="data.nc",
+        )
+
+
+def test_paired_config_raise_error_on_deprecated_topography():
+    with pytest.raises(ValueError, match="deprecated"):
+        PairedDataLoaderConfig(
+            fine=[XarrayDataConfig("fine_dataset_path")],
+            coarse=[XarrayDataConfig("coarse_dataset_path")],
+            batch_size=1,
+            num_data_workers=1,
+            strict_ensemble=False,
+            topography="data.nc",
         )
 
 
@@ -177,7 +216,7 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         fine_names=["var0"],
         coarse_names=["var0"],
         n_timesteps=1,
-        use_fine_topography=True,
+        use_fine_topography=False,
     )
     fine_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = [
         XarrayDataConfig(paths.fine),
@@ -193,7 +232,6 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         batch_size=2,
         num_data_workers=0,
         strict_ensemble=False,
-        topography=f"{paths.fine}/data.nc",
         lat_extent=ClosedInterval(1, 4),
         lon_extent=ClosedInterval(0, 3),
     )

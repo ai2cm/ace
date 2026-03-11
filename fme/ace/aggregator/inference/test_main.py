@@ -6,7 +6,10 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
+from fme.ace.aggregator.inference.main import (
+    InferenceEvaluatorAggregator,
+    StepMeanEntry,
+)
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
@@ -26,7 +29,9 @@ def test_inference_evaluator_aggregator_channel_mean_names(
     n_ensemble: int,
     channel_mean_names: Sequence[str] | None,
 ):
-    n_timesteps = 3
+    n_ic_steps = 1
+    n_forward_steps = 2
+    n_timesteps = n_ic_steps + n_forward_steps
     nx, ny = 4, 4
     batch_size = 2
 
@@ -35,10 +40,12 @@ def test_inference_evaluator_aggregator_channel_mean_names(
 
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_timesteps,
+        n_ic_steps=n_ic_steps,
+        n_forward_steps=n_forward_steps,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
         log_zonal_mean_images=False,
+        log_step_means=[],
         log_video=False,
         log_seasonal_means=False,
         log_global_mean_time_series=False,
@@ -96,7 +103,9 @@ def test_inference_evaluator_aggregator_channel_mean_names(
 
 def test_inference_evaluator_aggregator_ensemble():
     channel_mean_names = ["a", "b"]
-    n_timesteps = 40
+    n_ic_steps = 1
+    n_forward_steps = 39
+    n_timesteps = n_ic_steps + n_forward_steps
     nx, ny = 4, 4
     batch_size = 2
     n_ensemble = 2
@@ -106,7 +115,8 @@ def test_inference_evaluator_aggregator_ensemble():
 
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_timesteps,
+        n_ic_steps=n_ic_steps,
+        n_forward_steps=n_forward_steps,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
         log_zonal_mean_images=False,
@@ -119,7 +129,7 @@ def test_inference_evaluator_aggregator_ensemble():
         log_nino34_index=False,
         save_diagnostics=False,
         n_ensemble_per_ic=n_ensemble,
-        record_step_20=True,
+        log_step_means=[StepMeanEntry(step=20)],
     )
 
     target_data = BatchData.new_for_testing(

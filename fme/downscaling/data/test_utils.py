@@ -62,3 +62,26 @@ def test_scale_slice(input_slice, expected):
     scaled = scale_slice(input_slice, scale=2)
     assert scaled.start == expected.start
     assert scaled.stop == expected.stop
+
+
+@pytest.mark.parametrize(
+    "interval,expected_slice",
+    [
+        pytest.param(ClosedInterval(2, 4), slice(2, 5), id="middle"),
+        pytest.param(ClosedInterval(float("-inf"), 2), slice(0, 3), id="start_inf"),
+        pytest.param(ClosedInterval(4, float("inf")), slice(4, 5), id="end_inf"),
+        pytest.param(
+            ClosedInterval(float("-inf"), float("inf")), slice(0, 5), id="all_inf"
+        ),
+    ],
+)
+def test_ClosedInterval_slice_of(interval, expected_slice):
+    coords = torch.arange(5)
+    result_slice = interval.slice_of(coords)
+    assert result_slice == expected_slice
+
+
+def test_ClosedInterval_fail_on_empty_slice():
+    coords = torch.arange(5)
+    with pytest.raises(ValueError):
+        ClosedInterval(5.5, 7).slice_of(coords)

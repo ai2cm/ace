@@ -13,9 +13,9 @@ from fme.core.dataset.time import TimeSlice
 from fme.core.logging_utils import LoggingConfig
 from fme.downscaling.data import (
     LatLonCoordinates,
+    StaticInput,
     StaticInputs,
-    Topography,
-    get_normalized_topography,
+    load_static_inputs,
 )
 from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
 from fme.downscaling.inference.inference import Downscaler, InferenceConfig, main
@@ -62,10 +62,10 @@ def mock_output_target():
     return target
 
 
-def get_topography(shape=(16, 16)):
+def get_static_inputs(shape=(16, 16)):
     data = torch.randn(shape)
     coords = LatLonCoordinates(lat=torch.arange(shape[0]), lon=torch.arange(shape[1]))
-    return Topography(data=data, coords=coords)
+    return StaticInputs([StaticInput(data=data, coords=coords)])
 
 
 # Tests for Downscaler initialization
@@ -92,7 +92,7 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
     Test _get_generation_model returns model unchanged when shapes match exactly.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_topography(shape=(16, 16))
+    static_inputs = get_static_inputs(shape=(16, 16))
 
     downscaler = Downscaler(
         model=mock_model,
@@ -100,7 +100,7 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
     )
 
     result = downscaler._get_generation_model(
-        topography=topo,
+        static_inputs=static_inputs,
         output=mock_output_target,
     )
 
@@ -116,7 +116,7 @@ def test_get_generation_model_raises_when_domain_too_small(
     smaller than model.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_topography(shape=topo_shape)
+    topo = get_static_inputs(shape=topo_shape)
 
     downscaler = Downscaler(
         model=mock_model,
@@ -125,7 +125,7 @@ def test_get_generation_model_raises_when_domain_too_small(
 
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
-            topography=topo,
+            static_inputs=topo,
             output=mock_output_target,
         )
 
@@ -138,7 +138,7 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
     large domains with patching.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_topography(shape=(32, 32))  # Larger than model
+    static_inputs = get_static_inputs(shape=(32, 32))  # Larger than model
 
     patch_config = PatchPredictionConfig(
         divide_generation=True,
@@ -152,7 +152,7 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
     )
 
     model = downscaler._get_generation_model(
-        topography=topo,
+        static_inputs=static_inputs,
         output=mock_output_target,
     )
 
@@ -168,7 +168,7 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
     not configured.
     """
     mock_model.fine_shape = (16, 16)
-    topo = get_topography(shape=(32, 32))  # Larger than model
+    topo = get_static_inputs(shape=(32, 32))  # Larger than model
     mock_output_target.patch = PatchPredictionConfig(divide_generation=False)
 
     downscaler = Downscaler(
@@ -178,7 +178,7 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
 
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
-            topography=topo,
+            static_inputs=topo,
             output=mock_output_target,
         )
 
@@ -194,10 +194,10 @@ def test_run_target_generation_skips_padding_items(
     mock_work_item.n_ens = 4
     mock_work_item.batch = MagicMock()
 
-    mock_topo = get_topography(shape=(16, 16))
+    static_inputs = get_static_inputs(shape=(16, 16))
 
     mock_gridded_data = SliceWorkItemGriddedData(
-        [mock_work_item], {}, [0], torch.float32, (1, 4, 16, 16), mock_topo
+        [mock_work_item], {}, [0], torch.float32, (1, 4, 16, 16), static_inputs
     )
     mock_output_target.data = mock_gridded_data
     mock_model.fine_shape = (16, 16)
@@ -266,7 +266,7 @@ def get_generate_model_config():
 @pytest.fixture
 def checkpointed_model_config(
     tmp_path,
-    loader_config,
+    data_paths,
 ):
     """Create and return a path to a checkpointed model for testing."""
     model_config = get_generate_model_config()
@@ -276,10 +276,7 @@ def checkpointed_model_config(
 
     # loader_config is passed in to add static inputs into model
     # that correspond to the dataset coordinates
-    topography_path = (
-        f"{loader_config.coarse[0].data_path.replace('coarse', 'fine')}/data.nc"
-    )
-    static_inputs = StaticInputs([get_normalized_topography(topography_path)])
+    static_inputs = load_static_inputs({"HGTsfc": f"{data_paths.fine}/data.nc"})
     model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"
@@ -333,7 +330,6 @@ def generation_config_path(generation_config):
     return config_path
 
 
-@pytest.mark.parametrize("loader_config", [False], indirect=True)
 def test_generation_main(generation_config_path, skip_slow):
     """Test the main generation process end-to-end."""
     if skip_slow:
@@ -362,11 +358,11 @@ def test_generation_main(generation_config_path, skip_slow):
     assert event["var0"].sizes[TIME_NAME] == 1
 
 
-@pytest.mark.parametrize("loader_config", [False], indirect=True)
 @pytest.mark.skipif(
     (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
     reason="Skipping multi-GPU test: less than 2 GPUs available.",
 )
+@pytest.mark.serial
 def test_generation_entrypoint(generation_config_path, skip_slow):
     """Test the main generation process end-to-end."""
     if skip_slow:

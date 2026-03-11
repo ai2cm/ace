@@ -13,7 +13,6 @@ from fme.ace.testing import (
     save_scalar_netcdf,
 )
 from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
-from fme.core.generics.trainer import count_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.diffusion.train import main as train_main
 
@@ -153,8 +152,8 @@ loader:
 
 def get_sizes(
     spatial_dims: HorizontalCoordinates = LatLonCoordinates(
-        lon=torch.Tensor(np.arange(32)),
-        lat=torch.Tensor(np.arange(16)),
+        lon=torch.Tensor(np.arange(18)),
+        lat=torch.Tensor(np.arange(9)),
     ),
     n_time=3,
     nz_interface=3,
@@ -275,15 +274,3 @@ def test_train_inline(tmp_path, nettype, very_fast_only: bool):
         for log in wandb_logs:
             # ensure inference time series is not logged
             assert "inference/mean/forecast_step" not in log
-
-
-@pytest.mark.parametrize(
-    "module_list,expected_num_parameters",
-    [
-        (torch.nn.ModuleList([torch.nn.Linear(10, 5), torch.nn.Linear(5, 2)]), 67),
-        (torch.nn.ModuleList([]), 0),
-    ],
-)
-def test_count_parameters(module_list, expected_num_parameters):
-    num_parameters = count_parameters(module_list)
-    assert num_parameters == expected_num_parameters

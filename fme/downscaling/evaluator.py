@@ -6,10 +6,9 @@ import dacite
 import torch
 import yaml
 
-import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
+from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
@@ -27,7 +26,6 @@ from fme.downscaling.predictors import (
     PatchPredictor,
 )
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -62,11 +60,11 @@ class Evaluator:
         else:
             batch_generator = self.data.get_generator()
 
-        for i, (batch, topography) in enumerate(batch_generator):
+        for i, (batch, static_inputs) in enumerate(batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 outputs = self.model.generate_on_batch(
-                    batch, topography, n_samples=self.n_samples
+                    batch, static_inputs, n_samples=self.n_samples
                 )
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
@@ -113,7 +111,7 @@ class EventEvaluator:
 
     def run(self):
         logging.info(f"Running {self.event_name} event evaluation")
-        batch, topography = next(iter(self.data.get_generator()))
+        batch, static_inputs = next(iter(self.data.get_generator()))
         sample_agg = PairedSampleAggregator(
             target=batch[0].fine.data,
             coarse=batch[0].coarse.data,
@@ -132,7 +130,7 @@ class EventEvaluator:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch(
-                batch, topography, n_samples=end_idx - start_idx
+                batch, static_inputs, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs.prediction)
 
@@ -179,7 +177,7 @@ class PairedEventConfig(EventConfig):
         return event_data_config.build(
             train=False,
             requirements=requirements,
-            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
+            static_inputs=static_inputs_from_checkpoint,
         )
 
 
@@ -196,13 +194,9 @@ class EvaluatorConfig:
     events: list[PairedEventConfig] | None = None
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(self, resumable: bool = False, **kwargs):
-        config = to_flat_dict(dataclasses.asdict(self))
-        env_vars = logging_utils.retrieve_env_vars()
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=True
         )
 
     def _build_default_evaluator(self) -> Evaluator:
@@ -210,7 +204,7 @@ class EvaluatorConfig:
         dataset = self.data.build(
             train=False,
             requirements=self.model.data_requirements,
-            static_inputs_from_checkpoint=model.static_inputs,
+            static_inputs=model.static_inputs,
         )
         evaluator_model: DiffusionModel | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:
@@ -245,7 +239,9 @@ class EvaluatorConfig:
         evaluator_model: DiffusionModel | PatchPredictor
 
         dataset = event_config.get_paired_gridded_data(
-            base_data_config=self.data, requirements=self.model.data_requirements
+            base_data_config=self.data,
+            requirements=self.model.data_requirements,
+            static_inputs_from_checkpoint=model.static_inputs,
         )
 
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
@@ -289,9 +285,6 @@ def main(config_path: str):
     prepare_directory(evaluator_config.experiment_dir, config)
 
     evaluator_config.configure_logging(log_filename="out.log")
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    evaluator_config.configure_wandb(resumable=True, notes=beaker_url)
 
     logging.info("Starting downscaling model evaluation")
     evaluators = evaluator_config.build()
@@ -310,4 +303,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    main(args.config_path)
+    with Distributed.context():
+        main(args.config_path)
