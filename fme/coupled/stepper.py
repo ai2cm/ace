@@ -844,7 +844,7 @@ class CoupledStepper:
             "config": self._config.get_state(),
             "atmosphere_state": self.atmosphere.get_state(),
             "ocean_state": self.ocean.get_state(),
-            "dataset_info": self._dataset_info.to_state(),
+            "dataset_info": self._dataset_info.get_state(),
         }
 
     def load_state(self, state: dict[str, Any]):
