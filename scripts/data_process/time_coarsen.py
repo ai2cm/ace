@@ -41,7 +41,8 @@ class TimeCoarsenConfig:
         n_split: Number of partitions to split the write into when using xpartition.
             Only used when dask and xpartition are available.
         chunking: Mapping of dimension names to inner chunk sizes for the output
-            zarr store. Defaults to {"time": 1, "lat": -1, "lon": -1}.
+            zarr store. Defaults to {"time": 1}. Spatial dimensions keep their
+            existing chunking.
         sharding: Mapping of dimension names to shard sizes. If None, an unsharded
             zarr store is written with chunks as specified in ``chunking``.
     """
@@ -53,11 +54,9 @@ class TimeCoarsenConfig:
     window_names: list[str]
     constant_prefixes: list[str]
     n_split: int = 1
-    chunking: dict[str, int] = dataclasses.field(
-        default_factory=lambda: {"time": 1, "lat": -1, "lon": -1}
-    )
+    chunking: dict[str, int] = dataclasses.field(default_factory=lambda: {"time": 1})
     sharding: dict[str, int] | None = dataclasses.field(
-        default_factory=lambda: {"time": 360, "lat": -1, "lon": -1}
+        default_factory=lambda: {"time": 360}
     )
 
 
@@ -114,6 +113,11 @@ def coarsen(ds: xr.Dataset, config: TimeCoarsenConfig) -> xr.Dataset:
         for name in ds.data_vars
         if any(name.startswith(prefix) for prefix in config.constant_prefixes)
     ]
+    if set(config.snapshot_names).intersection(set(config.window_names)):
+        raise ValueError(
+            "Snapshot names overlap with window names: "
+            f"{set(config.snapshot_names).intersection(set(config.window_names))}"
+        )
     if set(constant_names).intersection(set(config.snapshot_names)):
         raise ValueError(
             "Constant names overlap with snapshot names: "
@@ -190,7 +194,8 @@ def process_path_pair(
         logging.warning(f"Output path {output_path} already exists. Skipping.")
         return
     if _HAS_XPARTITION:
-        ds = xr.open_zarr(input_path)
+        with dask.config.set({"array.chunk-size": "128MiB"}):
+            ds = xr.open_zarr(input_path, chunks={"time": "auto"})
     else:
         ds = xr.open_dataset(input_path)
     ds_coarsened = coarsen(ds, config)
