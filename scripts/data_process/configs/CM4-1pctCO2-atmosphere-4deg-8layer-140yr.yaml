@@ -3,7 +3,7 @@ runs:
 data_output_directory: gs://vcm-ml-intermediate
 stats:
   output_directory: gs://vcm-ml-intermediate/2025-06-18-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr-stats
-  start_date: "0151-01-01T06:00:00"
+  start_date: "0211-01-01T06:00:00"
   end_date: "0351-01-01T00:00:00"
   data_type: CM4
   beaker_dataset: 2025-06-18-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr
