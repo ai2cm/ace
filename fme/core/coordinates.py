@@ -331,16 +331,18 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
 
 
 def dz_from_idepth(
-    idepth: torch.Tensor, deptho: torch.Tensor | None = None
+    idepth: torch.Tensor,  # positive down
+    mask: torch.Tensor,  # 0 land, 1 sea
+    deptho: torch.Tensor | None = None,  # positive down
 ) -> torch.Tensor:
-    if deptho is not None:
-        z_top = idepth[..., :-1]
-        z_bot = idepth[..., 1:]
-        deptho = deptho.unsqueeze(-1)
-        dz = torch.clamp(deptho, min=z_top, max=z_bot) - z_top
+    z_top = idepth[..., :-1]
+    z_bot = idepth[..., 1:]
+    if deptho is None:
+        deptho_expanded = (mask * z_bot).max(dim=-1, keepdim=True).values
     else:
-        dz = idepth.diff(dim=-1)
-    return dz
+        deptho_expanded = deptho.unsqueeze(-1)
+    dz = torch.clamp(deptho_expanded, min=z_top, max=z_bot) - z_top
+    return dz.nan_to_num() * mask
 
 
 @dataclasses.dataclass
@@ -380,7 +382,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got idepth.shape: {self.idepth.shape} and mask.shape: "
                 f"{self.mask.shape}."
             )
-        self._dz = dz_from_idepth(self.idepth, self.deptho)
+        self._dz = dz_from_idepth(self.idepth, self.mask, self.deptho)
 
     @property
     def dz(self) -> torch.Tensor:
@@ -452,7 +454,7 @@ class DepthCoordinate(VerticalCoordinate):
             return False
         if self.deptho is not None and other.deptho is not None:
             try:
-                torch.testing.assert_close(self.deptho, other.deptho)
+                torch.testing.assert_close(self.deptho, other.deptho, equal_nan=True)
             except AssertionError:
                 return False
         return True
@@ -499,7 +501,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        integral = (integrand * self.dz * self.mask).nansum(dim=-1)
+        integral = (integrand * self.dz).nansum(dim=-1)
         mask_0 = self.mask.select(dim=-1, index=0).expand(integral.shape)
         return integral.where(mask_0 > 0, float("nan"))
 

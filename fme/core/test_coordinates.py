@@ -49,6 +49,18 @@ except ImportError:
             DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
             DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
         ),
+        (
+            DepthCoordinate(
+                idepth=torch.tensor([0.0, 10.0, 50.0]),
+                mask=torch.tensor([1.0, 0.0]),
+                deptho=torch.tensor([float("nan"), 10.0]),
+            ),
+            DepthCoordinate(
+                idepth=torch.tensor([0.0, 10.0, 50.0]),
+                mask=torch.tensor([1.0, 0.0]),
+                deptho=torch.tensor([float("nan"), 10.0]),
+            ),
+        ),
     ],
 )
 def test_equality(first, second):
@@ -221,42 +233,61 @@ def test_healpix_ops_raises_value_error_with_mask():
 
 
 @pytest.mark.parametrize(
-    "idepth, deptho, expected",
+    "idepth, mask, deptho, expected",
     [
         pytest.param(
             torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
             None,
             torch.tensor([10.0, 40.0, 50.0]),
             id="no_deptho",
         ),
         pytest.param(
             torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
             torch.tensor(50.0),
             torch.tensor([10.0, 40.0, 0.0]),
             id="deptho_at_interface",
         ),
         pytest.param(
             torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
             torch.tensor(30.0),
             torch.tensor([10.0, 20.0, 0.0]),
             id="deptho_between_interfaces",
         ),
         pytest.param(
             torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
             torch.tensor(100.0),
             torch.tensor([10.0, 40.0, 50.0]),
             id="deptho_at_bottom",
         ),
         pytest.param(
             torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
             torch.tensor(101.0),
             torch.tensor([10.0, 40.0, 50.0]),
             id="deptho_below_bottom",
         ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.tensor([1.0, 1.0, 0.0]),
+            None,
+            torch.tensor([10.0, 40.0, 0.0]),
+            id="deepest_layer_masked",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.tensor([0.0, 0.0, 0.0]),
+            None,
+            torch.tensor([0.0, 0.0, 0.0]),
+            id="all_masked",
+        ),
     ],
 )
-def test_dz_from_idepth(idepth, deptho, expected):
-    result = dz_from_idepth(idepth, deptho)
+def test_dz_from_idepth(idepth, mask, deptho, expected):
+    result = dz_from_idepth(idepth, mask, deptho)
     torch.testing.assert_close(result, expected)
 
 
@@ -295,6 +326,24 @@ def test_depth_integral_with_deptho(leading_dims):
     torch.testing.assert_close(
         result[..., 1, 0], torch.tensor(100.0).expand(leading_dims)
     )
+
+
+def test_depth_integral_gradient_with_mask():
+    nlat, nlon, nz = 3, 4, 2
+    idepth = torch.tensor([0.0, 10.0, 50.0])
+    mask = torch.ones(nlat, nlon, nz)
+    mask[0, 0, :] = 0  # land point
+    mask[1, 1, 1] = 0  # partial mask (only top layer valid)
+
+    coord = DepthCoordinate(idepth=idepth, mask=mask)
+    integrand = torch.randn(nlat, nlon, nz, requires_grad=True)
+    result = coord.depth_integral(integrand)
+    ocean_mask = mask.select(dim=-1, index=0) > 0
+    loss = result[ocean_mask].sum()
+    loss.backward()
+
+    assert integrand.grad is not None
+    assert torch.all(torch.isfinite(integrand.grad))
 
 
 @pytest.mark.skipif(e2ghpx is None, reason="earth2grid is not available")
