@@ -60,8 +60,10 @@ def run_validation(
 
     logging.info("Starting validation loop")
     no_opt = NullOptimization()
+    n_batches = len(validation_data.loader)
     with torch.no_grad():
-        for batch in validation_data.loader:
+        for i, batch in enumerate(validation_data.loader):
+            logging.info(f"Validation: processing batch {i + 1} of {n_batches}.")
             stepped = train_stepper.train_on_batch(
                 batch,
                 optimization=no_opt,
