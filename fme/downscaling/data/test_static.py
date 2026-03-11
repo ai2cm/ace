@@ -128,7 +128,7 @@ def test_StaticInputs_serialize():
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
     static_inputs = StaticInputs([topography, land_frac])
-    state = static_inputs.to_state()
+    state = static_inputs.get_state()
     static_inputs_reconstructed = StaticInputs.from_state(state)
     assert static_inputs_reconstructed[0].data.equal(static_inputs[0].data)
     assert static_inputs_reconstructed[1].data.equal(static_inputs[1].data)

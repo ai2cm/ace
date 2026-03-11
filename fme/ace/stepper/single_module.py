@@ -1263,7 +1263,7 @@ class Stepper:
         """
         return {
             "config": self._config.as_loaded_dict(),
-            "dataset_info": self._dataset_info.to_state(),
+            "dataset_info": self._dataset_info.get_state(),
             "step": self._step_obj.get_state(),
             "training_history": self._training_history.get_state(),
         }

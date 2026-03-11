@@ -25,8 +25,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
-    StaticInputs,
-    get_normalized_static_input,
+    load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
 
@@ -425,13 +424,7 @@ class TrainerConfig:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
-        static_inputs_fields = self.static_inputs or {}
-        static_inputs = StaticInputs(
-            fields=[
-                get_normalized_static_input(path, field_name=key)
-                for key, path in static_inputs_fields.items()
-            ]
-        )
+        static_inputs = load_static_inputs(self.static_inputs)
 
         train_data: PairedGriddedData = self.train_data.build(
             train=True,
