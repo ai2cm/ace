@@ -3,9 +3,9 @@
 set -e
 
 #JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-xshield-amip-100km-to-3km-prate-only-events"
+JOB_NAME="eval-xshield-amip-100km-to-3km-loguni-multivariate-global"
 
-CONFIG_FILENAME="eval-100-to-3km-prmsl-output.yaml"
+CONFIG_FILENAME="eval-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,11 +17,11 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=2
+NGPU=4
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET=01K8XGEEAJRHN8JRZE4WXQRDVD
+EXISTING_RESULTS_DATASET=01KK1ZH1KFJSHGR24W531AGKVE
 wandb_group=""
 
 #--not-preemptible \
@@ -31,7 +31,6 @@ gantry run \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
     --priority urgent \
-    --not-preemptible \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
