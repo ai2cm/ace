@@ -16,12 +16,14 @@ data:
       subset:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
+        step: 29
     - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
       file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
       engine: zarr
       subset:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
+        step: 29
   coarse:
   - merge:
     - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -30,12 +32,14 @@ data:
       subset:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
+        step: 29
     - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
       file_pattern: pressfc_renamed_to_prmsl_100km.zarr
       engine: zarr
       subset:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
+        step: 29
   lat_extent:
     start: -66
     stop: 70.0
