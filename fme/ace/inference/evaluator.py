@@ -27,7 +27,6 @@ from fme.ace.stepper import (
     load_stepper,
     load_stepper_config,
 )
-from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.ace.stepper.single_module import (
     StepperConfig,
     TrainStepper,
@@ -129,11 +128,10 @@ class ValidationConfig:
 
     def __post_init__(self):
         if self.stepper_training.parameter_init.weights_path is not None:
-            logging.warning(
+            raise ValueError(
                 "stepper_training.parameter_init is not used for validation within "
-                "inference evaluator jobs. Ignoring..."
+                "inference evaluator jobs."
             )
-        self.stepper_training.parameter_init = ParameterInitializationConfig()
         if isinstance(self.stepper_training.train_n_forward_steps, TimeLengthSchedule):
             raise ValueError(
                 "stepper_training.train_n_forward_steps may not be a "

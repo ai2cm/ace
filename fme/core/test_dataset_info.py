@@ -66,7 +66,7 @@ from fme.core.metrics import spherical_area_weights
     ],
 )
 def test_dataset_info_round_trip(dataset_info: DatasetInfo):
-    state = dataset_info.to_state()
+    state = dataset_info.get_state()
     dataset_info_reloaded = DatasetInfo.from_state(state)
     assert dataset_info == dataset_info_reloaded
 
