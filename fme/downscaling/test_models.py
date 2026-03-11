@@ -411,10 +411,8 @@ def test_DiffusionModel_generate_on_batch_no_target():
     batch_size = 2
     n_generated_samples = 2
 
-    # Coarse coords: step=2, offset=0.5 so adjust_fine_coord_range maps to
-    # full fine grid
-    coarse_lat = [i * 2 + 0.5 for i in range(coarse_shape[0])]
-    coarse_lon = [i * 2 + 0.5 for i in range(coarse_shape[1])]
+    coarse_lat = _get_monotonic_coordinate(coarse_shape[0], stop=fine_shape[0])
+    coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
     coarse_batch = make_batch_data((batch_size, *coarse_shape), coarse_lat, coarse_lon)
 
     samples = model.generate_on_batch_no_target(
@@ -436,7 +434,8 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
     # for all tested batch sizes.
     coarse_shape = (16, 16)
     downscale_factor = 2
-    # Full fine domain: 64x64 covers patches for both (8,8) and (32,32) coarse inputs
+    # Full fine domain: 64x64 covers inputs for both (8,8) and (32,32) coarse inputs
+    # with a downscaling factor of 2
     full_fine_size = 64
     static_inputs = make_static_inputs((full_fine_size, full_fine_size))
     # need to build with static inputs to get the correct n_in_channels
@@ -452,10 +451,9 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
 
     for alternative_input_shape in [(8, 8), (32, 32)]:
         fine_shape = tuple(dim * downscale_factor for dim in alternative_input_shape)
-        # Coarse coords: step=2, offset=0.5 so adjust_fine_coord_range selects the
-        # correct subset of the full fine grid.
-        coarse_lat = [i * 2 + 0.5 for i in range(alternative_input_shape[0])]
-        coarse_lon = [i * 2 + 0.5 for i in range(alternative_input_shape[1])]
+        alt_y, alt_x = alternative_input_shape
+        coarse_lat = _get_monotonic_coordinate(alt_y, stop=alt_y * downscale_factor)
+        coarse_lon = _get_monotonic_coordinate(alt_x, stop=alt_x * downscale_factor)
         coarse_batch = make_batch_data(
             (batch_size, *alternative_input_shape), coarse_lat, coarse_lon
         )
