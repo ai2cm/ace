@@ -553,18 +553,19 @@ def test_inference_data_loader(
     data_loader = data.loader
     batch_data = next(iter(data_loader))
     assert isinstance(batch_data, BatchData)
-    assert batch_data.n_ensemble == n_ensemble
+    # Loader yields single-ensemble batches; ensemble expansion happens in the stepper
+    assert batch_data.n_ensemble == 1
     for name in ["foo", "bar"]:
         assert isinstance(batch_data.data[name], torch.Tensor)
         assert batch_data.data[name].shape == (
-            batch_size * n_ensemble,
+            batch_size,
             n_forward_steps_in_memory + 1,
             16,
             32,
         )
     assert isinstance(batch_data.time, xr.DataArray)
     assert list(batch_data.time.dims) == ["sample", "time"]
-    assert batch_data.time.sizes["sample"] == batch_size * n_ensemble
+    assert batch_data.time.sizes["sample"] == batch_size
     assert batch_data.time.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.time.dt.calendar == "proleptic_gregorian"
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)

@@ -180,6 +180,8 @@ def get_inference_data(
     Returns:
         A data loader for inference with coordinates and metadata.
     """
+    # Use n_ensemble=1 in the dataset so broadcast never runs in DataLoader workers.
+    # Ensemble expansion is done in the stepper (and for IC in get_initial_condition).
     dataset = InferenceDataset(
         config=config,
         total_forward_steps=total_forward_steps,
@@ -187,7 +189,7 @@ def get_inference_data(
         surface_temperature_name=surface_temperature_name,
         ocean_fraction_name=ocean_fraction_name,
         label_override=label_override,
-        n_ensemble=n_ensemble,
+        n_ensemble=1,
     )
     properties = dataset.properties
 
@@ -215,10 +217,12 @@ def get_inference_data(
         persistent_workers=persistent_workers,
         worker_init_fn=worker_init_fn,
     )
+    n_ensemble_per_ic = n_ensemble if n_ensemble is not None else 1
     gridded_data = InferenceGriddedData(
         loader=loader,
         initial_condition=initial_condition,
         properties=properties,
+        n_ensemble_per_ic=n_ensemble_per_ic,
     )
 
     return gridded_data

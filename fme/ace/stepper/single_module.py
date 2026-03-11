@@ -1213,6 +1213,10 @@ class Stepper:
             final state, which can be used as a new initial condition.
         """
         forcing = self.forcing_deriver(forcing)
+        if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
+            forcing = forcing.broadcast_ensemble(
+                n_ensemble=initial_condition.as_batch_data().n_ensemble
+            )
         prediction, new_initial_condition = self.predict(
             initial_condition,
             forcing,
