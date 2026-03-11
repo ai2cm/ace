@@ -19,7 +19,6 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
-from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector
 from fme.core.step.args import StepArgs
@@ -391,7 +390,6 @@ class FCN3Step(StepABC):
         self.module = dist.wrap_module(module)
         self._img_shape = dataset_info.img_shape
         self._config = config
-        self._no_optimization = NullOptimization()
 
         self._timestep = timestep
 

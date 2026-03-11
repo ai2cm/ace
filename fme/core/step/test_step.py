@@ -23,7 +23,7 @@ from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector, SeparatedModuleSelector
-from fme.core.registry.test_separated_module import SimpleSeparatedBuilder  # noqa: F401
+from fme.core.registry.separated_module import register_test_types
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
@@ -33,6 +33,8 @@ from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
 from .radiation import SeparateRadiationStepConfig
+
+register_test_types()
 
 DEFAULT_IMG_SHAPE = (45, 90)
 

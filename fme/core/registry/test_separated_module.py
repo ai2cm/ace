@@ -1,52 +1,14 @@
-import dataclasses
-
 import torch
-from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.registry.separated_module import (
     SeparatedModule,
-    SeparatedModuleConfig,
     SeparatedModuleSelector,
+    _SimpleSeparatedModule,
+    register_test_types,
 )
 
-
-class SimpleSeparatedModule(nn.Module):
-    """A trivial module for testing the separated interface."""
-
-    def __init__(self, n_forcing, n_prognostic, n_diagnostic):
-        super().__init__()
-        n_in = n_forcing + n_prognostic
-        self.prog_linear = nn.Linear(n_in, n_prognostic, bias=False)
-        self.diag_linear = nn.Linear(n_in, n_diagnostic, bias=False)
-
-    def forward(
-        self,
-        forcing: torch.Tensor,
-        prognostic: torch.Tensor,
-        labels: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        combined = torch.cat([forcing, prognostic], dim=-3)
-        b, c, h, w = combined.shape
-        flat = combined.permute(0, 2, 3, 1).reshape(-1, c)
-        prog_out = self.prog_linear(flat).reshape(b, h, w, -1).permute(0, 3, 1, 2)
-        diag_out = self.diag_linear(flat).reshape(b, h, w, -1).permute(0, 3, 1, 2)
-        return prog_out, diag_out
-
-
-@SeparatedModuleSelector.register("test_simple")
-@dataclasses.dataclass
-class SimpleSeparatedBuilder(SeparatedModuleConfig):
-    def build(
-        self,
-        n_forcing_channels,
-        n_prognostic_channels,
-        n_diagnostic_channels,
-        dataset_info,
-    ):
-        return SimpleSeparatedModule(
-            n_forcing_channels, n_prognostic_channels, n_diagnostic_channels
-        )
+register_test_types()
 
 
 # --- Tests for SeparatedModuleSelector ---
@@ -62,11 +24,11 @@ def test_register_and_build():
         dataset_info=dataset_info,
     )
     assert isinstance(module, SeparatedModule)
-    assert isinstance(module.torch_module, SimpleSeparatedModule)
+    assert isinstance(module.torch_module, _SimpleSeparatedModule)
 
 
 def test_separated_module_forward():
-    inner = SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
+    inner = _SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
     module = SeparatedModule(inner, label_encoding=None)
 
     forcing = torch.randn(2, 2, 4, 8)
@@ -78,14 +40,14 @@ def test_separated_module_forward():
 
 
 def test_separated_module_get_and_load_state():
-    inner = SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
+    inner = _SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
     module = SeparatedModule(inner, label_encoding=None)
 
     state = module.get_state()
     assert "label_encoding" in state
     assert state["label_encoding"] is None
 
-    inner2 = SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
+    inner2 = _SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
     module2 = SeparatedModule(inner2, label_encoding=None)
     module2.load_state(state)
 
@@ -94,7 +56,7 @@ def test_separated_module_get_and_load_state():
 
 
 def test_separated_module_wrap_module():
-    inner = SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
+    inner = _SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
     module = SeparatedModule(inner, label_encoding=None)
 
     wrapped = module.wrap_module(lambda m: m)
@@ -109,7 +71,7 @@ def test_separated_module_wrap_module():
 
 
 def test_separated_module_accepts_none_labels():
-    inner = SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
+    inner = _SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
     module = SeparatedModule(inner, label_encoding=None)
 
     forcing = torch.randn(1, 2, 4, 8)

@@ -9,10 +9,12 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import SeparatedModuleSelector
-from fme.core.registry.test_separated_module import SimpleSeparatedBuilder  # noqa: F401
+from fme.core.registry.separated_module import register_test_types
 from fme.core.step.args import StepArgs
 from fme.core.step.separated_module import SeparatedModuleStepConfig
 from fme.core.step.step import StepSelector
+
+register_test_types()
 
 IMG_SHAPE = (16, 32)
 TIMESTEP = datetime.timedelta(hours=6)
