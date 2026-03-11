@@ -326,7 +326,7 @@ class Trainer:
             return
         if self._current_epoch_num_batches_seen > 0:
             return  # resumed mid-epoch, tuning already ran (or wasn't needed)
-        if self._epochs_trained % cfg.epoch_frequency != 0:
+        if not cfg.epochs.contains(self._epochs_trained):
             return
         if self._last_val_loss is None:
             # No prior validation (start of training, evaluate_before_training=False).

@@ -11,6 +11,7 @@ from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.validation import run_validation
+from fme.core.typing_ import Slice
 
 
 @dataclasses.dataclass
@@ -18,27 +19,30 @@ class LRTuningConfig:
     """
     Configuration for periodic learning rate tuning trials.
 
-    At the start of every ``epoch_frequency`` epochs, the trainer forks the
+    At the start of epochs contained in ``epochs``, the trainer forks the
     current model into a baseline and a candidate copy. Both are trained for
     ``num_batches`` on the first batches of the epoch; the candidate uses a
     learning rate of ``current_lr * lr_factor``. Both are then validated. If
-    both improve the validation loss and the candidate improves it by more than
-    ``improvement_threshold`` fractionally more than the baseline, the trainer
+    the candidate's validation loss is less than the baseline's by at least
+    ``improvement_threshold`` times the pre-trial validation loss, the trainer
     adopts the candidate's learning rate.
 
     Parameters:
-        epoch_frequency: Run a trial every N epochs.
+        epochs: A Slice selecting which epochs to run trials on. For example,
+            ``Slice(start=1, step=2)`` runs at epochs 1, 3, 5, … (skipping
+            epoch 0).
         lr_factor: Multiply the current LR by this to get the candidate LR.
         num_batches: Number of training batches for each fork in the trial.
-        improvement_threshold: The candidate must improve validation loss by
-            at least this fraction more than the baseline (e.g. 0.1 means
-            the candidate must improve at least 10% more).
+        improvement_threshold: The candidate must beat the baseline's
+            validation loss by at least this fraction of the pre-trial
+            validation loss (e.g. 0.01 means the candidate must be lower
+            by at least 1% of the pre-trial loss).
     """
 
-    epoch_frequency: int
     lr_factor: float
     num_batches: int
-    improvement_threshold: float
+    epochs: Slice = dataclasses.field(default_factory=Slice)
+    improvement_threshold: float = 0.0
 
 
 def run_lr_tuning_trial(
@@ -91,11 +95,11 @@ def run_lr_tuning_trial(
     candidate_stepper = copy_stepper()
 
     baseline_opt = build_optimization(baseline_stepper.modules)
-    baseline_opt.load_state(optimization_state)
+    baseline_opt.load_state(copy.deepcopy(optimization_state))
     baseline_opt.set_learning_rate(current_lr)
 
     candidate_opt = build_optimization(candidate_stepper.modules)
-    candidate_opt.load_state(optimization_state)
+    candidate_opt.load_state(copy.deepcopy(optimization_state))
     candidate_opt.set_learning_rate(candidate_lr)
 
     baseline_ema = copy_ema(baseline_stepper.modules)
@@ -130,27 +134,23 @@ def run_lr_tuning_trial(
     baseline_val_loss = baseline_val_logs["val/mean/loss"]
     candidate_val_loss = candidate_val_logs["val/mean/loss"]
 
-    baseline_improvement = pre_trial_val_loss - baseline_val_loss
-    candidate_improvement = pre_trial_val_loss - candidate_val_loss
+    threshold = baseline_val_loss - config.improvement_threshold * pre_trial_val_loss
 
     logging.info(
         f"LR tuning trial: baseline LR={current_lr}, candidate LR={candidate_lr}, "
         f"pre-trial val loss={pre_trial_val_loss:.6f}, "
-        f"baseline val loss={baseline_val_loss:.6f} "
-        f"(improvement={baseline_improvement:.6f}), "
-        f"candidate val loss={candidate_val_loss:.6f} "
-        f"(improvement={candidate_improvement:.6f})"
+        f"baseline val loss={baseline_val_loss:.6f}, "
+        f"candidate val loss={candidate_val_loss:.6f}, "
+        f"threshold={threshold:.6f}"
     )
 
-    if baseline_improvement > 0 and candidate_improvement > 0:
-        threshold = baseline_improvement * (1 + config.improvement_threshold)
-        if candidate_improvement > threshold:
-            logging.info(
-                f"LR tuning trial: candidate wins "
-                f"(improvement {candidate_improvement:.6f} > "
-                f"threshold {threshold:.6f})"
-            )
-            return candidate_lr
+    if candidate_val_loss < threshold:
+        logging.info(
+            f"LR tuning trial: candidate wins "
+            f"(candidate loss {candidate_val_loss:.6f} < "
+            f"threshold {threshold:.6f})"
+        )
+        return candidate_lr
 
     logging.info("LR tuning trial: baseline wins, keeping current LR")
     return None
