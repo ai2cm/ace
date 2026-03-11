@@ -98,7 +98,7 @@ def test_CascadePredictor_generate(downscale_factors):
             dtype=torch.float32,
         )
     }
-    generated, _, _ = cascade_predictor.generate(
+    generated = cascade_predictor._generate(
         coarse=coarse_input,
         n_samples=n_samples_generate,
         static_inputs=static_inputs_list,
