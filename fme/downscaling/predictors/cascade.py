@@ -2,6 +2,7 @@ import dataclasses
 import math
 
 import torch
+import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
@@ -15,6 +16,7 @@ from fme.downscaling.data import (
     adjust_fine_coord_range,
     scale_tuple,
 )
+from fme.downscaling.data.utils import BatchedLatLonCoordinates
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel, ModelOutputs
 from fme.downscaling.requirements import DataRequirements
@@ -86,6 +88,26 @@ def _restore_batch_and_sample_dims(data: TensorMapping, n_samples: int):
     return unfold_ensemble_dim(squeezed, n_samples)
 
 
+def _batch_data_with_unused_coords(data: TensorMapping) -> BatchData:
+    # wrapper function so that we can call each level's
+    # public generate_on_batch_no_target function using tensormapping
+    # from the previous step.
+    data_shape = next(iter(data.values())).shape
+    time = xr.DataArray(
+        [0 for _ in range(data_shape[0])],
+        dims=["time"],
+    )
+    latlon_coordinates = BatchedLatLonCoordinates(
+        lat=torch.zeros((data_shape[0], data_shape[1]), device=get_device()),
+        lon=torch.zeros((data_shape[0], data_shape[2]), device=get_device()),
+    )
+    return BatchData(
+        data=data,
+        time=time,
+        latlon_coordinates=latlon_coordinates,
+    )
+
+
 class CascadePredictor:
     def __init__(
         self, models: list[DiffusionModel], static_inputs: list[StaticInputs | None]
@@ -116,22 +138,26 @@ class CascadePredictor:
         return torch.nn.ModuleList([model.modules for model in self.models])
 
     @torch.no_grad()
-    def generate(
+    def _generate(
         self,
         coarse: TensorMapping,
         n_samples: int,
         static_inputs: list[StaticInputs | None],
     ):
         current_coarse = coarse
-        for i, (model, fine_topography) in enumerate(zip(self.models, static_inputs)):
+        for i, (model, step_static_inputs) in enumerate(
+            zip(self.models, static_inputs)
+        ):
             sample_data = next(iter(current_coarse.values()))
             batch_size = sample_data.shape[0]
             # n_samples are generated for the first step, and subsequent models
             # generate 1 sample
             n_samples_cascade_step = n_samples if i == 0 else 1
 
-            generated, generated_norm, latent_steps = model.generate(
-                current_coarse, fine_topography, n_samples_cascade_step
+            generated = model.generate_on_batch_no_target(
+                _batch_data_with_unused_coords(current_coarse),
+                step_static_inputs,
+                n_samples_cascade_step,
             )
             generated = {
                 k: v.reshape(batch_size * n_samples_cascade_step, *v.shape[-2:])
@@ -139,7 +165,7 @@ class CascadePredictor:
             }
             current_coarse = generated
         generated = _restore_batch_and_sample_dims(generated, n_samples)
-        return generated, generated_norm, latent_steps
+        return generated
 
     @torch.no_grad()
     def generate_on_batch_no_target(
@@ -151,7 +177,7 @@ class CascadePredictor:
         subset_static_inputs = self._get_subset_static_inputs(
             coarse_coords=batch.latlon_coordinates[0]
         )
-        generated, _, _ = self.generate(batch.data, n_samples, subset_static_inputs)
+        generated = self._generate(batch.data, n_samples, subset_static_inputs)
         return generated
 
     @torch.no_grad()
@@ -164,7 +190,7 @@ class CascadePredictor:
         static_inputs = self._get_subset_static_inputs(
             coarse_coords=batch.coarse.latlon_coordinates[0]
         )
-        generated, _, latent_steps = self.generate(
+        generated, _, latent_steps = self._generate(
             batch.coarse.data, n_samples, static_inputs
         )
         targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))

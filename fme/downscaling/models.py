@@ -412,7 +412,7 @@ class DiffusionModel:
         )
 
     @torch.no_grad()
-    def generate(
+    def _generate(
         self,
         coarse_data: TensorMapping,
         static_inputs: StaticInputs | None,
@@ -470,7 +470,7 @@ class DiffusionModel:
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> TensorDict:
-        generated, _, _ = self.generate(batch.data, static_inputs, n_samples)
+        generated, _, _ = self._generate(batch.data, static_inputs, n_samples)
         return generated
 
     @torch.no_grad()
@@ -481,7 +481,7 @@ class DiffusionModel:
         n_samples: int = 1,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
-        generated, generated_norm, latent_steps = self.generate(
+        generated, generated_norm, latent_steps = self._generate(
             coarse, static_inputs, n_samples
         )
 
