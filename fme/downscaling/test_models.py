@@ -98,22 +98,26 @@ def make_batch_data(
     return BatchData(data=data, time=time, latlon_coordinates=latlon)
 
 
+def _get_monotonic_coordinate(size: int, stop: float) -> torch.Tensor:
+    bounds = torch.linspace(0, stop, size + 1)
+    coord = (bounds[:-1] + bounds[1:]) / 2
+    return coord
+
+
 def make_paired_batch_data(
     coarse_shape: tuple[int, int],
     fine_shape: tuple[int, int],
     batch_size: int = 2,
 ) -> PairedBatchData:
-    """Create a PairedBatchData with consistent monotonic coordinates.
-
-    Fine coords: [0, 1, ..., lat_f-1].
-    Coarse coords: [0.5, 2.5, ...] (step=2, offset=0.5) aligned with fine.
+    """
+    Create a PairedBatchData with consistent monotonic coordinates.
     """
     lat_c, lon_c = coarse_shape
     lat_f, lon_f = fine_shape
-    fine_lat = torch.arange(lat_f, dtype=torch.float32).tolist()
-    fine_lon = torch.arange(lon_f, dtype=torch.float32).tolist()
-    coarse_lat = [lat * 2 + 0.5 for lat in range(lat_c)]
-    coarse_lon = [lon * 2 + 0.5 for lon in range(lon_c)]
+    fine_lat = _get_monotonic_coordinate(lat_f, stop=lat_f)
+    fine_lon = _get_monotonic_coordinate(lon_f, stop=lon_f)
+    coarse_lat = _get_monotonic_coordinate(lat_c, stop=lat_f)
+    coarse_lon = _get_monotonic_coordinate(lon_c, stop=lon_f)
     fine = make_batch_data((batch_size, lat_f, lon_f), fine_lat, fine_lon)
     coarse = make_batch_data((batch_size, lat_c, lon_c), coarse_lat, coarse_lon)
     return PairedBatchData(fine=fine, coarse=coarse)
@@ -127,8 +131,8 @@ def make_static_inputs(fine_shape: tuple[int, int]) -> StaticInputs:
             StaticInput(
                 torch.ones(*fine_shape, device=get_device()),
                 LatLonCoordinates(
-                    lat=torch.arange(lat_size, dtype=torch.float32),
-                    lon=torch.arange(lon_size, dtype=torch.float32),
+                    lat=_get_monotonic_coordinate(lat_size, stop=lat_size),
+                    lon=_get_monotonic_coordinate(lon_size, stop=lon_size),
                 ),
             )
         ]
@@ -137,16 +141,7 @@ def make_static_inputs(fine_shape: tuple[int, int]) -> StaticInputs:
 
 def test_module_serialization(tmp_path):
     coarse_shape = (8, 16)
-    static_inputs = StaticInputs(
-        fields=[
-            StaticInput(
-                torch.rand(*coarse_shape, device=get_device()),
-                LatLonCoordinates(
-                    lat=torch.ones(coarse_shape[0]), lon=torch.ones(coarse_shape[1])
-                ),
-            )
-        ]
-    )
+    static_inputs = make_static_inputs((16, 32))
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=2,
@@ -185,16 +180,7 @@ def test_from_state_backward_compat_fine_topography():
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
     downscale_factor = 2
-    static_inputs = StaticInputs(
-        fields=[
-            StaticInput(
-                torch.ones(*fine_shape, device=get_device()),
-                LatLonCoordinates(
-                    lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
-                ),
-            )
-        ]
-    )
+    static_inputs = make_static_inputs(fine_shape)
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
@@ -413,18 +399,7 @@ def test_DiffusionModel_generate_on_batch_no_target():
     fine_shape = (32, 32)
     coarse_shape = (16, 16)
     downscale_factor = 2
-    # Static inputs use monotonic coords: lat=[0..31], lon=[0..31]
-    static_inputs = StaticInputs(
-        fields=[
-            StaticInput(
-                torch.rand(*fine_shape, device=get_device()),
-                LatLonCoordinates(
-                    lat=torch.arange(fine_shape[0], dtype=torch.float32),
-                    lon=torch.arange(fine_shape[1], dtype=torch.float32),
-                ),
-            )
-        ]
-    )
+    static_inputs = make_static_inputs(fine_shape)
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
@@ -463,17 +438,7 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
     downscale_factor = 2
     # Full fine domain: 64x64 covers patches for both (8,8) and (32,32) coarse inputs
     full_fine_size = 64
-    static_inputs = StaticInputs(
-        fields=[
-            StaticInput(
-                torch.rand(full_fine_size, full_fine_size, device=get_device()),
-                LatLonCoordinates(
-                    lat=torch.arange(full_fine_size, dtype=torch.float32),
-                    lon=torch.arange(full_fine_size, dtype=torch.float32),
-                ),
-            )
-        ]
-    )
+    static_inputs = make_static_inputs((full_fine_size, full_fine_size))
     # need to build with static inputs to get the correct n_in_channels
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
@@ -584,16 +549,7 @@ def test_checkpoint_config_topography_raises():
 def test_checkpoint_model_build_raises_when_checkpoint_has_static_inputs(tmp_path):
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
-    static_inputs = StaticInputs(
-        fields=[
-            StaticInput(
-                torch.ones(*fine_shape, device=get_device()),
-                LatLonCoordinates(
-                    lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
-                ),
-            )
-        ]
-    )
+    static_inputs = make_static_inputs(fine_shape)
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=2,
