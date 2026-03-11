@@ -175,24 +175,23 @@ def test_legacy_wrapper_forward_splits_correctly():
     assert torch.allclose(diag_out, direct_out[:, n_prognostic:])
 
 
-def test_legacy_wrapper_state_dict_passthrough():
-    """LegacyWrapper.state_dict returns the inner module's state dict."""
+def test_legacy_wrapper_state_dict_prefixes_inner():
+    """LegacyWrapper.state_dict keys are prefixed with 'inner.'."""
     inner = SimpleLinearModule(3, 2)
     wrapper = LegacyWrapper(inner, n_prognostic_channels=1)
 
     inner_state = inner.state_dict()
     wrapper_state = wrapper.state_dict()
 
-    assert set(inner_state.keys()) == set(wrapper_state.keys())
     for key in inner_state:
-        assert torch.equal(inner_state[key], wrapper_state[key])
+        assert f"inner.{key}" in wrapper_state
+        assert torch.equal(inner_state[key], wrapper_state[f"inner.{key}"])
 
 
 def test_legacy_wrapper_load_state_dict():
     """LegacyWrapper.load_state_dict loads into the inner module."""
     torch.manual_seed(0)
     inner1 = SimpleLinearModule(3, 2)
-    state = inner1.state_dict()
 
     torch.manual_seed(1)
     inner2 = SimpleLinearModule(3, 2)
@@ -200,6 +199,8 @@ def test_legacy_wrapper_load_state_dict():
 
     assert not torch.equal(list(inner1.parameters())[0], list(inner2.parameters())[0])
 
+    # State dict needs 'inner.' prefix for LegacyWrapper
+    state = {"inner." + k: v for k, v in inner1.state_dict().items()}
     wrapper.load_state_dict(state)
 
     for p1, p2 in zip(inner1.parameters(), inner2.parameters()):
@@ -275,8 +276,9 @@ def test_legacy_adapter_numerical_equivalence():
         n_forcing + n_prognostic, n_prognostic + n_diagnostic
     )
 
-    # Load same weights
-    wrapper_module.load_state_dict(direct_module.state_dict())
+    # Load same weights (add 'inner.' prefix for LegacyWrapper)
+    state = {"inner." + k: v for k, v in direct_module.state_dict().items()}
+    wrapper_module.load_state_dict(state)
 
     forcing = torch.randn(2, n_forcing, 4, 8)
     prognostic = torch.randn(2, n_prognostic, 4, 8)

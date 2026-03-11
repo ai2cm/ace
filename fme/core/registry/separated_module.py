@@ -232,12 +232,6 @@ class LegacyWrapper(nn.Module):
         diag_out = output.narrow(-3, n, output.shape[-3] - n)
         return prog_out, diag_out
 
-    def state_dict(self, *args, **kwargs):
-        return self.inner.state_dict(*args, **kwargs)
-
-    def load_state_dict(self, state_dict, *args, **kwargs):
-        return self.inner.load_state_dict(state_dict, *args, **kwargs)
-
 
 @SeparatedModuleSelector.register("legacy")
 @dataclasses.dataclass
