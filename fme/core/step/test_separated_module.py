@@ -58,7 +58,7 @@ class TestSeparatedModuleStepConfig:
                     },
                 ),
                 forcing_names=["a"],
-                prognostic_names_=["a"],
+                prognostic_names=["a"],
                 diagnostic_names=["b"],
                 normalization=normalization,
             )
@@ -74,7 +74,7 @@ class TestSeparatedModuleStepConfig:
                     },
                 ),
                 forcing_names=["f"],
-                prognostic_names_=["p"],
+                prognostic_names=["p"],
                 diagnostic_names=["d"],
                 normalization=normalization,
                 prescribed_prognostic_names=["d"],
@@ -91,7 +91,7 @@ class TestSeparatedModuleStepConfig:
                     },
                 ),
                 forcing_names=["f"],
-                prognostic_names_=["p"],
+                prognostic_names=["p"],
                 diagnostic_names=["d"],
                 normalization=normalization,
                 next_step_forcing_names=["p"],
@@ -99,7 +99,7 @@ class TestSeparatedModuleStepConfig:
 
     def test_empty_prognostic_names_raises(self):
         normalization = _get_normalization(["f", "d"])
-        with pytest.raises(ValueError, match="prognostic_names_ must not be empty"):
+        with pytest.raises(ValueError, match="prognostic_names must not be empty"):
             SeparatedModuleStepConfig(
                 builder=SeparatedModuleSelector(
                     type="legacy",
@@ -108,7 +108,7 @@ class TestSeparatedModuleStepConfig:
                     },
                 ),
                 forcing_names=["f"],
-                prognostic_names_=[],
+                prognostic_names=[],
                 diagnostic_names=["d"],
                 normalization=normalization,
             )
@@ -123,7 +123,7 @@ class TestSeparatedModuleStepConfig:
                 },
             ),
             forcing_names=["f1", "f2"],
-            prognostic_names_=["p1", "p2"],
+            prognostic_names=["p1", "p2"],
             diagnostic_names=["d1"],
             normalization=normalization,
         )
@@ -141,14 +141,14 @@ class TestSeparatedModuleStepConfig:
                 },
             ),
             forcing_names=["f"],
-            prognostic_names_=["p"],
+            prognostic_names=["p"],
             diagnostic_names=["d"],
             normalization=normalization,
         )
         state = config.get_state()
         config2 = SeparatedModuleStepConfig.from_state(state)
         assert config2.forcing_names == config.forcing_names
-        assert config2.prognostic_names_ == config.prognostic_names_
+        assert config2.prognostic_names == config.prognostic_names
         assert config2.diagnostic_names == config.diagnostic_names
 
 
@@ -178,7 +178,7 @@ class TestSeparatedModuleStep:
                         },
                     ),
                     forcing_names=forcing_names,
-                    prognostic_names_=prognostic_names,
+                    prognostic_names=prognostic_names,
                     diagnostic_names=diagnostic_names,
                     normalization=normalization,
                 ),
@@ -223,7 +223,7 @@ class TestSeparatedModuleStep:
                 },
             ),
             forcing_names=forcing_names,
-            prognostic_names_=prognostic_names,
+            prognostic_names=prognostic_names,
             diagnostic_names=diagnostic_names,
             normalization=normalization,
         )
@@ -264,7 +264,7 @@ class TestSeparatedModuleStep:
                 },
             ),
             forcing_names=forcing_names,
-            prognostic_names_=prognostic_names,
+            prognostic_names=prognostic_names,
             diagnostic_names=diagnostic_names,
             normalization=normalization,
             residual_prediction=True,
@@ -307,7 +307,7 @@ class TestSeparatedModuleStep:
                 },
             ),
             forcing_names=[],
-            prognostic_names_=prognostic_names,
+            prognostic_names=prognostic_names,
             diagnostic_names=diagnostic_names,
             normalization=normalization,
         )
@@ -350,7 +350,7 @@ class TestSeparatedModuleStep:
                 },
             ),
             forcing_names=forcing_names,
-            prognostic_names_=prognostic_names,
+            prognostic_names=prognostic_names,
             diagnostic_names=[],
             normalization=normalization,
         )
@@ -392,7 +392,7 @@ class TestSeparatedModuleStep:
                 },
             ),
             forcing_names=[],
-            prognostic_names_=prognostic_names,
+            prognostic_names=prognostic_names,
             diagnostic_names=[],
             normalization=normalization,
         )
@@ -459,7 +459,7 @@ class TestSeparatedVsSingleModuleEquivalence:
                 },
             ),
             forcing_names=forcing_names,
-            prognostic_names_=prognostic_names,
+            prognostic_names=prognostic_names,
             diagnostic_names=diagnostic_names,
             normalization=normalization,
             residual_prediction=residual_prediction,

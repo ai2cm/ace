@@ -41,7 +41,7 @@ class SeparatedModuleStepConfig(StepConfigABC):
     Parameters:
         builder: The separated module builder.
         forcing_names: Names of input-only (forcing) variables.
-        prognostic_names_: Names of input-output (prognostic) variables.
+        prognostic_names: Names of input-output (prognostic) variables.
         diagnostic_names: Names of output-only (diagnostic) variables.
         normalization: The normalization configuration.
         secondary_decoder: Configuration for the secondary decoder that computes
@@ -56,7 +56,7 @@ class SeparatedModuleStepConfig(StepConfigABC):
 
     builder: SeparatedModuleSelector
     forcing_names: list[str]
-    prognostic_names_: list[str]
+    prognostic_names: list[str]
     diagnostic_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
     secondary_decoder: SecondaryDecoderConfig | None = None
@@ -69,14 +69,14 @@ class SeparatedModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
-        if len(self.prognostic_names_) == 0:
-            raise ValueError("prognostic_names_ must not be empty")
-        all_names = self.forcing_names + self.prognostic_names_ + self.diagnostic_names
+        if len(self.prognostic_names) == 0:
+            raise ValueError("prognostic_names must not be empty")
+        all_names = self.forcing_names + self.prognostic_names + self.diagnostic_names
         if len(all_names) != len(set(all_names)):
             seen: dict[str, str] = {}
             for name_list, label in (
                 (self.forcing_names, "forcing_names"),
-                (self.prognostic_names_, "prognostic_names_"),
+                (self.prognostic_names, "prognostic_names"),
                 (self.diagnostic_names, "diagnostic_names"),
             ):
                 for name in name_list:
@@ -87,10 +87,10 @@ class SeparatedModuleStepConfig(StepConfigABC):
                         )
                     seen[name] = label
         for name in self.prescribed_prognostic_names:
-            if name not in self.prognostic_names_:
+            if name not in self.prognostic_names:
                 raise ValueError(
                     f"prescribed_prognostic_name '{name}' must be in "
-                    f"prognostic_names_: {self.prognostic_names_}"
+                    f"prognostic_names: {self.prognostic_names}"
                 )
         for name in self.next_step_forcing_names:
             if name not in self.forcing_names:
@@ -104,7 +104,7 @@ class SeparatedModuleStepConfig(StepConfigABC):
                     raise ValueError(
                         f"secondary_diagnostic_name is a forcing variable: '{name}'"
                     )
-                if name in self.prognostic_names_:
+                if name in self.prognostic_names:
                     raise ValueError(
                         f"secondary_diagnostic_name is a prognostic variable: "
                         f"'{name}'"
@@ -133,9 +133,7 @@ class SeparatedModuleStepConfig(StepConfigABC):
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
             names=self._normalize_names + extra_names,
-            residual_scaled_names=(
-                self.prognostic_names_ + extra_residual_scaled_names
-            ),
+            residual_scaled_names=(self.prognostic_names + extra_residual_scaled_names),
         )
 
     @classmethod
@@ -151,7 +149,7 @@ class SeparatedModuleStepConfig(StepConfigABC):
 
     @property
     def input_names(self) -> list[str]:
-        names = self.forcing_names + self.prognostic_names_
+        names = self.forcing_names + self.prognostic_names
         if self.ocean is not None:
             names = list(set(names).union(self.ocean.forcing_names))
         return names
@@ -161,7 +159,7 @@ class SeparatedModuleStepConfig(StepConfigABC):
 
     @property
     def output_names(self) -> list[str]:
-        names = self.prognostic_names_ + self.diagnostic_names
+        names = self.prognostic_names + self.diagnostic_names
         if self.secondary_decoder is not None:
             names = list(
                 set(names).union(self.secondary_decoder.secondary_diagnostic_names)
@@ -189,10 +187,10 @@ class SeparatedModuleStepConfig(StepConfigABC):
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         for name in names:
-            if name not in self.prognostic_names_:
+            if name not in self.prognostic_names:
                 raise ValueError(
                     f"prescribed_prognostic_name '{name}' must be in "
-                    f"prognostic_names_: {self.prognostic_names_}"
+                    f"prognostic_names: {self.prognostic_names}"
                 )
         self.prescribed_prognostic_names = names
 
@@ -238,18 +236,18 @@ class SeparatedModuleStep(StepABC):
     ):
         super().__init__()
         n_forcing = len(config.forcing_names)
-        n_prognostic = len(config.prognostic_names_)
+        n_prognostic = len(config.prognostic_names)
         n_diagnostic = len(config.diagnostic_names)
 
         self.forcing_packer = Packer(config.forcing_names)
-        self.prognostic_packer = Packer(config.prognostic_names_)
+        self.prognostic_packer = Packer(config.prognostic_names)
         self.diagnostic_packer = Packer(config.diagnostic_names)
 
         self._normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
-                config.forcing_names + config.prognostic_names_,
-                config.prognostic_names_ + config.diagnostic_names,
+                config.forcing_names + config.prognostic_names,
+                config.prognostic_names + config.diagnostic_names,
                 dataset_info.timestep,
             )
         else:
@@ -374,7 +372,7 @@ class SeparatedModuleStep(StepABC):
             corrector=self._corrector,
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
-            prognostic_names=self._config.prognostic_names_,
+            prognostic_names=self._config.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
         )
 
