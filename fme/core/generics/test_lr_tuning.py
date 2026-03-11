@@ -500,6 +500,41 @@ def test_trial_does_not_mutate_original_ema_params():
         assert torch.equal(ema._ema_params[name], original_ema_params[name])
 
 
+def test_deepcopy_stepper_produces_independent_copy():
+    """Training a deepcopied stepper must not change the original's predictions."""
+    torch.manual_seed(0)
+    stepper = _Stepper()
+    # Set a known weight so we can detect any change
+    stepper.modules[0].weight.data.fill_(3.0)
+
+    # Record original prediction
+    x = torch.ones(1, 1, device=get_device())
+    original_pred = stepper.modules[0](x).detach().clone()
+
+    # Copy the stepper using the same pattern as Trainer._copy_stepper
+    copied = copy.deepcopy(stepper)
+    copied.load_state(copy.deepcopy(stepper.get_state()))
+
+    # Train the copy for several batches with a real optimizer
+    opt = _build_optimization(copied.modules)
+    train_data = _TrainData(n_batches=10)
+    for batch in train_data.loader:
+        copied.train_on_batch(batch, opt)
+
+    # The copy's weight should have changed (sanity check that training did something)
+    copied_pred = copied.modules[0](x).detach()
+    assert not torch.allclose(
+        copied_pred, original_pred
+    ), "Copy's weight didn't change after training — test is vacuous"
+
+    # The original's weight must be unchanged
+    current_pred = stepper.modules[0](x).detach()
+    assert torch.equal(current_pred, original_pred), (
+        f"Original stepper prediction changed from {original_pred.item()} "
+        f"to {current_pred.item()} after training the copy"
+    )
+
+
 def test_trial_does_not_mutate_original_optimizer_state():
     """The original optimizer's momentum buffers must not be modified by the trial."""
     stepper = _Stepper()
