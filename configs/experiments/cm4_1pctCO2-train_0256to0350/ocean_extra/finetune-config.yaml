@@ -159,7 +159,7 @@ stepper:
               - UI
               - VI
           surface_energy_flux_correction:
-            method: residual_prediction
+            method: prescribed
       next_step_forcing_names:
         - DLWRFsfc
         - DSWRFsfc
