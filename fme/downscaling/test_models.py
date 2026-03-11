@@ -12,6 +12,7 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import (
+    CheckpointModelConfig,
     DiffusionModel,
     DiffusionModelConfig,
     PairedNormalizationConfig,
@@ -514,3 +515,42 @@ def test_noise_config_error():
             use_fine_topography=False,
             predict_residual=True,
         )
+
+
+def test_checkpoint_config_topography_raises():
+    with pytest.raises(ValueError):
+        CheckpointModelConfig(
+            checkpoint_path="/any/path.ckpt",
+            fine_topography_path="/topo/path.nc",
+        )
+
+
+def test_checkpoint_model_build_raises_when_checkpoint_has_static_inputs(tmp_path):
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    static_inputs = StaticInputs(
+        fields=[
+            StaticInput(
+                torch.ones(*fine_shape, device=get_device()),
+                LatLonCoordinates(
+                    lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
+                ),
+            )
+        ]
+    )
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        predict_residual=True,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": model.get_state()}, checkpoint_path)
+
+    config = CheckpointModelConfig(
+        checkpoint_path=str(checkpoint_path),
+        static_inputs={"HGTsfc": "/any/path.nc"},
+    )
+    with pytest.raises(ValueError):
+        config.build()
