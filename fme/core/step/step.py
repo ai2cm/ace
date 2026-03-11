@@ -66,9 +66,8 @@ class StepConfigABC(abc.ABC):
         """
         pass
 
-    @property
     @final
-    def prognostic_names(self) -> list[str]:
+    def get_prognostic_names(self) -> list[str]:
         return list(set(self.input_names).intersection(self.output_names))
 
     @property
@@ -258,10 +257,9 @@ class StepABC(abc.ABC):
     def output_names(self) -> list[str]:
         return self.config.output_names
 
-    @property
     @final
-    def prognostic_names(self) -> list[str]:
-        return self.config.prognostic_names
+    def get_prognostic_names(self) -> list[str]:
+        return self.config.get_prognostic_names()
 
     @property
     @final

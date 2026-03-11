@@ -129,7 +129,7 @@ class TestSeparatedModuleStepConfig:
         )
         assert set(config.input_names) == {"f1", "f2", "p1", "p2"}
         assert set(config.output_names) == {"p1", "p2", "d1"}
-        assert set(config.prognostic_names) == {"p1", "p2"}
+        assert set(config.get_prognostic_names()) == {"p1", "p2"}
 
     def test_from_state_roundtrip(self):
         normalization = _get_normalization(["f", "p", "d"])

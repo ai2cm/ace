@@ -172,7 +172,7 @@ def test_looper():
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
-        prognostic_names=stepper.prognostic_names,
+        prognostic_names=stepper.get_prognostic_names(),
         n_ic_timesteps=1,
     )
     loader = MockLoader(shape, forcing_names, 3, time=time)
@@ -196,7 +196,7 @@ def test_looper_paired():
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
-        prognostic_names=stepper.prognostic_names,
+        prognostic_names=stepper.get_prognostic_names(),
         n_ic_timesteps=1,
     )
     loader = MockLoader(shape, forcing_names, 3, time=time)
@@ -234,7 +234,7 @@ def test_looper_paired_with_derived_variables():
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
-        prognostic_names=stepper.prognostic_names,
+        prognostic_names=stepper.get_prognostic_names(),
         n_ic_timesteps=1,
     )
     loader = MockLoader(shape, forcing_names, 2, time=time)
@@ -257,7 +257,7 @@ def test_looper_paired_with_target_data():
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
-        prognostic_names=stepper.prognostic_names,
+        prognostic_names=stepper.get_prognostic_names(),
         n_ic_timesteps=1,
     )
     loader = MockLoader(shape, all_names, 2, time=time)
@@ -283,7 +283,7 @@ def test_looper_paired_with_target_data_and_derived_variables():
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         time=time[:, 0:1],
     ).get_start(
-        prognostic_names=stepper.prognostic_names,
+        prognostic_names=stepper.get_prognostic_names(),
         n_ic_timesteps=1,
     )
     loader = MockLoader(shape, all_names, 2, time=time)

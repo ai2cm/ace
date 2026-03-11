@@ -525,7 +525,7 @@ class StepperConfig:
 
     def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
         return PrognosticStateDataRequirements(
-            names=self.prognostic_names,
+            names=self.get_prognostic_names(),
             n_timesteps=self.n_ic_timesteps,
         )
 
@@ -672,10 +672,9 @@ class StepperConfig:
         """
         return self.step.get_next_step_forcing_names()
 
-    @property
-    def prognostic_names(self) -> list[str]:
+    def get_prognostic_names(self) -> list[str]:
         """Names of variables which both inputs and outputs."""
-        return self.step.prognostic_names
+        return self.step.get_prognostic_names()
 
     @property
     def output_names(self) -> list[str]:
@@ -971,9 +970,8 @@ class Stepper:
         """
         return self._parameter_initializer.base_weights
 
-    @property
-    def prognostic_names(self) -> list[str]:
-        return self._step_obj.prognostic_names
+    def get_prognostic_names(self) -> list[str]:
+        return self._step_obj.get_prognostic_names()
 
     @property
     def out_names(self) -> list[str]:
@@ -1174,7 +1172,9 @@ class Stepper:
                     )
                     .remove_initial_condition(self.n_ic_timesteps)
                 )
-        prognostic_state = data.get_end(self.prognostic_names, self.n_ic_timesteps)
+        prognostic_state = data.get_end(
+            self.get_prognostic_names(), self.n_ic_timesteps
+        )
         data = BatchData.new_on_device(
             data=data.data,
             time=data.time,
@@ -1494,7 +1494,7 @@ class TrainStepper(
 
         self._epoch: int | None = None  # to keep track of cached values
 
-        self._prognostic_names = self._stepper.prognostic_names
+        self._prognostic_names = self._stepper.get_prognostic_names()
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
 

@@ -482,7 +482,7 @@ class CoupledStepperConfig:
         # validate ocean_fraction_prediction
         if self.ocean_fraction_prediction is not None:
             self.ocean_fraction_prediction.validate_ocean_prognostic_names(
-                self.ocean.stepper.prognostic_names,
+                self.ocean.stepper.get_prognostic_names(),
             )
             self.ocean_fraction_prediction.validate_atmosphere_forcing_names(
                 self.atmosphere.stepper.input_only_names
@@ -1260,11 +1260,11 @@ class CoupledStepper:
             ),
             CoupledPrognosticState(
                 ocean_data=gen_data.ocean_data.get_end(
-                    self.ocean.prognostic_names,
+                    self.ocean.get_prognostic_names(),
                     self.n_ic_timesteps,
                 ),
                 atmosphere_data=gen_data.atmosphere_data.get_end(
-                    self.atmosphere.prognostic_names,
+                    self.atmosphere.get_prognostic_names(),
                     self.atmosphere.n_ic_timesteps,
                 ),
             ),
@@ -1283,11 +1283,11 @@ class CoupledStepper:
             ),
             CoupledPrognosticState(
                 ocean_data=gen_data.ocean_data.get_end(
-                    self.ocean.prognostic_names,
+                    self.ocean.get_prognostic_names(),
                     self.n_ic_timesteps,
                 ),
                 atmosphere_data=gen_data.atmosphere_data.get_end(
-                    self.atmosphere.prognostic_names,
+                    self.atmosphere.get_prognostic_names(),
                     self.atmosphere.n_ic_timesteps,
                 ),
             ),
@@ -1512,10 +1512,10 @@ class CoupledTrainStepper(
         # get initial condition prognostic variables
         input_data = CoupledPrognosticState(
             atmosphere_data=data.atmosphere_data.get_start(
-                self.atmosphere.prognostic_names, self.n_ic_timesteps
+                self.atmosphere.get_prognostic_names(), self.n_ic_timesteps
             ),
             ocean_data=data.ocean_data.get_start(
-                self.ocean.prognostic_names, self.n_ic_timesteps
+                self.ocean.get_prognostic_names(), self.n_ic_timesteps
             ),
         )
 

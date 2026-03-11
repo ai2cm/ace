@@ -114,7 +114,8 @@ class SingleModuleStepConfig(StepConfigABC):
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
             names=self._normalize_names + extra_names,
-            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
+            residual_scaled_names=self.get_prognostic_names()
+            + extra_residual_scaled_names,
         )
 
     @classmethod
@@ -373,7 +374,7 @@ class SingleModuleStep(StepABC):
             corrector=self._corrector,
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            prognostic_names=self.get_prognostic_names(),
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
         )
 
