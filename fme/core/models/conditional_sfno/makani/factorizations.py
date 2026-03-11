@@ -28,8 +28,6 @@ from .contractions import (
     _contract_sep_lwise_real,
 )
 
-einsum_symbols = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
 
 # jitted PyTorch contractions:
 def _contract_dense_pytorch(

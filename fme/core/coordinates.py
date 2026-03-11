@@ -692,7 +692,7 @@ class HorizontalCoordinates(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def to_state(self) -> TensorMapping:
+    def get_state(self) -> TensorMapping:
         pass
 
 
@@ -786,7 +786,7 @@ class LatLonCoordinates(HorizontalCoordinates):
     def shape(self) -> tuple[int, int]:
         return (len(self.lat), len(self.lon))
 
-    def to_state(self) -> TensorMapping:
+    def get_state(self) -> TensorMapping:
         return {"lat": self.lat, "lon": self.lon}
 
 
@@ -937,7 +937,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
     def shape(self) -> tuple[int, int, int]:
         return (len(self.face), len(self.width), len(self.height))
 
-    def to_state(self) -> TensorMapping:
+    def get_state(self) -> TensorMapping:
         return {"face": self.face, "height": self.height, "width": self.width}
 
 
