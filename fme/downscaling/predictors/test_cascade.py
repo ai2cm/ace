@@ -9,13 +9,6 @@ from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySe
 from fme.downscaling.predictors.cascade import CascadePredictor
 
 
-def _latlon_coords_on_ngrid(n: int, edges=(0, 100)):
-    start, end = edges
-    dx = (end - start) / n
-    midpoints = (start + (torch.arange(n) + 0.5) * dx).to(device=get_device())
-    return LatLonCoordinates(lat=midpoints, lon=midpoints)
-
-
 def _get_diffusion_model(coarse_shape, downscale_factor):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),

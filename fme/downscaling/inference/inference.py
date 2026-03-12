@@ -55,7 +55,7 @@ class Downscaler:
 
     def _get_generation_model(
         self,
-        fine_shape: tuple[int, int],
+        input_shape: tuple[int, int],
         output: DownscalingOutput,
     ) -> DiffusionModel | PatchPredictor | CascadePredictor:
         """
@@ -65,20 +65,22 @@ class Downscaler:
         the user to use patching for larger domains because that provides better
         generations.
         """
-        model_patch_shape = self.model.fine_shape
-        actual_shape = fine_shape
+        model_patch_shape = self.model.coarse_shape
 
-        if model_patch_shape == actual_shape:
+        if model_patch_shape == input_shape:
             # short circuit, no patching necessary
             return self.model
         elif any(
             expected > actual
-            for expected, actual in zip(model_patch_shape, actual_shape)
+            for expected, actual in zip(model_patch_shape, input_shape)
         ):
             # we don't support generating regions smaller than the model patch size
             raise ValueError(
-                f"Model fine shape {model_patch_shape} is larger than "
-                f"actual fine shape {actual_shape} for output {output.name}."
+                f"Model coarse shape {model_patch_shape} is larger than "
+                f"actual input shape {input_shape} for output {output.name}."
+                "We do not support generating outputs with a smaller spatial extent"
+                " than the model's trained patch size. Please adjust the spatial extent"
+                " to be at least as large as the model's input patch size."
             )
         elif output.patch.needs_patch_predictor:
             # Use a patch predictor
@@ -91,7 +93,7 @@ class Downscaler:
             # User should enable patching
             raise ValueError(
                 f"Model coarse shape {model_patch_shape} does not match "
-                f"actual input shape {actual_shape} for output {output.name}, "
+                f"actual input shape {input_shape} for output {output.name}, "
                 "and patch prediction is not configured. Generation for larger domains "
                 "requires patch prediction."
             )
@@ -112,22 +114,43 @@ class Downscaler:
 
         loaded_item: LoadedSliceWorkItem
         for i, loaded_item in enumerate(output.data.get_generator()):
+            input_shape = loaded_item.batch.horizontal_shape
+            if model is None:
+                model = self._get_generation_model(
+                    input_shape=input_shape, output=output
+                )
+
             if writer is None:
                 coarse_lat = loaded_item.batch.latlon_coordinates.lat[0]
                 coarse_lon = loaded_item.batch.latlon_coordinates.lon[0]
+                if model.static_inputs is None:
+                    raise ValueError(
+                        "Model is missing static inputs, which are required to "
+                        "determine the coordinate information for the output "
+                        "dataset. Please ensure the model is configured with "
+                        "static inputs. This will be fixed in a future update."
+                    )
+                # TODO: this is a definciency of the implementation needing
+                #       fine spatial information to determine the output region.
+                #       Right now that requires that we use the model static
+                #       inputs to get the fine coordinates, but we should be able
+                #       to get the fine coordinate information from the output config
+                #       instead, which would remove the need for the model to have
+                #       static inputs at all.  This works because the batch always
+                #       contains the full coarse spatial extent
                 fine_lat_interval = adjust_fine_coord_range(
                     loaded_item.batch.lat_interval,
                     full_coarse_coord=coarse_lat,
-                    full_fine_coord=self.model.static_inputs.coords.lat,
-                    downscale_factor=self.model.downscale_factor,
+                    full_fine_coord=model.static_inputs.coords.lat,
+                    downscale_factor=model.downscale_factor,
                 )
                 fine_lon_interval = adjust_fine_coord_range(
                     loaded_item.batch.lon_interval,
                     full_coarse_coord=coarse_lon,
-                    full_fine_coord=self.model.static_inputs.coords.lon,
-                    downscale_factor=self.model.downscale_factor,
+                    full_fine_coord=model.static_inputs.coords.lon,
+                    downscale_factor=model.downscale_factor,
                 )
-                fine_static_inputs = self.model.static_inputs.subset_latlon(
+                fine_static_inputs = model.static_inputs.subset_latlon(
                     fine_lat_interval,
                     fine_lon_interval,
                 )
@@ -137,10 +160,6 @@ class Downscaler:
                 )
                 writer.initialize_store(
                     fine_static_inputs.fields[0].data.cpu().numpy().dtype
-                )
-            if model is None:
-                model = self._get_generation_model(
-                    fine_shape=fine_static_inputs.shape, output=output
                 )
 
             logging.info(

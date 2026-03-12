@@ -79,6 +79,10 @@ class PatchPredictor:
     def coarse_shape(self):
         return self.coarse_yx_patch_extent
 
+    @property
+    def static_inputs(self):
+        return self.model.static_inputs
+
     def _get_patches(
         self, coarse_yx_extent, fine_yx_extent
     ) -> tuple[list[Patch], list[Patch]]:

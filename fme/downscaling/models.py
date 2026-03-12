@@ -286,7 +286,8 @@ class DiffusionModel:
             normalizer: The normalizer object used for data normalization.
             loss: The loss function used for training the model.
             coarse_shape: The height (lat) and width (lon) of the
-                coarse-resolution input data.
+                coarse-resolution input data used to train the model
+                (same as patch extent, if training on patches).
             downscale_factor: The factor by which the data is downscaled from
                 coarse to fine.
             sigma_data: The standard deviation of the data, used for diffusion
@@ -338,7 +339,8 @@ class DiffusionModel:
 
     def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
         """
-        Calculate the fine shape based on the coarse shape and downscale factor.
+        Calculate the fine shape based on the coarse shape of data used to train
+        the model and the downscaling factor.
         """
         return (
             coarse_shape[0] * self.downscale_factor,

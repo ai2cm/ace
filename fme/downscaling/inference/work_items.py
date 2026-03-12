@@ -310,6 +310,4 @@ class SliceWorkItemGriddedData:
         return SizedMap(on_device, self._loader)
 
     def get_generator(self) -> Iterator[LoadedSliceWorkItem]:
-        work_item: LoadedSliceWorkItem
-        for work_item in self.loader:
-            yield work_item
+        yield from self.loader

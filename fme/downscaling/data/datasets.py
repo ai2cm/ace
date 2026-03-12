@@ -305,8 +305,7 @@ class GriddedData:
         return SizedMap(on_device, self._loader)
 
     def get_generator(self) -> Iterator["BatchData"]:
-        for batch in self.loader:
-            yield batch
+        yield from self.loader
 
     def get_patched_generator(
         self,
@@ -347,8 +346,7 @@ class PairedGriddedData:
         return SizedMap(on_device, self._loader)
 
     def get_generator(self) -> Iterator["PairedBatchData"]:
-        for batch in self.loader:
-            yield batch
+        yield from self.loader
 
     def get_patched_generator(
         self,
