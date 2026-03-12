@@ -327,7 +327,8 @@ validation:
       data_path: '{valid_data_path}'
       spatial_dimensions: latlon
     batch_size: 2
-  n_forward_steps: 2
+  stepper_training:
+    train_n_forward_steps: 2
   aggregator:
     log_snapshots: false
     log_mean_maps: false
