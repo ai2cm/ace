@@ -1333,7 +1333,7 @@ def test_evaluator_with_non_local_experiment_dir(
 @pytest.mark.parametrize(
     "validation_config_kwargs",
     [
-        pytest.param(dict(n_forward_steps=1), id="n_forward_steps"),
+        pytest.param(dict(), id="default"),
         pytest.param(
             dict(stepper_training=TrainStepperConfig(train_n_forward_steps=1)),
             id="stepper_training_int",
