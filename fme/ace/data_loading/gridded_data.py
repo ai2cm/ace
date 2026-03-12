@@ -50,7 +50,9 @@ class GriddedData(GriddedDataABC[BatchData]):
             will be on the current device.
         """
         self._loader = loader
-        self._properties = properties.to_device()
+        shape = properties.horizontal_coordinates.shape
+        self._global_img_shape: tuple[int, int] = (shape[-2], shape[-1])
+        self._properties = properties.to_device().localize()
         self._timestep = self._properties.timestep
         self._vertical_coordinate = self._properties.vertical_coordinate
         self._mask_provider = self._properties.mask_provider
@@ -72,7 +74,8 @@ class GriddedData(GriddedDataABC[BatchData]):
         self, base_loader: DataLoader[BatchData]
     ) -> DataLoader[BatchData]:
         def modify_and_on_device(batch: BatchData) -> BatchData:
-            return self._modifier(batch).to_device()
+            batch = self._modifier(batch)
+            return batch.to_device().scatter_spatial(self._global_img_shape)
 
         return SizedMap(modify_and_on_device, base_loader)
 
@@ -174,21 +177,23 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             will be on the current device.
         """
         self._loader = loader
-        self._properties = properties.to_device()
+        shape = properties.horizontal_coordinates.shape
+        self._global_img_shape: tuple[int, int] = (shape[-2], shape[-1])
+        self._properties = properties.to_device().localize()
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
             self._initial_condition: PrognosticState = get_initial_condition(
-                loader, initial_condition
+                self.loader, initial_condition
             )
         else:
             self._initial_condition = initial_condition.to_device()
 
     @property
     def loader(self) -> DataLoader[BatchData]:
-        def on_device(batch: BatchData) -> BatchData:
-            return batch.to_device()
+        def scatter_and_on_device(batch: BatchData) -> BatchData:
+            return batch.to_device().scatter_spatial(self._global_img_shape)
 
-        return SizedMap(on_device, self._loader)
+        return SizedMap(scatter_and_on_device, self._loader)
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
