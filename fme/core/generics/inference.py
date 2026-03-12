@@ -69,20 +69,40 @@ class Looper(Generic[PS, FD, SD]):
         return self._prognostic_state
 
 
-def get_record_to_wandb(label: str = "") -> Callable[[InferenceLogs], None]:
-    wandb = WandB.get_instance()
-    step = 0
+class WandBStepLogger:
+    """Logs inference metrics to wandb with step tracking and optional key prefixing.
 
-    def record_logs(logs: InferenceLogs):
-        nonlocal step
-        for j, log in enumerate(logs):
-            if len(log) > 0:
-                if label != "":
-                    log = {f"{label}/{k}": v for k, v in log.items()}
-                wandb.log(log, step=step + j)
-        step += len(logs)
+    Callable as a drop-in replacement for the previous ``get_record_to_wandb``
+    closure.  The ``log`` method additionally accepts a per-call *label*
+    override so that callers can mix prefixed and unprefixed keys through
+    the same step counter.
+    """
 
-    return record_logs
+    def __init__(self, label: str = ""):
+        self._wandb = WandB.get_instance()
+        self._label = label
+        self._step = 0
+
+    @property
+    def step(self) -> int:
+        return self._step
+
+    def __call__(self, logs: InferenceLogs) -> None:
+        self.log(logs, label=self._label)
+
+    def log(self, logs: InferenceLogs, label: str | None = None) -> None:
+        if label is None:
+            label = self._label
+        for j, log_dict in enumerate(logs):
+            if len(log_dict) > 0:
+                if label:
+                    log_dict = {f"{label}/{k}": v for k, v in log_dict.items()}
+                self._wandb.log(log_dict, step=self._step + j)
+        self._step += len(logs)
+
+
+def get_record_to_wandb(label: str = "") -> WandBStepLogger:
+    return WandBStepLogger(label=label)
 
 
 def run_inference(

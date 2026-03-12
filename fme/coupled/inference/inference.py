@@ -262,13 +262,13 @@ def run_inference_from_config(config: InferenceConfig):
     writer = config.get_data_writer(data=data)
     timer.stop()
     logging.info("Starting inference")
-    record_logs = get_record_to_wandb(label="inference")
+    logger = get_record_to_wandb(label="inference")
     run_inference(
         predict=stepper.predict_paired,
         data=data,
         aggregator=aggregator,
         writer=writer,
-        record_logs=record_logs,
+        record_logs=logger,
     )
 
     timer.start("final_writer_flush")
@@ -291,9 +291,12 @@ def run_inference_from_config(config: InferenceConfig):
         f"{total_steps_per_second:.2f} steps/second"
     )
 
-    summary_logs = {
-        "total_steps_per_second": total_steps_per_second,
-        **timer.get_durations(),
-        **aggregator.get_summary_logs(),
+    inference_summary = {
+        "inference/total_steps_per_second": total_steps_per_second,
+        **{f"inference/{k}": v for k, v in aggregator.get_summary_logs().items()},
     }
-    record_logs([summary_logs])
+    summary_logs = {
+        **timer.get_durations(),
+        **inference_summary,
+    }
+    logger.log([summary_logs], label="")
