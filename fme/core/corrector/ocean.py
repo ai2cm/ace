@@ -7,7 +7,7 @@ import dacite
 import torch
 
 from fme.core.constants import FREEZING_TEMPERATURE_KELVIN
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
@@ -81,7 +81,7 @@ class OceanHeatContentBudgetConfig:
 
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
-class OceanCorrectorConfig:
+class OceanCorrectorConfig(CorrectorConfigABC):
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
@@ -116,6 +116,26 @@ class OceanCorrectorConfig:
                         thickness_name
                     )
         return state_copy
+
+    def get_corrector(
+        self,
+        gridded_operations: GriddedOperations,
+        vertical_coordinate: Any | None,
+        timestep: datetime.timedelta,
+    ) -> "OceanCorrector":
+        if vertical_coordinate and not isinstance(
+            vertical_coordinate, HasOceanDepthIntegral
+        ):
+            raise ValueError(
+                "Cannot build OceanCorrector with vertical "
+                f"coordinate {vertical_coordinate}."
+            )
+        return OceanCorrector(
+            self,
+            gridded_operations,
+            vertical_coordinate,
+            timestep,
+        )
 
 
 class OceanCorrector(CorrectorABC):

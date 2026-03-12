@@ -13,7 +13,7 @@ from fme.core.atmosphere_data import (
     compute_layer_thickness,
 )
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
@@ -40,7 +40,7 @@ class EnergyBudgetConfig:
 
 @CorrectorSelector.register("atmosphere_corrector")
 @dataclasses.dataclass
-class AtmosphereCorrectorConfig:
+class AtmosphereCorrectorConfig(CorrectorConfigABC):
     r"""
     Configuration for the post-step state corrector.
 
@@ -136,6 +136,26 @@ class AtmosphereCorrectorConfig:
     def from_state(cls, state: Mapping[str, Any]) -> "AtmosphereCorrectorConfig":
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
+        )
+
+    def get_corrector(
+        self,
+        gridded_operations: GriddedOperations,
+        vertical_coordinate: Any | None,
+        timestep: datetime.timedelta,
+    ) -> "AtmosphereCorrector":
+        if vertical_coordinate and not isinstance(
+            vertical_coordinate, HasAtmosphereVerticalIntegral
+        ):
+            raise ValueError(
+                "Cannot build AtmosphereCorrector with vertical "
+                f"coordinate {vertical_coordinate}."
+            )
+        return AtmosphereCorrector(
+            self,
+            gridded_operations,
+            vertical_coordinate,
+            timestep,
         )
 
 
