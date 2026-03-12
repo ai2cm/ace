@@ -337,6 +337,7 @@ class PairedGriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
+    fine_coords: LatLonCoordinates | None = None
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:

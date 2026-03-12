@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass, field
 
 import dacite
+import numpy as np
 import torch
 import yaml
 
@@ -10,7 +11,7 @@ from fme.core.cli import prepare_directory
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig, adjust_fine_coord_range
+from ..data import DataLoaderConfig, LatLonCoordinates, adjust_fine_coord_range
 from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import (
     CascadePredictor,
@@ -123,44 +124,44 @@ class Downscaler:
             if writer is None:
                 coarse_lat = loaded_item.batch.latlon_coordinates.lat[0]
                 coarse_lon = loaded_item.batch.latlon_coordinates.lon[0]
-                if model.static_inputs is None:
+                if model.fine_coords is None:
                     raise ValueError(
-                        "Model is missing static inputs, which are required to "
-                        "determine the coordinate information for the output "
-                        "dataset. Please ensure the model is configured with "
-                        "static inputs. This will be fixed in a future update."
+                        "Model fine_coords is required to determine output "
+                        "coordinate information. Please ensure the model checkpoint "
+                        "was saved with fine_coords, or provide fine_coordinates_path "
+                        "in the checkpoint config."
                     )
-                # TODO: this is a definciency of the implementation needing
-                #       fine spatial information to determine the output region.
-                #       Right now that requires that we use the model static
-                #       inputs to get the fine coordinates, but we should be able
-                #       to get the fine coordinate information from the output config
-                #       instead, which would remove the need for the model to have
-                #       static inputs at all.  This works because the batch always
-                #       contains the full coarse spatial extent
                 fine_lat_interval = adjust_fine_coord_range(
                     loaded_item.batch.lat_interval,
                     full_coarse_coord=coarse_lat,
-                    full_fine_coord=model.static_inputs.coords.lat,
+                    full_fine_coord=model.fine_coords.lat,
                     downscale_factor=model.downscale_factor,
                 )
                 fine_lon_interval = adjust_fine_coord_range(
                     loaded_item.batch.lon_interval,
                     full_coarse_coord=coarse_lon,
-                    full_fine_coord=model.static_inputs.coords.lon,
+                    full_fine_coord=model.fine_coords.lon,
                     downscale_factor=model.downscale_factor,
                 )
-                fine_static_inputs = model.static_inputs.subset_latlon(
-                    fine_lat_interval,
-                    fine_lon_interval,
+                lat_slice = fine_lat_interval.slice_of(model.fine_coords.lat)
+                lon_slice = fine_lon_interval.slice_of(model.fine_coords.lon)
+                fine_region_coords = LatLonCoordinates(
+                    lat=model.fine_coords.lat[lat_slice],
+                    lon=model.fine_coords.lon[lon_slice],
                 )
                 writer = output.get_writer(
-                    latlon_coords=fine_static_inputs.coords,
+                    latlon_coords=fine_region_coords,
                     output_dir=self.output_dir,
                 )
-                writer.initialize_store(
-                    fine_static_inputs.fields[0].data.cpu().numpy().dtype
-                )
+                if model.static_inputs is not None:
+                    fine_static_inputs = model.static_inputs.subset(
+                        lat_slice, lon_slice
+                    )
+                    writer.initialize_store(
+                        fine_static_inputs.fields[0].data.cpu().numpy().dtype
+                    )
+                else:
+                    writer.initialize_store(np.float32)
 
             logging.info(
                 f"[{output.name}] Batch {i+1}/{total_batches}, "

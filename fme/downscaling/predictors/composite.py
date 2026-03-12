@@ -83,6 +83,10 @@ class PatchPredictor:
     def static_inputs(self):
         return self.model.static_inputs
 
+    @property
+    def fine_coords(self):
+        return self.model.fine_coords
+
     def _get_patches(
         self, coarse_yx_extent, fine_yx_extent
     ) -> tuple[list[Patch], list[Patch]]:

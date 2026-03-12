@@ -23,7 +23,11 @@ from fme.downscaling.data.datasets import (
     PairedBatchData,
     PairedGriddedData,
 )
-from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
+from fme.downscaling.data.utils import (
+    ClosedInterval,
+    adjust_fine_coord_range,
+    get_latlon_coords_from_properties,
+)
 from fme.downscaling.requirements import DataRequirements
 
 
@@ -529,6 +533,7 @@ class PairedDataLoaderConfig:
             dims=example.fine.latlon_coordinates.dims,
             variable_metadata=variable_metadata,
             all_times=all_times,
+            fine_coords=get_latlon_coords_from_properties(properties_fine),
         )
 
     def _get_sampler(

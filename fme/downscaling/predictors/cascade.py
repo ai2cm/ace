@@ -92,6 +92,10 @@ class CascadePredictor:
         return self.models[-1].static_inputs
 
     @property
+    def fine_coords(self):
+        return self.models[-1].fine_coords
+
+    @property
     def downscale_factor(self):
         return math.prod([model.downscale_factor for model in self.models])
 

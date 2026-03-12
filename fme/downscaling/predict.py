@@ -21,6 +21,7 @@ from fme.downscaling.data import (
     ClosedInterval,
     DataLoaderConfig,
     GriddedData,
+    adjust_fine_coord_range,
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
@@ -32,31 +33,6 @@ from fme.downscaling.predictors import (
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
-
-
-def _downscale_coord(coord: torch.tensor, downscale_factor: int):
-    """
-    This is a bandaid fix for the issue where BatchData does not
-    contain coords for the topography, which is fine-res in the no-target
-    generation case. The SampleAggregator requires the fine-res coords
-    for the predictions.
-
-    TODO: remove after topography refactors to have its own data container.
-    """
-    if len(coord.shape) != 1:
-        raise ValueError("coord tensor to downscale must be 1d")
-    spacing = coord[1] - coord[0]
-    # Compute edges from midpoints
-    first_edge = coord[0] - spacing / 2
-    last_edge = coord[-1] + spacing / 2
-
-    # Subdivide edges
-    step = spacing / downscale_factor
-    new_edges = torch.arange(first_edge, last_edge + step / 2, step)
-
-    # Compute new midpoints
-    coord_new = (new_edges[:-1] + new_edges[1:]) / 2
-    return coord_new.to(device=coord.device, dtype=coord.dtype)
 
 
 @dataclasses.dataclass
@@ -150,9 +126,32 @@ class EventDownscaler:
         logging.info(f"Running {self.event_name} event downscaling...")
         batch = next(iter(self.data.get_generator()))
         coarse_coords = batch[0].latlon_coordinates
+        if self.model.fine_coords is None:
+            raise ValueError(
+                "Model fine_coords must be set for event downscaling output "
+                "coordinates."
+            )
+        coarse_lat = coarse_coords.lat
+        coarse_lon = coarse_coords.lon
+        lat_interval = ClosedInterval(coarse_lat.min().item(), coarse_lat.max().item())
+        lon_interval = ClosedInterval(coarse_lon.min().item(), coarse_lon.max().item())
+        fine_lat_interval = adjust_fine_coord_range(
+            lat_interval,
+            full_coarse_coord=coarse_lat,
+            full_fine_coord=self.model.fine_coords.lat,
+            downscale_factor=self.model.downscale_factor,
+        )
+        fine_lon_interval = adjust_fine_coord_range(
+            lon_interval,
+            full_coarse_coord=coarse_lon,
+            full_fine_coord=self.model.fine_coords.lon,
+            downscale_factor=self.model.downscale_factor,
+        )
+        lat_slice = fine_lat_interval.slice_of(self.model.fine_coords.lat)
+        lon_slice = fine_lon_interval.slice_of(self.model.fine_coords.lon)
         fine_coords = LatLonCoordinates(
-            lat=_downscale_coord(coarse_coords.lat, self.model.downscale_factor),
-            lon=_downscale_coord(coarse_coords.lon, self.model.downscale_factor),
+            lat=self.model.fine_coords.lat[lat_slice],
+            lon=self.model.fine_coords.lon[lon_slice],
         )
         sample_agg = SampleAggregator(
             coarse=batch[0].data,
