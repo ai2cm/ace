@@ -12,7 +12,7 @@ from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (  # type: i
     AtmoSphericNeuralOperatorNet,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -177,6 +177,18 @@ class FCN3StepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
+        corrector: CorrectorConfigABC = self.corrector
+        if isinstance(corrector, CorrectorSelector):
+            corrector = corrector.config_instance
+        if (
+            isinstance(corrector, AtmosphereCorrectorConfig)
+            and corrector.ocean is not None
+        ):
+            raise ValueError(
+                "FCN3StepConfig manages ocean configuration via its own 'ocean' "
+                "attribute. Configuring 'ocean' on the AtmosphereCorrector is not "
+                "supported."
+            )
         for name in self.next_step_forcing_names:
             if name not in self.forcing_names:
                 raise ValueError(

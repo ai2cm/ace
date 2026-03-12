@@ -43,6 +43,10 @@ class CorrectorSelector(CorrectorConfigABC):
             CorrectorConfigABC, self.registry.get(self.type, self.config)
         )
 
+    @property
+    def config_instance(self) -> CorrectorConfigABC:
+        return self._corrector_config_instance
+
     @classmethod
     def register(cls, type_name) -> Callable[[Type[T]], Type[T]]:  # noqa: UP006
         return cls.registry.register(type_name)
@@ -51,6 +55,14 @@ class CorrectorSelector(CorrectorConfigABC):
     def get_available_types(cls) -> set[str]:
         """This class method is used to expose all available types of Correctors."""
         return set(cls.registry._types.keys())
+
+    @property
+    def input_names(self) -> list[str]:
+        return self._corrector_config_instance.input_names
+
+    @property
+    def next_step_input_names(self) -> list[str]:
+        return self._corrector_config_instance.next_step_input_names
 
     def get_corrector(
         self,

@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -70,6 +70,18 @@ class SeparateRadiationStepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
+        corrector: CorrectorConfigABC = self.corrector
+        if isinstance(corrector, CorrectorSelector):
+            corrector = corrector.config_instance
+        if (
+            isinstance(corrector, AtmosphereCorrectorConfig)
+            and corrector.ocean is not None
+        ):
+            raise ValueError(
+                "SeparateRadiationStepConfig manages ocean configuration via its own "
+                "'ocean' attribute. Configuring 'ocean' on the AtmosphereCorrector is "
+                "not supported."
+            )
         seen_names: dict[str, str] = {}
         for name_list, label in (
             (self.main_prognostic_names, "main_prognostic_names"),

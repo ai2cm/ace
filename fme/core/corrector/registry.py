@@ -15,6 +15,20 @@ class CorrectorConfigABC(abc.ABC):
         timestep: datetime.timedelta,
     ) -> "CorrectorABC": ...
 
+    @property
+    @abc.abstractmethod
+    def input_names(self) -> list[str]:
+        """Names of additional variables the corrector requires as inputs."""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def next_step_input_names(self) -> list[str]:
+        """Names of additional variables the corrector requires in
+        next_step_input_data.
+        """
+        ...
+
 
 class CorrectorABC(abc.ABC):
     @abc.abstractmethod

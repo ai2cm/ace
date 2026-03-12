@@ -455,3 +455,155 @@ def test_corrector_integration(air_temperature_prefix):
     timestep = datetime.timedelta(seconds=3600)
     corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
     corrector(input_data, gen_data, forcing_data)
+
+
+class TestAtmosphereCorrectorConfigOcean:
+    def test_input_names_without_ocean(self):
+        config = AtmosphereCorrectorConfig()
+        assert config.input_names == []
+
+    def test_next_step_input_names_without_ocean(self):
+        config = AtmosphereCorrectorConfig()
+        assert config.next_step_input_names == []
+
+    def test_input_names_with_prescribed_ocean(self):
+        from fme.core.ocean import OceanConfig
+
+        ocean = OceanConfig(
+            surface_temperature_name="SST",
+            ocean_fraction_name="ocean_frac",
+        )
+        config = AtmosphereCorrectorConfig(ocean=ocean)
+        assert set(config.input_names) == {"SST", "ocean_frac"}
+
+    def test_input_names_with_slab_ocean(self):
+        from fme.core.ocean import OceanConfig, SlabOceanConfig
+
+        ocean = OceanConfig(
+            surface_temperature_name="SST",
+            ocean_fraction_name="ocean_frac",
+            slab=SlabOceanConfig(mixed_layer_depth_name="MLD", q_flux_name="q_flux"),
+        )
+        config = AtmosphereCorrectorConfig(ocean=ocean)
+        assert set(config.input_names) == {"ocean_frac", "MLD", "q_flux"}
+
+    def test_next_step_input_names_with_ocean(self):
+        from fme.core.ocean import OceanConfig
+
+        ocean = OceanConfig(
+            surface_temperature_name="SST",
+            ocean_fraction_name="ocean_frac",
+        )
+        config = AtmosphereCorrectorConfig(ocean=ocean)
+        assert set(config.next_step_input_names) == {"SST", "ocean_frac"}
+
+    def test_get_corrector_builds_ocean(self):
+        from fme.core.ocean import OceanConfig
+
+        ocean = OceanConfig(
+            surface_temperature_name="SST",
+            ocean_fraction_name="ocean_frac",
+        )
+        config = AtmosphereCorrectorConfig(ocean=ocean)
+        ops = LatLonOperations(torch.ones(16, 32))
+        corrector = config.get_corrector(ops, None, TIMESTEP)
+        assert corrector.ocean is not None
+        assert corrector.ocean.surface_temperature_name == "SST"
+        assert corrector.ocean.ocean_fraction_name == "ocean_frac"
+
+    def test_get_corrector_without_ocean_has_no_ocean(self):
+        config = AtmosphereCorrectorConfig()
+        ops = LatLonOperations(torch.ones(16, 32))
+        corrector = config.get_corrector(ops, None, TIMESTEP)
+        assert corrector.ocean is None
+
+    def test_corrector_applies_prescribed_ocean(self):
+        from fme.core.ocean import OceanConfig
+
+        ocean = OceanConfig(
+            surface_temperature_name="SST",
+            ocean_fraction_name="ocean_frac",
+        )
+        config = AtmosphereCorrectorConfig(ocean=ocean)
+        ops = LatLonOperations(torch.ones(16, 32))
+        corrector = config.get_corrector(ops, None, TIMESTEP)
+        input_data = {"SST": torch.full((1, 16, 32), 290.0)}
+        gen_data = {"SST": torch.full((1, 16, 32), 300.0)}
+        target_sst = torch.full((1, 16, 32), 295.0)
+        forcing_data = {
+            "SST": target_sst,
+            "ocean_frac": torch.ones(1, 16, 32),
+        }
+        result = corrector(input_data, gen_data, forcing_data)
+        torch.testing.assert_close(result["SST"], target_sst)
+
+    def test_config_round_trip_with_ocean(self):
+        from fme.core.ocean import OceanConfig
+
+        ocean = OceanConfig(
+            surface_temperature_name="SST",
+            ocean_fraction_name="ocean_frac",
+        )
+        config = AtmosphereCorrectorConfig(ocean=ocean)
+        new_config = dacite.from_dict(
+            data_class=AtmosphereCorrectorConfig,
+            data=dataclasses.asdict(config),
+            config=dacite.Config(strict=True),
+        )
+        assert config == new_config
+
+
+class TestCorrectorSelectorDelegation:
+    def test_input_names_delegates_to_atmosphere_corrector(self):
+        from fme.core.ocean import OceanConfig
+        from fme.core.registry.corrector import CorrectorSelector
+
+        ocean = OceanConfig(
+            surface_temperature_name="SST",
+            ocean_fraction_name="ocean_frac",
+        )
+        selector = CorrectorSelector(
+            type="atmosphere_corrector",
+            config=dataclasses.asdict(AtmosphereCorrectorConfig(ocean=ocean)),
+        )
+        assert set(selector.input_names) == {"SST", "ocean_frac"}
+
+    def test_next_step_input_names_delegates_to_atmosphere_corrector(self):
+        from fme.core.ocean import OceanConfig
+        from fme.core.registry.corrector import CorrectorSelector
+
+        ocean = OceanConfig(
+            surface_temperature_name="SST",
+            ocean_fraction_name="ocean_frac",
+        )
+        selector = CorrectorSelector(
+            type="atmosphere_corrector",
+            config=dataclasses.asdict(AtmosphereCorrectorConfig(ocean=ocean)),
+        )
+        assert set(selector.next_step_input_names) == {"SST", "ocean_frac"}
+
+    def test_empty_names_for_default_atmosphere_corrector(self):
+        from fme.core.registry.corrector import CorrectorSelector
+
+        selector = CorrectorSelector(
+            type="atmosphere_corrector",
+            config=dataclasses.asdict(AtmosphereCorrectorConfig()),
+        )
+        assert selector.input_names == []
+        assert selector.next_step_input_names == []
+
+
+class TestOtherCorrectorInputNames:
+    def test_ocean_corrector_has_empty_input_names(self):
+        from fme.core.corrector.ocean import OceanCorrectorConfig
+
+        config = OceanCorrectorConfig()
+        assert config.input_names == []
+        assert config.next_step_input_names == []
+
+    def test_ice_corrector_has_empty_input_names(self):
+        from fme.core.corrector.ice import IceCorrectorConfig
+
+        config = IceCorrectorConfig()
+        assert config.input_names == []
+        assert config.next_step_input_names == []

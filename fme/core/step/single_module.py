@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -70,6 +70,18 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        corrector: CorrectorConfigABC = self.corrector
+        if isinstance(corrector, CorrectorSelector):
+            corrector = corrector.config_instance
+        if (
+            isinstance(corrector, AtmosphereCorrectorConfig)
+            and corrector.ocean is not None
+        ):
+            raise ValueError(
+                "SingleModuleStepConfig manages ocean configuration via its own "
+                "'ocean' attribute. Configuring 'ocean' on the AtmosphereCorrector is "
+                "not supported."
+            )
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
