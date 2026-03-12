@@ -136,11 +136,11 @@ class MaskProvider(MaskProviderABC):
     def localize(self) -> "MaskProvider":
         if not self._masks:
             return self
-        dist = Distributed.get_instance()
-        example_mask = next(iter(self._masks.values()))
-        img_shape = example_mask.shape[-2:]
         return MaskProvider(
-            {k: v[dist.get_local_slices(v.shape)].contiguous() for k, v in self._masks.items()}
+            {
+                k: v[Distributed.get_instance().get_local_slices(v.shape)].contiguous()
+                for k, v in self._masks.items()
+            }
         )
 
     def update(self, other: "MaskProvider") -> None:
