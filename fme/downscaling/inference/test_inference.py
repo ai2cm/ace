@@ -64,8 +64,7 @@ def mock_output_target():
 
 def get_static_inputs(shape=(16, 16)):
     data = torch.randn(shape)
-    coords = LatLonCoordinates(lat=torch.arange(shape[0]), lon=torch.arange(shape[1]))
-    return StaticInputs([StaticInput(data=data, coords=coords)])
+    return StaticInputs([StaticInput(data=data)])
 
 
 # Tests for Downscaler initialization
@@ -201,9 +200,11 @@ def test_run_target_generation_skips_padding_items(
     mock_output_target.data.get_generator.return_value = iter([mock_work_item])
 
     mock_model.downscale_factor = 2
-    mock_model.static_inputs.coords.lat = torch.arange(0, 18).float()
-    mock_model.static_inputs.coords.lon = torch.arange(0, 18).float()
-    mock_model.static_inputs.subset_latlon.return_value.fields[0].data = torch.zeros(1)
+    mock_model.fine_coords = LatLonCoordinates(
+        lat=torch.arange(0, 18).float(),
+        lon=torch.arange(0, 18).float(),
+    )
+    mock_model.static_inputs = None
     mock_model.generate_on_batch_no_target.return_value = {
         "var1": torch.zeros(1, 4, 16, 16),
     }
@@ -273,8 +274,16 @@ def checkpointed_model_config(
 
     # loader_config is passed in to add static inputs into model
     # that correspond to the dataset coordinates
-    static_inputs = load_static_inputs({"HGTsfc": f"{data_paths.fine}/data.nc"})
-    model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
+    fine_data_path = f"{data_paths.fine}/data.nc"
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
+    ds = xr.open_dataset(fine_data_path)
+    fine_coords = LatLonCoordinates(
+        lat=torch.tensor(ds["lat"].values, dtype=torch.float32),
+        lon=torch.tensor(ds["lon"].values, dtype=torch.float32),
+    )
+    model = model_config.build(
+        coarse_shape, 2, static_inputs=static_inputs, fine_coords=fine_coords
+    )
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"
     model.get_state()
