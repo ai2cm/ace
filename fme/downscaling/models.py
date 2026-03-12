@@ -5,6 +5,7 @@ from typing import Any
 
 import dacite
 import torch
+import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
@@ -183,6 +184,7 @@ class DiffusionModelConfig:
         downscale_factor: int,
         rename: dict[str, str] | None = None,
         static_inputs: StaticInputs | None = None,
+        fine_coords: LatLonCoordinates | None = None,
     ) -> "DiffusionModel":
         invert_rename = {v: k for k, v in (rename or {}).items()}
         orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
@@ -221,6 +223,7 @@ class DiffusionModelConfig:
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
             static_inputs=static_inputs,
+            fine_coords=fine_coords,
         )
 
     def get_state(self) -> Mapping[str, Any]:
@@ -277,6 +280,7 @@ class DiffusionModel:
         downscale_factor: int,
         sigma_data: float,
         static_inputs: StaticInputs | None = None,
+        fine_coords: LatLonCoordinates | None = None,
     ) -> None:
         """
         Args:
@@ -295,6 +299,8 @@ class DiffusionModel:
                 model preconditioning.
             static_inputs: Static inputs to the model, loaded from the trainer
                 config or checkpoint. Must be set when use_fine_topography is True.
+            fine_coords: Full-domain fine-resolution coordinates. Used as the
+                single coordinate authority for output spatial metadata.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
@@ -310,6 +316,14 @@ class DiffusionModel:
         self.static_inputs = (
             static_inputs.to_device() if static_inputs is not None else None
         )
+        self.fine_coords = fine_coords
+        if fine_coords is not None and static_inputs is not None:
+            expected = (len(fine_coords.lat), len(fine_coords.lon))
+            if static_inputs.shape != expected:
+                raise ValueError(
+                    f"static_inputs shape {static_inputs.shape} does not match "
+                    f"fine_coords grid {expected}"
+                )
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -332,7 +346,13 @@ class DiffusionModel:
                 "Static inputs must be provided for each batch when use of fine "
                 "static inputs is enabled."
             )
-        return self.static_inputs.subset_latlon(lat_interval, lon_interval)
+        if self.fine_coords is None:
+            raise ValueError(
+                "fine_coords must be set on the model to subset static inputs."
+            )
+        lat_slice = lat_interval.slice_of(self.fine_coords.lat)
+        lon_slice = lon_interval.slice_of(self.fine_coords.lon)
+        return self.static_inputs.subset(lat_slice, lon_slice)
 
     def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
         """Return fine-resolution coordinates matching the spatial extent of batch."""
@@ -541,23 +561,28 @@ class DiffusionModel:
                     "Static inputs must be provided for each batch when use of fine "
                     "static inputs is enabled."
                 )
+            if self.fine_coords is None:
+                raise ValueError(
+                    "fine_coords must be set on the model when use_fine_topography "
+                    "is enabled."
+                )
             coarse_lat = batch.latlon_coordinates.lat[0]
             coarse_lon = batch.latlon_coordinates.lon[0]
             fine_lat_interval = adjust_fine_coord_range(
                 batch.lat_interval,
                 full_coarse_coord=coarse_lat,
-                full_fine_coord=self.static_inputs.coords.lat,
+                full_fine_coord=self.fine_coords.lat,
                 downscale_factor=self.downscale_factor,
             )
             fine_lon_interval = adjust_fine_coord_range(
                 batch.lon_interval,
                 full_coarse_coord=coarse_lon,
-                full_fine_coord=self.static_inputs.coords.lon,
+                full_fine_coord=self.fine_coords.lon,
                 downscale_factor=self.downscale_factor,
             )
-            _static_inputs = self.static_inputs.subset_latlon(
-                fine_lat_interval, fine_lon_interval
-            )
+            lat_slice = fine_lat_interval.slice_of(self.fine_coords.lat)
+            lon_slice = fine_lon_interval.slice_of(self.fine_coords.lon)
+            _static_inputs = self.static_inputs.subset(lat_slice, lon_slice)
         else:
             _static_inputs = None
         generated, _, _ = self.generate(batch.data, _static_inputs, n_samples)
@@ -602,6 +627,9 @@ class DiffusionModel:
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
             "static_inputs": static_inputs_state,
+            "fine_coords": (
+                self.fine_coords.get_state() if self.fine_coords is not None else None
+            ),
         }
 
     @classmethod
@@ -615,10 +643,33 @@ class DiffusionModel:
             static_inputs = StaticInputs.from_state(state["static_inputs"]).to_device()
         else:
             static_inputs = None
+
+        # Load fine_coords: new checkpoints store it directly; old checkpoints
+        # that had static_inputs with coords can auto-migrate from raw state.
+        if state.get("fine_coords") is not None:
+            fine_coords = LatLonCoordinates(
+                lat=state["fine_coords"]["lat"],
+                lon=state["fine_coords"]["lon"],
+            )
+        elif (
+            state.get("static_inputs") is not None
+            and len(state["static_inputs"].get("fields", [])) > 0
+            and "coords" in state["static_inputs"]["fields"][0]
+        ):
+            # Backward compat: old checkpoints stored coords inside static_inputs fields
+            coords_state = state["static_inputs"]["fields"][0]["coords"]
+            fine_coords = LatLonCoordinates(
+                lat=coords_state["lat"],
+                lon=coords_state["lon"],
+            )
+        else:
+            fine_coords = None
+
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
             static_inputs=static_inputs,
+            fine_coords=fine_coords,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
@@ -648,6 +699,9 @@ class CheckpointModelConfig:
             but the model requires static input data. Raises an error if the
             checkpoint already has static inputs from training.
         fine_topography_path: Deprecated. Use static_inputs instead.
+        fine_coordinates_path: Optional path to a netCDF/zarr file containing lat/lon
+            coordinates for the full fine domain. Used for old checkpoints that have
+            no static_inputs and no stored fine_coords.
         model_updates: Optional mapping of {key: new_value} model config updates to
             apply when loading the model. This is useful for running evaluation with
             updated parameters than at training time. Use with caution; not all
@@ -658,6 +712,7 @@ class CheckpointModelConfig:
     rename: dict[str, str] | None = None
     static_inputs: dict[str, str] | None = None
     fine_topography_path: str | None = None
+    fine_coordinates_path: str | None = None
     model_updates: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -688,6 +743,8 @@ class CheckpointModelConfig:
             ]
             # backwards compatibility for models before static inputs serialization
             checkpoint_data["model"].setdefault("static_inputs", None)
+            # backwards compatibility for models before fine_coords serialization
+            checkpoint_data["model"].setdefault("fine_coords", None)
 
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
@@ -695,6 +752,23 @@ class CheckpointModelConfig:
                 for k, v in self.model_updates.items():
                     checkpoint_data["model"]["config"][k] = v
         return self._checkpoint_data
+
+    def _load_fine_coords_from_path(self, path: str) -> LatLonCoordinates:
+        if path.endswith(".zarr"):
+            ds = xr.open_zarr(path)
+        else:
+            ds = xr.open_dataset(path)
+        lat_name = next((n for n in ["lat", "latitude"] if n in ds.coords), None)
+        lon_name = next((n for n in ["lon", "longitude"] if n in ds.coords), None)
+        if lat_name is None or lon_name is None:
+            raise ValueError(
+                f"Could not find lat/lon coordinates in {path}. "
+                "Expected 'lat'/'latitude' and 'lon'/'longitude'."
+            )
+        return LatLonCoordinates(
+            lat=torch.tensor(ds[lat_name].values, dtype=torch.float32),
+            lon=torch.tensor(ds[lon_name].values, dtype=torch.float32),
+        )
 
     def build(
         self,
@@ -723,6 +797,31 @@ class CheckpointModelConfig:
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(self._checkpoint["model"]["module"])
+
+        # Restore fine_coords: new checkpoints have it stored directly; old
+        # checkpoints may have coords embedded in static_inputs fields.
+        model_state = self._checkpoint["model"]
+        if model_state.get("fine_coords") is not None:
+            fine_coords_state = model_state["fine_coords"]
+            model.fine_coords = LatLonCoordinates(
+                lat=fine_coords_state["lat"],
+                lon=fine_coords_state["lon"],
+            )
+        elif (
+            model_state.get("static_inputs") is not None
+            and len(model_state["static_inputs"].get("fields", [])) > 0
+            and "coords" in model_state["static_inputs"]["fields"][0]
+        ):
+            coords_state = model_state["static_inputs"]["fields"][0]["coords"]
+            model.fine_coords = LatLonCoordinates(
+                lat=coords_state["lat"],
+                lon=coords_state["lon"],
+            )
+        elif self.fine_coordinates_path is not None:
+            model.fine_coords = self._load_fine_coords_from_path(
+                self.fine_coordinates_path
+            )
+
         return model
 
     @property

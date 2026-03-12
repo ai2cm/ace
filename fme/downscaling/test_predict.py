@@ -2,8 +2,10 @@ import os
 
 import pytest
 import torch
+import xarray as xr
 import yaml
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
@@ -64,6 +66,18 @@ def get_model_config(
     )
 
 
+def load_fine_coords_from_path(path: str) -> LatLonCoordinates:
+    """Load lat/lon coordinates from a netCDF or zarr data file."""
+    if path.endswith(".zarr"):
+        ds = xr.open_zarr(path)
+    else:
+        ds = xr.open_dataset(path)
+    return LatLonCoordinates(
+        lat=torch.tensor(ds["lat"].values, dtype=torch.float32),
+        lon=torch.tensor(ds["lon"].values, dtype=torch.float32),
+    )
+
+
 def create_predictor_config(
     tmp_path,
     n_samples: int,
@@ -97,7 +111,7 @@ def create_predictor_config(
     out_path = tmp_path / "predictor-config.yaml"
     with open(out_path, "w") as file:
         yaml.dump(config, file)
-    return out_path, f"{paths.fine}/data.nc"
+    return out_path, paths
 
 
 def test_predictor_runs(tmp_path, very_fast_only: bool):
@@ -106,15 +120,18 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
     n_samples = 2
     coarse_shape = (4, 4)
     downscale_factor = 2
-    predictor_config_path, fine_data_path = create_predictor_config(
+    predictor_config_path, paths = create_predictor_config(
         tmp_path,
         n_samples,
     )
+    fine_data_path = f"{paths.fine}/data.nc"
+    fine_coords = load_fine_coords_from_path(fine_data_path)
     model_config = get_model_config(coarse_shape, downscale_factor=downscale_factor)
     model = model_config.build(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         static_inputs=load_static_inputs({"HGTsfc": fine_data_path}),
+        fine_coords=fine_coords,
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
@@ -147,7 +164,7 @@ def test_predictor_renaming(
     coarse_shape = (4, 4)
     downscale_factor = 2
     renaming = {"var0": "var0_renamed", "var1": "var1_renamed"}
-    predictor_config_path, fine_data_path = create_predictor_config(
+    predictor_config_path, paths = create_predictor_config(
         tmp_path,
         n_samples,
         model_renaming=renaming,
@@ -155,13 +172,12 @@ def test_predictor_renaming(
             "rename": {"var0": "var0_renamed", "var1": "var1_renamed"}
         },
     )
+    fine_coords = load_fine_coords_from_path(f"{paths.fine}/data.nc")
     model_config = get_model_config(
         coarse_shape, downscale_factor, use_fine_topography=False
     )
     model = model_config.build(
-        coarse_shape=coarse_shape,
-        downscale_factor=2,
-        static_inputs=load_static_inputs({"HGTsfc": fine_data_path}),
+        coarse_shape=coarse_shape, downscale_factor=2, fine_coords=fine_coords
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)

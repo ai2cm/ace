@@ -443,6 +443,7 @@ class TrainerConfig:
             model_coarse_shape,
             train_data.downscale_factor,
             static_inputs=static_inputs,
+            fine_coords=train_data.fine_coords,
         )
 
         optimization = self.optimization.build(
