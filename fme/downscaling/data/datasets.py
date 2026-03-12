@@ -474,7 +474,7 @@ class BatchData:
 
     def __getitem__(self, k):
         return BatchItem(
-            {key: value[k].squeeze() for key, value in self.data.items()},
+            {key: value[k] for key, value in self.data.items()},
             self.time[k],
             self.latlon_coordinates[k],
         )

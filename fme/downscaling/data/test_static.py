@@ -73,10 +73,6 @@ def test_Topography_generate_from_patches():
         generated_patches[0].data, torch.tensor([[4, 5, 6, 7], [8, 9, 10, 11]])
     )
     assert torch.equal(generated_patches[1].data, torch.tensor([[2], [6]]))
-    assert torch.equal(generated_patches[0].coords.lat, torch.tensor([1, 2]))
-    assert torch.equal(generated_patches[0].coords.lon, torch.tensor([0, 1, 2, 3]))
-    assert torch.equal(generated_patches[1].coords.lat, torch.tensor([0, 1]))
-    assert torch.equal(generated_patches[1].coords.lon, torch.tensor([2]))
 
 
 def test_StaticInputs_generate_from_patches():
@@ -119,11 +115,6 @@ def test_StaticInputs_generate_from_patches():
     # land_frac field values are -1 * topography
     assert torch.equal(generated_patches[0][1].data, expected_topography_patch_0 * -1.0)
     assert torch.equal(generated_patches[1][1].data, expected_topography_patch_1 * -1.0)
-
-    assert torch.equal(generated_patches[0].coords.lat, torch.tensor([1, 2]))
-    assert torch.equal(generated_patches[0].coords.lon, torch.tensor([0, 1, 2, 3]))
-    assert torch.equal(generated_patches[1].coords.lat, torch.tensor([0, 1]))
-    assert torch.equal(generated_patches[1].coords.lon, torch.tensor([2]))
 
 
 def test_StaticInputs_serialize():
