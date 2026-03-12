@@ -126,6 +126,7 @@ Please be responsive to feedback during the review process.
 
 ### Review comment conventions
 
+One guide our team finds helpful is [Conventional Comments](https://conventionalcomments.org/).
 Reviewers label comments to indicate priority:
 - **Issue**: Must be addressed before merge.
 - **Suggestion (optional)**: Worth considering but non-blocking.

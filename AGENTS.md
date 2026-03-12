@@ -88,6 +88,7 @@ future, as little code as possible should need to be touched.
 
 ### Review comment conventions
 
+One guide our team finds helpful is [Conventional Comments](https://conventionalcomments.org/).
 Label every comment with a severity prefix:
 - **Issue**: must fix before merge.
 - **Suggestion (optional)**: non-blocking improvement.
