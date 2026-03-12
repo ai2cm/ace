@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="label-foundation-model-multi-step-FT-c96-amip"
+JOB_NAME="label-foundation-model-multi-step-FT-e3sm-latest-ckpt"
 JOB_GROUP="foundation-model-era5"
-EXISTING_RESULTS_DATASET="01KK5ZKY0P3QE36KHN63FQ4CNN"  # this contains the checkpoint to use for inference
-CONFIG_FILENAME="ace-evaluator-config-c96-amip.yaml"
+EXISTING_RESULTS_DATASET="01KKEXRZZDJJ0DJZ2KTSXYWAME"  # this contains the checkpoint to use for inference
+CONFIG_FILENAME="ace-evaluator-config-e3sm.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -33,7 +33,8 @@ cd $REPO_ROOT && gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    # --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/ckpt.tar:/ckpt.tar \
     --gpus 1 \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
