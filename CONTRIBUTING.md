@@ -26,6 +26,92 @@ If you're an external user and want to implement a new feature, **please open an
 issue first to discuss it with us**. This helps ensure the feature aligns with
 the project's direction and prevents wasted effort.
 
+## Code Guidelines
+
+### Design Principles
+
+#### Isolate responsibilities to as few abstraction levels as possible
+
+When designing a change, think first about what absolutely must change, then
+about what level of abstraction that change could be handled in. Choose the
+option that splits the concern across the fewest levels of abstraction. When a
+decision changes in the future, as little code as possible should need to be
+touched.
+
+- **Prefer polymorphism over type-checking.** If you see `if isinstance(x, A)
+  ... elif isinstance(x, B) ...` chains, the behavior should be a method on
+  the types being checked. A single `isinstance` check can be acceptable, but
+  multiple branches are a sign that logic belongs on the objects themselves.
+- **Keep functions at one level of abstraction.** Don't mix high-level
+  orchestration with low-level implementation details in the same function.
+  Extract helpers when a function operates at mixed levels.
+- **Centralize cross-cutting concerns.** Only `Distributed` should access
+  distributed-aware code. Other modules call `dist.method()` rather than
+  importing `torch.distributed` or backend-specific code directly. Prefer
+  guard methods like `dist.require_no_model_parallelism(msg)` over if-else
+  checks scattered throughout the codebase.
+- **Training-specific concerns belong in training code.** The distributed
+  module wrapper (DDP), weight freezing, and loss configuration are
+  training concerns and should not be coupled into inference-capable code.
+
+#### Refactoring pattern: facade first, swap later
+
+When refactoring configs or APIs across multiple PRs, implement the new
+internal class alongside the old one. The old class becomes a facade that
+constructs the new classes. The final PR deletes the facade and promotes the
+new class. This avoids strange intermediate states where partially-implemented
+features block on breaking YAML changes.
+
+### Naming
+
+- Names should accurately describe behavior. "scatter" implies inter-process
+  communication; use "localize" when each rank computes its own local view.
+- Config class names: append `Config` to the name of the thing being built
+  (e.g. `TrainStepperConfig` builds `TrainStepper`).
+- Prefer descriptive names over abbreviations (`noise_distribution` not
+  `distribution`).
+- Mark functions as private (prefix `_`) when they are only used internally.
+
+### Configuration
+
+- Validate configs eagerly in `__post_init__`, not at runtime. Catch
+  misconfigurations before jobs are submitted.
+- Don't add config options that duplicate existing ones.
+- Remove unused fields rather than leaving them around.
+- Use deprecation warnings rather than hard errors when removing config
+  options, unless a breaking change has been communicated to the team.
+
+### Testing
+
+- **Test helpers over copy-paste.** Create helper functions to build common
+  test fixtures. If the same setup appears 3+ times, extract a helper.
+- **Demonstrate bugs with failing tests.** When fixing a bug, add a test
+  that fails without the fix, then fix it.
+- **Test behavior, not implementation.** If a test re-implements the logic
+  it's testing, it isn't actually verifying anything.
+- **Use xfail for known bugs.** Mark known issues with `pytest.mark.xfail`
+  rather than skipping them silently.
+- **Exercise meaningful values.** Don't use all-ones for area weights or
+  trivial shapes that hide real bugs.
+- **Regression tests for checkpoints.** Maintain regression checkpoints from
+  specific model releases. Use `strict=True` for state dict loading.
+
+### Code Organization
+
+- Consolidate duplicated code to shared locations (e.g. `fme/core/`).
+- Remove unused code, flags, and imports proactively.
+- Use `if condition: raise` instead of `assert` in production code (asserts
+  can be stripped by `python -O`).
+- Use context managers for resource cleanup (timers, distributed contexts).
+- Pass composed objects rather than their parts (e.g. `stepper.loss_scaling`
+  instead of two separate arguments).
+
+### Vendorized Code
+
+When vendorizing external code, commit the unmodified copy first (with
+pre-commit checks skipped if needed), then commit your modifications. This
+makes review transparent by separating "what we copied" from "what we changed".
+
 ## Code Review
 
 Automated CI tests must pass before your pull request will be reviewed. All
@@ -33,8 +119,24 @@ pull requests will be reviewed for:
 - Correctness and functionality
 - Code style, type-hinting and consistency
 - Alignment with project goals
+- Responsibility isolation and abstraction level consistency
+- Appropriate test coverage
 
 Please be responsive to feedback during the review process.
+
+### Review comment conventions
+
+Reviewers label comments to indicate priority:
+- **Issue**: Must be addressed before merge.
+- **Suggestion (optional)**: Worth considering but non-blocking.
+- **Question**: Seeking clarification; may or may not require changes.
+- **nit**: Minor style preference; does not require re-review.
+
+### PR scope
+
+- Keep PRs focused. Split cleanly separable changes into separate PRs.
+- Non-blocking suggestions are often deferred to follow-on PRs.
+- Config changes typically need multiple rounds of review.
 
 ## Developing
 

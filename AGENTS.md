@@ -31,6 +31,69 @@ Pre-commit hooks run ruff, ruff-format, and mypy. If ruff-format modifies files,
 
 To use the PR review rules, configure the GitHub MCP server in Cursor's "Tools & MCP" settings. You will need a read-only personal access token with the following permissions: Pull requests, Issues, Contents, Metadata.
 
+## Code Guidelines for Agents
+
+When writing or reviewing code, apply these project-specific guidelines. See
+CONTRIBUTING.md for the full details; this section highlights what agents are
+most likely to miss.
+
+### Design: abstraction and responsibility isolation
+
+This is the highest-priority review concern. When a decision changes in the
+future, as little code as possible should need to be touched.
+
+- **Polymorphism over type-checking.** `if isinstance(x, A) ... elif
+  isinstance(x, B) ...` chains mean the behavior should be a method on the
+  types being checked. Flag these in reviews and suggest moving logic to the
+  relevant classes.
+- **One abstraction level per function.** If a function mixes high-level
+  orchestration with low-level details, suggest extracting helpers.
+- **Distributed concerns stay in `Distributed`.** Other code calls
+  `dist.method()`. Never import `torch.distributed` or backend internals
+  outside of the distributed module. Prefer guard methods
+  (`dist.require_no_model_parallelism(msg)`) over scattered if-else checks.
+- **Training concerns stay in training code.** DDP wrapping, weight freezing,
+  and loss config should not leak into inference-capable code paths.
+- **Facade pattern for multi-PR refactors.** Implement the new class
+  internally, keep the old class as a translation layer, swap in a final PR.
+
+### Naming
+
+- Config classes: append `Config` to the built type (`TrainStepperConfig`).
+- Prefer descriptive names (`noise_distribution` not `distribution`).
+- "scatter" implies communication; "localize" when no communication occurs.
+- Private functions get a `_` prefix.
+
+### Config design
+
+- Validate in `__post_init__`, not at runtime.
+- No redundant options; remove unused fields.
+- Backwards compatibility for checkpoint loading is critical; use deprecation
+  warnings for config removal.
+
+### Testing
+
+- Create helpers for repeated test setup (threshold: 3+ instances).
+- When fixing a bug, add a failing test first.
+- Tests must test behavior, not re-implement logic.
+- Use `xfail` for known bugs, not silent skips.
+- Use non-trivial values (not all-ones) so tests exercise real behavior.
+
+### Code organization
+
+- `if/raise` instead of `assert` in production code.
+- Context managers for cleanup (timers, distributed contexts).
+- Pass composed objects, not their parts.
+- Commit vendorized code unmodified first, then modifications separately.
+
+### Review comment conventions
+
+Label every comment with a severity prefix:
+- **Issue**: must fix before merge.
+- **Suggestion (optional)**: non-blocking improvement.
+- **Question**: seeking clarification.
+- **nit**: minor style; does not need re-review.
+
 ## Pull Request Review Assistant
 
 Use this same workflow for both initial review and re-review.
