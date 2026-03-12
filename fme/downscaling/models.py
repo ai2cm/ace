@@ -449,7 +449,7 @@ class DiffusionModel:
     def generate(
         self,
         coarse_data: TensorMapping,
-        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
+        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
         # static_inputs receives an internally-subsetted value from the calling method;
