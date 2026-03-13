@@ -12,7 +12,7 @@ from .datasets import (
     PairedBatchItem,
     PairedGriddedData,
 )
-from .topography import StaticInput, StaticInputs, get_normalized_topography
+from .static import StaticInput, StaticInputs, load_static_inputs
 from .utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,

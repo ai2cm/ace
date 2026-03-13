@@ -16,6 +16,7 @@ from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
@@ -24,19 +25,9 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
-    StaticInputs,
-    get_normalized_topography,
+    load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
-
-
-def count_parameters(modules: torch.nn.ModuleList) -> int:
-    parameters = 0
-    for module in modules:
-        for parameter in module.parameters():
-            if parameter.requires_grad:
-                parameters += parameter.numel()
-    return parameters
 
 
 def _save_checkpoint(trainer: "Trainer", path: str) -> None:
@@ -186,7 +177,7 @@ class Trainer:
         for i, (batch, static_inputs) in enumerate(train_batch_generator):
             self.num_batches_seen += 1
             if i % 10 == 0:
-                logging.info(f"Training on batch {i+1}")
+                logging.info(f"Training on batch {i + 1}")
             outputs = self.model.train_on_batch(batch, static_inputs, self.optimization)
             self.ema(self.model.modules)
             with torch.no_grad():
@@ -433,13 +424,7 @@ class TrainerConfig:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
-        static_inputs_fields = self.static_inputs or {}
-        static_inputs = StaticInputs(
-            fields=[
-                get_normalized_topography(path, topography_name=key)
-                for key, path in static_inputs_fields.items()
-            ]
-        )
+        static_inputs = load_static_inputs(self.static_inputs)
 
         train_data: PairedGriddedData = self.train_data.build(
             train=True,

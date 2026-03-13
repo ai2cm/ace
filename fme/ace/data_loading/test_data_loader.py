@@ -1,6 +1,7 @@
 """This file contains unit tests related to creating torch Datasets from climate
 data (e.g. netCDF files)."""
 
+import datetime
 import math
 import os
 import pathlib
@@ -30,14 +31,20 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed.distributed import Distributed
-from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
+from fme.core.mask_provider import MaskProvider
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.typing_ import Slice
 
@@ -203,10 +210,6 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     tmp_path = dist.scatter_object(tmp_path)  # get the root value
     global_batch_size = 24
     if dist.is_root():
@@ -1173,3 +1176,67 @@ def test_pinned_memory(tmp_path, time_buffer: int):
     for batch in loader:
         tensor = next(iter(batch.data.values()))
         assert tensor.is_pinned() is using_gpu()
+
+
+@pytest.mark.parallel
+def test_localize_properties():
+    """Verify DatasetProperties.localize() partitions coords and masks across ranks."""
+    dist = Distributed.get_instance()
+    n_lat, n_lon = N_LAT, N_LON
+    lat = torch.linspace(-90.0, 90.0, n_lat)
+    lon = torch.linspace(0.0, 360.0, n_lon)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    mask_tensor = torch.arange(n_lat * n_lon, dtype=torch.float32).reshape(
+        1, n_lat, n_lon
+    )
+    mask_provider = MaskProvider(masks={"mask_test": mask_tensor})
+    timestep = datetime.timedelta(hours=6)
+    metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
+    vertical = NullVerticalCoordinate()
+    props = DatasetProperties(
+        variable_metadata=metadata,
+        vertical_coordinate=vertical,
+        horizontal_coordinates=coords,
+        mask_provider=mask_provider,
+        timestep=timestep,
+        is_remote=False,
+        all_labels=None,
+    )
+
+    local = props.localize()
+
+    # Unchanged fields
+    assert local.variable_metadata is metadata
+    assert local.vertical_coordinate is vertical
+    assert local.timestep == timestep
+
+    # Gather local coordinates to root and verify full, non-overlapping coverage.
+    assert isinstance(local.horizontal_coordinates, LatLonCoordinates)
+    local_lat = local.horizontal_coordinates.lat.tolist()
+    local_lon = local.horizontal_coordinates.lon.tolist()
+    all_lats = dist.gather_object(local_lat)
+    all_lons = dist.gather_object(local_lon)
+    if dist.is_root():
+        assert all_lats is not None and all_lons is not None
+        # Spatial co-ranks (same data_parallel_rank) should have distinct
+        # lat/lon slices whose union covers the global coordinates exactly.
+        combined_lat = sorted(set(v for rank_lat in all_lats for v in rank_lat))
+        combined_lon = sorted(set(v for rank_lon in all_lons for v in rank_lon))
+        assert combined_lat == lat.tolist(), "lat coverage incomplete or has gaps"
+        assert combined_lon == lon.tolist(), "lon coverage incomplete or has gaps"
+
+    # Gather local masks to root and verify they tile to the global mask.
+    assert isinstance(local.mask_provider, MaskProvider)
+    local_mask = local.mask_provider.masks["mask_test"]
+    h_slice, w_slice = dist.get_local_slices((n_lat, n_lon))
+    all_slices = dist.gather_object((h_slice, w_slice))
+    all_masks = dist.gather_object(local_mask.tolist())
+    if dist.is_root():
+        assert all_slices is not None and all_masks is not None
+        canvas = torch.zeros_like(mask_tensor)
+        for (hs, ws), mask_data in zip(all_slices, all_masks):
+            canvas[..., hs, ws] += torch.tensor(mask_data)
+        # Each cell should be covered once per data-parallel rank (spatial
+        # co-ranks have distinct slices, data-parallel ranks have identical ones).
+        expected_count = dist.total_data_parallel_ranks
+        torch.testing.assert_close(canvas, mask_tensor * expected_count)

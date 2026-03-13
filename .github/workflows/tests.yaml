@@ -30,10 +30,13 @@ jobs:
           uv venv --python 3.11
           uv pip install -c constraints.txt -e .[dev]
           uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
-      - name: Run pytest with code coverage
+      - name: Run unit tests with code coverage
         run: |
           source .venv/bin/activate
           make test_cov
+      - name: Run parallel tests
+        run: |
+          source .venv/bin/activate
           make cpu_test_all_parallel
   cpu-very-fast-no-healpix:
     runs-on: ubuntu-latest
@@ -94,6 +97,12 @@ jobs:
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
             python3 fme/require_gpu.py
             make test
+      - name: Run parallel tests
+        run: |
+            source .venv/bin/activate
+            export PATH=/usr/local/nvidia/bin:${PATH}
+            export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+            python3 fme/require_gpu.py
             # matrix for parallel tests
             # | backend | WS | H | W |
             # | ------- | -- | - | - |

@@ -5,7 +5,7 @@ comparing ensemble predictions against targets for each variable.
 
 This will work for saved event outputs from `fme.downscaling.evaluator`
 from a beaker experiment.  It downloads the experiment files to a temporary
-directory and then parses the filenames for <event_name>_YYYYMMDD.nc to look
+directory and then parses the filenames for <event_name>_YYYYMMDD*.nc to look
 for single-event outputs.
 
 Usage:
@@ -16,17 +16,13 @@ Requires:
 """
 
 import argparse
-import re
-import subprocess
 import tempfile
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-
-# Matching for <event_name>_YYYYMMDD.nc
-_EVENT_FILE_RE = re.compile(r"(.+)_(\d{8})\.nc$")
+from utils import fetch_beaker_dataset, find_event_files
 
 
 def parse_args():
@@ -43,25 +39,6 @@ def parse_args():
         help="Output directory for figures (default: ./histogram_outputs)",
     )
     return parser.parse_args()
-
-
-def fetch_beaker_dataset(dataset_id: str, target_dir: str) -> None:
-    """Fetch a beaker dataset to the specified directory."""
-    subprocess.run(
-        ["beaker", "dataset", "fetch", dataset_id, "--output", target_dir],
-        check=True,
-    )
-
-
-def find_event_files(directory: str) -> dict[str, Path]:
-    """Find netCDF files matching the event naming pattern, keyed by event name."""
-    event_files = {}
-    for p in sorted(Path(directory).glob("*.nc")):
-        # extract event name
-        matched = _EVENT_FILE_RE.match(p.name)
-        if matched:
-            event_files[matched.group(1)] = p
-    return event_files
 
 
 def detect_variable_pairs(ds: xr.Dataset) -> list[str]:

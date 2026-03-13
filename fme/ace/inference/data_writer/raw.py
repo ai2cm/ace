@@ -127,7 +127,7 @@ class RawDataWriter:
                 "non-local filesystem."
             )
         filename = str(Path(path) / f"{label}.nc")
-        calendar = _infer_calendar(initial_condition_times)
+        calendar = infer_calendar(initial_condition_times)
         n_initial_conditions = len(initial_condition_times)
         self._save_names = save_names
         self.initial_condition_times = initial_condition_times
@@ -301,7 +301,7 @@ def get_batch_lead_time_microseconds(
     return lead_time_microseconds[0, :]
 
 
-def _infer_calendar(array: npt.NDArray[cftime.datetime]) -> str:
+def infer_calendar(array: npt.NDArray[cftime.datetime]) -> str:
     """Infer the calendar of an array of cftime.datetime objects.
 
     Assumes that all the datetime objects in the array have the same calendar,
