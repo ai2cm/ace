@@ -39,12 +39,13 @@ data:
   lat_extent:
     start: -66
     stop: 70.0
-  batch_size: 6
+  batch_size: 4
   num_data_workers: 2
   strict_ensemble: false
+  drop_last: true
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: andrep-downscaling
+  project: multivariate-downscaling
   entity: ai2cm

@@ -3,9 +3,9 @@
 set -e
 
 #JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-xshield-amip-100km-to-3km-winds-prmsl-only-tropics"
+JOB_NAME="eval-xshield-amip-100km-to-3km-loguni-prate-only-global"
 
-CONFIG_FILENAME="eval-tropic-pac.yaml"
+CONFIG_FILENAME="eval-global.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,16 +17,17 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=2
+NGPU=4
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET=01KKCZ662FQ65S2MC9YPMN3X96
+EXISTING_RESULTS_DATASET=01KET96PB1RJMVJDADX04NDQJH
 wandb_group=""
 
 #--not-preemptible \
 #     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
 
+#    --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/checkpoints/best.ckpt \
 
 gantry run \
     --name $JOB_NAME \
@@ -44,8 +45,8 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/checkpoints/best.ckpt \
     --weka climate-default:/climate-default \
+    --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/checkpoints/best.ckpt \
     --gpus $NGPU \
     --shared-memory 400GiB \
     --budget ai2/climate \
