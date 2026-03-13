@@ -30,7 +30,6 @@ validation:
     time_buffer: 4
     dataset:
       data_path: /climate-default/2026-01-14-e3smv3-1deg-AMIP-1970-2020-ERA5-format
-      engine: zarr
       labels: ["e3smv3"]
       subset:
         start_time: '2010-01-01'
