@@ -208,18 +208,19 @@ def _compute_ocean_net_surface_energy_flux(
     heat transport by precipitation and evaporation.
     """
     atmos = AtmosphereData(forcing_data)
-    base_flux = atmos.net_surface_energy_flux
-    precip_heat_flux_ocean = (
+    base_flux = (
+        atmos.net_surface_energy_flux
+    )  # missing: - calving * LATENT_HEAT_OF_FREEZING
+    mass_heat_flux = (
         SPECIFIC_HEAT_OF_SEA_WATER_CM4
-        * atmos.precipitation_rate
+        * (
+            atmos.precipitation_rate
+            + atmos.frozen_precipitation_rate
+            - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
+        )  # missing: + river runoff + calving
         * (sst - FREEZING_TEMPERATURE_KELVIN)
     )
-    evap_heat_flux = (
-        SPECIFIC_HEAT_OF_SEA_WATER_CM4
-        * (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
-        * (sst - FREEZING_TEMPERATURE_KELVIN)
-    )
-    return base_flux + precip_heat_flux_ocean - evap_heat_flux
+    return base_flux + mass_heat_flux
 
 
 def _correct_hfds(
@@ -249,7 +250,7 @@ def _correct_hfds(
         hfds_name = "hfds_total_area"
     gen_hfds = gen_data[hfds_name]
     if method == "residual_prediction":
-        out[hfds_name] = gen_hfds + ocean_fraction * net_flux
+        out[hfds_name] = net_flux * ocean_fraction + gen_hfds
     elif method == "prescribed":
         out[hfds_name] = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
     else:
