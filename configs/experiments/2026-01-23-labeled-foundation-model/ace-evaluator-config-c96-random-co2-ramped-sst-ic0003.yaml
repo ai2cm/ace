@@ -14,7 +14,7 @@ loader:
       - '2020-01-01T06:00:00'
   dataset:
     data_path: /climate-default/2025-08-22-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset
-    file_pattern: ramped-sst-3xCO2-random-perturbation-ic_0003.zarr
+    file_pattern: ramped-sst-4xCO2-random-perturbation-ic_0003.zarr
     engine: zarr
     labels: ["c96-shield"]
   num_data_workers: 16
