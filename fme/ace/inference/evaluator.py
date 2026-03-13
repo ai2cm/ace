@@ -108,17 +108,16 @@ class ValidationConfig:
         loader: Data loader configuration for validation data. Uses the same
             :class:`~fme.ace.data_loading.config.DataLoaderConfig` as training
             data loaders.
-        n_forward_steps: Number of forward steps per validation batch. Defaults
-            to 1 for standard single-step validation.
         aggregator: Configuration for the one-step validation aggregator.
         stepper_training: Training-specific configuration including loss, ensemble
             settings, and forward step scheduling. Set this to match the training
             configuration if you want ``val/mean/loss`` to be directly comparable.
+            The number of forward steps is derived from
+            ``stepper_training.train_n_forward_steps`` (defaults to 1 if unset).
 
     """
 
     loader: DataLoaderConfig
-    n_forward_steps: int | None = None
     aggregator: OneStepAggregatorConfig = dataclasses.field(
         default_factory=lambda: OneStepAggregatorConfig()
     )
@@ -138,31 +137,25 @@ class ValidationConfig:
                 "TimeLengthSchedule for validation within inference evaluator jobs. "
                 "Use TimeLengthProbabilities or an int instead."
             )
-        if (
-            self.stepper_training.train_n_forward_steps is not None
-            and self.n_forward_steps is not None
-        ):
-            raise ValueError(
-                "stepper_training.train_n_forward_steps may not be given at the same "
-                "time as n_forward_steps at the top level"
-            )
 
     def get_n_forward_steps(self) -> int:
         """Resolve the effective number of forward steps for validation.
 
-        Returns the top-level ``n_forward_steps`` if set, otherwise derives
-        the value from ``stepper_training.train_n_forward_steps``.  If neither
-        is configured, defaults to 1 for standard single-step validation.
+        Derives the value from ``stepper_training.train_n_forward_steps``.
+        Defaults to 1 for standard single-step validation if unset.
         """
         train_n = self.stepper_training.train_n_forward_steps
-        if train_n is not None:
-            if isinstance(train_n, int):
-                return train_n
-            assert isinstance(train_n, TimeLengthProbabilities)  # already validated
-            return train_n.max_n_forward_steps
-        if self.n_forward_steps is not None:
-            return self.n_forward_steps
-        return 1
+        if train_n is None:
+            logging.info(
+                "stepper_training.train_n_forward_steps was not configured for "
+                "validation within the inference evaluator job, defaulting to "
+                "n_forward_steps=1."
+            )
+            return 1
+        if isinstance(train_n, int):
+            return train_n
+        assert isinstance(train_n, TimeLengthProbabilities)  # already validated
+        return train_n.max_n_forward_steps
 
 
 @dataclasses.dataclass

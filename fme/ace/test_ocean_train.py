@@ -95,7 +95,7 @@ def save_ocean_nd_netcdf(
             f"dim_sizes.nz_interface ({dim_sizes.nz_interface}) "
             f"must be nz_levels ({nz_levels}) + 1."
         )
-    max_depth_m = 500.0 * nz_levels
+    max_depth_m = 1000.0
     interface_depths = np.linspace(0.0, max_depth_m, dim_sizes.nz_interface)
     for i in range(dim_sizes.nz_interface):
         idepth_name = f"idepth_{i}"
@@ -327,7 +327,8 @@ validation:
       data_path: '{valid_data_path}'
       spatial_dimensions: latlon
     batch_size: 2
-  n_forward_steps: 2
+  stepper_training:
+    train_n_forward_steps: 2
   aggregator:
     log_snapshots: false
     log_mean_maps: false

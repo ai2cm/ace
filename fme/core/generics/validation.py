@@ -56,27 +56,27 @@ def run_validation(
         record_logs = _get_record_to_wandb()
 
     timer = GlobalTimer.get_instance()
-    timer.start("validation")
 
     logging.info("Starting validation loop")
-    no_opt = NullOptimization()
-    n_batches = len(validation_data.loader)
-    with torch.no_grad():
-        for i, batch in enumerate(validation_data.loader):
-            logging.info(f"Validation: processing batch {i + 1} of {n_batches}.")
-            stepped = train_stepper.train_on_batch(
-                batch,
-                optimization=no_opt,
-                compute_derived_variables=compute_derived_variables,
-            )
-            aggregator.record_batch(stepped)
 
-    logging.info("Flushing validation diagnostics")
-    aggregator.flush_diagnostics(subdir=diagnostics_subdir)
-    logging.info("Getting validation aggregator logs")
-    val_logs = aggregator.get_logs(label=label)
-    record_logs(val_logs)
+    with timer.context("validation"):
+        no_opt = NullOptimization()
+        n_batches = len(validation_data.loader)
+        with torch.no_grad():
+            for i, batch in enumerate(validation_data.loader):
+                logging.info(f"Validation: processing batch {i + 1} of {n_batches}.")
+                stepped = train_stepper.train_on_batch(
+                    batch,
+                    optimization=no_opt,
+                    compute_derived_variables=compute_derived_variables,
+                )
+                aggregator.record_batch(stepped)
 
-    timer.stop()
+        logging.info("Flushing validation diagnostics")
+        aggregator.flush_diagnostics(subdir=diagnostics_subdir)
+        logging.info("Getting validation aggregator logs")
+        val_logs = aggregator.get_logs(label=label)
+        record_logs(val_logs)
+
     logging.info("Validation complete")
     return val_logs
