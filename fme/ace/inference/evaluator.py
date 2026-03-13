@@ -321,56 +321,56 @@ class _Deriver(DeriverABC):
 
 def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer = GlobalTimer.get_instance()
-    timer.start_outer("inference")
-    timer.start("initialization")
+    timer.start("inference")
 
-    makedirs(config.experiment_dir, exist_ok=True)
-    config.configure_logging(log_filename="inference_out.log")
+    with timer.context("initialization"):
+        makedirs(config.experiment_dir, exist_ok=True)
+        config.configure_logging(log_filename="inference_out.log")
 
-    if fme.using_gpu():
-        torch.backends.cudnn.benchmark = True
+        if fme.using_gpu():
+            torch.backends.cudnn.benchmark = True
 
-    stepper_config = config.load_stepper_config()
-    logging.info("Initializing data loader")
-    window_requirements = stepper_config.get_evaluation_window_data_requirements(
-        n_forward_steps=config.forward_steps_in_memory
-    )
-    initial_condition_requirements = (
-        stepper_config.get_prognostic_state_data_requirements()
-    )
-    data = get_inference_data(
-        config=config.loader,
-        total_forward_steps=config.n_forward_steps,
-        window_requirements=window_requirements,
-        initial_condition=initial_condition_requirements,
-    )
+        stepper_config = config.load_stepper_config()
+        logging.info("Initializing data loader")
+        window_requirements = stepper_config.get_evaluation_window_data_requirements(
+            n_forward_steps=config.forward_steps_in_memory
+        )
+        initial_condition_requirements = (
+            stepper_config.get_prognostic_state_data_requirements()
+        )
+        data = get_inference_data(
+            config=config.loader,
+            total_forward_steps=config.n_forward_steps,
+            window_requirements=window_requirements,
+            initial_condition=initial_condition_requirements,
+        )
 
-    stepper = config.load_stepper()
-    stepper.set_eval()
+        stepper = config.load_stepper()
+        stepper.set_eval()
 
-    if not config.allow_incompatible_dataset:
-        try:
-            stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
-        except IncompatibleDatasetInfo as err:
-            raise IncompatibleDatasetInfo(
-                "Inference dataset is not compatible with dataset used for stepper "
-                "training. Set allow_incompatible_dataset to True to ignore this "
-                f"error. The incompatiblity found was: {str(err)}"
-            ) from err
+        if not config.allow_incompatible_dataset:
+            try:
+                stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
+            except IncompatibleDatasetInfo as err:
+                raise IncompatibleDatasetInfo(
+                    "Inference dataset is not compatible with dataset used for stepper "
+                    "training. Set allow_incompatible_dataset to True to ignore this "
+                    f"error. The incompatiblity found was: {str(err)}"
+                ) from err
 
-    aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
-    for batch in data.loader:
-        initial_time = batch.time.isel(time=0)
-        break
-    variable_metadata = resolve_variable_metadata(
-        dataset_metadata=data.variable_metadata,
-        stepper_metadata=stepper.training_variable_metadata,
-        stepper_all_names=stepper_config.all_names,
-    )
-    dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
+        aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
+        for batch in data.loader:
+            initial_time = batch.time.isel(time=0)
+            break
+        variable_metadata = resolve_variable_metadata(
+            dataset_metadata=data.variable_metadata,
+            stepper_metadata=stepper.training_variable_metadata,
+            stepper_all_names=stepper_config.all_names,
+        )
+        dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
 
     if config.validation is not None:
-        timer.stop()
+        timer.stop("inference")
         logging.info("Initializing validation data loader")
         data_requirements = stepper_config.get_evaluation_window_data_requirements(
             n_forward_steps=config.validation.get_n_forward_steps()
@@ -398,26 +398,26 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             aggregator=aggregator,
             label="val",
         )
-        timer.start("initialization")
+        timer.start("inference")
 
-    aggregator = aggregator_config.build(
-        dataset_info=dataset_info,
-        n_ic_steps=stepper_config.n_ic_timesteps,
-        n_forward_steps=config.n_forward_steps,
-        initial_time=initial_time,
-        channel_mean_names=stepper.loss_names,
-        normalize=stepper.normalizer.normalize,
-        output_dir=config.experiment_dir,
-    )
+    with timer.context("initialization"):
+        aggregator = aggregator_config.build(
+            dataset_info=dataset_info,
+            n_ic_steps=stepper_config.n_ic_timesteps,
+            n_forward_steps=config.n_forward_steps,
+            initial_time=initial_time,
+            channel_mean_names=stepper.loss_names,
+            normalize=stepper.normalizer.normalize,
+            output_dir=config.experiment_dir,
+        )
 
-    writer = config.get_data_writer(
-        initial_condition_times=data.initial_time.to_numpy(),
-        timestep=data.timestep,
-        variable_metadata=variable_metadata,
-        coords=data.coords,
-    )
+        writer = config.get_data_writer(
+            initial_condition_times=data.initial_time.to_numpy(),
+            timestep=data.timestep,
+            variable_metadata=variable_metadata,
+            coords=data.coords,
+        )
 
-    timer.stop()
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")
     if config.prediction_loader is not None:
@@ -448,23 +448,24 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             record_logs=record_logs,
         )
 
-    timer.start("final_writer_flush")
-    logging.info("Starting final flush of data writer")
-    writer.finalize()
-    logging.info("Writing reduced metrics to disk in netcdf format.")
-    aggregator.flush_diagnostics()
-    timer.stop()
+    with timer.context("final_writer_flush"):
+        logging.info("Starting final flush of data writer")
+        writer.finalize()
+        logging.info("Writing reduced metrics to disk in netcdf format.")
+        aggregator.flush_diagnostics()
 
-    timer.stop_outer("inference")
+    timer.stop("inference")
     total_steps = config.n_forward_steps * config.loader.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
+    wandb_logging_duration = timer.get_duration("wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
         "Total steps per second (ignoring wandb logging): "
         f"{total_steps_per_second:.2f} steps/second"
     )
+
+    breakpoint()
 
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,

@@ -260,7 +260,7 @@ def run_inference_from_config(config: InferenceConfig):
     )
 
     writer = config.get_data_writer(data=data)
-    timer.stop()
+    timer.stop("initialization")
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")
     run_inference(
@@ -276,7 +276,7 @@ def run_inference_from_config(config: InferenceConfig):
     writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
-    timer.stop()
+    timer.stop("final_writer_flush")
 
     timer.stop_outer("inference")
     total_steps = (

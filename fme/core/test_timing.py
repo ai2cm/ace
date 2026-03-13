@@ -54,13 +54,13 @@ def exercise_active_timer():
 
     timer.start("foo")
     time.sleep(0.01)
-    timer.stop()
+    timer.stop("foo")
 
     timer = GlobalTimer.get_instance()
 
     timer.start("bar")
     time.sleep(0.02)
-    timer.stop()
+    timer.stop("bar")
 
     assert timer.get_duration("foo") == pytest.approx(0.01, abs=0.005)
     assert timer.get_duration("bar") == pytest.approx(0.02, abs=0.005)
@@ -96,7 +96,7 @@ def test_GlobalTimer_resets_after_exception():
     with GlobalTimer():
         timer = GlobalTimer.get_instance()
         timer.start("foo")
-        timer.stop()
+        timer.stop("foo")
 
 
 def test_GlobalTimer_multiple_context_error():
@@ -119,7 +119,7 @@ def test_inactive_GlobalTimer_start():
 @pytest.mark.filterwarnings("ignore:The GlobalTimer")
 def test_inactive_GlobalTimer_stop():
     timer = GlobalTimer.get_instance()
-    timer.stop()
+    timer.stop("any_category")
 
 
 @pytest.mark.filterwarnings("ignore:The GlobalTimer")
@@ -172,15 +172,17 @@ def test_GlobalTimer_context_with_exception():
     assert timer.get_duration("foo") > 0.01
 
 
-def test_GlobalTimer_single_inner_timer():
-    with pytest.raises(
-        RuntimeError, match="GlobalTimer already has an active inner timer"
-    ):
-        with GlobalTimer():
-            timer = GlobalTimer.get_instance()
-            with timer.context("foo"):
-                with timer.context("bar"):
-                    pass
+def test_GlobalTimer_simultaneous_inner_timers():
+    with GlobalTimer():
+        timer = GlobalTimer.get_instance()
+        with timer.context("foo"):
+            with timer.context("bar"):
+                time.sleep(0.01)
+    durations = timer.get_durations()
+    assert "foo" in durations
+    assert "bar" in durations
+    assert durations["foo"] > 0.01
+    assert durations["bar"] > 0.01
 
 
 def test_GlobalTimer_nested_outer_context():
