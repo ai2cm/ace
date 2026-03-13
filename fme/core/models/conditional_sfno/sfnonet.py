@@ -16,7 +16,7 @@
 
 import dataclasses
 import math
-from typing import Any, Callable, Tuple
+from typing import Callable, Tuple
 
 import torch
 import torch.nn as nn
@@ -52,7 +52,6 @@ class SFNONetConfig:
         embed_dim: Dimension of the embeddings.
         filter_type: Type of spectral filter to use ('linear', 'makani-linear',
             'local').
-        operator_type: Type of spectral operator ('diagonal', 'dhconv').
         scale_factor: Scale factor for input/output resolution. Must be 1
             (other values are not implemented for conditional layer norm).
         global_layer_norm: Whether to reduce along the spatial domain when
@@ -65,17 +64,8 @@ class SFNONetConfig:
         pos_embed: Whether to use a learned positional embedding.
         drop_rate: Dropout rate.
         drop_path_rate: Stochastic depth rate (drop path).
-        num_blocks: Unused, kept for backwards compatibility only.
-        sparsity_threshold: Unused, kept for backwards compatibility only.
         hard_thresholding_fraction: Fraction of spectral modes to retain.
-        use_complex_kernels: Unused, kept for backwards compatibility only.
         big_skip: Whether to use a big skip connection from input to decoder.
-        rank: Rank of the spectral convolution approximation.
-        factorization: Type of factorization for spectral convolutions.
-        separable: Whether to use separable spectral convolutions.
-        complex_network: Unused, kept for backwards compatibility only.
-        complex_activation: Unused, kept for backwards compatibility only.
-        spectral_layers: Unused, kept for backwards compatibility only.
         checkpointing: Gradient checkpointing level (0=none, 1=encoder/decoder,
             3=all blocks).
         filter_num_groups: Number of groups in grouped spectral convolutions.
@@ -101,7 +91,6 @@ class SFNONetConfig:
 
     embed_dim: int = 256
     filter_type: str = "linear"
-    operator_type: str = "diagonal"
     scale_factor: int = 1
     global_layer_norm: bool = False
     num_layers: int = 12
@@ -112,17 +101,8 @@ class SFNONetConfig:
     pos_embed: bool = True
     drop_rate: float = 0.0
     drop_path_rate: float = 0.0
-    num_blocks: int = 16
-    sparsity_threshold: float = 0.0
     hard_thresholding_fraction: float = 1.0
-    use_complex_kernels: bool = True
     big_skip: bool = True
-    rank: float = 1.0
-    factorization: Any = None
-    separable: bool = False
-    complex_network: bool = True
-    complex_activation: str = "real"
-    spectral_layers: int = 3
     checkpointing: int = 0
     filter_num_groups: int = 1
     filter_residual: bool = False
@@ -173,10 +153,6 @@ class SpectralFilterLayer(nn.Module):
         inverse_transform,
         embed_dim,
         filter_type="linear",
-        operator_type="block-diagonal",
-        rank=1.0,
-        factorization=None,
-        separable=False,
         num_groups=1,
         filter_residual=False,
         lora_rank: int = 0,
@@ -197,12 +173,7 @@ class SpectralFilterLayer(nn.Module):
                 inverse_transform,
                 embed_dim,
                 embed_dim,
-                operator_type=operator_type,
-                rank=rank,
-                factorization=factorization,
-                separable=separable,
                 bias=True,
-                use_tensorly=False if factorization is None else True,
                 filter_residual=filter_residual,
                 lora_rank=lora_rank,
                 lora_alpha=lora_alpha,
@@ -259,15 +230,11 @@ class FourierNeuralOperatorBlock(nn.Module):
         img_shape: Tuple[int, int],
         context_config: ContextConfig,
         filter_type="linear",
-        operator_type="diagonal",
         global_layer_norm: bool = False,
         mlp_ratio=2.0,
         drop_rate=0.0,
         drop_path=0.0,
         act_layer=nn.GELU,
-        rank=1.0,
-        factorization=None,
-        separable=False,
         inner_skip="linear",
         outer_skip=None,  # None, nn.linear or nn.Identity
         concat_skip=False,
@@ -301,10 +268,6 @@ class FourierNeuralOperatorBlock(nn.Module):
             inverse_transform,
             embed_dim,
             filter_type,
-            operator_type,
-            rank=rank,
-            factorization=factorization,
-            separable=separable,
             filter_residual=filter_residual,
             num_groups=filter_num_groups,
             lora_rank=spectral_lora_rank,
@@ -525,7 +488,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.filter_residual = params.filter_residual
         self.filter_output = params.filter_output
         self.mlp_ratio = params.mlp_ratio
-        self.operator_type = params.operator_type
         self.img_shape = img_shape
         self._spatial_h_slice, self._spatial_w_slice = (
             Distributed.get_instance().get_local_slices(self.img_shape)
@@ -544,12 +506,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.encoder_layers = params.encoder_layers
         self._use_pos_embed = params.pos_embed
         self.big_skip = params.big_skip
-        self.rank = params.rank
-        self.factorization = params.factorization
-        self.separable = params.separable
-        self.complex_network = params.complex_network
-        self.complex_activation = params.complex_activation
-        self.spectral_layers = params.spectral_layers
         self.checkpointing = params.checkpointing
         if params.local_blocks is not None:
             self.local_blocks = [
@@ -652,7 +608,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 img_shape=self.img_shape,
                 context_config=context_config,
                 filter_type=block_filter_type,
-                operator_type=self.operator_type,
                 global_layer_norm=self.global_layer_norm,
                 mlp_ratio=self.mlp_ratio,
                 drop_rate=params.drop_rate,
@@ -661,9 +616,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 inner_skip=inner_skip,
                 outer_skip=outer_skip,
                 use_mlp=self.use_mlp,
-                rank=self.rank,
-                factorization=self.factorization,
-                separable=self.separable,
                 checkpointing=self.checkpointing,
                 filter_residual=self.filter_residual,
                 affine_norms=self.affine_norms,

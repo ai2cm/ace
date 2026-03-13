@@ -23,26 +23,46 @@ class ConditionalSFNOBuilder(ModuleConfig):
     """
 
     spectral_transform: str = "sht"
+    """Unused, kept for backwards compatibility only."""
     filter_type: str = "linear"
     operator_type: Literal["dhconv"] = "dhconv"
+    """Unused, kept for backwards compatibility only. Must be "dhconv"."""
     scale_factor: int = 1
     embed_dim: int = 256
     num_layers: int = 12
     hard_thresholding_fraction: float = 1.0
     normalization_layer: str = "instance_norm"
+    """Unused, kept for backwards compatibility only."""
     use_mlp: bool = True
     activation_function: str = "gelu"
     encoder_layers: int = 1
     pos_embed: bool = True
     big_skip: bool = True
     rank: float = 1.0
+    """Unused, kept for backwards compatibility only."""
     factorization: str | None = None
+    """Unused, kept for backwards compatibility only. Must be None."""
     separable: bool = False
+    """Unused, kept for backwards compatibility only. Must be False."""
     complex_network: bool = True
+    """Unused, kept for backwards compatibility only."""
     complex_activation: str = "real"
+    """Unused, kept for backwards compatibility only."""
     spectral_layers: int = 1
+    """Unused, kept for backwards compatibility only."""
     checkpointing: int = 0
     data_grid: Literal["legendre-gauss", "equiangular", "healpix"] = "legendre-gauss"
+
+    def __post_init__(self):
+        if self.factorization is not None:
+            raise ValueError("The 'factorization' parameter is no longer supported.")
+        if self.separable:
+            raise ValueError("The 'separable' parameter is no longer supported.")
+        if self.operator_type != "dhconv":
+            raise ValueError(
+                "Only 'dhconv' operator_type is supported for "
+                "ConditionalSFNO models."
+            )
 
     def build(
         self,
@@ -54,7 +74,6 @@ class ConditionalSFNOBuilder(ModuleConfig):
         sfno_config = SFNONetConfig(
             embed_dim=self.embed_dim,
             filter_type=self.filter_type,
-            operator_type=self.operator_type,
             scale_factor=self.scale_factor,
             num_layers=self.num_layers,
             hard_thresholding_fraction=self.hard_thresholding_fraction,
@@ -63,9 +82,6 @@ class ConditionalSFNOBuilder(ModuleConfig):
             encoder_layers=self.encoder_layers,
             pos_embed=self.pos_embed,
             big_skip=self.big_skip,
-            rank=self.rank,
-            factorization=self.factorization,
-            separable=self.separable,
             checkpointing=self.checkpointing,
             data_grid=self.data_grid,
         )

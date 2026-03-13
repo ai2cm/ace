@@ -114,9 +114,7 @@ def setup_sfnonet():
     conditional_embed_dim_noise = 16
     conditional_embed_dim_pos = 0
     device = get_device()
-    params = SFNONetConfig(
-        embed_dim=16, num_layers=2, filter_type="linear", operator_type="dhconv"
-    )
+    params = SFNONetConfig(embed_dim=16, num_layers=2, filter_type="linear")
     model = get_lat_lon_sfnonet(
         params=params,
         img_shape=img_shape,
@@ -219,7 +217,6 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
             num_layers=2,
             normalize_big_skip=normalize_big_skip,
             global_layer_norm=True,  # so it uses nn.LayerNorm
-            operator_type="dhconv",
         )
         model = get_lat_lon_sfnonet(
             params=params,

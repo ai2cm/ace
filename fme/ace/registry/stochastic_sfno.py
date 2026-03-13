@@ -257,7 +257,6 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         sfno_config = SFNONetConfig(
             embed_dim=self.embed_dim,
             filter_type=self.filter_type,
-            operator_type=self.operator_type,
             global_layer_norm=self.global_layer_norm,
             num_layers=self.num_layers,
             use_mlp=self.use_mlp,
@@ -266,7 +265,6 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             encoder_layers=self.encoder_layers,
             pos_embed=self.pos_embed,
             big_skip=self.big_skip,
-            rank=self.rank,
             checkpointing=self.checkpointing,
             data_grid=self.data_grid,
             filter_residual=self.filter_residual,
