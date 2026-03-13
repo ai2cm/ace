@@ -260,7 +260,7 @@ def run_inference_from_config(config: InferenceConfig):
     )
 
     writer = config.get_data_writer(data=data)
-    timer.stop()
+    timer.stop("initialization")
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")
     run_inference(
@@ -276,14 +276,14 @@ def run_inference_from_config(config: InferenceConfig):
     writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
-    timer.stop()
+    timer.stop("final_writer_flush")
 
     timer.stop_outer("inference")
     total_steps = (
         config.n_coupled_steps * stepper.n_inner_steps
     ) * data.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
