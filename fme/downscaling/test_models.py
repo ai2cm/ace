@@ -204,15 +204,15 @@ def test_from_state_backward_compat_fine_topography():
         fine_coords=fine_coords,
     )
 
-    # Simulate old checkpoint format: static_inputs not serialized
+    # Simulate old checkpoint format: static_inputs not serialized, fine_coords still
+    # present
     state = model.get_state()
     state["static_inputs"] = None
-    state["fine_coords"] = None
 
     # Should load correctly via the elif use_fine_topography branch (+1 channel)
     model_from_old_state = DiffusionModel.from_state(state)
     assert model_from_old_state.static_inputs is None
-    assert model_from_old_state.fine_coords is None
+    assert torch.equal(model_from_old_state.fine_coords.lat, fine_coords.lat)
     assert all(
         torch.equal(p1, p2)
         for p1, p2 in zip(
@@ -259,12 +259,18 @@ def _get_diffusion_model(
     predict_residual=True,
     use_fine_topography=True,
     static_inputs=None,
-    fine_coords=None,
+    fine_coords: LatLonCoordinates | None = None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
+    if fine_coords is None:
+        fine_shape = (
+            coarse_shape[0] * downscale_factor,
+            coarse_shape[1] * downscale_factor,
+        )
+        fine_coords = make_fine_coords(fine_shape)
 
     return DiffusionModelConfig(
         module=DiffusionModuleRegistrySelector(
@@ -296,13 +302,12 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
     batch_size = 2
+    fine_coords = make_fine_coords(fine_shape)
     if use_fine_topography:
         static_inputs = make_static_inputs(fine_shape)
-        fine_coords = make_fine_coords(fine_shape)
         batch = make_paired_batch_data(coarse_shape, fine_shape, batch_size)
     else:
         static_inputs = None
-        fine_coords = None
         batch = get_mock_paired_batch(
             [batch_size, *coarse_shape], [batch_size, *fine_shape]
         )
@@ -436,6 +441,7 @@ def test_model_error_cases():
     ).build(
         coarse_shape,
         upscaling_factor,
+        fine_coords=make_fine_coords(fine_shape),
     )
     batch = get_mock_paired_batch(
         [batch_size, *coarse_shape], [batch_size, *fine_shape]
@@ -552,6 +558,7 @@ def test_lognorm_noise_backwards_compatibility():
     model = model_config.build(
         (32, 32),
         2,
+        fine_coords=make_fine_coords((64, 64)),
     )
     state = model.get_state()
 

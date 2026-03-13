@@ -126,11 +126,6 @@ class EventDownscaler:
         logging.info(f"Running {self.event_name} event downscaling...")
         batch = next(iter(self.data.get_generator()))
         coarse_coords = batch[0].latlon_coordinates
-        if self.model.fine_coords is None:
-            raise ValueError(
-                "Model fine_coords must be set for event downscaling output "
-                "coordinates."
-            )
         coarse_lat = coarse_coords.lat
         coarse_lon = coarse_coords.lon
         lat_interval = ClosedInterval(coarse_lat.min().item(), coarse_lat.max().item())

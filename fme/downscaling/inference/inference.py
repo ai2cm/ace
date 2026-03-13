@@ -124,13 +124,6 @@ class Downscaler:
             if writer is None:
                 coarse_lat = loaded_item.batch.latlon_coordinates.lat[0]
                 coarse_lon = loaded_item.batch.latlon_coordinates.lon[0]
-                if model.fine_coords is None:
-                    raise ValueError(
-                        "Model fine_coords is required to determine output "
-                        "coordinate information. Please ensure the model checkpoint "
-                        "was saved with fine_coords, or provide fine_coordinates_path "
-                        "in the checkpoint config."
-                    )
                 fine_lat_interval = adjust_fine_coord_range(
                     loaded_item.batch.lat_interval,
                     full_coarse_coord=coarse_lat,
