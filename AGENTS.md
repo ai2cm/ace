@@ -62,6 +62,8 @@ future, as little code as possible should need to be touched.
 - Config classes: append `Config` to the built type (`TrainStepperConfig`).
 - Prefer descriptive names (`noise_distribution` not `distribution`).
   Names should reflect the present scope, not the caller's context.
+  For example, a function that normalizes any tensor should be
+  `normalize(x: Tensor)`, not `normalize_loss(loss: Tensor)`.
 - "scatter" implies communication; "localize" when no communication occurs.
 - Private functions get a `_` prefix.
 
@@ -76,27 +78,23 @@ future, as little code as possible should need to be touched.
 
 - Prefer fast-running, parsimonious tests.
 - Create helpers for repeated test setup (threshold: 3+ instances).
+  Prefer explicit helpers over pytest fixtures; use fixtures only when
+  sharing scope across tests is valuable.
 - When fixing a bug, add a failing test first.
-- Tests must test behavior, not re-implement logic.
+- Tests must test behavior, not re-implement logic. Prefer tests that cover
+  user-story-level behavior over tests that lock down subjective API details.
 - Use `xfail` for known bugs, not silent skips.
 - Use non-trivial values (not all-ones) so tests exercise real behavior.
 
 ### Code organization
 
+- Consolidate duplicated code to shared locations (e.g. `fme/core/`).
+- Remove unused code, flags, and imports proactively.
 - `if/raise` instead of `assert` in production code.
 - Context managers for cleanup (timers, distributed contexts).
 - Pass composed objects, not their parts, if multiple attributes would be
   used within the function.
 - Commit vendorized code unmodified first, then modifications separately.
-
-### Review comment conventions
-
-One guide our team finds helpful is [Conventional Comments](https://conventionalcomments.org/).
-Label every comment with a severity prefix:
-- **Issue**: must fix before merge.
-- **Suggestion (optional)**: non-blocking improvement.
-- **Question**: seeking clarification.
-- **nit**: minor style; does not need re-review.
 
 ## Pull Request Review Assistant
 
