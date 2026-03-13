@@ -1,6 +1,7 @@
 """This file contains unit tests related to creating torch Datasets from climate
 data (e.g. netCDF files)."""
 
+import datetime
 import math
 import os
 import pathlib
@@ -30,13 +31,24 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
+from fme.core.distributed.distributed import Distributed
+from fme.core.mask_provider import MaskProvider
+from fme.core.testing.regression import validate_tensor_dict
 from fme.core.typing_ import Slice
+
+DATA_DIR = pathlib.Path(__file__).parent / "testdata"
 
 
 def _get_coords(dim_sizes, calendar, timestep_size=1, timestep_start=0):
@@ -63,7 +75,7 @@ def _save_netcdf(
     filename, dim_sizes, variable_names, calendar, timestep_size=1, timestep_start=0
 ):
     data_vars = {}
-    for name in variable_names:
+    for name in sorted(variable_names):
         if name == "constant_mask":
             data = np.ones(list(dim_sizes.values()))
         else:
@@ -82,6 +94,10 @@ def _save_netcdf(
     return ds
 
 
+N_LAT = 16
+N_LON = 32
+
+
 def _create_dataset_on_disk(
     data_dir: pathlib.Path,
     calendar: str = "proleptic_gregorian",
@@ -94,7 +110,7 @@ def _create_dataset_on_disk(
     timestep_start=0,
 ) -> pathlib.Path:
     if data_dim_sizes is None:
-        data_dim_sizes = {"time": n_times, "lat": 16, "lon": 32}
+        data_dim_sizes = {"time": n_times, "lat": N_LAT, "lon": N_LON}
     seed = 0
     np.random.seed(seed)
     mask_name = "mask"
@@ -190,21 +206,57 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
 
+@pytest.mark.parallel
 def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
-    _create_dataset_on_disk(tmp_path)
+    dist = Distributed.get_instance()
+    tmp_path = dist.scatter_object(tmp_path)  # get the root value
+    global_batch_size = 24
+    if dist.is_root():
+        # TODO: investigate why this test fails if we
+        # increment n_times below by 1 (so it's + 2)
+        _create_dataset_on_disk(tmp_path, n_times=global_batch_size + 1)
+    dist.barrier()  # make sure the data's there before we load it
+    local_batch_size = dist.local_batch_size(global_batch_size)
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(
             concat=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)]
         ),
-        batch_size=1,
+        batch_size=global_batch_size,
         num_data_workers=0,
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_gridded_data(config, True, requirements)  # type: ignore
+    data = get_gridded_data(config, False, requirements)  # type: ignore
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
+    first_batch = next(iter(data.loader))
+    assert first_batch.data["foo"].shape[0] == (local_batch_size)
+    gathered_data = {}
+    for name, tensor in sorted(first_batch.data.items()):
+        gathered_tensor = dist.gather_global(
+            tensor,
+            global_shape=(global_batch_size,)
+            + tuple(tensor.shape[1:-2])
+            + (N_LAT, N_LON),
+        )
+        if dist.is_root():
+            assert gathered_tensor is not None
+            # batch order is not guaranteed, so we need to sort
+            # for the regression test
+            batch_items = [gathered_tensor[i] for i in range(global_batch_size)]
+            gathered_tensor = torch.cat(
+                sorted(batch_items, key=lambda x: x[0, 0, 0].item()), dim=0
+            )
+        gathered_data[name] = gathered_tensor
+    if dist.is_root():
+        validate_tensor_dict(
+            gathered_data,
+            DATA_DIR / "test_xarray_loader_regression.pt",
+        )
+    # TODO: it would be very helpful to implement scatter_object or something
+    # similar to ensure other attributes like time, labels, horizontal_dims, epoch,
+    # and n_ensemble are identical (i.e. have the correct value) across ranks
 
 
 @pytest.mark.parametrize(
@@ -1124,3 +1176,67 @@ def test_pinned_memory(tmp_path, time_buffer: int):
     for batch in loader:
         tensor = next(iter(batch.data.values()))
         assert tensor.is_pinned() is using_gpu()
+
+
+@pytest.mark.parallel
+def test_localize_properties():
+    """Verify DatasetProperties.localize() partitions coords and masks across ranks."""
+    dist = Distributed.get_instance()
+    n_lat, n_lon = N_LAT, N_LON
+    lat = torch.linspace(-90.0, 90.0, n_lat)
+    lon = torch.linspace(0.0, 360.0, n_lon)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    mask_tensor = torch.arange(n_lat * n_lon, dtype=torch.float32).reshape(
+        1, n_lat, n_lon
+    )
+    mask_provider = MaskProvider(masks={"mask_test": mask_tensor})
+    timestep = datetime.timedelta(hours=6)
+    metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
+    vertical = NullVerticalCoordinate()
+    props = DatasetProperties(
+        variable_metadata=metadata,
+        vertical_coordinate=vertical,
+        horizontal_coordinates=coords,
+        mask_provider=mask_provider,
+        timestep=timestep,
+        is_remote=False,
+        all_labels=None,
+    )
+
+    local = props.localize()
+
+    # Unchanged fields
+    assert local.variable_metadata is metadata
+    assert local.vertical_coordinate is vertical
+    assert local.timestep == timestep
+
+    # Gather local coordinates to root and verify full, non-overlapping coverage.
+    assert isinstance(local.horizontal_coordinates, LatLonCoordinates)
+    local_lat = local.horizontal_coordinates.lat.tolist()
+    local_lon = local.horizontal_coordinates.lon.tolist()
+    all_lats = dist.gather_object(local_lat)
+    all_lons = dist.gather_object(local_lon)
+    if dist.is_root():
+        assert all_lats is not None and all_lons is not None
+        # Spatial co-ranks (same data_parallel_rank) should have distinct
+        # lat/lon slices whose union covers the global coordinates exactly.
+        combined_lat = sorted(set(v for rank_lat in all_lats for v in rank_lat))
+        combined_lon = sorted(set(v for rank_lon in all_lons for v in rank_lon))
+        assert combined_lat == lat.tolist(), "lat coverage incomplete or has gaps"
+        assert combined_lon == lon.tolist(), "lon coverage incomplete or has gaps"
+
+    # Gather local masks to root and verify they tile to the global mask.
+    assert isinstance(local.mask_provider, MaskProvider)
+    local_mask = local.mask_provider.masks["mask_test"]
+    h_slice, w_slice = dist.get_local_slices((n_lat, n_lon))
+    all_slices = dist.gather_object((h_slice, w_slice))
+    all_masks = dist.gather_object(local_mask.tolist())
+    if dist.is_root():
+        assert all_slices is not None and all_masks is not None
+        canvas = torch.zeros_like(mask_tensor)
+        for (hs, ws), mask_data in zip(all_slices, all_masks):
+            canvas[..., hs, ws] += torch.tensor(mask_data)
+        # Each cell should be covered once per data-parallel rank (spatial
+        # co-ranks have distinct slices, data-parallel ranks have identical ones).
+        expected_count = dist.total_data_parallel_ranks
+        torch.testing.assert_close(canvas, mask_tensor * expected_count)

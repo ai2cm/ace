@@ -33,10 +33,10 @@ class CoupledDatasetInfo:
             return False
         return self.ocean == other.ocean and self.atmosphere == other.atmosphere
 
-    def to_state(self) -> dict[Literal["ocean", "atmosphere"], dict[str, Any]]:
+    def get_state(self) -> dict[Literal["ocean", "atmosphere"], dict[str, Any]]:
         return {
-            "ocean": self.ocean.to_state(),
-            "atmosphere": self.atmosphere.to_state(),
+            "ocean": self.ocean.get_state(),
+            "atmosphere": self.atmosphere.get_state(),
         }
 
     @property
