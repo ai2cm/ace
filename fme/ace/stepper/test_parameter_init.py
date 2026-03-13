@@ -425,6 +425,88 @@ def test_parameter_init_with_regularizer(tmpdir):
             )
 
 
+def test_bootstrap_initialization():
+    """
+    Test that bootstrap initialization produces weights with the same
+    distribution but different structure from the original checkpoint.
+    """
+    torch.manual_seed(0)
+    device = get_device()
+    saved_module = ComplexModule(10, 20).to(device)
+    saved_state = saved_module.state_dict()
+
+    config = ParameterInitializationConfig(
+        weights_path="unused",
+        bootstrap=True,
+    )
+    parameter_initializer = config.build(
+        load_weights_and_history=lambda _: (
+            [saved_state],
+            TrainingHistory(),
+        )
+    )
+
+    module = ComplexModule(10, 20).to(device)
+    parameter_initializer.apply_weights([module])
+
+    # Weights should differ from the original (with very high probability)
+    any_different = False
+    for name in saved_state:
+        new_val = module.state_dict()[name]
+        if not torch.allclose(new_val, saved_state[name]):
+            any_different = True
+        # Each bootstrapped tensor should only contain values from the original
+        original_values = set(saved_state[name].flatten().tolist())
+        for val in new_val.flatten().tolist():
+            assert (
+                val in original_values
+            ), f"Bootstrap produced value {val} not in original for {name}"
+    assert any_different, "Bootstrap should produce different weights"
+
+
+@pytest.mark.parametrize(
+    "alpha, beta",
+    [
+        pytest.param(1.0, 0.0, id="alpha_nonzero"),
+        pytest.param(0.0, 1.0, id="beta_nonzero"),
+        pytest.param(1.0, 1.0, id="both_nonzero"),
+    ],
+)
+def test_bootstrap_with_l2sp_raises(alpha, beta):
+    """Bootstrap with L2-SP tuning should raise at config init time."""
+    with pytest.raises(ValueError, match="bootstrap.*L2-SP"):
+        ParameterInitializationConfig(
+            weights_path="unused",
+            bootstrap=True,
+            alpha=alpha,
+            beta=beta,
+        )
+
+
+def test_bootstrap_false_loads_exact_weights():
+    """Test that bootstrap=False (default) loads weights exactly."""
+    torch.manual_seed(0)
+    device = get_device()
+    saved_module = ComplexModule(10, 20).to(device)
+    saved_state = saved_module.state_dict()
+
+    config = ParameterInitializationConfig(
+        weights_path="unused",
+        bootstrap=False,
+    )
+    parameter_initializer = config.build(
+        load_weights_and_history=lambda _: (
+            [saved_state],
+            TrainingHistory(),
+        )
+    )
+    module = ComplexModule(10, 20).to(device)
+    parameter_initializer.apply_weights([module])
+
+    for name in saved_state:
+        assert torch.allclose(module.state_dict()[name], saved_state[name])
+
+
 def test_parameter_init_weights_loaded_once(tmpdir):
     """
     Test that the parameter initialization config only loads the weights once,

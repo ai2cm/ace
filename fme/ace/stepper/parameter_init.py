@@ -70,6 +70,21 @@ def _freeze_weight(module: nn.Module, name: str):
         pass
 
 
+def _bootstrap_state_dict(
+    state_dict: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Sample values of each tensor with replacement, preserving shape."""
+    result = {}
+    for name, tensor in state_dict.items():
+        if isinstance(tensor, torch.Tensor) and tensor.numel() > 0:
+            flat = tensor.flatten()
+            indices = torch.randint(0, flat.numel(), (flat.numel(),))
+            result[name] = flat[indices].reshape(tensor.shape)
+        else:
+            result[name] = tensor
+    return result
+
+
 RegularizerFunction = Callable[[], torch.Tensor]
 
 
@@ -111,6 +126,11 @@ class ParameterInitializationConfig:
             By default modules are unfrozen and all parameters are included.
             Must be provided in the same order as provided by the stepper's
             `.modules` attribute.
+        bootstrap: if True, instead of loading the checkpoint weights directly,
+            randomly sample the values of each parameter tensor with replacement.
+            This preserves the per-parameter value distribution while destroying
+            learned structure, useful for generating diverse ensemble
+            initializations.
         alpha: L2 regularization coefficient keeping initialized weights
             close to their intiial values
         beta: L2 regularization coefficient keeping uninitialized weights
@@ -121,12 +141,20 @@ class ParameterInitializationConfig:
 
     weights_path: str | None = None
     parameters: list[ParameterClassification] = dataclasses.field(default_factory=list)
+    bootstrap: bool = False
     alpha: float = 0.0
     beta: float = 0.0
     exclude_parameters: list[str] | None = None
     frozen_parameters: FrozenParameterConfig | None = None
 
     def __post_init__(self):
+        if self.bootstrap and (self.alpha != 0 or self.beta != 0):
+            raise ValueError(
+                "Cannot use bootstrap initialization with L2-SP tuning "
+                "(alpha or beta != 0). Bootstrap destroys the learned weight "
+                "structure, making L2-SP regularization back to those weights "
+                "scientifically invalid."
+            )
         if self.exclude_parameters is not None or self.frozen_parameters is not None:
             if len(self.parameters) > 0:
                 raise ValueError(
@@ -210,6 +238,8 @@ class ParameterInitializer:
             for module, state_dict, classification in zip(
                 modules, self.base_weights, filled_parameters
             ):
+                if self.config.bootstrap:
+                    state_dict = _bootstrap_state_dict(state_dict)
                 overwrite_weights(
                     state_dict,
                     module,
