@@ -441,6 +441,16 @@ class BatchData:
     def horizontal_shape(self) -> tuple[int, int]:
         return self._horizontal_shape
 
+    @property
+    def lat_interval(self) -> ClosedInterval:
+        lat = self.latlon_coordinates.lat[0]  # all batch members identical; use first
+        return ClosedInterval(lat.min().item(), lat.max().item())
+
+    @property
+    def lon_interval(self) -> ClosedInterval:
+        lon = self.latlon_coordinates.lon[0]  # all batch members identical; use first
+        return ClosedInterval(lon.min().item(), lon.max().item())
+
     @classmethod
     def from_sequence(
         cls,
@@ -464,7 +474,7 @@ class BatchData:
 
     def __getitem__(self, k):
         return BatchItem(
-            {key: value[k].squeeze() for key, value in self.data.items()},
+            {key: value[k] for key, value in self.data.items()},
             self.time[k],
             self.latlon_coordinates[k],
         )
