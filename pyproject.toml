@@ -85,7 +85,7 @@ cache-keys = [
 ]
 
 [tool.ruff]
-exclude = ["fme/ace/models/makani_fcn3/**", "fme/downscaling/modules/physicsnemo_unets_v2/**",]
+exclude = ["fme/ace/models/makani_fcn3/**", "fme/downscaling/modules/physicsnemo_unets_v2/**", "fme/downscaling/modules/physicsnemo_unets_v3/**",]
 
 [tool.ruff.lint]
 select = ["D", "E", "F", "I", "W", "UP"]
@@ -120,4 +120,8 @@ exclude_also = [
 
 [[tool.mypy.overrides]]
 module = "fme.downscaling.modules.physicsnemo_unets_v2.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "fme.downscaling.modules.physicsnemo_unets_v3.*"
 ignore_errors = true
