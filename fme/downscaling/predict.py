@@ -235,14 +235,16 @@ class Downscaler:
                 f"{self.experiment_dir}/generated_maps_and_metrics.nc", mode="w"
             )
 
-    @property
-    def _fine_latlon_coordinates(self) -> LatLonCoordinates | None:
-        return None
-
     def run(self):
+        # TODO: remove when coordinates are stored with the model
+        if self.model.static_inputs is None:
+            raise ValueError(
+                "Model must have static inputs with coordinates for downscaling "
+                "generation."
+            )
         aggregator = NoTargetAggregator(
             downscale_factor=self.model.downscale_factor,
-            latlon_coordinates=self._fine_latlon_coordinates,
+            latlon_coordinates=self.model.static_inputs.fields[0].coords,
         )
         for i, batch in enumerate(self.batch_generator):
             with torch.no_grad():

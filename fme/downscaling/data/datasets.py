@@ -640,6 +640,9 @@ class ContiguousDistributedSampler(DistributedSampler):
         return iter(indices[start:end])
 
 
+# downscale_factor=None means fine patches not needed here, but reusing
+# _get_paired_patches in both paired and no-target cases to share the
+# coincident offset logic.
 def _get_paired_patches(
     coarse_yx_extent: tuple[int, int],
     coarse_yx_patch_extent: tuple[int, int],

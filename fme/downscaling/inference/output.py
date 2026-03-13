@@ -152,7 +152,7 @@ class DownscalingOutputConfig(ABC):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
-        output_fine_shape: tuple[int, int],
+        fine_shape: tuple[int, int],
     ) -> DownscalingOutput:
         """
         Build an OutputTarget from this configuration.
@@ -161,7 +161,7 @@ class DownscalingOutputConfig(ABC):
             loader_config: Base data loader configuration to modify
             requirements: Model's data requirements (variable names, etc.)
             patch: Default patch prediction configuration
-            output_fine_shape: Fine shape of the output used as metadata
+            fine_shape: Fine shape of the output used as metadata
                 for the shape of the output to insert into the dataset
         """
         pass
