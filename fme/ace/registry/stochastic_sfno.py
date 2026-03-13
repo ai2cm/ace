@@ -11,6 +11,7 @@ from fme.core.distributed.distributed import Distributed
 from fme.core.models.conditional_sfno.sfnonet import (
     Context,
     ContextConfig,
+    SFNONetConfig,
     get_lat_lon_sfnonet,
 )
 from fme.core.models.conditional_sfno.sfnonet import (
@@ -253,8 +254,15 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ):
+        sfno_config = SFNONetConfig(
+            **{
+                f.name: getattr(self, f.name)
+                for f in dataclasses.fields(SFNONetConfig)
+                if hasattr(self, f.name)
+            }
+        )
         sfno_net = get_lat_lon_sfnonet(
-            params=self,
+            params=sfno_config,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
             img_shape=dataset_info.img_shape,

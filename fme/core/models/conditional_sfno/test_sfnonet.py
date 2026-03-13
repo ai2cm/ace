@@ -1,5 +1,4 @@
 import os
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -11,7 +10,7 @@ from fme.core.models.conditional_sfno.benchmark import get_block_benchmark
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
-from .sfnonet import get_lat_lon_sfnonet
+from .sfnonet import SFNONetConfig, get_lat_lon_sfnonet
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -42,10 +41,9 @@ def test_can_call_sfnonet(
     img_shape = (9, 18)
     n_samples = 4
     device = get_device()
-    params = SimpleNamespace(
+    params = SFNONetConfig(
         embed_dim=16,
         num_layers=2,
-        residual_filter_factor=residual_filter_factor,
         filter_type="makani-linear",
     )
     model = get_lat_lon_sfnonet(
@@ -88,7 +86,7 @@ def test_scale_factor_not_implemented():
     output_channels = 3
     img_shape = (9, 18)
     device = get_device()
-    params = SimpleNamespace(embed_dim=16, num_layers=2, scale_factor=2)
+    params = SFNONetConfig(embed_dim=16, num_layers=2, scale_factor=2)
     with pytest.raises(NotImplementedError):
         # if this ever gets implemented, we need to instead test that the scale factor
         # is used to determine the nlat/nlon of the image in the network
@@ -116,7 +114,7 @@ def setup_sfnonet():
     conditional_embed_dim_noise = 16
     conditional_embed_dim_pos = 0
     device = get_device()
-    params = SimpleNamespace(
+    params = SFNONetConfig(
         embed_dim=16, num_layers=2, filter_type="linear", operator_type="dhconv"
     )
     model = get_lat_lon_sfnonet(
@@ -216,7 +214,7 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
     original_layer_norm = nn.LayerNorm
     try:
         nn.LayerNorm = SetToZero
-        params = SimpleNamespace(
+        params = SFNONetConfig(
             embed_dim=16,
             num_layers=2,
             normalize_big_skip=normalize_big_skip,
