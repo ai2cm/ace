@@ -100,13 +100,14 @@ def _abs_norm_tail_bias(
     target_counts: np.ndarray,
     predict_bin_edges: np.ndarray,
     target_bin_edges: np.ndarray,
+    upper_tail: bool = True,
 ):
     pred_counts_rebinned = _rebin_counts(
         bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
     )
     bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
     threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
-    tail_mask = bin_centers > threshold
+    tail_mask = bin_centers > threshold if upper_tail else bin_centers < threshold
 
     pred_density = (pred_counts_rebinned / np.sum(pred_counts_rebinned))[tail_mask]
     target_density = (target_counts / np.sum(target_counts))[tail_mask]
