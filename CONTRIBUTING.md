@@ -36,7 +36,9 @@ When designing a change, think first about what absolutely must change, then
 about what level of abstraction that change could be handled in. Choose the
 option that splits the concern across the fewest levels of abstraction. When a
 decision changes in the future, as little code as possible should need to be
-touched.
+touched. This does not mean minimizing the number of lines changed — you may
+need to modify APIs at several levels to properly isolate a feature into one
+level of abstraction.
 
 - **Prefer polymorphism over type-checking.** If you see `if isinstance(x, A)
   ... elif isinstance(x, B) ...` chains, the behavior should be a method on
@@ -69,7 +71,10 @@ features block on breaking YAML changes.
 - Config class names: append `Config` to the name of the thing being built
   (e.g. `TrainStepperConfig` builds `TrainStepper`).
 - Prefer descriptive names over abbreviations (`noise_distribution` not
-  `distribution`).
+  `distribution`). Names should only include information available in the
+  present scope — avoid naming based on the caller's context. For example,
+  a function that normalizes any tensor should be `normalize(x: Tensor)`,
+  not `normalize_loss(loss: Tensor)`.
 - Mark functions as private (prefix `_`) when they are only used internally.
 
 ### Configuration
@@ -85,10 +90,15 @@ features block on breaking YAML changes.
 
 - **Test helpers over copy-paste.** Create helper functions to build common
   test fixtures. If the same setup appears 3+ times, extract a helper.
+  Prefer explicit helper functions over pytest fixtures, which can become
+  unwieldy; use fixtures only when sharing scope across tests is valuable.
 - **Demonstrate bugs with failing tests.** When fixing a bug, add a test
   that fails without the fix, then fix it.
 - **Test behavior, not implementation.** If a test re-implements the logic
-  it's testing, it isn't actually verifying anything.
+  it's testing, it isn't actually verifying anything. Prefer tests that
+  cover important user-story-level behavior over tests that lock down
+  subjective API details, since the latter make it harder to evolve
+  interfaces. Both have a place, but use API-level tests in moderation.
 - **Use xfail for known bugs.** Mark known issues with `pytest.mark.xfail`
   rather than skipping them silently.
 - **Exercise meaningful values.** Don't use all-ones for area weights or
@@ -103,8 +113,8 @@ features block on breaking YAML changes.
 - Use `if condition: raise` instead of `assert` in production code (asserts
   can be stripped by `python -O`).
 - Use context managers for resource cleanup (timers, distributed contexts).
-- Pass composed objects rather than their parts (e.g. `stepper.loss_scaling`
-  instead of two separate arguments).
+- Pass composed objects rather than their parts when multiple attributes would
+  be used within the function.
 
 ### Vendorized Code
 

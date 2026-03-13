@@ -61,6 +61,7 @@ future, as little code as possible should need to be touched.
 
 - Config classes: append `Config` to the built type (`TrainStepperConfig`).
 - Prefer descriptive names (`noise_distribution` not `distribution`).
+  Names should reflect the present scope, not the caller's context.
 - "scatter" implies communication; "localize" when no communication occurs.
 - Private functions get a `_` prefix.
 
@@ -73,6 +74,7 @@ future, as little code as possible should need to be touched.
 
 ### Testing
 
+- Prefer fast-running, parsimonious tests.
 - Create helpers for repeated test setup (threshold: 3+ instances).
 - When fixing a bug, add a failing test first.
 - Tests must test behavior, not re-implement logic.
@@ -83,7 +85,8 @@ future, as little code as possible should need to be touched.
 
 - `if/raise` instead of `assert` in production code.
 - Context managers for cleanup (timers, distributed contexts).
-- Pass composed objects, not their parts.
+- Pass composed objects, not their parts, if multiple attributes would be
+  used within the function.
 - Commit vendorized code unmodified first, then modifications separately.
 
 ### Review comment conventions
