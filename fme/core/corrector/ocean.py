@@ -10,7 +10,7 @@ from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
-    SPECIFIC_HEAT_OF_WATER_CM4,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
@@ -210,12 +210,12 @@ def _compute_ocean_net_surface_energy_flux(
     atmos = AtmosphereData(forcing_data)
     base_flux = atmos.net_surface_energy_flux
     precip_heat_flux_ocean = (
-        SPECIFIC_HEAT_OF_WATER_CM4
+        SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * atmos.precipitation_rate
         * (sst - FREEZING_TEMPERATURE_KELVIN)
     )
     evap_heat_flux = (
-        SPECIFIC_HEAT_OF_WATER_CM4
+        SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
         * (sst - FREEZING_TEMPERATURE_KELVIN)
     )
