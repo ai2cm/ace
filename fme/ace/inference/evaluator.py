@@ -465,8 +465,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         f"{total_steps_per_second:.2f} steps/second"
     )
 
-    breakpoint()
-
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
         **timer.get_durations(),
