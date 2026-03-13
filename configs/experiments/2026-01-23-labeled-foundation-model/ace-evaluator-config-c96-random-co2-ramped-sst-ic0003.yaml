@@ -2,6 +2,7 @@ experiment_dir: /results
 n_forward_steps: 7300
 forward_steps_in_memory: 50
 checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
 logging:
   log_to_screen: true
   log_to_wandb: true
