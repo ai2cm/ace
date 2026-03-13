@@ -654,6 +654,10 @@ def _process_surface_analysis(
         skipna=True,
         na_thres=1.0,
     )
+    # For convenience we fill missing wave heights with 0.0.
+    regridded["significant_height_of_combined_wind_waves_and_swell"] = regridded[
+        "significant_height_of_combined_wind_waves_and_swell"
+    ].fillna(0.0)
 
     regridded = regridded.drop_vars(["latitude", "longitude"])
     invariant_ds = invariant_ds.drop_vars(["latitude", "longitude"])
