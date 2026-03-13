@@ -19,11 +19,7 @@ from fme.downscaling.data import (
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predict import EventConfig
-from fme.downscaling.predictors import (
-    CascadePredictorConfig,
-    PatchPredictionConfig,
-    PatchPredictor,
-)
+from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -176,7 +172,7 @@ class PairedEventConfig(EventConfig):
 
 @dataclasses.dataclass
 class EvaluatorConfig:
-    model: CheckpointModelConfig | CascadePredictorConfig
+    model: CheckpointModelConfig
     experiment_dir: str
     data: PairedDataLoaderConfig
     logging: LoggingConfig
