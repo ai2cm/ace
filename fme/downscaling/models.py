@@ -15,8 +15,10 @@ from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import (
     BatchData,
+    ClosedInterval,
     PairedBatchData,
     StaticInputs,
+    adjust_fine_coord_range,
     load_static_inputs,
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
@@ -303,11 +305,32 @@ class DiffusionModel:
         self.out_packer = Packer(config.out_names)
         self.config = config
         self._channel_axis = -3
-        self.static_inputs = static_inputs
+        self.static_inputs = (
+            static_inputs.to_device() if static_inputs is not None else None
+        )
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
+
+    def _subset_static_inputs(
+        self,
+        lat_interval: ClosedInterval,
+        lon_interval: ClosedInterval,
+    ) -> StaticInputs | None:
+        """Subset self.static_inputs to the given fine lat/lon interval.
+
+        Returns None if use_fine_topography is False.
+        Raises ValueError if use_fine_topography is True but self.static_inputs is None.
+        """
+        if not self.config.use_fine_topography:
+            return None
+        if self.static_inputs is None:
+            raise ValueError(
+                "Static inputs must be provided for each batch when use of fine "
+                "static inputs is enabled."
+            )
+        return self.static_inputs.subset_latlon(lat_interval, lon_interval)
 
     @property
     def fine_shape(self) -> tuple[int, int]:
@@ -338,6 +361,12 @@ class DiffusionModel:
                     "static inputs is enabled."
                 )
             else:
+                expected_shape = interpolated.shape[-2:]
+                if static_inputs.shape != expected_shape:
+                    raise ValueError(
+                        f"Subsetted static input shape {static_inputs.shape} does not "
+                        f"match expected fine spatial shape {expected_shape}."
+                    )
                 n_batches = normalized.shape[0]
                 # Join normalized static inputs to input (see dataset for details)
                 for field in static_inputs.fields:
@@ -354,12 +383,17 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: StaticInputs | None,
+        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
+        # Ignore the passed static_inputs; subset self.static_inputs using fine batch
+        # coordinates. The caller-provided value is kept for signature compatibility.
+        _static_inputs = self._subset_static_inputs(
+            batch.fine.lat_interval, batch.fine.lon_interval
+        )
         coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_norm = self._get_input_from_coarse(coarse, static_inputs)
+        inputs_norm = self._get_input_from_coarse(coarse, _static_inputs)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
@@ -418,6 +452,8 @@ class DiffusionModel:
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        # static_inputs receives an internally-subsetted value from the calling method;
+        # external callers should use generate_on_batch / generate_on_batch_no_target.
         inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
         # expand samples and fold to
         # [batch * n_samples, output_channels, height, width]
@@ -467,22 +503,54 @@ class DiffusionModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        static_inputs: StaticInputs | None,
+        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         n_samples: int = 1,
     ) -> TensorDict:
-        generated, _, _ = self.generate(batch.data, static_inputs, n_samples)
+        # Ignore the passed static_inputs; derive the fine lat/lon interval from coarse
+        # batch coordinates via adjust_fine_coord_range, then subset self.static_inputs.
+        if self.config.use_fine_topography:
+            if self.static_inputs is None:
+                raise ValueError(
+                    "Static inputs must be provided for each batch when use of fine "
+                    "static inputs is enabled."
+                )
+            coarse_lat = batch.latlon_coordinates.lat[0]
+            coarse_lon = batch.latlon_coordinates.lon[0]
+            fine_lat_interval = adjust_fine_coord_range(
+                batch.lat_interval,
+                full_coarse_coord=coarse_lat,
+                full_fine_coord=self.static_inputs.coords.lat,
+                downscale_factor=self.downscale_factor,
+            )
+            fine_lon_interval = adjust_fine_coord_range(
+                batch.lon_interval,
+                full_coarse_coord=coarse_lon,
+                full_fine_coord=self.static_inputs.coords.lon,
+                downscale_factor=self.downscale_factor,
+            )
+            _static_inputs = self.static_inputs.subset_latlon(
+                fine_lat_interval, fine_lon_interval
+            )
+        else:
+            _static_inputs = None
+        generated, _, _ = self.generate(batch.data, _static_inputs, n_samples)
         return generated
 
     @torch.no_grad()
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: StaticInputs | None,
+        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         n_samples: int = 1,
     ) -> ModelOutputs:
+        # Ignore the passed static_inputs; subset self.static_inputs using fine batch
+        # coordinates. The caller-provided value is kept for signature compatibility.
+        _static_inputs = self._subset_static_inputs(
+            batch.fine.lat_interval, batch.fine.lon_interval
+        )
         coarse, fine = batch.coarse.data, batch.fine.data
         generated, generated_norm, latent_steps = self.generate(
-            coarse, static_inputs, n_samples
+            coarse, _static_inputs, n_samples
         )
 
         targets_norm = self.out_packer.pack(
