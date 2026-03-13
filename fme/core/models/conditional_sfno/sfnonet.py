@@ -16,7 +16,7 @@
 
 import dataclasses
 import math
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Tuple
 
 import torch
 import torch.nn as nn
@@ -40,7 +40,7 @@ from .layers import (
     DropPath,
 )
 from .lora import LoRAConv2d
-from .s2convolutions import SpectralAttentionS2, SpectralConvS2
+from .s2convolutions import SpectralConvS2
 from .makani.spectral_convolution import SpectralConv
 
 
@@ -65,17 +65,17 @@ class SFNONetConfig:
         pos_embed: Whether to use a learned positional embedding.
         drop_rate: Dropout rate.
         drop_path_rate: Stochastic depth rate (drop path).
-        num_blocks: Number of blocks in the spectral convolution.
-        sparsity_threshold: Threshold for sparsity in spectral convolutions.
+        num_blocks: Unused, kept for backwards compatibility only.
+        sparsity_threshold: Unused, kept for backwards compatibility only.
         hard_thresholding_fraction: Fraction of spectral modes to retain.
-        use_complex_kernels: Whether to use complex-valued kernels.
+        use_complex_kernels: Unused, kept for backwards compatibility only.
         big_skip: Whether to use a big skip connection from input to decoder.
         rank: Rank of the spectral convolution approximation.
         factorization: Type of factorization for spectral convolutions.
         separable: Whether to use separable spectral convolutions.
-        complex_network: Whether to use a complex network architecture.
-        complex_activation: Type of complex activation function.
-        spectral_layers: Number of spectral layers per block.
+        complex_network: Unused, kept for backwards compatibility only.
+        complex_activation: Unused, kept for backwards compatibility only.
+        spectral_layers: Unused, kept for backwards compatibility only.
         checkpointing: Gradient checkpointing level (0=none, 1=encoder/decoder,
             3=all blocks).
         filter_num_groups: Number of groups in grouped spectral convolutions.
@@ -174,16 +174,9 @@ class SpectralFilterLayer(nn.Module):
         embed_dim,
         filter_type="linear",
         operator_type="block-diagonal",
-        sparsity_threshold=0.0,
-        use_complex_kernels=True,
-        hidden_size_factor=1,
         rank=1.0,
         factorization=None,
         separable=False,
-        complex_network=True,
-        complex_activation="real",
-        spectral_layers=1,
-        drop_rate=0.0,
         num_groups=1,
         filter_residual=False,
         lora_rank: int = 0,
@@ -272,8 +265,6 @@ class FourierNeuralOperatorBlock(nn.Module):
         drop_rate=0.0,
         drop_path=0.0,
         act_layer=nn.GELU,
-        sparsity_threshold=0.0,
-        use_complex_kernels=True,
         rank=1.0,
         factorization=None,
         separable=False,
@@ -281,9 +272,6 @@ class FourierNeuralOperatorBlock(nn.Module):
         outer_skip=None,  # None, nn.linear or nn.Identity
         concat_skip=False,
         use_mlp=False,
-        complex_network=True,
-        complex_activation="real",
-        spectral_layers=1,
         checkpointing=0,
         filter_residual=False,
         affine_norms=False,
@@ -314,16 +302,9 @@ class FourierNeuralOperatorBlock(nn.Module):
             embed_dim,
             filter_type,
             operator_type,
-            sparsity_threshold,
-            use_complex_kernels=use_complex_kernels,
-            hidden_size_factor=mlp_ratio,
             rank=rank,
             factorization=factorization,
             separable=separable,
-            complex_network=complex_network,
-            complex_activation=complex_activation,
-            spectral_layers=spectral_layers,
-            drop_rate=drop_rate,
             filter_residual=filter_residual,
             num_groups=filter_num_groups,
             lora_rank=spectral_lora_rank,
@@ -540,7 +521,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
-        self.params = params
         self.filter_type = params.filter_type
         self.filter_residual = params.filter_residual
         self.filter_output = params.filter_output
@@ -550,8 +530,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self._spatial_h_slice, self._spatial_w_slice = (
             Distributed.get_instance().get_local_slices(self.img_shape)
         )
-        self.scale_factor = params.scale_factor
-        if self.scale_factor != 1:
+        if params.scale_factor != 1:
             raise NotImplementedError(
                 "scale factor must be 1 as it is not implemented for "
                 "conditional layer normalization"
@@ -559,12 +538,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.global_layer_norm = params.global_layer_norm
         self.in_chans = in_chans
         self.out_chans = out_chans
-        self.embed_dim = self.num_features = params.embed_dim
+        self.embed_dim = params.embed_dim
         self.num_layers = params.num_layers
-        self.num_blocks = params.num_blocks
-        self.hard_thresholding_fraction = params.hard_thresholding_fraction
         self.use_mlp = params.use_mlp
-        self.activation_function = params.activation_function
         self.encoder_layers = params.encoder_layers
         self._use_pos_embed = params.pos_embed
         self.big_skip = params.big_skip
@@ -588,9 +564,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.spectral_lora_rank = params.spectral_lora_rank
         self.spectral_lora_alpha = params.spectral_lora_alpha
 
-        # no global padding because we removed the horizontal distributed code
-        self.padding = (0, 0)
-
         self.trans_down = trans_down
         self.itrans_up = itrans_up
         self.trans = trans
@@ -612,9 +585,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         # determine activation function
         activation_functions = {"relu": nn.ReLU, "gelu": nn.GELU, "silu": nn.SiLU}
-        if self.activation_function not in activation_functions:
-            raise ValueError(f"Unknown activation function {self.activation_function}")
-        act_layer = activation_functions[self.activation_function]
+        if params.activation_function not in activation_functions:
+            raise ValueError(
+                f"Unknown activation function {params.activation_function}"
+            )
+        act_layer = activation_functions[params.activation_function]
 
         # encoder
         encoder_hidden_dim = self.embed_dim
@@ -678,22 +653,17 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 context_config=context_config,
                 filter_type=block_filter_type,
                 operator_type=self.operator_type,
+                global_layer_norm=self.global_layer_norm,
                 mlp_ratio=self.mlp_ratio,
                 drop_rate=params.drop_rate,
                 drop_path=dpr[i],
                 act_layer=act_layer,
-                sparsity_threshold=params.sparsity_threshold,
-                global_layer_norm=self.global_layer_norm,
-                use_complex_kernels=params.use_complex_kernels,
                 inner_skip=inner_skip,
                 outer_skip=outer_skip,
                 use_mlp=self.use_mlp,
                 rank=self.rank,
                 factorization=self.factorization,
                 separable=self.separable,
-                complex_network=self.complex_network,
-                complex_activation=self.complex_activation,
-                spectral_layers=self.spectral_layers,
                 checkpointing=self.checkpointing,
                 filter_residual=self.filter_residual,
                 affine_norms=self.affine_norms,

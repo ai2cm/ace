@@ -52,11 +52,22 @@ class ConditionalSFNOBuilder(ModuleConfig):
         n_sigma_embedding_channels: int,
     ) -> ConditionalSFNO:
         sfno_config = SFNONetConfig(
-            **{
-                f.name: getattr(self, f.name)
-                for f in dataclasses.fields(SFNONetConfig)
-                if hasattr(self, f.name)
-            }
+            embed_dim=self.embed_dim,
+            filter_type=self.filter_type,
+            operator_type=self.operator_type,
+            scale_factor=self.scale_factor,
+            num_layers=self.num_layers,
+            hard_thresholding_fraction=self.hard_thresholding_fraction,
+            use_mlp=self.use_mlp,
+            activation_function=self.activation_function,
+            encoder_layers=self.encoder_layers,
+            pos_embed=self.pos_embed,
+            big_skip=self.big_skip,
+            rank=self.rank,
+            factorization=self.factorization,
+            separable=self.separable,
+            checkpointing=self.checkpointing,
+            data_grid=self.data_grid,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,

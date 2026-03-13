@@ -169,9 +169,9 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         rank: Rank of the model.
         factorization: Unused, kept for backwards compatibility only.
         separable: Unused, kept for backwards compatibility only.
-        complex_network: Whether to use a complex network.
-        complex_activation: Activation function to use.
-        spectral_layers: Number of spectral layers in the model.
+        complex_network: Unused, kept for backwards compatibility only.
+        complex_activation: Unused, kept for backwards compatibility only.
+        spectral_layers: Unused, kept for backwards compatibility only.
         checkpointing: Whether to use checkpointing.
         filter_residual: Whether to filter residual connections through a
             SHT round-trip. These will always be filtered if residual_filter_factor
@@ -255,11 +255,30 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         dataset_info: DatasetInfo,
     ):
         sfno_config = SFNONetConfig(
-            **{
-                f.name: getattr(self, f.name)
-                for f in dataclasses.fields(SFNONetConfig)
-                if hasattr(self, f.name)
-            }
+            embed_dim=self.embed_dim,
+            filter_type=self.filter_type,
+            operator_type=self.operator_type,
+            global_layer_norm=self.global_layer_norm,
+            num_layers=self.num_layers,
+            use_mlp=self.use_mlp,
+            mlp_ratio=self.mlp_ratio,
+            activation_function=self.activation_function,
+            encoder_layers=self.encoder_layers,
+            pos_embed=self.pos_embed,
+            big_skip=self.big_skip,
+            rank=self.rank,
+            checkpointing=self.checkpointing,
+            data_grid=self.data_grid,
+            filter_residual=self.filter_residual,
+            filter_output=self.filter_output,
+            local_blocks=self.local_blocks,
+            normalize_big_skip=self.normalize_big_skip,
+            affine_norms=self.affine_norms,
+            filter_num_groups=self.filter_num_groups,
+            lora_rank=self.lora_rank,
+            lora_alpha=self.lora_alpha,
+            spectral_lora_rank=self.spectral_lora_rank,
+            spectral_lora_alpha=self.spectral_lora_alpha,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
