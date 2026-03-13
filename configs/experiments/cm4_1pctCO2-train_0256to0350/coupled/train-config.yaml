@@ -134,7 +134,7 @@ optimization:
       - type: ConstantLR
         step_each_iteration: true
     milestones: [2000]
-train_stepper:
+stepper_training:
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
@@ -257,9 +257,10 @@ stepper:
                   - sfdsi
                   - UI
                   - VI
+              surface_energy_flux_correction:
+                method: prescribed
               ocean_heat_content_correction:
                 method: scaled_temperature
-                constant_unaccounted_heating: 0.161
           next_step_forcing_names:
             - DLWRFsfc
             - DSWRFsfc
