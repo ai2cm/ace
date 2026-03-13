@@ -18,38 +18,54 @@ from .module import ModuleConfig, ModuleSelector
 @ModuleSelector.register("ConditionalSFNO")
 @dataclasses.dataclass
 class ConditionalSFNOBuilder(ModuleConfig):
-    """
-    Configuration for the SFNO architecture used in FourCastNet-SFNO.
+    """Configuration for the SFNO architecture used in FourCastNet-SFNO.
+
+    Attributes:
+        spectral_transform: Unused, kept for backwards compatibility only.
+        filter_type: Type of spectral filter to use.
+        operator_type: Unused, kept for backwards compatibility only.
+            Must be "dhconv".
+        scale_factor: Scale factor for input/output resolution.
+        embed_dim: Dimension of the embedding.
+        num_layers: Number of blocks (SFNO and MLP) in the model.
+        hard_thresholding_fraction: Fraction of spectral modes to retain.
+        normalization_layer: Unused, kept for backwards compatibility only.
+        use_mlp: Whether to use an MLP in the model.
+        activation_function: Activation function to use.
+        encoder_layers: Number of encoder layers in the model.
+        pos_embed: Whether to use a position embedding.
+        big_skip: Whether to use a big skip connection in the model.
+        rank: Unused, kept for backwards compatibility only.
+        factorization: Unused, kept for backwards compatibility only.
+            Must be None.
+        separable: Unused, kept for backwards compatibility only.
+            Must be False.
+        complex_network: Unused, kept for backwards compatibility only.
+        complex_activation: Unused, kept for backwards compatibility only.
+        spectral_layers: Unused, kept for backwards compatibility only.
+        checkpointing: Whether to use checkpointing.
+        data_grid: Grid type for spherical harmonic transforms.
     """
 
     spectral_transform: str = "sht"
-    """Unused, kept for backwards compatibility only."""
     filter_type: str = "linear"
     operator_type: Literal["dhconv"] = "dhconv"
-    """Unused, kept for backwards compatibility only. Must be "dhconv"."""
     scale_factor: int = 1
     embed_dim: int = 256
     num_layers: int = 12
     hard_thresholding_fraction: float = 1.0
     normalization_layer: str = "instance_norm"
-    """Unused, kept for backwards compatibility only."""
     use_mlp: bool = True
     activation_function: str = "gelu"
     encoder_layers: int = 1
     pos_embed: bool = True
     big_skip: bool = True
     rank: float = 1.0
-    """Unused, kept for backwards compatibility only."""
-    factorization: str | None = None
-    """Unused, kept for backwards compatibility only. Must be None."""
+    factorization: None = None
     separable: bool = False
-    """Unused, kept for backwards compatibility only. Must be False."""
     complex_network: bool = True
-    """Unused, kept for backwards compatibility only."""
     complex_activation: str = "real"
-    """Unused, kept for backwards compatibility only."""
     spectral_layers: int = 1
-    """Unused, kept for backwards compatibility only."""
     checkpointing: int = 0
     data_grid: Literal["legendre-gauss", "equiangular", "healpix"] = "legendre-gauss"
 

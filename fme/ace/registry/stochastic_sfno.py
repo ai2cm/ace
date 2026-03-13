@@ -146,10 +146,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     Noise is provided as conditioning input to conditional layer normalization.
 
     Attributes:
-        spectral_transform: Type of spherical transform to use.
-            Kept for backwards compatibility.
+        spectral_transform: Unused, kept for backwards compatibility only.
         filter_type: Type of filter to use.
-        operator_type: Type of operator to use. Only "dhconv" is supported.
+        operator_type: Unused, kept for backwards compatibility only.
+            Must be "dhconv".
         residual_filter_factor: Factor by which to downsample the residual.
         embed_dim: Dimension of the embedding.
         noise_embed_dim: Dimension of the noise embedding.
@@ -158,21 +158,24 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             for conditioning.
         global_layer_norm: Whether to reduce along the spatial domain when applying
             layer normalization.
-        num_layers: Number of blocks (SFNO and MLP)in the model.
-        use_mlp: Whether to use a MLP in the model.
+        num_layers: Number of blocks (SFNO and MLP) in the model.
+        use_mlp: Whether to use an MLP in the model.
         mlp_ratio: Ratio of the MLP hidden dimension
             to the embedding dimension.
         activation_function: Activation function to use.
         encoder_layers: Number of encoder layers in the model.
         pos_embed: Whether to use a position embedding.
         big_skip: Whether to use a big skip connection in the model.
-        rank: Rank of the model.
+        rank: Unused, kept for backwards compatibility only.
         factorization: Unused, kept for backwards compatibility only.
+            Must be None.
         separable: Unused, kept for backwards compatibility only.
+            Must be False.
         complex_network: Unused, kept for backwards compatibility only.
         complex_activation: Unused, kept for backwards compatibility only.
         spectral_layers: Unused, kept for backwards compatibility only.
         checkpointing: Whether to use checkpointing.
+        data_grid: Grid type for spherical harmonic transforms.
         filter_residual: Whether to filter residual connections through a
             SHT round-trip. These will always be filtered if residual_filter_factor
             is not 1.
