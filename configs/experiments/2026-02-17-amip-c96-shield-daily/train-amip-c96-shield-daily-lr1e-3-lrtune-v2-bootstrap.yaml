@@ -76,6 +76,9 @@ lr_tuning:
   num_batches: 200
   improvement_threshold: 0.001
 stepper_training:
+  parameter_init:
+    weights_path: /weights/training_checkpoints/best_ckpt.tar
+    bootstrap: true
   n_ensemble: 2
   train_n_forward_steps: 1
   optimize_last_step_only: true
@@ -104,9 +107,6 @@ stepper_training:
       crps_weight: 0.9
       energy_score_weight: 0.1
 stepper:
-  parameter_init:
-    weights_path: /weights/training_checkpoints/best_ckpt.tar
-    bootstrap: true
   step:
     type: single_module
     config:
