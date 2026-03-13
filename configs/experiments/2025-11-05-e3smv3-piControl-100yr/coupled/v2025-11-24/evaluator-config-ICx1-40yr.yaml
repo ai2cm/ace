@@ -17,6 +17,7 @@ logging:
   entity: ai2cm
 aggregator:
   log_zonal_mean_images: true
+  log_histograms: true
 loader:
   num_data_workers: 1
   dataset:
