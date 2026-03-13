@@ -17,6 +17,7 @@ from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
@@ -330,16 +331,18 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
 
 
 def dz_from_idepth(
-    idepth: torch.Tensor, deptho: torch.Tensor | None = None
+    idepth: torch.Tensor,  # positive down
+    mask: torch.Tensor,  # 0 land, 1 sea
+    deptho: torch.Tensor | None = None,  # positive down
 ) -> torch.Tensor:
-    if deptho is not None:
-        z_top = idepth[..., :-1]
-        z_bot = idepth[..., 1:]
-        deptho = deptho.unsqueeze(-1)
-        dz = torch.clamp(deptho, min=z_top, max=z_bot) - z_top
+    z_top = idepth[..., :-1]
+    z_bot = idepth[..., 1:]
+    if deptho is None:
+        deptho_expanded = (mask * z_bot).max(dim=-1, keepdim=True).values
     else:
-        dz = idepth.diff(dim=-1)
-    return dz
+        deptho_expanded = deptho.unsqueeze(-1)
+    dz = torch.clamp(deptho_expanded, min=z_top, max=z_bot) - z_top
+    return dz.nan_to_num() * mask
 
 
 @dataclasses.dataclass
@@ -379,7 +382,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got idepth.shape: {self.idepth.shape} and mask.shape: "
                 f"{self.mask.shape}."
             )
-        self._dz = dz_from_idepth(self.idepth, self.deptho)
+        self._dz = dz_from_idepth(self.idepth, self.mask, self.deptho)
 
     @property
     def dz(self) -> torch.Tensor:
@@ -451,7 +454,7 @@ class DepthCoordinate(VerticalCoordinate):
             return False
         if self.deptho is not None and other.deptho is not None:
             try:
-                torch.testing.assert_close(self.deptho, other.deptho)
+                torch.testing.assert_close(self.deptho, other.deptho, equal_nan=True)
             except AssertionError:
                 return False
         return True
@@ -498,7 +501,7 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        integral = (integrand * self.dz * self.mask).nansum(dim=-1)
+        integral = (integrand * self.dz).nansum(dim=-1)
         mask_0 = self.mask.select(dim=-1, index=0).expand(integral.shape)
         return integral.where(mask_0 > 0, float("nan"))
 
@@ -692,6 +695,17 @@ class HorizontalCoordinates(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def localize(self: HC) -> HC:
+        """Return a copy with coordinates sliced to the local spatial chunk.
+
+        Uses ``Distributed.get_instance()`` to determine the local slices.
+        Coordinate types that do not support spatial parallelism should raise
+        ``SpatialParallelismNotImplemented`` when the distributed layout
+        requires slicing.
+        """
+        pass
+
+    @abc.abstractmethod
     def get_state(self) -> TensorMapping:
         pass
 
@@ -785,6 +799,14 @@ class LatLonCoordinates(HorizontalCoordinates):
     @property
     def shape(self) -> tuple[int, int]:
         return (len(self.lat), len(self.lon))
+
+    def localize(self) -> "LatLonCoordinates":
+        dist = Distributed.get_instance()
+        h_slice, w_slice = dist.get_local_slices(self.shape)
+        return LatLonCoordinates(
+            lat=self.lat[h_slice],
+            lon=self.lon[w_slice],
+        )
 
     def get_state(self) -> TensorMapping:
         return {"lat": self.lat, "lon": self.lon}
@@ -936,6 +958,12 @@ class HEALPixCoordinates(HorizontalCoordinates):
     @property
     def shape(self) -> tuple[int, int, int]:
         return (len(self.face), len(self.width), len(self.height))
+
+    def localize(self) -> "HEALPixCoordinates":
+        Distributed.get_instance().require_no_spatial_parallelism(
+            "HEALPixCoordinates does not support spatial parallelism."
+        )
+        return self
 
     def get_state(self) -> TensorMapping:
         return {"face": self.face, "height": self.height, "width": self.width}
