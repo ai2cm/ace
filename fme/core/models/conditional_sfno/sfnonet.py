@@ -46,7 +46,58 @@ from .makani.spectral_convolution import SpectralConv
 
 @dataclasses.dataclass
 class SFNONetConfig:
-    """Configuration parameters for SphericalFourierNeuralOperatorNet."""
+    """Configuration parameters for SphericalFourierNeuralOperatorNet.
+
+    Attributes:
+        embed_dim: Dimension of the embeddings.
+        filter_type: Type of spectral filter to use ('linear', 'makani-linear',
+            'local').
+        operator_type: Type of spectral operator ('diagonal', 'dhconv').
+        scale_factor: Scale factor for input/output resolution. Must be 1
+            (other values are not implemented for conditional layer norm).
+        global_layer_norm: Whether to reduce along the spatial domain when
+            applying layer normalization.
+        num_layers: Number of Fourier Neural Operator blocks.
+        use_mlp: Whether to use an MLP in each FNO block.
+        mlp_ratio: Ratio of MLP hidden dimension to the embedding dimension.
+        activation_function: Activation function name ('relu', 'gelu', 'silu').
+        encoder_layers: Number of convolutional layers in the encoder/decoder.
+        pos_embed: Whether to use a learned positional embedding.
+        drop_rate: Dropout rate.
+        drop_path_rate: Stochastic depth rate (drop path).
+        num_blocks: Number of blocks in the spectral convolution.
+        sparsity_threshold: Threshold for sparsity in spectral convolutions.
+        hard_thresholding_fraction: Fraction of spectral modes to retain.
+        use_complex_kernels: Whether to use complex-valued kernels.
+        big_skip: Whether to use a big skip connection from input to decoder.
+        rank: Rank of the spectral convolution approximation.
+        factorization: Type of factorization for spectral convolutions.
+        separable: Whether to use separable spectral convolutions.
+        complex_network: Whether to use a complex network architecture.
+        complex_activation: Type of complex activation function.
+        spectral_layers: Number of spectral layers per block.
+        checkpointing: Gradient checkpointing level (0=none, 1=encoder/decoder,
+            3=all blocks).
+        filter_num_groups: Number of groups in grouped spectral convolutions.
+        filter_residual: Whether to filter residual connections through a
+            SHT round-trip.
+        filter_output: Whether to filter the output through a SHT round-trip.
+        local_blocks: List of block indices to use local (DISCO) filters
+            instead of spectral filters.
+        normalize_big_skip: Whether to normalize the big skip connection.
+        affine_norms: Whether to use element-wise affine parameters in the
+            normalization layers.
+        lora_rank: Rank of LoRA adaptations outside spectral convolutions.
+            0 disables LoRA.
+        lora_alpha: Strength of LoRA adaptations outside spectral convolutions.
+            Defaults to lora_rank if None.
+        spectral_lora_rank: Rank of LoRA adaptations for spectral convolutions.
+            0 disables LoRA.
+        spectral_lora_alpha: Strength of LoRA adaptations for spectral
+            convolutions. Defaults to spectral_lora_rank if None.
+        data_grid: Grid type for spherical harmonic transforms
+            ('equiangular', 'legendre-gauss').
+    """
 
     embed_dim: int = 256
     filter_type: str = "linear"
@@ -450,105 +501,23 @@ def get_lat_lon_sfnonet(
 
 
 class SphericalFourierNeuralOperatorNet(torch.nn.Module):
-    """
-    Spherical Fourier Neural Operator Network
+    """Spherical Fourier Neural Operator Network.
 
-    Parameters
-    ----------
-    params : dict
-        Dictionary of parameters
-    img_shape : tuple
-        Shape of the input channels, by default (721, 1440)
-    get_pos_embed : Callable
-        Function to get the positional embedding
-    trans_down : nn.Module
-        Transform from input space to spectral space
-    itrans_up : nn.Module
-        Transform from spectral space to output space
-    trans : nn.Module
-        Transform from intermediate data space to spectral space
-    itrans : nn.Module
-        Transform from spectral space to intermediate data space
-    filter_type : str, optional
-        Type of filter to use ('linear', 'non-linear'), by default "non-linear"
-    operator_type : str, optional
-        Type of operator to use ('diaginal', 'dhconv'), by default "diagonal"
-    scale_factor : int, optional
-        Scale factor to use, by default 16
-    in_chans : int, optional
-        Number of input channels, by default 2
-    out_chans : int, optional
-        Number of output channels, by default 2
-    embed_dim : int, optional
-        Dimension of the embeddings, by default 256
-    context_config : ContextConfig, optional
-        Context configuration, by default
-        ContextConfig(embed_dim_scalar=0, embed_dim_2d=0)
-    num_layers : int, optional
-        Number of layers in the network, by default 12
-    use_mlp : int, optional
-        Whether to use MLP, by default True
-    mlp_ratio : int, optional
-        Ratio of MLP to use, by default 2.0
-    activation_function : str, optional
-        Activation function to use, by default "gelu"
-    encoder_layers : int, optional
-        Number of layers in the encoder, by default 1
-    pos_embed : bool, optional
-        Whether to use positional embedding, by default True
-    drop_rate : float, optional
-        Dropout rate, by default 0.0
-    drop_path_rate : float, optional
-        Dropout path rate, by default 0.0
-    num_blocks : int, optional
-        Number of blocks in the network, by default 16
-    sparsity_threshold : float, optional
-        Threshold for sparsity, by default 0.0
-    hard_thresholding_fraction : float, optional
-        Fraction of hard thresholding to apply, by default 1.0
-    use_complex_kernels : bool, optional
-        Whether to use complex kernels, by default True
-    big_skip : bool, optional
-        Whether to use big skip connections, by default True
-    rank : float, optional
-        Rank of the approximation, by default 1.0
-    factorization : Any, optional
-        Type of factorization to use, by default None
-    separable : bool, optional
-        Whether to use separable convolutions, by default False
-    complex_network : bool, optional
-        Whether to use a complex network architecture, by default True
-    complex_activation : str, optional
-        Type of complex activation function to use, by default "real"
-    spectral_layers : int, optional
-        Number of spectral layers, by default 3
-    checkpointing : int, optional
-        Number of checkpointing segments, by default 0
-    local_blocks: List[int], optional
-        List of blocks to use local filters, by default []
-    normalize_big_skip: bool, optional
-        Whether to normalize the big_skip connection, by default False
-    affine_norms: bool, optional
-        Whether to use element-wise affine parameters in the normalization layers,
-        by default False.
-
-    Example:
-    --------
-    >>> from modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet as SFNO
-    >>> model = SFNO(
-    ...         params={},
-    ...         img_shape=(8, 16),
-    ...         scale_factor=4,
-    ...         in_chans=2,
-    ...         out_chans=2,
-    ...         embed_dim=16,
-    ...         num_layers=2,
-    ...         encoder_layers=1,
-    ...         num_blocks=4,
-    ...         spectral_layers=2,
-    ...         use_mlp=True,)
-    >>> model(torch.randn(1, 2, 8, 16)).shape
-    torch.Size([1, 2, 8, 16])
+    Args:
+        params: Model configuration. See ``SFNONetConfig`` for details.
+        img_shape: Spatial dimensions (lat, lon) of the input data.
+        get_pos_embed: Factory function that returns a learned positional
+            embedding parameter.
+        trans_down: Spherical harmonic transform from input grid to spectral
+            space (used for the first layer).
+        itrans_up: Inverse spherical harmonic transform from spectral space
+            to the output grid (used for the last layer).
+        trans: Spherical harmonic transform for intermediate layers.
+        itrans: Inverse spherical harmonic transform for intermediate layers.
+        in_chans: Number of input channels.
+        out_chans: Number of output channels.
+        context_config: Configuration for conditional context embeddings
+            (scalar, noise, positional, labels).
     """
 
     def __init__(
