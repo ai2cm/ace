@@ -33,29 +33,9 @@ To use the PR review rules, configure the GitHub MCP server in Cursor's "Tools &
 
 ## Code Guidelines for Agents
 
-When writing or reviewing code, apply these project-specific guidelines. See
-CONTRIBUTING.md for the full details; this section highlights what agents are
-most likely to miss.
-
-### Design: abstraction and responsibility isolation
-
-This is the highest-priority review concern. When a decision changes in the
-future, as little code as possible should need to be touched.
-
-- **Polymorphism over type-checking.** `if isinstance(x, A) ... elif
-  isinstance(x, B) ...` chains mean the behavior should be a method on the
-  types being checked. Flag these in reviews and suggest moving logic to the
-  relevant classes.
-- **One abstraction level per function.** If a function mixes high-level
-  orchestration with low-level details, suggest extracting helpers.
-- **Distributed concerns stay in `Distributed`.** Other code calls
-  `dist.method()`. Never import `torch.distributed` or backend internals
-  outside of the distributed module. Prefer guard methods
-  (`dist.require_no_model_parallelism(msg)`) over scattered if-else checks.
-- **Training concerns stay in training code.** DDP wrapping, weight freezing,
-  and loss config should not leak into inference-capable code paths.
-- **Facade pattern for multi-PR refactors.** Implement the new class
-  internally, keep the old class as a translation layer, swap in a final PR.
+When writing or reviewing code, read CONTRIBUTING.md for design principles and
+testing guidelines. The sections below cover additional details agents are most
+likely to miss.
 
 ### Naming
 
