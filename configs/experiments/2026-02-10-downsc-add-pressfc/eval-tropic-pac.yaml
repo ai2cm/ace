@@ -1,0 +1,53 @@
+experiment_dir: /results
+n_samples: 2
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /checkpoints/best.ckpt
+data:
+  #topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        step: 7
+    - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        step: 7
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        step: 7
+    - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: pressfc_renamed_to_prmsl_100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        step: 7
+  lat_extent:
+    start: 0  #-66.0
+    stop: 35 #70.0
+  lon_extent:
+    start: 75 #230.0
+    stop:  195 #246.0
+  batch_size: 6
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
