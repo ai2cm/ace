@@ -15,7 +15,7 @@ initial_condition:
 forcing_loader:
   dataset:
     data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-  labels: ["era5"]
+    labels: ["era5"]
   num_data_workers: 8
   perturbations:
     sst:
