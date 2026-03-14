@@ -12,7 +12,7 @@ analytically, so the outcome is deterministic regardless of rank count.
 import pytest
 import torch
 
-from fme.core import get_device
+from fme.core import get_device, metrics
 from fme.core.distributed import Distributed
 
 
@@ -271,3 +271,83 @@ def test_gloo_all_to_all_patch():
         # Restore whatever state was in place before.
         torch_dist.all_to_all = saved_current
         gloo_patch._original_all_to_all = saved_original
+
+
+@pytest.mark.parallel
+def test_zonal_mean():
+    """Zonal mean of a known tensor matches non-distributed nanmean over lon."""
+    dist = Distributed.get_instance()
+    device = get_device()
+    global_shape = (2, 3, 8, 16)
+
+    # Use a fixed seed so every rank builds the same global tensor.
+    gen = torch.Generator(device="cpu").manual_seed(42)
+    global_data = torch.randn(*global_shape, generator=gen).to(device)
+
+    slices = dist.get_local_slices(global_shape)
+    local_data = global_data[slices]
+
+    result = dist.zonal_mean(local_data)
+
+    # Expected: full zonal mean restricted to local h-slice.
+    expected_full = global_data.nanmean(dim=-1)
+    expected = expected_full[slices[:-1]]  # drop w-slice (averaged away)
+
+    torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parallel
+def test_zonal_mean_with_nans():
+    """Zonal mean correctly ignores NaNs across distributed lon slices."""
+    dist = Distributed.get_instance()
+    device = get_device()
+    global_shape = (2, 8, 16)
+
+    gen = torch.Generator(device="cpu").manual_seed(99)
+    global_data = torch.randn(*global_shape, generator=gen).to(device)
+    # Sprinkle NaNs at fixed positions.
+    global_data[0, 3, 5] = float("nan")
+    global_data[1, 0, 14] = float("nan")
+    global_data[0, 7, 0] = float("nan")
+
+    slices = dist.get_local_slices(global_shape)
+    local_data = global_data[slices]
+
+    result = dist.zonal_mean(local_data)
+
+    expected_full = global_data.nanmean(dim=-1)
+    expected = expected_full[slices[:-1]]
+
+    torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parallel
+def test_gradient_magnitude_percent_diff():
+    """Distributed gradient_magnitude_percent_diff matches single-rank result."""
+    dist = Distributed.get_instance()
+    device = get_device()
+    global_shape = (2, 3, 8, 16)
+
+    gen = torch.Generator(device="cpu").manual_seed(123)
+    # Use 1 + rand to keep truth positive and avoid division-by-zero.
+    truth = (1.0 + torch.rand(*global_shape, generator=gen)).to(device)
+    predicted = (truth.cpu() + 0.1 * torch.randn(*global_shape, generator=gen)).to(
+        device
+    )
+    weights = torch.rand(8, 16, generator=gen).to(device)
+
+    slices = dist.get_local_slices(global_shape)
+    local_truth = truth[slices]
+    local_predicted = predicted[slices]
+    # weights only have spatial dims
+    local_weights = weights[slices[-2:]]
+
+    result = dist.gradient_magnitude_percent_diff(
+        local_truth, local_predicted, local_weights, dim=(-2, -1)
+    )
+
+    expected = metrics.gradient_magnitude_percent_diff(
+        truth, predicted, weights=weights, dim=(-2, -1)
+    )
+
+    torch.testing.assert_close(result, expected)

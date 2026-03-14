@@ -349,10 +349,61 @@ class ModelTorchDistributed(DistributedBackend):
             local_weight_sum
         )
 
-    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError(
-            "zonal_mean is not yet supported under spatial parallelism."
+    def _gather_along_dim(
+        self,
+        tensor: torch.Tensor,
+        dim: int,
+        group: torch.distributed.ProcessGroup,
+        group_size: int,
+    ) -> torch.Tensor:
+        """All-gather tensor slices along ``dim`` within ``group``."""
+        if group_size == 1:
+            return tensor
+
+        # Communicate local sizes to handle uneven splits.
+        local_size = torch.tensor(
+            [tensor.shape[dim]], device=tensor.device, dtype=torch.long
         )
+        all_sizes = [torch.empty_like(local_size) for _ in range(group_size)]
+        torch.distributed.all_gather(all_sizes, local_size, group=group)
+        sizes = [s.item() for s in all_sizes]
+
+        max_size = max(sizes)
+
+        # Pad to the largest slice so all_gather receives uniform shapes.
+        if tensor.shape[dim] < max_size:
+            pad_shape = list(tensor.shape)
+            pad_shape[dim] = max_size - tensor.shape[dim]
+            tensor = torch.cat([tensor, tensor.new_zeros(pad_shape)], dim=dim)
+
+        chunks = [torch.empty_like(tensor) for _ in range(group_size)]
+        torch.distributed.all_gather(chunks, tensor, group=group)
+
+        # Trim each chunk back to its true size and concatenate.
+        trimmed = []
+        for chunk, size in zip(chunks, sizes):
+            idx = [slice(None)] * chunk.dim()
+            idx[dim] = slice(0, size)
+            trimmed.append(chunk[tuple(idx)])
+
+        return torch.cat(trimmed, dim=dim)
+
+    def _gather_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Reconstruct the full spatial tensor by gathering across h and w."""
+        tensor = self._gather_along_dim(tensor, -1, self._w_group, self._w_size)
+        tensor = self._gather_along_dim(tensor, -2, self._h_group, self._h_size)
+        return tensor
+
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        if self._w_size == 1:
+            return data.nanmean(dim=-1)
+
+        # Distributed nanmean over the longitude (w) dimension.
+        local_sum = data.nansum(dim=-1)
+        local_count = (~torch.isnan(data)).to(data.dtype).sum(dim=-1)
+        torch.distributed.all_reduce(local_sum, group=self._w_group)
+        torch.distributed.all_reduce(local_count, group=self._w_group)
+        return local_sum / local_count
 
     def gradient_magnitude_percent_diff(
         self,
@@ -361,9 +412,15 @@ class ModelTorchDistributed(DistributedBackend):
         weights: torch.Tensor,
         dim: tuple[int, ...],
     ) -> torch.Tensor:
-        raise NotImplementedError(
-            "gradient_magnitude_percent_diff is not yet supported "
-            "under spatial parallelism."
+        from fme.core import metrics
+
+        # Gradient computation needs neighboring spatial values, so gather the
+        # full spatial domain before computing the metric.
+        truth_full = self._gather_spatial(truth)
+        predicted_full = self._gather_spatial(predicted)
+        weights_full = self._gather_spatial(weights)
+        return metrics.gradient_magnitude_percent_diff(
+            truth_full, predicted_full, weights=weights_full, dim=dim
         )
 
     def get_sht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
