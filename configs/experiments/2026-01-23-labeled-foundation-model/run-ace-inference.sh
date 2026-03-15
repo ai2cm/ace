@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME_BASE="ace-foundation-model-era5-sst-pert"
+JOB_NAME_BASE="ace-foundation-model-c96-sst-pert"
 JOB_GROUP="ace-foundation-model"
 # this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
 EXISTING_RESULTS_DATASET="01KKEXRZZDJJ0DJZ2KTSXYWAME"
@@ -11,11 +11,11 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-AIMIP_INFERENCE_P0K_CONFIG_FILENAME="ace-inference-era5-p0k.yaml"
+AIMIP_INFERENCE_P0K_CONFIG_FILENAME="ace-inference-c96-p0k.yaml"
 AIMIP_INFERENCE_BASE_P0K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P0K_CONFIG_FILENAME
-AIMIP_INFERENCE_P2K_CONFIG_FILENAME="ace-inference-era5-p2k.yaml"
+AIMIP_INFERENCE_P2K_CONFIG_FILENAME="ace-inference-c96-p2k.yaml"
 AIMIP_INFERENCE_BASE_P2K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P2K_CONFIG_FILENAME
-AIMIP_INFERENCE_P4K_CONFIG_FILENAME="ace-inference-era5-p4k.yaml"
+AIMIP_INFERENCE_P4K_CONFIG_FILENAME="ace-inference-c96-p4k.yaml"
 AIMIP_INFERENCE_BASE_P4K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P4K_CONFIG_FILENAME
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
@@ -52,6 +52,7 @@ launch_job () {
         --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
         --gpus 1 \
         --shared-memory 50GiB \
+        --allow-dirty \
         --weka climate-default:/climate-default \
         --budget ai2/climate \
         --system-python \
