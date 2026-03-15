@@ -32,7 +32,7 @@ class TorchDistributed(DistributedBackend):
                     torch.distributed.init_process_group(
                         backend="nccl",
                         init_method="env://",
-                        timeout=timedelta(minutes=30),
+                        timeout=timedelta(minutes=60),
                     )
                 else:
                     torch.distributed.init_process_group(
