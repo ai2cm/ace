@@ -4,7 +4,7 @@ import os
 from collections.abc import Generator, Iterator
 from typing import TypeVar
 
-import torch.distributed
+import torch
 
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
@@ -469,14 +469,10 @@ class Distributed:
         self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
     ) -> dict[str, torch.Tensor]:
         """Gather local spatial chunks back to global tensors via all-reduce."""
-        slices = self.get_local_slices(img_shape)
-        result = {}
-        for k, v in data.items():
-            global_shape = (*v.shape[:-2], *img_shape)
-            global_tensor = torch.zeros(global_shape, dtype=v.dtype, device=v.device)
-            global_tensor[(..., *slices)] = v
-            result[k] = self.spatial_reduce_sum(global_tensor)
-        return result
+        return {
+            k: self._distributed.gather_spatial_tensor(v, img_shape)
+            for k, v in data.items()
+        }
 
     def shutdown(self):
         return self._distributed.shutdown()

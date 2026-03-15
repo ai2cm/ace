@@ -153,6 +153,23 @@ class DistributedBackend(ABC):
         """All-reduce sum across spatial (h, w) ranks. Identity for non-spatial."""
         ...
 
+    def gather_spatial_tensor(
+        self, tensor: torch.Tensor, img_shape: tuple[int, int]
+    ) -> torch.Tensor:
+        """Reassemble a spatially-sharded tensor on every rank via all-reduce.
+
+        Args:
+            tensor: Local spatial shard.
+            img_shape: Global ``(H, W)`` spatial dimensions.
+        """
+        if img_shape == tensor.shape[-2:]:
+            return tensor
+        global_shape = (*tensor.shape[:-2], *img_shape)
+        slices = self.get_local_slices(img_shape)
+        buf = torch.zeros(global_shape, dtype=tensor.dtype, device=tensor.device)
+        buf[(..., *slices)] = tensor
+        return self.spatial_reduce_sum(buf)
+
     @abstractmethod
     def weighted_mean(
         self,
