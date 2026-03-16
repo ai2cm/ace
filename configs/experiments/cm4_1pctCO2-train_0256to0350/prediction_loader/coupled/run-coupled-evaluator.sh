@@ -1,0 +1,49 @@
+#!/usr/bin/env sh
+
+set -e
+
+CONFIG_FILENAME="${1:-coupled-evaluator-config.yaml}"
+JOB_NAME="${CONFIG_FILENAME%.yaml}"
+
+shift || true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --job-name) JOB_NAME="$2"; shift 2;;
+    *) echo "Unknown option: $1"; exit 1;;
+  esac
+done
+
+EXISTING_RESULTS_DATASET="01KKQJPTN1ZS75PMCBC8YWD2J1" # determines variables
+SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
+CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
+ # since we use a service account API key for wandb, we use the beaker username to set the wandb username
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+cd $REPO_ROOT  # so config path is valid no matter where we are running this script
+
+python -m fme.coupled.validate_config --config_type evaluator $CONFIG_PATH
+
+gantry run \
+    --name $JOB_NAME \
+    --task-name $JOB_NAME \
+    --description 'Run coupled prediction loader eval' \
+    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
+    --workspace ai2/climate-titan \
+    --priority urgent \
+    --not-preemptible \
+    --cluster titan \
+    --env WANDB_USERNAME=$BEAKER_USERNAME \
+    --env WANDB_NAME=$JOB_NAME \
+    --env WANDB_JOB_TYPE=inference \
+    --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+    --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+    --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    --gpus 1 \
+    --shared-memory 50GiB \
+    --weka climate-default:/climate-default \
+    --budget ai2/climate \
+    --system-python \
+    --install "pip install --no-deps ." \
+    -- python -I -m fme.coupled.evaluator $CONFIG_PATH
