@@ -532,6 +532,52 @@ def test_noise_config_error():
         )
 
 
+def test_get_fine_coords_for_batch():
+    # Model trained on full coarse (8x16) / fine (16x32) grid
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    downscale_factor = 2
+    static_inputs = make_static_inputs(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+
+    # Build a batch covering a spatial patch: middle 4 coarse lats and 8 coarse lons.
+    full_coarse_lat = _get_monotonic_coordinate(coarse_shape[0], stop=fine_shape[0])
+    full_coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    patch_coarse_lat = full_coarse_lat[2:6].tolist()  # [5, 7, 9, 11]
+    patch_coarse_lon = full_coarse_lon[4:12].tolist()  # [9, 11, ..., 23]
+    batch = make_batch_data((2, 4, 8), patch_coarse_lat, patch_coarse_lon)
+
+    result = model.get_fine_coords_for_batch(batch)
+
+    expected_lat = model.static_inputs.coords.lat[4:12]
+    expected_lon = model.static_inputs.coords.lon[8:24]
+    # model.static_inputs has been moved to device; index into it directly
+    # to match devices
+    assert torch.allclose(result.lat, expected_lat)
+    assert torch.allclose(result.lon, expected_lon)
+
+
+def test_get_fine_coords_for_batch_raises_without_static_inputs():
+    model = _get_diffusion_model(
+        coarse_shape=(16, 16),
+        downscale_factor=2,
+        use_fine_topography=False,
+        static_inputs=None,
+    )
+    batch = make_batch_data(
+        (1, 16, 16),
+        _get_monotonic_coordinate(16, stop=16).tolist(),
+        _get_monotonic_coordinate(16, stop=16).tolist(),
+    )
+    with pytest.raises(ValueError, match="missing static inputs"):
+        model.get_fine_coords_for_batch(batch)
+
+
 def test_checkpoint_config_topography_raises():
     with pytest.raises(ValueError):
         CheckpointModelConfig(
