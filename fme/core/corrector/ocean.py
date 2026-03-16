@@ -239,6 +239,7 @@ def _correct_hfds(
         prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
     """
     input = OceanData(input_data)
+    forcing = OceanData(forcing_data)
     ocean_fraction = input.ocean_fraction
     net_flux = _compute_ocean_net_surface_energy_flux(
         forcing_data, input.sea_surface_temperature
@@ -248,6 +249,7 @@ def _correct_hfds(
         hfds_name = "hfds"
     else:
         hfds_name = "hfds_total_area"
+        net_flux = net_flux * forcing.sea_surface_fraction
     gen_hfds = gen_data[hfds_name]
     if method == "residual_prediction":
         out[hfds_name] = net_flux * ocean_fraction + gen_hfds
