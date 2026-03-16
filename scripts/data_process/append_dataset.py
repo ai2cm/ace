@@ -12,7 +12,7 @@ import xarray as xr
 import yaml
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from compute_dataset import DatasetComputationConfig, DatasetConfig
+from compute_dataset import ChunkingConfig, StandardDimMapping
 
 
 @dataclasses.dataclass
@@ -24,6 +24,9 @@ class DatasetAppendConfig:
     def from_file(cls, path: str) -> "DatasetAppendConfig":
         with open(path, "r") as file:
             data = yaml.safe_load(file)
+
+        if "dataset_computation" in data:
+            data.pop("dataset_computation")
 
         return dacite.from_dict(
             data_class=cls, data=data, config=dacite.Config(cast=[tuple], strict=True)
@@ -55,7 +58,6 @@ def get_dataset_attrs(store_path: str) -> Dict:
 def get_variables_to_append(
     run_directory: str,
     append_store: str,
-    dataset_config: DatasetComputationConfig,
     append_config: DatasetAppendConfig,
 ) -> xr.Dataset:
     urls = get_dataset_urls(append_config, run_directory)
@@ -73,6 +75,36 @@ def get_variables_to_append(
             continue
         ds[variable] = ds_temp[variable]
     return ds
+
+
+@dataclasses.dataclass
+class DatasetComputationConfig:
+    n_split: int = 65
+    standard_names: StandardDimMapping = dataclasses.field(
+        default_factory=StandardDimMapping
+    )
+    chunking: ChunkingConfig = dataclasses.field(
+        default_factory=lambda: ChunkingConfig(time_dim=1)
+    )
+    sharding: ChunkingConfig | None = dataclasses.field(
+        default_factory=lambda: ChunkingConfig(time_dim=360)
+    )
+
+
+@dataclasses.dataclass
+class DatasetConfig:
+    dataset_computation: DatasetComputationConfig = dataclasses.field(
+        default_factory=DatasetComputationConfig
+    )
+
+    @classmethod
+    def from_file(cls, path: str) -> "DatasetConfig":
+        with open(path, "r") as file:
+            data = yaml.safe_load(file)
+
+        return dacite.from_dict(
+            data_class=cls, data=data, config=dacite.Config(cast=[tuple])
+        )
 
 
 @click.command()
@@ -110,7 +142,6 @@ def main(
     ds = get_variables_to_append(
         run_directory,
         append_store,
-        dataset_config,
         append_config,
     )
 

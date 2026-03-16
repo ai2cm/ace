@@ -4,7 +4,9 @@ import logging
 import os
 from typing import List, Sequence, Tuple
 
+import cftime
 import dacite
+import numpy.typing as npt
 import torch.utils.data
 import xarray as xr
 import yaml
@@ -93,6 +95,15 @@ def get_timesteps(data_loaders: List[torch.utils.data.DataLoader]) -> int:
     return timesteps_per_dataset
 
 
+def get_initial_condition_times(
+    data_loaders: List[torch.utils.data.DataLoader],
+) -> npt.NDArray[cftime.datetime]:
+    for window_batch_data in merge_loaders(data_loaders):
+        initial_condition_times = window_batch_data.time.isel(time=0).to_numpy()
+        break
+    return initial_condition_times
+
+
 @dataclasses.dataclass
 class Config:
     """
@@ -146,11 +157,12 @@ class Config:
             **data.properties.horizontal_coordinates.coords,
             **data.properties.vertical_coordinate.coords,
         }
+        initial_condition_times = get_initial_condition_times(data.loaders)
         return MonthlyDataWriter(
             path=self.experiment_dir,
             label="monthly_mean_data",
             save_names=None,  # save all data given
-            n_samples=self.data_loader.batch_size * len(data.loaders),
+            initial_condition_times=initial_condition_times,
             variable_metadata=data.properties.variable_metadata,
             coords=coords,
             dataset_metadata=DatasetMetadata.from_env(),
@@ -239,6 +251,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(
-        yaml_config=args.yaml_config,
-    )
+    with Distributed.context():
+        main(
+            yaml_config=args.yaml_config,
+        )

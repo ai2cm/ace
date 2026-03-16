@@ -13,6 +13,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
+from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import NoTargetAggregator, SampleAggregator
@@ -24,14 +25,8 @@ from fme.downscaling.data import (
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
-from fme.downscaling.predictors import (
-    CascadePredictor,
-    CascadePredictorConfig,
-    PatchPredictionConfig,
-    PatchPredictor,
-)
+from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -118,7 +113,7 @@ class EventDownscaler:
         self,
         event_name: str,
         data: GriddedData,
-        model: DiffusionModel | CascadePredictor,
+        model: DiffusionModel,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -197,7 +192,7 @@ class Downscaler:
     def __init__(
         self,
         data: GriddedData,
-        model: DiffusionModel | CascadePredictor,
+        model: DiffusionModel,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -276,7 +271,7 @@ class Downscaler:
 
 @dataclasses.dataclass
 class DownscalerConfig:
-    model: CheckpointModelConfig | CascadePredictorConfig
+    model: CheckpointModelConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig
@@ -362,4 +357,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    main(args.config_path)
+    with Distributed.context():
+        main(args.config_path)
