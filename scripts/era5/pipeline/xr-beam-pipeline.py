@@ -617,8 +617,11 @@ def _average_hourly_to_6hourly(ds: xr.Dataset) -> xr.Dataset:
     return averaged
 
 
-def process_mean_flux(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
-    _check_data_validity(ds)
+def process_mean_flux(
+    key, ds, output_grid=DEFAULT_OUTPUT_GRID, check_data_validity=False
+):
+    if check_data_validity:
+        _check_data_validity(ds)
     averaged = _average_hourly_to_6hourly(ds)
     output = _process_mean_flux(averaged, output_grid)
     # Convert from hourly input offset to 6-hourly output offset
@@ -635,10 +638,13 @@ def process_mean_flux(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
 # ---------------------------------------------------------------------------
 
 
-def _process_invariant(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
+def _process_invariant(
+    ds: xr.Dataset, output_grid: str, check_data_validity: bool = False
+) -> xr.Dataset:
     """Process invariant fields (land_sea_mask, geopotential_at_surface, soil_type)."""
     logging.info("Processing invariant data")
-    _check_data_validity(ds)
+    if check_data_validity:
+        _check_data_validity(ds)
     output = xr.Dataset()
     output["HGTsfc"] = ds["geopotential_at_surface"] / GRAVITY
     output["land_fraction"] = ds["land_sea_mask"]
@@ -721,9 +727,14 @@ def _process_surface_analysis(
 
 
 def process_surface_analysis(
-    key, ds, invariant_ds=None, output_grid=DEFAULT_OUTPUT_GRID
+    key,
+    ds,
+    invariant_ds=None,
+    output_grid=DEFAULT_OUTPUT_GRID,
+    check_data_validity: bool = False,
 ):
-    _check_data_validity(ds)
+    if check_data_validity:
+        _check_data_validity(ds)
     output = _process_surface_analysis(ds, invariant_ds, output_grid)
     new_key = key.replace(vars=frozenset(output.keys()))
     return new_key, output
@@ -766,8 +777,11 @@ def _process_pressure_level_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset
     return regridded
 
 
-def process_pressure_level_data(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
-    _check_data_validity(ds)
+def process_pressure_level_data(
+    key, ds, output_grid=DEFAULT_OUTPUT_GRID, check_data_validity: bool = False
+):
+    if check_data_validity:
+        _check_data_validity(ds)
     output = _process_pressure_level_data(ds, output_grid)
     new_key = key.replace(
         offsets={"time": key.offsets["time"], "latitude": 0, "longitude": 0},
@@ -959,9 +973,11 @@ def process_model_level_data(
     bk=None,
     output_grid=DEFAULT_OUTPUT_GRID,
     output_layer_indices=DEFAULT_OUTPUT_LAYER_INDICES,
+    check_data_validity: bool = False,
 ):
-    _check_data_validity(ds)
-    _check_data_validity(ds_surface.sel(time=ds.time))
+    if check_data_validity:
+        _check_data_validity(ds)
+        _check_data_validity(ds_surface.sel(time=ds.time))
     output = _process_model_level_data(
         ds, ds_surface.sel(time=ds.time), ak, bk, output_grid, output_layer_indices
     )
@@ -991,6 +1007,7 @@ def _make_template(
     output_grid,
     output_layer_indices,
     output_time,
+    check_data_validity: bool = False,
 ):
     """Eagerly process one timestep of each stream to build the output template."""
     logging.info("Building template from first timestep of each stream")
@@ -1006,7 +1023,9 @@ def _make_template(
         .isel(time=0)
         .load()
     )
-    ds_inv_regridded = _process_invariant(ds_invariant, output_grid)
+    ds_inv_regridded = _process_invariant(
+        ds_invariant, output_grid, check_data_validity
+    )
 
     ds_sfc_an_regridded = _process_surface_analysis(
         ds_surface_analysis.isel(time=0).load(), ds_inv_regridded, output_grid
@@ -1092,6 +1111,11 @@ def _get_parser():
             "Time chunk size for intermediate processing of pressure level and "
             "surface analysis streams. Must divide evenly into output_time_shardsize."
         ),
+    )
+    parser.add_argument(
+        "--check_data_validity",
+        action="store_true",
+        help="Check for unexpected NaN values before processing.",
     )
     parser.add_argument(
         "--output-layer-indices",
@@ -1184,6 +1208,7 @@ def main():
         args.output_grid,
         args.output_layer_indices,
         output_time,
+        args.check_data_validity,
     )
 
     logging.info("Template finished generating. Starting pipeline.")
@@ -1195,7 +1220,11 @@ def main():
         (
             p
             | xbeam.DatasetToChunks(ds_flux, chunks={"time": 6})
-            | beam.MapTuple(process_mean_flux, output_grid=args.output_grid)
+            | beam.MapTuple(
+                process_mean_flux,
+                output_grid=args.output_grid,
+                check_data_validity=args.check_data_validity,
+            )
             | "mean_flux_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "mean_flux_to_zarr"
             >> xbeam.ChunksToZarr(
@@ -1216,6 +1245,7 @@ def main():
                 process_surface_analysis,
                 invariant_ds=ds_inv_regridded,
                 output_grid=args.output_grid,
+                check_data_validity=args.check_data_validity,
             )
             | "sfc_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "sfc_to_zarr"
@@ -1233,7 +1263,11 @@ def main():
             p
             | "pl_DatasetToChunks"
             >> xbeam.DatasetToChunks(ds_pressure_level, chunks=process_chunks)
-            | beam.MapTuple(process_pressure_level_data, output_grid=args.output_grid)
+            | beam.MapTuple(
+                process_pressure_level_data,
+                output_grid=args.output_grid,
+                check_data_validity=args.check_data_validity,
+            )
             | "pl_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "pl_to_zarr"
             >> xbeam.ChunksToZarr(
@@ -1257,6 +1291,7 @@ def main():
                 bk=bk,
                 output_grid=args.output_grid,
                 output_layer_indices=args.output_layer_indices,
+                check_data_validity=args.check_data_validity,
             )
             | "ml_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "ml_to_zarr"
