@@ -202,7 +202,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
 
     @property
     def dataset_info(self) -> DatasetInfo:
-    """Always returns global datasets regardless of model parallelism"""
+        """Always returns global datasets regardless of model parallelism."""
         return DatasetInfo(
             horizontal_coordinates=self._global_properties.horizontal_coordinates,
             vertical_coordinate=self._global_properties.vertical_coordinate,
