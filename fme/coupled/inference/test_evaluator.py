@@ -109,6 +109,7 @@ def inference_helper(
     n_initial_conditions: int,
     checkpoint_path: str | StandaloneComponentCheckpointsConfig,
     use_prediction_data: bool = False,
+    expected_derived_names: list[str] | None = None,
 ):
     """
     Reusable helper for running coupled inference tests.
@@ -119,6 +120,9 @@ def inference_helper(
     Note: Mock data is created with a 2:1 ratio of atmosphere to ocean timesteps,
     resulting in ocean_timedelta="2D" and atmosphere_timedelta="1D".
     """
+    if expected_derived_names is None:
+        expected_derived_names = []
+
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmos_in_names + atmos_out_names)
 
@@ -207,12 +211,18 @@ def inference_helper(
         "ak_0" not in ds_atmos.coords
     ), "TODO: update this assertion now that vertical coords are written"
     assert "ak_0" not in ds_ocean.coords
+
+    all_out_names = ocean_out_names + atmos_out_names + expected_derived_names
+    ds_out_names = set(ds_ocean.data_vars).union(ds_atmos.data_vars)
+
+    for name in expected_derived_names:
+        assert name in ds_out_names
+
     if use_prediction_data:
         assert not os.path.exists(tmp_path / "atmosphere/restart.nc")
         assert not os.path.exists(tmp_path / "atmosphere/initial_condition.nc")
         assert not os.path.exists(tmp_path / "ocean/restart.nc")
         assert not os.path.exists(tmp_path / "ocean/initial_condition.nc")
-        all_out_names = ocean_out_names + atmos_out_names
         for var in all_out_names:
             rmse_key = f"inference/mean/weighted_rmse/{var}"
             bias_key = f"inference/mean/weighted_bias/{var}"
@@ -293,10 +303,11 @@ def test_evaluator_inference(
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 
-    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
-    ocean_out_names = ["o_prog", "sst", "o_diag"]
+    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag", "thetao_0"]
+    ocean_out_names = ["o_prog", "sst", "o_diag", "thetao_0"]
     atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]
     atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+    expected_derived_names = ["ocean_heat_content"]
 
     # Create mock data for stepper creation
     stepper_data_dir = tmp_path / "stepper_data"
@@ -333,6 +344,7 @@ def test_evaluator_inference(
         n_initial_conditions=n_initial_conditions,
         checkpoint_path=checkpoint_path,
         use_prediction_data=use_prediction_data,
+        expected_derived_names=expected_derived_names,
     )
 
 
