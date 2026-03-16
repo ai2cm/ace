@@ -46,7 +46,7 @@ class CreateCoupledICConfig:
             Defaults to {output_directory}/{version}-{family_name}-ocean.zarr.
         coupled_atmosphere_zarr: Optional path (or glob) to coupled atmosphere
             zarr. Defaults to path with how from coupled config:
-            {output_directory}/{version}-{family_name}-{how}-atmosphere.zarr.
+            {output_directory}/{version}-{family_name}-atmosphere.zarr.
         original_ocean_zarr: Optional path to original ocean zarr. Defaults to
             input_datasets.ocean.zarr_path from the coupled config.
         original_atmosphere_zarr: Optional path to original atmosphere zarr.
@@ -135,7 +135,7 @@ def _merge_with_original(coupled_ds: xr.Dataset, original_ds: xr.Dataset) -> xr.
     """Merge coupled dataset with original; coupled overwrites overlapping vars."""
     overlap = [v for v in coupled_ds.data_vars if v in original_ds.data_vars]
     original_dropped = original_ds.drop_vars(overlap, errors="ignore")
-    return xr.merge([original_dropped, coupled_ds], compat="override", join="override")
+    return xr.merge([coupled_ds, original_dropped], compat="override", join="override")
 
 
 def _load_original_only(
@@ -148,8 +148,8 @@ def _load_original_only(
     ds = xr.open_zarr(original_zarr)
     out = _select_time(ds, time_config)
     logging.info(
-        f"Original {label}: {len(out.data_vars)} vars, \
-            time size {out.sizes.get('time', 1)}"
+        f"Original {label}: {len(out.data_vars)} vars, "
+        f"time size {out.sizes.get('time', 1)}"
     )
     return out
 
@@ -235,9 +235,7 @@ def run(config: CreateCoupledICConfig) -> None:
 
     if config.use_coupled:
         coupled_ocean = config.coupled_ocean_zarr
-        coupled_atmosphere = config.coupled_atmosphere_zarr
         assert coupled_ocean is not None
-        assert coupled_atmosphere is not None
         ocean_ic = _load_and_merge(
             coupled_ocean,
             original_ocean,
@@ -286,7 +284,8 @@ def run(config: CreateCoupledICConfig) -> None:
     "config_path",
     required=True,
     type=click.Path(exists=True),
-    help="Path to YAML config for creating coupled ICs.",
+    help="Path to YAML config for creating coupled ICs, "
+    "expected to end with -coupled-ic.yaml",
 )
 def main(config_path: str) -> None:
     """Create initial condition NetCDF files from coupled datasets.

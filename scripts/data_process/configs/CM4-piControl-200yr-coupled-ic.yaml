@@ -1,4 +1,5 @@
 coupled_config_path: configs/CM4-piControl-200yr-coupled.yaml
+coupled_atmosphere_zarr: /climate-default/2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
 time:
   timestamp: "0151-01-03T12:00:00"
 output_directory: /climate-default/home/elynn/ace/scratch
