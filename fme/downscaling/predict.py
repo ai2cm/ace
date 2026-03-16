@@ -236,17 +236,14 @@ class Downscaler:
             )
 
     def run(self):
-        # TODO: remove when coordinates are stored with the model
-        if self.model.static_inputs is None:
-            raise ValueError(
-                "Model must have static inputs with coordinates for downscaling "
-                "generation."
-            )
-        aggregator = NoTargetAggregator(
-            downscale_factor=self.model.downscale_factor,
-            latlon_coordinates=self.model.static_inputs.fields[0].coords,
-        )
+        aggregator: NoTargetAggregator | None = None
         for i, batch in enumerate(self.batch_generator):
+            if aggregator is None:
+                fine_coords = self.model.get_fine_coords_for_batch(batch)
+                aggregator = NoTargetAggregator(
+                    downscale_factor=self.model.downscale_factor,
+                    latlon_coordinates=fine_coords,
+                )
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 prediction = self.generation_model.generate_on_batch_no_target(
@@ -257,6 +254,9 @@ class Downscaler:
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.data.items()}
                 aggregator.record_batch(prediction, coarse, batch.time)
+
+        # dataset build ensures non-empty batch_generator
+        assert aggregator is not None
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()
         wandb.log(logs, step=0)

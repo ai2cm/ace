@@ -2,6 +2,7 @@ import dataclasses
 
 import torch
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.data.patching import Patch, get_patches
@@ -81,6 +82,9 @@ class PatchPredictor:
     @property
     def static_inputs(self):
         return self.model.static_inputs
+
+    def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
+        return self.model.get_fine_coords_for_batch(batch)
 
     def _get_patches(
         self, coarse_yx_extent, fine_yx_extent

@@ -6,6 +6,7 @@ from typing import Any
 import dacite
 import torch
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.loss import LossConfig
@@ -332,6 +333,36 @@ class DiffusionModel:
                 "static inputs is enabled."
             )
         return self.static_inputs.subset_latlon(lat_interval, lon_interval)
+
+    def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
+        """Return fine-resolution coordinates matching the spatial extent of batch."""
+        if self.static_inputs is None:
+            raise ValueError(
+                "Model is missing static inputs, which are required to determine "
+                "the coordinate information for the output dataset."
+            )
+        coarse_lat = batch.latlon_coordinates.lat[0]
+        coarse_lon = batch.latlon_coordinates.lon[0]
+        fine_lat_interval = adjust_fine_coord_range(
+            batch.lat_interval,
+            full_coarse_coord=coarse_lat,
+            full_fine_coord=self.static_inputs.coords.lat,
+            downscale_factor=self.downscale_factor,
+        )
+        fine_lon_interval = adjust_fine_coord_range(
+            batch.lon_interval,
+            full_coarse_coord=coarse_lon,
+            full_fine_coord=self.static_inputs.coords.lon,
+            downscale_factor=self.downscale_factor,
+        )
+        return LatLonCoordinates(
+            lat=self.static_inputs.coords.lat[
+                fine_lat_interval.slice_of(self.static_inputs.coords.lat)
+            ],
+            lon=self.static_inputs.coords.lon[
+                fine_lon_interval.slice_of(self.static_inputs.coords.lon)
+            ],
+        )
 
     @property
     def fine_shape(self) -> tuple[int, int]:

@@ -8,51 +8,14 @@ import torch
 import yaml
 
 from fme.core.cli import prepare_directory
-from fme.core.coordinates import LatLonCoordinates
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig, adjust_fine_coord_range
+from ..data import DataLoaderConfig
 from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import PatchPredictionConfig, PatchPredictor
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
-
-
-def _get_fine_coords(
-    model: DiffusionModel | PatchPredictor, work_item: LoadedSliceWorkItem
-) -> LatLonCoordinates:
-    # TODO: simplify to just use model coordinates when those are saved instead
-    # of them being appended to static inputs
-    if model.static_inputs is None:
-        raise ValueError(
-            "Model is missing static inputs, which are required to "
-            "determine the coordinate information for the output "
-            "dataset. Please ensure the model is configured with "
-            "static inputs. This will be fixed in a future update."
-        )
-    coarse_lat = work_item.batch.latlon_coordinates.lat[0]
-    coarse_lon = work_item.batch.latlon_coordinates.lon[0]
-    fine_lat_interval = adjust_fine_coord_range(
-        work_item.batch.lat_interval,
-        full_coarse_coord=coarse_lat,
-        full_fine_coord=model.static_inputs.coords.lat,
-        downscale_factor=model.downscale_factor,
-    )
-    fine_lon_interval = adjust_fine_coord_range(
-        work_item.batch.lon_interval,
-        full_coarse_coord=coarse_lon,
-        full_fine_coord=model.static_inputs.coords.lon,
-        downscale_factor=model.downscale_factor,
-    )
-    return LatLonCoordinates(
-        lat=model.static_inputs.coords.lat[
-            fine_lat_interval.slice_of(model.static_inputs.coords.lat)
-        ],
-        lon=model.static_inputs.coords.lon[
-            fine_lon_interval.slice_of(model.static_inputs.coords.lon)
-        ],
-    )
 
 
 class Downscaler:
@@ -153,7 +116,7 @@ class Downscaler:
                 )
 
             if writer is None:
-                fine_latlon_coords = _get_fine_coords(model, loaded_item)
+                fine_latlon_coords = model.get_fine_coords_for_batch(loaded_item.batch)
                 writer = output.get_writer(
                     latlon_coords=fine_latlon_coords,
                     output_dir=self.output_dir,
