@@ -369,7 +369,7 @@ def run_inference_from_config(config: InferenceConfig):
     timer.stop_outer("inference")
     total_steps = config.n_forward_steps * data.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
