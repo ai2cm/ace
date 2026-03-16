@@ -151,8 +151,9 @@ class DataLoaderConfig:
             (For multi-GPU runtime, it's the number of workers per GPU.)
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
-        topography: Deprecated field for specifying the topography dataset. Now
-            provided via build method's `static_inputs` argument.
+        topography: Deprecated field for specifying the topography dataset.
+            StaticInput data are expected to be stored and serialized within a
+            model through the Trainer build process.
         lat_extent: The latitude extent to use for the dataset specified in
             degrees, limited to (-88.0, 88.0). The extent is inclusive, so the start and
             stop values are included in the extent. Defaults to [-66, 70] which
@@ -189,8 +190,8 @@ class DataLoaderConfig:
         if self.topography is not None:
             raise ValueError(
                 "The `topography` field on DataLoaderConfig is deprecated and will be "
-                "removed in a future release. Pass static_inputs via build's "
-                "`static_inputs` argument instead."
+                "removed in a future release. `StaticInputs` are now stored within "
+                " the model when it is first built and trained."
             )
 
     @property
@@ -334,7 +335,6 @@ class PairedDataLoaderConfig:
             time dimension.  Useful to include longer sequences of small
             data for testing.
         topography: Deprecated field for specifying the topography dataset.
-            Now provided via build method's `static_inputs` argument.
         sample_with_replacement: If provided, the dataset will be
             sampled randomly with replacement to the given size each period,
             instead of retrieving each sample once (either shuffled or not).
@@ -366,8 +366,8 @@ class PairedDataLoaderConfig:
         if self.topography is not None:
             raise ValueError(
                 "The `topography` field on PairedDataLoaderConfig is deprecated and "
-                "will be removed in a future release. Pass static_inputs via the "
-                "build method's `static_inputs` argument instead."
+                "will be removed in a future release. `StaticInputs` are now stored "
+                "within the model when it is first built and trained."
             )
 
     def _first_data_config(
