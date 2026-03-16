@@ -12,12 +12,7 @@ from fme.core.logging_utils import LoggingConfig
 
 from ..data import DataLoaderConfig, StaticInputs
 from ..models import CheckpointModelConfig, DiffusionModel
-from ..predictors import (
-    CascadePredictor,
-    CascadePredictorConfig,
-    PatchPredictionConfig,
-    PatchPredictor,
-)
+from ..predictors import PatchPredictionConfig, PatchPredictor
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
 
@@ -32,7 +27,7 @@ class Downscaler:
 
     def __init__(
         self,
-        model: DiffusionModel | CascadePredictor,
+        model: DiffusionModel,
         outputs: list[DownscalingOutput],
         output_dir: str = ".",
     ):
@@ -57,7 +52,7 @@ class Downscaler:
         self,
         static_inputs: StaticInputs,
         output: DownscalingOutput,
-    ) -> DiffusionModel | PatchPredictor | CascadePredictor:
+    ) -> DiffusionModel | PatchPredictor:
         """
         Set up the model, wrapping with PatchPredictor if needed.  While models are
         probably capable of generating any domain size, we haven't tested for domains
@@ -223,7 +218,7 @@ class InferenceConfig:
             entity: my_organization
     """
 
-    model: CheckpointModelConfig | CascadePredictorConfig
+    model: CheckpointModelConfig
     data: DataLoaderConfig
     experiment_dir: str
     outputs: list[EventConfig | TimeRangeConfig]
