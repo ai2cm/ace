@@ -47,6 +47,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def __init__(self, config: TrainAggregatorConfig, operations: GriddedOperations):
         self._n_loss_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
+        self._per_channel_loss: dict[str, torch.Tensor] = {}
         self._paired_aggregators: dict[str, Aggregator] = {}
         if config.spherical_power_spectrum:
             self._paired_aggregators["power_spectrum"] = (
@@ -66,6 +67,16 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def record_batch(self, batch: TrainOutput):
         self._loss += batch.metrics["loss"]
         self._n_loss_batches += 1
+        for key, value in batch.metrics.items():
+            if key.startswith("loss/") and key != "loss":
+                var_name = key[len("loss/") :]
+                if var_name not in self._per_channel_loss:
+                    self._per_channel_loss[var_name] = torch.tensor(
+                        0.0, device=get_device(), dtype=value.dtype
+                    )
+                self._per_channel_loss[var_name] = (
+                    self._per_channel_loss[var_name] + value
+                )
 
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
@@ -93,6 +104,11 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         logs[f"{label}/mean/loss"] = float(
             dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy()
         )
+        if self._n_loss_batches > 0:
+            for var_name, acc in self._per_channel_loss.items():
+                logs[f"{label}/mean/loss/{var_name}"] = float(
+                    dist.reduce_mean(acc / self._n_loss_batches).cpu().numpy()
+                )
         return logs
 
     @torch.no_grad()

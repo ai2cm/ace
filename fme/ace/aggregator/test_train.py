@@ -78,3 +78,52 @@ def test_aggregator_gets_logs_with_no_batches(config: TrainAggregatorConfig):
     logs = agg.get_logs(label="test")
     assert np.isnan(logs.pop("test/mean/loss"))
     assert logs == {}
+
+
+def test_aggregator_logs_per_channel_loss():
+    """
+    Per-channel (per-variable) loss is accumulated and reported in get_logs.
+    """
+    batch_size = 4
+    n_ensemble = 1
+    n_time = 2
+    nx, ny = 2, 2
+    device = get_device()
+    gridded_operations = LatLonOperations(
+        area_weights=torch.ones(nx, ny, device=device)
+    )
+    config = TrainAggregatorConfig(spherical_power_spectrum=False, weighted_rmse=False)
+    agg = TrainAggregator(config=config, operations=gridded_operations)
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=device)},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, n_ensemble, n_time, nx, ny, device=device)},
+    )
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={
+                "loss": torch.tensor(1.0, device=device),
+                "loss/a": torch.tensor(0.5, device=device),
+            },
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+        ),
+    )
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={
+                "loss": torch.tensor(2.0, device=device),
+                "loss/a": torch.tensor(1.0, device=device),
+            },
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+        ),
+    )
+    logs = agg.get_logs(label="train")
+    assert logs["train/mean/loss"] == 1.5
+    assert logs["train/mean/loss/a"] == 0.75

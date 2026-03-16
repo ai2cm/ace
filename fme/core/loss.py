@@ -73,6 +73,50 @@ class WeightedMappingLoss:
 
         return self.loss(predict_tensors, target_tensors)
 
+    def call_per_channel(
+        self,
+        predict_dict: TensorMapping,
+        target_dict: TensorMapping,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Compute loss per variable (per channel).
+
+        Returns:
+            Dict mapping each variable name to its scalar loss tensor.
+        """
+        predict_tensors = self.packer.pack(
+            self.normalizer.normalize(predict_dict), axis=self.channel_dim
+        )
+        target_tensors = self.packer.pack(
+            self.normalizer.normalize(target_dict), axis=self.channel_dim
+        )
+        nan_mask = target_tensors.isnan()
+        if nan_mask.any():
+            predict_tensors = torch.where(nan_mask, 0.0, predict_tensors)
+            target_tensors = torch.where(nan_mask, 0.0, target_tensors)
+
+        result: dict[str, torch.Tensor] = {}
+        channel_dim = (
+            self.channel_dim
+            if self.channel_dim >= 0
+            else predict_tensors.dim() + self.channel_dim
+        )
+        # _weight_tensor is always 4D (1, n_channels, 1, 1) from
+        # _construct_weight_tensor
+        weight_channel_dim = 1
+        for i, name in enumerate(self.packer.names):
+            pred_slice = predict_tensors.select(channel_dim, i).unsqueeze(channel_dim)
+            target_slice = target_tensors.select(channel_dim, i).unsqueeze(channel_dim)
+            weight_slice = self._weight_tensor.select(weight_channel_dim, i)
+            # Broadcast weight to match pred_slice ndim
+            # (e.g. 5D when ensemble dim present)
+            while weight_slice.dim() < pred_slice.dim():
+                weight_slice = weight_slice.unsqueeze(-1)
+            result[name] = self.loss.loss(
+                weight_slice * pred_slice, weight_slice * target_slice
+            )
+        return result
+
     def get_normalizer_state(self) -> dict[str, float]:
         return self.normalizer.get_state()
 
@@ -469,6 +513,22 @@ class StepLoss(torch.nn.Module):
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
         return self.loss(predict_dict, target_dict) * step_weight
+
+    def forward_per_channel(
+        self,
+        predict_dict: TensorMapping,
+        target_dict: TensorMapping,
+        step: int,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Compute per-variable (per-channel) loss with step weighting.
+
+        Returns:
+            Dict mapping each variable name to its scalar loss tensor.
+        """
+        step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
+        per_channel = self.loss.call_per_channel(predict_dict, target_dict)
+        return {k: v * step_weight for k, v in per_channel.items()}
 
 
 @dataclasses.dataclass
