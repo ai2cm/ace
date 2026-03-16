@@ -226,6 +226,11 @@ DESIRED_ATTRS = {
     },
 }
 
+VARIABLES_WITH_SOME_MISSING_VALUES = [
+    "sea_ice_cover",
+    "sea_surface_temperature",
+    "significant_height_of_combined_wind_waves_and_swell",
+]
 
 # ---------------------------------------------------------------------------
 # Regridding utilities
@@ -496,6 +501,34 @@ def _check_time_bounds(ds, time_slice):
     assert desired_stop <= ds_stop, f"Dataset time stop out of bounds"
 
 
+def _check_data_validity(ds):
+    """Check for time slices with an unexpected number of missing values.
+
+    We cannot rely solely on the valid_stop_time and valid_stop_time_era5t
+    attributes, since they may be updated prior to all the variables:
+    https://github.com/google-research/arco-era5/issues/128.
+    """
+    for name, da in ds.data_vars.items():
+        reduction_dims = [dim for dim in da.dims if dim != "time"]
+        if name in VARIABLES_WITH_SOME_MISSING_VALUES:
+            # Some 2D variables are masked, so we only raise if all values are
+            # missing in a time slice.
+            missing_indices = da.isnull().all(reduction_dims)
+        else:
+            # For all other variables, we use a stricter check and raise if any
+            # values are missing in a time slice.
+            missing_indices = da.isnull().any(reduction_dims)
+
+        # Accomdate variables where the time dimension has been squeezed out,
+        # like in the case of the invariant dataset.
+        if "time" not in missing_indices.dims:
+            missing_indices = missing_indices.expand_dims("time")
+
+        if missing_indices.any():
+            missing_times = da.time.isel(time=missing_indices).to_numpy()
+            raise ValueError(f"Missing values in {name!r} at times: {missing_times}.")
+
+
 # ---------------------------------------------------------------------------
 # Stream 1: Mean Flux processing
 # ---------------------------------------------------------------------------
@@ -585,6 +618,7 @@ def _average_hourly_to_6hourly(ds: xr.Dataset) -> xr.Dataset:
 
 
 def process_mean_flux(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
+    _check_data_validity(ds)
     averaged = _average_hourly_to_6hourly(ds)
     output = _process_mean_flux(averaged, output_grid)
     # Convert from hourly input offset to 6-hourly output offset
@@ -604,6 +638,7 @@ def process_mean_flux(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
 def _process_invariant(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
     """Process invariant fields (land_sea_mask, geopotential_at_surface, soil_type)."""
     logging.info("Processing invariant data")
+    _check_data_validity(ds)
     output = xr.Dataset()
     output["HGTsfc"] = ds["geopotential_at_surface"] / GRAVITY
     output["land_fraction"] = ds["land_sea_mask"]
@@ -688,6 +723,7 @@ def _process_surface_analysis(
 def process_surface_analysis(
     key, ds, invariant_ds=None, output_grid=DEFAULT_OUTPUT_GRID
 ):
+    _check_data_validity(ds)
     output = _process_surface_analysis(ds, invariant_ds, output_grid)
     new_key = key.replace(vars=frozenset(output.keys()))
     return new_key, output
@@ -731,6 +767,7 @@ def _process_pressure_level_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset
 
 
 def process_pressure_level_data(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
+    _check_data_validity(ds)
     output = _process_pressure_level_data(ds, output_grid)
     new_key = key.replace(
         offsets={"time": key.offsets["time"], "latitude": 0, "longitude": 0},
@@ -923,6 +960,8 @@ def process_model_level_data(
     output_grid=DEFAULT_OUTPUT_GRID,
     output_layer_indices=DEFAULT_OUTPUT_LAYER_INDICES,
 ):
+    _check_data_validity(ds)
+    _check_data_validity(ds_surface.sel(time=ds.time))
     output = _process_model_level_data(
         ds, ds_surface.sel(time=ds.time), ak, bk, output_grid, output_layer_indices
     )
