@@ -210,6 +210,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         surface_temperature_name: str | None = None,
         ocean_fraction_name: str | None = None,
         label_encoding: LabelEncoding | None = None,
+        n_ensemble: int | None = None,
     ):
         """
         Parameters:
@@ -225,6 +226,10 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         """
         if label_encoding is None and config.available_labels is not None:
             label_encoding = LabelEncoding(labels=sorted(list(config.available_labels)))
+        elif label_encoding is None and label_override is not None:
+            # When labels are overridden (e.g. from config.labels), we still need
+            # an encoding to collate them even if the dataset has no available_labels.
+            label_encoding = LabelEncoding(labels=sorted(list(label_override)))
         self._label_encoding = label_encoding
         self._label_override = (
             set(label_override) if label_override is not None else None
@@ -247,6 +252,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         self._surface_temperature_name = surface_temperature_name
         self._ocean_fraction_name = ocean_fraction_name
         self._n_initial_conditions = config.n_initial_conditions
+        self._n_ensemble = n_ensemble if n_ensemble is not None else 1
         if isinstance(config.start_indices, TimestampList):
             self._start_indices = config.start_indices.as_indices(
                 self._dataset.all_times
@@ -286,7 +292,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         sample_tuples = []
         for i_member in range(self._n_initial_conditions):
             # check if sample is one this local rank should process
-            if i_member % dist.total_data_parallel_ranks != dist.data_parallel_rank:
+            if i_member % dist.world_size != dist.rank:
                 continue
             i_window_start = i_start + self._start_indices[i_member]
             i_window_end = i_window_start + self._forward_steps_in_memory + 1
@@ -334,10 +340,8 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             for key, value in self._persistence_data.data.items():
                 updated_data[key] = value.expand_as(result.data[key])
             result.data = {**result.data, **updated_data}
-        assert result.time.shape[0] == (
-            self._n_initial_conditions // dist.total_data_parallel_ranks
-        )
-        return result
+        assert result.time.shape[0] == self._n_initial_conditions // dist.world_size
+        return result.broadcast_ensemble(n_ensemble=self._n_ensemble)
 
     def __len__(self) -> int:
         # The ceil is necessary so if the last batch is smaller
