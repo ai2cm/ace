@@ -1,4 +1,4 @@
-group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
+group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
 fto-1pctCO2_0256to0350-ewbpxamu_qkj0w2hd|rs0|01KAQJ7F4PXD0THKH40TAZ6CD8|trained|best_inference_ckpt|normal|--not-preemptible
 
@@ -46,21 +46,12 @@ resume_berobv1i-fto-1pctCO2_0256to0350|rs0|01KG815YCYZR5G1G3G53TXDDVG|training|b
 
 fto-1pctCO2_0256to0350-correct_budgets-4flptvc8_mb4prsz7|rs0|01KH899CM3WWB3HMM4V6WG8VZD|crashed|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-correct_budgets-4flptvc8_mb4prsz7|rs0-ep22||run_ICx1|best_inference_ckpt|high|--not-preemptible||01KH9MPEQBQY4NM7F88TNHYRJM
-fto-1pctCO2_0256to0350-correct_budgets-4flptvc8_mb4prsz7|rs0-ep22||run_insample|best_inference_ckpt|high|--not-preemptible||01KH9MPEQBQY4NM7F88TNHYRJM
+fto-1pctCO2_0256to0350-correct_budgets-4flptvc8_mb4prsz7|rs0-ep22||skip|best_inference_ckpt|high|--not-preemptible||01KH9MPEQBQY4NM7F88TNHYRJM
 
-fto-1pctCO2_0256to0350-correct_budgets-e1trm8ih_mb4prsz7|rs0|01KHWQ0RV0KRDQZZJWVDMGC9QZ|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-correct_budgets-e1trm8ih_mb4prsz7|rs0|01KHYVN5D8GD15E3HAJYPEPTQ2|trained|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-correct_budgets-e1trm8ih_mb4prsz7|rs0|01KHXZ25BEHBYVV4BK947PF5XX|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-correct_budgets-422nakro_mb4prsz7|rs0|01KHZCG9C3VCY3VBRHK1SKPNVN|trained|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-correct_budgets-e1trm8ih_mb4prsz7|rs0|01KHYR4K224H5304K1XVQ7GSC0|training|best_inference_ckpt|normal|--not-preemptible
-
-fto-1pctCO2_0256to0350-correct_budgets-e1trm8ih_mb4prsz7|rs0|01KHYVN5D8GD15E3HAJYPEPTQ2|training|best_inference_ckpt|normal|--not-preemptible
-
-fto-1pctCO2_0256to0350-correct_budgets-422nakro_mb4prsz7|rs0|01KHZCG9C3VCY3VBRHK1SKPNVN|training|best_inference_ckpt|normal|--not-preemptible
-
-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKJS4Z7THGZNBR7QSFRKRYBA|training|best_inference_ckpt|normal|--not-preemptible
-
-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKJY7YAPTQJFXX9BR0AYEHJ0|training|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0-ep17|01KKJY7YAPTQJFXX9BR0AYEHJ0|run_140yr|best_inference_ckpt|urgent|--not-preemptible||||b200
 
 fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|training|best_inference_ckpt|normal|--not-preemptible
