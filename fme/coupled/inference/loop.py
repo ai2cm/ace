@@ -39,21 +39,25 @@ def run_coupled_dataset_comparison(
     deriver: CoupledDeriver,
     writer: CoupledPairedDataWriter | NullDataWriter | None = None,
     record_logs: Callable[[InferenceLogs], None] | None = None,
-    restrict_to_all_names: CoupledNames | None = None,
+    all_names: CoupledNames | None = None,
 ) -> None:
     if record_logs is None:
         record_logs = get_record_to_wandb(label="inference")
     if writer is None:
         writer = NullDataWriter()
 
-    def _restrict_to_all_names(batch: CoupledBatchData) -> CoupledBatchData:
-        if restrict_to_all_names is None:
+    if all_names is not None:
+        overlapping_names = set(all_names.ocean) & set(all_names.atmosphere)
+    else:
+        overlapping_names = set()
+
+    def _remove_overlapping_names(batch: CoupledBatchData) -> CoupledBatchData:
+        if not overlapping_names:
             return batch
+        ocean_keep = [n for n in batch.ocean_data.data if n not in overlapping_names]
         return CoupledBatchData(
-            ocean_data=batch.ocean_data.subset_names(restrict_to_all_names.ocean),
-            atmosphere_data=batch.atmosphere_data.subset_names(
-                restrict_to_all_names.atmosphere
-            ),
+            ocean_data=batch.ocean_data.subset_names(ocean_keep),
+            atmosphere_data=batch.atmosphere_data,
         )
 
     timer = GlobalTimer.get_instance()
@@ -66,8 +70,8 @@ def run_coupled_dataset_comparison(
             with timer.context("aggregator"):
                 pred_ic = prediction_data.initial_condition.as_batch_data()
                 target_ic = target_data.initial_condition.as_batch_data()
-                pred_ic = _restrict_to_all_names(pred_ic)
-                target_ic = _restrict_to_all_names(target_ic)
+                pred_ic = _remove_overlapping_names(pred_ic)
+                target_ic = _remove_overlapping_names(target_ic)
                 logs = aggregator.record_initial_condition(
                     initial_condition=CoupledPairedData.from_coupled_batch_data(
                         prediction=pred_ic,
@@ -84,8 +88,8 @@ def run_coupled_dataset_comparison(
         )
         pred = deriver.get_forward_data(pred, compute_derived_variables=True)
         target = deriver.get_forward_data(target, compute_derived_variables=True)
-        pred = _restrict_to_all_names(pred)
-        target = _restrict_to_all_names(target)
+        pred = _remove_overlapping_names(pred)
+        target = _remove_overlapping_names(target)
         paired_data = CoupledPairedData.from_coupled_batch_data(
             prediction=pred,
             reference=target,
