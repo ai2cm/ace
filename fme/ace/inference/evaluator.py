@@ -437,7 +437,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             target_data=data,
             deriver=deriver,
             writer=writer,
-            record_logs=logger,
+            record_logs=logger.log,
         )
     else:
         run_inference(
@@ -445,7 +445,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data=data,
             aggregator=aggregator,
             writer=writer,
-            record_logs=logger,
+            record_logs=logger.log,
         )
 
     with timer.context("final_writer_flush"):

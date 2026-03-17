@@ -372,7 +372,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             target_data=data,
             deriver=deriver,
             writer=writer,
-            record_logs=logger,
+            record_logs=logger.log,
             restrict_to_all_names=stepper_config.all_names,
         )
     else:
@@ -381,7 +381,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data=data,
             aggregator=aggregator,
             writer=writer,
-            record_logs=logger,
+            record_logs=logger.log,
         )
 
     timer.start("final_writer_flush")

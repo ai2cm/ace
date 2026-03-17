@@ -268,7 +268,7 @@ def run_inference_from_config(config: InferenceConfig):
         data=data,
         aggregator=aggregator,
         writer=writer,
-        record_logs=logger,
+        record_logs=logger.log,
     )
 
     timer.start("final_writer_flush")

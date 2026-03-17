@@ -87,9 +87,6 @@ class WandBStepLogger:
     def step(self) -> int:
         return self._step
 
-    def __call__(self, logs: InferenceLogs) -> None:
-        self.log(logs, label=self._label)
-
     def log(self, logs: InferenceLogs, label: str | None = None) -> None:
         if label is None:
             label = self._label
@@ -124,7 +121,7 @@ def run_inference(
             wandb.
     """
     if record_logs is None:
-        record_logs = get_record_to_wandb(label="inference")
+        record_logs = get_record_to_wandb(label="inference").log
     if writer is None:
         writer = NullDataWriter()
     timer = GlobalTimer.get_instance()

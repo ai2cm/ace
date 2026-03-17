@@ -535,9 +535,9 @@ def test_wandb_step_logger_with_label():
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True)
         logger = WandBStepLogger(label="inference")
-        logger([{"a": 1}, {"b": 2}])
+        logger.log([{"a": 1}, {"b": 2}])
         assert logger.step == 2
-        logger([{"c": 3}])
+        logger.log([{"c": 3}])
         assert logger.step == 3
         logs = wandb.get_logs()
         assert logs[0] == {"inference/a": 1}
@@ -549,7 +549,7 @@ def test_wandb_step_logger_without_label():
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True)
         logger = WandBStepLogger(label="")
-        logger([{"a": 1}, {"b": 2}])
+        logger.log([{"a": 1}, {"b": 2}])
         assert logger.step == 2
         logs = wandb.get_logs()
         assert logs[0] == {"a": 1}
@@ -561,7 +561,7 @@ def test_wandb_step_logger_label_override():
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True)
         logger = WandBStepLogger(label="inference")
-        logger([{"a": 1}])
+        logger.log([{"a": 1}])
         logger.log([{"b": 2}], label="")
         logger.log([{"c": 3}], label="val")
         assert logger.step == 3
@@ -576,7 +576,7 @@ def test_wandb_step_logger_skips_empty_logs():
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True)
         logger = WandBStepLogger(label="inference")
-        logger([{}, {"a": 1}, {}])
+        logger.log([{}, {"a": 1}, {}])
         assert logger.step == 3
         logs = wandb.get_logs()
         assert len(logs) == 2
