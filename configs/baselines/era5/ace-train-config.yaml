@@ -2,8 +2,10 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 120
+max_epochs: 2
 n_forward_steps: 2
+train_aggregator:
+  per_channel_loss: True
 ema:
   decay: 0.999
 inference:
