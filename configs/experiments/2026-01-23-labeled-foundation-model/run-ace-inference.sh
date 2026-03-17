@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME_BASE="ace-foundation-model-c96-sst-pert"
+JOB_NAME_BASE="ace-foundation-model-c96-sst-pert-latest-ckpt-jan1-start"
 JOB_GROUP="ace-foundation-model"
 # this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
 EXISTING_RESULTS_DATASET="01KKEXRZZDJJ0DJZ2KTSXYWAME"
@@ -49,7 +49,7 @@ launch_job () {
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+        --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/ckpt.tar:/ckpt.tar \
         --gpus 1 \
         --shared-memory 50GiB \
         --allow-dirty \
