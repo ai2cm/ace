@@ -15,6 +15,7 @@ from fme.core.atmosphere_data import (
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.corrector.utils import force_positive
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -140,22 +141,19 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
 
     def get_corrector(
         self,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: Any | None,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> "AtmosphereCorrector":
-        if vertical_coordinate and not isinstance(
-            vertical_coordinate, HasAtmosphereVerticalIntegral
-        ):
-            raise ValueError(
-                "Cannot build AtmosphereCorrector with vertical "
-                f"coordinate {vertical_coordinate}."
-            )
+        vc = dataset_info.vertical_coordinate
+        vertical_coordinate: HasAtmosphereVerticalIntegral | None
+        if isinstance(vc, HasAtmosphereVerticalIntegral):
+            vertical_coordinate = vc
+        else:
+            vertical_coordinate = None
         return AtmosphereCorrector(
             self,
-            gridded_operations,
+            dataset_info.gridded_operations,
             vertical_coordinate,
-            timestep,
+            dataset_info.timestep,
         )
 
 
