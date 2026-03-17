@@ -318,7 +318,11 @@ class DiffusionModel:
         self.static_inputs = (
             static_inputs.to_device() if static_inputs is not None else None
         )
-        self.fine_coords = fine_coords
+        device = get_device()
+        self.fine_coords = LatLonCoordinates(
+            lat=fine_coords.lat.to(device),
+            lon=fine_coords.lon.to(device),
+        )
         if static_inputs is not None:
             expected = (len(fine_coords.lat), len(fine_coords.lon))
             if static_inputs.shape != expected:
@@ -355,32 +359,23 @@ class DiffusionModel:
 
     def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
         """Return fine-resolution coordinates matching the spatial extent of batch."""
-        if self.static_inputs is None:
-            raise ValueError(
-                "Model is missing static inputs, which are required to determine "
-                "the coordinate information for the output dataset."
-            )
         coarse_lat = batch.latlon_coordinates.lat[0]
         coarse_lon = batch.latlon_coordinates.lon[0]
         fine_lat_interval = adjust_fine_coord_range(
             batch.lat_interval,
             full_coarse_coord=coarse_lat,
-            full_fine_coord=self.static_inputs.coords.lat,
+            full_fine_coord=self.fine_coords.lat,
             downscale_factor=self.downscale_factor,
         )
         fine_lon_interval = adjust_fine_coord_range(
             batch.lon_interval,
             full_coarse_coord=coarse_lon,
-            full_fine_coord=self.static_inputs.coords.lon,
+            full_fine_coord=self.fine_coords.lon,
             downscale_factor=self.downscale_factor,
         )
         return LatLonCoordinates(
-            lat=self.static_inputs.coords.lat[
-                fine_lat_interval.slice_of(self.static_inputs.coords.lat)
-            ],
-            lon=self.static_inputs.coords.lon[
-                fine_lon_interval.slice_of(self.static_inputs.coords.lon)
-            ],
+            lat=self.fine_coords.lat[fine_lat_interval.slice_of(self.fine_coords.lat)],
+            lon=self.fine_coords.lon[fine_lon_interval.slice_of(self.fine_coords.lon)],
         )
 
     @property
@@ -574,9 +569,9 @@ class DiffusionModel:
                 full_fine_coord=self.fine_coords.lon,
                 downscale_factor=self.downscale_factor,
             )
-            lat_slice = fine_lat_interval.slice_of(self.fine_coords.lat)
-            lon_slice = fine_lon_interval.slice_of(self.fine_coords.lon)
-            _static_inputs = self.static_inputs.subset(lat_slice, lon_slice)
+            _static_inputs = self._subset_static_inputs(
+                fine_lat_interval, fine_lon_interval
+            )
         else:
             _static_inputs = None
         generated, _, _ = self.generate(batch.data, _static_inputs, n_samples)
@@ -801,10 +796,8 @@ class CheckpointModelConfig:
         )
         # TODO: simplify with static input refactor that deisables empty StaticInputs
         if (
-            has_fine_coords
-            or has_static_input_coords
-            and self.fine_coordinates_path is not None
-        ):
+            has_fine_coords or has_static_input_coords
+        ) and self.fine_coordinates_path is not None:
             raise ValueError(
                 "The model checkpoint already has fine coordinates from training. "
                 "fine_coordinates_path should not be provided in checkpoint model "
@@ -844,31 +837,6 @@ class CheckpointModelConfig:
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(self._checkpoint["model"]["module"])
-
-        # Restore fine_coords: new checkpoints have it stored directly; old
-        # checkpoints may have coords embedded in static_inputs fields.
-        model_state = self._checkpoint["model"]
-        if model_state.get("fine_coords") is not None:
-            fine_coords_state = model_state["fine_coords"]
-            model.fine_coords = LatLonCoordinates(
-                lat=fine_coords_state["lat"],
-                lon=fine_coords_state["lon"],
-            )
-        elif (
-            model_state.get("static_inputs") is not None
-            and len(model_state["static_inputs"].get("fields", [])) > 0
-            and "coords" in model_state["static_inputs"]["fields"][0]
-        ):
-            coords_state = model_state["static_inputs"]["fields"][0]["coords"]
-            model.fine_coords = LatLonCoordinates(
-                lat=coords_state["lat"],
-                lon=coords_state["lon"],
-            )
-        elif self.fine_coordinates_path is not None:
-            model.fine_coords = self._load_fine_coords_from_path(
-                self.fine_coordinates_path
-            )
-
         return model
 
     @property
