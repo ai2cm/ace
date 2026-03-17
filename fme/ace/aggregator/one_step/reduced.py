@@ -79,6 +79,7 @@ class MeanAggregator:
             try:
                 Distributed.get_instance().require_no_spatial_parallelism(
                     "gradient magnitude percent diff metric"
+                    " not supported for spatial parallelism."
                 )
                 self._variable_metrics["weighted_grad_mag_percent_diff"] = (
                     AreaWeightedReducedMetric(
