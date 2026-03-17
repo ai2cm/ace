@@ -98,6 +98,27 @@ def test_ClosedInterval_slice_of(interval, expected_slice):
     assert result_slice == expected_slice
 
 
+@pytest.mark.parametrize(
+    "interval,expected_values",
+    [
+        pytest.param(ClosedInterval(2, 4), torch.tensor([2, 3, 4]), id="middle"),
+        pytest.param(
+            ClosedInterval(float("-inf"), 2), torch.tensor([0, 1, 2]), id="start_inf"
+        ),
+        pytest.param(ClosedInterval(4, float("inf")), torch.tensor([4]), id="end_inf"),
+        pytest.param(
+            ClosedInterval(float("-inf"), float("inf")),
+            torch.arange(5),
+            id="all_inf",
+        ),
+    ],
+)
+def test_ClosedInterval_subset_of(interval, expected_values):
+    coords = torch.arange(5)
+    result = interval.subset_of(coords)
+    assert torch.equal(result, expected_values)
+
+
 def test_ClosedInterval_fail_on_empty_slice():
     coords = torch.arange(5)
     with pytest.raises(ValueError):

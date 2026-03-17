@@ -63,6 +63,14 @@ class ClosedInterval:
         indices = mask.nonzero(as_tuple=True)[0]
         return slice(indices[0].item(), indices[-1].item() + 1)
 
+    def subset_of(self, coords: torch.Tensor) -> torch.Tensor:
+        """
+        Return a subset of `coords` that falls within this specified interval.
+        This assumes `coords` is monotonically increasing.
+        """
+        slice = self.slice_of(coords)
+        return coords[slice]
+
 
 def scale_slice(slice_: slice, scale: int) -> slice:
     if slice_ == slice(None):

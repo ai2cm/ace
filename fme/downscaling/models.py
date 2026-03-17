@@ -353,6 +353,8 @@ class DiffusionModel:
                 "Static inputs must be provided for each batch when use of fine "
                 "static inputs is enabled."
             )
+        # Fine coords and static inputs are expected to be on the same grid
+        # as fine_coords so use the model's fine coords to subset StaticInputs
         lat_slice = lat_interval.slice_of(self.fine_coords.lat)
         lon_slice = lon_interval.slice_of(self.fine_coords.lon)
         return self.static_inputs.subset(lat_slice, lon_slice)
@@ -374,8 +376,8 @@ class DiffusionModel:
             downscale_factor=self.downscale_factor,
         )
         return LatLonCoordinates(
-            lat=self.fine_coords.lat[fine_lat_interval.slice_of(self.fine_coords.lat)],
-            lon=self.fine_coords.lon[fine_lon_interval.slice_of(self.fine_coords.lon)],
+            lat=fine_lat_interval.subset_of(self.fine_coords.lat),
+            lon=fine_lon_interval.subset_of(self.fine_coords.lon),
         )
 
     @property

@@ -138,11 +138,13 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
                 f"expected lon_min < {self.lon_interval.start + 360.0}"
             )
 
+        # Used to subset the data in __getitem__
         self._lats_slice = self.lat_interval.slice_of(self._orig_coords.lat)
         self._lons_slice = self.lon_interval.slice_of(self._orig_coords.lon)
+
         self._latlon_coordinates = LatLonCoordinates(
-            lat=self._orig_coords.lat[self._lats_slice],
-            lon=self._orig_coords.lon[self._lons_slice],
+            lat=self.lat_interval.subset_of(self._orig_coords.lat),
+            lon=self.lon_interval.subset_of(self._orig_coords.lon),
         )
         self._area_weights = self._latlon_coordinates.area_weights
 

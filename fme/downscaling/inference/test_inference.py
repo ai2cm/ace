@@ -32,6 +32,7 @@ from fme.downscaling.models import (
     LossConfig,
     NormalizationConfig,
     PairedNormalizationConfig,
+    load_fine_coords_from_path,
 )
 from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.test_evaluator import LinearDownscalingDiffusion
@@ -276,11 +277,7 @@ def checkpointed_model_config(
     # that correspond to the dataset coordinates
     fine_data_path = f"{data_paths.fine}/data.nc"
     static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
-    ds = xr.open_dataset(fine_data_path)
-    fine_coords = LatLonCoordinates(
-        lat=torch.tensor(ds["lat"].values, dtype=torch.float32),
-        lon=torch.tensor(ds["lon"].values, dtype=torch.float32),
-    )
+    fine_coords = load_fine_coords_from_path(fine_data_path)
     model = model_config.build(
         coarse_shape, 2, static_inputs=static_inputs, fine_coords=fine_coords
     )
