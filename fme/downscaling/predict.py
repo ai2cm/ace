@@ -9,7 +9,6 @@ import xarray as xr
 import yaml
 
 from fme.core.cli import prepare_directory
-from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -119,10 +118,7 @@ class EventDownscaler:
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
         batch = next(iter(self.data.get_generator()))
-        coarse_coords = LatLonCoordinates(
-            lat=batch[0].latlon_coordinates.lat,
-            lon=batch[0].latlon_coordinates.lon,
-        )
+        coarse_coords = batch[0].latlon_coordinates
         fine_coords = self.model.get_fine_coords_for_batch(batch)
         sample_agg = SampleAggregator(
             coarse=batch[0].data,
