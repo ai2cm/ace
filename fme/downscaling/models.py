@@ -680,6 +680,26 @@ class _CheckpointModelConfigSelector:
         ).wrapper
 
 
+def load_fine_coords_from_path(path: str) -> LatLonCoordinates:
+    if path.endswith(".zarr"):
+        ds = xr.open_zarr(path)
+    else:
+        ds = xr.open_dataset(path)
+    lat_name = next((n for n in ["lat", "latitude", "grid_yt"] if n in ds.coords), None)
+    lon_name = next(
+        (n for n in ["lon", "longitude", "grid_xt"] if n in ds.coords), None
+    )
+    if lat_name is None or lon_name is None:
+        raise ValueError(
+            f"Could not find lat/lon coordinates in {path}. "
+            "Expected 'lat'/'latitude'/'grid_yt' and 'lon'/'longitude'/'grid_xt'."
+        )
+    return LatLonCoordinates(
+        lat=torch.tensor(ds[lat_name].values, dtype=torch.float32),
+        lon=torch.tensor(ds[lon_name].values, dtype=torch.float32),
+    )
+
+
 @dataclasses.dataclass
 class CheckpointModelConfig:
     """
@@ -747,27 +767,6 @@ class CheckpointModelConfig:
                     checkpoint_data["model"]["config"][k] = v
         return self._checkpoint_data
 
-    def _load_fine_coords_from_path(self, path: str) -> LatLonCoordinates:
-        if path.endswith(".zarr"):
-            ds = xr.open_zarr(path)
-        else:
-            ds = xr.open_dataset(path)
-        lat_name = next(
-            (n for n in ["lat", "latitude", "grid_yt"] if n in ds.coords), None
-        )
-        lon_name = next(
-            (n for n in ["lon", "longitude", "grid_xt"] if n in ds.coords), None
-        )
-        if lat_name is None or lon_name is None:
-            raise ValueError(
-                f"Could not find lat/lon coordinates in {path}. "
-                "Expected 'lat'/'latitude'/'grid_yt' and 'lon'/'longitude'/'grid_xt'."
-            )
-        return LatLonCoordinates(
-            lat=torch.tensor(ds[lat_name].values, dtype=torch.float32),
-            lon=torch.tensor(ds[lon_name].values, dtype=torch.float32),
-        )
-
     def build(
         self,
     ) -> DiffusionModel:
@@ -818,7 +817,7 @@ class CheckpointModelConfig:
                 lon=coords_state["lon"],
             )
         elif self.fine_coordinates_path is not None:
-            fine_coords = self._load_fine_coords_from_path(self.fine_coordinates_path)
+            fine_coords = load_fine_coords_from_path(self.fine_coordinates_path)
         else:
             raise ValueError(
                 "No fine coordinates found in checkpoint state and no static inputs "

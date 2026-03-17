@@ -2,16 +2,18 @@ import os
 
 import pytest
 import torch
-import xarray as xr
 import yaml
 
-from fme.core.coordinates import LatLonCoordinates
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
 from fme.downscaling.data import load_static_inputs
-from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
+from fme.downscaling.models import (
+    DiffusionModelConfig,
+    PairedNormalizationConfig,
+    load_fine_coords_from_path,
+)
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
 from fme.downscaling.test_utils import data_paths_helper
@@ -63,18 +65,6 @@ def get_model_config(
         num_diffusion_generation_steps=2,
         predict_residual=True,
         use_fine_topography=use_fine_topography,
-    )
-
-
-def load_fine_coords_from_path(path: str) -> LatLonCoordinates:
-    """Load lat/lon coordinates from a netCDF or zarr data file."""
-    if path.endswith(".zarr"):
-        ds = xr.open_zarr(path)
-    else:
-        ds = xr.open_dataset(path)
-    return LatLonCoordinates(
-        lat=torch.tensor(ds["lat"].values, dtype=torch.float32),
-        lon=torch.tensor(ds["lon"].values, dtype=torch.float32),
     )
 
 
