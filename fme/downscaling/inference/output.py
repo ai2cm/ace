@@ -28,6 +28,13 @@ from .work_items import SliceItemDataset, SliceWorkItemGriddedData, get_work_ite
 from .zarr_utils import determine_zarr_chunks
 
 
+@dataclass
+class WriterParams:
+    chunks: dict[str, int]
+    shards: dict[str, int]
+    coords: dict[str, np.ndarray]
+
+
 def _identity_collate(batch):
     """
     Collate function that returns the single batch item.
@@ -66,8 +73,8 @@ class DownscalingOutput:
         max_samples_per_gpu: int,
         data: SliceWorkItemGriddedData,
         patch: PatchPredictionConfig,
-        chunks: dict[str, int],
-        shards: dict[str, int],
+        zarr_chunks_override: dict[str, int] | None,
+        zarr_shards_override: dict[str, int] | None,
         dims: tuple[str, ...] = DIMS,
     ) -> None:
         self.name = name
@@ -76,9 +83,33 @@ class DownscalingOutput:
         self.max_samples_per_gpu = max_samples_per_gpu
         self.data = data
         self.patch = patch
-        self.chunks = chunks
-        self.shards = shards
+        self.zarr_chunks_override = zarr_chunks_override
+        self.zarr_shards_override = zarr_shards_override
         self.dims = dims
+
+    def _build_writer_params(self, latlon_coords: LatLonCoordinates) -> WriterParams:
+        lat_size = len(latlon_coords.lat)
+        lon_size = len(latlon_coords.lon)
+        n_times, n_ens = self.data.max_output_shape
+        full_shape = (n_times, n_ens, lat_size, lon_size)
+        element_size = torch.tensor([], dtype=self.data.dtype).element_size()
+        chunks = self.zarr_chunks_override or determine_zarr_chunks(
+            DIMS, full_shape, element_size
+        )
+        shards = self.zarr_shards_override or dict(zip(DIMS, full_shape))
+        ensemble = list(range(self.n_ens))
+        coords = dict(
+            zip(
+                self.dims,
+                [
+                    self.data.all_times.to_numpy(),
+                    np.array(ensemble),
+                    latlon_coords.lat.cpu().numpy(),
+                    latlon_coords.lon.cpu().numpy(),
+                ],
+            )
+        )
+        return WriterParams(chunks=chunks, shards=shards, coords=coords)
 
     def get_writer(
         self,
@@ -92,27 +123,15 @@ class DownscalingOutput:
             latlon_coords: High-resolution spatial coordinates for outputs
             output_dir: Directory to store output zarr file
         """
-        ensemble = list(range(self.n_ens))
-        coords = dict(
-            zip(
-                self.dims,
-                [
-                    self.data.all_times.to_numpy(),
-                    np.array(ensemble),
-                    latlon_coords.lat.cpu().numpy(),
-                    latlon_coords.lon.cpu().numpy(),
-                ],
-            )
-        )
-        dims = tuple(coords.keys())
-
+        params = self._build_writer_params(latlon_coords)
+        dims = tuple(params.coords.keys())
         return ZarrWriter(
             path=f"{output_dir}/{self.name}.zarr",
             dims=dims,
-            coords=coords,
+            coords=params.coords,
             data_vars=self.save_vars,
-            chunks=self.chunks,
-            shards=self.shards,
+            chunks=params.chunks,
+            shards=params.shards,
         )
 
 
@@ -152,7 +171,6 @@ class DownscalingOutputConfig(ABC):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
-        fine_shape: tuple[int, int],
     ) -> DownscalingOutput:
         """
         Build an OutputTarget from this configuration.
@@ -161,8 +179,6 @@ class DownscalingOutputConfig(ABC):
             loader_config: Base data loader configuration to modify
             requirements: Model's data requirements (variable names, etc.)
             patch: Default patch prediction configuration
-            fine_shape: Fine shape of the output used as metadata
-                for the shape of the output to insert into the dataset
         """
         pass
 
@@ -220,7 +236,6 @@ class DownscalingOutputConfig(ABC):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         dist: Distributed | None = None,
-        fine_shape: tuple[int, int] | None = None,
     ) -> SliceWorkItemGriddedData:
         xr_dataset, properties = loader_config.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
@@ -241,7 +256,6 @@ class DownscalingOutputConfig(ABC):
         slice_dataset = SliceItemDataset(
             slice_items=work_items,
             dataset=dataset,
-            spatial_shape=fine_shape,
         )
 
         # each SliceItemDataset work item loads its own full batch, so batch_size=1
@@ -279,7 +293,6 @@ class DownscalingOutputConfig(ABC):
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
         coarse: list[XarrayDataConfig],
-        fine_shape: tuple[int, int] | None = None,
     ) -> DownscalingOutput:
         updated_loader_config = self._replace_loader_config(
             time,
@@ -289,27 +302,7 @@ class DownscalingOutputConfig(ABC):
             loader_config,
         )
 
-        gridded_data = self._build_gridded_data(
-            updated_loader_config,
-            requirements,
-            fine_shape=fine_shape,
-        )
-
-        if self.zarr_chunks is None:
-            # Get element size from dtype by creating a dummy tensor
-            element_size = torch.tensor([], dtype=gridded_data.dtype).element_size()
-            chunks = determine_zarr_chunks(
-                dims=DIMS,
-                data_shape=gridded_data.max_output_shape,
-                bytes_per_element=element_size,
-            )
-        else:
-            chunks = self.zarr_chunks
-
-        if self.zarr_shards is None:
-            shards = dict(zip(DIMS, gridded_data.max_output_shape))
-        else:
-            shards = self.zarr_shards
+        gridded_data = self._build_gridded_data(updated_loader_config, requirements)
 
         return DownscalingOutput(
             name=self.name,
@@ -318,8 +311,8 @@ class DownscalingOutputConfig(ABC):
             max_samples_per_gpu=self.max_samples_per_gpu,
             data=gridded_data,
             patch=patch,
-            chunks=chunks,
-            shards=shards,
+            zarr_chunks_override=self.zarr_chunks,
+            zarr_shards_override=self.zarr_shards,
             dims=DIMS,
         )
 
@@ -379,7 +372,6 @@ class EventConfig(DownscalingOutputConfig):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
-        fine_shape: tuple[int, int] | None = None,
     ) -> DownscalingOutput:
         # Convert single time to TimeSlice
         time: Slice | TimeSlice
@@ -402,7 +394,6 @@ class EventConfig(DownscalingOutputConfig):
             requirements=requirements,
             patch=patch,
             coarse=coarse,
-            fine_shape=fine_shape,
         )
 
 
@@ -462,7 +453,6 @@ class TimeRangeConfig(DownscalingOutputConfig):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
-        fine_shape: tuple[int, int] | None = None,
     ) -> DownscalingOutput:
         coarse = self._single_xarray_config(loader_config.coarse)
         return self._build(
@@ -473,5 +463,4 @@ class TimeRangeConfig(DownscalingOutputConfig):
             requirements=requirements,
             patch=patch,
             coarse=coarse,
-            fine_shape=fine_shape,
         )

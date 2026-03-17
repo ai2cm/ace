@@ -240,7 +240,6 @@ class InferenceConfig:
                 loader_config=self.data,
                 requirements=self.model.data_requirements,
                 patch=self.patch,
-                fine_shape=model.fine_shape,
             )
             for output_cfg in self.outputs
         ]

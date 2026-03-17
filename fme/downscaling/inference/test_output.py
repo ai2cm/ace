@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+import torch
 
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
@@ -10,9 +12,58 @@ from fme.downscaling.inference.output import (
     DownscalingOutputConfig,
     EventConfig,
     TimeRangeConfig,
+    WriterParams,
 )
 from fme.downscaling.predictors import PatchPredictionConfig
 from fme.downscaling.requirements import DataRequirements
+
+
+def _make_downscaling_output(zarr_chunks_override=None, zarr_shards_override=None):
+    mock_data = MagicMock()
+    mock_data.max_output_shape = (2, 4)
+    mock_data.dtype = torch.float32
+    mock_data.all_times.to_numpy.return_value = np.zeros(2)
+    return DownscalingOutput(
+        name="test",
+        save_vars=None,
+        n_ens=4,
+        max_samples_per_gpu=4,
+        data=mock_data,
+        patch=MagicMock(),
+        zarr_chunks_override=zarr_chunks_override,
+        zarr_shards_override=zarr_shards_override,
+    )
+
+
+def _make_latlon(lat_size=10, lon_size=20):
+    latlon = MagicMock()
+    latlon.lat = torch.zeros(lat_size)
+    latlon.lon = torch.zeros(lon_size)
+    return latlon
+
+
+def test_build_writer_params_default_chunks_and_shards():
+    output = _make_downscaling_output()
+    latlon = _make_latlon(lat_size=10, lon_size=20)
+    params = output._build_writer_params(latlon)
+    assert isinstance(params, WriterParams)
+    assert params.shards == {"time": 2, "ensemble": 4, "latitude": 10, "longitude": 20}
+    assert params.chunks["time"] == 1
+    assert params.chunks["ensemble"] == 1
+
+
+def test_build_writer_params_override_chunks_and_shards():
+    zarr_chunks_override = {"time": 5, "ensemble": 5, "latitude": 5, "longitude": 5}
+    zarr_shards_override = {"time": 10, "ensemble": 10, "latitude": 10, "longitude": 10}
+    output = _make_downscaling_output(
+        zarr_chunks_override=zarr_chunks_override,
+        zarr_shards_override=zarr_shards_override,
+    )
+    latlon = _make_latlon(lat_size=10, lon_size=20)
+    params = output._build_writer_params(latlon)
+    assert params.chunks == zarr_chunks_override
+    assert params.shards == zarr_shards_override
+
 
 # Tests for OutputTargetConfig validation
 
@@ -112,10 +163,6 @@ def test_event_config_build_creates_output_target_with_single_time(
     # Verify time dimension - should have exactly 1 timestep
     assert len(output_target.data.all_times) == 1
     assert output_target.data is not None
-    assert output_target.chunks is not None
-    assert tuple(output_target.chunks.values())[:2] == (1, 1)
-    assert output_target.shards is not None
-    assert tuple(output_target.shards.values()) == output_target.data.max_output_shape
 
 
 @pytest.mark.parametrize("loader_config", [True], indirect=True)
@@ -137,12 +184,7 @@ def test_region_config_build_creates_output_target_with_time_range(
     assert output_target.n_ens == 4
     assert len(output_target.data.all_times) == 2
 
-    # Verify chunks dict structure
     assert output_target.data is not None
-    assert output_target.chunks is not None
-    assert tuple(output_target.chunks.values())[:2] == (1, 1)
-    assert output_target.shards is not None
-    assert tuple(output_target.shards.values()) == output_target.data.max_output_shape
 
 
 def test_time_range_config_raise_error_invalid_lat_extent():

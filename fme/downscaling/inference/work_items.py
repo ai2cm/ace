@@ -110,17 +110,10 @@ class SliceItemDataset:
         self,
         slice_items: list[SliceWorkItem],
         dataset: BatchItemDatasetAdapter,
-        spatial_shape: tuple[int, int] | None = None,
     ) -> None:
         self.slice_items = slice_items
         self.dataset = dataset
         self._dtype = None
-
-        if spatial_shape is None:
-            sample_batch_item = self.dataset[0]
-            self.spatial_shape = sample_batch_item.horizontal_shape
-        else:
-            self.spatial_shape = spatial_shape
 
     def __len__(self) -> int:
         return len(self.slice_items)
@@ -133,11 +126,11 @@ class SliceItemDataset:
         return loaded_item
 
     @property
-    def max_output_shape(self):
+    def max_output_shape(self) -> tuple[int, int]:
         first_item = self.slice_items[0]
         n_times = first_item.time_slice.stop - first_item.time_slice.start
         n_ensembles = first_item.ens_slice.stop - first_item.ens_slice.start
-        return (n_times, n_ensembles, *self.spatial_shape)
+        return (n_times, n_ensembles)
 
     @property
     def dtype(self) -> torch.dtype:
@@ -296,7 +289,7 @@ class SliceWorkItemGriddedData:
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
     dtype: torch.dtype
-    max_output_shape: tuple[int, ...]
+    max_output_shape: tuple[int, int]
 
     # TODO: currently no protocol or ABC for gridded data objects
     #       if we want to unify, we will need one and just raise
