@@ -166,8 +166,8 @@ def test_module_serialization(tmp_path):
         )
     )
     assert model_from_state.fine_coords is not None
-    assert torch.equal(model_from_state.fine_coords.lat, fine_coords.lat)
-    assert torch.equal(model_from_state.fine_coords.lon, fine_coords.lon)
+    assert torch.equal(model_from_state.fine_coords.lat.cpu(), fine_coords.lat.cpu())
+    assert torch.equal(model_from_state.fine_coords.lon.cpu(), fine_coords.lon.cpu())
 
     torch.save(model.get_state(), tmp_path / "test.ckpt")
     model_from_disk = DiffusionModel.from_state(
@@ -185,8 +185,8 @@ def test_module_serialization(tmp_path):
         loaded_static_inputs.fields[0].data, static_inputs.fields[0].data
     )
     assert model_from_disk.fine_coords is not None
-    assert torch.equal(model_from_disk.fine_coords.lat, fine_coords.lat)
-    assert torch.equal(model_from_disk.fine_coords.lon, fine_coords.lon)
+    assert torch.equal(model_from_disk.fine_coords.lat.cpu(), fine_coords.lat.cpu())
+    assert torch.equal(model_from_disk.fine_coords.lon.cpu(), fine_coords.lon.cpu())
 
 
 def test_from_state_backward_compat_fine_topography():
@@ -212,7 +212,9 @@ def test_from_state_backward_compat_fine_topography():
     # Should load correctly via the elif use_fine_topography branch (+1 channel)
     model_from_old_state = DiffusionModel.from_state(state)
     assert model_from_old_state.static_inputs is None
-    assert torch.equal(model_from_old_state.fine_coords.lat, fine_coords.lat)
+    assert torch.equal(
+        model_from_old_state.fine_coords.lat.cpu(), fine_coords.lat.cpu()
+    )
     assert all(
         torch.equal(p1, p2)
         for p1, p2 in zip(
@@ -249,8 +251,12 @@ def test_from_state_backward_compat_migrates_fine_coords_from_old_static_inputs(
 
     model_from_old_state = DiffusionModel.from_state(state)
     assert model_from_old_state.fine_coords is not None
-    assert torch.equal(model_from_old_state.fine_coords.lat, fine_coords.lat)
-    assert torch.equal(model_from_old_state.fine_coords.lon, fine_coords.lon)
+    assert torch.equal(
+        model_from_old_state.fine_coords.lat.cpu(), fine_coords.lat.cpu()
+    )
+    assert torch.equal(
+        model_from_old_state.fine_coords.lon.cpu(), fine_coords.lon.cpu()
+    )
 
 
 def _get_diffusion_model(
@@ -619,28 +625,10 @@ def test_get_fine_coords_for_batch():
 
     result = model.get_fine_coords_for_batch(batch)
 
-    expected_lat = model.static_inputs.coords.lat[4:12]
-    expected_lon = model.static_inputs.coords.lon[8:24]
-    # model.static_inputs has been moved to device; index into it directly
-    # to match devices
+    expected_lat = model.fine_coords.lat[4:12]
+    expected_lon = model.fine_coords.lon[8:24]
     assert torch.allclose(result.lat, expected_lat)
     assert torch.allclose(result.lon, expected_lon)
-
-
-def test_get_fine_coords_for_batch_raises_without_static_inputs():
-    model = _get_diffusion_model(
-        coarse_shape=(16, 16),
-        downscale_factor=2,
-        use_fine_topography=False,
-        static_inputs=None,
-    )
-    batch = make_batch_data(
-        (1, 16, 16),
-        _get_monotonic_coordinate(16, stop=16).tolist(),
-        _get_monotonic_coordinate(16, stop=16).tolist(),
-    )
-    with pytest.raises(ValueError, match="missing static inputs"):
-        model.get_fine_coords_for_batch(batch)
 
 
 def test_checkpoint_config_topography_raises():

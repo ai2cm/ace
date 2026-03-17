@@ -123,7 +123,7 @@ class StaticInputs:
 
 def load_static_inputs(
     static_inputs_config: dict[str, str] | None,
-) -> "StaticInputs | None":
+) -> StaticInputs | None:
     """
     Load normalized static inputs from a mapping of field names to file paths.
     Returns None if the input config is empty.
