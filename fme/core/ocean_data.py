@@ -1,14 +1,14 @@
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Protocol
 
 import torch
 
 from fme.core.constants import (
-    DENSITY_OF_WATER_CM4,
+    DENSITY_OF_SEA_WATER_CM4,
     REFERENCE_SALINITY_PSU,
-    SPECIFIC_HEAT_OF_WATER_CM4,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -36,24 +36,10 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 
 
 class HasOceanDepthIntegral(Protocol):
-    def __len__(self) -> int: ...
-
-    def get_mask(self) -> torch.Tensor: ...
-
-    def get_mask_level(self, level: int) -> torch.Tensor: ...
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None: ...
-
-    def get_idepth(self) -> torch.Tensor: ...
-
     def depth_integral(
         self,
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
-
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
-
-    def to(self, device: str) -> "HasOceanDepthIntegral": ...
 
 
 class HasCellAreaInMetersSquared(Protocol):
@@ -163,8 +149,8 @@ class OceanData:
             )
         return self._depth_coordinate.depth_integral(
             self.sea_water_potential_temperature
-            * SPECIFIC_HEAT_OF_WATER_CM4
-            * DENSITY_OF_WATER_CM4
+            * SPECIFIC_HEAT_OF_SEA_WATER_CM4
+            * DENSITY_OF_SEA_WATER_CM4
         )
 
     @property
@@ -176,7 +162,7 @@ class OceanData:
                 "ocean salt content."
             )
         return self._depth_coordinate.depth_integral(
-            self.sea_water_salinity * DENSITY_OF_WATER_CM4
+            self.sea_water_salinity * DENSITY_OF_SEA_WATER_CM4
         )
 
     @property

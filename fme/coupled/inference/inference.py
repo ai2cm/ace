@@ -154,7 +154,6 @@ class InferenceConfig:
 
     def get_data_writer(
         self,
-        n_initial_conditions: int,
         data: InferenceGriddedData,
     ) -> CoupledPairedDataWriter:
         if self.data_writer.ocean.time_coarsen is not None:
@@ -186,7 +185,7 @@ class InferenceConfig:
         }
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,
             n_timesteps_atmosphere=self.n_coupled_steps * data.n_inner_steps,
             ocean_timestep=data.ocean_timestep,
@@ -260,10 +259,8 @@ def run_inference_from_config(config: InferenceConfig):
         output_dir=config.experiment_dir,
     )
 
-    writer = config.get_data_writer(
-        n_initial_conditions=data.n_initial_conditions, data=data
-    )
-    timer.stop()
+    writer = config.get_data_writer(data=data)
+    timer.stop("initialization")
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")
     run_inference(
@@ -279,14 +276,14 @@ def run_inference_from_config(config: InferenceConfig):
     writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
-    timer.stop()
+    timer.stop("final_writer_flush")
 
     timer.stop_outer("inference")
     total_steps = (
         config.n_coupled_steps * stepper.n_inner_steps
     ) * data.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(

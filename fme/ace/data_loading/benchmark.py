@@ -15,6 +15,7 @@ import yaml
 
 from fme.core import logging_utils
 from fme.core.dicts import to_flat_dict
+from fme.core.distributed.distributed import Distributed
 from fme.core.timing import GlobalTimer
 from fme.core.wandb import WandB
 
@@ -79,7 +80,7 @@ def benchmark(config: BenchmarkConfig):
         timer.start("data_loading")
         seconds_per_batch = time.time()
         for i, batch in enumerate(loader):
-            timer.stop()
+            timer.stop("data_loading")
             if i % 10 == 0:
                 logging.info(f"Loaded batch {i}")
             with timer.context("sleeping"):
@@ -88,7 +89,7 @@ def benchmark(config: BenchmarkConfig):
             wandb.log({"seconds_per_batch": seconds_per_batch}, step=i)
             seconds_per_batch = time.time()
             timer.start("data_loading")
-        timer.stop()
+        timer.stop("data_loading")
         logging.info(f"Finished loading {len(loader)} batches.")
         total_time = timer.get_duration("data_loading") + timer.get_duration("sleeping")
         actual_throughput = (bytes_per_batch * len(loader)) / total_time
@@ -122,4 +123,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with Distributed.context():
+        main()

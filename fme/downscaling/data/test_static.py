@@ -4,7 +4,7 @@ import torch
 from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
 
-from .topography import StaticInput, StaticInputs, _range_to_slice
+from .static import StaticInput, StaticInputs
 from .utils import ClosedInterval
 
 
@@ -27,13 +27,6 @@ from .utils import ClosedInterval
 def test_Topography_error_cases(init_args):
     with pytest.raises(ValueError):
         StaticInput(*init_args)
-
-
-def test__range_to_slice():
-    x = torch.arange(5)
-    assert torch.equal(
-        x[_range_to_slice(x, ClosedInterval(2, 4))], torch.tensor([2, 3, 4])
-    )
 
 
 def test_subset_latlon():
@@ -135,7 +128,7 @@ def test_StaticInputs_serialize():
         LatLonCoordinates(torch.arange(4), torch.arange(4)),
     )
     static_inputs = StaticInputs([topography, land_frac])
-    state = static_inputs.to_state()
+    state = static_inputs.get_state()
     static_inputs_reconstructed = StaticInputs.from_state(state)
     assert static_inputs_reconstructed[0].data.equal(static_inputs[0].data)
     assert static_inputs_reconstructed[1].data.equal(static_inputs[1].data)

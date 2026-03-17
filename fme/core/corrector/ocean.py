@@ -6,7 +6,13 @@ from typing import Any, Literal, Protocol
 import dacite
 import torch
 
-from fme.core.constants import FREEZING_TEMPERATURE_KELVIN, REFERENCE_SALINITY_PSU
+from fme.core.atmosphere_data import AtmosphereData
+from fme.core.constants import (
+    FREEZING_TEMPERATURE_KELVIN,
+    LATENT_HEAT_OF_VAPORIZATION,
+    REFERENCE_SALINITY_PSU,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
+)
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
@@ -80,6 +86,30 @@ class OceanHeatContentBudgetConfig:
 
 
 @dataclasses.dataclass
+class SurfaceEnergyFluxCorrectionConfig:
+    """Configuration for correcting the generated hfds using
+    atmosphere-derived surface energy fluxes and ocean_fraction.
+
+    The net_flux is the net surface energy flux computed from atmospheric
+    forcing variables and generated SST. The ocean_fraction naturally zeroes
+    out the correction on land and reduces it under sea ice.
+
+    Available options are:
+      - "residual_prediction": corrected_hfds = gen_hfds + ocean_fraction * net_flux.
+        The network predicts a residual that is added to the forcing-derived flux.
+      - "prescribed": corrected_hfds = net_flux * ocean_fraction + gen_hfds *
+        (1 - ocean_fraction). Open-ocean hfds is prescribed from forcings; the
+        network prediction is retained under sea ice and on land.
+
+    Parameters:
+        method: Method to use for the correction.
+
+    """
+
+    method: Literal["residual_prediction", "prescribed"]
+
+
+@dataclasses.dataclass
 class OceanSaltContentBudgetConfig:
     """Configuration for ocean salt content budget correction.
 
@@ -103,6 +133,7 @@ class OceanSaltContentBudgetConfig:
 class OceanCorrectorConfig:
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
+    surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
     ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
 
@@ -177,6 +208,13 @@ class OceanCorrector(CorrectorABC):
                 self._config.ocean_salt_content_correction.method,
                 self._config.ocean_salt_content_correction.constant_unaccounted_salt_flux,
             )
+        if self._config.surface_energy_flux_correction is not None:
+            gen_data = _correct_hfds(
+                input_data,
+                gen_data,
+                forcing_data,
+                method=self._config.surface_energy_flux_correction.method,
+            )
         if self._config.ocean_heat_content_correction is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
@@ -194,6 +232,71 @@ class OceanCorrector(CorrectorABC):
                 self._config.ocean_heat_content_correction.constant_unaccounted_heating,
             )
         return dict(gen_data)
+
+
+def _compute_ocean_net_surface_energy_flux(
+    forcing_data: TensorMapping,
+    sst: torch.Tensor,
+) -> torch.Tensor:
+    """Compute the net surface energy flux into the ocean from atmospheric
+    forcing variables and the sea surface temperature.
+
+    This extends the atmosphere net surface energy flux with SST-dependent
+    heat transport by precipitation and evaporation.
+    """
+    atmos = AtmosphereData(forcing_data)
+    base_flux = (
+        atmos.net_surface_energy_flux
+    )  # missing: - calving * LATENT_HEAT_OF_FREEZING
+    mass_heat_flux = (
+        SPECIFIC_HEAT_OF_SEA_WATER_CM4
+        * (
+            atmos.precipitation_rate
+            + atmos.frozen_precipitation_rate
+            - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
+        )  # missing: + river runoff + calving
+        * (sst - FREEZING_TEMPERATURE_KELVIN)
+    )
+    return base_flux + mass_heat_flux
+
+
+def _correct_hfds(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    forcing_data: TensorMapping,
+    method: Literal["residual_prediction", "prescribed"],
+) -> TensorDict:
+    """Apply surface energy flux correction to the generated hfds.
+
+    The ocean_fraction naturally zeroes the correction on land and reduces
+    it under sea ice.
+
+    Methods:
+        residual_prediction: gen_hfds + ocean_fraction * net_flux
+        prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
+    """
+    input = OceanData(input_data)
+    forcing = OceanData(forcing_data)
+    ocean_fraction = input.ocean_fraction
+    net_flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data, input.sea_surface_temperature
+    )
+    out = dict(gen_data)
+    if "hfds" in gen_data:
+        hfds_name = "hfds"
+    else:
+        hfds_name = "hfds_total_area"
+        net_flux = net_flux * forcing.sea_surface_fraction
+    gen_hfds = gen_data[hfds_name]
+    if method == "residual_prediction":
+        out[hfds_name] = net_flux * ocean_fraction + gen_hfds
+    elif method == "prescribed":
+        out[hfds_name] = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
+    else:
+        raise NotImplementedError(
+            f"Method {method!r} not implemented for surface energy flux correction"
+        )
+    return out
 
 
 class AreaWeightedMean(Protocol):

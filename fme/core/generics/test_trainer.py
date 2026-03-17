@@ -27,6 +27,8 @@ from fme.core.generics.trainer import (
     Trainer,
     TrainOutputABC,
     TrainStepperABC,
+    count_parameters,
+    epoch_checkpoint_enabled,
 )
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization
@@ -1184,3 +1186,28 @@ def test_ema_state_preserved_after_resume(tmp_path: str):
             resumed_ema_state["ema_params"][key],
             ema_state["ema_params"][key],
         )
+
+
+@pytest.mark.parametrize(
+    "module_list,expected_num_parameters",
+    [
+        (torch.nn.ModuleList([torch.nn.Linear(10, 5), torch.nn.Linear(5, 2)]), 67),
+        (torch.nn.ModuleList([]), 0),
+    ],
+)
+def test_count_parameters(module_list, expected_num_parameters):
+    num_parameters = count_parameters(module_list)
+    assert num_parameters == expected_num_parameters
+
+
+@pytest.mark.parametrize(
+    "checkpoint_save_epochs,expected_save_epochs",
+    [(None, []), (Slice(start=-2), [2, 3]), (Slice(step=2), [0, 2])],
+)
+def test_epoch_checkpoint_enabled(checkpoint_save_epochs, expected_save_epochs):
+    max_epochs = 4
+    for i in range(max_epochs):
+        if i in expected_save_epochs:
+            assert epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
+        else:
+            assert not epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
