@@ -409,8 +409,8 @@ def test_slice_item_dataset_max_output_shape(
     shape = dataset.max_output_shape
 
     # First item: time_slice=slice(0,2), ens_slice=slice(0,4)
-    # n_times = 2, n_ens = 4, spatial = (64, 64)
-    assert shape == (2, 4, 64, 64)
+    # n_times = 2, n_ens = 4
+    assert shape == (2, 4)
 
 
 def test_slice_item_dataset_dtype_property(

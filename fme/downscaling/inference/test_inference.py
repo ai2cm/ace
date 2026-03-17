@@ -44,7 +44,6 @@ def mock_model():
     """Create a mock model with coarse_shape attribute."""
     model = MagicMock()
     model.coarse_shape = (16, 16)
-    model.fine_shape = (32, 32)
     return model
 
 
