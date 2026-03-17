@@ -631,6 +631,43 @@ def test_get_fine_coords_for_batch():
     assert torch.allclose(result.lon, expected_lon)
 
 
+def test_checkpoint_model_build_with_fine_coordinates_path(tmp_path):
+    """Old-format checkpoint (no fine_coords key, no coords in static_inputs)
+    should load correctly when fine_coordinates_path is provided."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        use_fine_topography=False,
+        fine_coords=fine_coords,
+    )
+    # Simulate old checkpoint: no fine_coords stored
+    state = model.get_state()
+    del state["fine_coords"]
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": state}, checkpoint_path)
+
+    # Write fine coords to a netCDF file for the loader to read
+    coords_path = tmp_path / "fine_coords.nc"
+    ds = xr.Dataset(
+        coords={
+            "lat": fine_coords.lat.cpu().numpy(),
+            "lon": fine_coords.lon.cpu().numpy(),
+        }
+    )
+    ds.to_netcdf(coords_path)
+
+    loaded_model = CheckpointModelConfig(
+        checkpoint_path=str(checkpoint_path),
+        fine_coordinates_path=str(coords_path),
+    ).build()
+
+    assert torch.equal(loaded_model.fine_coords.lat.cpu(), fine_coords.lat.cpu())
+    assert torch.equal(loaded_model.fine_coords.lon.cpu(), fine_coords.lon.cpu())
+
+
 def test_checkpoint_config_topography_raises():
     with pytest.raises(ValueError):
         CheckpointModelConfig(
