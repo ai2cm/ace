@@ -92,7 +92,9 @@ def test_aggregator_logs_per_channel_loss():
     gridded_operations = LatLonOperations(
         area_weights=torch.ones(nx, ny, device=device)
     )
-    config = TrainAggregatorConfig(spherical_power_spectrum=False, weighted_rmse=False)
+    config = TrainAggregatorConfig(
+        spherical_power_spectrum=False, weighted_rmse=False, per_channel_loss=True
+    )
     agg = TrainAggregator(config=config, operations=gridded_operations)
     target_data = EnsembleTensorDict(
         {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=device)},
