@@ -346,8 +346,6 @@ class ComparedDynamicHistograms:
         n_bins: int,
         percentiles: list[float] | None = None,
         compute_percentile_frac: bool = False,
-        two_tailed_variables: list[str] | None = None,
-        left_tailed_variables: list[str] | None = None,
     ) -> None:
         self.n_bins = n_bins
         percentiles = [99.9999] if percentiles is None else percentiles
@@ -358,8 +356,6 @@ class ComparedDynamicHistograms:
         self._time_dim = -2
         self._variables: set[str] = set()
         self._compute_percentile_frac = compute_percentile_frac
-        self._two_tailed_variables = two_tailed_variables or []
-        self._left_tailed_variables = left_tailed_variables or []
 
     def _check_overlapping_keys(self, target: TensorMapping, prediction: TensorMapping):
         if not self._variables:
@@ -450,6 +446,99 @@ class ComparedDynamicHistograms:
         plt.tight_layout()
         return fig
 
+    def get_wandb(self) -> dict[str, float]:
+        return_dict: dict[str, matplotlib.figure.Figure | float] = {}
+
+        for field_name, histograms in self._get_histograms().items():
+            target = histograms.get("target")
+            prediction = histograms.get("prediction")
+            fig = self._plot_histogram(target, prediction)
+            return_dict[field_name] = fig
+            plt.close(fig)
+            if target is not None:
+                for p in self.percentiles:
+                    return_dict[f"target/{p}th-percentile/{field_name}"] = quantile(
+                        target.bin_edges, target.counts, p / 100.0
+                    )
+            if prediction is not None:
+                for p in self.percentiles:
+                    return_dict[f"prediction/{p}th-percentile/{field_name}"] = quantile(
+                        prediction.bin_edges, prediction.counts, p / 100.0
+                    )
+                    if self._compute_percentile_frac and target is not None:
+                        return_dict[
+                            f"prediction_frac_of_target/{p}th-percentile/{field_name}"
+                        ] = (
+                            return_dict[f"prediction/{p}th-percentile/{field_name}"]
+                            / return_dict[f"target/{p}th-percentile/{field_name}"]
+                        )
+
+                        abs_norm_tail_bias = _abs_norm_tail_bias(
+                            percentile=p,
+                            predict_counts=prediction.counts,
+                            target_counts=target.counts,
+                            predict_bin_edges=prediction.bin_edges,
+                            target_bin_edges=target.bin_edges,
+                        )
+                        return_dict[
+                            f"abs_norm_tail_bias_above_percentile/{p}/{field_name}"
+                        ] = abs_norm_tail_bias
+
+        return return_dict
+
+    def get_dataset(self) -> xr.Dataset:
+        if self.target_aggregator is None or self.prediction_aggregator is None:
+            raise ValueError("No data has been added to the histogram")
+        target_dataset = self.target_aggregator.get_dataset()
+        prediction_dataset = self.prediction_aggregator.get_dataset()
+        for missing_target_name in set(prediction_dataset.data_vars) - set(
+            target_dataset.data_vars
+        ):
+            if not missing_target_name.endswith("_bin_edges"):
+                target_dataset[missing_target_name] = xr.DataArray(
+                    np.zeros_like(prediction_dataset[missing_target_name]),
+                    dims=("bin",),
+                )
+                target_dataset[f"{missing_target_name}_bin_edges"] = prediction_dataset[
+                    f"{missing_target_name}_bin_edges"
+                ]
+        for missing_prediction_name in set(target_dataset.data_vars) - set(
+            prediction_dataset.data_vars
+        ):
+            if not missing_prediction_name.endswith("_bin_edges"):
+                prediction_dataset[missing_prediction_name] = xr.DataArray(
+                    np.zeros_like(target_dataset[missing_prediction_name]),
+                    dims=("bin",),
+                )
+                prediction_dataset[f"{missing_prediction_name}_bin_edges"] = (
+                    target_dataset[f"{missing_prediction_name}_bin_edges"]
+                )
+        ds = xr.concat([target_dataset, prediction_dataset], dim="source")
+        ds["source"] = ["target", "prediction"]
+        return ds
+
+
+class DynamicTailsHistogramAggregator(ComparedDynamicHistograms):
+    """ComparedDynamicHistograms with support for upper-tailed, lower-tailed,
+    and two-tailed distribution metrics.
+    """
+
+    def __init__(
+        self,
+        n_bins: int,
+        percentiles: list[float] | None = None,
+        compute_percentile_frac: bool = False,
+        two_tailed_variables: list[str] | None = None,
+        left_tailed_variables: list[str] | None = None,
+    ) -> None:
+        super().__init__(
+            n_bins=n_bins,
+            percentiles=percentiles,
+            compute_percentile_frac=compute_percentile_frac,
+        )
+        self._two_tailed_variables = two_tailed_variables or []
+        self._left_tailed_variables = left_tailed_variables or []
+
     def _variable_distribution_tail(
         self, field_name: str
     ) -> Literal["upper", "lower", "both"]:
@@ -498,84 +587,52 @@ class ComparedDynamicHistograms:
                             / return_dict[f"target/{p}th-percentile/{field_name}"]
                         )
 
-                        if (
-                            variable_distribution_tail == "upper"
-                            or variable_distribution_tail == "lower"
-                        ):
-                            abs_norm_tail_bias = _abs_norm_tail_bias(
+                    if target is not None and (
+                        variable_distribution_tail == "upper"
+                        or variable_distribution_tail == "lower"
+                    ):
+                        abs_norm_tail_bias = _abs_norm_tail_bias(
+                            percentile=p,
+                            predict_counts=prediction.counts,
+                            target_counts=target.counts,
+                            predict_bin_edges=prediction.bin_edges,
+                            target_bin_edges=target.bin_edges,
+                            tail=variable_distribution_tail,
+                        )
+                        direction = (
+                            "above"
+                            if variable_distribution_tail == "upper"
+                            else "below"
+                        )
+                        return_dict[
+                            f"abs_norm_tail_bias_{direction}_percentile/{p}/{field_name}"
+                        ] = abs_norm_tail_bias
+
+                    elif target is not None and variable_distribution_tail == "both":
+                        if p > 50.0:
+                            abs_norm_tail_bias_above = _abs_norm_tail_bias(
                                 percentile=p,
                                 predict_counts=prediction.counts,
                                 target_counts=target.counts,
                                 predict_bin_edges=prediction.bin_edges,
                                 target_bin_edges=target.bin_edges,
-                                tail=variable_distribution_tail,
+                                tail="upper",
                             )
-                            direction = (
-                                "above"
-                                if variable_distribution_tail == "upper"
-                                else "below"
+                            abs_norm_tail_bias_below = _abs_norm_tail_bias(
+                                percentile=1.0 - p,
+                                predict_counts=prediction.counts,
+                                target_counts=target.counts,
+                                predict_bin_edges=prediction.bin_edges,
+                                target_bin_edges=target.bin_edges,
+                                tail="lower",
                             )
                             return_dict[
-                                f"abs_norm_tail_bias_{direction}_percentile/{p}/{field_name}"
-                            ] = abs_norm_tail_bias
-
-                        elif variable_distribution_tail == "both":
-                            # average p and 1-p abs_norm_tail_bias
-                            if p > 50.0:
-                                abs_norm_tail_bias_above = _abs_norm_tail_bias(
-                                    percentile=p,
-                                    predict_counts=prediction.counts,
-                                    target_counts=target.counts,
-                                    predict_bin_edges=prediction.bin_edges,
-                                    target_bin_edges=target.bin_edges,
-                                    tail="upper",
-                                )
-                                abs_norm_tail_bias_below = _abs_norm_tail_bias(
-                                    percentile=1.0 - p,
-                                    predict_counts=prediction.counts,
-                                    target_counts=target.counts,
-                                    predict_bin_edges=prediction.bin_edges,
-                                    target_bin_edges=target.bin_edges,
-                                    tail="lower",
-                                )
-                                return_dict[
-                                    f"abs_norm_tail_bias_two_sided_beyond_percentile/{p}/{field_name}"
-                                ] = (
-                                    abs_norm_tail_bias_above + abs_norm_tail_bias_below
-                                ) / 2.0
+                                f"abs_norm_tail_bias_two_sided_beyond_percentile/{p}/{field_name}"
+                            ] = (
+                                abs_norm_tail_bias_above + abs_norm_tail_bias_below
+                            ) / 2.0
 
         return return_dict
-
-    def get_dataset(self) -> xr.Dataset:
-        if self.target_aggregator is None or self.prediction_aggregator is None:
-            raise ValueError("No data has been added to the histogram")
-        target_dataset = self.target_aggregator.get_dataset()
-        prediction_dataset = self.prediction_aggregator.get_dataset()
-        for missing_target_name in set(prediction_dataset.data_vars) - set(
-            target_dataset.data_vars
-        ):
-            if not missing_target_name.endswith("_bin_edges"):
-                target_dataset[missing_target_name] = xr.DataArray(
-                    np.zeros_like(prediction_dataset[missing_target_name]),
-                    dims=("bin",),
-                )
-                target_dataset[f"{missing_target_name}_bin_edges"] = prediction_dataset[
-                    f"{missing_target_name}_bin_edges"
-                ]
-        for missing_prediction_name in set(target_dataset.data_vars) - set(
-            prediction_dataset.data_vars
-        ):
-            if not missing_prediction_name.endswith("_bin_edges"):
-                prediction_dataset[missing_prediction_name] = xr.DataArray(
-                    np.zeros_like(target_dataset[missing_prediction_name]),
-                    dims=("bin",),
-                )
-                prediction_dataset[f"{missing_prediction_name}_bin_edges"] = (
-                    target_dataset[f"{missing_prediction_name}_bin_edges"]
-                )
-        ds = xr.concat([target_dataset, prediction_dataset], dim="source")
-        ds["source"] = ["target", "prediction"]
-        return ds
 
 
 def _normalize_histogram(counts, bin_edges):
