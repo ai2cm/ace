@@ -21,7 +21,6 @@ from fme.downscaling.data import (
     ClosedInterval,
     DataLoaderConfig,
     GriddedData,
-    adjust_fine_coord_range,
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
@@ -120,29 +119,11 @@ class EventDownscaler:
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
         batch = next(iter(self.data.get_generator()))
-        coarse_coords = batch[0].latlon_coordinates
-        coarse_lat = coarse_coords.lat
-        coarse_lon = coarse_coords.lon
-        lat_interval = ClosedInterval(coarse_lat.min().item(), coarse_lat.max().item())
-        lon_interval = ClosedInterval(coarse_lon.min().item(), coarse_lon.max().item())
-        fine_lat_interval = adjust_fine_coord_range(
-            lat_interval,
-            full_coarse_coord=coarse_lat,
-            full_fine_coord=self.model.fine_coords.lat,
-            downscale_factor=self.model.downscale_factor,
+        coarse_coords = LatLonCoordinates(
+            lat=batch[0].latlon_coordinates.lat,
+            lon=batch[0].latlon_coordinates.lon,
         )
-        fine_lon_interval = adjust_fine_coord_range(
-            lon_interval,
-            full_coarse_coord=coarse_lon,
-            full_fine_coord=self.model.fine_coords.lon,
-            downscale_factor=self.model.downscale_factor,
-        )
-        lat_slice = fine_lat_interval.slice_of(self.model.fine_coords.lat)
-        lon_slice = fine_lon_interval.slice_of(self.model.fine_coords.lon)
-        fine_coords = LatLonCoordinates(
-            lat=self.model.fine_coords.lat[lat_slice],
-            lon=self.model.fine_coords.lon[lon_slice],
-        )
+        fine_coords = self.model.get_fine_coords_for_batch(batch)
         sample_agg = SampleAggregator(
             coarse=batch[0].data,
             latlon_coordinates=FineResCoarseResPair(
