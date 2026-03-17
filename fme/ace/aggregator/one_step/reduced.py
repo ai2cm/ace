@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from typing import Literal
 
@@ -75,12 +76,21 @@ class MeanAggregator:
                 compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
             )
         if include_grad_mag_percent_diff:
-            self._variable_metrics["weighted_grad_mag_percent_diff"] = (
-                AreaWeightedReducedMetric(
-                    device=device,
-                    compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
+            try:
+                Distributed.get_instance().require_no_spatial_parallelism(
+                    "gradient magnitude percent diff metric"
                 )
-            )
+                self._variable_metrics["weighted_grad_mag_percent_diff"] = (
+                    AreaWeightedReducedMetric(
+                        device=device,
+                        compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
+                    )
+                )
+            except NotImplementedError:
+                logging.warning(
+                    "gradient magnitude percent diff aggregator not implemented "
+                    "for this grid type, omitting."
+                )
 
     @torch.no_grad()
     def record_batch(
