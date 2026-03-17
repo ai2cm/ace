@@ -118,7 +118,7 @@ class EventDownscaler:
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
         batch = next(iter(self.data.get_generator()))
-        coarse_coords = batch[0].latlon_coordinates
+        coarse_coords = batch.latlon_coordinates[0]
         fine_coords = self.model.get_fine_coords_for_batch(batch)
         sample_agg = SampleAggregator(
             coarse=batch[0].data,
