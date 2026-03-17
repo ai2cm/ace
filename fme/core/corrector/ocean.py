@@ -8,6 +8,7 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     REFERENCE_SALINITY_PSU,
@@ -115,16 +116,17 @@ class OceanSaltContentBudgetConfig:
 
     Parameters:
         method: Method to use for salt content budget correction. The available
-            option is "scaled_salinity", which enforces conservation of salt
-            content by scaling the predicted salinity by a vertically and
-            horizontally uniform correction factor.
+            option is "constant_salinity", which enforces conservation of salt
+            content by adding a uniform concentration correction (PSU) to each
+            ocean layer, computed by dividing the global salt deficit by the
+            local column mass (reference density times sea floor depth).
         constant_unaccounted_salt_flux: Area-weighted global mean
-            column-integrated salt flux in g/m**2/s to be added to the virtual
-            salt flux when conserving the salt content. This can be useful for
-            correcting errors in salt budget in target data.
+            column-integrated salt flux in g/m**2/s to be added to the surface
+            boundary flux when conserving the salt content. This can be useful
+            for correcting errors in salt budget in target data.
     """
 
-    method: Literal["scaled_salinity"]
+    method: Literal["constant_salinity"]
     constant_unaccounted_salt_flux: float = 0.0
 
 
@@ -388,10 +390,10 @@ def _force_conserve_ocean_salt_content(
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
-    method: Literal["scaled_salinity"] = "scaled_salinity",
+    method: Literal["constant_salinity"] = "constant_salinity",
     unaccounted_salt_flux: float = 0.0,
 ) -> TensorDict:
-    if method != "scaled_salinity":
+    if method != "constant_salinity":
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean salt content conservation"
         )
@@ -417,20 +419,27 @@ def _force_conserve_ocean_salt_content(
         wfo = gen.water_flux_into_sea_water
     except KeyError:
         wfo = input.water_flux_into_sea_water
+    try:
+        sfdsi = gen.downward_sea_ice_basal_salt_flux
+    except KeyError:
+        sfdsi = input.downward_sea_ice_basal_salt_flux
     virtual_salt_flux = -REFERENCE_SALINITY_PSU * wfo * forcing.sea_surface_fraction
+    total_surface_flux = virtual_salt_flux + 1000.0 * sfdsi
     salt_flux_global_mean = area_weighted_mean(
-        virtual_salt_flux,
+        total_surface_flux,
         keepdim=True,
         name="ocean_salt_content",
     )
-    expected_change_salt_content = (
-        salt_flux_global_mean + unaccounted_salt_flux
-    ) * timestep_seconds
-    salt_content_correction_ratio = (
-        global_input_salt_content + expected_change_salt_content
-    ) / global_gen_salt_content
+    salt_deficit = (
+        global_input_salt_content
+        + (salt_flux_global_mean + unaccounted_salt_flux) * timestep_seconds
+        - global_gen_salt_content
+    )
+    correction_psu = salt_deficit / (
+        DENSITY_OF_SEA_WATER_CM4 * vertical_coordinate.sea_floor_depth
+    )
     n_levels = gen.sea_water_salinity.shape[-1]
     for k in range(n_levels):
         name = f"so_{k}"
-        gen.data[name] = gen.data[name] * salt_content_correction_ratio
+        gen.data[name] = gen.data[name] + correction_psu
     return gen.data

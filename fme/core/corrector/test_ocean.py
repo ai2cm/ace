@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from fme import get_device
-from fme.core.constants import REFERENCE_SALINITY_PSU
+from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, REFERENCE_SALINITY_PSU
 from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrector,
@@ -30,6 +30,9 @@ _MASK[_LAT, _LON, :] = 0.0
 
 
 class _MockDepth:
+    def sea_floor_depth(self) -> torch.Tensor:
+        return torch.full_like(_MASK, 15)
+
     def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
         idepth = torch.tensor([0, 5, 15], device=DEVICE)
         thickness = idepth.diff(dim=-1)
@@ -414,7 +417,7 @@ def test_ocean_salt_content_correction(wfo_type):
     unaccounted_salt_flux = 0.1
     config = OceanCorrectorConfig(
         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity",
+            method="constant_salinity",
             constant_unaccounted_salt_flux=unaccounted_salt_flux,
         )
     )
@@ -438,6 +441,7 @@ def test_ocean_salt_content_correction(wfo_type):
     sea_surface_fraction = mask[:, :, :, 0]
 
     wfo_value = torch.ones(nsamples, nlat, nlon) * 0.5
+    sfdsi_value = torch.ones(nsamples, nlat, nlon) * 0.001
 
     input_data_dict = {
         "so_0": torch.ones(nsamples, nlat, nlon),
@@ -446,6 +450,7 @@ def test_ocean_salt_content_correction(wfo_type):
     gen_data_dict = {
         "so_0": torch.ones(nsamples, nlat, nlon) * 2,
         "so_1": torch.ones(nsamples, nlat, nlon) * 2,
+        "sfdsi": sfdsi_value,
     }
     if wfo_type == "gen":
         gen_data_dict["wfo"] = wfo_value
@@ -465,16 +470,18 @@ def test_ocean_salt_content_correction(wfo_type):
     gen_osc = gen_data.ocean_salt_content.nanmean(dim=(-1, -2), keepdim=True)
     torch.testing.assert_close(gen_osc, input_osc * 2, equal_nan=True)
 
-    # -reference_salinity * wfo at all non-masked points, plus unaccounted flux;
-    # masked points are excluded by the area_weighted_mean so the raw wfo value
-    # (0.5 everywhere) directly determines the mean.
-    osc_change = (
-        -REFERENCE_SALINITY_PSU * 0.5 + unaccounted_salt_flux
-    ) * timestep.total_seconds()
-    corrector_ratio = (input_osc + osc_change) / gen_osc
+    # Total surface flux combines virtual salt flux from freshwater and sfdsi.
+    # All non-masked ocean points have the same flux, so the area-weighted
+    # mean equals the pointwise value.
+    total_flux_mean = -REFERENCE_SALINITY_PSU * 0.5 + 1000.0 * 0.001
+    osc_change = (total_flux_mean + unaccounted_salt_flux) * timestep.total_seconds()
+    salt_deficit = input_osc + osc_change - gen_osc
+    correction_psu = salt_deficit / (
+        DENSITY_OF_SEA_WATER_CM4 * depth_coordinate.sea_floor_depth
+    )
 
     expected_gen_data_dict = {
-        key: value * corrector_ratio if key.startswith("so") else value
+        key: value + correction_psu if key.startswith("so") else value
         for key, value in gen_data_dict.items()
     }
 

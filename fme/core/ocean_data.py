@@ -30,12 +30,16 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "net_downward_surface_heat_flux_total_area": ["hfds_total_area"],
         "geothermal_heat_flux": ["hfgeou"],
         "water_flux_into_sea_water": ["wfo"],
+        "downward_sea_ice_basal_salt_flux": ["sfdsi"],
         "sea_surface_fraction": ["sea_surface_fraction"],
     }
 )
 
 
 class HasOceanDepthIntegral(Protocol):
+    @property
+    def sea_floor_depth(self) -> torch.Tensor: ...
+
     def depth_integral(
         self,
         integrand: torch.Tensor,
@@ -169,6 +173,11 @@ class OceanData:
     def water_flux_into_sea_water(self) -> torch.Tensor:
         """Returns water flux into sea water (wfo)."""
         return self._get("water_flux_into_sea_water")
+
+    @property
+    def downward_sea_ice_basal_salt_flux(self) -> torch.Tensor:
+        """Returns the downward sea ice basal salt flux in kg/m2/s."""
+        return self._get("downward_sea_ice_basal_salt_flux")
 
     @property
     def sea_surface_fraction(self) -> torch.Tensor:
