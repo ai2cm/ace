@@ -78,4 +78,5 @@ def data_paths_helper(
     create_test_data_on_disk(
         coarse_path / "data.nc", dim_sizes.coarse, variable_names, coords
     )
+    # TODO: should this return the full filename instead of just the directory?
     return FineResCoarseResPair[str](fine=fine_path, coarse=coarse_path)
