@@ -376,15 +376,12 @@ def run_inference_from_config(config: InferenceConfig):
         "Total steps per second (ignoring wandb logging): "
         f"{total_steps_per_second:.2f} steps/second"
     )
-    inference_summary = {
-        "inference/total_steps_per_second": total_steps_per_second,
-        **{f"inference/{k}": v for k, v in aggregator.get_summary_logs().items()},
-    }
     summary_logs = {
-        **timer.get_durations(),
-        **inference_summary,
+        "total_steps_per_second": total_steps_per_second,
+        **aggregator.get_summary_logs(),
     }
-    logger.log([summary_logs], label="")
+    logger.log_to_step(summary_logs)
+    logger.log_to_step(timer.get_durations(), label="")
 
 
 def run_segmented_inference(config: InferenceConfig, segments: int):

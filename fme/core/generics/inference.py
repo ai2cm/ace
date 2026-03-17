@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable, Iterator
-from typing import Generic, Protocol, TypeVar
+from typing import Any, Generic, Protocol, TypeVar
 
 from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceLogs
 from fme.core.generics.data import InferenceDataABC
@@ -72,10 +72,9 @@ class Looper(Generic[PS, FD, SD]):
 class WandBStepLogger:
     """Logs inference metrics to wandb with step tracking and optional key prefixing.
 
-    Callable as a drop-in replacement for the previous ``get_record_to_wandb``
-    closure.  The ``log`` method additionally accepts a per-call *label*
-    override so that callers can mix prefixed and unprefixed keys through
-    the same step counter.
+    The ``log`` method additionally accepts a per-call *label* override so that
+    callers can mix prefixed and unprefixed keys through the same step counter.
+
     """
 
     def __init__(self, label: str = ""):
@@ -87,15 +86,28 @@ class WandBStepLogger:
     def step(self) -> int:
         return self._step
 
-    def log(self, logs: InferenceLogs, label: str | None = None) -> None:
+    def _prefix_label(
+        self, log_dict: dict[str, Any], label: str | None = None
+    ) -> dict[str, Any]:
         if label is None:
             label = self._label
+        if label:
+            log_dict = {f"{label}/{k}": v for k, v in log_dict.items()}
+        return log_dict
+
+    def log(self, logs: InferenceLogs, label: str | None = None) -> None:
+        """Log each step in a sequence of logs."""
         for j, log_dict in enumerate(logs):
             if len(log_dict) > 0:
-                if label:
-                    log_dict = {f"{label}/{k}": v for k, v in log_dict.items()}
+                log_dict = self._prefix_label(log_dict, label)
                 self._wandb.log(log_dict, step=self._step + j)
         self._step += len(logs)
+
+    def log_to_step(self, log_dict: dict[str, Any], label: str | None = None) -> None:
+        """Log to the current step without incrementing."""
+        if len(log_dict) > 0:
+            log_dict = self._prefix_label(log_dict, label)
+            self._wandb.log(log_dict, step=self._step)
 
 
 def get_record_to_wandb(label: str = "") -> WandBStepLogger:

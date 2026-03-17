@@ -468,12 +468,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         f"{total_steps_per_second:.2f} steps/second"
     )
 
-    inference_summary = {
-        "inference/total_steps_per_second": total_steps_per_second,
-        **{f"inference/{k}": v for k, v in aggregator.get_summary_logs().items()},
-    }
     summary_logs = {
-        **timer.get_durations(),
-        **inference_summary,
+        "total_steps_per_second": total_steps_per_second,
+        **aggregator.get_summary_logs(),
     }
-    logger.log([summary_logs], label="")
+    logger.log_to_step(summary_logs)  # prefix "inference/"
+    logger.log_to_step(timer.get_durations(), label="")  # durations already prefixed
