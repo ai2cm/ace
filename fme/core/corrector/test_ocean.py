@@ -321,14 +321,14 @@ def test_ocean_heat_content_correction(hfds_type):
     )
     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
     nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
-    mask = torch.ones(nsamples, nlat, nlon, nlevels)
-    mask[:, 0, 0, 0] = 0.0
-    mask[:, 0, 0, 1] = 0.0
-    mask[:, 0, 1, 1] = 0.0
+    mask = torch.ones(nlat, nlon, nlevels)
+    mask[0, 0, 0] = 0.0
+    mask[0, 0, 1] = 0.0
+    mask[0, 1, 1] = 0.0
     masks = {
-        "mask_0": mask[:, :, :, 0],
-        "mask_1": mask[:, :, :, 1],
-        "mask_2d": mask[:, :, :, 0],
+        "mask_0": mask[:, :, 0],
+        "mask_1": mask[:, :, 1],
+        "mask_2d": mask[:, :, 0],
     }
     mask_provider = MaskProvider(masks)
     ops = LatLonOperations(torch.ones(size=[3, 3]), mask_provider)
@@ -336,7 +336,7 @@ def test_ocean_heat_content_correction(hfds_type):
     idepth = torch.tensor([2.5, 10, 20])
     depth_coordinate = DepthCoordinate(idepth, mask)
 
-    sea_surface_fraction = mask[:, :, :, 0]
+    sea_surface_fraction = mask[:, :, 0]
 
     input_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon),
@@ -423,22 +423,23 @@ def test_ocean_salt_content_correction(wfo_type):
     )
     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
     nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
-    mask = torch.ones(nsamples, nlat, nlon, nlevels)
-    mask[:, 0, 0, 0] = 0.0
-    mask[:, 0, 0, 1] = 0.0
-    mask[:, 0, 1, 1] = 0.0
+    mask = torch.ones(nlat, nlon, nlevels)
+    mask[0, 0, 0] = 0.0
+    mask[0, 0, 1] = 0.0
+    mask[0, 1, 1] = 0.0
     masks = {
-        "mask_0": mask[:, :, :, 0],
-        "mask_1": mask[:, :, :, 1],
-        "mask_2d": mask[:, :, :, 0],
+        "mask_0": mask[:, :, 0],
+        "mask_1": mask[:, :, 1],
+        "mask_2d": mask[:, :, 0],
     }
     mask_provider = MaskProvider(masks)
     ops = LatLonOperations(torch.ones(size=[3, 3]), mask_provider)
 
     idepth = torch.tensor([2.5, 10, 20])
     depth_coordinate = DepthCoordinate(idepth, mask)
+    global_mean_depth = 16.25  # (7 * 17.5 m * 1 * 7.5 m) / 8
 
-    sea_surface_fraction = mask[:, :, :, 0]
+    sea_surface_fraction = mask[:, :, 0]
 
     wfo_value = torch.ones(nsamples, nlat, nlon) * 0.5
     sfdsi_value = torch.ones(nsamples, nlat, nlon) * 0.001
@@ -476,9 +477,8 @@ def test_ocean_salt_content_correction(wfo_type):
     total_flux_mean = -REFERENCE_SALINITY_PSU * 0.5 + 1000.0 * 0.001
     osc_change = (total_flux_mean + unaccounted_salt_flux) * timestep.total_seconds()
     salt_deficit = input_osc + osc_change - gen_osc
-    correction_psu = salt_deficit / (
-        DENSITY_OF_SEA_WATER_CM4 * depth_coordinate.sea_floor_depth
-    )
+
+    correction_psu = salt_deficit / (DENSITY_OF_SEA_WATER_CM4 * global_mean_depth)
 
     expected_gen_data_dict = {
         key: value + correction_psu if key.startswith("so") else value

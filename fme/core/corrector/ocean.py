@@ -183,6 +183,20 @@ class OceanCorrector(CorrectorABC):
         self._gridded_operations = gridded_operations
         self._vertical_coordinate = vertical_coordinate
         self._timestep = timestep
+        self._global_mean_depth: torch.Tensor | None = None
+
+    @property
+    def global_mean_depth(self) -> torch.Tensor:
+        if self._vertical_coordinate is None:
+            raise RuntimeError(
+                "Global mean ocean depth cannot be computed without the ocean depth "
+                "coordinate."
+            )
+        if self._global_mean_depth is None:
+            self._global_mean_depth = self._gridded_operations.area_weighted_mean(
+                self._vertical_coordinate.sea_floor_depth, name="global_mean_depth"
+            )
+        return self._global_mean_depth
 
     def __call__(
         self,
@@ -207,6 +221,7 @@ class OceanCorrector(CorrectorABC):
                 self._gridded_operations.area_weighted_mean,
                 self._vertical_coordinate,
                 self._timestep.total_seconds(),
+                self.global_mean_depth,
                 self._config.ocean_salt_content_correction.method,
                 self._config.ocean_salt_content_correction.constant_unaccounted_salt_flux,
             )
@@ -390,6 +405,7 @@ def _force_conserve_ocean_salt_content(
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
+    global_mean_depth: torch.Tensor,
     method: Literal["constant_salinity"] = "constant_salinity",
     unaccounted_salt_flux: float = 0.0,
 ) -> TensorDict:
@@ -424,7 +440,8 @@ def _force_conserve_ocean_salt_content(
     except KeyError:
         sfdsi = input.downward_sea_ice_basal_salt_flux
     virtual_salt_flux = -REFERENCE_SALINITY_PSU * wfo * forcing.sea_surface_fraction
-    total_surface_flux = virtual_salt_flux + 1000.0 * sfdsi
+    salt_flux = 1000.0 * sfdsi  # kg/m2/s -> g/m2/s
+    total_surface_flux = virtual_salt_flux + salt_flux  # g/m2/s
     salt_flux_global_mean = area_weighted_mean(
         total_surface_flux,
         keepdim=True,
@@ -434,12 +451,12 @@ def _force_conserve_ocean_salt_content(
         global_input_salt_content
         + (salt_flux_global_mean + unaccounted_salt_flux) * timestep_seconds
         - global_gen_salt_content
-    )
-    correction_psu = salt_deficit / (
-        DENSITY_OF_SEA_WATER_CM4 * vertical_coordinate.sea_floor_depth
-    )
+    )  # g/m2
+    salinity_correction = salt_deficit / (
+        DENSITY_OF_SEA_WATER_CM4 * global_mean_depth
+    )  # g/kg
     n_levels = gen.sea_water_salinity.shape[-1]
     for k in range(n_levels):
         name = f"so_{k}"
-        gen.data[name] = gen.data[name] + correction_psu
+        gen.data[name] = gen.data[name] + salinity_correction
     return gen.data

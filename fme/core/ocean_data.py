@@ -159,7 +159,7 @@ class OceanData:
 
     @property
     def ocean_salt_content(self) -> torch.Tensor:
-        """Returns column-integrated ocean salt content."""
+        """Returns column-integrated ocean salt content in g/m2."""
         if self._depth_coordinate is None:
             raise ValueError(
                 "Depth coordinate must be provided to compute column-integrated "
@@ -171,7 +171,7 @@ class OceanData:
 
     @property
     def water_flux_into_sea_water(self) -> torch.Tensor:
-        """Returns water flux into sea water (wfo)."""
+        """Returns water flux into sea water in kg/m2/s."""
         return self._get("water_flux_into_sea_water")
 
     @property
