@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+class SpatialParallelismNotImplemented(NotImplementedError):
+    """Raised when a code path is incompatible with spatial parallelism."""
+
+    pass
+
+
 class Distributed:
     """
     A class to represent the distributed concerns for FME training.
@@ -182,6 +188,15 @@ class Distributed:
         Get the total number of processes.
         """
         return self._distributed.total_ranks
+
+    def require_no_spatial_parallelism(self, msg: str) -> None:
+        """Raise if spatial parallelism is active.
+
+        Use this to guard code paths that are known to be incorrect
+        when spatial co-ranks exist (world_size > total_data_parallel_ranks).
+        """
+        if self.world_size != self.total_data_parallel_ranks:
+            raise SpatialParallelismNotImplemented(msg)
 
     def get_sampler(
         self,
