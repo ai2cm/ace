@@ -502,7 +502,7 @@ def test_run_inference_simple(
         with mock_wandb() as wandb:
             wandb.configure(log_to_wandb=True)
             record_logs = unittest.mock.MagicMock(
-                side_effect=get_record_to_wandb("inference")
+                side_effect=get_record_to_wandb("inference").log
             )  # this init must be within mock_wandb context
             run_inference(
                 predict=stepper.predict,
