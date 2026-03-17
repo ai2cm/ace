@@ -31,7 +31,7 @@ class TrainAggregatorConfig:
 
     spherical_power_spectrum: bool = True
     weighted_rmse: bool = True
-    per_channel_loss: bool = True
+    per_channel_loss: bool = False
 
 
 class Aggregator(Protocol):
