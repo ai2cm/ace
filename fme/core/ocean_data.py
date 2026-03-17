@@ -5,7 +5,7 @@ from typing import Protocol
 
 import torch
 
-from fme.core.constants import DENSITY_OF_WATER_CM4, SPECIFIC_HEAT_OF_WATER_CM4
+from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -144,8 +144,8 @@ class OceanData:
             )
         return self._depth_coordinate.depth_integral(
             self.sea_water_potential_temperature
-            * SPECIFIC_HEAT_OF_WATER_CM4
-            * DENSITY_OF_WATER_CM4
+            * SPECIFIC_HEAT_OF_SEA_WATER_CM4
+            * DENSITY_OF_SEA_WATER_CM4
         )
 
     @property

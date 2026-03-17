@@ -3,7 +3,7 @@ import datetime
 import pytest
 import torch
 
-from fme.core.constants import DENSITY_OF_WATER_CM4, SPECIFIC_HEAT_OF_WATER_CM4
+from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.ocean_data import OceanData
 from fme.core.ocean_derived_variables import (
@@ -45,8 +45,8 @@ def test_compute_ocean_derived_variable():
         output_data["ocean_heat_content"],
         torch.tensor(
             [
-                SPECIFIC_HEAT_OF_WATER_CM4
-                * DENSITY_OF_WATER_CM4
+                SPECIFIC_HEAT_OF_SEA_WATER_CM4
+                * DENSITY_OF_SEA_WATER_CM4
                 * (
                     lev_thickness[0] * fake_data["thetao_0"]
                     + lev_thickness[1] * fake_data["thetao_1"]

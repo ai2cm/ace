@@ -10,8 +10,7 @@ from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
-    SPECIFIC_HEAT_OF_LIQUID_WATER_CM4,
-    SPECIFIC_HEAT_OF_WATER_CM4,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.utils import force_positive
@@ -217,18 +216,19 @@ def _compute_ocean_net_surface_energy_flux(
     heat transport by precipitation and evaporation.
     """
     atmos = AtmosphereData(forcing_data)
-    base_flux = atmos.net_surface_energy_flux
-    precip_heat_flux_ocean = (
-        SPECIFIC_HEAT_OF_WATER_CM4
-        * atmos.precipitation_rate
+    base_flux = (
+        atmos.net_surface_energy_flux
+    )  # missing: - calving * LATENT_HEAT_OF_FREEZING
+    mass_heat_flux = (
+        SPECIFIC_HEAT_OF_SEA_WATER_CM4
+        * (
+            atmos.precipitation_rate
+            + atmos.frozen_precipitation_rate
+            - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
+        )  # missing: + river runoff + calving
         * (sst - FREEZING_TEMPERATURE_KELVIN)
     )
-    evap_heat_flux = (
-        SPECIFIC_HEAT_OF_LIQUID_WATER_CM4
-        * (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
-        * (sst - FREEZING_TEMPERATURE_KELVIN)
-    )
-    return base_flux + precip_heat_flux_ocean - evap_heat_flux
+    return base_flux + mass_heat_flux
 
 
 def _correct_hfds(
@@ -247,6 +247,7 @@ def _correct_hfds(
         prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
     """
     input = OceanData(input_data)
+    forcing = OceanData(forcing_data)
     ocean_fraction = input.ocean_fraction
     net_flux = _compute_ocean_net_surface_energy_flux(
         forcing_data, input.sea_surface_temperature
@@ -256,9 +257,10 @@ def _correct_hfds(
         hfds_name = "hfds"
     else:
         hfds_name = "hfds_total_area"
+        net_flux = net_flux * forcing.sea_surface_fraction
     gen_hfds = gen_data[hfds_name]
     if method == "residual_prediction":
-        out[hfds_name] = gen_hfds + ocean_fraction * net_flux
+        out[hfds_name] = net_flux * ocean_fraction + gen_hfds
     elif method == "prescribed":
         out[hfds_name] = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
     else:
