@@ -49,6 +49,23 @@ def test_adjust_fine_coord_range(downscale_factor, lat_range):
     assert len(subsel_fine_lat) / len(subsel_coarse_lat) == downscale_factor
 
 
+def test_adjust_fine_coord_range_raises_near_domain_boundary():
+    downscale_factor = 4  # n_half_fine = 2
+    coarse_edges = torch.linspace(0, 6, 7)
+    coarse_lat = _fine_midpoints(coarse_edges, 1)
+    fine_lat = _fine_midpoints(coarse_edges, downscale_factor)
+    # Drop the first fine point so only 1 fine point exists below coarse_min=0.5,
+    # but n_half_fine=2 are required — simulating a grid truncated at the domain edge.
+    fine_lat_truncated = fine_lat[1:]
+    with pytest.raises(ValueError):
+        adjust_fine_coord_range(
+            ClosedInterval(0, 4),
+            full_coarse_coord=coarse_lat,
+            full_fine_coord=fine_lat_truncated,
+            downscale_factor=downscale_factor,
+        )
+
+
 @pytest.mark.parametrize(
     "input_slice,expected",
     [
