@@ -4,8 +4,8 @@ data_writer:
   save_monthly_files: false
   save_prediction_files: false
 experiment_dir: /results
-forward_steps_in_memory: 1460
-n_forward_steps: 40
+forward_steps_in_memory: 40
+n_forward_steps: 1460
 labels: ["c96-shield"]
 initial_condition:
   path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0002.zarr
