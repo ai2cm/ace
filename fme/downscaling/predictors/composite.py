@@ -85,7 +85,7 @@ class PatchPredictor:
 
     def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
         return self.model.get_fine_coords_for_batch(batch)
-    
+
     @property
     def fine_coords(self):
         return self.model.fine_coords
