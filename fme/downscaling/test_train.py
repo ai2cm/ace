@@ -192,7 +192,7 @@ def test_train_main_with_loss_weights(
         default_trainer_config, ["var0", "var1"], ["var0", "var1"]
     )
     config["max_epochs"] = 1
-    config["loss_weights"] = {"weights": [{"var0": 2.0}, {"var1": 0.5}]}
+    config["loss_weights"] = {"weights": {"var0": 2.0, "var1": 0.5}}
     config_path = _store_config(
         tmp_path, config, filename="train-config-loss-weights.yaml"
     )

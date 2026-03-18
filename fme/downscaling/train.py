@@ -89,15 +89,12 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 
 @dataclasses.dataclass
 class LossWeights:
-    weights: list[dict[str, float]]
+    weights: dict[str, float]
 
     def get_weight_tensor(
         self, variable_names: list[str], device: torch.device
     ) -> torch.Tensor:
-        weight_map = {}
-        for mapping in self.weights:
-            weight_map.update(mapping)
-        weights = [weight_map.get(name, 1.0) for name in variable_names]
+        weights = [self.weights.get(name, 1.0) for name in variable_names]
         return torch.tensor(weights, device=device).reshape(1, -1, 1, 1)
 
 
