@@ -9,6 +9,7 @@ import torch
 from fme.core.constants import FREEZING_TEMPERATURE_KELVIN
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.corrector.utils import force_positive
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
@@ -119,22 +120,19 @@ class OceanCorrectorConfig(CorrectorConfigABC):
 
     def get_corrector(
         self,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: Any | None,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
-        if vertical_coordinate and not isinstance(
-            vertical_coordinate, HasOceanDepthIntegral
-        ):
-            raise ValueError(
-                "Cannot build OceanCorrector with vertical "
-                f"coordinate {vertical_coordinate}."
-            )
+        vc = dataset_info.vertical_coordinate
+        vertical_coordinate: HasOceanDepthIntegral | None
+        if isinstance(vc, HasOceanDepthIntegral):
+            vertical_coordinate = vc
+        else:
+            vertical_coordinate = None
         return OceanCorrector(
             self,
-            gridded_operations,
+            dataset_info.gridded_operations,
             vertical_coordinate,
-            timestep,
+            dataset_info.timestep,
         )
 
 

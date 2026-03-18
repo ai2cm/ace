@@ -1,10 +1,9 @@
 import dataclasses
-import datetime
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
-from fme.core.gridded_ops import GriddedOperations
+from fme.core.dataset_info import DatasetInfo
 
 from .registry import Registry
 
@@ -48,12 +47,6 @@ class CorrectorSelector(CorrectorConfigABC):
 
     def get_corrector(
         self,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: Any | None,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> CorrectorABC:
-        return self._corrector_config_instance.get_corrector(
-            gridded_operations,
-            vertical_coordinate,
-            timestep,
-        )
+        return self._corrector_config_instance.get_corrector(dataset_info)

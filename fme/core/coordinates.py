@@ -3,7 +3,7 @@ import dataclasses
 import math
 from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import Literal, TypeVar, final
+from typing import Literal, TypeVar
 
 import dacite
 import numpy as np
@@ -11,7 +11,6 @@ import torch
 
 from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -131,22 +130,6 @@ class VerticalCoordinate(abc.ABC):
     @abc.abstractmethod
     def __eq__(self, other) -> bool:
         pass
-
-    @final
-    def build_corrector(
-        self,
-        config: CorrectorConfigABC,
-        gridded_operations: GriddedOperations,
-        timestep: timedelta,
-    ) -> CorrectorABC:
-        vertical_coord: VerticalCoordinate | None = self
-        if isinstance(vertical_coord, NullVerticalCoordinate):
-            vertical_coord = None
-        return config.get_corrector(
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coord,
-            timestep=timestep,
-        )
 
     @abc.abstractmethod
     def build_derive_function(

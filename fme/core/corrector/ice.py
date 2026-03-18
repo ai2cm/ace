@@ -7,6 +7,7 @@ import dacite
 import torch
 
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -196,14 +197,12 @@ class IceCorrectorConfig(CorrectorConfigABC):
 
     def get_corrector(
         self,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: Any | None,  # ignored
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> "IceCorrector":
         return IceCorrector(
             self,
-            gridded_operations,
-            timestep,
+            dataset_info.gridded_operations,
+            dataset_info.timestep,
         )
 
 

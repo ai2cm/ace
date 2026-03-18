@@ -16,6 +16,9 @@ class SphericalPowerSpectrumAggregator:
     """Average the power spectrum over batch and time dimensions."""
 
     def __init__(self, gridded_operations: GriddedOperations):
+        Distributed.get_instance().require_no_spatial_parallelism(
+            "SphericalPowerSpectrumAggregator does not support spatial parallelism."
+        )
         self._real_sht = gridded_operations.get_real_sht()
         self._power_spectrum: dict[str, torch.Tensor] = {}
         self._counts: dict[str, int] = defaultdict(int)

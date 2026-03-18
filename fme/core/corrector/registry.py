@@ -1,11 +1,10 @@
 import abc
-import datetime
 from collections.abc import Mapping
 from typing import Any, Self
 
 import dacite
 
-from fme.core.gridded_ops import GriddedOperations
+from fme.core.dataset_info import DatasetInfo
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -17,9 +16,7 @@ class CorrectorConfigABC(abc.ABC):
     @abc.abstractmethod
     def get_corrector(
         self,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: Any | None,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> "CorrectorABC": ...
 
 
