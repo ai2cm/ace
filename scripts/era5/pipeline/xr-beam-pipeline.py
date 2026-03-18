@@ -1003,7 +1003,6 @@ def _make_template(
     ds_akbk,
     ak,
     bk,
-    output_chunks,
     output_grid,
     output_layer_indices,
     output_time,
@@ -1060,7 +1059,6 @@ def _make_template(
     # Build template with full time coordinate
     template = xbeam.make_template(ds_regridded.drop_vars("time", errors="ignore"))
     template = template.expand_dims(dim={"time": output_time}, axis=0)
-    template = template.chunk(output_chunks)
 
     # Invariant + ak/bk written eagerly (not chunked)
     inv_fields = xr.merge([ds_inv_regridded, ds_akbk])
@@ -1204,7 +1202,6 @@ def main():
         ds_akbk,
         ak,
         bk,
-        output_chunks,
         args.output_grid,
         args.output_layer_indices,
         output_time,
