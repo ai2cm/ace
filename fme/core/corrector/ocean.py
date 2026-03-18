@@ -152,16 +152,10 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
-        vc = dataset_info.vertical_coordinate
-        vertical_coordinate: HasOceanDepthIntegral | None
-        if isinstance(vc, HasOceanDepthIntegral):
-            vertical_coordinate = vc
-        else:
-            vertical_coordinate = None
         return OceanCorrector(
             self,
             dataset_info.gridded_operations,
-            vertical_coordinate,
+            dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
         )
 

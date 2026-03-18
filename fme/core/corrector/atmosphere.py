@@ -143,16 +143,10 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "AtmosphereCorrector":
-        vc = dataset_info.vertical_coordinate
-        vertical_coordinate: HasAtmosphereVerticalIntegral | None
-        if isinstance(vc, HasAtmosphereVerticalIntegral):
-            vertical_coordinate = vc
-        else:
-            vertical_coordinate = None
         return AtmosphereCorrector(
             self,
             dataset_info.gridded_operations,
-            vertical_coordinate,
+            dataset_info.atmosphere_vertical_coordinate,
             dataset_info.timestep,
         )
 

@@ -3,6 +3,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from fme.core.atmosphere_data import HasAtmosphereVerticalIntegral
 from fme.core.coordinates import (
     HorizontalCoordinates,
     NullVerticalCoordinate,
@@ -14,6 +15,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
+from fme.core.ocean_data import HasOceanDepthIntegral
 
 
 class MissingDatasetInfo(ValueError):
@@ -180,6 +182,18 @@ class DatasetInfo:
         if self._vertical_coordinate is None:
             raise MissingDatasetInfo("vertical_coordinate")
         return self._vertical_coordinate
+
+    @property
+    def atmosphere_vertical_coordinate(self) -> HasAtmosphereVerticalIntegral | None:
+        if isinstance(self._vertical_coordinate, HasAtmosphereVerticalIntegral):
+            return self._vertical_coordinate
+        return None
+
+    @property
+    def ocean_vertical_coordinate(self) -> HasOceanDepthIntegral | None:
+        if isinstance(self._vertical_coordinate, HasOceanDepthIntegral):
+            return self._vertical_coordinate
+        return None
 
     @property
     def mask_provider(self) -> MaskProvider:
