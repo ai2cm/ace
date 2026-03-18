@@ -1,5 +1,5 @@
 
 fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP||01KJDH03MTDEKKJX3PND17EADV|done|best_inference_ckpt|high|--not-preemptible||||h100
 ft_fto-v1124-train-95yr-gvot5r9r-dso4ysdg||01KK0THF96WJJQW0V7GYPPC6EX|done|best_inference_ckpt|high|--not-preemptible||||h100
-ft_fto-v1124-train-95yr-gvot5r9r-dso4ysdg||01KK0THF96WJJQW0V7GYPPC6EX|done|best_inference_ckpt|high|--not-preemptible||||h100
-fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP-200-more-year||01KJDH03MTDEKKJX3PND17EADV|run_ICx1-400yr-extend|best_inference_ckpt|high|--not-preemptible||||h100|||01KKZ1QFTAMWD1D65N7RC21K35
+ft_fto-v1124-train-95yr-gvot5r9r-dso4ysdg-with-daily-data||01KK0THF96WJJQW0V7GYPPC6EX|run_ICx1-400yr|best_inference_ckpt|high|--not-preemptible||||h100
+fto-v1124-train-95yr-hp5rcl7w-dso4ysdg-ft-AMIP-200-more-year||01KJDH03MTDEKKJX3PND17EADV|done|best_inference_ckpt|high|--not-preemptible||||h100|||01KKZ1QFTAMWD1D65N7RC21K35

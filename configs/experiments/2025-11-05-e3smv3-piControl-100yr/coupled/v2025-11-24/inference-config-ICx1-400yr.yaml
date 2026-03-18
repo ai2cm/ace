@@ -5,9 +5,15 @@ checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: true
+    save_monthly_files: false
   atmosphere:
-    save_prediction_files: false
+    save_prediction_files: true
+    names:
+    - PRATEsfc
+    - FLUT
+    - T_7
+    time_coarsen:
+      coarsen_factor: 4
     save_monthly_files: false
 logging:
   log_to_screen: true
