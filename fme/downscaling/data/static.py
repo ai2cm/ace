@@ -1,12 +1,10 @@
 import dataclasses
-from collections.abc import Generator, Iterator
 
 import torch
 import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
-from fme.downscaling.data.patching import Patch
 from fme.downscaling.data.utils import ClosedInterval
 
 
@@ -53,11 +51,6 @@ class StaticInput:
             ),
         )
 
-    def _apply_patch(self, patch: Patch):
-        return self._latlon_index_slice(
-            lat_slice=patch.input_slice.y, lon_slice=patch.input_slice.x
-        )
-
     def _latlon_index_slice(
         self,
         lat_slice: slice,
@@ -72,13 +65,6 @@ class StaticInput:
             data=sliced_data,
             coords=sliced_latlon,
         )
-
-    def generate_from_patches(
-        self,
-        patches: list[Patch],
-    ) -> Generator["StaticInput", None, None]:
-        for patch in patches:
-            yield self._apply_patch(patch)
 
     def get_state(self) -> dict:
         return {
@@ -161,15 +147,6 @@ class StaticInputs:
 
     def to_device(self) -> "StaticInputs":
         return StaticInputs(fields=[field.to_device() for field in self.fields])
-
-    def generate_from_patches(
-        self,
-        patches: list[Patch],
-    ) -> Iterator["StaticInputs"]:
-        for patch in patches:
-            yield StaticInputs(
-                fields=[field._apply_patch(patch) for field in self.fields]
-            )
 
     def get_state(self) -> dict:
         return {
