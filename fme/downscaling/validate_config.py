@@ -4,6 +4,8 @@ from typing import TypeVar
 import dacite
 import yaml
 
+from fme.core.distributed import Distributed
+
 from .evaluator import EvaluatorConfig
 from .inference import InferenceConfig
 from .predict import DownscalerConfig
@@ -55,5 +57,6 @@ if __name__ == "__main__":
 
     with open(args.config_file) as f:
         config_dict = yaml.safe_load(f)
+    with Distributed.context():
         validate_config(config_dict, CONFIG_CLASSES[args.config_type])
-        print("Configuration is valid.")
+    print("Configuration is valid.")
