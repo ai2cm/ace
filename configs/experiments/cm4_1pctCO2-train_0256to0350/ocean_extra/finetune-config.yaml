@@ -160,6 +160,8 @@ stepper:
               - VI
           surface_energy_flux_correction:
             method: prescribed
+          ocean_heat_content_correction:
+            method: scaled_temperature
       next_step_forcing_names:
         - DLWRFsfc
         - DSWRFsfc
