@@ -187,13 +187,23 @@ class DatasetInfo:
     def atmosphere_vertical_coordinate(self) -> HasAtmosphereVerticalIntegral | None:
         if isinstance(self._vertical_coordinate, HasAtmosphereVerticalIntegral):
             return self._vertical_coordinate
-        return None
+        elif isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+            return None
+        raise RuntimeError(
+            f"{self._vertical_coordinate} cannot be used as an atmosphere vertical "
+            "coordinate."
+        )
 
     @property
     def ocean_vertical_coordinate(self) -> HasOceanDepthIntegral | None:
         if isinstance(self._vertical_coordinate, HasOceanDepthIntegral):
             return self._vertical_coordinate
-        return None
+        elif isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+            return None
+        raise RuntimeError(
+            f"{self._vertical_coordinate} cannot be used as an ocean vertical "
+            "coordinate."
+        )
 
     @property
     def mask_provider(self) -> MaskProvider:
