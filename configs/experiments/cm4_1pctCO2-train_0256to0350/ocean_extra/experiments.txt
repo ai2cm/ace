@@ -39,3 +39,5 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|run_140yr|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_OHC_OSC|rs0|01KKZ29EDG5X7KN4EMSP102Y8D|training|best_inference_ckpt|normal|--not-preemptible
+
+1pct_nosmooth_0256to0350-hfds_prescribed-ft_gqmfjs2j_w_OSC|rs0|01KKZMVVTGNKZ1P2M3W48PS5R2|training|best_inference_ckpt|normal|--not-preemptible
