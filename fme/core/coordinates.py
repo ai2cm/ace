@@ -477,7 +477,9 @@ class DepthCoordinate(VerticalCoordinate):
             result["deptho"] = self.deptho
         return result
 
-    def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
+    def depth_integral(
+        self, integrand: torch.Tensor, zos: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """Compute the depth integral of the integrand.
 
         ∫ x dz
@@ -485,8 +487,17 @@ class DepthCoordinate(VerticalCoordinate):
         - x = integrand
         - z = depth
 
+        When *zos* (sea surface height above geoid) is provided, a surface-cap
+        correction is added so that the integral accounts for the free-surface
+        anomaly without perturbing deeper layers::
+
+            integral = sum_k(x_k * dz_k) + x_0 * zos
+
         Args:
             integrand: A tensor whose last dimension is the vertical.
+            zos: Optional sea surface height anomaly.  Must be broadcastable
+                to the spatial dimensions of ``integrand`` (i.e.
+                ``integrand.shape[:-1]``).
 
         Returns:
             A tensor of same shape as integrand but without the last dimension.
@@ -502,6 +513,8 @@ class DepthCoordinate(VerticalCoordinate):
                 f"{self.idepth.shape}."
             )
         integral = (integrand * self.dz).nansum(dim=-1)
+        if zos is not None:
+            integral = integral + integrand[..., 0] * zos
         mask_0 = self.mask.select(dim=-1, index=0).expand(integral.shape)
         return integral.where(mask_0 > 0, float("nan"))
 
