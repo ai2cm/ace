@@ -31,7 +31,7 @@ class TrainAggregatorConfig:
 
     spherical_power_spectrum: bool = True
     weighted_rmse: bool = True
-    per_channel_loss: bool = False
+    per_channel_loss: bool = True
 
 
 class Aggregator(Protocol):
@@ -53,11 +53,8 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def __init__(self, config: TrainAggregatorConfig, operations: GriddedOperations):
         self._n_loss_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
-        if config.per_channel_loss:
-            self._per_channel_loss: dict[str, torch.Tensor] = {}
-            self._per_channel_loss_enabled = True
-        else:
-            self._per_channel_loss_enabled = False
+        self._per_channel_loss: dict[str, torch.Tensor] = {}
+        self._per_channel_loss_enabled = config.per_channel_loss
         self._paired_aggregators: dict[str, Aggregator] = {}
         if config.spherical_power_spectrum:
             self._paired_aggregators["power_spectrum"] = (
@@ -72,6 +69,11 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                 include_bias=False,
                 include_grad_mag_percent_diff=False,
             )
+
+    @property
+    def per_channel_loss_enabled(self) -> bool:
+        """Whether this aggregator accumulates per-variable loss from batch metrics."""
+        return self._per_channel_loss_enabled
 
     @torch.no_grad()
     def record_batch(self, batch: TrainOutput):

@@ -490,12 +490,17 @@ class Trainer:
         self.train_data.alternate_shuffle()
         aggregator = self._aggregator_builder.get_train_aggregator()
         self.stepper.set_eval()
+        compute_per_channel = getattr(aggregator, "per_channel_loss_enabled", False)
         with torch.no_grad(), self.validation_context():
             for batch in self.train_data.subset_loader(
                 stop_batch=self.config.train_evaluation_batches
             ):
                 with GlobalTimer():
-                    stepped = self.stepper.train_on_batch(batch, self._no_optimization)
+                    stepped = self.stepper.train_on_batch(
+                        batch,
+                        self._no_optimization,
+                        compute_per_channel_metrics=compute_per_channel,
+                    )
                 aggregator.record_batch(stepped)
         if (
             self._should_save_checkpoints()

@@ -31,6 +31,7 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
         data: BD,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        compute_per_channel_metrics: bool = False,
     ) -> TO:
         pass
 

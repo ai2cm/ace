@@ -82,7 +82,7 @@ def test_aggregator_gets_logs_with_no_batches(config: TrainAggregatorConfig):
 
 def test_aggregator_logs_per_channel_loss():
     """
-    Per-channel (per-variable) loss is accumulated and reported in get_logs.
+    Per-channel (per-variable) loss is accumulated from batch.metrics and reported.
     """
     batch_size = 4
     n_ensemble = 1

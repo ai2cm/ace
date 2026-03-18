@@ -1498,6 +1498,7 @@ class CoupledTrainStepper(
         data: CoupledBatchData,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        compute_per_channel_metrics: bool = False,
     ) -> CoupledTrainOutput:
         """
         Args:
@@ -1507,7 +1508,9 @@ class CoupledTrainStepper(
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction and target atmosphere data.
-
+            compute_per_channel_metrics: Whether to compute per-variable loss and add
+                to metrics (for TrainAggregator). Only set True when evaluating for
+                logging, not during training steps.
         """
         # get initial condition prognostic variables
         input_data = CoupledPrognosticState(
