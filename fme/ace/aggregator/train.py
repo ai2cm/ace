@@ -70,13 +70,6 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                 include_grad_mag_percent_diff=False,
             )
 
-    @property
-    def per_channel_loss_enabled(self) -> bool:
-        """
-        Whether this aggregator accumulates per-variable loss from batch metrics.
-        """
-        return self._per_channel_loss_enabled
-
     @torch.no_grad()
     def record_batch(self, batch: TrainOutput):
         self._loss += batch.metrics["loss"]
