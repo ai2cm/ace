@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from typing import Protocol
 
 import torch
@@ -57,12 +58,18 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         self._per_channel_loss_enabled = config.per_channel_loss
         self._paired_aggregators: dict[str, Aggregator] = {}
         if config.spherical_power_spectrum:
-            self._paired_aggregators["power_spectrum"] = (
-                PairedSphericalPowerSpectrumAggregator(
-                    gridded_operations=operations,
-                    report_plot=False,
+            try:
+                self._paired_aggregators["power_spectrum"] = (
+                    PairedSphericalPowerSpectrumAggregator(
+                        gridded_operations=operations,
+                        report_plot=False,
+                    )
                 )
-            )
+            except NotImplementedError:
+                logging.warning(
+                    "Power spectrum aggregator not implemented "
+                    "for this grid type, omitting."
+                )
         if config.weighted_rmse:
             self._paired_aggregators["mean"] = MeanAggregator(
                 gridded_operations=operations,

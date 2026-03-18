@@ -12,6 +12,7 @@ import yaml
 from fme.core.dataset.time import TimeSlice
 from fme.core.logging_utils import LoggingConfig
 from fme.downscaling.data import (
+    ClosedInterval,
     LatLonCoordinates,
     StaticInput,
     StaticInputs,
@@ -24,7 +25,6 @@ from fme.downscaling.inference.output import (
     EventConfig,
     TimeRangeConfig,
 )
-from fme.downscaling.inference.work_items import SliceWorkItemGriddedData
 from fme.downscaling.models import (
     CheckpointModelConfig,
     DiffusionModelConfig,
@@ -91,8 +91,7 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
     """
     Test _get_generation_model returns model unchanged when shapes match exactly.
     """
-    mock_model.fine_shape = (16, 16)
-    static_inputs = get_static_inputs(shape=(16, 16))
+    mock_model.coarse_shape = (16, 16)
 
     downscaler = Downscaler(
         model=mock_model,
@@ -100,23 +99,22 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
     )
 
     result = downscaler._get_generation_model(
-        static_inputs=static_inputs,
+        input_shape=(16, 16),
         output=mock_output_target,
     )
 
     assert result is mock_model
 
 
-@pytest.mark.parametrize("topo_shape", [(8, 16), (16, 8), (8, 8)])
+@pytest.mark.parametrize("input_shape", [(8, 16), (16, 8), (8, 8)])
 def test_get_generation_model_raises_when_domain_too_small(
-    mock_model, mock_output_target, topo_shape
+    mock_model, mock_output_target, input_shape
 ):
     """
     Test _get_generation_model raises ValueError when domain is
     smaller than model.
     """
-    mock_model.fine_shape = (16, 16)
-    topo = get_static_inputs(shape=topo_shape)
+    mock_model.coarse_shape = (16, 16)
 
     downscaler = Downscaler(
         model=mock_model,
@@ -125,7 +123,7 @@ def test_get_generation_model_raises_when_domain_too_small(
 
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
-            static_inputs=topo,
+            input_shape=input_shape,
             output=mock_output_target,
         )
 
@@ -137,8 +135,7 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
     Test _get_generation_model creates PatchPredictor for
     large domains with patching.
     """
-    mock_model.fine_shape = (16, 16)
-    static_inputs = get_static_inputs(shape=(32, 32))  # Larger than model
+    mock_model.coarse_shape = (16, 16)
 
     patch_config = PatchPredictionConfig(
         divide_generation=True,
@@ -152,7 +149,7 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
     )
 
     model = downscaler._get_generation_model(
-        static_inputs=static_inputs,
+        input_shape=(32, 32),
         output=mock_output_target,
     )
 
@@ -167,8 +164,7 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
     Test _get_generation_model raises when domain is large but patching
     not configured.
     """
-    mock_model.fine_shape = (16, 16)
-    topo = get_static_inputs(shape=(32, 32))  # Larger than model
+    mock_model.coarse_shape = (16, 16)
     mock_output_target.patch = PatchPredictionConfig(divide_generation=False)
 
     downscaler = Downscaler(
@@ -178,7 +174,7 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
 
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
-            static_inputs=topo,
+            input_shape=(32, 32),
             output=mock_output_target,
         )
 
@@ -187,26 +183,30 @@ def test_run_target_generation_skips_padding_items(
     mock_model,
     mock_output_target,
 ):
-    """Test run_target_generation skips writing output for padding items."""
-    # Create padding work item
+    """
+    Test run_output_generation calls the model but skips writing for padding items.
+    """
     mock_work_item = MagicMock()
     mock_work_item.is_padding = True
-    mock_work_item.n_ens = 4
-    mock_work_item.batch = MagicMock()
-
-    static_inputs = get_static_inputs(shape=(16, 16))
-
-    mock_gridded_data = SliceWorkItemGriddedData(
-        [mock_work_item], {}, [0], torch.float32, (1, 4, 16, 16), static_inputs
+    mock_work_item.batch.horizontal_shape = (16, 16)
+    # Coarse coords are interior so fine can have buffer on each side.
+    mock_work_item.batch.latlon_coordinates.lat = (
+        torch.arange(1, 9).float().unsqueeze(0)
     )
-    mock_output_target.data = mock_gridded_data
-    mock_model.fine_shape = (16, 16)
+    mock_work_item.batch.latlon_coordinates.lon = (
+        torch.arange(1, 9).float().unsqueeze(0)
+    )
+    mock_work_item.batch.lat_interval = ClosedInterval(1.0, 8.0)
+    mock_work_item.batch.lon_interval = ClosedInterval(1.0, 8.0)
+    mock_output_target.data.get_generator.return_value = iter([mock_work_item])
 
-    mock_output = {
-        "var1": torch.randn(1, 4, 16, 16),
-        "var2": torch.randn(1, 4, 16, 16),
+    mock_model.downscale_factor = 2
+    mock_model.static_inputs.coords.lat = torch.arange(0, 18).float()
+    mock_model.static_inputs.coords.lon = torch.arange(0, 18).float()
+    mock_model.static_inputs.subset_latlon.return_value.fields[0].data = torch.zeros(1)
+    mock_model.generate_on_batch_no_target.return_value = {
+        "var1": torch.zeros(1, 4, 16, 16),
     }
-    mock_model.generate_on_batch_no_target.return_value = mock_output
 
     mock_writer = MagicMock()
     mock_output_target.get_writer.return_value = mock_writer
@@ -218,11 +218,8 @@ def test_run_target_generation_skips_padding_items(
 
     downscaler.run_output_generation(output=mock_output_target)
 
-    # Verify model was still called
     mock_model.generate_on_batch_no_target.assert_called_once()
-
-    # Verify the mock writer was not called
-    mock_writer.write_batch.assert_not_called()
+    mock_writer.record_batch.assert_not_called()
 
 
 # Tests for end-to-end generation process
