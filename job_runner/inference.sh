@@ -148,6 +148,12 @@ while read TRAIN_EXPER; do
         )
     fi
 
+    if [[ -n $RESTART_DATASET ]]; then
+        CHECKPOINT_DATASET_ARGS+=(
+            --dataset "$RESTART_DATASET:/restart"
+        )
+    fi
+
 
     if [[ -z "$WORKSPACE" ]]; then
         WORKSPACE=ai2/ace
@@ -210,7 +216,6 @@ while read TRAIN_EXPER; do
             --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-            --dataset "$RESTART_DATASET:/restart" \
             "${CHECKPOINT_DATASET_ARGS[@]}" \
             --gpus 1 \
             --shared-memory 20GiB \
