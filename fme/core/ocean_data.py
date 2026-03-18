@@ -165,7 +165,7 @@ class OceanData:
             self.sea_water_potential_temperature
             * SPECIFIC_HEAT_OF_SEA_WATER_CM4
             * DENSITY_OF_SEA_WATER_CM4,
-            zos=zos,
+            zos=zos * self.sea_surface_fraction,
         )
 
     @property
