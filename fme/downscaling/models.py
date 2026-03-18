@@ -302,10 +302,28 @@ class DiffusionModel:
         self.config = config
         self._channel_axis = -3
         self.static_inputs = static_inputs
+        self.channel_weights: torch.Tensor | None = None
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
+
+    def _scaled_forward(
+        self, latents: torch.Tensor, inputs: torch.Tensor, sigma: torch.Tensor
+    ) -> torch.Tensor:
+        """Forward pass with optional per-channel scaling.
+
+        When ``channel_weights`` is set, the latent channels are scaled by
+        those weights before entering the module and the output is divided
+        by the same weights, so the prediction is returned in the original
+        (unscaled) range.
+        """
+        if self.channel_weights is not None:
+            latents = latents * self.channel_weights
+        output = self.module(latents, inputs, sigma)
+        if self.channel_weights is not None:
+            output = output / self.channel_weights
+        return output
 
     @property
     def fine_shape(self) -> tuple[int, int]:
@@ -355,7 +373,6 @@ class DiffusionModel:
         static_inputs: StaticInputs | None,
         optimizer: Optimization | NullOptimization,
         loss_weights: torch.Tensor,
-        max_loss_weight: float | None = None,
         loss_weight_exponent: float = 1.0,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
@@ -381,11 +398,10 @@ class DiffusionModel:
             targets_norm,
             self.config.noise_distribution,
             self.sigma_data,
-            max_loss_weight=max_loss_weight,
             loss_weight_exponent=loss_weight_exponent,
         )
 
-        denoised_norm = self.module(
+        denoised_norm = self._scaled_forward(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
         weighted_loss = conditioned_target.weight * self.loss(
@@ -445,7 +461,7 @@ class DiffusionModel:
         latents = torch.randn(outputs_shape).to(device=get_device())
 
         generated_norm, latent_steps = edm_sampler(
-            self.module,
+            self._scaled_forward,
             latents,
             inputs_,
             S_churn=self.config.churn,
@@ -523,6 +539,7 @@ class DiffusionModel:
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
             "static_inputs": static_inputs_state,
+            "channel_weights": self.channel_weights,
         }
 
     @classmethod
@@ -542,6 +559,7 @@ class DiffusionModel:
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(state["module"], strict=True)
+        model.channel_weights = state.get("channel_weights")
         return model
 
 

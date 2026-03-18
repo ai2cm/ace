@@ -131,6 +131,7 @@ class Trainer:
                 variable_names=self.model.out_packer.names,
                 device=get_device(),
             )
+            self.model.channel_weights = self.loss_weight_tensor.sqrt()
         self.patch_data = (
             True
             if (config.coarse_patch_extent_lat and config.coarse_patch_extent_lon)
@@ -215,7 +216,6 @@ class Trainer:
                 static_inputs,
                 self.optimization,
                 loss_weights=self.loss_weight_tensor,
-                max_loss_weight=self.config.max_loss_weight,
                 loss_weight_exponent=self.config.loss_weight_exponent,
             )
             self.ema(self.model.modules)
@@ -295,7 +295,6 @@ class Trainer:
                     static_inputs,
                     self.null_optimization,
                     loss_weights=self.loss_weight_tensor,
-                    max_loss_weight=self.config.max_loss_weight,
                     loss_weight_exponent=self.config.loss_weight_exponent,
                 )
                 validation_aggregator.record_batch(
@@ -441,7 +440,6 @@ class TrainerConfig:
     save_checkpoints: bool
     logging: LoggingConfig
     loss_weights: LossWeights | None = None
-    max_loss_weight: float | None = None
     loss_weight_exponent: float = 1.0
     static_inputs: dict[str, str] | None = None
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
