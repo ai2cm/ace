@@ -13,7 +13,7 @@ data:
   - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
     subset:
       start_time: "2021-01-01T00:00"
-      end_time: "2021-12-31T18:00"
+      stop_time: "2021-12-31T18:00"
   lat_extent:
     start: 22.0
     stop: 50.0
