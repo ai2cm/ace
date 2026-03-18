@@ -35,7 +35,7 @@ def run_dataset_comparison(
     record_logs: Callable[[InferenceLogs], None] | None = None,
 ):
     if record_logs is None:
-        record_logs = get_record_to_wandb(label="inference")
+        record_logs = get_record_to_wandb(label="inference").log
     if writer is None:
         writer = NullDataWriter()
 
