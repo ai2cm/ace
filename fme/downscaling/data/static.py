@@ -1,12 +1,10 @@
 import dataclasses
-from collections.abc import Generator, Iterator
 
 import torch
 import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
-from fme.downscaling.data.patching import Patch
 from fme.downscaling.data.utils import ClosedInterval
 
 
@@ -53,11 +51,6 @@ class StaticInput:
             ),
         )
 
-    def _apply_patch(self, patch: Patch):
-        return self._latlon_index_slice(
-            lat_slice=patch.input_slice.y, lon_slice=patch.input_slice.x
-        )
-
     def _latlon_index_slice(
         self,
         lat_slice: slice,
@@ -73,21 +66,22 @@ class StaticInput:
             coords=sliced_latlon,
         )
 
-    def generate_from_patches(
-        self,
-        patches: list[Patch],
-    ) -> Generator["StaticInput", None, None]:
-        for patch in patches:
-            yield self._apply_patch(patch)
-
-    def to_state(self) -> dict:
+    def get_state(self) -> dict:
         return {
             "data": self.data.cpu(),
-            "coords": self.coords.to_state(),
+            "coords": self.coords.get_state(),
         }
 
 
-def get_normalized_static_input(path: str, field_name: str):
+def _get_normalized_static_input(path: str, field_name: str):
+    """
+    Load a static input field from a given file path and field name and
+    normalize it.
+
+    Only supports 2D lat/lon static inputs. If the input has a time dimension, it is
+    squeezed by taking the first time step. The lat/lon coordinates are
+    assumed to be the last two dimensions of the loaded dataset dimensions.
+    """
     if path.endswith(".zarr"):
         static_input = xr.open_zarr(path, mask_and_scale=False)[field_name]
     else:
@@ -154,18 +148,9 @@ class StaticInputs:
     def to_device(self) -> "StaticInputs":
         return StaticInputs(fields=[field.to_device() for field in self.fields])
 
-    def generate_from_patches(
-        self,
-        patches: list[Patch],
-    ) -> Iterator["StaticInputs"]:
-        for patch in patches:
-            yield StaticInputs(
-                fields=[field._apply_patch(patch) for field in self.fields]
-            )
-
-    def to_state(self) -> dict:
+    def get_state(self) -> dict:
         return {
-            "fields": [field.to_state() for field in self.fields],
+            "fields": [field.get_state() for field in self.fields],
         }
 
     @classmethod
@@ -182,3 +167,22 @@ class StaticInputs:
                 for field_state in state["fields"]
             ]
         )
+
+
+def load_static_inputs(
+    static_inputs_config: dict[str, str] | None,
+) -> StaticInputs | None:
+    """
+    Load normalized static inputs from a mapping of field names to file paths.
+    Returns None if the input config is empty.
+    """
+    # TODO: consolidate/simplify empty StaticInputs vs. None handling in
+    #       downscaling code
+    if not static_inputs_config:
+        return None
+    return StaticInputs(
+        fields=[
+            _get_normalized_static_input(path, field_name)
+            for field_name, path in static_inputs_config.items()
+        ]
+    )

@@ -13,6 +13,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
+from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import NoTargetAggregator, SampleAggregator
@@ -20,18 +21,11 @@ from fme.downscaling.data import (
     ClosedInterval,
     DataLoaderConfig,
     GriddedData,
-    StaticInputs,
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
-from fme.downscaling.predictors import (
-    CascadePredictor,
-    CascadePredictorConfig,
-    PatchPredictionConfig,
-    PatchPredictor,
-)
+from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -93,7 +87,6 @@ class EventConfig:
         self,
         base_data_config: DataLoaderConfig,
         requirements: DataRequirements,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
         enforce_lat_bounds(self.lat_extent)
         event_coarse = dataclasses.replace(base_data_config.full_config[0])
@@ -109,7 +102,6 @@ class EventConfig:
         )
         return event_data_config.build(
             requirements=requirements,
-            static_inputs=static_inputs_from_checkpoint,
         )
 
 
@@ -118,7 +110,7 @@ class EventDownscaler:
         self,
         event_name: str,
         data: GriddedData,
-        model: DiffusionModel | CascadePredictor,
+        model: DiffusionModel,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -151,7 +143,7 @@ class EventDownscaler:
 
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
-        batch, static_inputs = next(iter(self.data.get_generator()))
+        batch = next(iter(self.data.get_generator()))
         coarse_coords = batch[0].latlon_coordinates
         fine_coords = LatLonCoordinates(
             lat=_downscale_coord(coarse_coords.lat, self.model.downscale_factor),
@@ -174,7 +166,7 @@ class EventDownscaler:
                 f"for event {self.event_name}"
             )
             outputs = self.model.generate_on_batch_no_target(
-                batch, static_inputs=static_inputs, n_samples=end_idx - start_idx
+                batch, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs)
         to_log = sample_agg.get_wandb()
@@ -197,7 +189,7 @@ class Downscaler:
     def __init__(
         self,
         data: GriddedData,
-        model: DiffusionModel | CascadePredictor,
+        model: DiffusionModel,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -243,30 +235,28 @@ class Downscaler:
                 f"{self.experiment_dir}/generated_maps_and_metrics.nc", mode="w"
             )
 
-    @property
-    def _fine_latlon_coordinates(self) -> LatLonCoordinates | None:
-        if self.data.static_inputs is not None:
-            return self.data.static_inputs.coords
-        else:
-            return None
-
     def run(self):
-        aggregator = NoTargetAggregator(
-            downscale_factor=self.model.downscale_factor,
-            latlon_coordinates=self._fine_latlon_coordinates,
-        )
-        for i, (batch, static_inputs) in enumerate(self.batch_generator):
+        aggregator: NoTargetAggregator | None = None
+        for i, batch in enumerate(self.batch_generator):
+            if aggregator is None:
+                fine_coords = self.model.get_fine_coords_for_batch(batch)
+                aggregator = NoTargetAggregator(
+                    downscale_factor=self.model.downscale_factor,
+                    latlon_coordinates=fine_coords,
+                )
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 prediction = self.generation_model.generate_on_batch_no_target(
                     batch=batch,
-                    static_inputs=static_inputs,
                     n_samples=self.n_samples,
                 )
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.data.items()}
                 aggregator.record_batch(prediction, coarse, batch.time)
+
+        # dataset build ensures non-empty batch_generator
+        assert aggregator is not None
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()
         wandb.log(logs, step=0)
@@ -276,7 +266,7 @@ class Downscaler:
 
 @dataclasses.dataclass
 class DownscalerConfig:
-    model: CheckpointModelConfig | CascadePredictorConfig
+    model: CheckpointModelConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig
@@ -302,7 +292,6 @@ class DownscalerConfig:
         model = self.model.build()
         dataset = self.data.build(
             requirements=self.model.data_requirements,
-            static_inputs=model.static_inputs,
         )
         downscaler = Downscaler(
             data=dataset,
@@ -316,7 +305,6 @@ class DownscalerConfig:
             event_dataset = event_config.get_gridded_data(
                 base_data_config=self.data,
                 requirements=self.model.data_requirements,
-                static_inputs_from_checkpoint=model.static_inputs,
             )
             event_downscalers.append(
                 EventDownscaler(

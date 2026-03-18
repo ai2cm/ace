@@ -413,7 +413,7 @@ class FileWriterConfig:
                 raw_writer = MonthlyDataWriter(
                     path=experiment_dir,
                     label=self.label,
-                    n_samples=n_initial_conditions,
+                    initial_condition_times=initial_condition_times,
                     save_names=self.names,
                     variable_metadata=variable_metadata,
                     coords=subselect_coords_,
