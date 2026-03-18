@@ -9,7 +9,7 @@ data_writer:
   atmosphere:
     save_prediction_files: true
     names:
-    - PRATEsfc
+    - surface_precipitation_rate
     - FLUT
     - T_7
     time_coarsen:
