@@ -91,19 +91,19 @@ class WandBStepLogger:
     ) -> dict[str, Any]:
         if label is None:
             label = self._label
-        if label:
+        if label:  # not None and not ""
             log_dict = {f"{label}/{k}": v for k, v in log_dict.items()}
         return log_dict
 
     def log(self, logs: InferenceLogs, label: str | None = None) -> None:
         """Log each step in a sequence of logs."""
-        for j, log_dict in enumerate(logs):
-            if len(log_dict) > 0:
-                log_dict = self._prefix_label(log_dict, label)
-                self._wandb.log(log_dict, step=self._step + j)
-        self._step += len(logs)
+        for log_dict in logs:
+            self.log_to_current_step(log_dict, label)
+            self._step += 1
 
-    def log_to_step(self, log_dict: dict[str, Any], label: str | None = None) -> None:
+    def log_to_current_step(
+        self, log_dict: dict[str, Any], label: str | None = None
+    ) -> None:
         """Log to the current step without incrementing."""
         if len(log_dict) > 0:
             log_dict = self._prefix_label(log_dict, label)

@@ -380,8 +380,8 @@ def run_inference_from_config(config: InferenceConfig):
         "total_steps_per_second": total_steps_per_second,
         **aggregator.get_summary_logs(),
     }
-    logger.log_to_step(summary_logs)
-    logger.log_to_step(timer.get_durations(), label="")
+    logger.log_to_current_step(summary_logs)
+    logger.log_to_current_step(timer.get_durations(), label="")
 
 
 def run_segmented_inference(config: InferenceConfig, segments: int):
