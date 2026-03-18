@@ -319,7 +319,7 @@ class DiffusionModel:
             static_inputs.to_device() if static_inputs is not None else None
         )
         device = get_device()
-        self.fine_coords = LatLonCoordinates(
+        self.fine_coords = fine_coords.to(device)
             lat=fine_coords.lat.to(device),
             lon=fine_coords.lon.to(device),
         )
