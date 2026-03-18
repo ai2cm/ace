@@ -359,27 +359,6 @@ class ModelTorchDistributed(DistributedBackend):
         torch.distributed.all_reduce(local_count, group=self._w_group)
         return local_sum / local_count
 
-    def gradient_magnitude_percent_diff(
-        self,
-        truth: torch.Tensor,
-        predicted: torch.Tensor,
-        weights: torch.Tensor,
-        dim: tuple[int, ...],
-    ) -> torch.Tensor:
-        # Recover global spatial shape (2 scalar all-reduces).
-        h_total = torch.tensor(truth.shape[-2], device=truth.device)
-        w_total = torch.tensor(truth.shape[-1], device=truth.device)
-        torch.distributed.all_reduce(h_total, group=self._h_group)
-        torch.distributed.all_reduce(w_total, group=self._w_group)
-        img_shape = (int(h_total), int(w_total))
-
-        return metrics.gradient_magnitude_percent_diff(
-            self.gather_spatial_tensor(truth, img_shape),
-            self.gather_spatial_tensor(predicted, img_shape),
-            weights=self.gather_spatial_tensor(weights, img_shape),
-            dim=dim,
-        )
-
     def get_sht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
         return thd.DistributedRealSHT(
             nlat, nlon, lmax=lmax, mmax=mmax, grid=grid

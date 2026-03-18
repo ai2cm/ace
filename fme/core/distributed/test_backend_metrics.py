@@ -165,8 +165,9 @@ def test_gradient_magnitude_percent_diff():
     local_weights = global_weights[slices[-2], slices[-1]]
 
     reduce_dims = (-2, -1)
+    img_shape = (global_shape[-2], global_shape[-1])
     result = dist.gradient_magnitude_percent_diff(
-        local_truth, local_pred, local_weights, dim=reduce_dims
+        local_truth, local_pred, local_weights, dim=reduce_dims, img_shape=img_shape
     )
 
     expected = metrics.gradient_magnitude_percent_diff(
