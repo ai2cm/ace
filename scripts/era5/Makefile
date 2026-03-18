@@ -11,9 +11,9 @@ OUTPUT_PATH_FOUR_DEGREE=gs://vcm-ml-intermediate/2025-03-18-era5-4deg-8layer-194
 OUTPUT_GRID_FOUR_DEGREE=F22.5
 
 # Test run parameters
-START_TIME_TEST_RUN ?= 2025-08-30T00:00:00
-END_TIME_TEST_RUN ?= 2025-08-31T18:00:00
-OUTPUT_PATH_TEST_RUN ?= gs://vcm-ml-scratch/spencerc/test-updated-era5-pipeline/era5-4deg-8layer2.zarr
+START_TIME_TEST_RUN ?= 2025-12-30T00:00:00
+END_TIME_TEST_RUN ?= 2025-12-31T18:00:00
+OUTPUT_PATH_TEST_RUN ?= gs://vcm-ml-scratch/spencerc/test-updated-era5-pipeline/era5-4deg-8layer.zarr
 OUTPUT_GRID_TEST_RUN ?= F22.5
 
 create_environment:
