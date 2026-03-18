@@ -1,12 +1,19 @@
 import abc
 import datetime
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, Self
+
+import dacite
 
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
 class CorrectorConfigABC(abc.ABC):
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> Self:
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+
     @abc.abstractmethod
     def get_corrector(
         self,
