@@ -72,7 +72,9 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
 
     @property
     def per_channel_loss_enabled(self) -> bool:
-        """Whether this aggregator accumulates per-variable loss from batch metrics."""
+        """
+        Whether this aggregator accumulates per-variable loss from batch metrics.
+        """
         return self._per_channel_loss_enabled
 
     @torch.no_grad()
