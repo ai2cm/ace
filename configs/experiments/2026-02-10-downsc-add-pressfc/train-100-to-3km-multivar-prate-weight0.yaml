@@ -9,6 +9,7 @@ model:
   - eastward_wind_at_ten_meters
   - northward_wind_at_ten_meters
   - PRMSL
+  - PRATEsfc
   in_names:
   - PRATEsfc
   - eastward_wind_at_ten_meters
