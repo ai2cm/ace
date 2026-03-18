@@ -6,9 +6,9 @@ cm4_1pctCO2-train_0256to0350-condSFNO|rs1|01KB4EFE21A9Q8VT5PFN2QWZCR|trained|bes
 
 ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs0|01KBZP38BX7NCDP4Y428VSSDEN|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs1|01KBZP41XMBZ8WB8QWM3FQZQ9C|trained|best_inference_ckpt|normal|--not-preemptible
+ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs1|01KBZP41XMBZ8WB8QWM3FQZQ9C|run_140yr|best_inference_ckpt|high|--not-preemptible
 
-aceS-cm4_1pctCO2_0256to0350-condSFNO|rs0|01KHZG19J8SFKZ3PDYCCEZNH1X|run_ICx1|best_inference_ckpt|urgent|--not-preemptible||||b200|||100GiB
+aceS-cm4_1pctCO2_0256to0350-condSFNO|rs0|01KHZG19J8SFKZ3PDYCCEZNH1X|trained|best_inference_ckpt|urgent|--not-preemptible||||b200|||100GiB
 
 cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs0|01KJ5XMPTBN669V97K55AC7KV3|training|best_inference_ckpt|normal|--not-preemptible
 
