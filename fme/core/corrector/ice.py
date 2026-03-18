@@ -189,6 +189,14 @@ class IceBudgetCorrectionConfig:
 class IceCorrectorConfig(CorrectorConfigABC):
     budget_correction: IceBudgetCorrectionConfig | None = None
 
+    @property
+    def input_names(self) -> list[str]:
+        return []
+
+    @property
+    def next_step_input_names(self) -> list[str]:
+        return []
+
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "IceCorrectorConfig":
         return dacite.from_dict(

@@ -118,6 +118,14 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     )
         return state_copy
 
+    @property
+    def input_names(self) -> list[str]:
+        return []
+
+    @property
+    def next_step_input_names(self) -> list[str]:
+        return []
+
     def get_corrector(
         self,
         dataset_info: DatasetInfo,

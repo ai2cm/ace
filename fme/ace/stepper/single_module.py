@@ -34,6 +34,7 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.registry import CorrectorConfigABC
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
@@ -133,6 +134,18 @@ class SingleModuleStepperConfig:
     residual_prediction: bool = False
 
     def __post_init__(self):
+        corrector: CorrectorConfigABC = self.corrector
+        if isinstance(corrector, CorrectorSelector):
+            corrector = corrector.config_instance
+        if (
+            isinstance(corrector, AtmosphereCorrectorConfig)
+            and corrector.ocean is not None
+        ):
+            raise ValueError(
+                "SingleModuleStepperConfig manages ocean configuration via its own "
+                "'ocean' attribute. Configuring 'ocean' on AtmosphereCorrector is not "
+                "supported."
+            )
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(

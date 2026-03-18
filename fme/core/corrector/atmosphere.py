@@ -17,6 +17,7 @@ from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.corrector.utils import force_positive
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.ocean import Ocean, OceanConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -117,6 +118,10 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         total_energy_budget_correction: If not None, force the generated data to
             conserve an idealized version of total energy using the provided
             configuration.
+        ocean: If provided, ocean configuration for SST prescribing or slab ocean
+            modeling. When set, the corrector's ``input_names`` and
+            ``next_step_input_names`` will include the ocean's forcing variable
+            names.
     """
 
     conserve_dry_air: bool = False
@@ -132,6 +137,19 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     ) = None
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: EnergyBudgetConfig | None = None
+    ocean: OceanConfig | None = None
+
+    @property
+    def input_names(self) -> list[str]:
+        if self.ocean is None:
+            return []
+        return self.ocean.forcing_names
+
+    @property
+    def next_step_input_names(self) -> list[str]:
+        if self.ocean is None:
+            return []
+        return self.ocean.forcing_names
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "AtmosphereCorrectorConfig":
@@ -174,6 +192,14 @@ class AtmosphereCorrector(CorrectorABC):
             self._dry_air_precision = torch.float32
         else:
             self._dry_air_precision = torch.float64
+
+        self._ocean: Ocean | None = None
+        if config.ocean is not None:
+            self._ocean = Ocean(config=config.ocean, timestep=timestep)
+
+    @property
+    def ocean(self) -> Ocean | None:
+        return self._ocean
 
     def __call__(
         self,
@@ -244,6 +270,8 @@ class AtmosphereCorrector(CorrectorABC):
                 method=self._config.total_energy_budget_correction.method,
                 unaccounted_heating=self._config.total_energy_budget_correction.constant_unaccounted_heating,
             )
+        if self._ocean is not None:
+            gen_data = self._ocean(input_data, gen_data, forcing_data)
         return gen_data
 
 
