@@ -1,0 +1,72 @@
+experiment_dir: /results
+n_samples: 4
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+  static_inputs:
+    HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+data:
+  coarse:
+  - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+    subset:
+      start_time: "2021-01-01T00:00"
+      end_time: "2021-12-31T18:00"
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 228.0
+    stop: 300.0
+  batch_size: 16
+  num_data_workers: 2
+  strict_ensemble: false
+events:
+- name: "Hurricane_Ida"
+  date: "2021-08-29T00:00"
+  lat_extent:
+    start: 22
+    stop: 38
+  lon_extent:
+    start: 260
+    stop: 276
+  save_generated_samples: true
+  n_samples: 32
+- name: "PNW_Atmospheric_River"
+  date: "2021-11-15T00:00"
+  lat_extent:
+    start: 36
+    stop: 52
+  lon_extent:
+    start: 228
+    stop: 244
+  save_generated_samples: true
+  n_samples: 32
+- name: "US_SE_Tornado_Outbreak"
+  date: "2021-12-11T00:00"
+  lat_extent:
+    start: 30
+    stop: 46
+  lon_extent:
+    start: 250
+    stop: 266
+  save_generated_samples: true
+  n_samples: 32
+- name: "Typhoon_Rai"
+  date: "2021-12-16T00:00"
+  lat_extent:
+    start: 4
+    stop: 20
+  lon_extent:
+    start: 122
+    stop: 138
+  save_generated_samples: true
+  n_samples: 32
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
