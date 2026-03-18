@@ -736,7 +736,7 @@ class LatLonCoordinates(HorizontalCoordinates):
     def __repr__(self) -> str:
         return f"LatLonCoordinates(\n    lat={self.lat},\n    lon={self.lon}\n"
 
-    def to(self, device: str) -> "LatLonCoordinates":
+    def to(self, device: str | torch.device) -> "LatLonCoordinates":
         return LatLonCoordinates(
             lon=self.lon.to(device),
             lat=self.lat.to(device),
