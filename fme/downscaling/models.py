@@ -324,7 +324,7 @@ class DiffusionModel:
             lon=fine_coords.lon.to(device),
         )
         if static_inputs is not None:
-            expected = (len(fine_coords.lat), len(fine_coords.lon))
+            expected = fine_coords.shape
             if static_inputs.shape != expected:
                 raise ValueError(
                     f"static_inputs are expected to be on the same coordinate grid as "
