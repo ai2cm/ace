@@ -408,7 +408,7 @@ def _stepper_config_with_extra_in_names(base: StepperConfig, extra_in_names: lis
     return StepperConfig(step=StepSelector(type=step.type, config=config))
 
 
-def test_all_names_returns_shared_forcing_name_once():
+def test_all_names_includes_shared_forcing_in_both_components():
     atmosphere = ComponentConfig(
         timedelta="6h",
         stepper=_stepper_config_with_extra_in_names(
@@ -423,8 +423,8 @@ def test_all_names_returns_shared_forcing_name_once():
     )
     config = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
     names = config.all_names
-    all_names = names.ocean + names.atmosphere
-    assert all_names.count("land_fraction") == 1
+    assert "land_fraction" in names.ocean
+    assert "land_fraction" in names.atmosphere
 
 
 def test_config_init_atmos_stepper_missing_ocean_error():
