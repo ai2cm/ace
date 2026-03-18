@@ -2,8 +2,6 @@ import logging
 from collections.abc import Callable
 from typing import TypeVar
 
-import torch
-
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -59,23 +57,28 @@ def run_validation(
 
     logging.info("Starting validation loop")
 
-    with timer.context("validation"):
-        no_opt = NullOptimization()
-        n_batches = len(validation_data.loader)
-        with torch.no_grad():
-            for i, batch in enumerate(validation_data.loader):
-                logging.info(f"Validation: processing batch {i + 1} of {n_batches}.")
-                stepped = train_stepper.train_on_batch(
-                    batch,
-                    optimization=no_opt,
-                    compute_derived_variables=compute_derived_variables,
-                )
-                aggregator.record_batch(stepped)
+    no_opt = NullOptimization()
+    n_batches = len(validation_data.loader)
 
-        logging.info("Flushing validation diagnostics")
+    for i, batch in enumerate(validation_data.loader):
+        logging.info(f"Validation: processing batch {i + 1} of {n_batches}.")
+        stepped = train_stepper.train_on_batch(
+            batch,
+            optimization=no_opt,
+            compute_derived_variables=compute_derived_variables,
+        )
+        with timer.context("aggregator"):
+            aggregator.record_batch(stepped)
+
+    logging.info("Flushing validation diagnostics")
+    with timer.context("flush_diagnostics"):
         aggregator.flush_diagnostics(subdir=diagnostics_subdir)
-        logging.info("Getting validation aggregator logs")
+
+    logging.info("Getting validation aggregator logs")
+    with timer.context("aggregator"):
         val_logs = aggregator.get_logs(label=label)
+
+    with timer.context("wandb_logging"):
         record_logs(val_logs)
 
     logging.info("Validation complete")
