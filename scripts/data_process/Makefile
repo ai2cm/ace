@@ -262,9 +262,13 @@ compute_cm4_trial_run_atmosphere_dataset:
 compute_cm4_trial_run_atmosphere_stats:
 	python -u get_stats.py configs/pre-industrial-CM4-1deg-8layer-trial-run.yaml 0
 
-.PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr
-cm4_picontrol_atmosphere_1deg_8layer_200yr:
-	./compute_dataset.sh --config configs/CM4-piControl-atmosphere-1deg-8layer-200yr.yaml
+.PHONY: cm4_picontrol_atmosphere_8layer_200yr
+cm4_picontrol_atmosphere_8layer_200yr:
+	./compute_dataset.sh --dataset --stats --config configs/CM4-piControl-atmosphere-$(RESOLUTION)deg-8layer-200yr.yaml
+
+.PHONY: cm4_1pctCO2_atmosphere_8layer_140yr
+cm4_1pctCO2_atmosphere_8layer_140yr:
+	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)deg-8layer-140yr.yaml
 
 .PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs
 cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
@@ -306,9 +310,13 @@ shield_amip_c96_idealized_0p1_heating_ensemble_dataset:
 xshield_amip_dataset_and_stats:
 	./compute_dataset.sh --config configs/X-SHiELD-AMIP-1deg-$(LAYERS)-11yr.yaml
 
+.PHONY: xshield_amip_plus_4K_dataset_and_stats
+xshield_amip_plus_4K_dataset_and_stats:
+	./compute_dataset.sh --config configs/X-SHiELD-AMIP-plus-4K-1deg-$(LAYERS)-1yr.yaml
+
 .PHONY: shield_c96_ramped_climSST_random_CO2_ensemble_dataset
 shield_c96_ramped_climSST_random_CO2_ensemble_dataset:
-       ./compute_dataset.sh --config configs/shield-ramped-climSST-random-CO2-ensemble-c96-1deg-$(LAYERS).yaml
+	./compute_dataset.sh --dataset --stats --config configs/shield-ramped-climSST-random-CO2-ensemble-c96-$(RESOLUTION)deg-$(LAYERS).yaml
 
 .PHONY: build_atmosphere_processing_image
 build_atmosphere_processing_image:
@@ -346,7 +354,7 @@ e3smv3_piControl_100yr_coupled:
 
 .PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
 cm4_like_am4_random_co2_ensemble_atmosphere:
-	./compute_dataset.sh --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)deg-8layer.yaml
 
 .PHONY:
 cm4_like_am4_random_co2_ensemble_coupled:

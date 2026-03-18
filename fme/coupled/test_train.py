@@ -28,26 +28,26 @@ train_loader:
   batch_size: 2
   num_data_workers: 0
   dataset:
-    - ocean:
-        data_path: {ocean_data_path}
-        subset:
-            start_time: '1970-01-01'
-      atmosphere:
-        data_path: {atmosphere_data_path}
-        subset:
-            start_time: '1970-01-01'
+    ocean:
+      data_path: {ocean_data_path}
+      subset:
+          start_time: '1970-01-01'
+    atmosphere:
+      data_path: {atmosphere_data_path}
+      subset:
+          start_time: '1970-01-01'
 validation_loader:
   batch_size: 2
   num_data_workers: 0
   dataset:
-    - ocean:
-        data_path: {ocean_data_path}
-        subset:
-            start_time: '1970-01-01'
-      atmosphere:
-        data_path: {atmosphere_data_path}
-        subset:
-            start_time: '1970-01-01'
+    ocean:
+      data_path: {ocean_data_path}
+      subset:
+          start_time: '1970-01-01'
+    atmosphere:
+      data_path: {atmosphere_data_path}
+      subset:
+          start_time: '1970-01-01'
 inference:
   loader:
     dataset:
@@ -66,7 +66,7 @@ optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: Adam
-train_stepper:
+stepper_training:
   ocean:
     loss:
       type: MSE

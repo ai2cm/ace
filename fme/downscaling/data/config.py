@@ -5,10 +5,12 @@ from torch.utils.data import DataLoader, Dataset, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.dataset.concat import XarrayConcat, get_dataset
+from fme.core.dataset.concat import XarrayConcat
+from fme.core.dataset.dataset import DatasetABC
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
-from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.downscaling.data.datasets import (
@@ -20,12 +22,6 @@ from fme.downscaling.data.datasets import (
     HorizontalSubsetDataset,
     PairedBatchData,
     PairedGriddedData,
-)
-from fme.downscaling.data.topography import (
-    StaticInputs,
-    Topography,
-    get_normalized_topography,
-    get_topography_downscale_factor,
 )
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
@@ -84,6 +80,56 @@ class XarrayEnsembleDataConfig:
             )
         return configs
 
+    @property
+    def zarr_engine_used(self) -> bool:
+        return self.data_config.zarr_engine_used
+
+
+def build_from_config_sequence(
+    configs: Sequence[
+        XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
+    ],
+    names: Sequence[str],
+    n_timesteps: IntSchedule,
+    strict_ensemble: bool,
+) -> tuple[XarrayConcat, DatasetProperties]:
+    """Build XarrayConcat and properties from a mix of xarray and merge configs."""
+    expanded: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = []
+    for config in configs:
+        if isinstance(config, XarrayEnsembleDataConfig):
+            expanded.extend(config.expand())
+        else:
+            expanded.append(config)
+    datasets: list[DatasetABC] = []
+    properties: DatasetProperties | None = None
+    for config in expanded:
+        ds, prop = config.build(names, n_timesteps)
+        datasets.append(ds)
+        if properties is None:
+            properties = prop
+        else:
+            properties.update(prop, strict=strict_ensemble)
+    if properties is None:
+        raise ValueError("At least one dataset must be provided.")
+    return XarrayConcat(datasets, strict=strict_ensemble), properties
+
+
+def _full_configs(
+    configs: Sequence[
+        XarrayDataConfig | MergeNoConcatDatasetConfig | XarrayEnsembleDataConfig
+    ],
+) -> list[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+    """Expands XarrayEnsembleDataConfig to multiple XarrayDataConfig;
+    other configs are unchanged.
+    """
+    all_configs: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = []
+    for config in configs:
+        if isinstance(config, XarrayEnsembleDataConfig):
+            all_configs += config.expand()
+        else:
+            all_configs.append(config)
+    return all_configs
+
 
 @dataclasses.dataclass
 class DataLoaderConfig:
@@ -97,17 +143,17 @@ class DataLoaderConfig:
     the data, e.g. when fine topography is loaded as an input.
 
     Args:
-        coarse: The dataset configuration.
+        coarse: The dataset configuration. May be a sequence of
+            XarrayDataConfig, XarrayEnsembleDataConfig, or
+            MergeNoConcatDatasetConfig.
         batch_size: The batch size to use for the dataloader.
         num_data_workers: The number of data workers to use for the dataloader.
             (For multi-GPU runtime, it's the number of workers per GPU.)
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
-        topography: The dataset path for the topography data.
-            This may be at a higher resolution than the coarse data, e.g.
-            when fine topography is loaded as an input for predictions that
-            have no fine-res paired targets.
-            If None, no topography data will be loaded.
+        topography: Deprecated field for specifying the topography dataset.
+            StaticInput data are expected to be stored and serialized within a
+            model through the Trainer build process.
         lat_extent: The latitude extent to use for the dataset specified in
             degrees, limited to (-88.0, 88.0). The extent is inclusive, so the start and
             stop values are included in the extent. Defaults to [-66, 70] which
@@ -123,7 +169,9 @@ class DataLoaderConfig:
             If false, pad with extra samples to make ranks have the same size batches.
     """
 
-    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
+    coarse: Sequence[
+        XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
+    ]
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
@@ -139,18 +187,16 @@ class DataLoaderConfig:
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
+        if self.topography is not None:
+            raise ValueError(
+                "The `topography` field on DataLoaderConfig is deprecated and will be "
+                "removed in a future release. `StaticInputs` are now stored within "
+                " the model when it is first built and trained."
+            )
 
     @property
-    def full_config(self) -> Sequence[XarrayDataConfig]:
-        # Expands any XarrayEnsembleDataConfig so it is converted
-        # to the equivalent sequence of XarrayDataConfig.
-        all_configs = []
-        for config in self.coarse:
-            if isinstance(config, XarrayEnsembleDataConfig):
-                all_configs += config.expand()
-            else:
-                all_configs.append(config)
-        return all_configs
+    def full_config(self) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+        return _full_configs(self.coarse)
 
     @property
     def mp_context(self):
@@ -158,8 +204,9 @@ class DataLoaderConfig:
         if self.num_data_workers == 0:
             return None
         for config in self.full_config:
-            if config.engine == "zarr":
+            if config.zarr_engine_used is True:
                 context = "forkserver"
+                break
         return context
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
@@ -170,48 +217,12 @@ class DataLoaderConfig:
         names: list[str],
         n_timesteps: int,
     ) -> tuple[XarrayConcat, DatasetProperties]:
-        return get_dataset(
-            self.full_config,
-            names,
-            IntSchedule.from_constant(n_timesteps),
-            strict=self.strict_ensemble,
+        return build_from_config_sequence(
+            configs=self.coarse,
+            names=names,
+            n_timesteps=IntSchedule.from_constant(n_timesteps),
+            strict_ensemble=self.strict_ensemble,
         )
-
-    def build_topography(
-        self,
-        coarse_coords: LatLonCoordinates,
-        requires_topography: bool,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
-    ) -> Topography | None:
-        if requires_topography is False:
-            return None
-        if static_inputs_from_checkpoint is not None:
-            # TODO: change to use full static inputs list
-            topography = static_inputs_from_checkpoint[0]
-        else:
-            if self.topography is None:
-                raise ValueError(
-                    "Topography is required for this model, but no topography "
-                    "dataset was specified in the configuration nor provided "
-                    "in model checkpoint."
-                )
-            topography = get_normalized_topography(self.topography)
-
-        # Fine grid boundaries are adjusted to exactly match the coarse grid
-        fine_lat_interval = adjust_fine_coord_range(
-            self.lat_extent,
-            full_coarse_coord=coarse_coords.lat,
-            full_fine_coord=topography.coords.lat,
-        )
-        fine_lon_interval = adjust_fine_coord_range(
-            self.lon_extent,
-            full_coarse_coord=coarse_coords.lon,
-            full_fine_coord=topography.coords.lon,
-        )
-        subset_topography = topography.subset_latlon(
-            lat_interval=fine_lat_interval, lon_interval=fine_lon_interval
-        )
-        return subset_topography.to_device()
 
     def build_batchitem_dataset(
         self,
@@ -244,14 +255,7 @@ class DataLoaderConfig:
         self,
         requirements: DataRequirements,
         dist: Distributed | None = None,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> GriddedData:
-        # TODO: static_inputs_from_checkpoint is currently passed from the model
-        # to allow loading fine topography when no fine data is available.
-        # See PR https://github.com/ai2cm/ace/pull/728
-        # In the future we could disentangle this dependency between the data loader
-        # and model by enabling the built GriddedData objects to take in full static
-        # input fields and subset them to the same coordinate range as data.
         xr_dataset, properties = self.get_xarray_dataset(
             names=requirements.coarse_names, n_timesteps=1
         )
@@ -259,7 +263,6 @@ class DataLoaderConfig:
             raise ValueError(
                 "Downscaling data loader only supports datasets with latlon coords."
             )
-        latlon_coords = properties.horizontal_coordinates
         dataset = self.build_batchitem_dataset(
             dataset=xr_dataset,
             properties=properties,
@@ -286,14 +289,8 @@ class DataLoaderConfig:
             persistent_workers=True if self.num_data_workers > 0 else False,
         )
         example = dataset[0]
-        subset_topography = self.build_topography(
-            coarse_coords=latlon_coords,
-            requires_topography=requirements.use_fine_topography,
-            static_inputs_from_checkpoint=static_inputs_from_checkpoint,
-        )
         return GriddedData(
             _loader=dataloader,
-            topography=subset_topography,
             shape=example.horizontal_shape,
             dims=example.latlon_coordinates.dims,
             variable_metadata=dataset.variable_metadata,
@@ -316,9 +313,11 @@ class PairedDataLoaderConfig:
     coordinates, and that the scale factors are equal.
 
     Args:
-        fine: The fine dataset configuration.
-        coarse: The coarse dataset configuration. XarrayEnsembleDataConfig
-            is supported to load multiple ensemble members.
+        fine: The fine dataset configuration. May be a sequence of
+            XarrayDataConfig or MergeNoConcatDatasetConfig.
+        coarse: The coarse dataset configuration. May be a sequence of
+            XarrayDataConfig, XarrayEnsembleDataConfig, or
+            MergeNoConcatDatasetConfig.
         batch_size: The batch size to use for the dataloader.
         num_data_workers: The number of data workers to use for the dataloader.
             (For multi-GPU runtime, it's the number of workers per GPU.)
@@ -335,9 +334,7 @@ class PairedDataLoaderConfig:
         repeat: The number of times to repeat the underlying xarray dataset
             time dimension.  Useful to include longer sequences of small
             data for testing.
-        topography: Optional path to dataset to load for topography. If not
-            provided and model has requires_topography=True, the data loader
-            will default to trying to load the variable from the fine data.
+        topography: Deprecated field for specifying the topography dataset.
         sample_with_replacement: If provided, the dataset will be
             sampled randomly with replacement to the given size each period,
             instead of retrieving each sample once (either shuffled or not).
@@ -346,8 +343,10 @@ class PairedDataLoaderConfig:
             If false, pad with extra samples to make ranks have the same size batches.
     """
 
-    fine: Sequence[XarrayDataConfig]
-    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
+    fine: Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]
+    coarse: Sequence[
+        XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
+    ]
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
@@ -364,6 +363,21 @@ class PairedDataLoaderConfig:
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
+        if self.topography is not None:
+            raise ValueError(
+                "The `topography` field on PairedDataLoaderConfig is deprecated and "
+                "will be removed in a future release. `StaticInputs` are now stored "
+                "within the model when it is first built and trained."
+            )
+
+    def _first_data_config(
+        self,
+        config: XarrayDataConfig | MergeNoConcatDatasetConfig,
+    ) -> XarrayDataConfig:
+        """Return the first XarrayDataConfig for data_path/file_pattern lookup."""
+        if isinstance(config, XarrayDataConfig):
+            return config
+        return config.merge[0]
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
@@ -372,55 +386,45 @@ class PairedDataLoaderConfig:
         mp_context = None
         if self.num_data_workers == 0:
             return None
-        for config in self.fine:
-            if config.engine == "zarr":
+        for fine_config in self.fine:
+            if fine_config.zarr_engine_used is True:
                 mp_context = "forkserver"
-        for config in self.coarse_full_config:
-            if config.engine == "zarr":
+                break
+        for coarse_config in self.coarse:
+            if coarse_config.zarr_engine_used is True:
                 mp_context = "forkserver"
+                break
         return mp_context
 
     @property
-    def coarse_full_config(self) -> Sequence[XarrayDataConfig]:
-        # Expands the coarse dataset configs so that any XarrayEnsembleDataConfig
-        # is converted to the equivalent sequence of XarrayDataConfig.
-        coarse_configs = []
-        for config in self.coarse:
-            if isinstance(config, XarrayEnsembleDataConfig):
-                coarse_configs += config.expand()
-            else:
-                coarse_configs.append(config)
-        return coarse_configs
+    def coarse_full_config(
+        self,
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+        return _full_configs(self.coarse)
 
     def build(
         self,
         train: bool,
         requirements: DataRequirements,
         dist: Distributed | None = None,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> PairedGriddedData:
-        # TODO: static_inputs_from_checkpoint is currently passed from the model
-        # to allow loading fine topography when no fine data is available.
-        # See PR https://github.com/ai2cm/ace/pull/728
-        # In the future we could disentangle this dependency between the data loader
-        # and model by enabling the built GriddedData objects to take in full static
-        # input fields and subset them to the same coordinate range as data.
         if dist is None:
             dist = Distributed.get_instance()
 
         # Load initial datasets
-        dataset_fine, properties_fine = get_dataset(
-            self.fine,
-            requirements.fine_names,
-            IntSchedule.from_constant(requirements.n_timesteps),
-            strict=self.strict_ensemble,
+        n_timesteps = IntSchedule.from_constant(requirements.n_timesteps)
+        dataset_fine, properties_fine = build_from_config_sequence(
+            configs=self.fine,
+            names=requirements.fine_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
         )
 
-        dataset_coarse, properties_coarse = get_dataset(
-            self.coarse_full_config,
-            requirements.coarse_names,
-            IntSchedule.from_constant(requirements.n_timesteps),
-            strict=self.strict_ensemble,
+        dataset_coarse, properties_coarse = build_from_config_sequence(
+            configs=self.coarse,
+            names=requirements.coarse_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
         )
 
         # Ensure that bounds for subselecting on latlon grids return fine grid data
@@ -430,6 +434,14 @@ class PairedDataLoaderConfig:
         ) or not isinstance(properties_fine.horizontal_coordinates, LatLonCoordinates):
             raise ValueError(
                 "Downscaling data loader only supports datasets with latlon coords."
+            )
+
+        # Check that timestamps on datasets are aligned
+        if not dataset_fine.sample_start_times.equals(
+            dataset_coarse.sample_start_times
+        ):
+            raise ValueError(
+                "Fine and coarse datasets must have the same sample start times."
             )
 
         # n_timesteps is hardcoded to 1 for downscaling, so the sample_start_times
@@ -457,44 +469,6 @@ class PairedDataLoaderConfig:
             full_fine_coord=properties_fine.horizontal_coordinates.lon,
         )
 
-        if requirements.use_fine_topography:
-            if static_inputs_from_checkpoint is not None:
-                # TODO: change to use full static inputs list
-                fine_topography = static_inputs_from_checkpoint[0]
-            elif self.topography is None:
-                data_path = self.fine[0].data_path
-                file_pattern = self.fine[0].file_pattern
-                raw_paths = get_raw_paths(data_path, file_pattern)
-                if len(raw_paths) == 0:
-                    raise ValueError(
-                        f"No files found matching '{data_path}/{file_pattern}'."
-                    )
-                fine_topography = get_normalized_topography(raw_paths[0])
-            else:
-                fine_topography = get_normalized_topography(self.topography)
-
-            fine_topography = fine_topography.to_device()
-            if (
-                get_topography_downscale_factor(
-                    fine_topography.data.shape,
-                    properties_fine.horizontal_coordinates.shape,
-                )
-                != 1
-            ):
-                raise ValueError(
-                    f"Fine topography shape {fine_topography.shape} does not match "
-                    f"fine data shape {properties_fine.horizontal_coordinates.shape}."
-                )
-
-            fine_topography = fine_topography.subset_latlon(
-                lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
-            )
-        else:
-            fine_topography = None
-
-        # TODO: horizontal subsetting should probably live in the XarrayDatast level
-        # Subset to overall horizontal domain
-        # TODO: Follow up PR will remove topography from batch items
         dataset_fine_subset = HorizontalSubsetDataset(
             dataset_fine,
             properties=properties_fine,
@@ -543,14 +517,6 @@ class PairedDataLoaderConfig:
         )
 
         example = dataset[0]
-        common_metadata_keys = set(dataset_fine_subset.variable_metadata).intersection(
-            dataset_coarse_subset.variable_metadata
-        )
-        assert all(
-            dataset_fine_subset.variable_metadata[key]
-            == dataset_coarse_subset.variable_metadata[key]
-            for key in common_metadata_keys
-        ), "Metadata for variables common to coarse and fine datasets must match."
         variable_metadata = {
             **dataset_fine_subset.variable_metadata,
             **dataset_coarse_subset.variable_metadata,
@@ -558,7 +524,6 @@ class PairedDataLoaderConfig:
 
         return PairedGriddedData(
             _loader=dataloader,
-            topography=fine_topography,
             coarse_shape=example.coarse.horizontal_shape,
             downscale_factor=example.downscale_factor,
             dims=example.fine.latlon_coordinates.dims,

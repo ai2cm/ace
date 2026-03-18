@@ -18,6 +18,7 @@ from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -472,13 +473,17 @@ def get_step(
     return selector.get_step(dataset_info, init_weights)
 
 
+@pytest.mark.parallel
 def test_label_conditioned_step():
+    dist = Distributed.get_instance()
     selector = get_label_conditioned_selector()
     step = get_step(selector, DEFAULT_IMG_SHAPE, all_labels={"a", "b"})
     input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=1)
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples=1
     )
+    input_data = dist.scatter_spatial(input_data, DEFAULT_IMG_SHAPE)
+    next_step_input_data = dist.scatter_spatial(next_step_input_data, DEFAULT_IMG_SHAPE)
     output = step.step(
         args=StepArgs(
             input=input_data,
@@ -489,8 +494,11 @@ def test_label_conditioned_step():
         ),
         wrapper=lambda x: x,
     )
-    assert output["diagnostic_main"].shape == (1, 45, 90)
-    assert output["diagnostic_rad"].shape == (1, 45, 90)
+    h_sl, w_sl = dist.get_local_slices(DEFAULT_IMG_SHAPE)
+    local_h = DEFAULT_IMG_SHAPE[0] if h_sl == slice(None) else h_sl.stop - h_sl.start
+    local_w = DEFAULT_IMG_SHAPE[1] if w_sl == slice(None) else w_sl.stop - w_sl.start
+    assert output["diagnostic_main"].shape == (1, local_h, local_w)
+    assert output["diagnostic_rad"].shape == (1, local_h, local_w)
 
 
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
@@ -635,6 +643,7 @@ def test_load_is_required_for_path_config(
         ),
     ],
 )
+@pytest.mark.parallel
 def test_input_output_names_secondary_decoder_conflict(conflict: str):
     input_names = ["input"]
     output_names = ["output"]
@@ -655,3 +664,48 @@ def test_input_output_names_secondary_decoder_conflict(conflict: str):
             ),
         )
     assert f"secondary_diagnostic_name is an {conflict} variable:" in str(err.value)
+
+
+def test_step_with_prescribed_prognostic_overwrites_output():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                prescribed_prognostic_names=["diagnostic_main"],
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 2
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    prescribed_value = torch.full(
+        (n_samples,) + img_shape, 42.0, device=fme.get_device()
+    )
+    next_step_input_data["diagnostic_main"] = prescribed_value
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+        wrapper=lambda x: x,
+    )
+    torch.testing.assert_close(output["diagnostic_main"], prescribed_value)

@@ -58,7 +58,6 @@ import torch
 import xarray as xr
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator import OneStepAggregator, TrainAggregator
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
@@ -69,7 +68,6 @@ from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.cli import get_parser, prepare_config, prepare_directory
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
-from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -101,8 +99,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         inference_config=config.inference_aggregator,
         dataset_info=train_data.dataset_info,
         initial_inference_time=initial_inference_times,
-        record_step_20=config.inference_n_forward_steps >= 20,
-        n_timesteps=config.inference_n_forward_steps + stepper.n_ic_timesteps,
+        n_ic_steps=stepper.n_ic_timesteps,
+        n_forward_steps=config.inference_n_forward_steps,
         variable_metadata=train_data.variable_metadata,
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.out_names,
@@ -143,8 +141,8 @@ class AggregatorBuilder(
         inference_config: InferenceEvaluatorAggregatorConfig,
         dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray,
-        record_step_20: bool,
-        n_timesteps: int,
+        n_ic_steps: int,
+        n_forward_steps: int,
         output_dir: str,
         normalize: Callable[[TensorMapping], TensorDict],
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
@@ -156,8 +154,8 @@ class AggregatorBuilder(
         self.inference_config = inference_config
         self.dataset_info = dataset_info
         self.initial_inference_time = initial_inference_time
-        self.record_step_20 = record_step_20
-        self.n_timesteps = n_timesteps
+        self.n_ic_steps = n_ic_steps
+        self.n_forward_steps = n_forward_steps
         self.output_dir = output_dir
         self.variable_metadata = variable_metadata
         self.loss_scaling = loss_scaling
@@ -185,8 +183,8 @@ class AggregatorBuilder(
         return self.inference_config.build(
             dataset_info=self.dataset_info,
             initial_time=self.initial_inference_time,
-            record_step_20=self.record_step_20,
-            n_timesteps=self.n_timesteps,
+            n_ic_steps=self.n_ic_steps,
+            n_forward_steps=self.n_forward_steps,
             channel_mean_names=self.channel_mean_names,
             normalize=self.normalize,
             save_diagnostics=self.save_per_epoch_diagnostics,
@@ -204,13 +202,12 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         torch.backends.cudnn.benchmark = True
     if not os.path.isdir(config.experiment_dir):
         os.makedirs(config.experiment_dir, exist_ok=True)
-    config.logging.configure_logging(config.experiment_dir, log_filename="out.log")
-    env_vars = logging_utils.retrieve_env_vars()
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    config_as_dict = to_flat_dict(dataclasses.asdict(config))
-    config.logging.configure_wandb(
-        config=config_as_dict, env_vars=env_vars, resumable=True, notes=beaker_url
+    config_data = dataclasses.asdict(config)
+    config.logging.configure_logging(
+        config.experiment_dir,
+        log_filename="out.log",
+        config=config_data,
+        resumable=True,
     )
     if config.resume_results is not None:
         logging.info(
@@ -218,11 +215,8 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         )
         config.resume_results.verify_wandb_resumption(config.experiment_dir)
     trainer = build_trainer(builders, config)
-    try:
-        trainer.train()
-        logging.info(f"DONE ---- rank {dist.rank}")
-    finally:
-        dist.shutdown()
+    trainer.train()
+    logging.info(f"DONE ---- rank {dist.rank}")
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
@@ -242,4 +236,5 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
 if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
-    main(args.yaml_config, override_dotlist=args.override)
+    with Distributed.context():
+        main(args.yaml_config, override_dotlist=args.override)

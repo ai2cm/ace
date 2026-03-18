@@ -1,5 +1,6 @@
 import sys
 
+from fme.ace.aggregator.inference import StepMeanEntry
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
@@ -20,6 +21,7 @@ from fme.ace.inference.evaluator import (
     InferenceDataLoaderConfig,
     InferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorConfig,
+    ValidationConfig,
     run_evaluator_from_config,
 )
 from fme.ace.inference.inference import (
@@ -50,7 +52,12 @@ from fme.ace.stepper.parameter_init import (
     ParameterClassification,
     ParameterInitializationConfig,
 )
-from fme.ace.stepper.single_module import Stepper, StepperConfig, StepSelector
+from fme.ace.stepper.single_module import (
+    Stepper,
+    StepperConfig,
+    StepSelector,
+    TrainStepperConfig,
+)
 from fme.ace.stepper.time_length_probabilities import (
     TimeLengthMilestone,
     TimeLengthProbabilities,

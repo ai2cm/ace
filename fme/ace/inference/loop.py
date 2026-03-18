@@ -44,7 +44,7 @@ def run_dataset_comparison(
     i_time = 0
     n_windows = min(len(prediction_data.loader), len(target_data.loader))
     for i, (pred, target) in enumerate(zip(prediction_data.loader, target_data.loader)):
-        timer.stop()
+        timer.stop("data_loading")
         if i_time == 0:
             with timer.context("aggregator"):
                 logs = aggregator.record_initial_condition(
@@ -80,4 +80,4 @@ def run_dataset_comparison(
         timer.start("data_loading")
         i_time += forward_steps_in_memory
 
-    timer.stop()
+    timer.stop("data_loading")

@@ -10,8 +10,15 @@ from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.downscaling.data import Topography
+from fme.downscaling.data import (
+    BatchData,
+    BatchedLatLonCoordinates,
+    PairedBatchData,
+    StaticInput,
+    StaticInputs,
+)
 from fme.downscaling.models import (
+    CheckpointModelConfig,
     DiffusionModel,
     DiffusionModelConfig,
     PairedNormalizationConfig,
@@ -19,6 +26,7 @@ from fme.downscaling.models import (
     _separate_interleaved_samples,
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.noise import LogNormalNoiseDistribution
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -70,13 +78,76 @@ def get_mock_paired_batch(coarse_shape, fine_shape):
     return FineResCoarseResPair(fine=fine, coarse=coarse)
 
 
+def make_batch_data(
+    shape: tuple[int, int, int],
+    lat_values: list[float],
+    lon_values: list[float],
+) -> BatchData:
+    """Create a BatchData with proper monotonic coordinates."""
+    batch_size, lat_size, lon_size = shape
+    assert lat_size == len(lat_values)
+    assert lon_size == len(lon_values)
+    data = {"x": torch.ones(batch_size, lat_size, lon_size, device=get_device())}
+    time = xr.DataArray(range(batch_size), dims=["batch"])
+    lat = torch.tensor(lat_values, dtype=torch.float32)
+    lon = torch.tensor(lon_values, dtype=torch.float32)
+    latlon = BatchedLatLonCoordinates(
+        lat=lat.unsqueeze(0).expand(batch_size, -1),
+        lon=lon.unsqueeze(0).expand(batch_size, -1),
+    )
+    return BatchData(data=data, time=time, latlon_coordinates=latlon)
+
+
+def _get_monotonic_coordinate(size: int, stop: float) -> torch.Tensor:
+    bounds = torch.linspace(0, stop, size + 1)
+    coord = (bounds[:-1] + bounds[1:]) / 2
+    return coord
+
+
+def make_paired_batch_data(
+    coarse_shape: tuple[int, int],
+    fine_shape: tuple[int, int],
+    batch_size: int = 2,
+) -> PairedBatchData:
+    """
+    Create a PairedBatchData with consistent monotonic coordinates.
+    """
+    lat_c, lon_c = coarse_shape
+    lat_f, lon_f = fine_shape
+    fine_lat = _get_monotonic_coordinate(lat_f, stop=lat_f)
+    fine_lon = _get_monotonic_coordinate(lon_f, stop=lon_f)
+    coarse_lat = _get_monotonic_coordinate(lat_c, stop=lat_f)
+    coarse_lon = _get_monotonic_coordinate(lon_c, stop=lon_f)
+    fine = make_batch_data((batch_size, lat_f, lon_f), fine_lat, fine_lon)
+    coarse = make_batch_data((batch_size, lat_c, lon_c), coarse_lat, coarse_lon)
+    return PairedBatchData(fine=fine, coarse=coarse)
+
+
+def make_static_inputs(fine_shape: tuple[int, int]) -> StaticInputs:
+    """Create StaticInputs with proper monotonic coordinates for given shape."""
+    lat_size, lon_size = fine_shape
+    return StaticInputs(
+        fields=[
+            StaticInput(
+                torch.ones(*fine_shape, device=get_device()),
+                LatLonCoordinates(
+                    lat=_get_monotonic_coordinate(lat_size, stop=lat_size),
+                    lon=_get_monotonic_coordinate(lon_size, stop=lon_size),
+                ),
+            )
+        ]
+    )
+
+
 def test_module_serialization(tmp_path):
     coarse_shape = (8, 16)
+    static_inputs = make_static_inputs((16, 32))
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=2,
         predict_residual=True,
         use_fine_topography=False,
+        static_inputs=static_inputs,
     )
     model_from_state = DiffusionModel.from_state(
         model.get_state(),
@@ -98,6 +169,44 @@ def test_module_serialization(tmp_path):
             model.module.parameters(), model_from_disk.module.parameters()
         )
     )
+    loaded_static_inputs = model_from_disk.static_inputs
+    assert loaded_static_inputs is not None
+    assert torch.equal(
+        loaded_static_inputs.fields[0].data, static_inputs.fields[0].data
+    )
+
+
+def test_from_state_backward_compat_fine_topography():
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    downscale_factor = 2
+    static_inputs = make_static_inputs(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        predict_residual=True,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+
+    # Simulate old checkpoint format: static_inputs not serialized
+    state = model.get_state()
+    state["static_inputs"] = None
+
+    # Should load correctly via the elif use_fine_topography branch (+1 channel)
+    model_from_old_state = DiffusionModel.from_state(state)
+    assert model_from_old_state.static_inputs is None
+    assert all(
+        torch.equal(p1, p2)
+        for p1, p2 in zip(
+            model.module.parameters(), model_from_old_state.module.parameters()
+        )
+    )
+
+    # At runtime, omitting static inputs must raise a clear error
+    batch = get_mock_paired_batch([2, *coarse_shape], [2, *fine_shape])
+    with pytest.raises(ValueError, match="Static inputs must be provided"):
+        model_from_old_state.generate_on_batch(batch)
 
 
 def _get_diffusion_model(
@@ -105,6 +214,7 @@ def _get_diffusion_model(
     downscale_factor,
     predict_residual=True,
     use_fine_topography=True,
+    static_inputs=None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -127,7 +237,7 @@ def _get_diffusion_model(
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
-    ).build(coarse_shape, downscale_factor)
+    ).build(coarse_shape, downscale_factor, static_inputs=static_inputs)
 
 
 @pytest.mark.parametrize("predict_residual", [True, False])
@@ -135,36 +245,32 @@ def _get_diffusion_model(
 def test_diffusion_model_train_and_generate(predict_residual, use_fine_topography):
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
+    batch_size = 2
+    if use_fine_topography:
+        static_inputs = make_static_inputs(fine_shape)
+        batch = make_paired_batch_data(coarse_shape, fine_shape, batch_size)
+    else:
+        static_inputs = None
+        batch = get_mock_paired_batch(
+            [batch_size, *coarse_shape], [batch_size, *fine_shape]
+        )
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=2,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
+        static_inputs=static_inputs,
     )
 
     assert model._get_fine_shape(coarse_shape) == fine_shape
 
-    batch_size = 2
-
-    batch = get_mock_paired_batch(
-        [batch_size, *coarse_shape], [batch_size, *fine_shape]
-    )
-    if use_fine_topography:
-        topography = Topography(
-            torch.ones(*fine_shape, device=get_device()),
-            LatLonCoordinates(
-                lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])
-            ),
-        )
-    else:
-        topography = None
     optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
-    train_outputs = model.train_on_batch(batch, topography, optimization)
+    train_outputs = model.train_on_batch(batch, optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
 
     n_generated_samples = 2
     generated_outputs = [
-        model.generate_on_batch(batch, topography) for _ in range(n_generated_samples)
+        model.generate_on_batch(batch) for _ in range(n_generated_samples)
     ]
 
     for generated_output in generated_outputs:
@@ -285,34 +391,31 @@ def test_model_error_cases():
     # missing fine topography when model requires it
     batch.fine.topography = None
     with pytest.raises(ValueError):
-        model.generate_on_batch(batch, topography=None)
+        model.generate_on_batch(batch)
 
 
 def test_DiffusionModel_generate_on_batch_no_target():
     fine_shape = (32, 32)
     coarse_shape = (16, 16)
     downscale_factor = 2
+    static_inputs = make_static_inputs(fine_shape)
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         predict_residual=True,
         use_fine_topography=True,
+        static_inputs=static_inputs,
     )
 
     batch_size = 2
-
     n_generated_samples = 2
 
-    coarse_batch = get_mock_batch(
-        [batch_size, *coarse_shape], topography_scale_factor=downscale_factor
-    )
-    topography = Topography(
-        torch.rand(*fine_shape, device=get_device()),
-        LatLonCoordinates(lat=torch.ones(fine_shape[0]), lon=torch.ones(fine_shape[1])),
-    )
+    coarse_lat = _get_monotonic_coordinate(coarse_shape[0], stop=fine_shape[0])
+    coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    coarse_batch = make_batch_data((batch_size, *coarse_shape), coarse_lat, coarse_lon)
+
     samples = model.generate_on_batch_no_target(
         coarse_batch,
-        topography=topography,
         n_samples=n_generated_samples,
     )
 
@@ -324,36 +427,182 @@ def test_DiffusionModel_generate_on_batch_no_target():
 
 
 def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
-    # We currently require an input coarse shape for accounting, but the model
-    # can handle arbitrary input sizes
-
+    # The model subsets its own stored static_inputs based on coarse batch
+    # coordinates. The stored static_inputs must cover the full fine domain
+    # for all tested batch sizes.
     coarse_shape = (16, 16)
     downscale_factor = 2
+    # Full fine domain: 64x64 covers inputs for both (8,8) and (32,32) coarse inputs
+    # with a downscaling factor of 2
+    full_fine_size = 64
+    static_inputs = make_static_inputs((full_fine_size, full_fine_size))
+    # need to build with static inputs to get the correct n_in_channels
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         predict_residual=True,
         use_fine_topography=True,
+        static_inputs=static_inputs,
     )
     n_ensemble = 2
     batch_size = 2
 
     for alternative_input_shape in [(8, 8), (32, 32)]:
         fine_shape = tuple(dim * downscale_factor for dim in alternative_input_shape)
-        coarse_batch = get_mock_batch(
-            [batch_size, *alternative_input_shape],
-            topography_scale_factor=downscale_factor,
+        alt_y, alt_x = alternative_input_shape
+        coarse_lat = _get_monotonic_coordinate(alt_y, stop=alt_y * downscale_factor)
+        coarse_lon = _get_monotonic_coordinate(alt_x, stop=alt_x * downscale_factor)
+        coarse_batch = make_batch_data(
+            (batch_size, *alternative_input_shape), coarse_lat, coarse_lon
         )
-        topography = Topography(
-            torch.rand(*fine_shape, device=get_device()),
-            LatLonCoordinates(torch.ones(fine_shape[0]), torch.ones(fine_shape[1])),
-        )
-        samples = model.generate_on_batch_no_target(
-            coarse_batch, n_samples=n_ensemble, topography=topography
-        )
+        samples = model.generate_on_batch_no_target(coarse_batch, n_samples=n_ensemble)
 
         assert samples["x"].shape == (
             batch_size,
             n_ensemble,
             *fine_shape,
         )
+
+
+def test_lognorm_noise_backwards_compatibility():
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+
+    model_config = DiffusionModelConfig(
+        module=DiffusionModuleRegistrySelector(
+            "unet_diffusion_song", {"model_channels": 4}
+        ),
+        loss=LossConfig(type="MSE"),
+        in_names=["x"],
+        out_names=["x"],
+        normalization=normalizer,
+        p_mean=-1.0,
+        p_std=1.0,
+        sigma_min=0.1,
+        sigma_max=1.0,
+        churn=0.5,
+        num_diffusion_generation_steps=3,
+        training_noise_distribution=None,
+        use_fine_topography=False,
+        predict_residual=True,
+    )
+    assert model_config.noise_distribution == LogNormalNoiseDistribution(
+        p_mean=-1.0, p_std=1.0
+    )
+    model = model_config.build(
+        (32, 32),
+        2,
+    )
+    state = model.get_state()
+
+    # test from_state on checkpoints saved prior to noise distribution classes
+    del state["config"]["training_noise_distribution"]
+    model_from_state = DiffusionModel.from_state(state)
+    assert model_from_state.config.noise_distribution == LogNormalNoiseDistribution(
+        p_mean=-1.0, p_std=1.0
+    )
+
+
+def test_noise_config_error():
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+
+    with pytest.raises(ValueError):
+        DiffusionModelConfig(
+            module=DiffusionModuleRegistrySelector(
+                "unet_diffusion_song", {"model_channels": 4}
+            ),
+            loss=LossConfig(type="MSE"),
+            in_names=["x"],
+            out_names=["x"],
+            normalization=normalizer,
+            p_mean=-1.0,
+            p_std=1.0,
+            sigma_min=0.1,
+            sigma_max=1.0,
+            churn=0.5,
+            num_diffusion_generation_steps=3,
+            training_noise_distribution=LogNormalNoiseDistribution(-1.0, 1.0),
+            use_fine_topography=False,
+            predict_residual=True,
+        )
+
+
+def test_get_fine_coords_for_batch():
+    # Model trained on full coarse (8x16) / fine (16x32) grid
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    downscale_factor = 2
+    static_inputs = make_static_inputs(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+
+    # Build a batch covering a spatial patch: middle 4 coarse lats and 8 coarse lons.
+    full_coarse_lat = _get_monotonic_coordinate(coarse_shape[0], stop=fine_shape[0])
+    full_coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    patch_coarse_lat = full_coarse_lat[2:6].tolist()  # [5, 7, 9, 11]
+    patch_coarse_lon = full_coarse_lon[4:12].tolist()  # [9, 11, ..., 23]
+    batch = make_batch_data((2, 4, 8), patch_coarse_lat, patch_coarse_lon)
+
+    result = model.get_fine_coords_for_batch(batch)
+
+    expected_lat = model.static_inputs.coords.lat[4:12]
+    expected_lon = model.static_inputs.coords.lon[8:24]
+    # model.static_inputs has been moved to device; index into it directly
+    # to match devices
+    assert torch.allclose(result.lat, expected_lat)
+    assert torch.allclose(result.lon, expected_lon)
+
+
+def test_get_fine_coords_for_batch_raises_without_static_inputs():
+    model = _get_diffusion_model(
+        coarse_shape=(16, 16),
+        downscale_factor=2,
+        use_fine_topography=False,
+        static_inputs=None,
+    )
+    batch = make_batch_data(
+        (1, 16, 16),
+        _get_monotonic_coordinate(16, stop=16).tolist(),
+        _get_monotonic_coordinate(16, stop=16).tolist(),
+    )
+    with pytest.raises(ValueError, match="missing static inputs"):
+        model.get_fine_coords_for_batch(batch)
+
+
+def test_checkpoint_config_topography_raises():
+    with pytest.raises(ValueError):
+        CheckpointModelConfig(
+            checkpoint_path="/any/path.ckpt",
+            fine_topography_path="/topo/path.nc",
+        )
+
+
+def test_checkpoint_model_build_raises_when_checkpoint_has_static_inputs(tmp_path):
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    static_inputs = make_static_inputs(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        predict_residual=True,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": model.get_state()}, checkpoint_path)
+
+    config = CheckpointModelConfig(
+        checkpoint_path=str(checkpoint_path),
+        static_inputs={"HGTsfc": "/any/path.nc"},
+    )
+    with pytest.raises(ValueError):
+        config.build()

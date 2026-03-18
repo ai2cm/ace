@@ -1,14 +1,25 @@
 import contextlib
 import logging
-from collections.abc import Iterator
+import os
+from collections.abc import Generator, Iterator
+from typing import TypeVar
 
 import torch.distributed
 
 from .base import DistributedBackend
+from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+class SpatialParallelismNotImplemented(NotImplementedError):
+    """Raised when a code path is incompatible with spatial parallelism."""
+
+    pass
 
 
 class Distributed:
@@ -26,22 +37,95 @@ class Distributed:
     for this global state in the same place as the routines that use it.
     """
 
-    def __init__(self, force_non_distributed: bool = False):
-        if TorchDistributed.is_available() and not force_non_distributed:
-            self._distributed: DistributedBackend = TorchDistributed()
+    _entered: bool = False
+
+    def __init__(
+        self,
+        force_non_distributed: bool = False,
+        spatial_parallelism: tuple[int, int] | None = None,
+        verbose: bool = False,
+    ):
+        if force_non_distributed:
+            self._distributed: DistributedBackend = NonDistributed()
+        elif spatial_parallelism is not None:
+            h_size, w_size = spatial_parallelism
+            self._distributed = ModelTorchDistributed(
+                h_size=h_size,
+                w_size=w_size,
+                verbose=verbose,
+            )
+        elif TorchDistributed.is_available():
+            self._distributed = TorchDistributed()
         else:
             self._distributed = NonDistributed()
         self._seed = 0
-        self._force_non_distributed = force_non_distributed  # for debugging
+        self._force_non_distributed = force_non_distributed
+
+    @classmethod
+    @contextlib.contextmanager
+    def context(cls) -> Generator[None, None, None]:
+        """
+        Context manager for initializing and shutting down the distributed backend.
+
+        This should generally be used at the top level of the training script to
+        wrap the entire training process, to ensure proper initialization and
+        shutdown of the distributed backend.
+        """
+        if cls._entered:
+            raise RuntimeError("Nested Distributed.context() is not supported.")
+        cls._entered = True
+        instance = cls.get_instance()
+        try:
+            yield
+        except BaseException:
+            # exit immediately to avoid hanging other ranks
+            # the OS should clean up resources based on the non-zero exit
+            raise  # re-raise the exception to avoid masking it
+        else:  # if no exception is raised, let root finish cleanup
+            instance.shutdown()
+        finally:
+            cls._entered = False
 
     @classmethod
     def get_instance(cls) -> "Distributed":
         """
         Get the singleton instance of the Distributed class.
+
+        The backend can be overridden at the session level via environment
+        variables, which is useful for switching between backends
+
+        - ``FME_DISTRIBUTED_BACKEND=torch`` to force :class:`TorchDistributed`
+          (the default when ``torch.distributed`` is available)
+        - ``FME_DISTRIBUTED_BACKEND=model`` to force
+          :class:`ModelTorchDistributed`. Requires ``FME_DISTRIBUTED_H`` and
+          ``FME_DISTRIBUTED_W`` to also be set.
+        - ``FME_DISTRIBUTED_BACKEND=none`` to force
+          :class:`NonDistributed`
         """
+        if not cls._entered:
+            raise RuntimeError(
+                "Distributed.get_instance() called before entering context. "
+                "Please use Distributed.context() to wrap the training process, "
+                "or ensure that get_instance() is only called within the context."
+            )
         global singleton
         if singleton is None:
-            singleton = cls()
+            backend_env = os.environ.get("FME_DISTRIBUTED_BACKEND")
+            if backend_env == "model":
+                h = int(os.environ["FME_DISTRIBUTED_H"])
+                w = int(os.environ["FME_DISTRIBUTED_W"])
+                singleton = cls(spatial_parallelism=(h, w))
+            elif backend_env == "none":
+                singleton = cls(force_non_distributed=True)
+            elif backend_env == "torch":
+                singleton = cls()
+            elif backend_env is not None:
+                raise ValueError(
+                    f"Unknown FME_DISTRIBUTED_BACKEND value '{backend_env}'. "
+                    "Valid values: 'torch', 'model', 'none'."
+                )
+            else:
+                singleton = cls()
         return singleton
 
     @classmethod
@@ -80,11 +164,39 @@ class Distributed:
         return self._distributed.rank
 
     @property
+    def data_parallel_rank(self) -> int:
+        """
+        Get the data parallel rank of this process.
+
+        In the context of distributed learning, this is the "batch"
+        rank of this process.
+        """
+        return self._distributed.data_parallel_rank
+
+    @property
+    def total_data_parallel_ranks(self) -> int:
+        """
+        Get the total number of data parallel ranks.
+
+        This is the number of parallel splits along the "batch" dimension.
+        """
+        return self._distributed.total_data_parallel_ranks
+
+    @property
     def world_size(self) -> int:
         """
         Get the total number of processes.
         """
         return self._distributed.total_ranks
+
+    def require_no_spatial_parallelism(self, msg: str) -> None:
+        """Raise if spatial parallelism is active.
+
+        Use this to guard code paths that are known to be incorrect
+        when spatial co-ranks exist (world_size > total_data_parallel_ranks).
+        """
+        if self.world_size != self.total_data_parallel_ranks:
+            raise SpatialParallelismNotImplemented(msg)
 
     def get_sampler(
         self,
@@ -95,8 +207,8 @@ class Distributed:
         return torch.utils.data.DistributedSampler(
             dataset,
             shuffle=shuffle,
-            num_replicas=self._distributed.total_ranks,
-            rank=self._distributed.rank,
+            num_replicas=self._distributed.total_data_parallel_ranks,
+            rank=self._distributed.data_parallel_rank,
             seed=self._seed,
             drop_last=drop_last,
         )
@@ -117,6 +229,32 @@ class Distributed:
         Modifies the input tensor in-place as a side effect.
         """
         return self._distributed.reduce_mean(tensor)
+
+    def get_local_slices(
+        self,
+        tensor_shape,
+        data_parallel_dim: int | None = None,
+    ):
+        """
+        Gets the slice corresponding to the current rank within a global tensor_shape.
+
+        Args:
+            tensor_shape: the shape of the global tensor, which may or may not contain
+                a data parallel (batch) dimension. Assume last dims are (H, W).
+            data_parallel_dim: the index of the data parallel dimension, if it exists.
+                by default, assumes the tensor does not have a data parallel dimension.
+        """
+        if data_parallel_dim is not None and (
+            tensor_shape[data_parallel_dim] % self.total_data_parallel_ranks != 0
+        ):
+            raise ValueError(
+                "expected global data parallel dim to be divisible by data parallel "
+                f"ranks, got global shape {tensor_shape} with "
+                f"{self.total_data_parallel_ranks} data parallel ranks"
+            )
+        return self._distributed.get_local_slices(
+            tensor_shape, data_parallel_dim=data_parallel_dim
+        )
 
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -145,7 +283,35 @@ class Distributed:
         """
         return self._distributed.reduce_max(tensor)
 
-    def gather(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
+    def gather_object(self, obj: T) -> list[T] | None:
+        """
+        Gather a picklable object from all processes to the root process.
+
+        Args:
+            obj: The object to gather.
+
+        Returns:
+            A list of objects, where the i-th element is the object
+                from the i-th process.
+        """
+        return self._distributed.gather_object(obj)
+
+    def scatter_object(self, obj: T | None) -> T:
+        """
+        Scatter a picklable object from the root process to all processes.
+
+        Args:
+            obj: The object to scatter.
+
+        Returns:
+            The object scattered from the root process.
+        """
+        scattered = self._distributed.scatter_object(obj)
+        if scattered is None:  # necessary check due to mypy limitations
+            raise RuntimeError("scatter_object returned None")
+        return scattered
+
+    def gather(self, tensor: T, gather_list: list[T] | None = None) -> list[T] | None:
         """
         Gather a tensor from all processes to the root process.
 
@@ -156,12 +322,51 @@ class Distributed:
 
         Args:
             tensor: The tensor to gather.
+            gather_list: A list of tensor buffers to gather into,
+                one for each rank.
 
         Returns:
             A list of tensors, where the i-th element is the tensor
                 from the i-th process.
         """
-        return self._distributed.gather(tensor)
+        return self._distributed.gather(tensor, gather_list=gather_list)
+
+    def gather_global(
+        self, tensor: torch.Tensor, global_shape, data_parallel_dim: int = 0
+    ) -> torch.Tensor | None:
+        """
+        Gathers tensor data into a single tensor with the data from all ranks.
+
+        Args:
+            tensor: the tensor data to gather
+            global_shape: the shape of the tensor containing data from all ranks
+            data_parallel_dim: the dimension in global_shape corresponding to the
+                data parallel (or "batch") dimension
+        """
+        if global_shape[data_parallel_dim] % self.total_data_parallel_ranks != 0:
+            raise ValueError(
+                "expected global data parallel dim to be divisible by data parallel "
+                f"ranks, got global_shape {global_shape} with "
+                f"{self.total_data_parallel_ranks} data parallel ranks"
+            )
+        local_slices = self.get_local_slices(
+            global_shape, data_parallel_dim=data_parallel_dim
+        )
+        gathered_local_slices = self.gather_object(local_slices)
+        gathered_tensors = self.gather(tensor.contiguous())
+        if self.is_root():
+            if gathered_local_slices is None or gathered_tensors is None:
+                raise RuntimeError(
+                    "gather_object or gather returned None on root process"
+                )
+            gathered_global = torch.zeros(
+                *global_shape, dtype=tensor.dtype, device=tensor.device
+            )
+            for i in range(len(gathered_local_slices)):
+                gathered_global[gathered_local_slices[i]] = gathered_tensors[i]
+        else:
+            gathered_global = None
+        return gathered_global
 
     def gather_irregular(
         self,
@@ -217,6 +422,61 @@ class Distributed:
         Get the random seed.
         """
         return self._seed
+
+    def get_sht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
+        return self._distributed.get_sht(nlat, nlon, lmax, mmax, grid)
+
+    def get_isht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
+        return self._distributed.get_isht(nlat, nlon, lmax, mmax, grid)
+
+    def get_disco_conv_s2(self, *args, **kwargs):
+        return self._distributed.get_disco_conv_s2(*args, **kwargs)
+
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        return self._distributed.spatial_reduce_sum(tensor)
+
+    def weighted_mean(
+        self,
+        data: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+        keepdim: bool = False,
+    ) -> torch.Tensor:
+        return self._distributed.weighted_mean(data, weights, dim=dim, keepdim=keepdim)
+
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        return self._distributed.zonal_mean(data)
+
+    def gradient_magnitude_percent_diff(
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+    ) -> torch.Tensor:
+        return self._distributed.gradient_magnitude_percent_diff(
+            truth, predicted, weights, dim
+        )
+
+    def scatter_spatial(
+        self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
+    ) -> dict[str, torch.Tensor]:
+        """Slice global tensors to the local spatial chunk for this rank."""
+        slices = self.get_local_slices(img_shape)
+        return {k: v[(..., *slices)].contiguous() for k, v in data.items()}
+
+    def gather_spatial(
+        self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
+    ) -> dict[str, torch.Tensor]:
+        """Gather local spatial chunks back to global tensors via all-reduce."""
+        slices = self.get_local_slices(img_shape)
+        result = {}
+        for k, v in data.items():
+            global_shape = (*v.shape[:-2], *img_shape)
+            global_tensor = torch.zeros(global_shape, dtype=v.dtype, device=v.device)
+            global_tensor[(..., *slices)] = v
+            result[k] = self.spatial_reduce_sum(global_tensor)
+        return result
 
     def shutdown(self):
         return self._distributed.shutdown()
