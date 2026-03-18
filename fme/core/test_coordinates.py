@@ -346,6 +346,57 @@ def test_depth_integral_gradient_with_mask():
     assert torch.all(torch.isfinite(integrand.grad))
 
 
+@pytest.mark.parametrize(
+    "leading_dims",
+    [(), (2,), (2, 3)],
+    ids=["no_leading", "batch", "batch_time"],
+)
+def test_depth_integral_with_zos(leading_dims):
+    nlat, nlon, nz = 2, 3, 3
+    idepth = torch.tensor([0.0, 10.0, 50.0, 100.0])
+    mask = torch.ones(nlat, nlon, nz)
+    coord = DepthCoordinate(idepth=idepth, mask=mask)
+
+    integrand = torch.ones(*leading_dims, nlat, nlon, nz)
+    zos = torch.full((*leading_dims, nlat, nlon), 2.0)
+
+    result_no_zos = coord.depth_integral(integrand)
+    result_with_zos = coord.depth_integral(integrand, zos=zos)
+
+    # surface-layer value is 1.0, so correction is 1.0 * 2.0 = 2.0
+    expected_diff = torch.full((*leading_dims, nlat, nlon), 2.0)
+    torch.testing.assert_close(result_with_zos - result_no_zos, expected_diff)
+
+
+def test_depth_integral_with_zos_uses_surface_layer_value():
+    idepth = torch.tensor([0.0, 10.0, 50.0])
+    mask = torch.ones(2)
+    coord = DepthCoordinate(idepth=idepth, mask=mask)
+
+    integrand = torch.tensor([3.0, 7.0])
+    zos = torch.tensor(1.5)
+
+    static = coord.depth_integral(integrand)
+    result = coord.depth_integral(integrand, zos=zos)
+    # correction = integrand[0] * zos = 3.0 * 1.5 = 4.5
+    torch.testing.assert_close(result - static, torch.tensor(4.5))
+
+
+def test_depth_integral_with_zos_land_is_nan():
+    nlat, nlon, nz = 2, 2, 2
+    idepth = torch.tensor([0.0, 10.0, 50.0])
+    mask = torch.ones(nlat, nlon, nz)
+    mask[0, 0, :] = 0  # land
+
+    coord = DepthCoordinate(idepth=idepth, mask=mask)
+    integrand = torch.ones(nlat, nlon, nz)
+    zos = torch.ones(nlat, nlon)
+
+    result = coord.depth_integral(integrand, zos=zos)
+    assert torch.isnan(result[0, 0])
+    assert torch.isfinite(result[1, 1])
+
+
 @pytest.mark.skipif(e2ghpx is None, reason="earth2grid is not available")
 @pytest.mark.parametrize("pad", [True, False])
 def test_healpix_coordinates_xyz(pad: bool):

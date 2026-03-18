@@ -43,6 +43,7 @@ class HasOceanDepthIntegral(Protocol):
     def depth_integral(
         self,
         integrand: torch.Tensor,
+        zos: torch.Tensor | None = None,
     ) -> torch.Tensor: ...
 
 
@@ -145,16 +146,26 @@ class OceanData:
 
     @property
     def ocean_heat_content(self) -> torch.Tensor:
-        """Returns column-integrated ocean heat content."""
+        """Returns column-integrated ocean heat content.
+
+        When sea surface height (``zos``) is available in the data, a
+        surface-cap correction is included so that the integral accounts for
+        the free-surface volume anomaly.
+        """
         if self._depth_coordinate is None:
             raise ValueError(
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean heat content."
             )
+        try:
+            zos = self.sea_surface_height_above_geoid
+        except KeyError:
+            zos = None
         return self._depth_coordinate.depth_integral(
             self.sea_water_potential_temperature
             * SPECIFIC_HEAT_OF_SEA_WATER_CM4
-            * DENSITY_OF_SEA_WATER_CM4
+            * DENSITY_OF_SEA_WATER_CM4,
+            zos=zos,
         )
 
     @property

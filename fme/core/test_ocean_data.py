@@ -95,6 +95,45 @@ def test_column_integrated_ocean_salt_content(has_depth_coordinate: bool):
             _ = ocean_data.ocean_salt_content
 
 
+def test_column_integrated_ocean_heat_content_with_zos():
+    """OHC includes the surface-cap correction when zos is present."""
+    n_samples, n_time_steps, nlat, nlon, nlevels = 1, 1, 2, 2, 2
+    shape_2d = (n_samples, n_time_steps, nlat, nlon)
+
+    temp_value = 2.0
+    zos_value = 0.5
+    data = {
+        "thetao_0": torch.full(shape_2d, temp_value),
+        "thetao_1": torch.full(shape_2d, temp_value),
+        "zos": torch.full(shape_2d, zos_value),
+    }
+
+    idepth = torch.tensor([0.0, 10.0, 50.0])
+    mask = torch.ones(nlevels)
+    depth_coordinate = DepthCoordinate(idepth, mask)
+
+    ocean_data_with_zos = OceanData(data, depth_coordinate)
+    ohc_with_zos = ocean_data_with_zos.ocean_heat_content
+
+    data_no_zos = {k: v for k, v in data.items() if k != "zos"}
+    ocean_data_no_zos = OceanData(data_no_zos, depth_coordinate)
+    ohc_no_zos = ocean_data_no_zos.ocean_heat_content
+
+    # correction = rho * cp * T_surf * zos at every ocean point
+    expected_correction = (
+        SPECIFIC_HEAT_OF_SEA_WATER_CM4
+        * DENSITY_OF_SEA_WATER_CM4
+        * temp_value
+        * zos_value
+    )
+    torch.testing.assert_close(
+        ohc_with_zos - ohc_no_zos,
+        torch.full(shape_2d, expected_correction),
+        rtol=1e-5,
+        atol=0,
+    )
+
+
 def test_get_3d_fields():
     """Test getting 3D fields (fields with vertical levels)."""
     n_samples, n_time_steps, nlat, nlon, nlevels = 2, 3, 4, 8, 2
