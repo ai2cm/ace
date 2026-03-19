@@ -29,52 +29,34 @@ Pre-commit hooks run ruff, ruff-format, and mypy. If ruff-format modifies files,
 
 ### GitHub MCP Server Setup
 
-To use the PR review rules, configure the GitHub MCP server in Cursor's "Tools & MCP" settings. You will need a read-only personal access token with the following permissions: Pull requests, Issues, Contents, Metadata.
+To use the PR review rules, configure the GitHub MCP server in Cursor's "Tools & MCP" settings.
+You will need a read-only personal access token with the following permissions: Pull requests, Issues, Contents, Metadata.
 
 ## Code Guidelines for Agents
 
-When writing or reviewing code, read CONTRIBUTING.md for design principles and
-testing guidelines. The sections below cover additional details agents are most
-likely to miss.
-
 ### Naming
 
-- Config classes: append `Config` to the built type (`TrainStepperConfig`).
-- Prefer descriptive names (`noise_distribution` not `distribution`).
-  Names should reflect the present scope, not the caller's context.
-  For example, a function that normalizes any tensor should be
-  `normalize(x: Tensor)`, not `normalize_loss(loss: Tensor)`.
-- "scatter" implies communication; "localize" when no communication occurs.
+- Config classes loaded from user-specified yaml: append `Config` to the built type (`TrainStepperConfig`).
 - Private functions get a `_` prefix.
 
 ### Config design
 
 - Validate in `__post_init__`, not at runtime.
-- No redundant options; remove unused fields.
-- Backwards compatibility for checkpoint loading is critical; use deprecation
-  warnings for config removal.
+- Config loading backwards compatibility for inference is critical, but can be broken for training; use deprecation warnings for config removal. Ask user if unsure.
 
 ### Testing
 
-- Prefer fast-running, parsimonious tests.
 - Create helpers for repeated test setup (threshold: 3+ instances).
-  Prefer explicit helpers over pytest fixtures; use fixtures only when
-  sharing scope across tests is valuable.
+- Prefer explicit helpers over pytest fixtures; use fixtures only when sharing scope across tests is valuable.
 - When fixing a bug, add a failing test first.
-- Tests must test behavior, not re-implement logic. Prefer tests that cover
-  user-story-level behavior over tests that lock down subjective API details.
-- Use `xfail` for known bugs, not silent skips.
-- Use non-trivial values (not all-ones) so tests exercise real behavior.
+- Prefer tests that cover user-story-level behavior over tests that lock down subjective API details.
+- Helper function `validate_tensor_dict` is available for regression testing against a saved reference
 
 ### Code organization
 
 - Consolidate duplicated code to shared locations (e.g. `fme/core/`).
-- Remove unused code, flags, and imports proactively.
-- `if/raise` instead of `assert` in production code.
-- Context managers for cleanup (timers, distributed contexts).
-- Pass composed objects, not their parts, if multiple attributes would be
-  used within the function.
-- Commit vendorized code unmodified first, then modifications separately.
+- `fme/core` is not allowed to import from `fme.ace` or other submodules.
+- `fme/ace` is allowed to import from `fme.core`, but not from other submodules.
 
 ## Pull Request Review Assistant
 
@@ -105,7 +87,8 @@ Use these severity buckets:
 - **Suggestions (Should Consider)**: performance, error handling, clarity/design improvements
 - **Minor/Nitpicks (Optional)**: style, naming, docs polish
 
-For re-reviews, classify prior comments as **Addressed**, **Partially Addressed**, **Unaddressed**, or **Dismissed**. Treat clear author rationale as addressed when appropriate.
+For re-reviews, classify prior comments as **Addressed**, **Partially Addressed**, **Unaddressed**, or **Dismissed**.
+Treat clear author rationale as addressed when appropriate.
 
 ### 4) Output format
 
