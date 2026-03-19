@@ -1,6 +1,6 @@
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, ClassVar
+from typing import Any, ClassVar  # noqa: UP035
 
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.dataset_info import DatasetInfo
