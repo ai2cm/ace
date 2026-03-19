@@ -962,6 +962,31 @@ def test_inference_persistence_names(tmp_path):
     assert not torch.all(first_item["bar"] == second_item["bar"])
 
 
+def test_inference_dataset_label_override_without_dataset_labels(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        start_indices=ExplicitIndices([0]),
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=3,
+    )
+    dataset = InferenceDataset(
+        config,
+        total_forward_steps=3,
+        requirements=window_requirements,
+        label_override=["era5"],
+    )
+    batch = dataset[0]
+    # assert that the labels are not None and are the correct labels set during
+    # inference config initialization
+    assert batch.labels is not None
+    assert batch.labels.names == ["era5"]
+    assert batch.labels.tensor.shape[0] == 1
+    assert batch.labels.tensor.shape[1] == 1
+
+
 def test_zarr_engine_used_sequence():
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(
@@ -1240,3 +1265,111 @@ def test_localize_properties():
         # co-ranks have distinct slices, data-parallel ranks have identical ones).
         expected_count = dist.total_data_parallel_ranks
         torch.testing.assert_close(canvas, mask_tensor * expected_count)
+
+
+@pytest.fixture
+def _global_properties():
+    """Build a DatasetProperties with a non-trivial mask so that localize()
+    produces observably different objects under spatial parallelism."""
+    n_lat, n_lon = N_LAT, N_LON
+    lat = torch.linspace(-90.0, 90.0, n_lat)
+    lon = torch.linspace(0.0, 360.0, n_lon)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    timestep = datetime.timedelta(hours=6)
+    metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
+    vertical = NullVerticalCoordinate()
+    mask = torch.ones(n_lat, n_lon)
+    mask_provider = MaskProvider(masks={"mask_land": mask})
+    return DatasetProperties(
+        variable_metadata=metadata,
+        vertical_coordinate=vertical,
+        horizontal_coordinates=coords,
+        mask_provider=mask_provider,
+        timestep=timestep,
+        is_remote=False,
+        all_labels=None,
+    )
+
+
+def _assert_dataset_info_uses_global_properties(dataset_info, props):
+    """Check that every field in dataset_info matches the *global* properties,
+    not the localized ones."""
+    n_lat, n_lon = N_LAT, N_LON
+
+    # img_shape must be the full global grid
+    assert dataset_info.img_shape == (n_lat, n_lon)
+
+    # horizontal_coordinates must match the full global shape
+    assert dataset_info.horizontal_coordinates.shape[-2:] == (n_lat, n_lon)
+
+    # vertical_coordinate type must match
+    assert type(dataset_info.vertical_coordinate) is type(props.vertical_coordinate)
+
+    # mask_provider must have the same keys as the global (non-localized) one
+    info_masks = dataset_info.mask_provider.masks
+    prop_masks = props.mask_provider.masks
+    assert set(info_masks.keys()) == set(prop_masks.keys())
+    for key in prop_masks:
+        assert info_masks[key].shape == prop_masks[key].shape
+
+
+@pytest.mark.parallel
+def test_gridded_data_dataset_info_not_localized(_global_properties):
+    """dataset_info built by GriddedData must use global properties so that
+    models receiving img_shape don't double-partition via get_local_slices."""
+    from unittest.mock import MagicMock
+
+    from fme.ace.data_loading.gridded_data import GriddedData
+
+    mock_loader = MagicMock()
+    mock_loader.__len__ = MagicMock(return_value=1)
+    mock_loader.batch_size = 1
+
+    gridded = GriddedData(loader=mock_loader, properties=_global_properties)
+    _assert_dataset_info_uses_global_properties(
+        gridded.dataset_info, _global_properties
+    )
+
+    # Sanity-check: under spatial parallelism the *local* shape differs
+    dist = Distributed.get_instance()
+    if dist.world_size != dist.total_data_parallel_ranks:
+        local_shape = gridded.horizontal_coordinates.shape[-2:]
+        assert local_shape != (N_LAT, N_LON)
+        assert gridded.dataset_info.img_shape == (N_LAT, N_LON)
+
+
+@pytest.mark.parallel
+def test_inference_gridded_data_dataset_info_not_localized(_global_properties):
+    """dataset_info built by InferenceGriddedData must use global properties."""
+    from unittest.mock import MagicMock
+
+    from fme.ace.data_loading.gridded_data import InferenceGriddedData
+
+    # Build a minimal PrognosticState as initial condition
+    data = {"temp": torch.randn(1, 1, N_LAT, N_LON)}
+    time = xr.DataArray(
+        [[np.datetime64("2000-01-01")]],
+        dims=["sample", "time"],
+    )
+    batch = BatchData(data=data, time=time)
+    initial_condition = PrognosticState(batch)
+
+    mock_loader = MagicMock()
+    mock_loader.__len__ = MagicMock(return_value=1)
+    mock_loader.__iter__ = MagicMock(return_value=iter([]))
+
+    inference = InferenceGriddedData(
+        loader=mock_loader,
+        initial_condition=initial_condition,
+        properties=_global_properties,
+    )
+    _assert_dataset_info_uses_global_properties(
+        inference.dataset_info, _global_properties
+    )
+
+    # Sanity-check: under spatial parallelism the *local* shape differs
+    dist = Distributed.get_instance()
+    if dist.world_size != dist.total_data_parallel_ranks:
+        local_shape = inference.horizontal_coordinates.shape[-2:]
+        assert local_shape != (N_LAT, N_LON)
+        assert inference.dataset_info.img_shape == (N_LAT, N_LON)

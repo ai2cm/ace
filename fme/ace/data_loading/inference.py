@@ -225,6 +225,10 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         """
         if label_encoding is None and config.available_labels is not None:
             label_encoding = LabelEncoding(labels=sorted(list(config.available_labels)))
+        elif label_encoding is None and label_override is not None:
+            # When labels are overridden (e.g. from config.labels), we still need
+            # an encoding to collate them even if the dataset has no available_labels.
+            label_encoding = LabelEncoding(labels=sorted(list(label_override)))
         self._label_encoding = label_encoding
         self._label_override = (
             set(label_override) if label_override is not None else None

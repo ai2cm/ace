@@ -321,7 +321,7 @@ class _Deriver(DeriverABC):
 
 def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer = GlobalTimer.get_instance()
-    timer.start("inference")
+    timer.start_outer("inference")
 
     with timer.context("initialization"):
         makedirs(config.experiment_dir, exist_ok=True)
@@ -370,35 +370,38 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
 
     if config.validation is not None:
-        timer.stop("inference")
-        logging.info("Initializing validation data loader")
-        data_requirements = stepper_config.get_evaluation_window_data_requirements(
-            n_forward_steps=config.validation.get_n_forward_steps()
-        )
-        valid_data = get_gridded_data(
-            config.validation.loader,
-            requirements=data_requirements,
-            train=False,
-        )
+        timer.stop_outer("inference")
+        timer.start_outer("validation")
+        with timer.context("initialization"):
+            logging.info("Initializing validation data loader")
+            data_requirements = stepper_config.get_evaluation_window_data_requirements(
+                n_forward_steps=config.validation.get_n_forward_steps()
+            )
+            valid_data = get_gridded_data(
+                config.validation.loader,
+                requirements=data_requirements,
+                train=False,
+            )
 
-        logging.info("Building validation stepper and aggregator")
-        train_stepper_config = config.validation.stepper_training
-        train_stepper = TrainStepper(stepper=stepper, config=train_stepper_config)
+            logging.info("Building validation stepper and aggregator")
+            train_stepper_config = config.validation.stepper_training
+            train_stepper = TrainStepper(stepper=stepper, config=train_stepper_config)
 
-        aggregator = config.validation.aggregator.build(
-            dataset_info=dataset_info,
-            loss_scaling=train_stepper.effective_loss_scaling,
-            save_diagnostics=True,
-            output_dir=os.path.join(config.experiment_dir, "validation"),
-            channel_mean_names=stepper.loss_names,
-        )
+            aggregator = config.validation.aggregator.build(
+                dataset_info=dataset_info,
+                loss_scaling=train_stepper.effective_loss_scaling,
+                save_diagnostics=True,
+                output_dir=os.path.join(config.experiment_dir, "validation"),
+                channel_mean_names=stepper.loss_names,
+            )
         run_validation(
             train_stepper=train_stepper,
             validation_data=valid_data,
             aggregator=aggregator,
             label="val",
         )
-        timer.start("inference")
+        timer.stop_outer("validation")
+        timer.start_outer("inference")
 
     with timer.context("initialization"):
         aggregator = aggregator_config.build(
@@ -419,7 +422,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         )
 
     logging.info("Starting inference")
-    record_logs = get_record_to_wandb(label="inference")
+    logger = get_record_to_wandb(label="inference")
     if config.prediction_loader is not None:
         prediction_data = get_inference_data(
             config.prediction_loader,
@@ -437,7 +440,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             target_data=data,
             deriver=deriver,
             writer=writer,
-            record_logs=record_logs,
+            record_logs=logger.log,
         )
     else:
         run_inference(
@@ -445,7 +448,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data=data,
             aggregator=aggregator,
             writer=writer,
-            record_logs=record_logs,
+            record_logs=logger.log,
         )
 
     with timer.context("final_writer_flush"):
@@ -454,10 +457,10 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         logging.info("Writing reduced metrics to disk in netcdf format.")
         aggregator.flush_diagnostics()
 
-    timer.stop("inference")
+    timer.stop_outer("inference")
     total_steps = config.n_forward_steps * config.loader.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
@@ -467,7 +470,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
-        **timer.get_durations(),
         **aggregator.get_summary_logs(),
     }
-    record_logs([summary_logs])
+    logger.log_to_current_step(summary_logs)  # prefix "inference/"
+    logger.log_to_current_step(
+        timer.get_durations(), label=""
+    )  # durations already prefixed
