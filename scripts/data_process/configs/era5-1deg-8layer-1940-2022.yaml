@@ -89,6 +89,7 @@ time_coarsen:
     - USWRFsfc
     - USWRFtoa
     - tendency_of_total_water_path_due_to_advection
+    - total_frozen_precipitation_rate
   constant_prefixes:
     - HGTsfc
     - ak_
