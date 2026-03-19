@@ -1,5 +1,6 @@
 import collections
 import logging
+import math
 from collections import namedtuple
 from collections.abc import Mapping
 from typing import Literal
@@ -26,19 +27,29 @@ def _add_trailing_slash(s):
 
 
 def _decimal_places_in_percentile(reference_percentile: float) -> int:
-    """Infer fractional decimal places from a percentile (metric keys)."""
-    text = f"{reference_percentile:.14f}".rstrip("0").rstrip(".")
-    if "." not in text:
+    """Fractional digit count from ``repr`` of the configured percentile."""
+    s = repr(reference_percentile)
+    if "." not in s:
         return 0
-    return len(text.split(".")[1])
+    return len(s.split(".")[1])
 
 
 def _format_percentile_for_metric_key(p: float, reference_percentile: float) -> str:
     r"""
-    Format *p* (the percentile passed to tail bias routines) for wandb keys using
-    the same number of fractional digits as *reference_percentile* from config
-    (e.g. ref 99.9999 and complementary tail p=0.0001 -> ``"0.0001"``).
+    Format *p* (the percentile passed to tail routines) for wandb keys.
+
+    When *p* matches the configured reference (upper tail), use ``str(reference)``
+    so keys match e.g. ``99.0th-percentile``. For complementary tails
+    (``p = 100 - reference``), round using the reference's fractional width
+    (e.g. ref ``99.9999`` -> ``0.0001``).
     """
+    if math.isclose(
+        p,
+        reference_percentile,
+        rel_tol=0.0,
+        abs_tol=1e-9 * max(1.0, abs(reference_percentile)),
+    ):
+        return str(reference_percentile)
     decimals = _decimal_places_in_percentile(reference_percentile)
     rounded = round(p, decimals)
     if decimals == 0:
@@ -569,16 +580,26 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
             return "lower"
         return "upper"
 
-    def _percentiles_to_use(
-        self, tail: Literal["upper", "lower", "both"] = "upper"
-    ) -> list[float]:
-        lower_tail_percentiles: list[float] = []
-        upper_tail_percentiles: list[float] = []
-        if tail == "upper" or tail == "both":
-            upper_tail_percentiles.extend(self.percentiles)
-        if tail == "lower" or tail == "both":
-            lower_tail_percentiles.extend([100.0 - p for p in self.percentiles])
-        return lower_tail_percentiles + upper_tail_percentiles
+    def _percentile_entries_for_field(self, field_name: str) -> list[tuple[float, str]]:
+        """(quantile_percentile, stable_key_fragment) pairs for wandb metric names."""
+        tail = self._variable_distribution_tail(field_name)
+        entries: list[tuple[float, str]] = []
+        if tail == "upper":
+            for ref in self.percentiles:
+                p = ref
+                entries.append((p, _format_percentile_for_metric_key(p, ref)))
+        elif tail == "lower":
+            for ref in self.percentiles:
+                p = 100.0 - ref
+                entries.append((p, _format_percentile_for_metric_key(p, ref)))
+        else:
+            for ref in self.percentiles:
+                p = 100.0 - ref
+                entries.append((p, _format_percentile_for_metric_key(p, ref)))
+            for ref in self.percentiles:
+                p = ref
+                entries.append((p, _format_percentile_for_metric_key(p, ref)))
+        return entries
 
     def _get_abs_norm_tail_biases_beyond_percentile(
         self, field_name: str, prediction: _Histogram, target: _Histogram
@@ -643,23 +664,23 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
             fig = self._plot_histogram(target, prediction)
             return_dict[field_name] = fig
             plt.close(fig)
-            variable_distribution_tail = self._variable_distribution_tail(field_name)
+            percentile_entries = self._percentile_entries_for_field(field_name)
             if target is not None:
-                for p in self._percentiles_to_use(tail=variable_distribution_tail):
-                    return_dict[f"target/{p}th-percentile/{field_name}"] = quantile(
+                for p, p_key in percentile_entries:
+                    return_dict[f"target/{p_key}th-percentile/{field_name}"] = quantile(
                         target.bin_edges, target.counts, p / 100.0
                     )
             if prediction is not None:
-                for p in self._percentiles_to_use(tail=variable_distribution_tail):
-                    return_dict[f"prediction/{p}th-percentile/{field_name}"] = quantile(
-                        prediction.bin_edges, prediction.counts, p / 100.0
+                for p, p_key in percentile_entries:
+                    return_dict[f"prediction/{p_key}th-percentile/{field_name}"] = (
+                        quantile(prediction.bin_edges, prediction.counts, p / 100.0)
                     )
                     if self._compute_percentile_frac and target is not None:
                         return_dict[
-                            f"prediction_frac_of_target/{p}th-percentile/{field_name}"
+                            f"prediction_frac_of_target/{p_key}th-percentile/{field_name}"
                         ] = (
-                            return_dict[f"prediction/{p}th-percentile/{field_name}"]
-                            / return_dict[f"target/{p}th-percentile/{field_name}"]
+                            return_dict[f"prediction/{p_key}th-percentile/{field_name}"]
+                            / return_dict[f"target/{p_key}th-percentile/{field_name}"]
                         )
 
                 if target is not None:
