@@ -25,6 +25,27 @@ def _add_trailing_slash(s):
         return s + "/"
 
 
+def _decimal_places_in_percentile(reference_percentile: float) -> int:
+    """Infer fractional decimal places from a percentile (metric keys)."""
+    text = f"{reference_percentile:.14f}".rstrip("0").rstrip(".")
+    if "." not in text:
+        return 0
+    return len(text.split(".")[1])
+
+
+def _format_percentile_for_metric_key(p: float, reference_percentile: float) -> str:
+    r"""
+    Format *p* (the percentile passed to tail bias routines) for wandb keys using
+    the same number of fractional digits as *reference_percentile* from config
+    (e.g. ref 99.9999 and complementary tail p=0.0001 -> ``"0.0001"``).
+    """
+    decimals = _decimal_places_in_percentile(reference_percentile)
+    rounded = round(p, decimals)
+    if decimals == 0:
+        return str(int(rounded))
+    return f"{rounded:.{decimals}f}"
+
+
 def trim_zero_bins(
     counts: np.ndarray, bin_edges: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -518,7 +539,7 @@ class ComparedDynamicHistograms:
         return ds
 
 
-class DynamicTailsHistogramAggregator(ComparedDynamicHistograms):
+class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
     """ComparedDynamicHistograms with support for upper-tailed, lower-tailed,
     and two-tailed distribution metrics.
     """
@@ -562,15 +583,16 @@ class DynamicTailsHistogramAggregator(ComparedDynamicHistograms):
     def _get_abs_norm_tail_biases_beyond_percentile(
         self, field_name: str, prediction: _Histogram, target: _Histogram
     ) -> dict[str, float]:
-        if field_name in self._left_tailed_variables:
-            percentiles = [100.0 - p for p in self.percentiles]
-        else:
-            percentiles = self.percentiles
         return_dict: dict[str, float] = {}
-        for p in percentiles:
+        for ref in self.percentiles:
+            if field_name in self._left_tailed_variables:
+                p = 100.0 - ref
+            else:
+                p = ref
+            p_key = _format_percentile_for_metric_key(p, ref)
             if self._variable_distribution_tail(field_name) == "upper":
                 return_dict[
-                    f"abs_norm_tail_bias_beyond_percentile/{p}/{field_name}"
+                    f"abs_norm_tail_bias_beyond_percentile/{p_key}/{field_name}"
                 ] = _abs_norm_tail_bias(
                     percentile=p,
                     predict_counts=prediction.counts,
@@ -581,7 +603,7 @@ class DynamicTailsHistogramAggregator(ComparedDynamicHistograms):
                 )
             elif self._variable_distribution_tail(field_name) == "lower":
                 return_dict[
-                    f"abs_norm_tail_bias_beyond_percentile/{p}/{field_name}"
+                    f"abs_norm_tail_bias_beyond_percentile/{p_key}/{field_name}"
                 ] = _abs_norm_tail_bias(
                     percentile=p,
                     predict_counts=prediction.counts,
@@ -608,7 +630,7 @@ class DynamicTailsHistogramAggregator(ComparedDynamicHistograms):
                     tail="lower",
                 )
                 return_dict[
-                    f"abs_norm_tail_bias_beyond_percentile/{p}/{field_name}"
+                    f"abs_norm_tail_bias_beyond_percentile/{p_key}/{field_name}"
                 ] = (bias_upper + bias_lower) / 2.0
         return return_dict
 
