@@ -1,9 +1,10 @@
 resume_results_dir: /previous_results
+resume_wandb: false
 loss_weights:
   weights:
     PRATEsfc:
       start_epoch: 270
-      end_epoch: 470
+      end_epoch: 570
       start_weight: 0.000001
       end_weight: 1.0
 loss_weight_exponent: 0.75
@@ -146,7 +147,7 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 500
+max_epochs: 600
 validate_interval: 15
 experiment_dir: /results
 save_checkpoints: false
