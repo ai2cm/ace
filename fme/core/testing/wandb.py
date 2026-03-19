@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from fme.core import wandb
+from fme.core.disk_metric_logger import DiskMetricLogger
 from fme.core.distributed import Distributed
 
 
@@ -16,11 +17,14 @@ class MockWandB:
         self._logs: dict[int, dict[str, Any]] = collections.defaultdict(dict)
         self._last_step = 0
         self._id: str | None = None
+        self._disk_logger: DiskMetricLogger | None = None
 
-    def configure(self, log_to_wandb: bool):
+    def configure(self, log_to_wandb: bool, metrics_log_dir: str | None = None):
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
+        if metrics_log_dir is not None and dist.is_root():
+            self._disk_logger = DiskMetricLogger(metrics_log_dir)
 
     def init(
         self,
@@ -96,6 +100,8 @@ class MockWandB:
         # sleep arg is ignored since we don't want to sleep in tests
         if self._enabled:
             self._logs[step].update(data)
+        if self._disk_logger is not None:
+            self._disk_logger.log(dict(data), step=step)
 
     def get_logs(self) -> list[dict[str, Any]]:
         if len(self._logs) == 0:
