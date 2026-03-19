@@ -237,7 +237,7 @@ def load_static_inputs(
 ) -> StaticInputs:
     """
     Load normalized static inputs from a mapping of field names to file paths.
-    Returns an empty StaticInputs (no fields) if the config is None or empty.
+    Returns an empty StaticInputs (no fields) if the config is empty.
     """
     fields = [
         _get_normalized_static_input(path, field_name)

@@ -64,8 +64,6 @@ def mock_output_target():
 
 
 def get_static_inputs(shape=(16, 16)):
-    from fme.core.coordinates import LatLonCoordinates
-
     data = torch.randn(shape)
     coords = LatLonCoordinates(
         lat=torch.arange(shape[0], dtype=torch.float32),

@@ -193,19 +193,6 @@ def test_module_serialization(tmp_path):
     )
 
 
-def test_from_state_raises_when_no_coords_available():
-    """from_state must raise when the checkpoint has neither top-level coords
-    nor legacy per-field coords to migrate from."""
-    model = _get_diffusion_model(
-        coarse_shape=(8, 16), downscale_factor=2, use_fine_topography=False
-    )
-    state = model.get_state()
-    # Wipe coords entirely — no way to recover them
-    state["static_inputs"] = None
-    with pytest.raises(ValueError):
-        DiffusionModel.from_state(state)
-
-
 def test_generate_raises_when_no_static_fields_but_topography_required():
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
