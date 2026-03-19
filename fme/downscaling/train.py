@@ -107,13 +107,25 @@ class WeightSchedule:
 
 @dataclasses.dataclass
 class LossWeights:
-    weights: dict[str, float | WeightSchedule]
+    weights: dict
 
-    def get_weight_tensor(
-        self, variable_names: list[str], device: torch.device
+    def __post_init__(self):
+        self.weights = {
+            str(k): v if isinstance(v, WeightSchedule) else float(v)
+            for k, v in self.weights.items()
+        }
+
+    def get_weight_tensor_for_epoch(
+        self, variable_names: list[str], epoch: int, device: torch.device
     ) -> torch.Tensor:
-        weights = [self.weights.get(name, 1.0) for name in variable_names]
-        return torch.tensor(weights, device=device).reshape(1, -1, 1, 1)
+        resolved = []
+        for name in variable_names:
+            w = self.weights.get(name, 1.0)
+            if isinstance(w, WeightSchedule):
+                resolved.append(w.get_weight(epoch))
+            else:
+                resolved.append(w)
+        return torch.tensor(resolved, device=device).reshape(1, -1, 1, 1)
 
 
 class Trainer:
@@ -137,16 +149,9 @@ class Trainer:
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
         self.config = config
-        if config.loss_weights is None:
-            self.loss_weight_tensor = torch.ones(
-                1, len(self.model.out_packer.names), 1, 1, device=get_device()
-            )
-        else:
-            self.loss_weight_tensor = config.loss_weights.get_weight_tensor(
-                variable_names=self.model.out_packer.names,
-                device=get_device(),
-            )
-            self.model.channel_weights = self.loss_weight_tensor.sqrt()
+        self.loss_weights_config = config.loss_weights
+        self._update_weights_for_epoch(0)
+
         self.patch_data = (
             True
             if (config.coarse_patch_extent_lat and config.coarse_patch_extent_lon)
@@ -191,6 +196,19 @@ class Trainer:
         self._best_histogram_tail_name = (
             "generation/histogram/abs_norm_tail_bias_above_percentile/99.99/"
         )
+
+    def _update_weights_for_epoch(self, epoch: int) -> None:
+        if self.loss_weights_config is None:
+            self.loss_weight_tensor = torch.ones(
+                1, len(self.model.out_packer.names), 1, 1, device=get_device()
+            )
+        else:
+            self.loss_weight_tensor = (
+                self.loss_weights_config.get_weight_tensor_for_epoch(
+                    self.model.out_packer.names, epoch, get_device()
+                )
+            )
+        self.model.channel_weights = self.loss_weight_tensor.sqrt()
 
     def _get_batch_generator(
         self, data: PairedGriddedData, random_offset: bool, shuffle: bool
@@ -418,6 +436,7 @@ class Trainer:
                 self.startEpoch + self.segment_epochs, self.config.max_epochs
             )
         for epoch in range(self.startEpoch, segment_max_epochs):
+            self._update_weights_for_epoch(epoch)
             logging.info(f"Training epoch: {epoch + 1}")
             start_time = time.time()
             self.train_one_epoch()
