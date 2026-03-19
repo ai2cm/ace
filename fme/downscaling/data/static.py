@@ -174,7 +174,7 @@ class StaticInputs:
     def from_state(cls, state: dict) -> "StaticInputs":
         if not _has_coords_in_state(state):
             raise ValueError(
-                "No coordinates found in state for StaticInputs. Load with"
+                "No coordinates found in state for StaticInputs. Load with "
                 "from_state_backwards_compatible if loading from a checkpoint "
                 "saved prior to current coordinate serialization format."
             )

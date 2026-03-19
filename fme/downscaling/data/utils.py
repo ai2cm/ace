@@ -68,8 +68,7 @@ class ClosedInterval:
         Return a subset of `coords` that falls within this specified interval.
         This assumes `coords` is monotonically increasing.
         """
-        slice = self.slice_from(coords)
-        return coords[slice]
+        return coords[self.slice_from(coords)]
 
 
 def scale_slice(slice_: slice, scale: int) -> slice:
