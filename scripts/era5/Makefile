@@ -5,9 +5,9 @@ LOCAL_ENVIRONMENT ?= era5-ingestion
 # Production run parameters
 START_TIME=1940-01-01T12:00:00
 END_TIME=2025-12-31T18:00:00
-OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/2025-03-18-era5-1deg-8layer-1940-2025.zarr
+OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/2026-03-19-era5-1deg-8layer-1940-2025.zarr
 OUTPUT_GRID_ONE_DEGREE=F90
-OUTPUT_PATH_FOUR_DEGREE=gs://vcm-ml-intermediate/2025-03-18-era5-4deg-8layer-1940-2025.zarr
+OUTPUT_PATH_FOUR_DEGREE=gs://vcm-ml-intermediate/2026-03-19-era5-4deg-8layer-1940-2025.zarr
 OUTPUT_GRID_FOUR_DEGREE=F22.5
 
 # Test run parameters

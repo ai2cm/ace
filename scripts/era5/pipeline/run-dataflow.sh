@@ -32,7 +32,7 @@ DIRECT_ARGS=(
 DATAFLOW_ARGS=(
     --project vcm-ml
     --region us-central1
-    --temp_location gs://vcm-ml-scratch/spencerc/temp/
+    --temp_location gs://vcm-ml-scratch/era5-ingestion-pipeline/temp/
     --experiments use_runner_v2
     --sdk_location container
     --sdk_container_image us-central1-docker.pkg.dev/vcm-ml/full-model/era5-ingest-dataflow:2026-03-03-era5-xarray-beam-pipelines
