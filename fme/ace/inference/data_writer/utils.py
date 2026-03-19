@@ -18,12 +18,13 @@ def get_all_names(
         variables = variables.union(set(varnames))
     if allowlist is None:
         return variables
-    missing = set(allowlist) - variables
+    allowlist = set(allowlist)
+    missing = allowlist - variables
     if missing:
         warnings.warn(
             f"Requested variable(s) not present in data: {list(missing)}",
         )
-    return variables.intersection(set(allowlist))
+    return variables.intersection(allowlist)
 
 
 @dataclass
