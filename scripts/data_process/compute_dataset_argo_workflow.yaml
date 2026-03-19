@@ -117,7 +117,7 @@ spec:
           - name: output_directory
           - name: run
       container:
-        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2026.03.0
         resources:
           limits:
             cpu: "30000m"
@@ -196,7 +196,7 @@ spec:
           - name: config
           - name: run
       container:
-        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2026.03.0
         resources:
           limits:
             cpu: "30000m"
@@ -241,7 +241,7 @@ spec:
           - name: config
           - name: run
       container:
-        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2026.03.0
         resources:
           limits:
             cpu: "30000m"
@@ -281,7 +281,7 @@ spec:
           - name: python_script
           - name: config
       container:
-        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2026.03.0
         resources:
           limits:
             cpu: "8000m"
@@ -319,7 +319,7 @@ spec:
           - name: python_script
           - name: config
       container:
-        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2026.03.0
         resources:
           limits:
             cpu: "8000m"

@@ -5,6 +5,7 @@ dacite
 dask[distributed]
 fsspec
 gcsfs
+obstore
 pyyaml
 scipy
 xarray>=2025.1.2

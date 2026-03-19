@@ -15,6 +15,14 @@ import dacite
 import fsspec
 import xarray as xr
 import yaml
+from zarr.storage import ObjectStore
+
+try:
+    import obstore  # noqa: F401
+
+    _HAS_OBSTORE = True
+except ImportError:
+    _HAS_OBSTORE = False
 
 # these are auxiliary variables that exist in dataset for convenience, e.g. to do
 # masking or to more easily compute vertical integrals. But they are not inputs
@@ -103,6 +111,23 @@ class Config:
     time_coarsen: TimeCoarsenConfig | None = None
 
 
+def get_zarr_store(url: str, read_only: bool = True):
+    """Create a zarr store from a URL using obstore if available.
+
+    Args:
+        url: The URL of the zarr store to create.
+        read_only: Whether to open the store in read-only mode.
+    Returns:
+        A zarr store or the path to a zarr store if obstore is not available.
+    """
+    if url.startswith("gs://") and _HAS_OBSTORE:
+        from obstore.store import from_url
+
+        return ObjectStore(from_url(url), read_only=read_only)
+    else:
+        return url
+
+
 def get_stats(
     config: StatsConfig,
     input_zarr: str,
@@ -126,14 +151,16 @@ def get_stats(
     xr.set_options(keep_attrs=True, display_max_rows=100)
     logging.info(f"Reading data from {input_zarr}")
 
+    input_store = get_zarr_store(input_zarr)
+
     # Open data with roughly 128 MiB chunks via dask's automatic chunking. This
     # is useful when opening sharded zarr stores with an inner chunk size of 1,
     # which is otherwise inefficient for the type of computation done here.
     if dask is not None:
         with dask.config.set({"array.chunk-size": "128MiB"}):
-            ds = xr.open_zarr(input_zarr, chunks={"time": "auto"})
+            ds = xr.open_zarr(input_store, chunks={"time": "auto"})
     else:
-        ds = xr.open_zarr(input_zarr)
+        ds = xr.open_zarr(input_store)
 
     ds = ds.drop_vars(DROP_VARIABLES, errors="ignore")
     ds = ds.sel(time=slice(config.start_date, config.end_date))

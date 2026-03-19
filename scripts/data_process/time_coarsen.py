@@ -12,7 +12,7 @@ import xarray as xr
 import yaml
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from get_stats import StatsConfig
+from get_stats import StatsConfig, get_zarr_store
 
 try:
     import dask  # noqa: F401
@@ -151,7 +151,8 @@ def coarsen(ds: xr.Dataset, config: TimeCoarsenConfig) -> xr.Dataset:
 
 def _write_eager(ds: xr.Dataset, path: str) -> None:
     """Write dataset eagerly using xarray's to_zarr."""
-    ds.to_zarr(path, mode="w", zarr_version=3)
+    output_store = get_zarr_store(path, read_only=False)
+    ds.to_zarr(output_store, mode="w", zarr_version=3)
 
 
 def _write_xpartition(ds: xr.Dataset, path: str, config: TimeCoarsenConfig) -> None:
@@ -170,13 +171,14 @@ def _write_xpartition(ds: xr.Dataset, path: str, config: TimeCoarsenConfig) -> N
     else:
         inner_chunks = config.chunking
 
-    ds.partition.initialize_store(path, inner_chunks=inner_chunks)
+    output_store = get_zarr_store(path, read_only=False)
+    ds.partition.initialize_store(output_store, inner_chunks=inner_chunks)
     for i in range(config.n_split):
         segment_number = f"{i + 1} / {config.n_split}"
         logging.info(f"Writing segment {segment_number}")
         segment_time = time.time()
         ds.partition.write(
-            path,
+            output_store,
             config.n_split,
             ["time"],
             i,
@@ -193,11 +195,12 @@ def process_path_pair(
     if os.path.exists(output_path):
         logging.warning(f"Output path {output_path} already exists. Skipping.")
         return
+    input_store = get_zarr_store(input_path)
     if _HAS_XPARTITION:
         with dask.config.set({"array.chunk-size": "128MiB"}):
-            ds = xr.open_zarr(input_path, chunks={"time": "auto"})
+            ds = xr.open_zarr(input_store, chunks={"time": "auto"})
     else:
-        ds = xr.open_dataset(input_path)
+        ds = xr.open_dataset(input_store)
     ds_coarsened = coarsen(ds, config)
     if not dry_run:
         if _HAS_XPARTITION:
