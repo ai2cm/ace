@@ -14,7 +14,13 @@ import yaml
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
-from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
+from fme.downscaling.train import (
+    Trainer,
+    TrainerConfig,
+    WeightSchedule,
+    main,
+    restore_checkpoint,
+)
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 4
@@ -331,3 +337,24 @@ def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     initial_process.check_returncode()
     resume_process = subprocess.run(command)
     resume_process.check_returncode()
+
+
+@pytest.mark.parametrize(
+    "start_epoch, end_epoch, start_weight, end_weight, epoch_expected_weights",
+    [
+        (0, 10, 1.0, 1.0, {0: 1.0, 6: 1.0, 11: 1.0}),
+        (0, 10, 0.0, 1.0, {0: 0.0, 6: 0.6, 11: 1.0}),
+        (2, 10, 2, 10, {0: 2, 2: 2, 6: 6, 11: 10}),
+    ],
+)
+def test_weight_schedule(
+    start_epoch, end_epoch, start_weight, end_weight, epoch_expected_weights
+):
+    weight_schedule = WeightSchedule(
+        start_epoch=start_epoch,
+        end_epoch=end_epoch,
+        start_weight=start_weight,
+        end_weight=end_weight,
+    )
+    for epoch, weight in epoch_expected_weights.items():
+        assert weight_schedule.get_weight(epoch) == weight

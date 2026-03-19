@@ -88,8 +88,26 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 
 
 @dataclasses.dataclass
+class WeightSchedule:
+    start_weight: float
+    end_weight: float
+    start_epoch: int
+    end_epoch: int
+
+    def get_weight(self, epoch: int) -> float:
+        if epoch < self.start_epoch:
+            return self.start_weight
+        elif epoch > self.end_epoch:
+            return self.end_weight
+        else:
+            return self.start_weight + (self.end_weight - self.start_weight) * (
+                epoch - self.start_epoch
+            ) / (self.end_epoch - self.start_epoch)
+
+
+@dataclasses.dataclass
 class LossWeights:
-    weights: dict[str, float]
+    weights: dict[str, float | WeightSchedule]
 
     def get_weight_tensor(
         self, variable_names: list[str], device: torch.device
