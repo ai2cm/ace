@@ -2,12 +2,11 @@ import dataclasses
 
 import torch
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.typing_ import TensorDict
-from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs, scale_tuple
+from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.data.patching import Patch, get_patches
-from fme.downscaling.data.utils import null_generator
 from fme.downscaling.models import DiffusionModel, ModelOutputs
-from fme.downscaling.predictors import CascadePredictor
 
 
 @dataclasses.dataclass
@@ -53,7 +52,7 @@ class PatchPredictor:
 
     def __init__(
         self,
-        model: DiffusionModel | CascadePredictor,
+        model: DiffusionModel,
         coarse_yx_patch_extent: tuple[int, int] | None = None,
         coarse_horizontal_overlap: int = 1,
     ):
@@ -79,6 +78,13 @@ class PatchPredictor:
     @property
     def coarse_shape(self):
         return self.coarse_yx_patch_extent
+
+    @property
+    def static_inputs(self):
+        return self.model.static_inputs
+
+    def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
+        return self.model.get_fine_coords_for_batch(batch)
 
     def _get_patches(
         self, coarse_yx_extent, fine_yx_extent
@@ -106,7 +112,6 @@ class PatchPredictor:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
         predictions = []
@@ -119,17 +124,9 @@ class PatchPredictor:
         batch_generator = batch.generate_from_patches(
             coarse_patches=coarse_patches, fine_patches=fine_patches
         )
-        if static_inputs is not None:
-            static_inputs_generator = static_inputs.generate_from_patches(fine_patches)
-        else:
-            static_inputs_generator = null_generator(len(fine_patches))
 
-        for data_patch, static_inputs_patch in zip(
-            batch_generator, static_inputs_generator
-        ):
-            model_output = self.model.generate_on_batch(
-                data_patch, static_inputs_patch, n_samples
-            )
+        for data_patch in batch_generator:
+            model_output = self.model.generate_on_batch(data_patch, n_samples)
             predictions.append(model_output.prediction)
             loss = loss + model_output.loss
 
@@ -147,7 +144,6 @@ class PatchPredictor:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> TensorDict:
         coarse_yx_extent = batch.horizontal_shape
@@ -157,17 +153,10 @@ class PatchPredictor:
         )
         predictions = []
         batch_generator = batch.generate_from_patches(coarse_patches)
-        if static_inputs is not None:
-            static_inputs_generator = static_inputs.generate_from_patches(fine_patches)
-        else:
-            static_inputs_generator = null_generator(len(fine_patches))
-        for data_patch, static_inputs_patch in zip(
-            batch_generator, static_inputs_generator
-        ):
+        for data_patch in batch_generator:
             predictions.append(
                 self.model.generate_on_batch_no_target(
                     batch=data_patch,
-                    static_inputs=static_inputs_patch,
                     n_samples=n_samples,
                 )
             )

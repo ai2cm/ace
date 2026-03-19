@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 import math
-import re
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import Literal, TypeVar
@@ -12,17 +11,12 @@ import torch
 
 from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
-from fme.core.corrector.atmosphere import AtmosphereCorrector, AtmosphereCorrectorConfig
-from fme.core.corrector.ice import IceCorrector, IceCorrectorConfig
-from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
-from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
-from fme.core.masking import StaticMasking
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
-from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
@@ -138,15 +132,6 @@ class VerticalCoordinate(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def build_corrector(
-        self,
-        config: AtmosphereCorrectorConfig | CorrectorSelector,
-        gridded_operations: GriddedOperations,
-        timestep: timedelta,
-    ) -> CorrectorABC:
-        pass
-
-    @abc.abstractmethod
     def build_derive_function(
         self,
         timestep: timedelta,
@@ -208,35 +193,6 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
     def __len__(self):
         """The number of vertical layer interfaces."""
         return len(self.ak)
-
-    def build_corrector(
-        self,
-        config: AtmosphereCorrectorConfig | CorrectorSelector,
-        gridded_operations: GriddedOperations,
-        timestep: timedelta,
-    ) -> AtmosphereCorrector:
-        if (
-            isinstance(config, CorrectorSelector)
-            and config.type != "atmosphere_corrector"
-        ):
-            raise ValueError(
-                f"Cannot build corrector for vertical coordinate {self} with "
-                f"corrector selector {config}."
-            )
-        if isinstance(config, CorrectorSelector):
-            config_instance = dacite.from_dict(
-                data_class=AtmosphereCorrectorConfig,
-                data=config.config,
-                config=dacite.Config(strict=True),
-            )
-        else:
-            config_instance = config
-        return AtmosphereCorrector(
-            config=config_instance,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=self,
-            timestep=timestep,
-        )
 
     def build_derive_function(
         self,
@@ -331,7 +287,19 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         return (integrand * pressure_thickness).sum(dim=-1) / GRAVITY
 
 
-LEVEL_PATTERN = re.compile(r"_(\d+)$")
+def dz_from_idepth(
+    idepth: torch.Tensor,  # positive down
+    mask: torch.Tensor,  # 0 land, 1 sea
+    deptho: torch.Tensor | None = None,  # positive down
+) -> torch.Tensor:
+    z_top = idepth[..., :-1]
+    z_bot = idepth[..., 1:]
+    if deptho is None:
+        deptho_expanded = (mask * z_bot).max(dim=-1, keepdim=True).values
+    else:
+        deptho_expanded = deptho.unsqueeze(-1)
+    dz = torch.clamp(deptho_expanded, min=z_top, max=z_bot) - z_top
+    return dz.nan_to_num() * mask
 
 
 @dataclasses.dataclass
@@ -346,11 +314,15 @@ class DepthCoordinate(VerticalCoordinate):
             it must be one shorter than idepth. The mask may have additional dimensions
             before the vertical, which are assumed to be broadcastable to match the
             integrand when computing integrals.
+        deptho: optional sea floor depth in meters at each horizontal grid point.
+            When provided, layer thicknesses account for partial bottom cells.
+            Must be broadcastable to the spatial dimensions of ``mask``
+            (i.e. ``mask.shape[:-1]``).
     """
 
     idepth: torch.Tensor
     mask: torch.Tensor
-    surface_mask: torch.Tensor | None = None
+    deptho: torch.Tensor | None = None
 
     def __post_init__(self):
         if len(self.idepth.shape) != 1:
@@ -367,55 +339,15 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got idepth.shape: {self.idepth.shape} and mask.shape: "
                 f"{self.mask.shape}."
             )
+        self._dz = dz_from_idepth(self.idepth, self.mask, self.deptho)
+
+    @property
+    def dz(self) -> torch.Tensor:
+        return self._dz
 
     def __len__(self):
         """The number of vertical layer interfaces."""
         return len(self.idepth)
-
-    def get_mask(self) -> torch.Tensor:
-        return self.mask
-
-    def get_mask_level(self, level: int) -> torch.Tensor:
-        return self.mask.select(dim=-1, index=level)
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
-        match = LEVEL_PATTERN.search(name)
-        if match:
-            # 3D variable
-            level = int(match.group(1))
-            return self.get_mask_level(level)
-        else:
-            # 2D variable
-            if self.surface_mask is not None:
-                return self.surface_mask
-            return self.get_mask_level(0)
-
-    def get_idepth(self) -> torch.Tensor:
-        return self.idepth
-
-    def build_corrector(
-        self,
-        config: AtmosphereCorrectorConfig | CorrectorSelector,
-        gridded_operations: GriddedOperations,
-        timestep: timedelta,
-    ) -> OceanCorrector:
-        if isinstance(config, AtmosphereCorrectorConfig):
-            raise ValueError(
-                "Cannot build corrector for depth coordinate with an "
-                "AtmosphereCorrectorConfig."
-            )
-        elif config.type != "ocean_corrector":
-            raise ValueError(
-                f"Cannot build corrector for vertical coordinate {self} with "
-                f"corrector selector {config}."
-            )
-        config_instance = OceanCorrectorConfig.from_state(config.config)
-        return OceanCorrector(
-            config=config_instance,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=self,
-            timestep=timestep,
-        )
 
     def build_derive_function(
         self,
@@ -423,18 +355,6 @@ class DepthCoordinate(VerticalCoordinate):
         horizontal_coordinates: "HorizontalCoordinates | None" = None,
     ) -> DeriveFnABC:
         return OceanDeriveFn(self, timestep, horizontal_coordinates)
-
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
-        """
-        Returns a StaticMasking object that fills in NaNs outside of mask
-        valid points, i.e. where the mask value is 0.
-
-        """
-        return StaticMasking(
-            mask_value=0,
-            fill_value=float("nan"),
-            mask=self,
-        )
 
     @property
     def dtype(self) -> torch.dtype:
@@ -449,14 +369,11 @@ class DepthCoordinate(VerticalCoordinate):
         return {"idepth": self.idepth.cpu().numpy()}
 
     def to(self, device: str) -> "DepthCoordinate":
-        idepth_on_device = self.idepth.to(device)
-        mask_on_device = self.mask.to(device)
-        if self.surface_mask is not None:
-            surface_mask_on_device = self.surface_mask.to(device)
-            return DepthCoordinate(
-                idepth_on_device, mask_on_device, surface_mask_on_device
-            )
-        return DepthCoordinate(idepth_on_device, mask_on_device)
+        return DepthCoordinate(
+            idepth=self.idepth.to(device),
+            mask=self.mask.to(device),
+            deptho=self.deptho.to(device) if self.deptho is not None else None,
+        )
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, DepthCoordinate):
@@ -466,13 +383,32 @@ class DepthCoordinate(VerticalCoordinate):
             torch.testing.assert_close(self.mask, other.mask)
         except AssertionError:
             return False
+        if (self.deptho is None) != (other.deptho is None):
+            return False
+        if self.deptho is not None and other.deptho is not None:
+            try:
+                torch.testing.assert_close(self.deptho, other.deptho, equal_nan=True)
+            except AssertionError:
+                return False
         return True
 
     def __repr__(self) -> str:
-        return f"DepthCoordinate(\n    idepth={self.idepth},\n    mask={self.mask}\n)"
+        parts = [
+            f"    idepth={self.idepth}",
+            f"    mask={self.mask}",
+        ]
+        if self.deptho is not None:
+            parts.append(f"    deptho={self.deptho}")
+        return "DepthCoordinate(\n" + ",\n".join(parts) + "\n)"
 
     def as_dict(self) -> TensorMapping:
-        return {"idepth": self.idepth, "mask": self.mask}
+        result: dict[str, torch.Tensor] = {
+            "idepth": self.idepth,
+            "mask": self.mask,
+        }
+        if self.deptho is not None:
+            result["deptho"] = self.deptho
+        return result
 
     def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
         """Compute the depth integral of the integrand.
@@ -498,10 +434,9 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got integrand.shape: {integrand.shape} and idepth.shape: "
                 f"{self.idepth.shape}."
             )
-        layer_thickness = self.idepth.diff(dim=-1)
-        ohc = (integrand * layer_thickness * self.mask).nansum(dim=-1)
-        mask = self.get_mask_level(0).expand(ohc.shape)
-        return ohc.where(mask > 0, float("nan"))
+        integral = (integrand * self.dz).nansum(dim=-1)
+        mask_0 = self.mask.select(dim=-1, index=0).expand(integral.shape)
+        return integral.where(mask_0 > 0, float("nan"))
 
 
 @dataclasses.dataclass
@@ -518,56 +453,6 @@ class NullVerticalCoordinate(VerticalCoordinate):
 
     def __len__(self) -> int:
         return 0
-
-    def build_corrector(
-        self,
-        config: AtmosphereCorrectorConfig | CorrectorSelector,
-        gridded_operations: GriddedOperations,
-        timestep: timedelta,
-    ) -> CorrectorABC:
-        if isinstance(config, AtmosphereCorrectorConfig):
-            return AtmosphereCorrector(
-                config=config,
-                gridded_operations=gridded_operations,
-                vertical_coordinate=None,
-                timestep=timestep,
-            )
-        if config.type == "atmosphere_corrector":
-            config_instance = dacite.from_dict(
-                data_class=AtmosphereCorrectorConfig,
-                data=config.config,
-                config=dacite.Config(strict=True),
-            )
-            return AtmosphereCorrector(
-                config=config_instance,
-                gridded_operations=gridded_operations,
-                vertical_coordinate=None,
-                timestep=timestep,
-            )
-        elif config.type == "ocean_corrector":
-            config_instance = OceanCorrectorConfig.from_state(config.config)
-            return OceanCorrector(
-                config=config_instance,
-                gridded_operations=gridded_operations,
-                vertical_coordinate=None,
-                timestep=timestep,
-            )
-        elif config.type == "ice_corrector":
-            config_instance = dacite.from_dict(
-                data_class=IceCorrectorConfig,
-                data=config.config,
-                config=dacite.Config(strict=True),
-            )
-            return IceCorrector(
-                config=config_instance,
-                gridded_operations=gridded_operations,
-                timestep=timestep,
-            )
-        else:
-            raise ValueError(
-                f"Invalid corrector type: {config.type}. "
-                "Must be either 'atmosphere_corrector' or 'ocean_corrector'."
-            )
 
     def build_derive_function(
         self,
@@ -693,7 +578,18 @@ class HorizontalCoordinates(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def to_state(self) -> TensorMapping:
+    def localize(self: HC) -> HC:
+        """Return a copy with coordinates sliced to the local spatial chunk.
+
+        Uses ``Distributed.get_instance()`` to determine the local slices.
+        Coordinate types that do not support spatial parallelism should raise
+        ``SpatialParallelismNotImplemented`` when the distributed layout
+        requires slicing.
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_state(self) -> TensorMapping:
         pass
 
 
@@ -787,7 +683,15 @@ class LatLonCoordinates(HorizontalCoordinates):
     def shape(self) -> tuple[int, int]:
         return (len(self.lat), len(self.lon))
 
-    def to_state(self) -> TensorMapping:
+    def localize(self) -> "LatLonCoordinates":
+        dist = Distributed.get_instance()
+        h_slice, w_slice = dist.get_local_slices(self.shape)
+        return LatLonCoordinates(
+            lat=self.lat[h_slice],
+            lon=self.lon[w_slice],
+        )
+
+    def get_state(self) -> TensorMapping:
         return {"lat": self.lat, "lon": self.lon}
 
 
@@ -938,7 +842,13 @@ class HEALPixCoordinates(HorizontalCoordinates):
     def shape(self) -> tuple[int, int, int]:
         return (len(self.face), len(self.width), len(self.height))
 
-    def to_state(self) -> TensorMapping:
+    def localize(self) -> "HEALPixCoordinates":
+        Distributed.get_instance().require_no_spatial_parallelism(
+            "HEALPixCoordinates does not support spatial parallelism."
+        )
+        return self
+
+    def get_state(self) -> TensorMapping:
         return {"face": self.face, "height": self.height, "width": self.width}
 
 

@@ -6,7 +6,7 @@ import xarray as xr
 from fme.core.device import get_device
 from fme.core.packer import Packer
 from fme.downscaling.aggregators.shape_helpers import upsample_tensor
-from fme.downscaling.data import BatchData, PairedBatchData, StaticInput, StaticInputs
+from fme.downscaling.data import BatchData, PairedBatchData
 from fme.downscaling.data.patching import get_patches
 from fme.downscaling.data.utils import BatchedLatLonCoordinates
 from fme.downscaling.models import ModelOutputs
@@ -14,10 +14,6 @@ from fme.downscaling.predictors.composite import (
     PatchPredictor,
     composite_patch_predictions,
 )
-
-
-def _get_static_inputs(shape, coords):
-    return StaticInputs(fields=[StaticInput(data=torch.randn(shape), coords=coords)])
 
 
 def test_composite_predictions():
@@ -54,9 +50,7 @@ class DummyModel:
         self.modules = []
         self.out_packer = Packer(["x"])
 
-    def generate_on_batch(
-        self, batch: PairedBatchData, static_inputs: StaticInputs | None, n_samples=1
-    ):
+    def generate_on_batch(self, batch: PairedBatchData, n_samples=1):
         prediction_data = {
             k: v.unsqueeze(1).expand(-1, n_samples, -1, -1)
             for k, v in batch.fine.data.items()
@@ -65,9 +59,7 @@ class DummyModel:
             prediction=prediction_data, target=prediction_data, loss=torch.tensor(1.0)
         )
 
-    def generate_on_batch_no_target(
-        self, batch: BatchData, static_inputs: StaticInputs | None, n_samples=1
-    ):
+    def generate_on_batch_no_target(self, batch: BatchData, n_samples=1):
         prediction_data = {
             k: upsample_tensor(
                 v.unsqueeze(1).expand(-1, n_samples, -1, -1),
@@ -137,13 +129,6 @@ def test_SpatialCompositePredictor_generate_on_batch(patch_size_coarse):
     paired_batch_data = get_paired_test_data(
         *coarse_extent, downscale_factor=downscale_factor, batch_size=batch_size
     )
-    static_inputs = _get_static_inputs(
-        shape=(
-            coarse_extent[0] * downscale_factor,
-            coarse_extent[1] * downscale_factor,
-        ),
-        coords=paired_batch_data.fine.latlon_coordinates[0],
-    )
 
     predictor = PatchPredictor(
         DummyModel(coarse_shape=patch_size_coarse, downscale_factor=downscale_factor),  # type: ignore
@@ -152,7 +137,7 @@ def test_SpatialCompositePredictor_generate_on_batch(patch_size_coarse):
     )
     n_samples_generate = 2
     outputs = predictor.generate_on_batch(
-        paired_batch_data, static_inputs, n_samples=n_samples_generate
+        paired_batch_data, n_samples=n_samples_generate
     )
     assert outputs.prediction["x"].shape == (batch_size, n_samples_generate, 8, 8)
     # dummy model predicts same value as fine data for all samples
@@ -174,13 +159,6 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
     paired_batch_data = get_paired_test_data(
         *coarse_extent, downscale_factor=downscale_factor, batch_size=batch_size
     )
-    static_inputs = _get_static_inputs(
-        shape=(
-            coarse_extent[0] * downscale_factor,
-            coarse_extent[1] * downscale_factor,
-        ),
-        coords=paired_batch_data.fine.latlon_coordinates[0],
-    )
     predictor = PatchPredictor(
         DummyModel(coarse_shape=patch_size_coarse, downscale_factor=2),  # type: ignore
         coarse_extent,
@@ -189,6 +167,6 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
     n_samples_generate = 2
     coarse_batch_data = paired_batch_data.coarse
     prediction = predictor.generate_on_batch_no_target(
-        coarse_batch_data, static_inputs, n_samples=n_samples_generate
+        coarse_batch_data, n_samples=n_samples_generate
     )
     assert prediction["x"].shape == (batch_size, n_samples_generate, 8, 8)

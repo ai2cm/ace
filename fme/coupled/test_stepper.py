@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import datetime
 from collections import namedtuple
@@ -394,6 +395,36 @@ def test_config_n_inner_steps(timedelta_atmos, timedelta_ocean, expected_n_inner
     )
     config = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
     assert config.n_inner_steps == expected_n_inner_steps
+
+
+def _stepper_config_with_extra_in_names(base: StepperConfig, extra_in_names: list[str]):
+    step = base.step
+    config = copy.deepcopy(step.config)
+    config["in_names"] = list(config["in_names"]) + extra_in_names
+    norm = config["normalization"]["network"]
+    for name in extra_in_names:
+        norm["means"][name] = 0.0
+        norm["stds"][name] = 1.0
+    return StepperConfig(step=StepSelector(type=step.type, config=config))
+
+
+def test_all_names_includes_shared_forcing_in_both_components():
+    atmosphere = ComponentConfig(
+        timedelta="6h",
+        stepper=_stepper_config_with_extra_in_names(
+            ATMOS_STEPPER_CONFIG, ["land_fraction"]
+        ),
+    )
+    ocean = ComponentConfig(
+        timedelta="5D",
+        stepper=_stepper_config_with_extra_in_names(
+            OCEAN_STEPPER_CONFIG, ["land_fraction"]
+        ),
+    )
+    config = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
+    names = config.all_names
+    assert "land_fraction" in names.ocean
+    assert "land_fraction" in names.atmosphere
 
 
 def test_config_init_atmos_stepper_missing_ocean_error():
