@@ -1,7 +1,11 @@
 import dataclasses
 from typing import Literal
 
-from fme.core.models.conditional_sfno.sfnonet import ContextConfig, get_lat_lon_sfnonet
+from fme.core.models.conditional_sfno.sfnonet import (
+    ContextConfig,
+    SFNONetConfig,
+    get_lat_lon_sfnonet,
+)
 from fme.core.models.conditional_sfno.sfnonet import (
     SphericalFourierNeuralOperatorNet as ConditionalSFNO,
 )
@@ -14,8 +18,33 @@ from .module import ModuleConfig, ModuleSelector
 @ModuleSelector.register("ConditionalSFNO")
 @dataclasses.dataclass
 class ConditionalSFNOBuilder(ModuleConfig):
-    """
-    Configuration for the SFNO architecture used in FourCastNet-SFNO.
+    """Configuration for the SFNO architecture used in FourCastNet-SFNO.
+
+    Attributes:
+        spectral_transform: Unused, kept for backwards compatibility only.
+        filter_type: Type of spectral filter to use.
+        operator_type: Unused, kept for backwards compatibility only.
+            Must be "dhconv".
+        scale_factor: Scale factor for input/output resolution.
+        embed_dim: Dimension of the embedding.
+        num_layers: Number of blocks (SFNO and MLP) in the model.
+        hard_thresholding_fraction: Fraction of spectral modes to retain.
+        normalization_layer: Unused, kept for backwards compatibility only.
+        use_mlp: Whether to use an MLP in the model.
+        activation_function: Activation function to use.
+        encoder_layers: Number of encoder layers in the model.
+        pos_embed: Whether to use a position embedding.
+        big_skip: Whether to use a big skip connection in the model.
+        rank: Unused, kept for backwards compatibility only.
+        factorization: Unused, kept for backwards compatibility only.
+            Must be None.
+        separable: Unused, kept for backwards compatibility only.
+            Must be False.
+        complex_network: Unused, kept for backwards compatibility only.
+        complex_activation: Unused, kept for backwards compatibility only.
+        spectral_layers: Unused, kept for backwards compatibility only.
+        checkpointing: Whether to use checkpointing.
+        data_grid: Grid type for spherical harmonic transforms.
     """
 
     spectral_transform: str = "sht"
@@ -32,13 +61,24 @@ class ConditionalSFNOBuilder(ModuleConfig):
     pos_embed: bool = True
     big_skip: bool = True
     rank: float = 1.0
-    factorization: str | None = None
+    factorization: None = None
     separable: bool = False
     complex_network: bool = True
     complex_activation: str = "real"
     spectral_layers: int = 1
     checkpointing: int = 0
     data_grid: Literal["legendre-gauss", "equiangular", "healpix"] = "legendre-gauss"
+
+    def __post_init__(self):
+        if self.factorization is not None:
+            raise ValueError("The 'factorization' parameter is no longer supported.")
+        if self.separable:
+            raise ValueError("The 'separable' parameter is no longer supported.")
+        if self.operator_type != "dhconv":
+            raise ValueError(
+                "Only 'dhconv' operator_type is supported for "
+                "ConditionalSFNO models."
+            )
 
     def build(
         self,
@@ -47,8 +87,22 @@ class ConditionalSFNOBuilder(ModuleConfig):
         img_shape: tuple[int, int],
         n_sigma_embedding_channels: int,
     ) -> ConditionalSFNO:
+        sfno_config = SFNONetConfig(
+            embed_dim=self.embed_dim,
+            filter_type=self.filter_type,
+            scale_factor=self.scale_factor,
+            num_layers=self.num_layers,
+            hard_thresholding_fraction=self.hard_thresholding_fraction,
+            use_mlp=self.use_mlp,
+            activation_function=self.activation_function,
+            encoder_layers=self.encoder_layers,
+            pos_embed=self.pos_embed,
+            big_skip=self.big_skip,
+            checkpointing=self.checkpointing,
+            data_grid=self.data_grid,
+        )
         sfno_net = get_lat_lon_sfnonet(
-            params=self,
+            params=sfno_config,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
             img_shape=img_shape,

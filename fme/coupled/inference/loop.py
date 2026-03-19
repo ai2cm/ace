@@ -42,7 +42,7 @@ def run_coupled_dataset_comparison(
     all_names: CoupledNames | None = None,
 ) -> None:
     if record_logs is None:
-        record_logs = get_record_to_wandb(label="inference")
+        record_logs = get_record_to_wandb(label="inference").log
     if writer is None:
         writer = NullDataWriter()
 
