@@ -17,10 +17,10 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.histogram import ComparedDynamicHistograms
+from fme.core.histogram import ComparedDynamicTailsHistograms
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators.adapters import ComparedDynamicHistogramsAdapter
+from fme.downscaling.aggregators.adapters import ComparedDynamicTailsHistogramsAdapter
 from fme.downscaling.data import PairedBatchData
 
 from ..metrics_and_maths import (
@@ -871,6 +871,11 @@ class Aggregator:
         ssim_kwargs: Mapping[str, Any] | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
+        two_tailed_variables: list[str] | None = [
+            "eastward_wind_at_ten_meters",
+            "northward_wind_at_ten_meters",
+        ],
+        left_tailed_variables: list[str] | None = ["PRMSL"],
     ) -> None:
         self.downscale_factor = downscale_factor
 
@@ -881,11 +886,13 @@ class Aggregator:
         self._comparisons: list[_ComparisonAggregator] = [
             MeanComparison(metrics.root_mean_squared_error, name="metrics/rmse"),
             SnapshotAggregator(dims, variable_metadata, name="snapshot"),
-            ComparedDynamicHistogramsAdapter(
-                histograms=ComparedDynamicHistograms(
+            ComparedDynamicTailsHistogramsAdapter(
+                histograms=ComparedDynamicTailsHistograms(
                     n_bins=n_histogram_bins,
                     percentiles=percentiles,
                     compute_percentile_frac=True,
+                    two_tailed_variables=two_tailed_variables,
+                    left_tailed_variables=left_tailed_variables,
                 ),
                 name="histogram",
             ),

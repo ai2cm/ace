@@ -113,8 +113,8 @@ def test_event_config_build_creates_output_target_with_single_time(
         event_time="2000-01-01T00:00:00",
         n_ens=4,
         save_vars=["var0", "var1"],
-        lat_extent=ClosedInterval(2.0, 6.0),
-        lon_extent=ClosedInterval(2.0, 6.0),
+        lat_extent=ClosedInterval(0.0, 6.0),
+        lon_extent=ClosedInterval(0.0, 6.0),
     )
     static_inputs = _get_static_inputs((8, 8))
     output_target = config.build(

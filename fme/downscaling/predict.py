@@ -13,6 +13,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
+from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import NoTargetAggregator, SampleAggregator
@@ -31,7 +32,6 @@ from fme.downscaling.predictors import (
     PatchPredictor,
 )
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 

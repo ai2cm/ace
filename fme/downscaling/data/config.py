@@ -10,7 +10,7 @@ from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
-from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.downscaling.data.datasets import (
@@ -23,11 +23,7 @@ from fme.downscaling.data.datasets import (
     PairedBatchData,
     PairedGriddedData,
 )
-from fme.downscaling.data.topography import (
-    StaticInputs,
-    get_normalized_topography,
-    get_topography_downscale_factor,
-)
+from fme.downscaling.data.static import StaticInputs
 from fme.downscaling.data.utils import ClosedInterval, adjust_fine_coord_range
 from fme.downscaling.requirements import DataRequirements
 
@@ -136,6 +132,18 @@ def _full_configs(
     return all_configs
 
 
+def _check_fine_res_static_input_compatibility(
+    static_input_shape: tuple[int, int], data_coords_shape: tuple[int, int]
+) -> None:
+    for static, coord in zip(static_input_shape, data_coords_shape):
+        if static != coord:
+            raise ValueError(
+                f"Static input shape {static_input_shape} is not compatible with "
+                f"data coordinates shape {data_coords_shape}. Static input dimensions "
+                "must match fine resolution coordinate dimensions."
+            )
+
+
 @dataclasses.dataclass
 class DataLoaderConfig:
     """
@@ -156,11 +164,8 @@ class DataLoaderConfig:
             (For multi-GPU runtime, it's the number of workers per GPU.)
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
-        topography: The dataset path for the topography data.
-            This may be at a higher resolution than the coarse data, e.g.
-            when fine topography is loaded as an input for predictions that
-            have no fine-res paired targets.
-            If None, no topography data will be loaded.
+        topography: Deprecated field for specifying the topography dataset. Now
+            provided via build method's `static_inputs` argument.
         lat_extent: The latitude extent to use for the dataset specified in
             degrees, limited to (-88.0, 88.0). The extent is inclusive, so the start and
             stop values are included in the extent. Defaults to [-66, 70] which
@@ -194,6 +199,12 @@ class DataLoaderConfig:
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
+        if self.topography is not None:
+            raise ValueError(
+                "The `topography` field on DataLoaderConfig is deprecated and will be "
+                "removed in a future release. Pass static_inputs via build's "
+                "`static_inputs` argument instead."
+            )
 
     @property
     def full_config(self) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
@@ -383,9 +394,8 @@ class PairedDataLoaderConfig:
         repeat: The number of times to repeat the underlying xarray dataset
             time dimension.  Useful to include longer sequences of small
             data for testing.
-        topography: Optional path to dataset to load for topography. If not
-            provided and model has requires_topography=True, the data loader
-            will default to trying to load the variable from the fine data.
+        topography: Deprecated field for specifying the topography dataset.
+            Now provided via build method's `static_inputs` argument.
         sample_with_replacement: If provided, the dataset will be
             sampled randomly with replacement to the given size each period,
             instead of retrieving each sample once (either shuffled or not).
@@ -414,6 +424,12 @@ class PairedDataLoaderConfig:
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
+        if self.topography is not None:
+            raise ValueError(
+                "The `topography` field on PairedDataLoaderConfig is deprecated and "
+                "will be removed in a future release. Pass static_inputs via the "
+                "build method's `static_inputs` argument instead."
+            )
 
     def _first_data_config(
         self,
@@ -522,48 +538,24 @@ class PairedDataLoaderConfig:
         )
 
         if requirements.use_fine_topography:
-            if static_inputs is not None:
-                fine_topography = static_inputs
-            elif self.topography is None:
-                first_config = self._first_data_config(self.fine[0])
-                raw_paths = get_raw_paths(
-                    first_config.data_path, first_config.file_pattern
-                )
-                if len(raw_paths) == 0:
-                    raise ValueError(
-                        f"No files found matching "
-                        f"'{first_config.data_path}/{first_config.file_pattern}'."
-                    )
-                fine_topography = StaticInputs(
-                    fields=[get_normalized_topography(raw_paths[0])]
-                )
-            else:
-                fine_topography = StaticInputs(
-                    fields=[get_normalized_topography(self.topography)]
-                )
-
-            fine_topography = fine_topography.to_device()
-            if (
-                get_topography_downscale_factor(
-                    fine_topography.shape,
-                    properties_fine.horizontal_coordinates.shape,
-                )
-                != 1
-            ):
+            if static_inputs is None:
                 raise ValueError(
-                    f"Fine topography shape {fine_topography.shape} does not match "
-                    f"fine data shape {properties_fine.horizontal_coordinates.shape}."
+                    "Model requires static inputs (use_fine_topography=True),"
+                    " but no static inputs were provided to the data loader's"
+                    " build method."
                 )
 
-            fine_topography = fine_topography.subset_latlon(
+            static_inputs = static_inputs.to_device()
+            _check_fine_res_static_input_compatibility(
+                static_inputs.shape,
+                properties_fine.horizontal_coordinates.shape,
+            )
+            static_inputs = static_inputs.subset_latlon(
                 lat_interval=fine_lat_extent, lon_interval=fine_lon_extent
             )
         else:
-            fine_topography = None
+            static_inputs = None
 
-        # TODO: horizontal subsetting should probably live in the XarrayDatast level
-        # Subset to overall horizontal domain
-        # TODO: Follow up PR will remove topography from batch items
         dataset_fine_subset = HorizontalSubsetDataset(
             dataset_fine,
             properties=properties_fine,
@@ -619,7 +611,7 @@ class PairedDataLoaderConfig:
 
         return PairedGriddedData(
             _loader=dataloader,
-            static_inputs=fine_topography,
+            static_inputs=static_inputs,
             coarse_shape=example.coarse.horizontal_shape,
             downscale_factor=example.downscale_factor,
             dims=example.fine.latlon_coordinates.dims,

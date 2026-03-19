@@ -78,10 +78,11 @@ class DataLoaderConfig:
 
     def __post_init__(self):
         dist = Distributed.get_instance()
-        if self.batch_size % dist.world_size != 0:
+        if self.batch_size % dist.total_data_parallel_ranks != 0:
             raise ValueError(
-                "batch_size must be divisible by the number of parallel "
-                f"workers, got {self.batch_size} and {dist.world_size}"
+                "batch_size must be divisible by the number of data-parallel "
+                f"workers, got {self.batch_size} and "
+                f"{dist.total_data_parallel_ranks}"
             )
         self._zarr_engine_used = self.dataset.zarr_engine_used
         if self.time_buffer < 0:

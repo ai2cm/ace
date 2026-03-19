@@ -313,6 +313,7 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
             mock.assert_called()
 
 
+@pytest.mark.serial
 def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""

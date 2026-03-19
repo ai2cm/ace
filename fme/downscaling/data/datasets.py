@@ -20,7 +20,7 @@ from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.generics.data import SizedMap
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.data.patching import Patch, get_patches
-from fme.downscaling.data.topography import StaticInputs
+from fme.downscaling.data.static import StaticInputs
 from fme.downscaling.data.utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,
@@ -101,7 +101,6 @@ class BatchItem:
         return True
 
 
-# TODO: If we move the subsetting, we still have to handle the latlon coordinates
 class HorizontalSubsetDataset(torch.utils.data.Dataset):
     """Subsets the horizontal latitude-longitude dimensions of a dataset."""
 
@@ -123,20 +122,6 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             )
 
         self._orig_coords: LatLonCoordinates = properties.horizontal_coordinates
-        lats = torch.tensor(
-            [
-                i
-                for i in range(len(self._orig_coords.lat))
-                if float(self._orig_coords.lat[i]) in self.lat_interval
-            ]
-        )
-        lons = torch.tensor(
-            [
-                i
-                for i in range(len(self._orig_coords.lon))
-                if float(self._orig_coords.lon[i]) in self.lon_interval
-            ]
-        )
 
         if (self.lon_interval.stop != float("inf")) and (
             torch.any(self._orig_coords.lon < self.lon_interval.stop - 360.0)
@@ -155,16 +140,11 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
                 f"expected lon_min < {self.lon_interval.start + 360.0}"
             )
 
-        assert lats.numel() > 0, "No latitudes found in the specified range."
-        assert lons.numel() > 0, "No longitudes found in the specified range."
-
-        self.mask_indices = LatLonCoordinates(
-            lat=lats,
-            lon=lons,
-        )
+        self._lats_slice = self.lat_interval.slice_of(self._orig_coords.lat)
+        self._lons_slice = self.lon_interval.slice_of(self._orig_coords.lon)
         self._latlon_coordinates = LatLonCoordinates(
-            lat=self._orig_coords.lat[self.mask_indices.lat],
-            lon=self._orig_coords.lon[self.mask_indices.lon],
+            lat=self._orig_coords.lat[self._lats_slice],
+            lon=self._orig_coords.lon[self._lons_slice],
         )
         self._area_weights = self._latlon_coordinates.area_weights
 
@@ -192,8 +172,8 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
         batch = {
             k: v[
                 ...,
-                self.mask_indices.lat.unsqueeze(1),
-                self.mask_indices.lon.unsqueeze(0),
+                self._lats_slice,
+                self._lons_slice,
             ]
             for k, v in batch.items()
         }
@@ -461,6 +441,16 @@ class BatchData:
     def horizontal_shape(self) -> tuple[int, int]:
         return self._horizontal_shape
 
+    @property
+    def lat_interval(self) -> ClosedInterval:
+        lat = self.latlon_coordinates.lat[0]  # all batch members identical; use first
+        return ClosedInterval(lat.min().item(), lat.max().item())
+
+    @property
+    def lon_interval(self) -> ClosedInterval:
+        lon = self.latlon_coordinates.lon[0]  # all batch members identical; use first
+        return ClosedInterval(lon.min().item(), lon.max().item())
+
     @classmethod
     def from_sequence(
         cls,
@@ -484,7 +474,7 @@ class BatchData:
 
     def __getitem__(self, k):
         return BatchItem(
-            {key: value[k].squeeze() for key, value in self.data.items()},
+            {key: value[k] for key, value in self.data.items()},
             self.time[k],
             self.latlon_coordinates[k],
         )
