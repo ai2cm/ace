@@ -132,14 +132,6 @@ class StaticInputs:
 
     @classmethod
     def from_state(cls, state: dict) -> "StaticInputs":
-        """Reconstruct StaticInputs from a state dict.
-
-        Args:
-            state: State dict from get_state().
-            coords: Override coordinates. If None, reads coords from the state dict.
-                Pass explicitly when loading old-format checkpoints that stored coords
-                outside of the StaticInputs state.
-        """
         return cls(
             fields=[
                 StaticInput.from_state(field_state) for field_state in state["fields"]
