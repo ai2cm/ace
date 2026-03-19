@@ -6,7 +6,8 @@ from typing import Any
 import dacite
 import torch
 
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -185,14 +186,23 @@ class IceBudgetCorrectionConfig:
 
 @CorrectorSelector.register("ice_corrector")
 @dataclasses.dataclass
-class IceCorrectorConfig:
-    # Correctors here. Can add more as needed
+class IceCorrectorConfig(CorrectorConfigABC):
     budget_correction: IceBudgetCorrectionConfig | None = None
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "IceCorrectorConfig":
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
+        )
+
+    def get_corrector(
+        self,
+        dataset_info: DatasetInfo,
+    ) -> "IceCorrector":
+        return IceCorrector(
+            self,
+            dataset_info.gridded_operations,
+            dataset_info.timestep,
         )
 
 

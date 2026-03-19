@@ -6,6 +6,7 @@ from typing import Any
 import dacite
 import torch
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.loss import LossConfig
@@ -286,7 +287,8 @@ class DiffusionModel:
             normalizer: The normalizer object used for data normalization.
             loss: The loss function used for training the model.
             coarse_shape: The height (lat) and width (lon) of the
-                coarse-resolution input data.
+                coarse-resolution input data used to train the model
+                (same as patch extent, if training on patches).
             downscale_factor: The factor by which the data is downscaled from
                 coarse to fine.
             sigma_data: The standard deviation of the data, used for diffusion
@@ -332,13 +334,44 @@ class DiffusionModel:
             )
         return self.static_inputs.subset_latlon(lat_interval, lon_interval)
 
+    def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
+        """Return fine-resolution coordinates matching the spatial extent of batch."""
+        if self.static_inputs is None:
+            raise ValueError(
+                "Model is missing static inputs, which are required to determine "
+                "the coordinate information for the output dataset."
+            )
+        coarse_lat = batch.latlon_coordinates.lat[0]
+        coarse_lon = batch.latlon_coordinates.lon[0]
+        fine_lat_interval = adjust_fine_coord_range(
+            batch.lat_interval,
+            full_coarse_coord=coarse_lat,
+            full_fine_coord=self.static_inputs.coords.lat,
+            downscale_factor=self.downscale_factor,
+        )
+        fine_lon_interval = adjust_fine_coord_range(
+            batch.lon_interval,
+            full_coarse_coord=coarse_lon,
+            full_fine_coord=self.static_inputs.coords.lon,
+            downscale_factor=self.downscale_factor,
+        )
+        return LatLonCoordinates(
+            lat=self.static_inputs.coords.lat[
+                fine_lat_interval.slice_of(self.static_inputs.coords.lat)
+            ],
+            lon=self.static_inputs.coords.lon[
+                fine_lon_interval.slice_of(self.static_inputs.coords.lon)
+            ],
+        )
+
     @property
     def fine_shape(self) -> tuple[int, int]:
         return self._get_fine_shape(self.coarse_shape)
 
     def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
         """
-        Calculate the fine shape based on the coarse shape and downscale factor.
+        Calculate the fine shape based on the coarse shape of data used to train
+        the model and the downscaling factor.
         """
         return (
             coarse_shape[0] * self.downscale_factor,
@@ -383,12 +416,9 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
-        # Ignore the passed static_inputs; subset self.static_inputs using fine batch
-        # coordinates. The caller-provided value is kept for signature compatibility.
         _static_inputs = self._subset_static_inputs(
             batch.fine.lat_interval, batch.fine.lon_interval
         )
@@ -452,8 +482,8 @@ class DiffusionModel:
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        # static_inputs receives an internally-subsetted value from the calling method;
-        # external callers should use generate_on_batch / generate_on_batch_no_target.
+        # Internal method; external callers should use generate_on_batch /
+        # generate_on_batch_no_target.
         inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
         # expand samples and fold to
         # [batch * n_samples, output_channels, height, width]
@@ -503,11 +533,8 @@ class DiffusionModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         n_samples: int = 1,
     ) -> TensorDict:
-        # Ignore the passed static_inputs; derive the fine lat/lon interval from coarse
-        # batch coordinates via adjust_fine_coord_range, then subset self.static_inputs.
         if self.config.use_fine_topography:
             if self.static_inputs is None:
                 raise ValueError(
@@ -540,11 +567,8 @@ class DiffusionModel:
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         n_samples: int = 1,
     ) -> ModelOutputs:
-        # Ignore the passed static_inputs; subset self.static_inputs using fine batch
-        # coordinates. The caller-provided value is kept for signature compatibility.
         _static_inputs = self._subset_static_inputs(
             batch.fine.lat_interval, batch.fine.lon_interval
         )

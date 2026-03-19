@@ -351,13 +351,13 @@ def run_inference_from_config(config: InferenceConfig):
             variable_metadata=variable_metadata,
         )
     logging.info("Starting inference")
-    record_logs = get_record_to_wandb(label="inference")
+    logger = get_record_to_wandb(label="inference")
     run_inference(
         predict=stepper.predict_paired,
         data=data,
         writer=writer,
         aggregator=aggregator,
-        record_logs=record_logs,
+        record_logs=logger.log,
     )
 
     with timer.context("final_writer_flush"):
@@ -378,10 +378,10 @@ def run_inference_from_config(config: InferenceConfig):
     )
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
-        **timer.get_durations(),
         **aggregator.get_summary_logs(),
     }
-    record_logs([summary_logs])
+    logger.log_to_current_step(summary_logs)
+    logger.log_to_current_step(timer.get_durations(), label="")
 
 
 def run_segmented_inference(config: InferenceConfig, segments: int):
