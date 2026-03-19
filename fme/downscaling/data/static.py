@@ -76,6 +76,46 @@ def _get_normalized_static_input(path: str, field_name: str):
     )
 
 
+def _has_legacy_coords_in_state(state: dict) -> bool:
+    return "fields" in state and state["fields"] and "coords" in state["fields"][0]
+
+
+def _sync_state_coordinates(state: dict) -> dict:
+    # if necessary adjusts legacy coordinate to expected
+    # format for state loading
+    state = state.copy()
+    if _has_legacy_coords_in_state(state):
+        state["coords"] = state["fields"][0]["coords"]
+    return state
+
+
+def _has_coords_in_state(state: dict) -> bool:
+    if "coords" in state or _has_legacy_coords_in_state(state):
+        return True
+    else:
+        return False
+
+
+def load_fine_coords_from_path(path: str) -> LatLonCoordinates:
+    if path.endswith(".zarr"):
+        ds = xr.open_zarr(path)
+    else:
+        ds = xr.open_dataset(path)
+    lat_name = next((n for n in ["lat", "latitude", "grid_yt"] if n in ds.coords), None)
+    lon_name = next(
+        (n for n in ["lon", "longitude", "grid_xt"] if n in ds.coords), None
+    )
+    if lat_name is None or lon_name is None:
+        raise ValueError(
+            f"Could not find lat/lon coordinates in {path}. "
+            "Expected 'lat'/'latitude'/'grid_yt' and 'lon'/'longitude'/'grid_xt'."
+        )
+    return LatLonCoordinates(
+        lat=torch.tensor(ds[lat_name].values, dtype=torch.float32),
+        lon=torch.tensor(ds[lon_name].values, dtype=torch.float32),
+    )
+
+
 @dataclasses.dataclass
 class StaticInputs:
     fields: list[StaticInput]
@@ -132,6 +172,13 @@ class StaticInputs:
 
     @classmethod
     def from_state(cls, state: dict) -> "StaticInputs":
+        if not _has_coords_in_state(state):
+            raise ValueError(
+                "No coordinates found in state for StaticInputs. Load with"
+                "from_state_backwards_compatible if loading from a checkpoint "
+                "saved prior to current coordinate serialization format."
+            )
+        state = _sync_state_coordinates(state)
         return cls(
             fields=[
                 StaticInput.from_state(field_state) for field_state in state["fields"]
@@ -141,6 +188,48 @@ class StaticInputs:
                 lon=state["coords"]["lon"],
             ),
         )
+
+    @classmethod
+    def from_state_backwards_compatible(
+        cls,
+        state: dict,
+        static_inputs_config: dict[str, str],
+        fine_coordinates_path: str | None,
+    ) -> "StaticInputs":
+        if state and static_inputs_config:
+            raise ValueError(
+                "Checkpoint contains static inputs but static_inputs_config is "
+                "also provided. Backwards compatibility loading only supports "
+                "a single source of StaticInputs info."
+            )
+
+        if fine_coordinates_path and _has_coords_in_state(state):
+            raise ValueError(
+                "State contains coordinates but fine_coordinates_path is also provided."
+                " Only one source of coordinate info can be used for backwards "
+                "compatibility loading of StaticInputs."
+            )
+        elif not _has_coords_in_state(state) and not fine_coordinates_path:
+            raise ValueError(
+                "No coordinates found in state and no fine_coordinates_path provided. "
+                "Cannot load StaticInputs without coordinates."
+            )
+
+        # All compatibility cases:
+        # Serialized StaticInputs exist, which always had coordinates stored
+        # No serialized static inputs or specified inputs, load coordinates
+        # Specified static input fields and specified coordinates
+
+        if _has_coords_in_state(state):
+            return cls.from_state(state)
+        else:
+            assert fine_coordinates_path is not None  # for type checker
+            coords = load_fine_coords_from_path(fine_coordinates_path)
+
+        if static_inputs_config:
+            return load_static_inputs(static_inputs_config, coords)
+        else:
+            return cls(fields=[], coords=coords)
 
 
 def load_static_inputs(

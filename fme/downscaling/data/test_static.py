@@ -1,21 +1,33 @@
+import numpy as np
 import pytest
 import torch
+import xarray as xr
 
 from .static import StaticInput, StaticInputs
 
 
-@pytest.mark.parametrize(
-    "init_args",
-    [
-        pytest.param(
-            [torch.randn((1, 2, 2))],
-            id="3d_data",
-        ),
-    ],
-)
-def test_Topography_error_cases(init_args):
+def _make_coords(n=4):
+    from fme.core.coordinates import LatLonCoordinates
+
+    return LatLonCoordinates(
+        lat=torch.arange(n, dtype=torch.float32),
+        lon=torch.arange(n, dtype=torch.float32),
+    )
+
+
+def _write_coords_netcdf(path, n=4):
+    xr.Dataset(
+        coords={
+            "lat": np.arange(n, dtype=np.float32),
+            "lon": np.arange(n, dtype=np.float32),
+        }
+    ).to_netcdf(path)
+
+
+def test_StaticInput_error_cases():
+    data = torch.randn(1, 2, 2)
     with pytest.raises(ValueError):
-        StaticInput(*init_args)
+        StaticInput(data=data)
 
 
 def test_subset():
@@ -29,47 +41,121 @@ def test_subset():
 
 
 def test_StaticInputs_serialize():
-    from fme.core.coordinates import LatLonCoordinates
-
-    data = torch.arange(16, dtype=torch.float32).reshape(4, 4)
-    coords = LatLonCoordinates(
-        lat=torch.arange(4, dtype=torch.float32),
-        lon=torch.arange(4, dtype=torch.float32),
+    dim_len = 4
+    data = torch.arange(dim_len * dim_len, dtype=torch.float32).reshape(
+        dim_len, dim_len
     )
-    topography = StaticInput(data)
-    land_frac = StaticInput(data * -1.0)
-    static_inputs = StaticInputs([topography, land_frac], coords=coords)
+    coords = _make_coords(n=dim_len)
+    static_inputs = StaticInputs(
+        [StaticInput(data), StaticInput(data * -1.0)], coords=coords
+    )
     state = static_inputs.get_state()
-    # Verify coords are stored at the top level, not inside each field
     assert "coords" in state
-    assert "coords" not in state["fields"][0]
-    static_inputs_reconstructed = StaticInputs.from_state(state)
-    assert static_inputs_reconstructed[0].data.equal(static_inputs[0].data)
-    assert static_inputs_reconstructed[1].data.equal(static_inputs[1].data)
+    reconstructed = StaticInputs.from_state(state)
+    assert reconstructed[0].data.equal(static_inputs[0].data)
+    assert reconstructed[1].data.equal(static_inputs[1].data)
+    assert torch.equal(reconstructed.coords.lat, static_inputs.coords.lat)
+    assert torch.equal(reconstructed.coords.lon, static_inputs.coords.lon)
 
 
-def test_StaticInputs_serialize_backward_compat_with_coords():
-    """from_state should silently ignore 'coords' key in fields for old state dicts."""
-    from fme.core.coordinates import LatLonCoordinates
-
+def test_StaticInputs_from_state_raises_on_missing_coords():
     data = torch.arange(16, dtype=torch.float32).reshape(4, 4)
-    coords = LatLonCoordinates(
-        lat=torch.arange(4, dtype=torch.float32),
-        lon=torch.arange(4, dtype=torch.float32),
+    with pytest.raises(ValueError, match="No coordinates"):
+        StaticInputs.from_state({"fields": [{"data": data}]})
+
+
+def test_StaticInputs_from_state_legacy_coords_in_fields():
+    """from_state handles old format where coords were stored only inside each field."""
+    dim_len = 4
+    data = torch.arange(dim_len * dim_len, dtype=torch.float32).reshape(
+        dim_len, dim_len
     )
-    # Simulate old state dict format that included coords inside fields.
-    # from_state should silently ignore extra keys (like 'coords') in field dicts.
+    coords = _make_coords(n=dim_len)
     old_state = {
-        "fields": [
-            {
-                "data": data,
-                "coords": {
-                    "lat": torch.arange(4, dtype=torch.float32),
-                    "lon": torch.arange(4, dtype=torch.float32),
-                },
-            }
-        ],
-        "coords": coords.get_state(),
+        "fields": [{"data": data, "coords": {"lat": coords.lat, "lon": coords.lon}}],
     }
-    static_inputs = StaticInputs.from_state(old_state)
-    assert torch.equal(static_inputs[0].data, data)
+    result = StaticInputs.from_state(old_state)
+    assert torch.equal(result[0].data, data)
+    assert torch.equal(result.coords.lat, coords.lat)
+    assert torch.equal(result.coords.lon, coords.lon)
+
+
+def test_from_state_backwards_compatible_has_coords():
+    """When state has coords, delegates to from_state."""
+    data = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    coords = _make_coords()
+    state = StaticInputs([StaticInput(data)], coords=coords).get_state()
+    result = StaticInputs.from_state_backwards_compatible(
+        state=state, static_inputs_config={}, fine_coordinates_path=None
+    )
+    assert torch.equal(result[0].data, data)
+
+
+def test_from_state_backwards_compatible_no_state_no_config(tmp_path):
+    """Old checkpoint with no static inputs: empty StaticInputs with loaded coords."""
+    coords_path = str(tmp_path / "coords.nc")
+    dim_len = 4
+    _write_coords_netcdf(coords_path, n=dim_len)
+    result = StaticInputs.from_state_backwards_compatible(
+        state={}, static_inputs_config={}, fine_coordinates_path=coords_path
+    )
+    assert result.fields == []
+    assert result.coords.lat.shape == (dim_len,)
+
+
+def test_from_state_backwards_compatible_with_config(tmp_path):
+    """Old checkpoint with static_inputs_config: loads fields from paths."""
+    coords_path = str(tmp_path / "coords.nc")
+    dim_len = 4
+    _write_coords_netcdf(coords_path, n=dim_len)
+    field_data = np.random.rand(dim_len, dim_len).astype(np.float32)
+    field_path = str(tmp_path / "field.nc")
+    xr.Dataset({"HGTsfc": (["lat", "lon"], field_data)}).to_netcdf(field_path)
+    result = StaticInputs.from_state_backwards_compatible(
+        state={},
+        static_inputs_config={"HGTsfc": field_path},
+        fine_coordinates_path=coords_path,
+    )
+    assert len(result.fields) == 1
+
+
+def test_from_state_backwards_compatible_raises_state_and_config():
+    """
+    Errors if checkpoint state has fields and static_inputs_config is also provided.
+    """
+    dim_len = 4
+    data = torch.arange(dim_len * dim_len, dtype=torch.float32).reshape(
+        dim_len, dim_len
+    )
+    coords = _make_coords(n=dim_len)
+    state = StaticInputs([StaticInput(data)], coords=coords).get_state()
+    with pytest.raises(ValueError, match="static_inputs_config"):
+        StaticInputs.from_state_backwards_compatible(
+            state=state,
+            static_inputs_config={"HGTsfc": "some/path"},
+            fine_coordinates_path=None,
+        )
+
+
+def test_from_state_backwards_compatible_raises_coords_in_state_and_path():
+    """Errors if state has coords and fine_coordinates_path is also provided."""
+    dim_len = 4
+    data = torch.arange(dim_len * dim_len, dtype=torch.float32).reshape(
+        dim_len, dim_len
+    )
+    coords = _make_coords(n=dim_len)
+    state = StaticInputs([StaticInput(data)], coords=coords).get_state()
+    with pytest.raises(ValueError, match="fine_coordinates_path"):
+        StaticInputs.from_state_backwards_compatible(
+            state=state,
+            static_inputs_config={},
+            fine_coordinates_path="some/path",
+        )
+
+
+def test_from_state_backwards_compatible_raises_no_coords():
+    """Errors if no coords in state and no fine_coordinates_path."""
+    with pytest.raises(ValueError, match="No coordinates"):
+        StaticInputs.from_state_backwards_compatible(
+            state={}, static_inputs_config={}, fine_coordinates_path=None
+        )

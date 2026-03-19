@@ -5,7 +5,6 @@ from typing import Any
 
 import dacite
 import torch
-import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
@@ -20,7 +19,6 @@ from fme.downscaling.data import (
     PairedBatchData,
     StaticInputs,
     adjust_fine_coord_range,
-    load_static_inputs,
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
@@ -552,39 +550,6 @@ class DiffusionModel:
             "static_inputs": self.static_inputs.get_state(),
         }
 
-    @staticmethod
-    def _legacy_coord_in_state(
-        static_inputs_state: Mapping[str, Any],
-    ) -> bool:
-        return (
-            "fields" in static_inputs_state
-            and static_inputs_state["fields"]
-            and "coords" in static_inputs_state["fields"][0]
-        )
-
-    @classmethod
-    def coords_in_checkpoint(cls, static_inputs_state: Mapping[str, Any]) -> bool:
-        return "coords" in static_inputs_state or cls._legacy_coord_in_state(
-            static_inputs_state
-        )
-
-    @classmethod
-    def _update_state_with_legacy_coords(
-        cls,
-        static_inputs_state: dict[str, Any],
-    ) -> None:
-        if cls._legacy_coord_in_state(static_inputs_state):
-            coords = static_inputs_state["fields"][0]["coords"]
-            static_inputs_state["coords"] = coords
-        else:
-            raise ValueError(
-                "No coordinates found in static_inputs state. "
-                "Must have a 'coords' field, or at least one field in static_inputs"
-                " must have a 'coords' field to infer coordinates from for model "
-                " reconstruction. Coordinates must be serialized with the "
-                "checkpoint to reload from state during training."
-            )
-
     @classmethod
     def from_state(
         cls,
@@ -597,10 +562,6 @@ class DiffusionModel:
         static_inputs and fine_coordinates for backwards compatibility.
         """
         static_inputs_state: dict = state.get("static_inputs") or {}
-
-        if "coords" not in static_inputs_state:
-            cls._update_state_with_legacy_coords(static_inputs_state)
-
         static_inputs = StaticInputs.from_state(static_inputs_state)
         config = DiffusionModelConfig.from_state(state["config"])
         model = config.build(
@@ -621,26 +582,6 @@ class _CheckpointModelConfigSelector:
         return dacite.from_dict(
             data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
         ).wrapper
-
-
-def load_fine_coords_from_path(path: str) -> LatLonCoordinates:
-    if path.endswith(".zarr"):
-        ds = xr.open_zarr(path)
-    else:
-        ds = xr.open_dataset(path)
-    lat_name = next((n for n in ["lat", "latitude", "grid_yt"] if n in ds.coords), None)
-    lon_name = next(
-        (n for n in ["lon", "longitude", "grid_xt"] if n in ds.coords), None
-    )
-    if lat_name is None or lon_name is None:
-        raise ValueError(
-            f"Could not find lat/lon coordinates in {path}. "
-            "Expected 'lat'/'latitude'/'grid_yt' and 'lon'/'longitude'/'grid_xt'."
-        )
-    return LatLonCoordinates(
-        lat=torch.tensor(ds[lat_name].values, dtype=torch.float32),
-        lon=torch.tensor(ds[lon_name].values, dtype=torch.float32),
-    )
 
 
 @dataclasses.dataclass
@@ -698,8 +639,6 @@ class CheckpointModelConfig:
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["out_names"]
             ]
-            # backwards compatibility for models before static inputs serialization
-            checkpoint_data["model"].setdefault("static_inputs", {})
 
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
@@ -711,48 +650,14 @@ class CheckpointModelConfig:
     def build(
         self,
     ) -> DiffusionModel:
-        checkpoint_model = self._checkpoint["model"]
-        checkpoint_static_inputs = checkpoint_model["static_inputs"]
+        checkpoint_model: dict = self._checkpoint["model"]
+        checkpoint_static_inputs = checkpoint_model.get("static_inputs", {})
 
-        has_coords_in_checkpoint = DiffusionModel.coords_in_checkpoint(
-            checkpoint_static_inputs
+        static_inputs = StaticInputs.from_state_backwards_compatible(
+            state=checkpoint_static_inputs,
+            static_inputs_config=self.static_inputs or {},
+            fine_coordinates_path=self.fine_coordinates_path,
         )
-        if has_coords_in_checkpoint and self.fine_coordinates_path is not None:
-            raise ValueError(
-                "The model checkpoint already has fine coordinates from training. "
-                "fine_coordinates_path should not be provided in checkpoint model "
-                "config."
-            )
-        elif checkpoint_static_inputs and self.static_inputs is not None:
-            raise ValueError(
-                "The model checkpoint already has static inputs from training. "
-                "static_inputs should not be provided in checkpoint model config."
-            )
-
-        if has_coords_in_checkpoint:
-            if DiffusionModel._legacy_coord_in_state(checkpoint_static_inputs):
-                DiffusionModel._update_state_with_legacy_coords(
-                    checkpoint_static_inputs
-                )
-            static_inputs = StaticInputs.from_state(checkpoint_static_inputs)
-        else:
-            if self.fine_coordinates_path is None:
-                raise ValueError(
-                    "No fine coordinates found in checkpoint state. "
-                    "fine_coordinates_path must be provided in the checkpoint model "
-                    "configuration to load this model."
-                )
-            fine_coords = load_fine_coords_from_path(self.fine_coordinates_path)
-            if checkpoint_static_inputs:
-                checkpoint_static_inputs["coords"] = fine_coords.get_state()
-                static_inputs = StaticInputs.from_state(checkpoint_static_inputs)
-            elif self.static_inputs is not None:
-                static_inputs = load_static_inputs(
-                    self.static_inputs, coords=fine_coords
-                )
-            else:
-                static_inputs = StaticInputs(fields=[], coords=fine_coords)
-
         model = _CheckpointModelConfigSelector.from_state(
             self._checkpoint["model"]["config"]
         ).build(
