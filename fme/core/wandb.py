@@ -165,13 +165,17 @@ class WandB:
             wandb.watch(modules)
 
     def log(
-        self, data: Mapping[str, Any], step=None, sleep=None, commit: bool | None = None
+        self,
+        data: Mapping[str, Any],
+        step: int,
+        sleep: float | None = None,
+        commit: bool | None = None,
     ):
         if self._enabled:
             wandb.log(dict(data), step=step, commit=commit)
             if sleep is not None:
                 time.sleep(sleep)
-        if self._disk_logger is not None and step is not None:
+        if self._disk_logger is not None:
             self._disk_logger.log(dict(data), step=step)
         dist = Distributed.get_instance()
         dist.barrier()
