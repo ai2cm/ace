@@ -8,7 +8,7 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
-from fme.downscaling.data import load_static_inputs
+from fme.downscaling.data import StaticInputs, load_static_inputs
 from fme.downscaling.models import (
     DiffusionModelConfig,
     PairedNormalizationConfig,
@@ -120,8 +120,9 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
     model = model_config.build(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
-        static_inputs=load_static_inputs({"HGTsfc": fine_data_path}),
-        fine_coords=fine_coords,
+        static_inputs=load_static_inputs(
+            {"HGTsfc": fine_data_path}, coords=fine_coords
+        ),
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
@@ -167,7 +168,9 @@ def test_predictor_renaming(
         coarse_shape, downscale_factor, use_fine_topography=False
     )
     model = model_config.build(
-        coarse_shape=coarse_shape, downscale_factor=2, fine_coords=fine_coords
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)

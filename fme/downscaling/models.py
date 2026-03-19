@@ -17,7 +17,6 @@ from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import (
     BatchData,
-    ClosedInterval,
     PairedBatchData,
     StaticInputs,
     adjust_fine_coord_range,
@@ -182,9 +181,8 @@ class DiffusionModelConfig:
         self,
         coarse_shape: tuple[int, int],
         downscale_factor: int,
-        fine_coords: LatLonCoordinates,
+        static_inputs: StaticInputs,
         rename: dict[str, str] | None = None,
-        static_inputs: StaticInputs | None = None,
     ) -> "DiffusionModel":
         invert_rename = {v: k for k, v in (rename or {}).items()}
         orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
@@ -196,10 +194,10 @@ class DiffusionModelConfig:
         # https://en.wikipedia.org/wiki/Standard_score
         sigma_data = 1.0
 
-        n_in_channels = len(self.in_names)
-        if static_inputs is not None:
-            n_in_channels += len(static_inputs.fields)
-        elif self.use_fine_topography:
+        n_in_channels = len(self.in_names) + len(static_inputs.fields)
+        if self.use_fine_topography and len(static_inputs.fields) == 0:
+            # TODO: remove this when forcing static inputs to be provided
+            # .      via removing use_fine_topography
             # Old checkpoints may not have static inputs serialized, but if
             # use_fine_topography is True, we still need to account for the topography
             # channel, which was the only static input at the time
@@ -223,7 +221,6 @@ class DiffusionModelConfig:
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
             static_inputs=static_inputs,
-            fine_coords=fine_coords,
         )
 
     def get_state(self) -> Mapping[str, Any]:
@@ -279,8 +276,7 @@ class DiffusionModel:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
-        fine_coords: LatLonCoordinates,
-        static_inputs: StaticInputs | None = None,
+        static_inputs: StaticInputs,
     ) -> None:
         """
         Args:
@@ -297,12 +293,9 @@ class DiffusionModel:
                 coarse to fine.
             sigma_data: The standard deviation of the data, used for diffusion
                 model preconditioning.
-            fine_coords: the full-domain fine-resolution coordinates to use
-                for spatial metadata in the model output.
-            static_inputs: Static inputs to the model, loaded from the trainer
-                config or checkpoint. Must be set when use_fine_topography is True.
-                Expected to be on the same coordinate grid as fine_coords for now,
-                but this may be relaxed in the future.
+            static_inputs: Static inputs to the model. Always provided, carrying
+                the full-domain fine-resolution coordinates. Fields may be empty
+                when no static data is needed.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
@@ -315,48 +308,20 @@ class DiffusionModel:
         self.out_packer = Packer(config.out_names)
         self.config = config
         self._channel_axis = -3
-        self.static_inputs = (
-            static_inputs.to_device() if static_inputs is not None else None
-        )
-        self.fine_coords = fine_coords.to(get_device())
-        if static_inputs is not None:
-            expected = fine_coords.shape
-            if static_inputs.shape != expected:
-                raise ValueError(
-                    f"static_inputs are expected to be on the same coordinate grid as "
-                    f"fine_coords. StaticInputs shape {static_inputs.shape} does not "
-                    f"match fine_coords grid {expected}."
-                )
+        self.static_inputs = static_inputs.to_device()
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
 
-    def _subset_static_inputs(
-        self,
-        lat_interval: ClosedInterval,
-        lon_interval: ClosedInterval,
-    ) -> StaticInputs | None:
-        """Subset self.static_inputs to the given fine lat/lon interval.
-
-        Returns None if use_fine_topography is False.
-        Raises ValueError if use_fine_topography is True but self.static_inputs is None.
-        """
-        if not self.config.use_fine_topography:
-            return None
-        if self.static_inputs is None:
-            raise ValueError(
-                "Static inputs must be provided for each batch when use of fine "
-                "static inputs is enabled."
-            )
-        # Static inputs are expected to be on the same grid
-        # as fine_coords so use the model's fine coords to subset StaticInputs
-        lat_slice = lat_interval.slice_of(self.fine_coords.lat)
-        lon_slice = lon_interval.slice_of(self.fine_coords.lon)
-        return self.static_inputs.subset(lat_slice, lon_slice)
+    @property
+    def fine_coords(self) -> LatLonCoordinates:
+        return self.static_inputs.coords
 
     def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
-        """Return fine-resolution coordinates matching the spatial extent of batch."""
+        return self._get_subset_for_coarse_batch(batch).coords
+
+    def _get_subset_for_coarse_batch(self, batch: BatchData) -> StaticInputs:
         coarse_lat = batch.latlon_coordinates.lat[0]
         coarse_lon = batch.latlon_coordinates.lon[0]
         fine_lat_interval = adjust_fine_coord_range(
@@ -371,10 +336,11 @@ class DiffusionModel:
             full_fine_coord=self.fine_coords.lon,
             downscale_factor=self.downscale_factor,
         )
-        return LatLonCoordinates(
-            lat=fine_lat_interval.subset_of(self.fine_coords.lat),
-            lon=fine_lon_interval.subset_of(self.fine_coords.lon),
+        subset_static_inputs = self.static_inputs.subset(
+            lat_interval=fine_lat_interval,
+            lon_interval=fine_lon_interval,
         )
+        return subset_static_inputs
 
     @property
     def fine_shape(self) -> tuple[int, int]:
@@ -391,7 +357,7 @@ class DiffusionModel:
         )
 
     def _get_input_from_coarse(
-        self, coarse: TensorMapping, static_inputs: StaticInputs | None
+        self, coarse: TensorMapping, static_inputs: StaticInputs
     ) -> torch.Tensor:
         inputs = filter_tensor_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
@@ -399,11 +365,13 @@ class DiffusionModel:
         )
         interpolated = interpolate(normalized, self.downscale_factor)
 
+        # TODO: update when removing use_fine_topography flag
         if self.config.use_fine_topography:
-            if static_inputs is None:
+            if not static_inputs.fields:
                 raise ValueError(
-                    "Static inputs must be provided for each batch when use of fine "
-                    "static inputs is enabled."
+                    "Static inputs must be provided for each batch when flag "
+                    "use_fine_topography is enabled, but no static input fields "
+                    "were found."
                 )
             else:
                 expected_shape = interpolated.shape[-2:]
@@ -414,12 +382,13 @@ class DiffusionModel:
                     )
                 n_batches = normalized.shape[0]
                 # Join normalized static inputs to input (see dataset for details)
+                fields: list[torch.Tensor] = [interpolated]
                 for field in static_inputs.fields:
-                    topo = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
-                    topo = topo.unsqueeze(self._channel_axis)
-                    interpolated = torch.concat(
-                        [interpolated, topo], axis=self._channel_axis
-                    )
+                    static_field = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
+                    static_field = static_field.unsqueeze(self._channel_axis)
+                    fields.append(static_field)
+
+                interpolated = torch.concat(fields, dim=self._channel_axis)
 
         if self.config._interpolate_input:
             return interpolated
@@ -431,9 +400,7 @@ class DiffusionModel:
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
-        _static_inputs = self._subset_static_inputs(
-            batch.fine.lat_interval, batch.fine.lon_interval
-        )
+        _static_inputs = self._get_subset_for_coarse_batch(batch.coarse)
         coarse, fine = batch.coarse.data, batch.fine.data
         inputs_norm = self._get_input_from_coarse(coarse, _static_inputs)
         targets_norm = self.out_packer.pack(
@@ -491,7 +458,7 @@ class DiffusionModel:
     def generate(
         self,
         coarse_data: TensorMapping,
-        static_inputs: StaticInputs | None,
+        static_inputs: StaticInputs,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
         # Internal method; external callers should use generate_on_batch /
@@ -547,31 +514,7 @@ class DiffusionModel:
         batch: BatchData,
         n_samples: int = 1,
     ) -> TensorDict:
-        if self.config.use_fine_topography:
-            if self.static_inputs is None:
-                raise ValueError(
-                    "Static inputs must be provided for each batch when use of fine "
-                    "static inputs is enabled."
-                )
-            coarse_lat = batch.latlon_coordinates.lat[0]
-            coarse_lon = batch.latlon_coordinates.lon[0]
-            fine_lat_interval = adjust_fine_coord_range(
-                batch.lat_interval,
-                full_coarse_coord=coarse_lat,
-                full_fine_coord=self.fine_coords.lat,
-                downscale_factor=self.downscale_factor,
-            )
-            fine_lon_interval = adjust_fine_coord_range(
-                batch.lon_interval,
-                full_coarse_coord=coarse_lon,
-                full_fine_coord=self.fine_coords.lon,
-                downscale_factor=self.downscale_factor,
-            )
-            _static_inputs = self._subset_static_inputs(
-                fine_lat_interval, fine_lon_interval
-            )
-        else:
-            _static_inputs = None
+        _static_inputs = self._get_subset_for_coarse_batch(batch)
         generated, _, _ = self.generate(batch.data, _static_inputs, n_samples)
         return generated
 
@@ -581,9 +524,7 @@ class DiffusionModel:
         batch: PairedBatchData,
         n_samples: int = 1,
     ) -> ModelOutputs:
-        _static_inputs = self._subset_static_inputs(
-            batch.fine.lat_interval, batch.fine.lon_interval
-        )
+        _static_inputs = self._get_subset_for_coarse_batch(batch.coarse)
         coarse, fine = batch.coarse.data, batch.fine.data
         generated, generated_norm, latent_steps = self.generate(
             coarse, _static_inputs, n_samples
@@ -603,65 +544,69 @@ class DiffusionModel:
         )
 
     def get_state(self) -> Mapping[str, Any]:
-        if self.static_inputs is not None:
-            static_inputs_state = self.static_inputs.get_state()
-        else:
-            static_inputs_state = None
-
         return {
             "config": self.config.get_state(),
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
-            "static_inputs": static_inputs_state,
-            "fine_coords": self.fine_coords.get_state(),
+            "static_inputs": self.static_inputs.get_state(),
         }
+
+    @staticmethod
+    def _legacy_coord_in_state(
+        static_inputs_state: Mapping[str, Any],
+    ) -> bool:
+        return (
+            "fields" in static_inputs_state
+            and static_inputs_state["fields"]
+            and "coords" in static_inputs_state["fields"][0]
+        )
+
+    @classmethod
+    def coords_in_checkpoint(cls, static_inputs_state: Mapping[str, Any]) -> bool:
+        return "coords" in static_inputs_state or cls._legacy_coord_in_state(
+            static_inputs_state
+        )
+
+    @classmethod
+    def _update_state_with_legacy_coords(
+        cls,
+        static_inputs_state: dict[str, Any],
+    ) -> None:
+        if cls._legacy_coord_in_state(static_inputs_state):
+            coords = static_inputs_state["fields"][0]["coords"]
+            static_inputs_state["coords"] = coords
+        else:
+            raise ValueError(
+                "No coordinates found in static_inputs state. "
+                "Must have a 'coords' field, or at least one field in static_inputs"
+                " must have a 'coords' field to infer coordinates from for model "
+                " reconstruction. Coordinates must be serialized with the "
+                "checkpoint to reload from state during training."
+            )
 
     @classmethod
     def from_state(
         cls,
         state: Mapping[str, Any],
     ) -> "DiffusionModel":
+        """
+        Model-level from state is used to reconstruct the full model during training via
+        loading a checkpoint. This requires recent checkpoint state fields, as
+        opposed to the CheckpointModelConfig where we build with the option to provide
+        static_inputs and fine_coordinates for backwards compatibility.
+        """
+        static_inputs_state: dict = state.get("static_inputs") or {}
+
+        if "coords" not in static_inputs_state:
+            cls._update_state_with_legacy_coords(static_inputs_state)
+
+        static_inputs = StaticInputs.from_state(static_inputs_state)
         config = DiffusionModelConfig.from_state(state["config"])
-        # backwards compatibility for models before static inputs serialization
-        if state.get("static_inputs") is not None:
-            static_inputs = StaticInputs.from_state(state["static_inputs"]).to_device()
-        else:
-            static_inputs = None
-
-        # Load fine_coords: new checkpoints store it directly; old checkpoints
-        # that had static_inputs with coords can auto-migrate from raw state.
-        fine_coords = state.get("fine_coords")
-        if fine_coords is not None:
-            # TODO: Why doesn't LatLonCoordinates have a from_state method?
-            fine_coords = LatLonCoordinates(
-                lat=state["fine_coords"]["lat"],
-                lon=state["fine_coords"]["lon"],
-            )
-        elif (
-            static_inputs is not None
-            and static_inputs.fields
-            and "coords" in state["static_inputs"]["fields"][0]
-        ):
-            # Backward compat: old checkpoints with static inputs stored coords inside
-            # static_inputs fields[0]["coords"]
-            coords_state = state["static_inputs"]["fields"][0]["coords"]
-            fine_coords = LatLonCoordinates(
-                lat=coords_state["lat"],
-                lon=coords_state["lon"],
-            )
-        else:
-            raise ValueError(
-                "No fine coordinates found in checkpoint state and no static inputs "
-                " were available to infer them. fine_coords must be serialized with the"
-                " checkpoint to resume from training."
-            )
-
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
             static_inputs=static_inputs,
-            fine_coords=fine_coords,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
@@ -754,9 +699,7 @@ class CheckpointModelConfig:
                 for name in checkpoint_data["model"]["config"]["out_names"]
             ]
             # backwards compatibility for models before static inputs serialization
-            checkpoint_data["model"].setdefault("static_inputs", None)
-            # backwards compatibility for models before fine_coords serialization
-            checkpoint_data["model"].setdefault("fine_coords", None)
+            checkpoint_data["model"].setdefault("static_inputs", {})
 
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
@@ -768,68 +711,53 @@ class CheckpointModelConfig:
     def build(
         self,
     ) -> DiffusionModel:
-        static_inputs: StaticInputs | None
-        if self._checkpoint["model"]["static_inputs"] is not None:
-            if self.static_inputs is not None:
-                raise ValueError(
-                    "The model checkpoint already has static inputs from training. "
-                    "static_inputs should not be provided in checkpoint model config."
-                    "static inputs from training."
-                )
-            static_inputs = StaticInputs.from_state(
-                self._checkpoint["model"]["static_inputs"]
-            )
-        elif self.static_inputs is not None:
-            static_inputs = load_static_inputs(self.static_inputs)
-        else:
-            static_inputs = None
+        checkpoint_model = self._checkpoint["model"]
+        checkpoint_static_inputs = checkpoint_model["static_inputs"]
 
-        fine_coords: LatLonCoordinates
-        has_fine_coords = self._checkpoint["model"]["fine_coords"] is not None
-        has_static_input_coords = (
-            self._checkpoint["model"]["static_inputs"] is not None
-            and self._checkpoint["model"]["static_inputs"]["fields"][0].get("coords")
-            is not None
+        has_coords_in_checkpoint = DiffusionModel.coords_in_checkpoint(
+            checkpoint_static_inputs
         )
-        # TODO: simplify with static input refactor that deisables empty StaticInputs
-        if (
-            has_fine_coords or has_static_input_coords
-        ) and self.fine_coordinates_path is not None:
+        if has_coords_in_checkpoint and self.fine_coordinates_path is not None:
             raise ValueError(
                 "The model checkpoint already has fine coordinates from training. "
                 "fine_coordinates_path should not be provided in checkpoint model "
                 "config."
             )
-        elif has_fine_coords:
-            fine_coords_state = self._checkpoint["model"]["fine_coords"]
-            fine_coords = LatLonCoordinates(
-                lat=fine_coords_state["lat"],
-                lon=fine_coords_state["lon"],
-            )
-        elif has_static_input_coords:
-            coords_state = self._checkpoint["model"]["static_inputs"]["fields"][0][
-                "coords"
-            ]
-            fine_coords = LatLonCoordinates(
-                lat=coords_state["lat"],
-                lon=coords_state["lon"],
-            )
-        elif self.fine_coordinates_path is not None:
-            fine_coords = load_fine_coords_from_path(self.fine_coordinates_path)
-        else:
+        elif checkpoint_static_inputs and self.static_inputs is not None:
             raise ValueError(
-                "No fine coordinates found in checkpoint state and no static inputs "
-                " were available to infer them. fine_coordinates_path must be provided "
-                "in the checkpoint model configuration to load fine coordinates from "
-                "the provided path."
+                "The model checkpoint already has static inputs from training. "
+                "static_inputs should not be provided in checkpoint model config."
             )
+
+        if has_coords_in_checkpoint:
+            if DiffusionModel._legacy_coord_in_state(checkpoint_static_inputs):
+                DiffusionModel._update_state_with_legacy_coords(
+                    checkpoint_static_inputs
+                )
+            static_inputs = StaticInputs.from_state(checkpoint_static_inputs)
+        else:
+            if self.fine_coordinates_path is None:
+                raise ValueError(
+                    "No fine coordinates found in checkpoint state. "
+                    "fine_coordinates_path must be provided in the checkpoint model "
+                    "configuration to load this model."
+                )
+            fine_coords = load_fine_coords_from_path(self.fine_coordinates_path)
+            if checkpoint_static_inputs:
+                checkpoint_static_inputs["coords"] = fine_coords.get_state()
+                static_inputs = StaticInputs.from_state(checkpoint_static_inputs)
+            elif self.static_inputs is not None:
+                static_inputs = load_static_inputs(
+                    self.static_inputs, coords=fine_coords
+                )
+            else:
+                static_inputs = StaticInputs(fields=[], coords=fine_coords)
 
         model = _CheckpointModelConfigSelector.from_state(
             self._checkpoint["model"]["config"]
         ).build(
             coarse_shape=self._checkpoint["model"]["coarse_shape"],
             downscale_factor=self._checkpoint["model"]["downscale_factor"],
-            fine_coords=fine_coords,
             rename=self._rename,
             static_inputs=static_inputs,
         )

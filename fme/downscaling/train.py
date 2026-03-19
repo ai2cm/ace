@@ -393,7 +393,7 @@ class TrainerConfig:
     experiment_dir: str
     save_checkpoints: bool
     logging: LoggingConfig
-    static_inputs: dict[str, str] | None = None
+    static_inputs: dict[str, str] = dataclasses.field(default_factory=dict)
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
@@ -421,8 +421,6 @@ class TrainerConfig:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
-        static_inputs = load_static_inputs(self.static_inputs)
-
         train_data: PairedGriddedData = self.train_data.build(
             train=True,
             requirements=self.model.data_requirements,
@@ -431,6 +429,10 @@ class TrainerConfig:
             train=False,
             requirements=self.model.data_requirements,
         )
+        static_inputs = load_static_inputs(
+            self.static_inputs, coords=train_data.fine_coords
+        )
+
         if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:
             model_coarse_shape = (
                 self.coarse_patch_extent_lat,
@@ -443,7 +445,6 @@ class TrainerConfig:
             model_coarse_shape,
             train_data.downscale_factor,
             static_inputs=static_inputs,
-            fine_coords=train_data.fine_coords,
         )
 
         optimization = self.optimization.build(

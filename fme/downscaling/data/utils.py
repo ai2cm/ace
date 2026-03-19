@@ -37,9 +37,9 @@ class ClosedInterval:
     def __contains__(self, value: float):
         return self.start <= value <= self.stop
 
-    def slice_of(self, coords: torch.Tensor) -> slice:
+    def slice_from(self, coords: torch.Tensor) -> slice:
         """
-        Return a slice that selects all elements of `coords` within this
+        Return a slice that selects all elements from `coords` within this
         specified interval. This assumes `coords` is monotonically increasing.
 
         Args:
@@ -68,7 +68,7 @@ class ClosedInterval:
         Return a subset of `coords` that falls within this specified interval.
         This assumes `coords` is monotonically increasing.
         """
-        slice = self.slice_of(coords)
+        slice = self.slice_from(coords)
         return coords[slice]
 
 

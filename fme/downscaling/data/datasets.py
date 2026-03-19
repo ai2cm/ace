@@ -139,8 +139,8 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             )
 
         # Used to subset the data in __getitem__
-        self._lats_slice = self.lat_interval.slice_of(self._orig_coords.lat)
-        self._lons_slice = self.lon_interval.slice_of(self._orig_coords.lon)
+        self._lats_slice = self.lat_interval.slice_from(self._orig_coords.lat)
+        self._lons_slice = self.lon_interval.slice_from(self._orig_coords.lon)
 
         self._latlon_coordinates = LatLonCoordinates(
             lat=self.lat_interval.subset_of(self._orig_coords.lat),

@@ -92,9 +92,9 @@ def test_scale_slice(input_slice, expected):
         ),
     ],
 )
-def test_ClosedInterval_slice_of(interval, expected_slice):
+def test_ClosedInterval_slice_from(interval, expected_slice):
     coords = torch.arange(5)
-    result_slice = interval.slice_of(coords)
+    result_slice = interval.slice_from(coords)
     assert result_slice == expected_slice
 
 
@@ -122,4 +122,4 @@ def test_ClosedInterval_subset_of(interval, expected_values):
 def test_ClosedInterval_fail_on_empty_slice():
     coords = torch.arange(5)
     with pytest.raises(ValueError):
-        ClosedInterval(5.5, 7).slice_of(coords)
+        ClosedInterval(5.5, 7).slice_from(coords)

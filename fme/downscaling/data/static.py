@@ -3,8 +3,9 @@ import dataclasses
 import torch
 import xarray as xr
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
-from fme.downscaling.data.patching import Patch
+from fme.downscaling.data.utils import ClosedInterval
 
 
 @dataclasses.dataclass
@@ -13,7 +14,10 @@ class StaticInput:
 
     def __post_init__(self):
         if len(self.data.shape) != 2:
-            raise ValueError(f"Topography data must be 2D. Got shape {self.data.shape}")
+            raise ValueError(
+                f"StaticInput data must be 2D. Got shape {self.data.shape}"
+            )
+        self._shape = (self.data.shape[0], self.data.shape[1])
 
     @property
     def dim(self) -> int:
@@ -21,7 +25,7 @@ class StaticInput:
 
     @property
     def shape(self) -> tuple[int, int]:
-        return self.data.shape
+        return self._shape
 
     def subset(
         self,
@@ -34,13 +38,14 @@ class StaticInput:
         device = get_device()
         return StaticInput(data=self.data.to(device))
 
-    def _apply_patch(self, patch: Patch):
-        return self.subset(lat_slice=patch.input_slice.y, lon_slice=patch.input_slice.x)
-
     def get_state(self) -> dict:
         return {
             "data": self.data.cpu(),
         }
+
+    @classmethod
+    def from_state(cls, state: dict) -> "StaticInput":
+        return cls(data=state["data"])
 
 
 def _get_normalized_static_input(path: str, field_name: str):
@@ -74,6 +79,7 @@ def _get_normalized_static_input(path: str, field_name: str):
 @dataclasses.dataclass
 class StaticInputs:
     fields: list[StaticInput]
+    coords: LatLonCoordinates
 
     def __post_init__(self):
         for i, field in enumerate(self.fields[1:]):
@@ -82,6 +88,11 @@ class StaticInputs:
                     f"All StaticInput fields must have the same shape. "
                     f"Fields {i + 1} and 0 do not match shapes."
                 )
+        if self.fields and self.coords.shape != self.fields[0].shape:
+            raise ValueError(
+                f"Coordinates shape {self.coords.shape} does not match fields shape "
+                f"{self.fields[0].shape} for StaticInputs."
+            )
 
     def __getitem__(self, index: int):
         return self.fields[index]
@@ -94,47 +105,61 @@ class StaticInputs:
 
     def subset(
         self,
-        lat_slice: slice,
-        lon_slice: slice,
+        lat_interval: ClosedInterval,
+        lon_interval: ClosedInterval,
     ) -> "StaticInputs":
+        lat_slice = lat_interval.slice_from(self.coords.lat)
+        lon_slice = lon_interval.slice_from(self.coords.lon)
         return StaticInputs(
-            fields=[field.subset(lat_slice, lon_slice) for field in self.fields]
+            fields=[field.subset(lat_slice, lon_slice) for field in self.fields],
+            coords=LatLonCoordinates(
+                lat=lat_interval.subset_of(self.coords.lat),
+                lon=lon_interval.subset_of(self.coords.lon),
+            ),
         )
 
     def to_device(self) -> "StaticInputs":
-        return StaticInputs(fields=[field.to_device() for field in self.fields])
+        return StaticInputs(
+            fields=[field.to_device() for field in self.fields],
+            coords=self.coords.to(get_device()),
+        )
 
     def get_state(self) -> dict:
         return {
             "fields": [field.get_state() for field in self.fields],
+            "coords": self.coords.get_state(),
         }
 
     @classmethod
     def from_state(cls, state: dict) -> "StaticInputs":
+        """Reconstruct StaticInputs from a state dict.
+
+        Args:
+            state: State dict from get_state().
+            coords: Override coordinates. If None, reads coords from the state dict.
+                Pass explicitly when loading old-format checkpoints that stored coords
+                outside of the StaticInputs state.
+        """
         return cls(
             fields=[
-                StaticInput(
-                    data=field_state["data"],
-                )
-                for field_state in state["fields"]
-            ]
+                StaticInput.from_state(field_state) for field_state in state["fields"]
+            ],
+            coords=LatLonCoordinates(
+                lat=state["coords"]["lat"],
+                lon=state["coords"]["lon"],
+            ),
         )
 
 
 def load_static_inputs(
-    static_inputs_config: dict[str, str] | None,
-) -> StaticInputs | None:
+    static_inputs_config: dict[str, str], coords: LatLonCoordinates
+) -> StaticInputs:
     """
     Load normalized static inputs from a mapping of field names to file paths.
-    Returns None if the input config is empty.
+    Returns an empty StaticInputs (no fields) if the config is None or empty.
     """
-    # TODO: consolidate/simplify empty StaticInputs vs. None handling in
-    #       downscaling code
-    if not static_inputs_config:
-        return None
-    return StaticInputs(
-        fields=[
-            _get_normalized_static_input(path, field_name)
-            for field_name, path in static_inputs_config.items()
-        ]
-    )
+    fields = [
+        _get_normalized_static_input(path, field_name)
+        for field_name, path in static_inputs_config.items()
+    ]
+    return StaticInputs(fields=fields, coords=coords)

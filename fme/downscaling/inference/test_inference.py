@@ -64,8 +64,14 @@ def mock_output_target():
 
 
 def get_static_inputs(shape=(16, 16)):
+    from fme.core.coordinates import LatLonCoordinates
+
     data = torch.randn(shape)
-    return StaticInputs([StaticInput(data=data)])
+    coords = LatLonCoordinates(
+        lat=torch.arange(shape[0], dtype=torch.float32),
+        lon=torch.arange(shape[1], dtype=torch.float32),
+    )
+    return StaticInputs([StaticInput(data=data)], coords=coords)
 
 
 # Tests for Downscaler initialization
@@ -276,11 +282,9 @@ def checkpointed_model_config(
     # loader_config is passed in to add static inputs into model
     # that correspond to the dataset coordinates
     fine_data_path = f"{data_paths.fine}/data.nc"
-    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
     fine_coords = load_fine_coords_from_path(fine_data_path)
-    model = model_config.build(
-        coarse_shape, 2, static_inputs=static_inputs, fine_coords=fine_coords
-    )
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path}, coords=fine_coords)
+    model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"
     model.get_state()
