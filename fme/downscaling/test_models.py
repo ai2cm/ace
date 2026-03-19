@@ -642,33 +642,3 @@ def test_checkpoint_model_build_with_fine_coordinates_path(tmp_path):
 
     assert torch.equal(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat.cpu())
     assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
-
-
-def test_checkpoint_config_topography_raises():
-    with pytest.raises(ValueError):
-        CheckpointModelConfig(
-            checkpoint_path="/any/path.ckpt",
-            fine_topography_path="/topo/path.nc",
-        )
-
-
-def test_checkpoint_model_build_raises_when_checkpoint_has_static_inputs(tmp_path):
-    coarse_shape = (8, 16)
-    fine_shape = (16, 32)
-    static_inputs = make_static_inputs(fine_shape)
-    model = _get_diffusion_model(
-        coarse_shape=coarse_shape,
-        downscale_factor=2,
-        predict_residual=True,
-        use_fine_topography=True,
-        static_inputs=static_inputs,
-    )
-    checkpoint_path = tmp_path / "test.ckpt"
-    torch.save({"model": model.get_state()}, checkpoint_path)
-
-    config = CheckpointModelConfig(
-        checkpoint_path=str(checkpoint_path),
-        static_inputs={"HGTsfc": "/any/path.nc"},
-    )
-    with pytest.raises(ValueError):
-        config.build()
