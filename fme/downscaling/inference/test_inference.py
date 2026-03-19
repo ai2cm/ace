@@ -16,6 +16,7 @@ from fme.downscaling.data import (
     LatLonCoordinates,
     StaticInput,
     StaticInputs,
+    load_fine_coords_from_path,
     load_static_inputs,
 )
 from fme.downscaling.inference.constants import ENSEMBLE_NAME, TIME_NAME
@@ -32,7 +33,6 @@ from fme.downscaling.models import (
     LossConfig,
     NormalizationConfig,
     PairedNormalizationConfig,
-    load_fine_coords_from_path,
 )
 from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.test_evaluator import LinearDownscalingDiffusion

@@ -8,12 +8,12 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
-from fme.downscaling.data import StaticInputs, load_static_inputs
-from fme.downscaling.models import (
-    DiffusionModelConfig,
-    PairedNormalizationConfig,
+from fme.downscaling.data import (
+    StaticInputs,
     load_fine_coords_from_path,
+    load_static_inputs,
 )
+from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
 from fme.downscaling.test_utils import data_paths_helper
