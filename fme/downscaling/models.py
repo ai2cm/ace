@@ -313,7 +313,7 @@ class DiffusionModel:
         return torch.nn.ModuleList([self.module])
 
     @property
-    def fine_coords(self) -> LatLonCoordinates:
+    def full_fine_coords(self) -> LatLonCoordinates:
         return self.static_inputs.coords
 
     def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
@@ -325,13 +325,13 @@ class DiffusionModel:
         fine_lat_interval = adjust_fine_coord_range(
             batch.lat_interval,
             full_coarse_coord=coarse_lat,
-            full_fine_coord=self.fine_coords.lat,
+            full_fine_coord=self.full_fine_coords.lat,
             downscale_factor=self.downscale_factor,
         )
         fine_lon_interval = adjust_fine_coord_range(
             batch.lon_interval,
             full_coarse_coord=coarse_lon,
-            full_fine_coord=self.fine_coords.lon,
+            full_fine_coord=self.full_fine_coords.lon,
             downscale_factor=self.downscale_factor,
         )
         subset_static_inputs = self.static_inputs.subset(

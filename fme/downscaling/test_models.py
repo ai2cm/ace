@@ -24,7 +24,6 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
     _repeat_batch_by_samples,
     _separate_interleaved_samples,
-    load_fine_coords_from_path,
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import LogNormalNoiseDistribution
@@ -162,9 +161,13 @@ def test_module_serialization(tmp_path):
             model.module.parameters(), model_from_state.module.parameters()
         )
     )
-    assert model_from_state.fine_coords is not None
-    assert torch.equal(model_from_state.fine_coords.lat.cpu(), fine_coords.lat.cpu())
-    assert torch.equal(model_from_state.fine_coords.lon.cpu(), fine_coords.lon.cpu())
+    assert model_from_state.full_fine_coords is not None
+    assert torch.equal(
+        model_from_state.full_fine_coords.lat.cpu(), fine_coords.lat.cpu()
+    )
+    assert torch.equal(
+        model_from_state.full_fine_coords.lon.cpu(), fine_coords.lon.cpu()
+    )
 
     torch.save(model.get_state(), tmp_path / "test.ckpt")
     model_from_disk = DiffusionModel.from_state(
@@ -181,9 +184,13 @@ def test_module_serialization(tmp_path):
     assert torch.equal(
         loaded_static_inputs.fields[0].data, static_inputs.fields[0].data
     )
-    assert model_from_disk.fine_coords is not None
-    assert torch.equal(model_from_disk.fine_coords.lat.cpu(), fine_coords.lat.cpu())
-    assert torch.equal(model_from_disk.fine_coords.lon.cpu(), fine_coords.lon.cpu())
+    assert model_from_disk.full_fine_coords is not None
+    assert torch.equal(
+        model_from_disk.full_fine_coords.lat.cpu(), fine_coords.lat.cpu()
+    )
+    assert torch.equal(
+        model_from_disk.full_fine_coords.lon.cpu(), fine_coords.lon.cpu()
+    )
 
 
 def test_from_state_raises_when_no_coords_available():
@@ -234,12 +241,12 @@ def test_from_state_backward_compat_migrates_fine_coords_from_old_static_inputs(
     state["static_inputs"]["fields"][0]["coords"] = fine_coords.get_state()
 
     model_from_old_state = DiffusionModel.from_state(state)
-    assert model_from_old_state.fine_coords is not None
+    assert model_from_old_state.full_fine_coords is not None
     assert torch.equal(
-        model_from_old_state.fine_coords.lat.cpu(), fine_coords.lat.cpu()
+        model_from_old_state.full_fine_coords.lat.cpu(), fine_coords.lat.cpu()
     )
     assert torch.equal(
-        model_from_old_state.fine_coords.lon.cpu(), fine_coords.lon.cpu()
+        model_from_old_state.full_fine_coords.lon.cpu(), fine_coords.lon.cpu()
     )
 
 
@@ -596,8 +603,8 @@ def test_get_fine_coords_for_batch():
 
     result = model.get_fine_coords_for_batch(batch)
 
-    expected_lat = model.fine_coords.lat[4:12]
-    expected_lon = model.fine_coords.lon[8:24]
+    expected_lat = model.full_fine_coords.lat[4:12]
+    expected_lon = model.full_fine_coords.lon[8:24]
     assert torch.allclose(result.lat, expected_lat)
     assert torch.allclose(result.lon, expected_lon)
 
@@ -611,7 +618,7 @@ def test_checkpoint_model_build_with_fine_coordinates_path(tmp_path):
         downscale_factor=2,
         use_fine_topography=False,
     )
-    fine_coords = model.fine_coords
+    fine_coords = model.full_fine_coords
     # Simulate old checkpoint: no coords in static_inputs state
     state = model.get_state()
     del state["static_inputs"]["coords"]
@@ -633,8 +640,8 @@ def test_checkpoint_model_build_with_fine_coordinates_path(tmp_path):
         fine_coordinates_path=str(coords_path),
     ).build()
 
-    assert torch.equal(loaded_model.fine_coords.lat.cpu(), fine_coords.lat.cpu())
-    assert torch.equal(loaded_model.fine_coords.lon.cpu(), fine_coords.lon.cpu())
+    assert torch.equal(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat.cpu())
+    assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
 
 
 def test_checkpoint_config_topography_raises():
@@ -665,33 +672,3 @@ def test_checkpoint_model_build_raises_when_checkpoint_has_static_inputs(tmp_pat
     )
     with pytest.raises(ValueError):
         config.build()
-
-
-@pytest.mark.parametrize(
-    "lat_name,lon_name",
-    [
-        pytest.param("lat", "lon", id="standard"),
-        pytest.param("latitude", "longitude", id="long_names"),
-        pytest.param("grid_yt", "grid_xt", id="fv3_names"),
-    ],
-)
-def test_load_fine_coords_from_path(tmp_path, lat_name, lon_name):
-    lat = [0.0, 1.0, 2.0]
-    lon = [10.0, 20.0, 30.0, 40.0]
-    ds = xr.Dataset(coords={lat_name: lat, lon_name: lon})
-    path = str(tmp_path / "coords.nc")
-    ds.to_netcdf(path)
-
-    coords = load_fine_coords_from_path(path)
-
-    assert torch.allclose(coords.lat, torch.tensor(lat, dtype=torch.float32))
-    assert torch.allclose(coords.lon, torch.tensor(lon, dtype=torch.float32))
-
-
-def test_load_fine_coords_from_path_raises_on_missing_coords(tmp_path):
-    ds = xr.Dataset(coords={"x": [0.0, 1.0], "y": [10.0, 20.0]})
-    path = str(tmp_path / "no_latlon.nc")
-    ds.to_netcdf(path)
-
-    with pytest.raises(ValueError, match="Could not find lat/lon coordinates"):
-        load_fine_coords_from_path(path)

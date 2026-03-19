@@ -3,7 +3,7 @@ import pytest
 import torch
 import xarray as xr
 
-from .static import StaticInput, StaticInputs
+from .static import StaticInput, StaticInputs, load_fine_coords_from_path
 
 
 def _make_coords(n=4):
@@ -159,3 +159,33 @@ def test_from_state_backwards_compatible_raises_no_coords():
         StaticInputs.from_state_backwards_compatible(
             state={}, static_inputs_config={}, fine_coordinates_path=None
         )
+
+
+@pytest.mark.parametrize(
+    "lat_name,lon_name",
+    [
+        pytest.param("lat", "lon", id="standard"),
+        pytest.param("latitude", "longitude", id="long_names"),
+        pytest.param("grid_yt", "grid_xt", id="fv3_names"),
+    ],
+)
+def test_load_fine_coords_from_path(tmp_path, lat_name, lon_name):
+    lat = [0.0, 1.0, 2.0]
+    lon = [10.0, 20.0, 30.0, 40.0]
+    ds = xr.Dataset(coords={lat_name: lat, lon_name: lon})
+    path = str(tmp_path / "coords.nc")
+    ds.to_netcdf(path)
+
+    coords = load_fine_coords_from_path(path)
+
+    assert torch.allclose(coords.lat, torch.tensor(lat, dtype=torch.float32))
+    assert torch.allclose(coords.lon, torch.tensor(lon, dtype=torch.float32))
+
+
+def test_load_fine_coords_from_path_raises_on_missing_coords(tmp_path):
+    ds = xr.Dataset(coords={"x": [0.0, 1.0], "y": [10.0, 20.0]})
+    path = str(tmp_path / "no_latlon.nc")
+    ds.to_netcdf(path)
+
+    with pytest.raises(ValueError, match="Could not find lat/lon coordinates"):
+        load_fine_coords_from_path(path)

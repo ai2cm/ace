@@ -88,7 +88,7 @@ class PatchPredictor:
 
     @property
     def fine_coords(self):
-        return self.model.fine_coords
+        return self.model.full_fine_coords
 
     def _get_patches(
         self, coarse_yx_extent, fine_yx_extent
