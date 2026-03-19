@@ -68,7 +68,6 @@ class MockDistributed:
             truth, predicted, weights=weights, dim=dim
         )
         result.fill_(self.fill_value)
-        self.reduce_called = True
         return result
 
 
