@@ -50,10 +50,12 @@ class GriddedData(GriddedDataABC[BatchData]):
             will be on the current device.
         """
         self._loader = loader
-        self._properties = properties.to_device()
+        self._global_properties = properties.to_device()
+        shape = self._global_properties.horizontal_coordinates.shape
+        self._global_img_shape: tuple[int, int] = (shape[-2], shape[-1])
+        self._properties = self._global_properties.localize()
         self._timestep = self._properties.timestep
         self._vertical_coordinate = self._properties.vertical_coordinate
-        self._mask_provider = self._properties.mask_provider
         self._modifier = modifier
         self._batch_size: int | None = None
 
@@ -72,7 +74,8 @@ class GriddedData(GriddedDataABC[BatchData]):
         self, base_loader: DataLoader[BatchData]
     ) -> DataLoader[BatchData]:
         def modify_and_on_device(batch: BatchData) -> BatchData:
-            return self._modifier(batch).to_device()
+            batch = self._modifier(batch)
+            return batch.to_device().scatter_spatial(self._global_img_shape)
 
         return SizedMap(modify_and_on_device, base_loader)
 
@@ -83,12 +86,12 @@ class GriddedData(GriddedDataABC[BatchData]):
     @property
     def dataset_info(self) -> DatasetInfo:
         return DatasetInfo(
-            horizontal_coordinates=self.horizontal_coordinates,
-            vertical_coordinate=self._vertical_coordinate,
-            mask_provider=self._mask_provider,
+            horizontal_coordinates=self._global_properties.horizontal_coordinates,
+            vertical_coordinate=self._global_properties.vertical_coordinate,
+            mask_provider=self._global_properties.mask_provider,
             timestep=self._timestep,
-            variable_metadata=self._properties.variable_metadata,
-            all_labels=self._properties.all_labels,
+            variable_metadata=self._global_properties.variable_metadata,
+            all_labels=self._global_properties.all_labels,
         )
 
     @property
@@ -174,21 +177,24 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             will be on the current device.
         """
         self._loader = loader
-        self._properties = properties.to_device()
+        self._global_properties = properties.to_device()
+        shape = self._global_properties.horizontal_coordinates.shape
+        self._global_img_shape: tuple[int, int] = (shape[-2], shape[-1])
+        self._properties = self._global_properties.localize()
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
             self._initial_condition: PrognosticState = get_initial_condition(
-                loader, initial_condition
+                self.loader, initial_condition
             )
         else:
             self._initial_condition = initial_condition.to_device()
 
     @property
     def loader(self) -> DataLoader[BatchData]:
-        def on_device(batch: BatchData) -> BatchData:
-            return batch.to_device()
+        def scatter_and_on_device(batch: BatchData) -> BatchData:
+            return batch.to_device().scatter_spatial(self._global_img_shape)
 
-        return SizedMap(on_device, self._loader)
+        return SizedMap(scatter_and_on_device, self._loader)
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
@@ -196,12 +202,13 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
 
     @property
     def dataset_info(self) -> DatasetInfo:
+        """Always returns global datasets regardless of model parallelism."""
         return DatasetInfo(
-            horizontal_coordinates=self.horizontal_coordinates,
-            vertical_coordinate=self._vertical_coordinate,
-            mask_provider=self._properties.mask_provider,
+            horizontal_coordinates=self._global_properties.horizontal_coordinates,
+            vertical_coordinate=self._global_properties.vertical_coordinate,
+            mask_provider=self._global_properties.mask_provider,
             timestep=self.timestep,
-            all_labels=self._properties.all_labels,
+            all_labels=self._global_properties.all_labels,
         )
 
     @property

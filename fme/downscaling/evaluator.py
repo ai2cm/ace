@@ -8,24 +8,19 @@ import yaml
 
 from fme.core.cli import prepare_directory
 from fme.core.distributed import Distributed
+from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggregator
 from fme.downscaling.data import (
     PairedDataLoaderConfig,
     PairedGriddedData,
-    StaticInputs,
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predict import EventConfig
-from fme.downscaling.predictors import (
-    CascadePredictorConfig,
-    PatchPredictionConfig,
-    PatchPredictor,
-)
+from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -60,12 +55,10 @@ class Evaluator:
         else:
             batch_generator = self.data.get_generator()
 
-        for i, (batch, static_inputs) in enumerate(batch_generator):
+        for i, batch in enumerate(batch_generator):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
-                outputs = self.model.generate_on_batch(
-                    batch, static_inputs, n_samples=self.n_samples
-                )
+                outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison
                 coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
@@ -111,7 +104,7 @@ class EventEvaluator:
 
     def run(self):
         logging.info(f"Running {self.event_name} event evaluation")
-        batch, static_inputs = next(iter(self.data.get_generator()))
+        batch = next(iter(self.data.get_generator()))
         sample_agg = PairedSampleAggregator(
             target=batch[0].fine.data,
             coarse=batch[0].coarse.data,
@@ -129,9 +122,7 @@ class EventEvaluator:
                 f"Generating samples {start_idx} to {end_idx} "
                 f"for event {self.event_name}"
             )
-            outputs = self.model.generate_on_batch(
-                batch, static_inputs, n_samples=end_idx - start_idx
-            )
+            outputs = self.model.generate_on_batch(batch, n_samples=end_idx - start_idx)
             sample_agg.record_batch(outputs.prediction)
 
         to_log = sample_agg.get_wandb()
@@ -156,7 +147,6 @@ class PairedEventConfig(EventConfig):
         self,
         base_data_config: PairedDataLoaderConfig,
         requirements: DataRequirements,
-        static_inputs_from_checkpoint: StaticInputs | None = None,
     ) -> PairedGriddedData:
         enforce_lat_bounds(self.lat_extent)
         time_slice = self._time_selection_slice
@@ -177,13 +167,12 @@ class PairedEventConfig(EventConfig):
         return event_data_config.build(
             train=False,
             requirements=requirements,
-            static_inputs=static_inputs_from_checkpoint,
         )
 
 
 @dataclasses.dataclass
 class EvaluatorConfig:
-    model: CheckpointModelConfig | CascadePredictorConfig
+    model: CheckpointModelConfig
     experiment_dir: str
     data: PairedDataLoaderConfig
     logging: LoggingConfig
@@ -204,7 +193,6 @@ class EvaluatorConfig:
         dataset = self.data.build(
             train=False,
             requirements=self.model.data_requirements,
-            static_inputs=model.static_inputs,
         )
         evaluator_model: DiffusionModel | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:
@@ -241,7 +229,6 @@ class EvaluatorConfig:
         dataset = event_config.get_paired_gridded_data(
             base_data_config=self.data,
             requirements=self.model.data_requirements,
-            static_inputs_from_checkpoint=model.static_inputs,
         )
 
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (

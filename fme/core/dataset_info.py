@@ -216,9 +216,9 @@ class DatasetInfo:
             all_labels=self._all_labels,
         )
 
-    def to_state(self) -> dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         if self._gridded_operations is not None:
-            gridded_operations = self._gridded_operations.to_state()
+            gridded_operations = self._gridded_operations.get_state()
         else:
             gridded_operations = None
         if self._img_shape is not None:
@@ -228,7 +228,7 @@ class DatasetInfo:
         if self._horizontal_coordinates is None:
             horizontal_coordinates = None
         else:
-            horizontal_coordinates = self._horizontal_coordinates.to_state()
+            horizontal_coordinates = self._horizontal_coordinates.get_state()
         if self._vertical_coordinate is None:
             vertical_coordinate = None
         else:
@@ -236,7 +236,7 @@ class DatasetInfo:
         if self._mask_provider is None:
             mask_provider = None
         else:
-            mask_provider = self._mask_provider.to_state()
+            mask_provider = self._mask_provider.get_state()
         if self._timestep is None:
             timestep = None
         else:
@@ -256,13 +256,21 @@ class DatasetInfo:
     def from_state(cls, state: dict[str, Any]) -> "DatasetInfo":
         if state.get("gridded_operations") is not None:
             # this is for backwards compatibility with older serialized states
-            assert state.get("horizontal_coordinates") is None
+            if state.get("horizontal_coordinates") is not None:
+                raise ValueError(
+                    "Cannot have both 'gridded_operations' and "
+                    "'horizontal_coordinates' in state."
+                )
             gridded_ops = GriddedOperations.from_state(state["gridded_operations"])
         else:
             gridded_ops = None
         if state.get("img_shape") is not None:
             # this is for backwards compatibility with older serialized states
-            assert state.get("horizontal_coordinates") is None
+            if state.get("horizontal_coordinates") is not None:
+                raise ValueError(
+                    "Cannot have both 'img_shape' and "
+                    "'horizontal_coordinates' in state."
+                )
             img_shape = state["img_shape"]
         else:
             img_shape = None
