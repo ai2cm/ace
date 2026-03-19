@@ -12,7 +12,7 @@ class CorrectorConfigABC(abc.ABC):
     @classmethod
     @final
     def from_state(cls, state: Mapping[str, Any]) -> Self:
-        cls.remove_deprecated_keys(state)
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
     @classmethod
