@@ -107,13 +107,7 @@ class WeightSchedule:
 
 @dataclasses.dataclass
 class LossWeights:
-    weights: dict
-
-    def __post_init__(self):
-        self.weights = {
-            str(k): v if isinstance(v, WeightSchedule) else float(v)
-            for k, v in self.weights.items()
-        }
+    weights: dict[str, float | WeightSchedule]
 
     def get_weight_tensor_for_epoch(
         self, variable_names: list[str], epoch: int, device: torch.device
@@ -586,7 +580,10 @@ def main(config_path: str):
     train_config: TrainerConfig = dacite.from_dict(
         data_class=TrainerConfig,
         data=config,
-        config=dacite.Config(strict=True),
+        config=dacite.Config(
+            strict=True,
+            type_hooks={float: float},
+        ),
     )
 
     if train_config.resume_results_dir is not None:
