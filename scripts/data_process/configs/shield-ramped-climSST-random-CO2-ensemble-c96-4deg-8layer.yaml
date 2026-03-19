@@ -144,7 +144,6 @@ time_coarsen:
     - eastward_wind_5
     - eastward_wind_6
     - eastward_wind_7
-    - global_mean_co2
     - h200
     - h50
     - h500
@@ -185,6 +184,7 @@ time_coarsen:
     - ULWRFtoa
     - USWRFsfc
     - USWRFtoa
+    - global_mean_co2
     - tendency_of_air_temperature_due_to_longwave_heating_0
     - tendency_of_air_temperature_due_to_longwave_heating_1
     - tendency_of_air_temperature_due_to_longwave_heating_2

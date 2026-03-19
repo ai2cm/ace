@@ -3,7 +3,7 @@ runs:
 data_output_directory: gs://vcm-ml-intermediate
 stats:
   output_directory: gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-stats-1990-2019
-  beaker_dataset: era5-1deg-8layer-stats-1990-2019-v2
+  beaker_dataset: 2024-06-20-era5-1deg-8layer-stats-1990-2019
   start_date: "1990-01-01"
   end_date: "2019-12-31"
   data_type: ERA5
@@ -46,7 +46,6 @@ time_coarsen:
     - eastward_wind_5
     - eastward_wind_6
     - eastward_wind_7
-    - global_mean_co2
     - h1000
     - h200
     - h250
@@ -88,6 +87,7 @@ time_coarsen:
     - ULWRFtoa
     - USWRFsfc
     - USWRFtoa
+    - global_mean_co2
     - tendency_of_total_water_path_due_to_advection
     - total_frozen_precipitation_rate
   constant_prefixes:

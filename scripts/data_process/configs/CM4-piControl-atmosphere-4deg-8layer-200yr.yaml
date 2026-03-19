@@ -128,7 +128,6 @@ time_coarsen:
     - air_temperature_5
     - air_temperature_6
     - air_temperature_7
-    - carbon_dioxide
     - column_soil_moisture
     - eastward_wind_0
     - eastward_wind_1
@@ -177,6 +176,7 @@ time_coarsen:
     - total_moisture_content_of_soil_layer_2
     - total_moisture_content_of_soil_layer_3
     - total_water_path
+    - total_energy
   window_names:
     - DLWRFsfc
     - DSWRFsfc
@@ -189,13 +189,13 @@ time_coarsen:
     - ULWRFtoa
     - USWRFsfc
     - USWRFtoa
+    - carbon_dioxide
     - downward_longwave_radiative_flux
     - eastward_surface_wind_stress
     - net_surface_longwave_radiative_flux
     - northward_surface_wind_stress
     - tendency_of_total_water_path
     - tendency_of_total_water_path_due_to_advection
-    - total_energy
     - total_frozen_precipitation_rate
     - total_precipitation_heat_flux
     - total_vapor_sensible_heat_flux
