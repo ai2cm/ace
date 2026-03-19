@@ -20,6 +20,7 @@ import fsspec
 import numpy as np
 import xarray as xr
 import yaml
+from zarr.storage import ObjectStore
 
 try:
     from xtorch_harmonics import roundtrip_filter
@@ -27,6 +28,14 @@ except ModuleNotFoundError:
 
     def roundtrip_filter(*args, **kwargs):
         raise ModuleNotFoundError("xtorch_harmonics")
+
+
+try:
+    import obstore  # noqa: F401
+
+    _HAS_OBSTORE = True
+except ImportError:
+    _HAS_OBSTORE = False
 
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -342,13 +351,31 @@ def get_dataset_urls(
     return {k: os.path.join(run_directory, k) for k in config.variable_sources}
 
 
+def get_zarr_store(url: str, read_only: bool = True):
+    """Create a zarr store from a URL using obstore if available.
+
+    Args:
+        url: The URL of the zarr store to create.
+        read_only: Whether to open the store in read-only mode.
+    Returns:
+        A zarr store or the path to a zarr store if obstore is not available.
+    """
+    if url.startswith("gs://") and _HAS_OBSTORE:
+        from obstore.store import from_url
+
+        return ObjectStore(from_url(url), read_only=read_only)
+    else:
+        return url
+
+
 def open_datasets(
     config: DatasetComputationConfig, urls: MutableMapping[str, str]
 ) -> xr.Dataset:
     datasets = []
     for store, names in config.variable_sources.items():
         url = urls[store]
-        ds = xr.open_zarr(url, decode_timedelta=True)[names]
+        store = get_zarr_store(url)
+        ds = xr.open_zarr(store, decode_timedelta=True)[names]
         datasets.append(ds)
     return xr.merge(datasets, compat="equals")
 
@@ -994,6 +1021,7 @@ def main(
     ds = clear_compressors_encoding(ds)
 
     logging.info(f"Output dataset size is {ds.nbytes / 1e9} GB")
+    output_store = get_zarr_store(output_store, read_only=False)
     if debug:
         with xr.set_options(display_max_rows=500):
             logging.info(ds)
