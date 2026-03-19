@@ -1,9 +1,8 @@
 import dataclasses
 import datetime
-from collections.abc import Callable, Mapping
-from typing import Any, Literal, Protocol
+from collections.abc import Callable
+from typing import Literal, Protocol
 
-import dacite
 import torch
 
 import fme
@@ -132,12 +131,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     ) = None
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: EnergyBudgetConfig | None = None
-
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "AtmosphereCorrectorConfig":
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
 
     def get_corrector(
         self,

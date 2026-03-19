@@ -1,13 +1,11 @@
 import dataclasses
-from collections.abc import Callable, Mapping
-from typing import Any, ClassVar, Type, TypeVar, cast  # noqa: UP035
+from collections.abc import Mapping
+from typing import Any, ClassVar  # noqa: UP035
 
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.dataset_info import DatasetInfo
 
 from .registry import Registry
-
-T = TypeVar("T")
 
 
 @dataclasses.dataclass
@@ -33,15 +31,13 @@ class CorrectorSelector(CorrectorConfigABC):
 
     type: str
     config: Mapping[str, Any]
-    registry: ClassVar[Registry] = Registry()
+    registry: ClassVar[Registry[CorrectorConfigABC]] = Registry[CorrectorConfigABC]()
 
     def __post_init__(self):
-        self._corrector_config_instance: CorrectorConfigABC = cast(
-            CorrectorConfigABC, self.registry.get(self.type, self.config)
-        )
+        self._corrector_config_instance = self.registry.get(self.type, self.config)
 
     @classmethod
-    def register(cls, type_name) -> Callable[[Type[T]], Type[T]]:  # noqa: UP006
+    def register(cls, type_name):
         return cls.registry.register(type_name)
 
     @classmethod
