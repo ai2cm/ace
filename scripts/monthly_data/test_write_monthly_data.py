@@ -1,6 +1,7 @@
 import pathlib
 from typing import List
 
+import cftime
 import pytest
 import xarray as xr
 from write_monthly_data import Config, run
@@ -60,4 +61,10 @@ def test_write_monthly_data(very_fast_only: bool, tmp_path: pathlib.Path):
         variable_names=all_names,
     )
     run(config)
-    xr.open_dataset(tmp_path / "monthly_mean_data.nc", decode_timedelta=False)
+    path = tmp_path / "monthly_mean_data.nc"
+    decode_times = xr.coders.CFDatetimeCoder(use_cftime=True)
+    ds = xr.open_dataset(path, decode_timedelta=False, decode_times=decode_times)
+    expected_values = 3 * [cftime.DatetimeProlepticGregorian(2000, 1, 1)]
+    expected = xr.DataArray(expected_values, dims=["sample"], name="init_time")
+    expected = expected.assign_coords(init_time=expected)
+    xr.testing.assert_equal(ds.init_time, expected)

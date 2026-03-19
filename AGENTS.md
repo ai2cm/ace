@@ -22,8 +22,10 @@ This is a Python machine learning project for atmospheric modeling (ACE - AI2 Cl
 - Run tests with coverage: `make test_cov`
 - Create development environment: `make create_environment`
 - Build Docker image: `make build_docker_image`
+- Run pre-commit hooks: `pre-commit run --all-files`
 
 When running tests in a conda environment, use `python -m pytest` (not `pytest`) to ensure the correct interpreter is used.
+Pre-commit hooks run ruff, ruff-format, and mypy. If ruff-format modifies files, re-stage and create a new commit (do not amend).
 
 ### GitHub MCP Server Setup
 

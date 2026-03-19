@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+class SpatialParallelismNotImplemented(NotImplementedError):
+    """Raised when a code path is incompatible with spatial parallelism."""
+
+    pass
+
+
 class Distributed:
     """
     A class to represent the distributed concerns for FME training.
@@ -183,6 +189,15 @@ class Distributed:
         """
         return self._distributed.total_ranks
 
+    def require_no_spatial_parallelism(self, msg: str) -> None:
+        """Raise if spatial parallelism is active.
+
+        Use this to guard code paths that are known to be incorrect
+        when spatial co-ranks exist (world_size > total_data_parallel_ranks).
+        """
+        if self.world_size != self.total_data_parallel_ranks:
+            raise SpatialParallelismNotImplemented(msg)
+
     def get_sampler(
         self,
         dataset: torch.utils.data.Dataset,
@@ -225,7 +240,7 @@ class Distributed:
 
         Args:
             tensor_shape: the shape of the global tensor, which may or may not contain
-                a data parallel (batch) dimension.
+                a data parallel (batch) dimension. Assume last dims are (H, W).
             data_parallel_dim: the index of the data parallel dimension, if it exists.
                 by default, assumes the tensor does not have a data parallel dimension.
         """
@@ -268,7 +283,7 @@ class Distributed:
         """
         return self._distributed.reduce_max(tensor)
 
-    def gather_object(self, obj: object) -> list[object] | None:
+    def gather_object(self, obj: T) -> list[T] | None:
         """
         Gather a picklable object from all processes to the root process.
 
@@ -280,6 +295,21 @@ class Distributed:
                 from the i-th process.
         """
         return self._distributed.gather_object(obj)
+
+    def scatter_object(self, obj: T | None) -> T:
+        """
+        Scatter a picklable object from the root process to all processes.
+
+        Args:
+            obj: The object to scatter.
+
+        Returns:
+            The object scattered from the root process.
+        """
+        scattered = self._distributed.scatter_object(obj)
+        if scattered is None:  # necessary check due to mypy limitations
+            raise RuntimeError("scatter_object returned None")
+        return scattered
 
     def gather(self, tensor: T, gather_list: list[T] | None = None) -> list[T] | None:
         """
@@ -323,19 +353,19 @@ class Distributed:
             global_shape, data_parallel_dim=data_parallel_dim
         )
         gathered_local_slices = self.gather_object(local_slices)
+        gathered_tensors = self.gather(tensor.contiguous())
         if self.is_root():
-            if gathered_local_slices is None:
-                raise RuntimeError("gather_object returned None on root process")
+            if gathered_local_slices is None or gathered_tensors is None:
+                raise RuntimeError(
+                    "gather_object or gather returned None on root process"
+                )
             gathered_global = torch.zeros(
                 *global_shape, dtype=tensor.dtype, device=tensor.device
             )
-            gather_list = []
-            for i in range(self.total_data_parallel_ranks):
-                gather_list.append(gathered_global[gathered_local_slices[i]])
+            for i in range(len(gathered_local_slices)):
+                gathered_global[gathered_local_slices[i]] = gathered_tensors[i]
         else:
-            gather_list = None
             gathered_global = None
-        self.gather(tensor, gather_list=gather_list)
         return gathered_global
 
     def gather_irregular(
@@ -392,6 +422,61 @@ class Distributed:
         Get the random seed.
         """
         return self._seed
+
+    def get_sht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
+        return self._distributed.get_sht(nlat, nlon, lmax, mmax, grid)
+
+    def get_isht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
+        return self._distributed.get_isht(nlat, nlon, lmax, mmax, grid)
+
+    def get_disco_conv_s2(self, *args, **kwargs):
+        return self._distributed.get_disco_conv_s2(*args, **kwargs)
+
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        return self._distributed.spatial_reduce_sum(tensor)
+
+    def weighted_mean(
+        self,
+        data: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+        keepdim: bool = False,
+    ) -> torch.Tensor:
+        return self._distributed.weighted_mean(data, weights, dim=dim, keepdim=keepdim)
+
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        return self._distributed.zonal_mean(data)
+
+    def gradient_magnitude_percent_diff(
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+    ) -> torch.Tensor:
+        return self._distributed.gradient_magnitude_percent_diff(
+            truth, predicted, weights, dim
+        )
+
+    def scatter_spatial(
+        self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
+    ) -> dict[str, torch.Tensor]:
+        """Slice global tensors to the local spatial chunk for this rank."""
+        slices = self.get_local_slices(img_shape)
+        return {k: v[(..., *slices)].contiguous() for k, v in data.items()}
+
+    def gather_spatial(
+        self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
+    ) -> dict[str, torch.Tensor]:
+        """Gather local spatial chunks back to global tensors via all-reduce."""
+        slices = self.get_local_slices(img_shape)
+        result = {}
+        for k, v in data.items():
+            global_shape = (*v.shape[:-2], *img_shape)
+            global_tensor = torch.zeros(global_shape, dtype=v.dtype, device=v.device)
+            global_tensor[(..., *slices)] = v
+            result[k] = self.spatial_reduce_sum(global_tensor)
+        return result
 
     def shutdown(self):
         return self._distributed.shutdown()

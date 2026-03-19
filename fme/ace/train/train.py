@@ -114,7 +114,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     else:
         initial_inference_times = inference_data.initial_time
     inference_n_forward_steps = config.inference_n_forward_steps
-    record_step_20 = inference_n_forward_steps >= 20
 
     aggregator_builder = AggregatorBuilder(
         train_config=config.train_aggregator,
@@ -122,8 +121,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         dataset_info=dataset_info.update_variable_metadata(variable_metadata),
         output_dir=config.output_dir,
         initial_inference_time=initial_inference_times,
-        record_step_20=record_step_20,
-        n_timesteps=inference_n_forward_steps + stepper.n_ic_timesteps,
+        n_ic_steps=stepper.n_ic_timesteps,
+        n_forward_steps=inference_n_forward_steps,
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
@@ -183,8 +182,8 @@ class AggregatorBuilder(
         inference_config: InferenceEvaluatorAggregatorConfig | None,
         dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray | None,
-        record_step_20: bool,
-        n_timesteps: int,
+        n_ic_steps: int,
+        n_forward_steps: int,
         output_dir: str,
         normalize: Callable[[TensorMapping], TensorDict],
         loss_scaling: dict[str, torch.Tensor] | None = None,
@@ -198,8 +197,8 @@ class AggregatorBuilder(
         self.inference_config = inference_config
         self.dataset_info = dataset_info
         self.initial_inference_time = initial_inference_time
-        self.record_step_20 = record_step_20
-        self.n_timesteps = n_timesteps
+        self.n_ic_steps = n_ic_steps
+        self.n_forward_steps = n_forward_steps
         self.loss_scaling = loss_scaling
         self.channel_mean_names = channel_mean_names
         self.normalize = normalize
@@ -229,8 +228,8 @@ class AggregatorBuilder(
             return self.inference_config.build(
                 dataset_info=self.dataset_info,
                 initial_time=self.initial_inference_time,
-                record_step_20=self.record_step_20,
-                n_timesteps=self.n_timesteps,
+                n_ic_steps=self.n_ic_steps,
+                n_forward_steps=self.n_forward_steps,
                 channel_mean_names=self.channel_mean_names,
                 normalize=self.normalize,
                 save_diagnostics=self.save_per_epoch_diagnostics,

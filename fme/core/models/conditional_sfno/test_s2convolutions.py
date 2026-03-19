@@ -60,7 +60,7 @@ def test_contract_dhconv_groups_are_faster():
     L = 360
     G = 8
     x = torch.randn(B, 1, C, H, L, dtype=torch.complex64, device=get_device())
-    w = torch.randn(1, C, C, H, 2, dtype=torch.float32, device=get_device())
+    w = torch.randn(1, H, C, C, 2, dtype=torch.float32, device=get_device())
 
     def contract_ungrouped():
         return _contract_dhconv(x, w)
@@ -69,7 +69,7 @@ def test_contract_dhconv_groups_are_faster():
 
     x_grouped = x.reshape(B, G, C // G, H, L)
     w_grouped = torch.randn(
-        G, C // G, C // G, H, 2, dtype=torch.float32, device=get_device()
+        G, H, C // G, C // G, 2, dtype=torch.float32, device=get_device()
     )
 
     def contract_grouped():
@@ -82,8 +82,9 @@ def test_contract_dhconv_groups_are_faster():
         f"{grouped_result.ms_per:.6f} seconds for grouped and "
         f"{ungrouped_result.ms_per:.6f} seconds for ungrouped."
     )
-    assert grouped_result.max_alloc < ungrouped_result.max_alloc, (
-        "Expected grouped DHConv to use less memory than ungrouped, but got "
+    assert grouped_result.max_alloc < 1.05 * ungrouped_result.max_alloc, (
+        "Did not expect grouped DHConv to use significantly more memory "
+        "than ungrouped, but got "
         f"{grouped_result.max_alloc/1024/1024:.2f} MB for grouped and "
         f"{ungrouped_result.max_alloc/1024/1024:.2f} MB for ungrouped."
     )

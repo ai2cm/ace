@@ -207,12 +207,12 @@ class SongUNetv2Benchmark(BenchmarkABC):
     @classmethod
     def new(cls) -> Self:
         return cls._new_with_params(
-            img_resolution=512,
+            img_resolution=64,
             B=1,
-            in_channels=6,
-            out_channels=4,
+            in_channels=3,
+            out_channels=2,
             label_dim=0,
-            model_channels=128, # min for apex gn
+            model_channels=16,
             channel_mult=[1, 2, 2, 2],
             use_apex_gn=False,
         )
@@ -281,12 +281,12 @@ class SongUNetv2BenchmarkBf16(SongUNetv2Benchmark):
     @classmethod
     def new(cls) -> Self:
         return cls._new_with_params(
-            img_resolution=512,
+            img_resolution=64,
             B=1,
-            in_channels=6,
-            out_channels=4,
+            in_channels=3,
+            out_channels=2,
             label_dim=0,
-            model_channels=128, # min for apex gn
+            model_channels=16,
             channel_mult=[1, 2, 2, 2],
             use_apex_gn=False,
             use_amp_bf16=True,
