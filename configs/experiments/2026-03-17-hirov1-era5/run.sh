@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="predict-HiROv1-on-era5-100km-to-3km-conus"
+JOB_NAME="predict-HiROv1-on-era5-100km-to-3km-conus-v2"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH="$SCRIPT_PATH/pp-config.yaml"

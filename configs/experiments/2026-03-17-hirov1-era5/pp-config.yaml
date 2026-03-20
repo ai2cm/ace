@@ -27,7 +27,7 @@ data:
   num_data_workers: 2
   strict_ensemble: false
 events:
-- name: "Hurricane_Ida"
+- name: "Hurricane_Ida_20210829T00:00"
   date: "2021-08-29T00:00"
   lat_extent:
     start: 22
@@ -37,7 +37,7 @@ events:
     stop: 276
   save_generated_samples: true
   n_samples: 32
-- name: "PNW_Atmospheric_River"
+- name: "PNW_Atmospheric_River_20211115T00:00"
   date: "2021-11-15T00:00"
   lat_extent:
     start: 36
@@ -47,17 +47,17 @@ events:
     stop: 244
   save_generated_samples: true
   n_samples: 32
-- name: "US_SE_Tornado_Outbreak"
+- name: "US_SE_Tornado_Outbreak_20211211T00:00"
   date: "2021-12-11T00:00"
   lat_extent:
     start: 30
     stop: 46
   lon_extent:
-    start: 250
-    stop: 266
+    start: 258
+    stop: 274
   save_generated_samples: true
   n_samples: 32
-- name: "Typhoon_Rai"
+- name: "Typhoon_Rai_20211216T00:00"
   date: "2021-12-16T00:00"
   lat_extent:
     start: 4
