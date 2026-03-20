@@ -23,6 +23,7 @@ from typing import Any, TypeVar
 
 import torch
 import torch.distributed
+import torch.distributed as pt_dist
 import torch.nn as nn
 import torch_harmonics.distributed as thd
 from torch.amp import custom_bwd, custom_fwd
@@ -413,6 +414,7 @@ class ModelTorchDistributed(DistributedBackend):
         dim: tuple[int, ...],
         keepdim: bool = False,
     ) -> torch.Tensor:
+
         from fme.core.metrics import weighted_sum
 
         local_weighted_sum = weighted_sum(data, weights, dim=dim, keepdim=keepdim)
