@@ -38,6 +38,8 @@ class LoggingConfig:
         log_to_screen: Whether to log to the screen.
         log_to_file: Whether to log to a file.
         log_to_wandb: Whether to log to Weights & Biases.
+        metrics_log_dir: Directory to write scalar metrics to disk as JSONL.
+            If None, disk metric logging is disabled.
         log_format: Format of the log messages.
         level: Sets the logging level.
         wandb_dir_in_experiment_dir: Whether to create the wandb_dir in the
@@ -49,6 +51,7 @@ class LoggingConfig:
     log_to_screen: bool = True
     log_to_file: bool = True
     log_to_wandb: bool = True
+    metrics_log_dir: str | None = None
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     level: str | int = logging.INFO
     wandb_dir_in_experiment_dir: bool = False
@@ -143,7 +146,10 @@ class LoggingConfig:
 
         # must ensure wandb.configure is called before wandb.init
         wandb = WandB.get_instance()
-        wandb.configure(log_to_wandb=self.log_to_wandb)
+        wandb.configure(
+            log_to_wandb=self.log_to_wandb,
+            metrics_log_dir=self.metrics_log_dir,
+        )
         notes = _get_wandb_notes(_get_beaker_id())
         wandb.init(
             config=config_copy,
