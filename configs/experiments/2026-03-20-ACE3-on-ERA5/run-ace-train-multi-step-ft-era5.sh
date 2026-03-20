@@ -23,7 +23,7 @@ declare -A PRE_TRAINED_WEIGHTS_DATASETS=( \
 
 for seed in 0;
 do
-    job_name="ace-era5-pt-multi-step-shield-multi-step-ft-on-era5${seed}"
+    job_name="ace-era5-pt-multi-step-shield-multi-step-ft-on-era5-rs${seed}"
     # Offset seed for fine-tuning so that data shuffling is different than
     # during pre-training, but still follows the same path for a given set
     # random initialization weights.

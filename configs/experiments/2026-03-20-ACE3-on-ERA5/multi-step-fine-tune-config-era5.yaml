@@ -27,7 +27,7 @@ inference:
       data_path: /climate-default/
       file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
-    num_data_workers: 16
+    num_data_workers: 8
   aggregator:
     log_histograms: true
 logging:
@@ -37,9 +37,10 @@ logging:
   project: ace
   entity: ai2cm
 train_loader:
-  batch_size: 16
-  num_data_workers: 16
+  batch_size: 8
+  num_data_workers: 4
   prefetch_factor: 4
+  time_buffer: 1
   dataset:
     data_path: /climate-default/
     file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
@@ -50,7 +51,7 @@ train_loader:
 validation_loader:
   batch_size: 32
   num_data_workers: 4
-  prefetch_factor: 4
+  prefetch_factor: 2
   dataset:
     data_path: /climate-default
     file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
