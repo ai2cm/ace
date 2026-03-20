@@ -7,6 +7,7 @@ static_inputs:
 model:
   log_transform:
    variable: PRATEsfc
+   floor: 0.0
   use_amp_bf16: true
   out_names:
   - PRATEsfc
