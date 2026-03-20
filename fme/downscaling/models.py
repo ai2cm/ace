@@ -611,6 +611,11 @@ class DiffusionModel:
         targets = {k: v.unsqueeze(1) for k, v in fine_targets.items()}
 
         loss = self.loss(generated_norm, targets_norm)
+
+        if self.config.log_transform is not None:
+            variable = self.config.log_transform.variable
+            if variable in targets:
+                targets[variable] = torch.exp(targets[variable])
         return ModelOutputs(
             prediction=generated, target=targets, loss=loss, latent_steps=latent_steps
         )
