@@ -25,7 +25,6 @@ import torch
 import torch.distributed
 import torch.nn as nn
 import torch_harmonics.distributed as thd
-from torch.amp import custom_bwd, custom_fwd
 from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
@@ -57,7 +56,6 @@ class _AutogradAllReduce(torch.autograd.Function):
     """
 
     @staticmethod
-    @custom_fwd(device_type="cuda")
     def forward(
         ctx,
         input: torch.Tensor,
@@ -68,9 +66,8 @@ class _AutogradAllReduce(torch.autograd.Function):
         return output
 
     @staticmethod
-    @custom_bwd(device_type="cuda")
     def backward(ctx, grad_output: torch.Tensor):
-        return grad_output.clone(), None
+        return grad_output, None
 
 
 class ModelTorchDistributed(DistributedBackend):
