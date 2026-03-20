@@ -430,7 +430,7 @@ class TrainerConfig:
             requirements=self.model.data_requirements,
         )
         static_inputs = load_static_inputs(
-            self.static_inputs, coords=train_data.fine_coords
+            self.static_inputs, fallback_coords=train_data.fine_coords
         )
 
         if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:

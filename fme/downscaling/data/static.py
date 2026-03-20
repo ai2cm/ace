@@ -48,7 +48,34 @@ class StaticInput:
         return cls(data=state["data"])
 
 
-def _get_normalized_static_input(path: str, field_name: str):
+def _load_coords_from_ds(ds: xr.Dataset) -> LatLonCoordinates:
+    lat_name = next((n for n in ["lat", "latitude", "grid_yt"] if n in ds.coords), None)
+    lon_name = next(
+        (n for n in ["lon", "longitude", "grid_xt"] if n in ds.coords), None
+    )
+    if lat_name is None or lon_name is None:
+        raise ValueError(
+            f"Could not find lat/lon coordinates in dataset. "
+            "Expected 'lat'/'latitude'/'grid_yt' and 'lon'/'longitude'/'grid_xt'."
+        )
+    return LatLonCoordinates(
+        lat=torch.tensor(ds[lat_name].values, dtype=torch.float32),
+        lon=torch.tensor(ds[lon_name].values, dtype=torch.float32),
+    )
+
+
+def load_fine_coords_from_path(path: str) -> LatLonCoordinates:
+    if path.endswith(".zarr"):
+        ds = xr.open_zarr(path)
+    else:
+        ds = xr.open_dataset(path)
+
+    return _load_coords_from_ds(ds)
+
+
+def _get_normalized_static_input(
+    path: str, field_name: str
+) -> tuple[StaticInput, LatLonCoordinates | None]:
     """
     Load a static input field from a given file path and field name and
     normalize it.
@@ -58,22 +85,30 @@ def _get_normalized_static_input(path: str, field_name: str):
     assumed to be the last two dimensions of the loaded dataset dimensions.
     """
     if path.endswith(".zarr"):
-        static_input = xr.open_zarr(path, mask_and_scale=False)[field_name]
+        ds = xr.open_zarr(path, mask_and_scale=False)
     else:
-        static_input = xr.open_dataset(path, mask_and_scale=False)[field_name]
-    if "time" in static_input.dims:
-        static_input = static_input.isel(time=0).squeeze()
-    if len(static_input.shape) != 2:
+        ds = xr.open_dataset(path, mask_and_scale=False)
+
+    da = ds[field_name]
+    try:
+        coords = _load_coords_from_ds(ds)
+    except ValueError:
+        # no coords available
+        coords = None
+
+    if "time" in da.dims:
+        da = da.isel(time=0).squeeze()
+    if len(da.shape) != 2:
         raise ValueError(
-            f"unexpected shape {static_input.shape} for static input."
+            f"unexpected shape {da.shape} for static input."
             "Currently, only lat/lon static input is supported."
         )
 
-    static_input_normalized = (static_input - static_input.mean()) / static_input.std()
+    static_input_normalized = (da - da.mean()) / da.std()
 
     return StaticInput(
         data=torch.tensor(static_input_normalized.values, dtype=torch.float32),
-    )
+    ), coords
 
 
 def _has_legacy_coords_in_state(state: dict) -> bool:
@@ -94,26 +129,6 @@ def _has_coords_in_state(state: dict) -> bool:
         return True
     else:
         return False
-
-
-def load_fine_coords_from_path(path: str) -> LatLonCoordinates:
-    if path.endswith(".zarr"):
-        ds = xr.open_zarr(path)
-    else:
-        ds = xr.open_dataset(path)
-    lat_name = next((n for n in ["lat", "latitude", "grid_yt"] if n in ds.coords), None)
-    lon_name = next(
-        (n for n in ["lon", "longitude", "grid_xt"] if n in ds.coords), None
-    )
-    if lat_name is None or lon_name is None:
-        raise ValueError(
-            f"Could not find lat/lon coordinates in {path}. "
-            "Expected 'lat'/'latitude'/'grid_yt' and 'lon'/'longitude'/'grid_xt'."
-        )
-    return LatLonCoordinates(
-        lat=torch.tensor(ds[lat_name].values, dtype=torch.float32),
-        lon=torch.tensor(ds[lon_name].values, dtype=torch.float32),
-    )
 
 
 @dataclasses.dataclass
@@ -232,15 +247,42 @@ class StaticInputs:
             return cls(fields=[], coords=coords)
 
 
+def _validate_coords(
+    case: str, coord1: LatLonCoordinates, coord2: LatLonCoordinates
+) -> None:
+    if not coord1 == coord2:
+        raise ValueError(f"Coordinates do not match between static inputs: {case}")
+
+
 def load_static_inputs(
-    static_inputs_config: dict[str, str], coords: LatLonCoordinates
+    static_inputs_config: dict[str, str],
+    fallback_coords: LatLonCoordinates,
+    validate_coords: bool = True,
 ) -> StaticInputs:
     """
     Load normalized static inputs from a mapping of field names to file paths.
     Returns an empty StaticInputs (no fields) if the config is empty.
+
+    Coordinates are inferred from the static input field datasets and verified
+    to match between each field. If no static inputs are provided
+    coordinates are used from fallback_coords.
     """
-    fields = [
-        _get_normalized_static_input(path, field_name)
-        for field_name, path in static_inputs_config.items()
-    ]
-    return StaticInputs(fields=fields, coords=coords)
+    coords_to_use = None
+    fields = []
+    for field_name, path in static_inputs_config.items():
+        si, coords = _get_normalized_static_input(path, field_name)
+        fields.append(si)
+
+        if coords is not None and coords_to_use is None:
+            coords_to_use = coords
+        elif coords is not None and validate_coords:
+            assert coords_to_use is not None  # for type checker
+            _validate_coords(field_name, coords, coords_to_use)
+
+    if coords_to_use is None:
+        # no coords found with static inputs, use provided fallback
+        coords_to_use = fallback_coords
+    elif validate_coords:
+        _validate_coords("fallback", coords_to_use, fallback_coords)
+
+    return StaticInputs(fields=fields, coords=coords_to_use)

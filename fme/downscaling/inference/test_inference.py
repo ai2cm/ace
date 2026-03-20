@@ -281,7 +281,9 @@ def checkpointed_model_config(
     # that correspond to the dataset coordinates
     fine_data_path = f"{data_paths.fine}/data.nc"
     fine_coords = load_fine_coords_from_path(fine_data_path)
-    static_inputs = load_static_inputs({"HGTsfc": fine_data_path}, coords=fine_coords)
+    static_inputs = load_static_inputs(
+        {"HGTsfc": fine_data_path}, fallback_coords=fine_coords
+    )
     model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"

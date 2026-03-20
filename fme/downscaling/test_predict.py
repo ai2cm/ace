@@ -121,7 +121,9 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         static_inputs=load_static_inputs(
-            {"HGTsfc": fine_data_path}, coords=fine_coords
+            {"HGTsfc": fine_data_path},
+            fallback_coords=fine_coords,
+            validate_coords=False,
         ),
     )
     with open(predictor_config_path) as f:
