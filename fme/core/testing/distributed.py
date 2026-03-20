@@ -56,12 +56,19 @@ class MockDistributed:
     def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
         return data.nanmean(dim=-1)
 
-    def gradient_magnitude_percent_diff(
-        self, truth, predicted, weights, dim
+    def gather_spatial_tensor(
+        self, tensor: torch.Tensor, img_shape: tuple[int, int]
     ) -> torch.Tensor:
-        return metrics.gradient_magnitude_percent_diff(
+        return tensor
+
+    def gradient_magnitude_percent_diff(
+        self, truth, predicted, weights, dim, img_shape
+    ) -> torch.Tensor:
+        result = metrics.gradient_magnitude_percent_diff(
             truth, predicted, weights=weights, dim=dim
         )
+        result.fill_(self.fill_value)
+        return result
 
 
 @contextlib.contextmanager

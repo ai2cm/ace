@@ -11,16 +11,12 @@ import torch
 
 from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
-from fme.core.corrector.atmosphere import AtmosphereCorrector, AtmosphereCorrectorConfig
-from fme.core.corrector.ice import IceCorrector, IceCorrectorConfig
-from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
-from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
-from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
@@ -136,15 +132,6 @@ class VerticalCoordinate(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def build_corrector(
-        self,
-        config: AtmosphereCorrectorConfig | CorrectorSelector,
-        gridded_operations: GriddedOperations,
-        timestep: timedelta,
-    ) -> CorrectorABC:
-        pass
-
-    @abc.abstractmethod
     def build_derive_function(
         self,
         timestep: timedelta,
@@ -206,35 +193,6 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
     def __len__(self):
         """The number of vertical layer interfaces."""
         return len(self.ak)
-
-    def build_corrector(
-        self,
-        config: AtmosphereCorrectorConfig | CorrectorSelector,
-        gridded_operations: GriddedOperations,
-        timestep: timedelta,
-    ) -> AtmosphereCorrector:
-        if (
-            isinstance(config, CorrectorSelector)
-            and config.type != "atmosphere_corrector"
-        ):
-            raise ValueError(
-                f"Cannot build corrector for vertical coordinate {self} with "
-                f"corrector selector {config}."
-            )
-        if isinstance(config, CorrectorSelector):
-            config_instance = dacite.from_dict(
-                data_class=AtmosphereCorrectorConfig,
-                data=config.config,
-                config=dacite.Config(strict=True),
-            )
-        else:
-            config_instance = config
-        return AtmosphereCorrector(
-            config=config_instance,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=self,
-            timestep=timestep,
-        )
 
     def build_derive_function(
         self,
@@ -391,30 +349,6 @@ class DepthCoordinate(VerticalCoordinate):
         """The number of vertical layer interfaces."""
         return len(self.idepth)
 
-    def build_corrector(
-        self,
-        config: AtmosphereCorrectorConfig | CorrectorSelector,
-        gridded_operations: GriddedOperations,
-        timestep: timedelta,
-    ) -> OceanCorrector:
-        if isinstance(config, AtmosphereCorrectorConfig):
-            raise ValueError(
-                "Cannot build corrector for depth coordinate with an "
-                "AtmosphereCorrectorConfig."
-            )
-        elif config.type != "ocean_corrector":
-            raise ValueError(
-                f"Cannot build corrector for vertical coordinate {self} with "
-                f"corrector selector {config}."
-            )
-        config_instance = OceanCorrectorConfig.from_state(config.config)
-        return OceanCorrector(
-            config=config_instance,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=self,
-            timestep=timestep,
-        )
-
     def build_derive_function(
         self,
         timestep: timedelta,
@@ -519,56 +453,6 @@ class NullVerticalCoordinate(VerticalCoordinate):
 
     def __len__(self) -> int:
         return 0
-
-    def build_corrector(
-        self,
-        config: AtmosphereCorrectorConfig | CorrectorSelector,
-        gridded_operations: GriddedOperations,
-        timestep: timedelta,
-    ) -> CorrectorABC:
-        if isinstance(config, AtmosphereCorrectorConfig):
-            return AtmosphereCorrector(
-                config=config,
-                gridded_operations=gridded_operations,
-                vertical_coordinate=None,
-                timestep=timestep,
-            )
-        if config.type == "atmosphere_corrector":
-            config_instance = dacite.from_dict(
-                data_class=AtmosphereCorrectorConfig,
-                data=config.config,
-                config=dacite.Config(strict=True),
-            )
-            return AtmosphereCorrector(
-                config=config_instance,
-                gridded_operations=gridded_operations,
-                vertical_coordinate=None,
-                timestep=timestep,
-            )
-        elif config.type == "ocean_corrector":
-            config_instance = OceanCorrectorConfig.from_state(config.config)
-            return OceanCorrector(
-                config=config_instance,
-                gridded_operations=gridded_operations,
-                vertical_coordinate=None,
-                timestep=timestep,
-            )
-        elif config.type == "ice_corrector":
-            config_instance = dacite.from_dict(
-                data_class=IceCorrectorConfig,
-                data=config.config,
-                config=dacite.Config(strict=True),
-            )
-            return IceCorrector(
-                config=config_instance,
-                gridded_operations=gridded_operations,
-                timestep=timestep,
-            )
-        else:
-            raise ValueError(
-                f"Invalid corrector type: {config.type}. "
-                "Must be either 'atmosphere_corrector' or 'ocean_corrector'."
-            )
 
     def build_derive_function(
         self,
@@ -694,6 +578,17 @@ class HorizontalCoordinates(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def localize(self: HC) -> HC:
+        """Return a copy with coordinates sliced to the local spatial chunk.
+
+        Uses ``Distributed.get_instance()`` to determine the local slices.
+        Coordinate types that do not support spatial parallelism should raise
+        ``SpatialParallelismNotImplemented`` when the distributed layout
+        requires slicing.
+        """
+        pass
+
+    @abc.abstractmethod
     def get_state(self) -> TensorMapping:
         pass
 
@@ -787,6 +682,14 @@ class LatLonCoordinates(HorizontalCoordinates):
     @property
     def shape(self) -> tuple[int, int]:
         return (len(self.lat), len(self.lon))
+
+    def localize(self) -> "LatLonCoordinates":
+        dist = Distributed.get_instance()
+        h_slice, w_slice = dist.get_local_slices(self.shape)
+        return LatLonCoordinates(
+            lat=self.lat[h_slice],
+            lon=self.lon[w_slice],
+        )
 
     def get_state(self) -> TensorMapping:
         return {"lat": self.lat, "lon": self.lon}
@@ -938,6 +841,12 @@ class HEALPixCoordinates(HorizontalCoordinates):
     @property
     def shape(self) -> tuple[int, int, int]:
         return (len(self.face), len(self.width), len(self.height))
+
+    def localize(self) -> "HEALPixCoordinates":
+        Distributed.get_instance().require_no_spatial_parallelism(
+            "HEALPixCoordinates does not support spatial parallelism."
+        )
+        return self
 
     def get_state(self) -> TensorMapping:
         return {"face": self.face, "height": self.height, "width": self.width}

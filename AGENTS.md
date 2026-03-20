@@ -27,6 +27,24 @@ This is a Python machine learning project for atmospheric modeling (ACE - AI2 Cl
 When running tests in a conda environment, use `python -m pytest` (not `pytest`) to ensure the correct interpreter is used.
 Pre-commit hooks run ruff, ruff-format, and mypy. If ruff-format modifies files, re-stage and create a new commit (do not amend).
 
+### Parallel / Spatial Parallel Testing
+
+Tests marked `@pytest.mark.parallel` must be run via `torchrun`. Environment
+variables `FME_DISTRIBUTED_BACKEND` (`torch`|`model`|`none`),
+`FME_DISTRIBUTED_H`, and `FME_DISTRIBUTED_W` control the backend.
+Set `FME_FORCE_CPU=1` for CPU. Quick smoke test:
+```
+FME_FORCE_CPU=1 FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=2 FME_DISTRIBUTED_W=1 \
+  torchrun --nproc-per-node 2 -m pytest -m parallel .
+```
+Full matrix (8 configs, ~3-4 min): `make cpu_test_all_parallel`
+Narrow to specific tests: `make cpu_test_all_parallel TEST_PATH=fme/core/distributed/parallel_tests/test_step.py`
+
+Regression tests using `.pt` baselines must generate the baseline with a
+single-rank `python -m pytest` run, then verify under spatial parallel via
+torchrun. Generating baselines under the same backend you test against does
+not validate cross-backend correctness.
+
 ### GitHub MCP Server Setup
 
 To use the PR review rules, configure the GitHub MCP server in Cursor's "Tools & MCP" settings. You will need a read-only personal access token with the following permissions: Pull requests, Issues, Contents, Metadata.

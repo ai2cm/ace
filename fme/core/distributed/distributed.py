@@ -4,7 +4,9 @@ import os
 from collections.abc import Generator, Iterator
 from typing import TypeVar
 
-import torch.distributed
+import torch
+
+from fme.core import metrics
 
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
@@ -14,6 +16,12 @@ from .torch_distributed import TorchDistributed
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+class SpatialParallelismNotImplemented(NotImplementedError):
+    """Raised when a code path is incompatible with spatial parallelism."""
+
+    pass
 
 
 class Distributed:
@@ -182,6 +190,15 @@ class Distributed:
         Get the total number of processes.
         """
         return self._distributed.total_ranks
+
+    def require_no_spatial_parallelism(self, msg: str) -> None:
+        """Raise if spatial parallelism is active.
+
+        Use this to guard code paths that are known to be incorrect
+        when spatial co-ranks exist (world_size > total_data_parallel_ranks).
+        """
+        if self.world_size != self.total_data_parallel_ranks:
+            raise SpatialParallelismNotImplemented(msg)
 
     def get_sampler(
         self,
@@ -438,9 +455,13 @@ class Distributed:
         predicted: torch.Tensor,
         weights: torch.Tensor,
         dim: tuple[int, ...],
+        img_shape: tuple[int, int],
     ) -> torch.Tensor:
-        return self._distributed.gradient_magnitude_percent_diff(
-            truth, predicted, weights, dim
+        truth = self.gather_spatial_tensor(truth, img_shape)
+        predicted = self.gather_spatial_tensor(predicted, img_shape)
+        weights = self.gather_spatial_tensor(weights, img_shape)
+        return metrics.gradient_magnitude_percent_diff(
+            truth, predicted, weights=weights, dim=dim
         )
 
     def scatter_spatial(
@@ -454,14 +475,24 @@ class Distributed:
         self, data: dict[str, torch.Tensor], img_shape: tuple[int, int]
     ) -> dict[str, torch.Tensor]:
         """Gather local spatial chunks back to global tensors via all-reduce."""
+        return {k: self.gather_spatial_tensor(v, img_shape) for k, v in data.items()}
+
+    def gather_spatial_tensor(
+        self, tensor: torch.Tensor, img_shape: tuple[int, int]
+    ) -> torch.Tensor:
+        """Reassemble a spatially-sharded tensor on every rank via all-reduce.
+
+        Args:
+            tensor: Local spatial shard.
+            img_shape: Global ``(H, W)`` spatial dimensions.
+        """
+        if img_shape == tensor.shape[-2:]:
+            return tensor
+        global_shape = (*tensor.shape[:-2], *img_shape)
         slices = self.get_local_slices(img_shape)
-        result = {}
-        for k, v in data.items():
-            global_shape = (*v.shape[:-2], *img_shape)
-            global_tensor = torch.zeros(global_shape, dtype=v.dtype, device=v.device)
-            global_tensor[(..., *slices)] = v
-            result[k] = self.spatial_reduce_sum(global_tensor)
-        return result
+        buf = torch.zeros(global_shape, dtype=tensor.dtype, device=tensor.device)
+        buf[(..., *slices)] = tensor
+        return self.spatial_reduce_sum(buf)
 
     def shutdown(self):
         return self._distributed.shutdown()

@@ -349,9 +349,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     writer = config.get_data_writer(data)
 
-    timer.stop()
+    timer.stop("initialization")
     logging.info("Starting inference")
-    record_logs = get_record_to_wandb(label="inference")
+    logger = get_record_to_wandb(label="inference")
     if config.prediction_loader is not None:
         prediction_data = get_inference_data(
             config=config.prediction_loader,
@@ -372,8 +372,8 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             target_data=data,
             deriver=deriver,
             writer=writer,
-            record_logs=record_logs,
-            restrict_to_all_names=stepper_config.all_names,
+            record_logs=logger.log,
+            all_names=stepper_config.all_names,
         )
     else:
         run_inference(
@@ -381,7 +381,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data=data,
             aggregator=aggregator,
             writer=writer,
-            record_logs=record_logs,
+            record_logs=logger.log,
         )
 
     timer.start("final_writer_flush")
@@ -389,14 +389,14 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
-    timer.stop()
+    timer.stop("final_writer_flush")
 
     timer.stop_outer("inference")
     total_steps = (
         config.n_coupled_steps * stepper.n_inner_steps
     ) * config.loader.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
@@ -406,7 +406,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
-        **timer.get_durations(),
         **aggregator.get_summary_logs(),
     }
-    record_logs([summary_logs])
+    logger.log_to_current_step(summary_logs)
+    logger.log_to_current_step(timer.get_durations(), label="")

@@ -372,8 +372,16 @@ class LatLonOperations(GriddedOperations):
         name: str | None = None,
     ):
         area_weights = self._get_area_weights(truth, name)
+        img_shape = (
+            self._cpu_area_global.shape[-2],
+            self._cpu_area_global.shape[-1],
+        )
         return Distributed.get_instance().gradient_magnitude_percent_diff(
-            truth, predicted, weights=area_weights, dim=self.HORIZONTAL_DIMS
+            truth,
+            predicted,
+            weights=area_weights,
+            dim=self.HORIZONTAL_DIMS,
+            img_shape=img_shape,
         )
 
     def get_real_sht(self) -> nn.Module:
