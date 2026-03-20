@@ -28,7 +28,7 @@ def fetch_beaker_dataset(
         The directory containing the fetched dataset files.
     """
     if cache_dir is not None:
-        cached = Path(cache_dir) / dataset_id
+        cached = Path(cache_dir).expanduser() / dataset_id
         if cached.is_dir() and any(cached.iterdir()):
             return str(cached)
         target_dir = str(cached)

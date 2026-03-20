@@ -212,10 +212,12 @@ def main():
             td = tempfile.mkdtemp()
             temp_dirs.append(td)
             print(f"Fetching beaker dataset: {ds_id}")
-            fetch_beaker_dataset(ds_id, td, prefix=NC_FILENAME)
-            nc_path = Path(td) / NC_FILENAME
+            result_dir = fetch_beaker_dataset(ds_id, td, prefix=NC_FILENAME)
+            nc_path = Path(result_dir) / NC_FILENAME
             if not nc_path.exists():
-                raise FileNotFoundError(f"{NC_FILENAME} not found in dataset {ds_id}")
+                raise FileNotFoundError(
+                    f"{NC_FILENAME} not found in dataset {ds_id} at {nc_path}"
+                )
             ds = xr.open_dataset(nc_path)
             ds = add_wind_speed_histogram(ds)
             datasets.append(ds)
