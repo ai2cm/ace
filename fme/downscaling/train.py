@@ -184,16 +184,13 @@ class Trainer:
 
     def _update_weights_for_epoch(self, epoch: int) -> None:
         if self.loss_weights_config is None:
-            self.loss_weight_tensor = torch.ones(
-                1, len(self.model.out_packer.names), 1, 1, device=get_device()
-            )
+            self.model.target_scale = None
         else:
-            self.loss_weight_tensor = (
+            self.model.target_scale = (
                 self.loss_weights_config.get_weight_tensor_for_epoch(
                     self.model.out_packer.names, epoch, get_device()
                 )
             )
-        self.model.channel_weights = self.loss_weight_tensor.sqrt()
 
     def _get_batch_generator(
         self, data: PairedGriddedData, random_offset: bool, shuffle: bool
@@ -233,7 +230,6 @@ class Trainer:
                 batch,
                 static_inputs,
                 self.optimization,
-                loss_weights=self.loss_weight_tensor,
                 loss_weight_exponent=self.config.loss_weight_exponent,
             )
             self.ema(self.model.modules)
@@ -312,7 +308,6 @@ class Trainer:
                     batch,
                     static_inputs,
                     self.null_optimization,
-                    loss_weights=self.loss_weight_tensor,
                     loss_weight_exponent=self.config.loss_weight_exponent,
                 )
                 validation_aggregator.record_batch(

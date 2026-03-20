@@ -32,6 +32,8 @@ from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
 
+_TARGET_SCALE_EPS = 1e-12
+
 
 @dataclasses.dataclass
 class ModelOutputs:
@@ -310,28 +312,11 @@ class DiffusionModel:
         self.static_inputs = (
             static_inputs.to_device() if static_inputs is not None else None
         )
-        self.channel_weights: torch.Tensor | None = None
+        self.target_scale: torch.Tensor | None = None
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
-
-    def _scaled_forward(
-        self, latents: torch.Tensor, inputs: torch.Tensor, sigma: torch.Tensor
-    ) -> torch.Tensor:
-        """Forward pass with optional per-channel scaling.
-
-        When ``channel_weights`` is set, the latent channels are scaled by
-        those weights before entering the module and the output is divided
-        by the same weights, so the prediction is returned in the original
-        (unscaled) range.
-        """
-        if self.channel_weights is not None:
-            latents = latents * self.channel_weights
-        output = self.module(latents, inputs, sigma)
-        if self.channel_weights is not None:
-            output = output / self.channel_weights
-        return output
 
     def _subset_static_inputs(
         self,
@@ -405,7 +390,6 @@ class DiffusionModel:
         batch: PairedBatchData,
         static_inputs: StaticInputs | None,  # TODO: remove in follow-on PR
         optimizer: Optimization | NullOptimization,
-        loss_weights: torch.Tensor,
         loss_weight_exponent: float = 1.0,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
@@ -432,6 +416,9 @@ class DiffusionModel:
             )
             targets_norm = targets_norm - base_prediction
 
+        if self.target_scale is not None:
+            targets_norm = targets_norm * self.target_scale
+
         conditioned_target = condition_with_noise_for_training(
             targets_norm,
             self.config.noise_distribution,
@@ -439,13 +426,12 @@ class DiffusionModel:
             loss_weight_exponent=loss_weight_exponent,
         )
 
-        denoised_norm = self._scaled_forward(
+        denoised_norm = self.module(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
         weighted_loss = conditioned_target.weight * self.loss(
             denoised_norm, targets_norm
         )
-        weighted_loss = weighted_loss * loss_weights
         loss = torch.mean(weighted_loss)
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
@@ -461,6 +447,10 @@ class DiffusionModel:
             }
             sigma = conditioned_target.sigma[:, 0, 0, 0].detach()
 
+        if self.target_scale is not None:
+            denoised_norm = denoised_norm / self.target_scale.clamp(
+                min=_TARGET_SCALE_EPS
+            )
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
 
@@ -501,7 +491,7 @@ class DiffusionModel:
         latents = torch.randn(outputs_shape).to(device=get_device())
 
         generated_norm, latent_steps = edm_sampler(
-            self._scaled_forward,
+            self.module,
             latents,
             inputs_,
             S_churn=self.config.churn,
@@ -509,6 +499,11 @@ class DiffusionModel:
             sigma_max=self.config.sigma_max,
             num_steps=self.config.num_diffusion_generation_steps,
         )
+
+        if self.target_scale is not None:
+            generated_norm = generated_norm / self.target_scale.clamp(
+                min=_TARGET_SCALE_EPS
+            )
 
         if self.config.predict_residual:
             base_prediction = interpolate(
@@ -611,7 +606,7 @@ class DiffusionModel:
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
             "static_inputs": static_inputs_state,
-            "channel_weights": self.channel_weights,
+            "target_scale": self.target_scale,
         }
 
     @classmethod
@@ -631,7 +626,7 @@ class DiffusionModel:
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(state["module"], strict=True)
-        model.channel_weights = state.get("channel_weights")
+        model.target_scale = state.get("target_scale")
         return model
 
 
