@@ -21,7 +21,7 @@ declare -A PRE_TRAINED_WEIGHTS_DATASETS=( \
     [1]="01KHCEF1SBYCZCGDM78N1CJC3H" \
 )
 
-for seed in 0
+for seed in 0;
 do
     job_name="ace-shield-multi-step-fine-tune-full-rs${seed}"
     # Offset seed for fine-tuning so that data shuffling is different than
