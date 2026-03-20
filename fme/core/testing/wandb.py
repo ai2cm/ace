@@ -144,10 +144,13 @@ def mock_wandb():
     the given fill_value, which can be checked for in tests.
     """
     original = wandb.singleton
-    wandb.singleton = MockWandB()  # type: ignore
+    mock = MockWandB()
+    wandb.singleton = mock  # type: ignore
     try:
-        yield wandb.singleton
+        yield mock
     finally:
+        if mock._disk_logger is not None:
+            mock._disk_logger.close()
         wandb.singleton = original
 
 

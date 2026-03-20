@@ -19,7 +19,7 @@ class DiskMetricLogger:
     Non-JSON-serializable values (e.g. images, tensors) are silently dropped.
     """
 
-    def __init__(self, directory: str):
+    def __init__(self, directory: str | os.PathLike):
         os.makedirs(directory, exist_ok=True)
         self._path = os.path.join(directory, METRICS_FILENAME)
         self._high_water_mark: int | None = None
@@ -52,8 +52,14 @@ class DiskMetricLogger:
         the call is silently skipped.  Non-serializable values are dropped.
         """
         if self._high_water_mark is not None and step <= self._high_water_mark:
+            logging.warning(
+                "DiskMetricLogger: skipping log for step %d "
+                "(at or below high-water mark %d)",
+                step,
+                self._high_water_mark,
+            )
             return
-        scalars = _extract_scalars(data)
+        scalars = _extract_serializable(data)
         if not scalars:
             return
         record = {"step": step, **scalars}
@@ -67,8 +73,8 @@ class DiskMetricLogger:
             self._file = None
 
 
-def _extract_scalars(data: dict[str, Any]) -> dict[str, Any]:
-    """Return only JSON-serializable scalar entries from *data*."""
+def _extract_serializable(data: dict[str, Any]) -> dict[str, Any]:
+    """Return only JSON-serializable entries from *data*."""
     result: dict[str, Any] = {}
     for key, value in data.items():
         if isinstance(value, int | float | bool):
@@ -87,7 +93,7 @@ def _extract_scalars(data: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def read_metrics(directory: str) -> list[dict[str, Any]]:
+def read_metrics(directory: str | os.PathLike) -> list[dict[str, Any]]:
     """Read all metric records from a metrics JSONL file.
 
     Returns a list of dicts, one per logged line, in file order.
