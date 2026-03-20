@@ -1,0 +1,3 @@
+runs:
+  2026-03-19-era5-1deg-8layer-1940-2025: ""  # no real data source, config only for computing stats
+data_output_directory: gs://vcm-ml-intermediate
