@@ -498,7 +498,6 @@ class Trainer:
                     stepped = self.stepper.train_on_batch(
                         batch,
                         self._no_optimization,
-                        compute_per_channel_metrics=True,
                     )
                 aggregator.record_batch(stepped)
         if (

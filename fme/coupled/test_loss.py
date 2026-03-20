@@ -118,11 +118,15 @@ def test_loss_contributions(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
+    def mae_loss_step_loss(gen, target, step: int):
+        # Single-element packed vector so `.sum()` matches the scalar loss.
+        return mae_loss(gen, target, step).unsqueeze(0)
+
     atmos_loss_config = LossContributionsConfig(
         n_steps=6,
         weight=1 / 3,
     )
-    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss)
+    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss_step_loss)
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
@@ -159,12 +163,18 @@ def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
     # test LossContributionsConfig with n_steps = 0
     atmos_loss_config = LossContributionsConfig()
     atmosphere_loss = atmos_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(5.25)),
+        loss_obj=Mock(
+            spec=StepLoss,
+            return_value=torch.tensor([5.25]),
+        ),
         time_dim=1,
     )
     ocean_loss_config = LossContributionsConfig(**ocean_config_kwargs)
     ocean_loss = ocean_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(42.0)),
+        loss_obj=Mock(
+            spec=StepLoss,
+            return_value=torch.tensor([42.0]),
+        ),
         time_dim=1,
     )
     loss_obj = CoupledStepperTrainLoss(

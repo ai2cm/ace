@@ -1006,7 +1006,6 @@ class DiffusionStepper(
         data: BatchData,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
-        compute_per_channel_metrics: bool = False,
     ) -> TrainOutput:
         """
         Step the model forward multiple steps on a batch of data.
@@ -1018,9 +1017,6 @@ class DiffusionStepper(
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction and target data.
-            compute_per_channel_metrics: Whether to compute per-variable loss and add
-                to metrics (for TrainAggregator). Only set True when evaluating for
-                logging, not during training steps.
 
         Returns:
             The loss metrics, the generated data, the normalized generated data,

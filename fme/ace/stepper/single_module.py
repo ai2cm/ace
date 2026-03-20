@@ -1503,7 +1503,6 @@ class TrainStepper(
         data: BatchData,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
-        compute_per_channel_metrics: bool = False,
     ) -> TrainOutput:
         """
         Train the model on a batch of data with one or more forward steps.
@@ -1520,9 +1519,6 @@ class TrainStepper(
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction and target data.
-            compute_per_channel_metrics: Whether to compute per-variable loss and add
-                to metrics (for TrainAggregator). Only set True when evaluating for
-                logging, not during training steps.
 
         Returns:
             The loss metrics, the generated data, the normalized generated data,
@@ -1543,7 +1539,6 @@ class TrainStepper(
             target_data,
             optimization,
             metrics,
-            compute_per_channel_metrics=compute_per_channel_metrics,
         )
 
         regularizer_loss = self._stepper.get_regularizer_loss()
@@ -1578,8 +1573,6 @@ class TrainStepper(
         target_data: BatchData,
         optimization: OptimizationABC,
         metrics: dict[str, float],
-        *,
-        compute_per_channel_metrics: bool = False,
     ) -> list[EnsembleTensorDict]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
@@ -1635,23 +1628,17 @@ class TrainStepper(
                     }
                 )
                 step_loss = self._loss_obj(gen_step, target_step, step=step)
-                metrics[f"loss_step_{step}"] = step_loss.detach()
-                if compute_per_channel_metrics:
-                    per_channel = self._loss_obj.forward_per_channel(
-                        gen_step, target_step, step=step
-                    )
-                    if per_channel_sum is None:
-                        per_channel_sum = {
-                            k: v.detach().clone() for k, v in per_channel.items()
-                        }
-                    else:
-                        for k in per_channel_sum:
-                            per_channel_sum[k] = (
-                                per_channel_sum[k] + per_channel[k].detach()
-                            )
+                step_total = step_loss.sum()
+                metrics[f"loss_step_{step}"] = step_total.detach()
+                per_ch = self._loss_obj.loss.packer.unpack(step_loss.detach(), axis=0)
+                if per_channel_sum is None:
+                    per_channel_sum = {k: v.clone() for k, v in per_ch.items()}
+                else:
+                    for k in per_channel_sum:
+                        per_channel_sum[k] = per_channel_sum[k] + per_ch[k]
             if optimize_step:
-                optimization.accumulate_loss(step_loss)
-        if compute_per_channel_metrics and per_channel_sum is not None:
+                optimization.accumulate_loss(step_total)
+        if per_channel_sum is not None:
             for k, v in per_channel_sum.items():
                 metrics[f"loss/{k}"] = v.detach()
         return output_list
