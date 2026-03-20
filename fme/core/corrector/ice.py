@@ -1,9 +1,6 @@
 import dataclasses
 import datetime
-from collections.abc import Mapping
-from typing import Any
 
-import dacite
 import torch
 
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
@@ -188,12 +185,6 @@ class IceBudgetCorrectionConfig:
 @dataclasses.dataclass
 class IceCorrectorConfig(CorrectorConfigABC):
     budget_correction: IceBudgetCorrectionConfig | None = None
-
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "IceCorrectorConfig":
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
 
     def get_corrector(
         self,

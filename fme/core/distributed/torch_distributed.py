@@ -224,17 +224,6 @@ class TorchDistributed(DistributedBackend):
     def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
         return data.nanmean(dim=-1)
 
-    def gradient_magnitude_percent_diff(
-        self,
-        truth: torch.Tensor,
-        predicted: torch.Tensor,
-        weights: torch.Tensor,
-        dim: tuple[int, ...],
-    ) -> torch.Tensor:
-        return metrics.gradient_magnitude_percent_diff(
-            truth, predicted, weights=weights, dim=dim
-        )
-
     def shutdown(self):
         logger.debug(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()

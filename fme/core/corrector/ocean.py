@@ -3,7 +3,6 @@ import datetime
 from collections.abc import Mapping
 from typing import Any, Literal, Protocol
 
-import dacite
 import torch
 
 from fme.core.atmosphere_data import AtmosphereData
@@ -116,13 +115,6 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
-
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
-        state = cls.remove_deprecated_keys(state)
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
