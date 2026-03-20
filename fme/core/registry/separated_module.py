@@ -1,9 +1,7 @@
 import abc
 import dataclasses
 from collections.abc import Callable, Mapping
-
-# we use Type to distinguish from type attr of SeparatedModuleSelector
-from typing import Any, ClassVar, Type  # noqa: UP035
+from typing import Any, ClassVar
 
 import dacite
 import torch
@@ -13,6 +11,8 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels, LabelEncoding
 
 from .registry import Registry
+
+SeparatedModuleConfigType = type["SeparatedModuleConfig"]
 
 
 @dataclasses.dataclass
@@ -83,6 +83,14 @@ class SeparatedModule:
         prognostic: torch.Tensor,
         labels: BatchLabels | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if labels is not None and self._label_encoding is None:
+            raise ValueError(
+                "labels were provided but the module has no label encoding"
+            )
+        if labels is None and self._label_encoding is not None:
+            raise ValueError(
+                "labels were not provided but the module has a label encoding"
+            )
         if labels is not None and self._label_encoding is not None:
             encoded_labels = labels.conform_to_encoding(self._label_encoding)
             return self._module(forcing, prognostic, labels=encoded_labels.tensor)
@@ -156,7 +164,7 @@ class SeparatedModuleSelector:
     @classmethod
     def register(
         cls, type_name: str
-    ) -> Callable[[Type[SeparatedModuleConfig]], Type[SeparatedModuleConfig]]:  # noqa: UP006
+    ) -> Callable[[SeparatedModuleConfigType], SeparatedModuleConfigType]:
         return cls.registry.register(type_name)
 
     def build(
@@ -194,44 +202,3 @@ class SeparatedModuleSelector:
     @classmethod
     def get_available_types(cls):
         return cls.registry._types.keys()
-
-
-class _SimpleSeparatedModule(nn.Module):
-    """A trivial module for testing the separated interface."""
-
-    def __init__(self, n_forcing: int, n_prognostic: int, n_diagnostic: int):
-        super().__init__()
-        n_in = n_forcing + n_prognostic
-        self.prog_linear = nn.Linear(n_in, n_prognostic, bias=False)
-        self.diag_linear = nn.Linear(n_in, n_diagnostic, bias=False)
-
-    def forward(
-        self,
-        forcing: torch.Tensor,
-        prognostic: torch.Tensor,
-        labels: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        combined = torch.cat([forcing, prognostic], dim=-3)
-        b, c, h, w = combined.shape
-        flat = combined.permute(0, 2, 3, 1).reshape(-1, c)
-        prog_out = self.prog_linear(flat).reshape(b, h, w, -1).permute(0, 3, 1, 2)
-        diag_out = self.diag_linear(flat).reshape(b, h, w, -1).permute(0, 3, 1, 2)
-        return prog_out, diag_out
-
-
-def register_test_types() -> None:
-    """Register test-only module types. Call from tests before use."""
-
-    @SeparatedModuleSelector.register("test_simple")
-    @dataclasses.dataclass
-    class _SimpleSeparatedBuilder(SeparatedModuleConfig):
-        def build(
-            self,
-            n_forcing_channels,
-            n_prognostic_channels,
-            n_diagnostic_channels,
-            dataset_info,
-        ):
-            return _SimpleSeparatedModule(
-                n_forcing_channels, n_prognostic_channels, n_diagnostic_channels
-            )

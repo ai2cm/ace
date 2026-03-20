@@ -1,12 +1,10 @@
+import pytest
 import torch
 
 from fme.core.dataset_info import DatasetInfo
-from fme.core.registry.separated_module import (
-    SeparatedModule,
-    SeparatedModuleSelector,
-    _SimpleSeparatedModule,
-    register_test_types,
-)
+from fme.core.labels import BatchLabels, LabelEncoding
+from fme.core.registry.separated_module import SeparatedModule, SeparatedModuleSelector
+from fme.core.registry.testing import _SimpleSeparatedModule, register_test_types
 
 register_test_types()
 
@@ -85,3 +83,27 @@ def test_separated_module_accepts_none_labels():
     # Should also work with explicit None
     prog_out, diag_out = module(forcing, prognostic, labels=None)
     assert prog_out.shape == (1, 3, 4, 8)
+
+
+def test_separated_module_raises_if_labels_without_encoding():
+    inner = _SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
+    module = SeparatedModule(inner, label_encoding=None)
+
+    forcing = torch.randn(1, 2, 4, 8)
+    prognostic = torch.randn(1, 3, 4, 8)
+    labels = BatchLabels(tensor=torch.tensor([[0.0]]), names=["task"])
+
+    with pytest.raises(ValueError, match="no label encoding"):
+        module(forcing, prognostic, labels=labels)
+
+
+def test_separated_module_raises_if_encoding_without_labels():
+    inner = _SimpleSeparatedModule(n_forcing=2, n_prognostic=3, n_diagnostic=1)
+    label_encoding = LabelEncoding(["a", "b"])
+    module = SeparatedModule(inner, label_encoding=label_encoding)
+
+    forcing = torch.randn(1, 2, 4, 8)
+    prognostic = torch.randn(1, 3, 4, 8)
+
+    with pytest.raises(ValueError, match="labels were not provided"):
+        module(forcing, prognostic, labels=None)

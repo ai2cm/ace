@@ -1,5 +1,5 @@
 import dataclasses
-import datetime
+from datetime import timedelta
 
 import pytest
 import torch
@@ -9,7 +9,7 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import SeparatedModuleSelector
-from fme.core.registry.separated_module import register_test_types
+from fme.core.registry.testing import register_test_types
 from fme.core.step.args import StepArgs
 from fme.core.step.separated_module import SeparatedModuleStepConfig
 from fme.core.step.step import StepSelector
@@ -17,7 +17,7 @@ from fme.core.step.step import StepSelector
 register_test_types()
 
 IMG_SHAPE = (16, 32)
-TIMESTEP = datetime.timedelta(hours=6)
+TIMESTEP = timedelta(hours=6)
 
 
 def _get_dataset_info():
@@ -208,12 +208,10 @@ class TestSeparatedModuleStep:
         step2 = config.get_step(dataset_info, lambda _: None)
         step2.load_state(state)
 
-        # Verify weights match
-        for p1, p2 in zip(
-            step1.module.torch_module.parameters(),
-            step2.module.torch_module.parameters(),
-        ):
-            assert torch.equal(p1, p2)
+        # Verify weights match using the public .modules API
+        for m1, m2 in zip(step1.modules, step2.modules):
+            for p1, p2 in zip(m1.parameters(), m2.parameters()):
+                assert torch.equal(p1, p2)
 
     def test_residual_prediction(self):
         forcing_names = ["f1"]
