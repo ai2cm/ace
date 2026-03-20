@@ -10,6 +10,7 @@ from fme.core.loss import (
     EnergyScoreLoss,
     GlobalMeanLoss,
     LossConfig,
+    MeanMSELoss,
     StepLossConfig,
     VariableWeightingLoss,
     WeightedMappingLoss,
@@ -29,7 +30,7 @@ def test_loss_builds_and_runs(global_mean_type):
     )
     x = torch.randn(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
-    result = loss(x, y)
+    result = loss(x, y, -3).sum()
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
 
@@ -67,7 +68,7 @@ def test_loss_of_zeros_is_variance():
     )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
-    result = loss(x, y)
+    result = loss(x, y, -3).sum()
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
     if str(get_device()).startswith("cuda"):
@@ -92,7 +93,7 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
     )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
-    result = loss(x, y)
+    result = loss(x, y, -3).sum()
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
     expected = torch.tensor(1.0 + global_mean_weight)
@@ -124,12 +125,10 @@ def test_loss_fails_when_gridded_operations_not_provided(
 def test_global_mean_loss():
     torch.manual_seed(0)
     area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
-    loss = GlobalMeanLoss(
-        LatLonOperations(area).area_weighted_mean, loss=torch.nn.MSELoss()
-    )
+    loss = GlobalMeanLoss(LatLonOperations(area).area_weighted_mean, loss=MeanMSELoss())
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
-    result = loss(x, y)
+    result = loss(x, y, -1).sum()
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
 
@@ -147,7 +146,7 @@ def test_area_weighted_mse():
     target = torch.rand(10, 10).to(get_device())
     area = torch.rand(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     area_weighted_mse = AreaWeightedMSELoss(LatLonOperations(area).area_weighted_mean)
-    result = area_weighted_mse(x, target)
+    result = area_weighted_mse(x, target, channel_dim=0).sum()
     expected = metrics.weighted_mean(
         torch.nn.MSELoss(reduction="none")(x, target), weights=area, dim=(-2, -1)
     ).mean()
@@ -178,7 +177,7 @@ def test__construct_weight_tensor():
 @pytest.mark.parametrize("mean", [0.0, 1.0])
 @pytest.mark.parametrize("scale", [1.0, 2.0])
 def test_WeightedMappingLoss(mean, scale):
-    loss = torch.nn.MSELoss()
+    loss = MeanMSELoss()
     n_channels = 5
     packer = Packer([f"var_{i}" for i in range(n_channels)])
     out_names = [f"var_{i}" for i in range(n_channels)]
@@ -206,7 +205,10 @@ def test_WeightedMappingLoss(mean, scale):
     ).to(get_device(), dtype=torch.float)
     x_mapping = {name: x[:, i, :, :] for i, name in enumerate(packer.names)}
     y_mapping = {name: y[:, i, :, :] for i, name in enumerate(packer.names)}
-    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y) / scale**2)
+    assert torch.allclose(
+        mapping_loss(x_mapping, y_mapping).sum(),
+        loss(x, y, -3).sum() / scale**2,
+    )
 
 
 def test_VariableWeightingLoss():
@@ -216,14 +218,14 @@ def test_VariableWeightingLoss():
             1.0,
         ]
     ).to(get_device())
-    mse_loss = torch.nn.MSELoss()
+    mse_loss = MeanMSELoss()
     weighted_loss = VariableWeightingLoss(weights=weights, loss=mse_loss)
 
     x = torch.tensor([[1.0, 2.0]]).to(get_device())
     y = torch.tensor([[2, 2.5]]).to(get_device())
 
-    weighted_result = weighted_loss(x, y)
-    assert weighted_result == ((16 + 0.25) / 2.0)
+    weighted_result = weighted_loss(x, y, 1)
+    assert weighted_result.sum() == ((16 + 0.25) / 2.0)
 
 
 def test_StepLossConfig_no_weights():
@@ -252,8 +254,12 @@ def test_StepLossConfig_no_weights():
     x = packer.pack(x_mapping, axis=channel_dim)
     y = packer.pack(y_mapping, axis=channel_dim)
 
-    assert loss(x, y) == mapping_loss(x_mapping, y_mapping, step=0)
-    assert loss(x, y) == mapping_loss(x_mapping, y_mapping, step=1)
+    torch.testing.assert_close(
+        loss(x, y, channel_dim).sum(), mapping_loss(x_mapping, y_mapping, step=0).sum()
+    )
+    torch.testing.assert_close(
+        loss(x, y, channel_dim).sum(), mapping_loss(x_mapping, y_mapping, step=1).sum()
+    )
 
 
 def test_StepLossConfig_weights():
@@ -285,7 +291,7 @@ def test_StepLossConfig_weights():
     x_mapping = {"var_0": x0, "var_1": x1}
     y_mapping = {"var_0": y0, "var_1": y1}
 
-    assert mapping_loss(x_mapping, y_mapping, step=0) == ((16 + 0.25) / 2.0)
+    assert mapping_loss(x_mapping, y_mapping, step=0).sum() == ((16 + 0.25) / 2.0)
 
 
 @pytest.mark.parametrize("sqrt_loss_step_decay_constant", [0.0, 0.1, 1.0])
@@ -321,13 +327,13 @@ def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant):
     y_mapping = {"var_0": y0, "var_1": y1}
 
     torch.testing.assert_close(
-        mapping_loss(x_mapping, y_mapping, step=0),
-        mapping_loss(x_mapping, y_mapping, step=1)
+        mapping_loss(x_mapping, y_mapping, step=0).sum(),
+        mapping_loss(x_mapping, y_mapping, step=1).sum()
         * (1 + sqrt_loss_step_decay_constant) ** 0.5,
     )
     torch.testing.assert_close(
-        mapping_loss(x_mapping, y_mapping, step=0),
-        mapping_loss(x_mapping, y_mapping, step=2)
+        mapping_loss(x_mapping, y_mapping, step=0).sum(),
+        mapping_loss(x_mapping, y_mapping, step=2).sum()
         * (1 + sqrt_loss_step_decay_constant * 2) ** 0.5,
     )
 
@@ -335,7 +341,7 @@ def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant):
 @pytest.mark.parametrize("mean", [0.0, 1.0])
 @pytest.mark.parametrize("scale", [1.0, 2.0])
 def test_WeightedMappingLoss_with_ensemble_dim(mean, scale):
-    loss = torch.nn.MSELoss()
+    loss = MeanMSELoss()
     n_channels = 5
     n_ensemble = 3
     packer = Packer([f"var_{i}" for i in range(n_channels)])
@@ -366,11 +372,14 @@ def test_WeightedMappingLoss_with_ensemble_dim(mean, scale):
     ).to(get_device(), dtype=torch.float)
     x_mapping = {name: x[:, :, i, :, :] for i, name in enumerate(packer.names)}
     y_mapping = {name: y[:, :, i, :, :] for i, name in enumerate(packer.names)}
-    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y) / scale**2)
+    assert torch.allclose(
+        mapping_loss(x_mapping, y_mapping).sum(),
+        loss(x, y, -3).sum() / scale**2,
+    )
 
 
 def test_WeightedMappingLoss_with_target_nans():
-    loss = torch.nn.MSELoss()
+    loss = MeanMSELoss()
     n_channels = 5
     packer = Packer([f"var_{i}" for i in range(n_channels)])
     out_names = [f"var_{i}" for i in range(n_channels)]
@@ -401,12 +410,16 @@ def test_WeightedMappingLoss_with_target_nans():
     y_mapping[packer.names[0]][:, :, 0] = float("nan")
     x[:, 0, :, 0] = 0.0
     y[:, 0, :, 0] = 0.0
-    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y))
+    assert torch.allclose(
+        mapping_loss(x_mapping, y_mapping).sum(), loss(x, y, -3).sum()
+    )
 
 
-def test_WeightedMappingLoss_call_per_channel():
-    """Per-channel loss sums to total loss and has one entry per variable."""
-    loss_fn = torch.nn.MSELoss()
+def test_WeightedMappingLoss_per_channel_vector_matches_unpack():
+    """
+    Packed loss is (C,) with ``sum`` equal to the scalar mean loss; unpack matches.
+    """
+    loss_fn = MeanMSELoss()
     n_channels = 3
     out_names = [f"var_{i}" for i in range(n_channels)]
     normalizer = StandardNormalizer(
@@ -423,9 +436,10 @@ def test_WeightedMappingLoss_call_per_channel():
     y = torch.randn(4, n_channels, 5, 5, device=get_device(), dtype=torch.float)
     x_mapping = {name: x[:, i, :, :] for i, name in enumerate(out_names)}
     y_mapping = {name: y[:, i, :, :] for i, name in enumerate(out_names)}
-    total = mapping_loss(x_mapping, y_mapping)
-    per_channel = mapping_loss.call_per_channel(x_mapping, y_mapping)
-    assert set(per_channel.keys()) == set(out_names)
-    # Mean of per-channel losses equals total (total is mean over all channels)
-    mean_per_channel = torch.stack(list(per_channel.values())).mean()
-    assert torch.allclose(total, mean_per_channel)
+    result = mapping_loss(x_mapping, y_mapping)
+    assert result.shape == (n_channels,)
+    assert torch.allclose(result.sum(), loss_fn(x, y, -3).sum())
+    per_channel_dict = mapping_loss.packer.unpack(result, axis=0)
+    assert set(per_channel_dict.keys()) == set(out_names)
+    for i, name in enumerate(out_names):
+        assert torch.allclose(per_channel_dict[name], result[i])

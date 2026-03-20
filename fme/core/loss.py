@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 import torch
 import torch.linalg
+import torch.nn
 
 from fme.core.device import get_device
 from fme.core.ensemble import get_crps, get_energy_score
@@ -13,18 +14,78 @@ from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
 
 
+def _channel_dim_positive(ndim: int, channel_dim: int) -> int:
+    return channel_dim if channel_dim >= 0 else ndim + channel_dim
+
+
+def _mean_except_channel(x: torch.Tensor, channel_dim: int) -> torch.Tensor:
+    dims = tuple(i for i in range(x.ndim) if i != channel_dim)
+    return x.mean(dim=dims)
+
+
+def _uniform_broadcast_per_channel(
+    total: torch.Tensor, x: torch.Tensor, channel_dim: int
+) -> torch.Tensor:
+    """Split scalar ``total`` evenly across channels.
+
+    ``vector.sum()`` equals ``total``.
+    """
+    cdim = _channel_dim_positive(x.ndim, channel_dim)
+    n_c = int(x.shape[cdim])
+    return (total / n_c).expand(n_c)
+
+
+class MeanMSELoss(torch.nn.Module):
+    """Per-channel MSE: shape ``(n_channels,)``.
+
+    Sum with ``tensor.sum()`` for a scalar equal to the usual global mean MSE.
+    """
+
+    def forward(
+        self, x: torch.Tensor, y: torch.Tensor, channel_dim: int
+    ) -> torch.Tensor:
+        cdim = _channel_dim_positive(x.ndim, channel_dim)
+        diff_sq = (x - y) ** 2
+        raw = _mean_except_channel(diff_sq, cdim)
+        n_c = int(x.shape[cdim])
+        return raw / n_c
+
+
+class MeanL1Loss(torch.nn.Module):
+    """Per-channel L1: shape ``(n_channels,)``.
+
+    Sum with ``tensor.sum()`` for a scalar equal to the usual global mean L1.
+    """
+
+    def forward(
+        self, x: torch.Tensor, y: torch.Tensor, channel_dim: int
+    ) -> torch.Tensor:
+        cdim = _channel_dim_positive(x.ndim, channel_dim)
+        abs_diff = (x - y).abs()
+        raw = _mean_except_channel(abs_diff, cdim)
+        n_c = int(x.shape[cdim])
+        return raw / n_c
+
+
 class NaNLoss(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, input, target):
-        return torch.tensor(torch.nan)
+    def forward(
+        self,
+        input: torch.Tensor,
+        target: torch.Tensor,
+        channel_dim: int,
+    ) -> torch.Tensor:
+        cdim = _channel_dim_positive(input.ndim, channel_dim)
+        n_c = int(input.shape[cdim])
+        return torch.full((n_c,), float("nan"), device=input.device, dtype=input.dtype)
 
 
 class WeightedMappingLoss:
     def __init__(
         self,
-        loss: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+        loss: torch.nn.Module,
         weights: dict[str, float],
         out_names: list[str],
         normalizer: StandardNormalizer,
@@ -32,7 +93,9 @@ class WeightedMappingLoss:
     ):
         """
         Args:
-            loss: The loss function to apply.
+            loss: Built from :class:`LossConfig` (e.g. :class:`MeanMSELoss`,
+                :class:`WeightedSum`). ``forward(x, y, channel_dim)`` returns
+                shape ``(n_channels,)``; reduce with ``.sum()`` when a scalar is needed.
             weights: A dictionary of variable names with individual
                 weights to apply to their normalized losses
             out_names: The names of the output variables.
@@ -59,7 +122,7 @@ class WeightedMappingLoss:
         self,
         predict_dict: TensorMapping,
         target_dict: TensorMapping,
-    ):
+    ) -> torch.Tensor:
         predict_tensors = self.packer.pack(
             self.normalizer.normalize(predict_dict), axis=self.channel_dim
         )
@@ -71,51 +134,8 @@ class WeightedMappingLoss:
             predict_tensors = torch.where(nan_mask, 0.0, predict_tensors)
             target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
-        return self.loss(predict_tensors, target_tensors)
-
-    def call_per_channel(
-        self,
-        predict_dict: TensorMapping,
-        target_dict: TensorMapping,
-    ) -> dict[str, torch.Tensor]:
-        """
-        Compute loss per variable (per channel).
-
-        Returns:
-            Dict mapping each variable name to its scalar loss tensor.
-        """
-        predict_tensors = self.packer.pack(
-            self.normalizer.normalize(predict_dict), axis=self.channel_dim
-        )
-        target_tensors = self.packer.pack(
-            self.normalizer.normalize(target_dict), axis=self.channel_dim
-        )
-        nan_mask = target_tensors.isnan()
-        if nan_mask.any():
-            predict_tensors = torch.where(nan_mask, 0.0, predict_tensors)
-            target_tensors = torch.where(nan_mask, 0.0, target_tensors)
-
-        result: dict[str, torch.Tensor] = {}
-        channel_dim = (
-            self.channel_dim
-            if self.channel_dim >= 0
-            else predict_tensors.dim() + self.channel_dim
-        )
-        # _weight_tensor is always 4D (1, n_channels, 1, 1) from
-        # _construct_weight_tensor
-        weight_channel_dim = 1
-        for i, name in enumerate(self.packer.names):
-            pred_slice = predict_tensors.select(channel_dim, i).unsqueeze(channel_dim)
-            target_slice = target_tensors.select(channel_dim, i).unsqueeze(channel_dim)
-            weight_slice = self._weight_tensor.select(weight_channel_dim, i)
-            # Broadcast weight to match pred_slice ndim
-            # (e.g. 5D when ensemble dim present)
-            while weight_slice.dim() < pred_slice.dim():
-                weight_slice = weight_slice.unsqueeze(-1)
-            result[name] = self.loss.loss(
-                weight_slice * pred_slice, weight_slice * target_slice
-            )
-        return result
+        cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
+        return self.loss(predict_tensors, target_tensors, cdim)
 
     def get_normalizer_state(self) -> dict[str, float]:
         return self.normalizer.get_state()
@@ -179,8 +199,11 @@ class LpLoss(torch.nn.Module):
 
         return torch.mean(diff_norms / y_norms)
 
-    def __call__(self, x, y):
-        return self.rel(x, y)
+    def forward(
+        self, x: torch.Tensor, y: torch.Tensor, channel_dim: int
+    ) -> torch.Tensor:
+        scalar = self.rel(x, y)
+        return _uniform_broadcast_per_channel(scalar, x, channel_dim)
 
 
 class AreaWeightedMSELoss(torch.nn.Module):
@@ -188,8 +211,18 @@ class AreaWeightedMSELoss(torch.nn.Module):
         super().__init__()
         self._area_weighted_mean = area_weighted_mean
 
-    def __call__(self, x, y):
-        return torch.mean(self._area_weighted_mean((x - y) ** 2))
+    def forward(
+        self, x: torch.Tensor, y: torch.Tensor, channel_dim: int
+    ) -> torch.Tensor:
+        sq = (x - y) ** 2
+        awm = self._area_weighted_mean(sq)
+        cdim = _channel_dim_positive(x.ndim, channel_dim)
+        if awm.ndim == 0:
+            return _uniform_broadcast_per_channel(awm, x, channel_dim)
+        dims = tuple(i for i in range(awm.ndim) if i != cdim)
+        raw = awm.mean(dim=dims)
+        n_c = int(x.shape[cdim])
+        return raw / n_c
 
 
 class WeightedSum(torch.nn.Module):
@@ -202,8 +235,8 @@ class WeightedSum(torch.nn.Module):
     def __init__(self, modules: list[torch.nn.Module], weights: list[float]):
         """
         Args:
-            modules: A list of modules, each of which takes two tensors and
-                returns a scalar tensor.
+            modules: Submodules ``forward(x, y, channel_dim)`` each return a
+                per-channel vector ``(n_channels,)``.
             weights: A list of weights to apply to the outputs of the modules.
         """
         super().__init__()
@@ -212,8 +245,13 @@ class WeightedSum(torch.nn.Module):
         self._wrapped = modules
         self._weights = weights
 
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return sum(w * module(x, y) for w, module in zip(self._weights, self._wrapped))
+    def forward(
+        self, x: torch.Tensor, y: torch.Tensor, channel_dim: int
+    ) -> torch.Tensor:
+        return sum(
+            w * module(x, y, channel_dim)
+            for w, module in zip(self._weights, self._wrapped)
+        )
 
 
 class GlobalMeanLoss(torch.nn.Module):
@@ -230,18 +268,19 @@ class GlobalMeanLoss(torch.nn.Module):
         Args:
             area_weighted_mean: Computes an area-weighted mean, removing the
                 horizontal dimensions.
-            loss: A loss function which takes two tensors of shape
-                (n_samples, n_timesteps, n_channels) and returns a scalar
-                tensor.
+            loss: Inner module ``forward(x, y, channel_dim)`` returning
+                ``(n_channels,)``.
         """
         super().__init__()
         self.global_mean = GlobalMean(area_weighted_mean)
         self.loss = loss
 
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, y: torch.Tensor, channel_dim: int
+    ) -> torch.Tensor:
         x = self.global_mean(x)
         y = self.global_mean(y)
-        return self.loss(x, y)
+        return self.loss(x, y, channel_dim)
 
 
 class GlobalMean(torch.nn.Module):
@@ -269,14 +308,17 @@ class VariableWeightingLoss(torch.nn.Module):
         Args:
             weights: A tensor of shape (n_samples, n_channels, n_lat, n_lon)
                 containing the weights to apply to each channel.
-            loss: A loss function which takes two tensors.
+            loss: Inner module ``forward(x, y, channel_dim)`` returning
+                ``(n_channels,)``.
         """
         super().__init__()
         self.loss = loss
         self.weights = weights
 
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return self.loss(self.weights * x, self.weights * y)
+    def forward(
+        self, x: torch.Tensor, y: torch.Tensor, channel_dim: int
+    ) -> torch.Tensor:
+        return self.loss(self.weights * x, self.weights * y, channel_dim)
 
 
 class EnergyScoreLoss(torch.nn.Module):
@@ -296,6 +338,9 @@ class EnergyScoreLoss(torch.nn.Module):
     We use a scaling factor of 2 * sqrt(n_l * n_m) to bring its magnitude in
     line with the real-valued CRPS loss, and to prevent its value depending on domain
     size for Gaussian distributed random data where n_lon = 2 * n_lat.
+
+    Returns a **scalar**. :class:`EnsembleLoss` maps that to a per-channel vector
+    for packed training via :func:`_uniform_broadcast_per_channel` (see follow-up PR).
 
     .. [1] https://sites.stat.washington.edu/people/raftery/Research/PDF/Gneiting2007jasa.pdf
     """
@@ -334,6 +379,9 @@ class CRPSLoss(torch.nn.Module):
     Supports almost-fair modification to CRPS from
     https://arxiv.org/html/2412.15832v1, which claims to be helpful in
     avoiding numerical issues with fair CRPS.
+
+    Returns a **scalar** (mean over all non-ensemble dimensions). :class:`EnsembleLoss`
+    maps that to a per-channel vector for packed training (see follow-up PR).
     """
 
     def __init__(self, alpha: float):
@@ -372,7 +420,8 @@ class EnsembleLoss(torch.nn.Module):
         self,
         gen_norm: torch.Tensor,
         target_norm: torch.Tensor,
-    ):
+        channel_dim: int,
+    ) -> torch.Tensor:
         if self.crps_weight > 0:
             crps = self.crps_weight * self.crps_loss(gen_norm, target_norm)
         else:
@@ -383,7 +432,8 @@ class EnsembleLoss(torch.nn.Module):
             )
         else:
             energy_score_loss = torch.tensor(0.0)
-        return crps + energy_score_loss
+        total = crps + energy_score_loss
+        return _uniform_broadcast_per_channel(total, gen_norm, channel_dim)
 
 
 @dataclasses.dataclass
@@ -433,17 +483,25 @@ class LossConfig:
     ) -> Any:
         """
         Args:
-            reduction: The reduction to apply to the loss, either "mean" or "none".
-                Only used if the loss function is L1, MSE, or LpLoss.
+            reduction: For L1/MSE, ``"mean"`` uses :class:`MeanL1Loss` /
+                :class:`MeanMSELoss` (per-channel vectors; sum for a scalar).
+                ``"none"`` uses ``torch.nn.L1Loss`` / ``torch.nn.MSELoss``
+                (elementwise output).
             gridded_operations: The gridded operations to use in the case that
                 the loss function requires use of the horizontal dimensions.
         """
         if self.type == "LpLoss":
             main_loss = LpLoss(**self.kwargs)
         elif self.type == "L1":
-            main_loss = torch.nn.L1Loss(reduction=reduction)
+            if reduction == "none":
+                main_loss = torch.nn.L1Loss(reduction="none")
+            else:
+                main_loss = MeanL1Loss()
         elif self.type == "MSE":
-            main_loss = torch.nn.MSELoss(reduction=reduction)
+            if reduction == "none":
+                main_loss = torch.nn.MSELoss(reduction="none")
+            else:
+                main_loss = MeanMSELoss()
         elif self.type == "AreaWeightedMSE":
             if gridded_operations is None:
                 raise ValueError("gridded_operations is required for AreaWeightedMSE")
@@ -509,26 +567,11 @@ class StepLoss(torch.nn.Module):
             step: The step number, indexed from 0 for the first step.
 
         Returns:
-            The loss.
+            Per-channel losses, shape ``(n_channels,)``. The step loss scalar is
+            ``tensor.sum()``.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
         return self.loss(predict_dict, target_dict) * step_weight
-
-    def forward_per_channel(
-        self,
-        predict_dict: TensorMapping,
-        target_dict: TensorMapping,
-        step: int,
-    ) -> dict[str, torch.Tensor]:
-        """
-        Compute per-variable (per-channel) loss with step weighting.
-
-        Returns:
-            Dict mapping each variable name to its scalar loss tensor.
-        """
-        step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
-        per_channel = self.loss.call_per_channel(predict_dict, target_dict)
-        return {k: v * step_weight for k, v in per_channel.items()}
 
 
 @dataclasses.dataclass
