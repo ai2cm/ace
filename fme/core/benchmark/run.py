@@ -144,7 +144,7 @@ def main(
             entity=entity,
             name=wandb_name,
         )
-        wandb.log(wandb_logs, commit=True)
+        wandb.log(wandb_logs, step=0, commit=True)
     return 0
 
 
