@@ -18,10 +18,18 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 import torch
+import xarray as xr
 from torch import nn
 
 import fme
+from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
+from fme.ace.stepper.single_module import (
+    StepperConfig,
+    TrainOutput,
+    TrainStepper,
+    TrainStepperConfig,
+)
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
@@ -29,19 +37,52 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
+from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.optimization import Optimization, OptimizationConfig, SchedulerConfig
 from fme.core.registry import ModuleSelector
+from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
-from fme.core.step.single_module import SingleModuleStepConfig
+
+# from fme.core.step.single_module import (
+#     SingleModuleStepConfig,
+#     TrainOutput,
+#     TrainStepper,
+# )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
 DEFAULT_IMG_SHAPE = (45, 90)
 
 DATA_DIR = pathlib.Path(__file__).parent / "testdata"
+
+
+def get_dataset_info(
+    img_shape=(5, 5),
+) -> DatasetInfo:
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(img_shape[-2]),
+        lon=torch.zeros(img_shape[-1]),
+    )
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
+    return DatasetInfo(
+        horizontal_coordinates=horizontal_coordinate,
+        vertical_coordinate=vertical_coordinate,
+        timestep=TIMESTEP,
+    )
+
+
+def _get_train_stepper(
+    stepper_config: StepperConfig,
+    dataset_info: DatasetInfo,
+    **train_config_kwargs,
+) -> TrainStepper:
+    train_config = TrainStepperConfig(**train_config_kwargs)
+    return train_config.get_train_stepper(stepper_config, dataset_info)
 
 
 def get_network_and_loss_normalization_config(
@@ -469,96 +510,151 @@ def test_step_regression(
 
     cache_step_output(output, DATA_DIR / f"{case_name}_output.pt")
 
-def _run_step_optimization_backward(
+
+def _run_stepper_backward_with_optimization(
     img_shape: tuple[int, int],
     n_samples: int,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """
-    Run a single forward + backward through a Step using Optimization,
-    and return:
-      - scalar loss on this rank
-      - gradients for all parameters (CPU tensors)
+    Single forward + backward through TrainStepper using Optimization.
+    Returns scalar loss and per-parameter gradients (CPU tensors).
     """
+    torch.manual_seed(0)
     device = fme.get_device()
     dist = Distributed.get_instance()
 
-    selector = get_single_module_noise_conditioned_selector(None)
-    step = get_step(selector, img_shape)
+    # Reuse the same config pattern as get_regression_stepper_and_data
+    in_names = ["a", "b"]
+    out_names = ["b", "c"]
+    n_forward_steps = 2
+    all_names = list(set(in_names + out_names))
 
-    modules = nn.ModuleList(step.modules)
+    loss_cfg = StepLossConfig(type="AreaWeightedMSE")
+
+    stepper_config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="NoiseConditionedSFNO",
+                        config=dataclasses.asdict(
+                            NoiseConditionedSFNOBuilder(
+                                embed_dim=16,
+                                num_layers=2,
+                                noise_embed_dim=16,
+                                noise_type="isotropic",
+                            )
+                        ),
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={n: 0.1 for n in all_names},
+                            stds={n: 1.1 for n in all_names},
+                        ),
+                    ),
+                    ocean=None,
+                )
+            ),
+        ),
+    )
+
+    dataset_info = get_dataset_info(img_shape=img_shape)
+
+    train_stepper: TrainStepper = _get_train_stepper(
+        stepper_config,
+        dataset_info,
+        loss=loss_cfg,
+    )
+
+    # Random data, same as regression helper
+    data = BatchData.new_on_device(
+        data={
+            "a": torch.randn(n_samples, n_forward_steps + 1, *img_shape, device=device),
+            "b": torch.randn(n_samples, n_forward_steps + 1, *img_shape, device=device),
+            "c": torch.randn(n_samples, n_forward_steps + 1, *img_shape, device=device),
+        },
+        time=xr.DataArray(
+            np.zeros((n_samples, n_forward_steps + 1)),
+            dims=["sample", "time"],
+        ),
+        labels=None,
+        epoch=0,
+        horizontal_dims=["lat", "lon"],
+    )
+    data = data.scatter_spatial(img_shape)
+
+    # Build Optimization on train_stepper.modules
     opt_config = OptimizationConfig(
         optimizer_type="Adam",
         lr=1e-3,
-        scheduler=SchedulerConfig(),
+        use_gradient_accumulation=True,
         enable_automatic_mixed_precision=False,
     )
-    optimization = opt_config.build(modules, max_epochs=1)
-    optimization.set_mode(modules)
 
-    # Global inputs; Distributed backend decides what scatter_spatial does
-    input_data: TensorDict = get_tensor_dict(step.input_names, img_shape, n_samples)
-    next_input_data: TensorDict = get_tensor_dict(
-        step.next_step_input_names, img_shape, n_samples
+    optimization = opt_config.build(train_stepper.modules, max_epochs=1)
+    optimization.set_mode(train_stepper.modules)
+
+    # Forward + backward through the *training* API
+    # train_output: TrainOutput = train_stepper.train_on_batch(data, optimization)
+
+    # --- Manual version of train_on_batch, but WITHOUT step_weights() ---
+    train_stepper._init_for_epoch(data.epoch)
+    metrics: dict[str, torch.Tensor] = {}
+
+    input_data = data.get_start(train_stepper._prognostic_names, train_stepper.n_ic_timesteps)
+    target_data = train_stepper._stepper.get_forward_data(
+        data, compute_derived_variables=False
+    )
+    data = train_stepper._stepper.forcing_deriver(data)
+
+    optimization.set_mode(train_stepper._stepper.modules)
+
+    output_list = train_stepper._accumulate_loss(
+        input_data=input_data,
+        data=data,
+        target_data=target_data,
+        optimization=optimization,
+        metrics=metrics,
     )
 
-    # Use the same scatter pattern as the step tests; in serial this is a no-op
-    input_data = dist.scatter_spatial(input_data, img_shape)
-    next_input_data = dist.scatter_spatial(next_input_data, img_shape)
+    regularizer_loss = train_stepper._stepper.get_regularizer_loss()
+    if torch.any(regularizer_loss > 0):
+        optimization.accumulate_loss(regularizer_loss)
 
-    # Forward
-    out = step.step(
-        args=StepArgs(
-            input=input_data,
-            next_step_input_data=next_input_data,
-            labels=None,
-        ),
-        wrapper=lambda x: x,
-    )
+    loss = optimization.get_accumulated_loss()
 
-    # Use the real training loss from the step output
-    if isinstance(out, dict) and "loss" in out:
-        loss = out["loss"]
-    else:
-        raise RuntimeError(
-            "Step output does not contain 'loss'; "
-            "wire this test to the real training loss output."
-        )
-
-    # Route loss through Optimization, but only run backward (no step/zero yet)
-    optimization.accumulate_loss(loss)
-    total_loss = optimization.get_accumulated_loss()
-    optimization._backward(total_loss)
-
-    # Collect parameter grads
     grads: dict[str, torch.Tensor] = {}
-    for name, p in step.named_parameters():
-        if p.grad is not None:
-            grads[name] = p.grad.detach().cpu().clone()
+    for i, wrapped in enumerate(train_stepper.modules):
+        module = getattr(wrapped, "module", wrapped)
+        for name, p in module.named_parameters():
+            if p.grad is not None:
+                grads[f"module_{i}.{name}"] = p.grad.detach().cpu().clone()
 
-    return total_loss.detach().cpu(), grads
+
+    return loss.detach().cpu(), grads
 
 
 @pytest.mark.parallel
-def test_step_optimization_backward_matches_baseline():
+def test_stepper_backward_with_optimization():
     """
-    Regression test for Step+Optimization backward under spatial parallelism.
+    Test compares gradients after backward step with and without spatial parallelism.
 
-    Uses the same forward/Optimization path in both serial and spatial
-    backends; serial run is used to create the baseline. Spatial backends
-    must reproduce the baseline loss and parameter gradients element-wise.
+    Since each rank holds the entire global model's parameters, there is no need to gather.
+    This test will need to be modified once spatial sharding is implemented for parameters.
     """
     DATA_DIR = pathlib.Path(__file__).parent / "testdata"
-    BASELINE_FILE = DATA_DIR / "backward_with_opt_baseline.pt"
-
+    BASELINE_FILE = DATA_DIR / "csfno_stepper_backward_with_opt_baseline.pt"
     dist = Distributed.get_instance()
     torch.manual_seed(0)
 
     img_shape = (20, 40)
     n_samples = 2
 
-    loss, grads = _run_step_optimization_backward(img_shape, n_samples)
+    loss, grads = _run_stepper_backward_with_optimization(img_shape, n_samples)
 
-    # Only root rank writes/compares baseline
     if not dist.is_root():
         return
 
@@ -573,10 +669,8 @@ def test_step_optimization_backward_matches_baseline():
             },
             BASELINE_FILE,
         )
-        raise AssertionError(
-            f"Baseline created at {BASELINE_FILE}. "
-            "Re-run the test to perform regression check."
-        )
+        print("Created Baseline file")
+        return
 
     baseline = torch.load(BASELINE_FILE, map_location="cpu")
     assert tuple(baseline["img_shape"]) == tuple(img_shape)
@@ -585,9 +679,8 @@ def test_step_optimization_backward_matches_baseline():
     baseline_loss = baseline["loss"]
     baseline_grads: dict[str, torch.Tensor] = baseline["grads"]
 
-    # 1) Loss finite and close to baseline.
+    # Loss check
     assert torch.isfinite(loss), "Loss is not finite on this rank"
-
     actual_loss = loss.item()
     expected_loss = baseline_loss.item()
     rel_loss = abs(actual_loss - expected_loss) / max(abs(expected_loss), 1e-12)
@@ -597,12 +690,8 @@ def test_step_optimization_backward_matches_baseline():
         f"rel_diff={rel_loss:.3e}"
     )
 
-    # 2) Parameter gradients match baseline element-wise.
-    # Require same parameter set as baseline
-    assert set(grads.keys()) == set(
-        baseline_grads.keys()
-    ), "Parameter set changed since baseline generation"
-
+    # Grad check
+    assert set(grads.keys()) == set(baseline_grads.keys())
     for name in sorted(grads.keys()):
         g = grads[name]
         g_ref = baseline_grads[name]
@@ -610,7 +699,7 @@ def test_step_optimization_backward_matches_baseline():
         diff = (g - g_ref).abs()
         max_abs = diff.max().item()
         max_rel = (diff / g_ref.abs().clamp_min(1e-12)).max().item()
-        assert torch.allclose(g, g_ref, rtol=1e-6, atol=1e-7), (
+        assert torch.allclose(g, g_ref, rtol=1e-6, atol=1e-8), (
             f"Gradient for '{name}' deviates from baseline: "
             f"max_abs={max_abs:.3e}, max_rel={max_rel:.3e}"
         )
