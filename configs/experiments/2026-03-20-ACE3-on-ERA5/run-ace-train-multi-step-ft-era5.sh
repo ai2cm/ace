@@ -28,7 +28,7 @@ do
     # during pre-training, but still follows the same path for a given set
     # random initialization weights.
     fine_tune_seed=$((seed + SEED_OFFSET))
-    override="seed=${fine_tune_seed} stepper.parameter_init.weights_path=${PRE_TRAINED_WEIGHTS_PATH}"
+    override="seed=${fine_tune_seed} stepper_training.parameter_init.weights_path=${PRE_TRAINED_WEIGHTS_PATH}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
     gantry run \
         --name $job_name \
