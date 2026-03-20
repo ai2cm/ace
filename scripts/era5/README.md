@@ -25,3 +25,14 @@ image has been pushed, the pipeline can be launched with:
 ```
 make era5_dataflow
 ```
+
+This will run the production workflow on the full range of data targeting one
+degree and four degree grids. During development it can be helpful to run the
+workflow for a shorter period of time targeting just a single grid. For this
+purpose use the
+
+```
+make era5_dataflow_test_run
+```
+
+rule as a starting point.
