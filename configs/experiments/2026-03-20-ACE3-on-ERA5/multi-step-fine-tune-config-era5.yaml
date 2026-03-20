@@ -48,8 +48,8 @@ train_loader:
       start_time: '1979-01-01'
       stop_time: '2008-12-31'
 validation_loader:
-  batch_size: 128
-  num_data_workers: 16
+  batch_size: 32
+  num_data_workers: 4
   prefetch_factor: 4
   dataset:
     data_path: /climate-default
