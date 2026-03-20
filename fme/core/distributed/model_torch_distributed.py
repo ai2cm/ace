@@ -29,6 +29,7 @@ from torch.amp import custom_bwd, custom_fwd
 from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
+from fme.core import metrics
 from fme.core.device import using_gpu, using_srun
 
 from ._gloo_patch import patch_gloo_alltoall
@@ -261,9 +262,6 @@ class ModelTorchDistributed(DistributedBackend):
         """Divide global batch among data-parallel ranks."""
         return batch_size // self.total_data_parallel_ranks
 
-    # NOTE: reductions are performed over the data-parallel group only, since
-    # the spatial groups are meant for model parallelism, and for now we assume
-    # that any tensors being reduced are replicated across the spatial groups.
     def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None:
         torch.distributed.all_reduce(tensor, group=self._data_group)
         return tensor / self.total_data_parallel_ranks
@@ -413,30 +411,25 @@ class ModelTorchDistributed(DistributedBackend):
         dim: tuple[int, ...],
         keepdim: bool = False,
     ) -> torch.Tensor:
-        from fme.core.metrics import weighted_sum
-
-        local_weighted_sum = weighted_sum(data, weights, dim=dim, keepdim=keepdim)
+        local_weighted_sum = metrics.weighted_sum(
+            data, weights, dim=dim, keepdim=keepdim
+        )
         local_weight_sum = weights.expand(data.shape).sum(dim=dim, keepdim=keepdim)
         return self.spatial_reduce_sum(local_weighted_sum) / self.spatial_reduce_sum(
             local_weight_sum
         )
 
     def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError(
-            "zonal_mean is not yet supported under spatial parallelism."
-        )
+        # If we have 1 rank along the longitude dimension, quickly return the local mean
+        if self._w_size == 1:
+            return data.nanmean(dim=-1)
 
-    def gradient_magnitude_percent_diff(
-        self,
-        truth: torch.Tensor,
-        predicted: torch.Tensor,
-        weights: torch.Tensor,
-        dim: tuple[int, ...],
-    ) -> torch.Tensor:
-        raise NotImplementedError(
-            "gradient_magnitude_percent_diff is not yet supported "
-            "under spatial parallelism."
-        )
+        # Distributed nanmean over the longitude (w) dimension.
+        local_sum = data.nansum(dim=-1)
+        local_count = (~torch.isnan(data)).to(data.dtype).sum(dim=-1)
+        torch.distributed.all_reduce(local_sum, group=self._w_group)
+        torch.distributed.all_reduce(local_count, group=self._w_group)
+        return local_sum / local_count
 
     def get_sht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
         return thd.DistributedRealSHT(
