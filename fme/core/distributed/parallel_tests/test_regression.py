@@ -82,11 +82,7 @@ class _LinearCase(RegressionCase):
     """1x1 Conv2d applied channel-wise; verifies basic gradient flow."""
 
     n_channels: int = 4
-    _img_shape: tuple[int, int] = (8, 16)
-
-    @property
-    def img_shape(self) -> tuple[int, int]:
-        return self._img_shape
+    img_shape: tuple[int, int] = (8, 16)
 
     def initialize(self) -> tuple[TensorDict, torch.nn.Module]:
         torch.manual_seed(0)

@@ -381,10 +381,6 @@ class ModelTorchDistributed(DistributedBackend):
 
             reduced = grad.contiguous().clone()
             torch.distributed.all_reduce(reduced, group=spatial_group)
-
-            # If we want mean gradient instead of sum, we want:
-            # reduced /= (self._h_size * self._w_size)
-
             return reduced
 
         for p in module.parameters():
