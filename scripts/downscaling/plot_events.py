@@ -26,6 +26,7 @@ from pathlib import Path
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cftime
+import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -42,11 +43,60 @@ from plot_beaker_histograms import plot_histogram_lines
 TIME_SEL = slice(cftime.DatetimeJulian(2023, 1, 1), None)
 UNITS = {
     "PRMSL": "hPa",
-    "PRATEsfc": "kg/m^2/s",
+    "PRATEsfc": "mm/day",
     "eastward_wind_at_ten_meters": "m/s",
     "northward_wind_at_ten_meters": "m/s",
     "wind_speed": "m/s",
 }
+PRECIP_VARS = {"PRATEsfc"}
+_KG_TO_MM_PER_DAY = 86400  # (kg/m^2/s) -> (mm/day)
+
+_PRECIP_CLEVS = np.array(
+    [
+        0,
+        0.5,
+        1,
+        2.5,
+        5,
+        7.5,
+        10,
+        15,
+        20,
+        30,
+        40,
+        50,
+        70,
+        100,
+        150,
+        200,
+        250,
+        300,
+        400,
+        500,
+        700,
+        1000,
+        1500,
+    ]
+)
+
+
+def make_precip_cmap(max_value=None):
+    clevs = _PRECIP_CLEVS.copy()
+    if max_value is not None:
+        idx = np.argmax(clevs > max_value)
+        if idx > 0:
+            clevs = clevs[:idx]
+        else:
+            raise ValueError("max_value is less than the minimum clev value")
+    clevs = clevs[1:]  # drop the 0 level (used only for bounds)
+    base_cmap = plt.get_cmap("turbo")
+    step = max(1, base_cmap.N // len(clevs))
+    cmaplist = [base_cmap(i) for i in range(0, base_cmap.N, step)][: len(clevs)]
+    cmap = colors.LinearSegmentedColormap.from_list(
+        "precip_cmap", cmaplist, base_cmap.N
+    )
+    norm = colors.BoundaryNorm(clevs, cmap.N)
+    return cmap, norm
 
 
 def parse_args():
@@ -72,6 +122,15 @@ def parse_args():
         nargs="*",
         default=None,
         help="Filter to only these variables (default: all eligible variables)",
+    )
+    parser.add_argument(
+        "--generation-only",
+        action="store_true",
+        default=False,
+        help=(
+            "Plot only generated (predicted) samples; "
+            "do not require paired target data or coarse data merging."
+        ),
     )
     return parser.parse_args()
 
@@ -158,7 +217,13 @@ def upsample_array(x: np.ndarray, upsample_factor: int = 32) -> np.ndarray:
 def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
     if samples is None:
         samples = list(range(ds.sample.size))
-    N = 2 + len(samples)
+    if len(samples) == 0:
+        samples = [0]
+
+    # Show whichever reference panels are present in the dataset
+    reference_panels = [s for s in ("coarse", "target") if f"{var_name}_{s}" in ds]
+    n_reference = len(reference_panels)
+    N = n_reference + len(samples)
     n_rows = math.ceil(N / n_cols)
 
     fig, axes = plt.subplots(
@@ -169,56 +234,55 @@ def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
     )
 
     axes = axes.ravel()  # 1D array, easy to index
-    # Use only the first N axes
     for ax in axes[N:]:
         ax.set_visible(False)
 
-    suffixes = ["coarse", "target", "predicted"]
-    var_names_with_suffixes = [f"{var_name}_{suffix}" for suffix in suffixes]
-    ds_ = ds[var_names_with_suffixes]
+    predicted_name = f"{var_name}_predicted"
+    reference_names = [f"{var_name}_{s}" for s in reference_panels]
+    vars_to_load = reference_names + [predicted_name]
+    ds_ = ds[vars_to_load].copy(deep=True)
 
     if sel:
         ds_ = ds_.sel(sel)
 
-    if len(samples) == 0:
-        samples = [0]
-
-    if var_name == "PRMSL":
-        # fill PRMSL_coarse with nans
-        ds_["PRMSL_coarse"].values[:] = np.nan
-        # For colorbar range, use only target and predicted (coarse is hidden)
-        arr = ds_[["PRMSL_target", "PRMSL_predicted"]].to_array()
+    if var_name in PRECIP_VARS:
+        for v in vars_to_load:
+            ds_[v] = ds_[v] * _KG_TO_MM_PER_DAY
+            ds_[v].attrs["units"] = "mm/day"
+        cmap, norm = make_precip_cmap()
+        plot_kwargs["cmap"] = cmap
+        plot_kwargs["norm"] = norm
     else:
-        arr = ds_.to_array()
+        if var_name == "PRMSL" and "PRMSL_coarse" in ds_:
+            # fill PRMSL_coarse with nans; exclude it from color range
+            ds_["PRMSL_coarse"].values[:] = np.nan
+            range_vars = [v for v in vars_to_load if v != "PRMSL_coarse"]
+            arr = ds_[range_vars].to_array()
+        else:
+            arr = ds_.to_array()
+        vals = arr.values
+        if hasattr(vals, "compute"):
+            vals = vals.compute()
+        data_min = np.nanmin(vals)
+        data_max = np.nanmax(vals)
+        if data_min < -0.2:
+            plot_kwargs["cmap"] = "RdBu_r"
+        else:
+            plot_kwargs["cmap"] = "turbo"
+            plot_kwargs["vmin"] = max(0, data_min)
+        if "vmax" not in plot_kwargs:
+            plot_kwargs["vmax"] = data_max
 
-    vals = arr.values
-    if hasattr(vals, "compute"):
-        vals = vals.compute()
-    data_min = np.nanmin(vals)
-    data_max = np.nanmax(vals)
-    if data_min < -0.2:
-        plot_kwargs["cmap"] = "RdBu_r"
-    else:
-        plot_kwargs["cmap"] = "turbo"
-        plot_kwargs["vmin"] = max(0, data_min)
-    vmax = data_max
-    if "vmax" not in plot_kwargs:
-        plot_kwargs["vmax"] = vmax
-    # coarse and target
-    for i, var in enumerate(var_names_with_suffixes[:2]):
+    for i, (var, label) in enumerate(zip(reference_names, reference_panels)):
         ax = axes[i]
-
         da = ds_[var]
         img = da.plot(ax=ax, add_colorbar=False, **plot_kwargs)
-
-        ax.set_title(suffixes[i], fontsize=10)
+        ax.set_title(label, fontsize=10)
         ax.add_feature(states_feature)
         ax.add_feature(cfeature.BORDERS, color="lightgrey")
         ax.coastlines(color="lightgrey")
-
         row = i // n_cols
         col = i % n_cols
-
         add_outer_latlon_grid(
             ax,
             show_left=(col == 0),
@@ -226,21 +290,21 @@ def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
         )
 
     for i, s in enumerate(samples):
-        ax = axes[2 + i]
-        da = ds_[var_names_with_suffixes[-1]].isel(sample=s)
-
+        ax = axes[n_reference + i]
+        da = ds_[predicted_name].isel(sample=s)
         img = da.plot(ax=ax, add_colorbar=False, **plot_kwargs)
         ax.set_title(f"predicted {s}", fontsize=10)
         ax.add_feature(states_feature)
         ax.coastlines(color="lightgrey")
         ax.add_feature(cfeature.BORDERS, linestyle="-", color="lightgrey")
-        row = (i + 2) // n_cols
-        col = (i + 2) % n_cols
+        row = (n_reference + i) // n_cols
+        col = (n_reference + i) % n_cols
         add_outer_latlon_grid(
             ax,
             show_left=(col == 0),
             show_bottom=(row == n_rows - 1),
         )
+
     cbar_ax = fig.add_axes([0.99, 0.25, 0.01, 0.5])  # [left, bottom, width, height]
     cbar = fig.colorbar(img, cax=cbar_ax)
     cbar.set_label(f"{var_name} [{UNITS.get(var_name, '')}]")
@@ -257,6 +321,13 @@ def detect_variable_pairs(ds: xr.Dataset) -> list[str]:
     return sorted(predicted & target)
 
 
+def detect_predicted_variables(ds: xr.Dataset) -> list[str]:
+    """Detect variables that have a _predicted version (no target required)."""
+    return sorted(
+        v[: -len("_predicted")] for v in ds.data_vars if v.endswith("_predicted")
+    )
+
+
 def filename_to_datetime(filename: str) -> cftime.DatetimeJulian:
     match = re.search(r"(\d{4})(\d{2})(\d{2})(?:T(\d{2}))?", filename)
     if match is None:
@@ -265,40 +336,63 @@ def filename_to_datetime(filename: str) -> cftime.DatetimeJulian:
         int(match.group(1)),
         int(match.group(2)),
         int(match.group(3)),
-        int(match.group(4) or 12),
+        int(match.group(4) or 00),
     )
 
 
 def add_wind_speed(ds: xr.Dataset) -> xr.Dataset:
-    variables = detect_variable_pairs(ds)
-    if (
-        "eastward_wind_at_ten_meters" in variables
-        and "northward_wind_at_ten_meters" in variables
-    ):
-        ds["wind_speed_target"] = np.sqrt(
-            ds.eastward_wind_at_ten_meters_target**2
-            + ds.northward_wind_at_ten_meters_target**2
-        )
-        ds["wind_speed_predicted"] = np.sqrt(
-            ds.eastward_wind_at_ten_meters_predicted**2
-            + ds.northward_wind_at_ten_meters_predicted**2
-        )
-        ds["wind_speed_coarse"] = np.sqrt(
-            ds.eastward_wind_at_ten_meters_coarse**2
-            + ds.northward_wind_at_ten_meters_coarse**2
-        )
+    u_pred = "eastward_wind_at_ten_meters_predicted"
+    v_pred = "northward_wind_at_ten_meters_predicted"
+    if u_pred not in ds or v_pred not in ds:
+        return ds
+    ds["wind_speed_predicted"] = np.sqrt(ds[u_pred] ** 2 + ds[v_pred] ** 2)
+    for suffix in ("target", "coarse"):
+        u = f"eastward_wind_at_ten_meters_{suffix}"
+        v = f"northward_wind_at_ten_meters_{suffix}"
+        if u in ds and v in ds:
+            ds[f"wind_speed_{suffix}"] = np.sqrt(ds[u] ** 2 + ds[v] ** 2)
     return ds
+
+
+_LAT_NAMES = ("lat", "latitude", "grid_yt", "y")
+_LON_NAMES = ("lon", "longitude", "grid_xt", "x")
+
+
+def _coerce_datetime(dt: cftime.DatetimeJulian, time_coord: xr.DataArray):
+    """Convert dt to match the dtype of time_coord (cftime or numpy datetime64)."""
+    import pandas as pd
+
+    if np.issubdtype(time_coord.dtype, np.datetime64):
+        return pd.Timestamp(dt.year, dt.month, dt.day, dt.hour)
+    return dt
+
+
+def _detect_coord(ds: xr.Dataset, candidates: tuple[str, ...]) -> str:
+    for name in candidates:
+        if name in ds.coords or name in ds.dims:
+            return name
+    raise ValueError(
+        f"Could not find a coordinate matching any of {candidates} in dataset. "
+        f"Available coords: {list(ds.coords)}"
+    )
 
 
 def merge_coarse(
     event: xr.Dataset, coarse: xr.Dataset, datetime: cftime.DatetimeJulian
 ) -> xr.Dataset:
-    _coarse = coarse.sel(
-        time=datetime,
-        grid_yt=slice(event.lat.min(), event.lat.max()),
-        grid_xt=slice(event.lon.min(), event.lon.max()),
+    lat_coord = _detect_coord(coarse, _LAT_NAMES)
+    lon_coord = _detect_coord(coarse, _LON_NAMES)
+    t = _coerce_datetime(datetime, coarse.time)
+    _coarse = coarse.sel(time=t, method="nearest").sel(
+        **{
+            lat_coord: slice(event.lat.min(), event.lat.max()),
+            lon_coord: slice(event.lon.min(), event.lon.max()),
+        }
     )
-    for var in detect_variable_pairs(event):
+    candidates = detect_variable_pairs(event) or detect_predicted_variables(event)
+    for var in candidates:
+        if var not in _coarse:
+            continue
         event[f"{var}_coarse"] = xr.DataArray(
             upsample_array(_coarse[var].values, 32), dims=["lat", "lon"]
         )
@@ -309,7 +403,11 @@ def main():
     args = parse_args()
     beaker_id = args.beaker_dataset_id
     output_dir = Path(args.output_dir)
-    coarse = get_coarse_data(args.coarse_data, time_sel=TIME_SEL)
+    generation_only = args.generation_only
+
+    load_coarse = not generation_only or args.coarse_data is not None
+    if load_coarse:
+        coarse = get_coarse_data(args.coarse_data, time_sel=TIME_SEL)
 
     print(f"Fetching beaker dataset: {beaker_id}")
 
@@ -330,16 +428,24 @@ def main():
             print(f"Processing: {nc_file.name} -> {output_event_dir}")
 
             event = xr.open_dataset(nc_file)
-            event = merge_coarse(
-                event, coarse, datetime=filename_to_datetime(nc_file.name)
-            )
+            if load_coarse:
+                event = merge_coarse(
+                    event, coarse, datetime=filename_to_datetime(nc_file.name)
+                )
             event = add_wind_speed(event)
-            variables = detect_variable_pairs(event)
+
+            if generation_only:
+                variables = detect_predicted_variables(event)
+                no_vars_msg = f"  No predicted variables found in {nc_file.name}"
+            else:
+                variables = detect_variable_pairs(event)
+                no_vars_msg = f"  No variable pairs found in {nc_file.name}"
+
             if args.variables is not None:
                 variables = [v for v in variables if v in args.variables]
 
             if not variables:
-                print(f"  No variable pairs found in {nc_file.name}")
+                print(no_vars_msg)
                 continue
             for var in variables:
                 fig, axes = plot_event(event, var)
@@ -350,12 +456,14 @@ def main():
                     bbox_inches="tight",
                 )
                 plt.close(fig)
-                plot_histogram_lines(
-                    event,
-                    var,
-                    event_name,
-                    save_path=output_event_dir / f"{var}_histogram.png",
-                )
+                if not generation_only:
+                    plot_histogram_lines(
+                        event,
+                        var,
+                        event_name,
+                        save_path=output_event_dir / f"{var}_histogram.png",
+                    )
+                print(f"  Saved: {output_event_dir / f'{var}_generated_maps.png'}")
             event.close()
 
     print("Done!")

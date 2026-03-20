@@ -38,6 +38,11 @@ def parse_args():
         default="./histogram_outputs",
         help="Output directory for figures (default: ./histogram_outputs)",
     )
+    parser.add_argument(
+        "--generation-only",
+        action="store_true",
+        help="Plot only predicted/generated samples without target comparison",
+    )
     return parser.parse_args()
 
 
@@ -48,6 +53,81 @@ def detect_variable_pairs(ds: xr.Dataset) -> list[str]:
     }
     target = {v[: -len("_target")] for v in ds.data_vars if v.endswith("_target")}
     return sorted(predicted & target)
+
+
+def detect_predicted_variables(ds: xr.Dataset) -> list[str]:
+    """Detect variables that have a _predicted version."""
+    return sorted(
+        v[: -len("_predicted")] for v in ds.data_vars if v.endswith("_predicted")
+    )
+
+
+def plot_histogram_lines_generation_only(
+    ds: xr.Dataset,
+    key_prefix: str,
+    title_prefix: str,
+    save_path: Path,
+) -> None:
+    """
+    Plot histogram of ensemble predictions only (no target comparison).
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    predicted_data = ds[f"{key_prefix}_predicted"]
+    sample_data = predicted_data.values
+    if sample_data.ndim < 3:
+        raise ValueError(
+            f"Expected predicted data to be at least 3D (..., lat, lon), "
+            f"got shape {sample_data.shape}"
+        )
+    # Merge all leading dims into a single samples dimension
+    sample_data = sample_data.reshape(-1, sample_data.shape[-2], sample_data.shape[-1])
+
+    data_min, data_max = np.min(sample_data), np.max(sample_data)
+    bins = 50
+    bin_edges = np.linspace(data_min, data_max, bins + 1)
+    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+
+    all_counts = []
+    num_samples = sample_data.shape[0]
+    for i in range(num_samples):
+        sample_flat = sample_data[i].flatten()
+        sample_counts, _ = np.histogram(sample_flat, bins=bin_edges)
+        ax.step(
+            bin_centers,
+            sample_counts,
+            where="mid",
+            alpha=0.1,
+            label="Samples" if i == 0 else None,
+        )
+        all_counts.append(sample_counts)
+    all_counts = np.stack(all_counts)
+
+    avg_counts = np.mean(all_counts, axis=0)
+    ylim_min = 0.1
+    ylim_max = 10 ** (np.log10(np.max(avg_counts)) + 1)
+
+    ax.step(
+        bin_centers,
+        avg_counts,
+        where="mid",
+        color="C0",
+        linewidth=2,
+        label="Average Predicted",
+    )
+
+    var_label = key_prefix.replace("_", " ").title()
+    ax.set_xlabel(var_label)
+    ax.set_ylabel("Count")
+    ax.set_yscale("log")
+    ax.set_ylim(ylim_min, ylim_max)
+    ax.grid(which="major", linestyle="--", linewidth=0.5, alpha=0.5)
+    ax.set_title(f"{title_prefix} distribution: {var_label}")
+    ax.legend()
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
 def plot_histogram_lines(
@@ -193,16 +273,29 @@ def main():
             print(f"Processing: {nc_file.name} -> {output_event_dir}")
 
             ds = xr.open_dataset(nc_file)
-            variables = detect_variable_pairs(ds)
 
-            if not variables:
-                print(f"  No variable pairs found in {nc_file.name}")
-                continue
-
-            for var_prefix in variables:
-                fig_path = output_event_dir / f"{var_prefix}.png"
-                plot_histogram_lines(ds, var_prefix, event_name, save_path=fig_path)
-                print(f"  Saved: {fig_path}")
+            if args.generation_only:
+                variables = detect_predicted_variables(ds)
+                if not variables:
+                    print(f"  No predicted variables found in {nc_file.name}")
+                    ds.close()
+                    continue
+                for var_prefix in variables:
+                    fig_path = output_event_dir / f"{var_prefix}.png"
+                    plot_histogram_lines_generation_only(
+                        ds, var_prefix, event_name, save_path=fig_path
+                    )
+                    print(f"  Saved: {fig_path}")
+            else:
+                variables = detect_variable_pairs(ds)
+                if not variables:
+                    print(f"  No variable pairs found in {nc_file.name}")
+                    ds.close()
+                    continue
+                for var_prefix in variables:
+                    fig_path = output_event_dir / f"{var_prefix}.png"
+                    plot_histogram_lines(ds, var_prefix, event_name, save_path=fig_path)
+                    print(f"  Saved: {fig_path}")
 
             ds.close()
 
