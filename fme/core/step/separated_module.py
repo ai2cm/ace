@@ -55,9 +55,9 @@ class SeparatedModuleStepConfig(StepConfigABC):
 
     builder: SeparatedModuleSelector
     prognostic_names: list[str]
+    normalization: NetworkAndLossNormalizationConfig
     forcing_names: list[str] = dataclasses.field(default_factory=list)
     diagnostic_names: list[str] = dataclasses.field(default_factory=list)
-    normalization: NetworkAndLossNormalizationConfig
     secondary_decoder: SecondaryDecoderConfig | None = None
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
