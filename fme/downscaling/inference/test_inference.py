@@ -64,8 +64,11 @@ def mock_output_target():
 
 def get_static_inputs(shape=(16, 16)):
     data = torch.randn(shape)
-    coords = LatLonCoordinates(lat=torch.arange(shape[0]), lon=torch.arange(shape[1]))
-    return StaticInputs([StaticInput(data=data, coords=coords)])
+    coords = LatLonCoordinates(
+        lat=torch.arange(shape[0], dtype=torch.float32),
+        lon=torch.arange(shape[1], dtype=torch.float32),
+    )
+    return StaticInputs([StaticInput(data=data)], coords=coords)
 
 
 # Tests for Downscaler initialization
