@@ -86,36 +86,36 @@ def test_from_state_backwards_compatible_has_coords():
     coords = _make_coords()
     state = StaticInputs([StaticInput(data)], coords=coords).get_state()
     result = StaticInputs.from_state_backwards_compatible(
-        state=state, static_inputs_config={}, fine_coordinates_path=None
+        state=state, static_inputs_config={}
     )
+    assert result is not None
     assert torch.equal(result[0].data, data)
 
 
-def test_from_state_backwards_compatible_no_state_no_config(tmp_path):
-    """Old checkpoint with no static inputs: empty StaticInputs with loaded coords."""
-    coords_path = str(tmp_path / "coords.nc")
-    dim_len = 4
-    _write_coords_netcdf(coords_path, n=dim_len)
+def test_from_state_backwards_compatible_no_state_no_config():
+    """No static inputs in checkpoint and no config: returns None."""
     result = StaticInputs.from_state_backwards_compatible(
-        state={}, static_inputs_config={}, fine_coordinates_path=coords_path
+        state={}, static_inputs_config={}
     )
-    assert result.fields == []
-    assert result.coords.lat.shape == (dim_len,)
+    assert result is None
 
 
 def test_from_state_backwards_compatible_with_config(tmp_path):
-    """Old checkpoint with static_inputs_config: loads fields from paths."""
-    coords_path = str(tmp_path / "coords.nc")
+    """Checkpoint with static_inputs_config: loads fields and coords from files."""
     dim_len = 4
-    _write_coords_netcdf(coords_path, n=dim_len)
+    lat = np.linspace(0, 1, dim_len, dtype=np.float32)
+    lon = np.linspace(0, 1, dim_len, dtype=np.float32)
     field_data = np.random.rand(dim_len, dim_len).astype(np.float32)
     field_path = str(tmp_path / "field.nc")
-    xr.Dataset({"HGTsfc": (["lat", "lon"], field_data)}).to_netcdf(field_path)
+    xr.Dataset(
+        {"HGTsfc": (["lat", "lon"], field_data)},
+        coords={"lat": lat, "lon": lon},
+    ).to_netcdf(field_path)
     result = StaticInputs.from_state_backwards_compatible(
         state={},
         static_inputs_config={"HGTsfc": field_path},
-        fine_coordinates_path=coords_path,
     )
+    assert result is not None
     assert len(result.fields) == 1
 
 
@@ -133,31 +133,6 @@ def test_from_state_backwards_compatible_raises_state_and_config():
         StaticInputs.from_state_backwards_compatible(
             state=state,
             static_inputs_config={"HGTsfc": "some/path"},
-            fine_coordinates_path=None,
-        )
-
-
-def test_from_state_backwards_compatible_raises_coords_in_state_and_path():
-    """Errors if state has coords and fine_coordinates_path is also provided."""
-    dim_len = 4
-    data = torch.arange(dim_len * dim_len, dtype=torch.float32).reshape(
-        dim_len, dim_len
-    )
-    coords = _make_coords(n=dim_len)
-    state = StaticInputs([StaticInput(data)], coords=coords).get_state()
-    with pytest.raises(ValueError, match="fine_coordinates_path"):
-        StaticInputs.from_state_backwards_compatible(
-            state=state,
-            static_inputs_config={},
-            fine_coordinates_path="some/path",
-        )
-
-
-def test_from_state_backwards_compatible_raises_no_coords():
-    """Errors if no coords in state and no fine_coordinates_path."""
-    with pytest.raises(ValueError, match="No coordinates"):
-        StaticInputs.from_state_backwards_compatible(
-            state={}, static_inputs_config={}, fine_coordinates_path=None
         )
 
 

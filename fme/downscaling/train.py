@@ -429,9 +429,10 @@ class TrainerConfig:
             train=False,
             requirements=self.model.data_requirements,
         )
-        static_inputs = load_static_inputs(
-            self.static_inputs, fallback_coords=train_data.fine_coords
-        )
+        if self.static_inputs:
+            static_inputs = load_static_inputs(self.static_inputs)
+        else:
+            static_inputs = None
 
         if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:
             model_coarse_shape = (
@@ -444,6 +445,7 @@ class TrainerConfig:
         downscaling_model = self.model.build(
             model_coarse_shape,
             train_data.downscale_factor,
+            full_fine_coords=train_data.fine_coords,
             static_inputs=static_inputs,
         )
 
