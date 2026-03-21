@@ -444,6 +444,7 @@ class TrainerConfig:
         downscaling_model = self.model.build(
             model_coarse_shape,
             train_data.downscale_factor,
+            full_fine_coords=train_data.fine_coords,
             static_inputs=static_inputs,
         )
 
