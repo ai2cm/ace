@@ -17,6 +17,7 @@ class StaticInput:
             raise ValueError(
                 f"StaticInput data must be 2D. Got shape {self.data.shape}"
             )
+        self._shape = (self.data.shape[0], self.data.shape[1])
 
     @property
     def dim(self) -> int:
@@ -24,7 +25,7 @@ class StaticInput:
 
     @property
     def shape(self) -> tuple[int, int]:
-        return self.data.shape
+        return self._shape
 
     def subset(
         self,
@@ -64,7 +65,7 @@ def _load_coords_from_ds(ds: xr.Dataset) -> LatLonCoordinates:
 
 def _get_normalized_static_input(
     path: str, field_name: str
-) -> tuple["StaticInput", LatLonCoordinates]:
+) -> tuple[StaticInput, LatLonCoordinates]:
     """
     Load a static input field from a given file path and field name and
     normalize it.

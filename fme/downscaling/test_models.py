@@ -665,5 +665,5 @@ def test_checkpoint_model_build_with_fine_coordinates_path(tmp_path):
     )
     loaded_model = config.build()
     assert loaded_model.full_fine_coords is not None
-    assert torch.allclose(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat)
-    assert torch.allclose(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon)
+    assert torch.equal(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat.cpu())
+    assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
