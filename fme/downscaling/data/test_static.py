@@ -28,7 +28,7 @@ def test_Topography_error_cases(init_args):
         StaticInput(*init_args)
 
 
-def test_subset_latlon():
+def test_subset():
     full_data_shape = (10, 10)
     expected_slices = [slice(2, 6), slice(3, 8)]
     data = torch.randn(*full_data_shape)
@@ -38,7 +38,7 @@ def test_subset_latlon():
     topo = StaticInput(data=data, coords=coords)
     lat_interval = ClosedInterval(2, 5)
     lon_interval = ClosedInterval(3, 7)
-    subset_topo = topo.subset_latlon(lat_interval, lon_interval)
+    subset_topo = topo.subset(lat_interval, lon_interval)
     expected_lats = torch.tensor([2, 3, 4, 5], dtype=coords.lat.dtype)
     expected_lons = torch.tensor([3, 4, 5, 6, 7], dtype=coords.lon.dtype)
     expected_data = data[*expected_slices]

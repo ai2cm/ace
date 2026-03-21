@@ -32,13 +32,13 @@ class StaticInput:
     def shape(self) -> tuple[int, int]:
         return self.data.shape
 
-    def subset_latlon(
+    def subset(
         self,
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
     ) -> "StaticInput":
-        lat_slice = lat_interval.slice_of(self.coords.lat)
-        lon_slice = lon_interval.slice_of(self.coords.lon)
+        lat_slice = lat_interval.slice_from(self.coords.lat)
+        lon_slice = lon_interval.slice_from(self.coords.lon)
         return self._latlon_index_slice(lat_slice=lat_slice, lon_slice=lon_slice)
 
     def to_device(self) -> "StaticInput":
@@ -134,14 +134,16 @@ class StaticInputs:
             raise ValueError("No fields in StaticInputs to get shape from.")
         return self.fields[0].shape
 
-    def subset_latlon(
+    def subset(
         self,
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
     ) -> "StaticInputs":
+        lat_slice = lat_interval.slice_from(self.coords.lat)
+        lon_slice = lon_interval.slice_from(self.coords.lon)
         return StaticInputs(
             fields=[
-                field.subset_latlon(lat_interval, lon_interval) for field in self.fields
+                field._latlon_index_slice(lat_slice, lon_slice) for field in self.fields
             ]
         )
 
