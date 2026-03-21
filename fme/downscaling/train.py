@@ -393,7 +393,7 @@ class TrainerConfig:
     experiment_dir: str
     save_checkpoints: bool
     logging: LoggingConfig
-    static_inputs: dict[str, str] | None = None
+    static_inputs: dict[str, str] = dataclasses.field(default_factory=dict)
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
