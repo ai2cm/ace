@@ -65,16 +65,10 @@ class ClosedInterval:
 
     def subset_of(self, coords: torch.Tensor) -> torch.Tensor:
         """
-        Return the values from `coords` that fall within this interval.
-
-        Args:
-            coords: A 1-D tensor of coordinate values.
-
-        Returns:
-            A tensor containing only the values within [start, stop].
+        Return a subset of `coords` that falls within this specified interval.
+        This assumes `coords` is monotonically increasing.
         """
-        mask = (coords >= self.start) & (coords <= self.stop)
-        return coords[mask]
+        return coords[self.slice_from(coords)]
 
 
 def scale_slice(slice_: slice, scale: int) -> slice:
