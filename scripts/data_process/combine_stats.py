@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 import shutil
 import tempfile
 from typing import Dict, List
@@ -65,6 +66,16 @@ def open_datasets(roots: List[str], filename: str) -> List[xr.Dataset]:
     return datasets
 
 
+def _combined_stats_exist(output_directory: str, subdirectory: str) -> bool:
+    """Check if combined stats already exist."""
+    path = output_directory + f"/{subdirectory}/centering.nc"
+    if output_directory.startswith("gs:"):
+        fs = fsspec.filesystem("gs")
+        return fs.exists(path)
+    else:
+        return fsspec.filesystem("file").exists(path)
+
+
 def combine_stats(
     stats_roots: list[str],
     output_directory: str,
@@ -77,6 +88,13 @@ def combine_stats(
     Args:
         stats_roots: List of root directories with the stats to combine.
     """
+    if _combined_stats_exist(output_directory, subdirectory):
+        logging.info(
+            f"Combined stats already exist at "
+            f"{output_directory}/{subdirectory}. Skipping."
+        )
+        return
+
     with tempfile.TemporaryDirectory() as tmpdir, xr.set_options(keep_attrs=True):
         for filename in (
             "centering.nc",
@@ -148,6 +166,7 @@ def main(config_yaml: str):
     Arguments:
     config_yaml -- Path to the configuration file for the data processing pipeline.
     """
+    logging.basicConfig(level=logging.INFO)
     with open(config_yaml, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
     config = dacite.from_dict(data_class=Config, data=config_data)

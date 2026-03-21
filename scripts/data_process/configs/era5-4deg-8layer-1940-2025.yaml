@@ -1,16 +1,16 @@
 runs:
-  2024-06-20-era5-1deg-8layer-1940-2022: ""  # no real data source, config only for computing stats
+  2026-03-19-era5-4deg-8layer-1940-2025: ""  # no real data source, config only for computing stats
 data_output_directory: gs://vcm-ml-intermediate
 stats:
-  output_directory: gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-stats-1990-2019
-  beaker_dataset: 2024-06-20-era5-1deg-8layer-stats-1990-2019
+  output_directory: gs://vcm-ml-intermediate/2026-03-19-era5-4deg-8layer-stats-1990-2019
+  beaker_dataset: 2026-03-19-era5-4deg-8layer-stats-1990-2019
   start_date: "1990-01-01"
   end_date: "2019-12-31"
   data_type: ERA5
 time_coarsen:
   factor: 4
-  data_output_directory: gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-daily-1940-2022
-  stats_output_directory: gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-daily-stats-1990-2019
+  data_output_directory: gs://vcm-ml-intermediate/2026-03-19-era5-4deg-8layer-daily-1940-2022
+  stats_output_directory: gs://vcm-ml-intermediate/2026-03-19-era5-4deg-8layer-daily-stats-1990-2019
   snapshot_names:
     - DPT2m
     - PRESsfc
