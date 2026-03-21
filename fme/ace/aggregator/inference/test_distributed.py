@@ -15,7 +15,7 @@ def test_mean_metrics_call_distributed():
     """
     with mock_distributed(-1.0):
         data_a = torch.ones([2, 3, 4, 4], device=get_device())
-        area_weights = torch.ones(1, 1).to(get_device())
+        area_weights = torch.ones(4, 4).to(get_device())
         agg = MeanAggregator(
             LatLonOperations(area_weights), target="denorm", n_timesteps=3
         )
@@ -35,7 +35,7 @@ def test_time_mean_metrics_call_distributed():
     """
     torch.manual_seed(0)
     with mock_distributed(0.0) as mock:
-        area_weights = torch.ones(1, 1).to(get_device())
+        area_weights = torch.ones(4, 4).to(get_device())
         agg = TimeMeanEvaluatorAggregator(
             LatLonOperations(area_weights), horizontal_dims=["lat", "lon"]
         )
