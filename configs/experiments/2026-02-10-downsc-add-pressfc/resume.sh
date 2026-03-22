@@ -22,7 +22,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 
-PREVIOUS_RESULTS_DATASET="01KM1XK9B77PRDFZ4ET2J2HK2C"
+PREVIOUS_RESULTS_DATASET="01KM6P4KN0FN5NY30CW79D7ARM"
 
 
 gantry run \

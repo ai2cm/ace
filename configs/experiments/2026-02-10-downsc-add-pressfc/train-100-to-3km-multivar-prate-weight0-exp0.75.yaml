@@ -145,7 +145,7 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 500
+max_epochs: 250
 validate_interval: 15
 experiment_dir: /results
 save_checkpoints: false

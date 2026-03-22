@@ -1,12 +1,11 @@
 resume_results_dir: /previous_results
-resume_wandb: false
 loss_weights:
   weights:
     PRATEsfc:
-      start_epoch: 270
-      end_epoch: 570
-      start_weight: 0.000001
-      end_weight: 1.0
+      start_epoch: 250
+      end_epoch: 400
+      start_weight: 0.0
+      end_weight: 0.7
 loss_weight_exponent: 0.75
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
@@ -66,7 +65,7 @@ validate_using_ema: true
 train_data:
   sample_with_replacement: 640
   batch_size: 120
-  num_data_workers: 4
+  num_data_workers: 2
   fine:
   - merge:
     - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
@@ -103,7 +102,7 @@ train_data:
     stop: 195
   strict_ensemble: false
 validation_data:
-  batch_size: 56
+  batch_size: 16
   num_data_workers: 4
   fine:
   - merge:
@@ -147,7 +146,7 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 600
+max_epochs: 500
 validate_interval: 15
 experiment_dir: /results
 save_checkpoints: false
