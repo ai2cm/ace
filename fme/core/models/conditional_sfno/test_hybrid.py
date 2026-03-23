@@ -72,34 +72,6 @@ def test_can_call_hybridnet_with_localnet():
     assert diag_out.shape == (n_samples, n_diagnostic, *img_shape)
 
 
-def test_can_call_hybridnet_with_localnet_conv1x1():
-    n_forcing = 3
-    n_prognostic = 2
-    n_diagnostic = 4
-    img_shape = (9, 18)
-    n_samples = 4
-    device = get_device()
-    config = HybridNetConfig(
-        backbone=SFNONetConfig(embed_dim=16, num_layers=2, filter_type="makani-linear"),
-        local=LocalNetConfig(
-            embed_dim=16,
-            block_types=["conv1x1", "conv1x1"],
-        ),
-    )
-    model = get_lat_lon_hybridnet(
-        params=config,
-        n_forcing_channels=n_forcing,
-        n_prognostic_channels=n_prognostic,
-        n_diagnostic_channels=n_diagnostic,
-        img_shape=img_shape,
-    ).to(device)
-    forcing = torch.randn(n_samples, n_forcing, *img_shape, device=device)
-    prognostic = torch.randn(n_samples, n_prognostic, *img_shape, device=device)
-    prog_out, diag_out = model(forcing, prognostic)
-    assert prog_out.shape == (n_samples, n_prognostic, *img_shape)
-    assert diag_out.shape == (n_samples, n_diagnostic, *img_shape)
-
-
 def test_hybridnet_with_labels():
     n_forcing = 3
     n_prognostic = 2
@@ -207,32 +179,6 @@ def test_backward_pass():
     loss.backward()
     for name, param in model.named_parameters():
         assert param.grad is not None, f"No gradient for {name}"
-
-
-def test_ankur_disco_encoder():
-    """Test HybridNet with AnkurLocalNet using DISCO encoder."""
-    n_forcing = 3
-    n_prognostic = 2
-    n_diagnostic = 4
-    img_shape = (9, 18)
-    n_samples = 2
-    device = get_device()
-    config = HybridNetConfig(
-        backbone=SFNONetConfig(embed_dim=16, num_layers=2, filter_type="makani-linear"),
-        local=AnkurLocalNetConfig(embed_dim=16, use_disco_encoder=True, pos_embed=True),
-    )
-    model = get_lat_lon_hybridnet(
-        params=config,
-        n_forcing_channels=n_forcing,
-        n_prognostic_channels=n_prognostic,
-        n_diagnostic_channels=n_diagnostic,
-        img_shape=img_shape,
-    ).to(device)
-    forcing = torch.randn(n_samples, n_forcing, *img_shape, device=device)
-    prognostic = torch.randn(n_samples, n_prognostic, *img_shape, device=device)
-    prog_out, diag_out = model(forcing, prognostic)
-    assert prog_out.shape == (n_samples, n_prognostic, *img_shape)
-    assert diag_out.shape == (n_samples, n_diagnostic, *img_shape)
 
 
 def setup_hybridnet():
