@@ -2,7 +2,19 @@ experiment_dir: /results
 checkpoint_path: /ckpt.tar
 data_writer:
   save_prediction_files: false
-  save_monthly_files: false
+  save_monthly_files: true
+  names:
+    - surface_temperature
+    - LHTFLsfc
+    - SHTFLsfc
+    - DLWRFsfc
+    - DSWRFsfc
+    - ULWRFsfc
+    - USWRFsfc
+    - ULWRFtoa
+    - USWRFtoa
+    - PRATEsfc
+    - total_frozen_precipitation_rate
 logging:
   project: ace-shield
   log_to_screen: true
