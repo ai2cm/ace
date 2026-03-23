@@ -31,11 +31,11 @@ model:
     type: unet_diffusion_song_v2
   normalization:
     coarse:
-      global_means_path: /climate-default/home/annak/stats/stats_100km_XSHiELD_AMIP_log_precip/centering.nc
-      global_stds_path: /climate-default/home/annak/stats/stats_100km_XSHiELD_AMIP_log_precip/scaling-full-field.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-pressfc-cp-to-prmsl.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-pressfc-cp-to-prmsl.nc
     fine:
-      global_means_path: /climate-default/home/annak/stats/stats_3km_XSHiELD_AMIP_log_precip/centering.nc
-      global_stds_path: /climate-default/home/annak/stats/stats_3km_XSHiELD_AMIP_log_precip/centering.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering-20260206.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260206.nc
   num_diffusion_generation_steps: 18
   churn: 0.0
   training_noise_distribution:

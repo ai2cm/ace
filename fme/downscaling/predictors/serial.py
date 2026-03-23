@@ -56,8 +56,7 @@ class SerialPredictor:
         self.first_model = first_model
         self.second_model = second_model
         self._high_res_cond_names = high_res_cond
-        # First-model outputs that are not consumed as conditioning
-        self._first_model_output_names = first_out - high_res_cond
+        self._first_model_output_names = first_out
 
     @property
     def modules(self) -> torch.nn.ModuleList:
