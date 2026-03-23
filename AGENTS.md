@@ -45,9 +45,31 @@ single-rank `python -m pytest` run, then verify under spatial parallel via
 torchrun. Generating baselines under the same backend you test against does
 not validate cross-backend correctness.
 
-### GitHub MCP Server Setup
+## Code Guidelines for Agents
 
-To use the PR review rules, configure the GitHub MCP server in Cursor's "Tools & MCP" settings. You will need a read-only personal access token with the following permissions: Pull requests, Issues, Contents, Metadata.
+### Naming
+
+- Config classes loaded from user-specified yaml: append `Config` to the built type (`TrainStepperConfig`).
+- Private functions get a `_` prefix.
+
+### Config design
+
+- Validate in `__post_init__`, not at runtime.
+- Config loading backwards compatibility for inference is critical, but can be broken for training; use deprecation warnings for config removal. Ask user if unsure.
+
+### Testing
+
+- Create helpers for repeated test setup (threshold: 3+ instances).
+- Prefer explicit helpers over pytest fixtures; use fixtures only when sharing scope across tests is valuable.
+- When fixing a bug, add a failing test first.
+- Prefer tests that cover user-story-level behavior over tests that lock down subjective API details.
+- Helper function `validate_tensor_dict` is available for regression testing against a saved reference
+
+### Code organization
+
+- Consolidate duplicated code to shared locations (e.g. `fme/core/`).
+- `fme/core` is not allowed to import from `fme.ace` or other submodules.
+- `fme/ace` is allowed to import from `fme.core`, but not from other submodules.
 
 ## Pull Request Review Assistant
 
@@ -78,7 +100,8 @@ Use these severity buckets:
 - **Suggestions (Should Consider)**: performance, error handling, clarity/design improvements
 - **Minor/Nitpicks (Optional)**: style, naming, docs polish
 
-For re-reviews, classify prior comments as **Addressed**, **Partially Addressed**, **Unaddressed**, or **Dismissed**. Treat clear author rationale as addressed when appropriate.
+For re-reviews, classify prior comments as **Addressed**, **Partially Addressed**, **Unaddressed**, or **Dismissed**.
+Treat clear author rationale as addressed when appropriate.
 
 ### 4) Output format
 
