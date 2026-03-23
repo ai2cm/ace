@@ -1,5 +1,6 @@
 import dataclasses
 from collections.abc import Callable
+from typing import Literal, get_args
 
 import torch
 import torch.nn as nn
@@ -12,6 +13,8 @@ from .layers import MLP, ConditionalLayerNorm, Context, ContextConfig
 from .lora import LoRAConv2d
 from .sfnonet import DiscreteContinuousConvS2, NoLayerNorm, _compute_cutoff_radius
 
+BlockType = Literal["disco", "conv1x1"]
+
 
 @dataclasses.dataclass
 class LocalNetConfig:
@@ -19,18 +22,16 @@ class LocalNetConfig:
 
     Attributes:
         embed_dim: Dimension of the embeddings.
-        filter_type: Type of filter to use ('disco', 'conv1x1').
+        block_types: List of filter types for each block ('disco', 'conv1x1').
+            The length determines the number of blocks.
         global_layer_norm: Whether to reduce along the spatial domain when
             applying layer normalization.
-        num_layers: Number of blocks.
         use_mlp: Whether to use an MLP in each block.
         mlp_ratio: Ratio of MLP hidden dimension to the embedding dimension.
         activation_function: Activation function name ('relu', 'gelu', 'silu').
         encoder_layers: Number of convolutional layers in the encoder/decoder.
         pos_embed: Whether to use a learned positional embedding.
         big_skip: Whether to use a big skip connection from input to decoder.
-        conv1x1_blocks: List of block indices to use 1x1 convolutions
-            instead of the default filter type.
         normalize_big_skip: Whether to normalize the big skip connection.
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
@@ -42,21 +43,30 @@ class LocalNetConfig:
     """
 
     embed_dim: int = 256
-    filter_type: str = "disco"
+    block_types: list[BlockType] = dataclasses.field(
+        default_factory=lambda: ["disco"] * 12
+    )
     global_layer_norm: bool = False
-    num_layers: int = 12
     use_mlp: bool = True
     mlp_ratio: float = 2.0
     activation_function: str = "gelu"
     encoder_layers: int = 1
     pos_embed: bool = True
     big_skip: bool = True
-    conv1x1_blocks: list[int] | None = None
     normalize_big_skip: bool = False
     affine_norms: bool = False
     lora_rank: int = 0
     lora_alpha: float | None = None
     data_grid: str = "equiangular"
+
+    def __post_init__(self):
+        valid = get_args(BlockType)
+        for i, bt in enumerate(self.block_types):
+            if bt not in valid:
+                raise ValueError(
+                    f"Invalid block type {bt!r} at index {i}, "
+                    f"must be one of {valid}"
+                )
 
 
 class Conv1x1Filter(nn.Module):
@@ -321,7 +331,7 @@ class LocalNet(torch.nn.Module):
     ):
         super().__init__()
 
-        self.filter_type = params.filter_type
+        self.block_types = params.block_types
         self.mlp_ratio = params.mlp_ratio
         self.img_shape = img_shape
         self._spatial_h_slice, self._spatial_w_slice = (
@@ -331,17 +341,11 @@ class LocalNet(torch.nn.Module):
         self.in_chans = in_chans
         self.out_chans = out_chans
         self.embed_dim = params.embed_dim
-        self.num_layers = params.num_layers
+        self.num_layers = len(params.block_types)
         self.use_mlp = params.use_mlp
         self.encoder_layers = params.encoder_layers
         self._use_pos_embed = params.pos_embed
         self.big_skip = params.big_skip
-        if params.conv1x1_blocks is not None:
-            self.conv1x1_blocks = [
-                i for i in range(self.num_layers) if i in params.conv1x1_blocks
-            ]
-        else:
-            self.conv1x1_blocks = []
         self.affine_norms = params.affine_norms
         self.lora_rank = params.lora_rank
         self.lora_alpha = params.lora_alpha
@@ -386,12 +390,7 @@ class LocalNet(torch.nn.Module):
 
         # blocks
         self.blocks = nn.ModuleList([])
-        for i in range(self.num_layers):
-            if i in self.conv1x1_blocks:
-                block_filter_type = "conv1x1"
-            else:
-                block_filter_type = self.filter_type
-
+        for block_type in self.block_types:
             inner_skip = "linear"
             outer_skip = "identity"
 
@@ -399,7 +398,7 @@ class LocalNet(torch.nn.Module):
                 self.embed_dim,
                 img_shape=self.img_shape,
                 context_config=context_config,
-                filter_type=block_filter_type,
+                filter_type=block_type,
                 data_grid=self.data_grid,
                 global_layer_norm=self.global_layer_norm,
                 mlp_ratio=self.mlp_ratio,

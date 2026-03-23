@@ -34,8 +34,7 @@ def test_can_call_localnet_disco(
     device = get_device()
     params = LocalNetConfig(
         embed_dim=16,
-        num_layers=2,
-        filter_type="disco",
+        block_types=["disco", "disco"],
     )
     model = get_lat_lon_localnet(
         params=params,
@@ -80,8 +79,7 @@ def test_can_call_localnet_conv1x1():
     device = get_device()
     params = LocalNetConfig(
         embed_dim=16,
-        num_layers=2,
-        filter_type="conv1x1",
+        block_types=["conv1x1", "conv1x1"],
     )
     model = get_lat_lon_localnet(
         params=params,
@@ -108,9 +106,7 @@ def test_can_call_localnet_mixed_blocks():
     device = get_device()
     params = LocalNetConfig(
         embed_dim=16,
-        num_layers=4,
-        filter_type="disco",
-        conv1x1_blocks=[1, 3],
+        block_types=["disco", "conv1x1", "disco", "conv1x1"],
     )
     model = get_lat_lon_localnet(
         params=params,
@@ -154,7 +150,7 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
         nn.LayerNorm = SetToZero
         params = LocalNetConfig(
             embed_dim=16,
-            num_layers=2,
+            block_types=["disco", "disco"],
             normalize_big_skip=normalize_big_skip,
             global_layer_norm=True,  # so it uses nn.LayerNorm
         )
@@ -205,7 +201,7 @@ def test_no_big_skip():
     device = get_device()
     params = LocalNetConfig(
         embed_dim=16,
-        num_layers=2,
+        block_types=["disco", "disco"],
         big_skip=False,
     )
     model = get_lat_lon_localnet(
@@ -226,14 +222,8 @@ def test_no_big_skip():
 
 
 def test_unknown_filter_type_raises():
-    with pytest.raises(NotImplementedError):
-        LocalNetConfig(filter_type="spectral")
-        get_lat_lon_localnet(
-            params=LocalNetConfig(filter_type="spectral"),
-            img_shape=(9, 18),
-            in_chans=2,
-            out_chans=3,
-        )
+    with pytest.raises(ValueError, match="Invalid block type"):
+        LocalNetConfig(block_types=["spectral"])  # type: ignore[list-item]
 
 
 def test_backward_pass():
@@ -245,8 +235,7 @@ def test_backward_pass():
     device = get_device()
     params = LocalNetConfig(
         embed_dim=16,
-        num_layers=2,
-        filter_type="disco",
+        block_types=["disco", "disco"],
     )
     model = get_lat_lon_localnet(
         params=params,
