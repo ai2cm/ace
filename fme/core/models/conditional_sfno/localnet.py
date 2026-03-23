@@ -21,6 +21,7 @@ class LocalNetConfig:
     """Configuration parameters for LocalNet.
 
     Attributes:
+        type: Discriminator tag for union deserialization.
         embed_dim: Dimension of the embeddings.
         block_types: List of filter types for each block ('disco', 'conv1x1').
             The length determines the number of blocks.
@@ -40,6 +41,7 @@ class LocalNetConfig:
             if None.
     """
 
+    type: Literal["localnet"] = "localnet"
     embed_dim: int = 256
     block_types: list[BlockType] = dataclasses.field(
         default_factory=lambda: ["disco"] * 12

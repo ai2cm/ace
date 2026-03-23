@@ -1,5 +1,6 @@
 import dataclasses
 import math
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -19,6 +20,7 @@ class AnkurLocalNetConfig:
     ColumnDiagnosticSphericalFourierNeuralOperatorNet.
 
     Attributes:
+        type: Discriminator tag for union deserialization.
         embed_dim: Dimension of the hidden layers.
         use_disco_encoder: Whether to use a DISCO convolution for the first
             layer instead of a 1x1 convolution.
@@ -28,6 +30,7 @@ class AnkurLocalNetConfig:
         activation_function: Activation function name ('relu', 'gelu', 'silu').
     """
 
+    type: Literal["ankurlocalnet"] = "ankurlocalnet"
     embed_dim: int = 256
     use_disco_encoder: bool = False
     disco_kernel_size: int = 3
