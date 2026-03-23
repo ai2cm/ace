@@ -127,7 +127,7 @@ def test_from_state_backwards_compatible_raises_state_and_config():
         )
 
 
-def test_load_fine_coords_from_path():
+def test__load_coords_from_ds():
     lat = [0.0, 1.0, 2.0]
     lon = [10.0, 20.0, 30.0, 40.0]
     ds = xr.Dataset(coords={"lat": lat, "lon": lon})
