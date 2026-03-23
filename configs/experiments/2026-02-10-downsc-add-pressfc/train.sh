@@ -26,7 +26,7 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km multivar training' \
     --workspace ai2/climate-titan \
-    --priority urgent \
+    --priority low \
     --preemptible \
     --cluster ai2/titan \
     --cluster ai2/jupiter \
