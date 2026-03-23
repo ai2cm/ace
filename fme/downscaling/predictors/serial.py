@@ -74,6 +74,10 @@ class SerialPredictor:
         return self.second_model.downscale_factor
 
     @property
+    def fine_shape(self):
+        return self.second_model.fine_shape
+
+    @property
     def static_inputs(self):
         return self.second_model.static_inputs
 

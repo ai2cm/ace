@@ -7,6 +7,7 @@ from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.data.patching import Patch, get_patches
 from fme.downscaling.models import DiffusionModel, ModelOutputs
+from fme.downscaling.predictors.serial import SerialPredictor
 
 
 @dataclasses.dataclass
@@ -52,7 +53,7 @@ class PatchPredictor:
 
     def __init__(
         self,
-        model: DiffusionModel,
+        model: DiffusionModel | SerialPredictor,
         coarse_yx_patch_extent: tuple[int, int] | None = None,
         coarse_horizontal_overlap: int = 1,
     ):

@@ -1,7 +1,7 @@
 import dataclasses
 import warnings
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import dacite
 import torch
@@ -32,6 +32,9 @@ from fme.downscaling.noise import (
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
+
+if TYPE_CHECKING:
+    from fme.downscaling.predictors.serial import SerialPredictor
 
 
 @dataclasses.dataclass
@@ -796,3 +799,43 @@ class CheckpointModelConfig:
     @property
     def out_names(self):
         return self._checkpoint["model"]["config"]["out_names"]
+
+
+@dataclasses.dataclass
+class SerialPredictorConfig:
+    first_model: CheckpointModelConfig
+    second_model: CheckpointModelConfig
+
+    def build(self) -> "SerialPredictor":
+        from fme.downscaling.predictors.serial import SerialPredictor
+
+        first_model = self.first_model.build()
+        second_model = self.second_model.build()
+        return SerialPredictor(first_model=first_model, second_model=second_model)
+
+    @property
+    def data_requirements(self) -> DataRequirements:
+        first = self.first_model.data_requirements
+        second = self.second_model.data_requirements
+        n_timesteps = first.n_timesteps
+        if second.n_timesteps != n_timesteps:
+            raise ValueError(
+                "first_model and second_model must have matching n_timesteps, got "
+                f"{n_timesteps} and {second.n_timesteps}"
+            )
+        return DataRequirements(
+            fine_names=list(set(first.fine_names).union(second.fine_names)),
+            coarse_names=list(set(first.coarse_names).union(second.coarse_names)),
+            n_timesteps=n_timesteps,
+            use_fine_topography=(
+                first.use_fine_topography or second.use_fine_topography
+            ),
+        )
+
+    @property
+    def in_names(self) -> list[str]:
+        return list(set(self.first_model.in_names).union(self.second_model.in_names))
+
+    @property
+    def out_names(self) -> list[str]:
+        return list(set(self.first_model.out_names).union(self.second_model.out_names))
