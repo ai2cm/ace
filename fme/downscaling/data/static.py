@@ -160,6 +160,8 @@ class StaticInputs:
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
     ) -> "StaticInputs":
+        lat_slice = lat_interval.slice_from(self.coords.lat)
+        lon_slice = lon_interval.slice_from(self.coords.lon)
         return StaticInputs(
             fields=[field.subset(lat_slice, lon_slice) for field in self.fields],
             coords=LatLonCoordinates(
