@@ -139,12 +139,8 @@ class StaticInputs:
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
     ) -> "StaticInputs":
-        lat_slice = lat_interval.slice_from(self.coords.lat)
-        lon_slice = lon_interval.slice_from(self.coords.lon)
         return StaticInputs(
-            fields=[
-                field._latlon_index_slice(lat_slice, lon_slice) for field in self.fields
-            ]
+            fields=[field.subset(lat_interval, lon_interval) for field in self.fields]
         )
 
     def to_device(self) -> "StaticInputs":

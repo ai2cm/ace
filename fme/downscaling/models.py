@@ -356,12 +356,8 @@ class DiffusionModel:
             downscale_factor=self.downscale_factor,
         )
         return LatLonCoordinates(
-            lat=self.static_inputs.coords.lat[
-                fine_lat_interval.slice_from(self.static_inputs.coords.lat)
-            ],
-            lon=self.static_inputs.coords.lon[
-                fine_lon_interval.slice_from(self.static_inputs.coords.lon)
-            ],
+            lat=fine_lat_interval.subset_of(self.static_inputs.coords.lat),
+            lon=fine_lon_interval.subset_of(self.static_inputs.coords.lon),
         )
 
     @property
