@@ -332,7 +332,7 @@ class DiffusionModel:
                 "Static inputs must be provided for each batch when use of fine "
                 "static inputs is enabled."
             )
-        return self.static_inputs.subset_latlon(lat_interval, lon_interval)
+        return self.static_inputs.subset(lat_interval, lon_interval)
 
     def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
         """Return fine-resolution coordinates matching the spatial extent of batch."""
@@ -356,12 +356,8 @@ class DiffusionModel:
             downscale_factor=self.downscale_factor,
         )
         return LatLonCoordinates(
-            lat=self.static_inputs.coords.lat[
-                fine_lat_interval.slice_of(self.static_inputs.coords.lat)
-            ],
-            lon=self.static_inputs.coords.lon[
-                fine_lon_interval.slice_of(self.static_inputs.coords.lon)
-            ],
+            lat=fine_lat_interval.subset_of(self.static_inputs.coords.lat),
+            lon=fine_lon_interval.subset_of(self.static_inputs.coords.lon),
         )
 
     @property
@@ -555,7 +551,7 @@ class DiffusionModel:
                 full_fine_coord=self.static_inputs.coords.lon,
                 downscale_factor=self.downscale_factor,
             )
-            _static_inputs = self.static_inputs.subset_latlon(
+            _static_inputs = self.static_inputs.subset(
                 fine_lat_interval, fine_lon_interval
             )
         else:
