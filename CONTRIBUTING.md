@@ -26,56 +26,6 @@ If you're an external user and want to implement a new feature, **please open an
 issue first to discuss it with us**. This helps ensure the feature aligns with
 the project's direction and prevents wasted effort.
 
-## Code Guidelines
-
-For general Python style we follow the
-[Google Python Style Guide](https://google.github.io/styleguide/pyguide.html).
-The sections below cover what matters most in this project. See
-[AGENTS.md](AGENTS.md) for more detailed guidelines on naming, configuration,
-code organization, and other topics.
-
-### Design: isolate responsibilities
-
-When designing a change, think first about what absolutely must change, then
-about what level of abstraction that change could be handled in. Choose the
-option that splits the concern across the fewest levels of abstraction. When a
-decision changes in the future, as little code as possible should need to be
-touched. This does not mean minimizing the number of lines changed — you may
-need to modify APIs at several levels to properly isolate a feature into one
-level of abstraction.
-
-- **Prefer polymorphism over type-checking.** If you see `if isinstance(x, A)
-  ... elif isinstance(x, B) ...` chains, the behavior should be a method on
-  the types being checked.
-- **Keep functions at one level of abstraction.** Don't mix high-level
-  orchestration with low-level details. Extract helpers when needed.
-- **Centralize cross-cutting concerns.** Only `Distributed` should access
-  `torch.distributed`; other modules call `dist.method()`. Training concerns
-  (DDP, weight freezing, loss config) stay in training code.
-- **Facade-first refactors.** When refactoring across multiple PRs, implement
-  the new class internally, keep the old class as a translation layer, then
-  swap in a final PR.
-
-### Testing
-
-- **Test helpers over copy-paste.** Create helper functions to build common
-  test fixtures. If the same setup appears 3+ times, extract a helper.
-  Prefer explicit helper functions over pytest fixtures, which can become
-  unwieldy; use fixtures only when sharing scope across tests is valuable.
-- **Demonstrate bugs with failing tests.** When fixing a bug, add a test
-  that fails without the fix, then fix it.
-- **Test behavior, not implementation.** If a test re-implements the logic
-  it's testing, it isn't actually verifying anything. Prefer tests that
-  cover important user-story-level behavior over tests that lock down
-  subjective API details, since the latter make it harder to evolve
-  interfaces. Both have a place, but use API-level tests in moderation.
-- **Use xfail for known bugs.** Mark known issues with `pytest.mark.xfail`
-  rather than skipping them silently.
-- **Exercise meaningful values.** Don't use all-ones for area weights or
-  trivial shapes that hide real bugs.
-- **Regression tests for checkpoints.** Maintain regression checkpoints from
-  specific model releases. Use `strict=True` for state dict loading.
-
 ## Code Review
 
 Automated CI tests must pass before your pull request will be reviewed. All
@@ -128,3 +78,53 @@ When making new branches, use the naming convention:
 - config: Changes to baseline and experimental configurations under config/.
 - scripts: Changes isolated to a single script under scripts/ and subject to less rigorous review than changes to core code.
 - docs: Documentation changes only.
+
+## Code Guidelines
+
+For general Python style we follow the
+[Google Python Style Guide](https://google.github.io/styleguide/pyguide.html).
+The sections below cover what matters most in this project. See
+[AGENTS.md](AGENTS.md) for more detailed guidelines on naming, configuration,
+code organization, and other topics.
+
+### Design: isolate responsibilities
+
+When designing a change, think first about what absolutely must change, then
+about what level of abstraction that change could be handled in. Choose the
+option that splits the concern across the fewest levels of abstraction. When a
+decision changes in the future, as little code as possible should need to be
+touched. This does not mean minimizing the number of lines changed — you may
+need to modify APIs at several levels to properly isolate a feature into one
+level of abstraction.
+
+- **Prefer polymorphism over type-checking.** If you see `if isinstance(x, A)
+  ... elif isinstance(x, B) ...` chains, the behavior should be a method on
+  the types being checked.
+- **Keep functions at one level of abstraction.** Don't mix high-level
+  orchestration with low-level details. Extract helpers when needed.
+- **Centralize cross-cutting concerns.** Only `Distributed` should access
+  `torch.distributed`; other modules call `dist.method()`. Training concerns
+  (DDP, weight freezing, loss config) stay in training code.
+- **Facade-first refactors.** When refactoring across multiple PRs, implement
+  the new class internally, keep the old class as a translation layer, then
+  swap in a final PR.
+
+### Testing
+
+- **Test helpers over copy-paste.** Create helper functions to build common
+  test fixtures. If the same setup appears 3+ times, extract a helper.
+  Prefer explicit helper functions over pytest fixtures, which can become
+  unwieldy; use fixtures only when sharing scope across tests is valuable.
+- **Demonstrate bugs with failing tests.** When fixing a bug, add a test
+  that fails without the fix, then fix it.
+- **Test behavior, not implementation.** If a test re-implements the logic
+  it's testing, it isn't actually verifying anything. Prefer tests that
+  cover important user-story-level behavior over tests that lock down
+  subjective API details, since the latter make it harder to evolve
+  interfaces. Both have a place, but use API-level tests in moderation.
+- **Use xfail for known bugs.** Mark known issues with `pytest.mark.xfail`
+  rather than skipping them silently.
+- **Exercise meaningful values.** Don't use all-ones for area weights or
+  trivial shapes that hide real bugs.
+- **Regression tests for checkpoints.** Maintain regression checkpoints from
+  specific model releases. Use `strict=True` for state dict loading.
