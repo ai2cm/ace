@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-prate-only-high-res-inputs-tropics"
-CONFIG_FILENAME="train.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-prate-only-high-res-inputs-tropics-resume"
+CONFIG_FILENAME="resume.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -21,6 +21,9 @@ N_GPUS=8 # TODO: change to 8 after testing
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
+
+PREVIOUS_RESULTS_DATASET="01KMEA21HKR3FQ570A8NPXCG4B"
+
 
 gantry run \
     --name $JOB_NAME \
@@ -36,6 +39,7 @@ gantry run \
     --env WANDB_RUN_GROUP=$wandb_group \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
+    --dataset $PREVIOUS_RESULTS_DATASET:/previous_results \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --weka climate-default:/climate-default \
     --gpus $N_GPUS \
