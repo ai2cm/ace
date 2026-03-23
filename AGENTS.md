@@ -45,11 +45,6 @@ single-rank `python -m pytest` run, then verify under spatial parallel via
 torchrun. Generating baselines under the same backend you test against does
 not validate cross-backend correctness.
 
-### GitHub MCP Server Setup
-
-To use the PR review rules, configure the GitHub MCP server in Cursor's "Tools & MCP" settings.
-You will need a read-only personal access token with the following permissions: Pull requests, Issues, Contents, Metadata.
-
 ## Code Guidelines for Agents
 
 ### Naming
