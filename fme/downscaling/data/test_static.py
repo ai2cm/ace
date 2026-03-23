@@ -1,64 +1,142 @@
+import numpy as np
 import pytest
 import torch
+import xarray as xr
 
-from fme.core.coordinates import LatLonCoordinates
-
-from .static import StaticInput, StaticInputs
-from .utils import ClosedInterval
+from .static import StaticInput, StaticInputs, _load_coords_from_ds
 
 
-@pytest.mark.parametrize(
-    "init_args",
-    [
-        pytest.param(
-            [
-                torch.randn((1, 2, 2)),
-                LatLonCoordinates(torch.arange(2), torch.arange(2)),
-            ],
-            id="3d_data",
-        ),
-        pytest.param(
-            [torch.randn((2, 2)), LatLonCoordinates(torch.arange(2), torch.arange(5))],
-            id="dim_size_mismatch",
-        ),
-    ],
-)
-def test_Topography_error_cases(init_args):
+def _make_coords(n=4):
+    from fme.core.coordinates import LatLonCoordinates
+
+    return LatLonCoordinates(
+        lat=torch.arange(n, dtype=torch.float32),
+        lon=torch.arange(n, dtype=torch.float32),
+    )
+
+
+def test_StaticInput_error_cases():
+    data = torch.randn(1, 2, 2)
     with pytest.raises(ValueError):
-        StaticInput(*init_args)
+        StaticInput(data=data)
 
 
 def test_subset():
     full_data_shape = (10, 10)
-    expected_slices = [slice(2, 6), slice(3, 8)]
     data = torch.randn(*full_data_shape)
-    coords = LatLonCoordinates(
-        lat=torch.linspace(0, 9, 10), lon=torch.linspace(0, 9, 10)
-    )
-    topo = StaticInput(data=data, coords=coords)
-    lat_interval = ClosedInterval(2, 5)
-    lon_interval = ClosedInterval(3, 7)
-    subset_topo = topo.subset(lat_interval, lon_interval)
-    expected_lats = torch.tensor([2, 3, 4, 5], dtype=coords.lat.dtype)
-    expected_lons = torch.tensor([3, 4, 5, 6, 7], dtype=coords.lon.dtype)
-    expected_data = data[*expected_slices]
-    assert torch.equal(subset_topo.coords.lat, expected_lats)
-    assert torch.equal(subset_topo.coords.lon, expected_lons)
-    assert torch.allclose(subset_topo.data, expected_data)
+    topo = StaticInput(data=data)
+    lat_slice = slice(2, 6)
+    lon_slice = slice(3, 8)
+    subset_topo = topo.subset(lat_slice, lon_slice)
+    assert torch.allclose(subset_topo.data, data[lat_slice, lon_slice])
 
 
 def test_StaticInputs_serialize():
-    data = torch.arange(16).reshape(4, 4)
-    topography = StaticInput(
-        data,
-        LatLonCoordinates(torch.arange(4), torch.arange(4)),
+    dim_len = 4
+    data = torch.arange(dim_len * dim_len, dtype=torch.float32).reshape(
+        dim_len, dim_len
     )
-    land_frac = StaticInput(
-        data * -1.0,
-        LatLonCoordinates(torch.arange(4), torch.arange(4)),
+    coords = _make_coords(n=dim_len)
+    static_inputs = StaticInputs(
+        [StaticInput(data), StaticInput(data * -1.0)], coords=coords
     )
-    static_inputs = StaticInputs([topography, land_frac])
     state = static_inputs.get_state()
-    static_inputs_reconstructed = StaticInputs.from_state(state)
-    assert static_inputs_reconstructed[0].data.equal(static_inputs[0].data)
-    assert static_inputs_reconstructed[1].data.equal(static_inputs[1].data)
+    assert "coords" in state
+    reconstructed = StaticInputs.from_state(state)
+    assert reconstructed[0].data.equal(static_inputs[0].data)
+    assert reconstructed[1].data.equal(static_inputs[1].data)
+    assert torch.equal(reconstructed.coords.lat, static_inputs.coords.lat)
+    assert torch.equal(reconstructed.coords.lon, static_inputs.coords.lon)
+
+
+def test_StaticInputs_from_state_raises_on_missing_coords():
+    data = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    with pytest.raises(ValueError, match="No coordinates"):
+        StaticInputs.from_state({"fields": [{"data": data}]})
+
+
+def test_StaticInputs_from_state_legacy_coords_in_fields():
+    """from_state handles old format where coords were stored only inside each field."""
+    dim_len = 4
+    data = torch.arange(dim_len * dim_len, dtype=torch.float32).reshape(
+        dim_len, dim_len
+    )
+    coords = _make_coords(n=dim_len)
+    old_state = {
+        "fields": [{"data": data, "coords": {"lat": coords.lat, "lon": coords.lon}}],
+    }
+    result = StaticInputs.from_state(old_state)
+    assert torch.equal(result[0].data, data)
+    assert torch.equal(result.coords.lat, coords.lat)
+    assert torch.equal(result.coords.lon, coords.lon)
+
+
+def test_from_state_backwards_compatible_has_coords():
+    """When state has coords, delegates to from_state."""
+    data = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    coords = _make_coords()
+    state = StaticInputs([StaticInput(data)], coords=coords).get_state()
+    result = StaticInputs.from_state_backwards_compatible(
+        state=state, static_inputs_config={}
+    )
+    assert result is not None
+    assert torch.equal(result[0].data, data)
+
+
+def test_from_state_backwards_compatible_no_state_no_config():
+    """No static inputs in checkpoint and no config: returns None."""
+    result = StaticInputs.from_state_backwards_compatible(
+        state={}, static_inputs_config={}
+    )
+    assert result is None
+
+
+def test_from_state_backwards_compatible_with_config(tmp_path):
+    """Checkpoint with static_inputs_config: loads fields and coords from files."""
+    dim_len = 4
+    lat = np.linspace(0, 1, dim_len, dtype=np.float32)
+    lon = np.linspace(0, 1, dim_len, dtype=np.float32)
+    field_data = np.random.rand(dim_len, dim_len).astype(np.float32)
+    field_path = str(tmp_path / "field.nc")
+    xr.Dataset(
+        {"HGTsfc": (["lat", "lon"], field_data)},
+        coords={"lat": lat, "lon": lon},
+    ).to_netcdf(field_path)
+    result = StaticInputs.from_state_backwards_compatible(
+        state={},
+        static_inputs_config={"HGTsfc": field_path},
+    )
+    assert result is not None
+    assert len(result.fields) == 1
+
+
+def test_from_state_backwards_compatible_raises_state_and_config():
+    """
+    Errors if checkpoint state has fields and static_inputs_config is also provided.
+    """
+    dim_len = 4
+    data = torch.arange(dim_len * dim_len, dtype=torch.float32).reshape(
+        dim_len, dim_len
+    )
+    coords = _make_coords(n=dim_len)
+    state = StaticInputs([StaticInput(data)], coords=coords).get_state()
+    with pytest.raises(ValueError, match="static_inputs_config"):
+        StaticInputs.from_state_backwards_compatible(
+            state=state,
+            static_inputs_config={"HGTsfc": "some/path"},
+        )
+
+
+def test__load_coords_from_ds():
+    lat = [0.0, 1.0, 2.0]
+    lon = [10.0, 20.0, 30.0, 40.0]
+    ds = xr.Dataset(coords={"lat": lat, "lon": lon})
+
+    coords = _load_coords_from_ds(ds)
+    assert torch.allclose(coords.lat, torch.tensor(lat, dtype=torch.float32))
+    assert torch.allclose(coords.lon, torch.tensor(lon, dtype=torch.float32))
+
+    # expected coord names missing
+    ds = xr.Dataset(coords={"x": lon, "y": lat})
+    with pytest.raises(ValueError):
+        _load_coords_from_ds(ds)
