@@ -62,15 +62,6 @@ def _load_coords_from_ds(ds: xr.Dataset) -> LatLonCoordinates:
     )
 
 
-def load_fine_coords_from_path(path: str) -> LatLonCoordinates:
-    """Load lat/lon coordinates from a netCDF or zarr file."""
-    if path.endswith(".zarr"):
-        ds = xr.open_zarr(path)
-    else:
-        ds = xr.open_dataset(path)
-    return _load_coords_from_ds(ds)
-
-
 def _get_normalized_static_input(
     path: str, field_name: str
 ) -> tuple["StaticInput", LatLonCoordinates]:
