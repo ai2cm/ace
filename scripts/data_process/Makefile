@@ -308,7 +308,7 @@ shield_amip_c96_idealized_0p1_heating_ensemble_dataset:
 
 .PHONY: xshield_amip_dataset_and_stats
 xshield_amip_dataset_and_stats:
-	./compute_dataset.sh --config configs/X-SHiELD-AMIP-1deg-$(LAYERS)-11yr.yaml
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/X-SHiELD-AMIP-$(RESOLUTION)-$(LAYERS)-11yr.yaml
 
 .PHONY: xshield_amip_plus_4K_dataset_and_stats
 xshield_amip_plus_4K_dataset_and_stats:
