@@ -26,8 +26,6 @@ class AnkurLocalNetConfig:
         pos_embed: Whether to add a learned positional embedding after the
             first layer.
         activation_function: Activation function name ('relu', 'gelu', 'silu').
-        data_grid: Grid type for DISCO convolutions
-            ('equiangular', 'legendre-gauss').
     """
 
     embed_dim: int = 256
@@ -35,7 +33,6 @@ class AnkurLocalNetConfig:
     disco_kernel_size: int = 3
     pos_embed: bool = False
     activation_function: str = "gelu"
-    data_grid: str = "equiangular"
 
 
 class GroupedDiscreteContinuousConvS2(nn.Module):
@@ -87,6 +84,7 @@ def get_lat_lon_ankur_localnet(
     in_chans: int,
     out_chans: int,
     img_shape: tuple[int, int],
+    data_grid: str = "equiangular",
     context_config: ContextConfig = ContextConfig(
         embed_dim_scalar=0,
         embed_dim_noise=0,
@@ -99,6 +97,7 @@ def get_lat_lon_ankur_localnet(
         img_shape=img_shape,
         in_chans=in_chans,
         out_chans=out_chans,
+        data_grid=data_grid,
     )
 
 
@@ -122,6 +121,7 @@ class AnkurLocalNet(nn.Module):
         img_shape: tuple[int, int],
         in_chans: int,
         out_chans: int,
+        data_grid: str = "equiangular",
     ):
         super().__init__()
 
@@ -143,7 +143,7 @@ class AnkurLocalNet(nn.Module):
                         hidden_dim,
                         img_shape=img_shape,
                         kernel_size=params.disco_kernel_size,
-                        data_grid=params.data_grid,
+                        data_grid=data_grid,
                     )
                 )
             else:

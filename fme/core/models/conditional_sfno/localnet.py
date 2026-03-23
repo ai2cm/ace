@@ -38,8 +38,6 @@ class LocalNetConfig:
         lora_rank: Rank of LoRA adaptations. 0 disables LoRA.
         lora_alpha: Strength of LoRA adaptations. Defaults to lora_rank
             if None.
-        data_grid: Grid type for DISCO convolutions
-            ('equiangular', 'legendre-gauss').
     """
 
     embed_dim: int = 256
@@ -57,7 +55,6 @@ class LocalNetConfig:
     affine_norms: bool = False
     lora_rank: int = 0
     lora_alpha: float | None = None
-    data_grid: str = "equiangular"
 
     def __post_init__(self):
         valid = get_args(BlockType)
@@ -272,6 +269,7 @@ def get_lat_lon_localnet(
     in_chans: int,
     out_chans: int,
     img_shape: tuple[int, int],
+    data_grid: str = "equiangular",
     context_config: ContextConfig = ContextConfig(
         embed_dim_scalar=0,
         embed_dim_noise=0,
@@ -292,6 +290,7 @@ def get_lat_lon_localnet(
         img_shape=img_shape,
         in_chans=in_chans,
         out_chans=out_chans,
+        data_grid=data_grid,
         context_config=context_config,
         get_pos_embed=get_pos_embed,
     )
@@ -322,6 +321,7 @@ class LocalNet(torch.nn.Module):
         get_pos_embed: Callable[[], nn.Parameter],
         in_chans: int,
         out_chans: int,
+        data_grid: str = "equiangular",
         context_config: ContextConfig = ContextConfig(
             embed_dim_scalar=0,
             embed_dim_labels=0,
@@ -349,7 +349,7 @@ class LocalNet(torch.nn.Module):
         self.affine_norms = params.affine_norms
         self.lora_rank = params.lora_rank
         self.lora_alpha = params.lora_alpha
-        self.data_grid = params.data_grid
+        self.data_grid = data_grid
 
         # determine activation function
         activation_functions = {"relu": nn.ReLU, "gelu": nn.GELU, "silu": nn.SiLU}
