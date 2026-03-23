@@ -1627,9 +1627,10 @@ class TrainStepper(
                     }
                 )
                 step_loss = self._loss_obj(gen_step, target_step, step=step)
-                metrics[f"loss_step_{step}"] = step_loss.detach()
+                step_total = step_loss.sum()
+                metrics[f"loss_step_{step}"] = step_total.detach()
             if optimize_step:
-                optimization.accumulate_loss(step_loss)
+                optimization.accumulate_loss(step_total)
         return output_list
 
     def update_training_history(self, training_job: TrainingJob) -> None:

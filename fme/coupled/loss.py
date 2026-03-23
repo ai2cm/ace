@@ -127,7 +127,8 @@ class LossContributions(StepLossABC):
         self, prediction: StepPredictionABC, target_data: TensorMapping
     ) -> torch.Tensor:
         if self.step_is_optimized(prediction.step):
-            return self._weight * self._loss(
-                prediction.data, target_data, prediction.step
+            return (
+                self._weight
+                * self._loss(prediction.data, target_data, prediction.step).sum()
             )
         return torch.tensor(0.0, device=get_device())
