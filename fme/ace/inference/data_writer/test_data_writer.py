@@ -349,6 +349,7 @@ class TestDataWriter:
         [
             pytest.param(None, id="None"),
             pytest.param(["temp", "humidity", "pressure"], id="subset"),
+            pytest.param(["temp", "missing_var"], id="missing_var"),
         ],
     )
     def test_append_batch_save_names(
