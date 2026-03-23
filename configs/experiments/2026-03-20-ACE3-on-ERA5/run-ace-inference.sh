@@ -3,7 +3,7 @@
 
 set -e
 
-JOB_NAME_BASE="ace-era5-pt-multi-step-shield-ft-lr1e-4-rs0-inference"
+JOB_NAME_BASE="ace-era5-pt-multi-step-shield-ft-lr1e-4-rs0-inference-year-long"
 JOB_GROUP="ace-foundation-model"
 # this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
 EXISTING_RESULTS_DATASET="01KMB53NZ5X9TQWEC6P6GKK0HW"
