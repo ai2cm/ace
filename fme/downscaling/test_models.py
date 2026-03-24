@@ -127,15 +127,11 @@ def make_static_inputs(fine_shape: tuple[int, int]) -> StaticInputs:
     """Create StaticInputs with proper monotonic coordinates for given shape."""
     lat_size, lon_size = fine_shape
     return StaticInputs(
-        fields=[
-            StaticInput(
-                torch.ones(*fine_shape, device=get_device()),
-                LatLonCoordinates(
-                    lat=_get_monotonic_coordinate(lat_size, stop=lat_size),
-                    lon=_get_monotonic_coordinate(lon_size, stop=lon_size),
-                ),
-            )
-        ]
+        fields=[StaticInput(torch.ones(*fine_shape, device=get_device()))],
+        coords=LatLonCoordinates(
+            lat=_get_monotonic_coordinate(lat_size, stop=lat_size),
+            lon=_get_monotonic_coordinate(lon_size, stop=lon_size),
+        ),
     )
 
 
