@@ -123,6 +123,8 @@ for name in "${!MODELS[@]}"; do
         -- /bin/bash -c "\
             python -I -m fme.ace.inference $CONFIG_PATH --override $spin_up_override \
             && \
-            python -I -m fme.ace.inference $CONFIG_PATH --override $main_override \
+            python -I -m fme.ace.inference $CONFIG_PATH --override $train_and_validate_override \
+            && \
+            python -I -m fme.ace.inference $CONFIG_PATH --override $test_override \
         "
 done
