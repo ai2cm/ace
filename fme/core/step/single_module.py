@@ -20,6 +20,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.registry.module import Module
 from fme.core.step.args import StepArgs
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
@@ -53,6 +54,14 @@ class SingleModuleStepConfig(StepConfigABC):
         prescribed_prognostic_names: Prognostic variable names to overwrite from
             forcing data at each step (e.g. for inference with observed values).
         residual_prediction: Whether to use residual prediction.
+        secondary_builder: Optional builder for a secondary network that receives
+            the same input as the primary module.
+        secondary_out_names: Names of variables output by the secondary network.
+            Names that overlap with out_names must appear in
+            secondary_residual_names.
+        secondary_residual_names: Names of variables (a subset of both out_names
+            and secondary_out_names) for which the secondary network's output is
+            added as a residual to the primary module's output.
     """
 
     builder: ModuleSelector
@@ -67,6 +76,9 @@ class SingleModuleStepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
+    secondary_builder: ModuleSelector | None = None
+    secondary_out_names: list[str] = dataclasses.field(default_factory=list)
+    secondary_residual_names: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -85,16 +97,53 @@ class SingleModuleStepConfig(StepConfigABC):
                 raise ValueError(
                     f"next_step_forcing_name is an output variable: '{name}'"
                 )
+        all_out_names = set(self.out_names) | set(self.secondary_out_names)
         if self.secondary_decoder is not None:
             for name in self.secondary_decoder.secondary_diagnostic_names:
                 if name in self.in_names:
                     raise ValueError(
                         f"secondary_diagnostic_name is an input variable: '{name}'"
                     )
-                if name in self.out_names:
+                if name in all_out_names:
                     raise ValueError(
                         f"secondary_diagnostic_name is an output variable: '{name}'"
                     )
+        if self.secondary_builder is None:
+            if self.secondary_out_names:
+                raise ValueError(
+                    "secondary_out_names must be empty when "
+                    "secondary_builder is not provided"
+                )
+            if self.secondary_residual_names:
+                raise ValueError(
+                    "secondary_residual_names must be empty when "
+                    "secondary_builder is not provided"
+                )
+        else:
+            if not self.secondary_out_names:
+                raise ValueError(
+                    "secondary_out_names must not be empty when "
+                    "secondary_builder is provided"
+                )
+            for name in self.secondary_residual_names:
+                if name not in self.secondary_out_names:
+                    raise ValueError(
+                        f"secondary_residual_name '{name}' must be in "
+                        f"secondary_out_names: {self.secondary_out_names}"
+                    )
+                if name not in self.out_names:
+                    raise ValueError(
+                        f"secondary_residual_name '{name}' must be in "
+                        f"out_names: {self.out_names}"
+                    )
+            overlap = set(self.secondary_out_names) & set(self.out_names)
+            if overlap != set(self.secondary_residual_names):
+                raise ValueError(
+                    f"Names appearing in both out_names and secondary_out_names "
+                    f"must be listed in secondary_residual_names. "
+                    f"Overlap: {overlap}, "
+                    f"secondary_residual_names: {set(self.secondary_residual_names)}"
+                )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -151,12 +200,16 @@ class SingleModuleStepConfig(StepConfigABC):
 
     @property
     def output_names(self) -> list[str]:
-        secondary_names = (
+        secondary_decoder_names = (
             self.secondary_decoder.secondary_diagnostic_names
             if self.secondary_decoder is not None
             else []
         )
-        return list(set(self.out_names).union(secondary_names))
+        return list(
+            set(self.out_names)
+            .union(secondary_decoder_names)
+            .union(self.secondary_out_names)
+        )
 
     @property
     def next_step_input_names(self) -> list[str]:
@@ -267,6 +320,20 @@ class SingleModuleStep(StepABC):
 
         dist = Distributed.get_instance()
 
+        if config.secondary_builder is not None:
+            secondary_module = config.secondary_builder.build(
+                n_in_channels=n_in_channels,
+                n_out_channels=len(config.secondary_out_names),
+                dataset_info=dataset_info,
+            )
+            self.secondary_module: Module | None = secondary_module.to(get_device())
+            self.secondary_out_packer: Packer | None = Packer(
+                config.secondary_out_names
+            )
+        else:
+            self.secondary_module = None
+            self.secondary_out_packer = None
+
         if config.secondary_decoder is not None:
             self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
                 config.secondary_decoder.build(
@@ -282,6 +349,8 @@ class SingleModuleStep(StepABC):
         self._no_optimization = NullOptimization()
 
         self.module = self.module.wrap_module(dist.wrap_module)
+        if self.secondary_module is not None:
+            self.secondary_module = self.secondary_module.wrap_module(dist.wrap_module)
         self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
         self._timestep = dataset_info.timestep
 
@@ -329,6 +398,8 @@ class SingleModuleStep(StepABC):
             A list of modules being trained.
         """
         modules = [self.module.torch_module]
+        if self.secondary_module is not None:
+            modules.append(self.secondary_module.torch_module)
         modules.extend(self.secondary_decoder.torch_modules)
         return nn.ModuleList(modules)
 
@@ -355,6 +426,21 @@ class SingleModuleStep(StepABC):
                 labels=args.labels,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            if self.secondary_module is not None:
+                if self.secondary_out_packer is None:
+                    raise RuntimeError("secondary_out_packer is unexpectedly None")
+                secondary_tensor = self.secondary_module.wrap_module(wrapper)(
+                    input_tensor,
+                    labels=args.labels,
+                )
+                secondary_dict = self.secondary_out_packer.unpack(
+                    secondary_tensor, axis=self.CHANNEL_DIM
+                )
+                for name in self._config.secondary_residual_names:
+                    output_dict[name] = output_dict[name] + secondary_dict[name]
+                for name in self._config.secondary_out_names:
+                    if name not in self._config.secondary_residual_names:
+                        output_dict[name] = secondary_dict[name]
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
                 output_tensor.detach()  # detach avoids changing base outputs
             )
@@ -385,6 +471,8 @@ class SingleModuleStep(StepABC):
             "module": self.module.get_state(),
             "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
+        if self.secondary_module is not None:
+            state["secondary_module"] = self.secondary_module.get_state()
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -399,6 +487,8 @@ class SingleModuleStep(StepABC):
             # for backwards compatibility with old checkpoints
             del module["module.device_buffer"]
         self.module.load_state(module)
+        if "secondary_module" in state and self.secondary_module is not None:
+            self.secondary_module.load_state(state["secondary_module"])
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
 

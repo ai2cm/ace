@@ -374,6 +374,41 @@ def get_fcn3_selector(
     )
 
 
+def get_single_module_with_secondary_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_a",
+            "prog_a",
+            "prog_b",
+            "diag_a",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_a", "prog_a", "prog_b"],
+                out_names=["prog_a", "prog_b"],
+                normalization=normalization,
+                secondary_builder=ModuleSelector(type="MLP", config={}),
+                secondary_out_names=["prog_a", "diag_a"],
+                secondary_residual_names=["prog_a"],
+            ),
+        ),
+    )
+
+
 def get_multi_call_selector(
     dir: pathlib.Path | None = None,
 ) -> StepSelector:
@@ -403,6 +438,7 @@ SELECTOR_GETTERS = [
     get_separate_radiation_selector,
     get_single_module_selector,
     get_single_module_noise_conditioned_selector,
+    get_single_module_with_secondary_selector,
     get_multi_call_selector,
 ]
 
@@ -664,6 +700,214 @@ def test_input_output_names_secondary_decoder_conflict(conflict: str):
             ),
         )
     assert f"secondary_diagnostic_name is an {conflict} variable:" in str(err.value)
+
+
+def test_secondary_builder_none_with_out_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    with pytest.raises(ValueError, match="secondary_out_names must be empty"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_out_names=["c"],
+        )
+
+
+def test_secondary_builder_none_with_residual_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    with pytest.raises(ValueError, match="secondary_residual_names must be empty"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_residual_names=["b"],
+        )
+
+
+def test_secondary_builder_with_empty_out_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    with pytest.raises(ValueError, match="secondary_out_names must not be empty"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+            secondary_out_names=[],
+        )
+
+
+def test_secondary_residual_name_not_in_secondary_out_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b", "c"],
+    )
+    with pytest.raises(ValueError, match="secondary_residual_name 'b'.*secondary_out"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+            secondary_out_names=["c"],
+            secondary_residual_names=["b"],
+        )
+
+
+def test_secondary_residual_name_not_in_out_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b", "c"],
+    )
+    with pytest.raises(ValueError, match="secondary_residual_name 'c'.*out_names"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+            secondary_out_names=["c"],
+            secondary_residual_names=["c"],
+        )
+
+
+def test_secondary_out_name_overlaps_out_name_without_residual_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b", "c"],
+    )
+    with pytest.raises(ValueError, match="secondary_residual_names"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+            secondary_out_names=["b", "c"],
+            secondary_residual_names=[],
+        )
+
+
+def test_secondary_out_name_overlaps_secondary_decoder_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b", "c"],
+    )
+    with pytest.raises(ValueError, match="secondary_diagnostic_name is an output"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+            secondary_out_names=["c"],
+            secondary_decoder=SecondaryDecoderConfig(
+                secondary_diagnostic_names=["c"],
+                network=ModuleSelector(type="MLP", config={}),
+            ),
+        )
+
+
+@pytest.mark.parallel
+def test_secondary_network_residual_adds_to_backbone():
+    """Test that secondary_residual_names outputs are added to backbone outputs."""
+    torch.manual_seed(0)
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing", "prog", "diag"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing", "prog"],
+                out_names=["prog"],
+                normalization=normalization,
+                secondary_builder=ModuleSelector(type="MLP", config={}),
+                secondary_out_names=["prog", "diag"],
+                secondary_residual_names=["prog"],
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(config, img_shape)
+    assert "prog" in step.output_names
+    assert "diag" in step.output_names
+    assert "prog" in step.prognostic_names
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples=2
+    )
+    output = step.step(
+        args=StepArgs(
+            input=input_data, next_step_input_data=next_step_input_data, labels=None
+        ),
+    )
+    assert "prog" in output
+    assert "diag" in output
+    assert output["prog"].shape == (2, *img_shape)
+    assert output["diag"].shape == (2, *img_shape)
+
+
+@pytest.mark.parallel
+def test_secondary_network_state_round_trip():
+    """Test get_state/load_state with secondary module."""
+    torch.manual_seed(0)
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing", "prog", "diag"],
+    )
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={
+                "scale_factor": 1,
+                "embed_dim": 4,
+                "num_layers": 2,
+            },
+        ),
+        in_names=["forcing", "prog"],
+        out_names=["prog"],
+        normalization=normalization,
+        secondary_builder=ModuleSelector(type="MLP", config={}),
+        secondary_out_names=["prog", "diag"],
+        secondary_residual_names=["prog"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step1 = get_step(
+        StepSelector(type="single_module", config=dataclasses.asdict(config)),
+        img_shape,
+    )
+    state = step1.get_state()
+    assert "secondary_module" in state
+
+    step2 = get_step(
+        StepSelector(type="single_module", config=dataclasses.asdict(config)),
+        img_shape,
+    )
+    step2.load_state(state)
+
+    input_data = get_tensor_dict(step1.input_names, img_shape, n_samples=1)
+    next_step_input_data = get_tensor_dict(
+        step1.next_step_input_names, img_shape, n_samples=1
+    )
+    args = StepArgs(
+        input=input_data, next_step_input_data=next_step_input_data, labels=None
+    )
+    out1 = step1.step(args=args)
+    out2 = step2.step(args=args)
+    for name in out1:
+        torch.testing.assert_close(out1[name], out2[name])
 
 
 def test_step_with_prescribed_prognostic_overwrites_output():
