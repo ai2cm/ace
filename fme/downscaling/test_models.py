@@ -226,6 +226,7 @@ def test_from_state_backward_compat_migrates_fine_coords_from_old_static_inputs(
     state = model.get_state()
     # Simulate old format: coords embedded in fields, not in static_inputs state
     del state["static_inputs"]["coords"]
+    del state["full_fine_coords"]
     state["static_inputs"]["fields"][0]["coords"] = fine_coords.to(
         get_device()
     ).get_state()

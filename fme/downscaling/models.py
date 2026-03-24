@@ -20,7 +20,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     StaticInputs,
     adjust_fine_coord_range,
-    load_fine_coords_from_path,
+    load_coords_from_path,
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
@@ -705,12 +705,12 @@ class CheckpointModelConfig:
                 lon=coords_from_state["lon"],
             )
         elif fine_coordinates_path is not None:
-            return load_fine_coords_from_path(fine_coordinates_path)
+            return load_coords_from_path(fine_coordinates_path)
         else:
             raise ValueError(
                 "No fine coordinates found in checkpoint state and no "
                 "fine_coordinates_path provided. One of these must be provided to "
-                "load the model."
+                "load the model using CheckpointModelConfig."
             )
 
     def build(
