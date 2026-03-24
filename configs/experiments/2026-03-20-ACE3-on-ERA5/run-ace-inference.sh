@@ -3,10 +3,10 @@
 
 set -e
 
-JOB_NAME_BASE="ace-era5-pt-multi-step-shield-ft-lr1e-4-rs0-inference-year-long-first-epoch"
+JOB_NAME_BASE="ace-era5-pt-multi-step-shield-ft-lr1e-4-rs0-inference-year-long-zero-epoch"
 JOB_GROUP="ace-foundation-model"
 # this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
-EXISTING_RESULTS_DATASET="01KMB53NZ5X9TQWEC6P6GKK0HW"
+EXISTING_RESULTS_DATASET="01KHJ5F1M6YKVZESPZAAVVD6G8"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -50,7 +50,7 @@ launch_job () {
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/ema_ckpt_0001.tar:/ckpt.tar \
+        --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
         --gpus 1 \
         --shared-memory 50GiB \
         --allow-dirty \
