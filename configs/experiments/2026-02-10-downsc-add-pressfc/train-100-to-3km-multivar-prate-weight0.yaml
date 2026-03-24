@@ -1,10 +1,10 @@
 loss_weights:
   weights:
     PRATEsfc:
-      start_epoch: 250
-      end_epoch: 400
+      start_epoch: 600
+      end_epoch: 1100
       start_weight: 0.0
-      end_weight: 0.7
+      end_weight: 1.0
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
@@ -144,7 +144,7 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 250
+max_epochs: 600
 validate_interval: 15
 experiment_dir: /results
 save_checkpoints: false
