@@ -7,13 +7,7 @@ data_writer:
     save_prediction_files: false
     save_monthly_files: false
   atmosphere:
-    save_prediction_files: true
-    names:
-    - surface_precipitation_rate
-    - FLUT
-    - T_7
-    time_coarsen:
-      coarsen_factor: 4
+    save_prediction_files: false
     save_monthly_files: false
 logging:
   log_to_screen: true
