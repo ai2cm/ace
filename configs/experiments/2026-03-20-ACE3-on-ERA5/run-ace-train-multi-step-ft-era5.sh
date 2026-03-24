@@ -22,12 +22,12 @@ declare -A PRE_TRAINED_WEIGHTS_DATASETS=( \
 )
 
 # Simple list of learning rates
-LEARNING_RATES=(1e-4 1e-6)
+LEARNING_RATES=(1e-4)  #1e-6)
 
 for seed in 0; do
     for lr in "${LEARNING_RATES[@]}"; do
 
-        job_name="ace-era5-pt-multi-step-shield-ft-lr${lr}-rs${seed}"
+        job_name="ace-era5-pt-multi-step-shield-ft-lr${lr}-rs${seed}-sampler"
 
         fine_tune_seed=$((seed + SEED_OFFSET))
 

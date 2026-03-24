@@ -2,13 +2,9 @@ experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 evaluate_before_training: true
-ema_checkpoint_save_epochs:
-  start: 1
-  stop: 10
-  step: 1
 ema:
   decay: 0.999
-max_epochs: 30
+max_epochs: 2
 inference:
   n_forward_steps: 21900 #2009 - 2025
   forward_steps_in_memory: 40
@@ -41,6 +37,7 @@ train_loader:
   num_data_workers: 4
   prefetch_factor: 4
   time_buffer: 1
+  sample_with_replacement: 250
   dataset:
     data_path: /climate-default/
     file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
