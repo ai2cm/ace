@@ -3,7 +3,7 @@
 set -e
 
 #JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-debug-event-channel-mixing"
+JOB_NAME="eval-debug-event-channel-mixing-serial-predictor"
 
 CONFIG_FILENAME="debug-events.yaml"
 
@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=2
+NGPU=1
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
@@ -48,6 +48,7 @@ gantry run \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $EXISTING_RESULTS_DATASET_WINDSPRMSL:checkpoints:/winds_prmsl  \
+    --dataset $EXISTING_RESULTS_DATASET_PRATE:checkpoints:/prate  \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \

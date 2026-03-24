@@ -5,11 +5,11 @@ patch:
   composite_prediction: true
   coarse_horizontal_overlap: 1
 model:
-  checkpoint_path: /winds_prmsl/best.ckpt
-  # first_model:
-  #   checkpoint_path: /winds_prmsl/best.ckpt
-  # second_model:
-  #   checkpoint_path: /prate/best.ckpt
+  #checkpoint_path: /winds_prmsl/best.ckpt
+  first_model:
+    checkpoint_path: /winds_prmsl/best.ckpt
+  second_model:
+    checkpoint_path: /prate/best.ckpt
 data:
   coarse:
   - merge:
