@@ -359,6 +359,7 @@ class DiffusionModel:
         self._channel_axis = -3
         self.full_fine_coords = full_fine_coords.to(get_device())
         self.static_inputs = static_inputs.to_device() if static_inputs else None
+        self._raw_module = module
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -542,7 +543,7 @@ class DiffusionModel:
         latents = torch.randn(outputs_shape).to(device=get_device())
 
         generated_norm, latent_steps = edm_sampler(
-            self.module,
+            self._raw_module,
             latents,
             inputs_,
             S_churn=self.config.churn,
