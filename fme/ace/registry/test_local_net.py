@@ -2,7 +2,6 @@ import dataclasses
 
 import pytest
 import torch
-from torch import nn
 
 import fme
 from fme.ace.registry.local_net import AnkurLocalNetBuilder, LocalNetBuilder
@@ -143,12 +142,13 @@ def test_local_net_noise_produces_stochastic_output():
         affine_norms=True,
     )
     module = builder.build(n_in, n_out, dataset_info).to(fme.get_device())
-    # At init, noise scale/bias weights are zero so noise has no effect.
-    # Set them to nonzero to verify the noise path works.
-    for name, param in module.named_parameters():
-        if "W_scale_2d" in name or "W_bias_2d" in name:
-            nn.init.normal_(param, std=1.0)
     x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    # At init, noise scale/bias weights are zero so noise has no effect.
+    # A training step makes them nonzero, enabling stochastic output.
+    loss = module(x).sum()
+    loss.backward()
+    optimizer = torch.optim.SGD(module.parameters(), lr=1.0)
+    optimizer.step()
     with torch.no_grad():
         out1 = module(x)
         out2 = module(x)
