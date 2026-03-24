@@ -15,6 +15,7 @@ run_evaluator() {
     local config_filename="$1"
     local dataset_id="$2"
     local job_name="$3"
+    local ckpt_filename="${4:-best_inference_ckpt.tar}"
     local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
     python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 
@@ -34,7 +35,7 @@ run_evaluator() {
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset $dataset_id:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+        --dataset $dataset_id:training_checkpoints/$ckpt_filename:/ckpt.tar \
         --gpus 1 \
         --shared-memory 50GiB \
         --weka climate-default:/climate-default \
@@ -45,5 +46,7 @@ run_evaluator() {
         -- python -I -m fme.ace.evaluator $CONFIG_PATH
 }
 
-run_evaluator "evaluator-6h.yaml" "01KJKM724X54EMA1JFEE5JWX9V" "amip-c96-shield-evaluator-6h"
-run_evaluator "evaluator-daily.yaml" "01KJCVYVEB52QATDCZ3ZA74TDT" "amip-c96-shield-evaluator-daily"
+# run_evaluator "evaluator-6h.yaml" "01KJKM724X54EMA1JFEE5JWX9V" "amip-c96-shield-evaluator-6h"
+# run_evaluator "evaluator-daily.yaml" "01KJCVYVEB52QATDCZ3ZA74TDT" "amip-c96-shield-evaluator-daily"
+run_evaluator "evaluator-6h.yaml" "01KJKM724X54EMA1JFEE5JWX9V" "amip-c96-shield-evaluator-6h-best-ckpt" "best_ckpt.tar"
+run_evaluator "evaluator-daily.yaml" "01KJCVYVEB52QATDCZ3ZA74TDT" "amip-c96-shield-evaluator-daily-best-ckpt" "best_ckpt.tar"
