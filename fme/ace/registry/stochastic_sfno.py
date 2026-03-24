@@ -5,11 +5,11 @@ from typing import Literal
 
 import torch
 
+from fme.ace.registry.noise_conditioned import NoiseConditionedModule
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.distributed import Distributed
 from fme.core.models.conditional_sfno.sfnonet import (
-    Context,
     ContextConfig,
     SFNONetConfig,
     get_lat_lon_sfnonet,
@@ -48,7 +48,13 @@ def isotropic_noise(
     return isht(alm)
 
 
-class NoiseConditionedSFNO(torch.nn.Module):
+class NoiseConditionedSFNO(NoiseConditionedModule):
+    """Noise-conditioned SFNO with support for isotropic noise.
+
+    Extends NoiseConditionedModule with isotropic noise generation that uses
+    the SFNO's inverse spherical harmonic transform.
+    """
+
     def __init__(
         self,
         conditional_model: ConditionalSFNO,
@@ -58,81 +64,30 @@ class NoiseConditionedSFNO(torch.nn.Module):
         embed_dim_pos: int = 0,
         embed_dim_labels: int = 0,
     ):
-        super().__init__()
-        self.conditional_model = conditional_model
-        self.embed_dim = embed_dim_noise
+        super().__init__(
+            module=conditional_model,
+            img_shape=img_shape,
+            embed_dim_noise=embed_dim_noise,
+            embed_dim_pos=embed_dim_pos,
+            embed_dim_labels=embed_dim_labels,
+        )
         self.noise_type = noise_type
-        self.img_shape = img_shape
-        self.label_pos_embed: torch.nn.Parameter | None = None
-        # register pos embed if pos_embed_dim != 0
-        if embed_dim_pos != 0:
-            self.pos_embed = torch.nn.Parameter(
-                torch.zeros(
-                    1, embed_dim_pos, img_shape[0], img_shape[1], requires_grad=True
-                )
-            )
-            # initialize pos embed with std=0.02
-            torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
-            if embed_dim_labels > 0:
-                self.label_pos_embed = torch.nn.Parameter(
-                    torch.zeros(
-                        embed_dim_labels,
-                        embed_dim_pos,
-                        img_shape[0],
-                        img_shape[1],
-                        requires_grad=True,
-                    )
-                )
-                torch.nn.init.trunc_normal_(self.label_pos_embed, std=0.02)
-        else:
-            self.pos_embed = None
 
-    def forward(
-        self, x: torch.Tensor, labels: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        x = x.reshape(-1, *x.shape[-3:])
+    def _generate_noise(self, x: torch.Tensor) -> torch.Tensor:
         if self.noise_type == "isotropic":
-            lmax = self.conditional_model.itrans_up.lmax
-            mmax = self.conditional_model.itrans_up.mmax
-            noise = isotropic_noise(
-                (x.shape[0], self.embed_dim),
+            lmax = self.module.itrans_up.lmax
+            mmax = self.module.itrans_up.mmax
+            return isotropic_noise(
+                (x.shape[0], self.embed_dim_noise),
                 lmax,
                 mmax,
-                self.conditional_model.itrans_up,
+                self.module.itrans_up,
                 device=x.device,
             )
         elif self.noise_type == "gaussian":
-            noise = torch.randn(
-                [x.shape[0], self.embed_dim, *x.shape[-2:]],
-                device=x.device,
-                dtype=x.dtype,
-            )
+            return super()._generate_noise(x)
         else:
             raise ValueError(f"Invalid noise type: {self.noise_type}")
-
-        h_slice, w_slice = Distributed.get_instance().get_local_slices(self.img_shape)
-
-        if self.pos_embed is not None:
-            pos_local = self.pos_embed[..., h_slice, w_slice]
-            embedding_pos = pos_local.repeat(noise.shape[0], 1, 1, 1)
-            if self.label_pos_embed is not None and labels is not None:
-                label_local = self.label_pos_embed[..., h_slice, w_slice]
-                label_embedding_pos = torch.einsum(
-                    "bl, lpxy -> bpxy", labels, label_local
-                )
-                embedding_pos = embedding_pos + label_embedding_pos
-        else:
-            embedding_pos = None
-
-        return self.conditional_model(
-            x,
-            Context(
-                embedding_scalar=None,
-                embedding_pos=embedding_pos,
-                labels=labels,
-                noise=noise,
-            ),
-        )
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
