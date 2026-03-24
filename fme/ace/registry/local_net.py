@@ -4,7 +4,10 @@ from typing import Literal
 import torch
 from torch import nn
 
-from fme.ace.registry.noise_conditioned import NoiseConditionedModule
+from fme.ace.registry.noise_conditioned import (
+    NoiseConditionedModule,
+    make_noise_generator,
+)
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
 from fme.core.models.conditional_sfno.ankur import (
@@ -111,7 +114,10 @@ class LocalNetBuilder(ModuleConfig):
 
     Attributes:
         embed_dim: Dimension of the embeddings.
-        noise_embed_dim: Dimension of the gaussian noise conditioning channels.
+        noise_embed_dim: Dimension of the noise conditioning channels.
+        noise_type: Type of noise for conditioning ('gaussian' or 'isotropic').
+            Isotropic noise is generated via inverse spherical harmonic
+            transform.
         context_pos_embed_dim: Dimension of the learned positional embedding
             used for conditioning. 0 disables.
         block_types: List of filter types for each block ('disco', 'conv1x1').
@@ -132,11 +138,12 @@ class LocalNetBuilder(ModuleConfig):
         lora_alpha: Strength of LoRA adaptations. Defaults to lora_rank
             if None.
         data_grid: Grid type for spherical harmonic transforms used by
-            DISCO convolutions.
+            DISCO convolutions and isotropic noise generation.
     """
 
     embed_dim: int = 256
     noise_embed_dim: int = 256
+    noise_type: Literal["gaussian", "isotropic"] = "gaussian"
     context_pos_embed_dim: int = 0
     block_types: list[BlockType] = dataclasses.field(
         default_factory=lambda: ["disco"] * 12
@@ -190,10 +197,25 @@ class LocalNetBuilder(ModuleConfig):
             data_grid=self.data_grid,
             context_config=context_config,
         )
+        img_shape = dataset_info.img_shape
+        if self.noise_type == "isotropic":
+            from torch_harmonics import InverseRealSHT
+
+            grid_mapping = {
+                "legendre-gauss": "legendre-gauss",
+                "equiangular": "equiangular",
+            }
+            isht = InverseRealSHT(*img_shape, grid=grid_mapping[self.data_grid])
+            noise_generator = make_noise_generator(
+                self.noise_type, isht=isht, lmax=isht.lmax, mmax=isht.mmax
+            )
+        else:
+            noise_generator = make_noise_generator(self.noise_type)
         return NoiseConditionedModule(
             net,
-            img_shape=dataset_info.img_shape,
+            img_shape=img_shape,
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=self.context_pos_embed_dim,
             embed_dim_labels=embed_dim_labels,
+            noise_generator=noise_generator,
         )

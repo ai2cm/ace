@@ -4,7 +4,8 @@ import pytest
 import torch
 from torch_harmonics import InverseRealSHT
 
-from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO, isotropic_noise
+from fme.ace.registry.noise_conditioned import isotropic_noise
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context
 

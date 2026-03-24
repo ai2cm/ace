@@ -1,18 +1,12 @@
 import dataclasses
-import math
-from collections.abc import Callable
 from typing import Literal
-
-import torch
 
 from fme.ace.registry.noise_conditioned import (
     NoiseConditionedModule,
-    NoiseGenerator,
-    gaussian_noise,
+    make_noise_generator,
 )
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
-from fme.core.distributed.distributed import Distributed
 from fme.core.models.conditional_sfno.sfnonet import (
     ContextConfig,
     SFNONetConfig,
@@ -21,65 +15,6 @@ from fme.core.models.conditional_sfno.sfnonet import (
 from fme.core.models.conditional_sfno.sfnonet import (
     SphericalFourierNeuralOperatorNet as ConditionalSFNO,
 )
-
-
-def isotropic_noise(
-    leading_shape: tuple[int, ...],
-    lmax: int,  # length of the ℓ axis expected by isht (global)
-    mmax: int,  # length of the m axis expected by isht (global)
-    isht: Callable[[torch.Tensor], torch.Tensor],
-    device: torch.device,
-) -> torch.Tensor:
-    # --- draw independent N(0,1) parts --------------------------------------
-    coeff_shape = (*leading_shape, lmax, mmax)
-    real = torch.randn(coeff_shape, dtype=torch.float32, device=device)
-    imag = torch.randn(coeff_shape, dtype=torch.float32, device=device)
-    imag[..., :, 0] = 0.0  # m = 0 ⇒ purely real
-
-    # m > 0: make Re and Im each N(0,½)  → |a_{ℓ m}|² has variance 1
-    sqrt2 = math.sqrt(2.0)
-    real[..., :, 1:] /= sqrt2
-    imag[..., :, 1:] /= sqrt2
-
-    # --- global scale that makes Var[T(θ,φ)] = 1 ---------------------------
-    scale = math.sqrt(4.0 * math.pi) / lmax  # (Unsöld theorem ⇒ L = lmax)
-    alm = (real + 1j * imag) * scale
-
-    # --- for distributed iSHT, slice to local spectral extent --------------
-    l_slice, m_slice = Distributed.get_instance().get_local_slices((lmax, mmax))
-    alm = alm[..., l_slice, m_slice]
-
-    return isht(alm)
-
-
-def _make_sfno_noise_generator(
-    noise_type: Literal["isotropic", "gaussian"],
-    conditional_model: ConditionalSFNO,
-) -> NoiseGenerator:
-    """Create a noise generator for an SFNO model.
-
-    For gaussian noise, returns the default generator. For isotropic noise,
-    returns a generator that uses the SFNO's inverse spherical harmonic
-    transform.
-    """
-    if noise_type == "gaussian":
-        return gaussian_noise
-    elif noise_type == "isotropic":
-
-        def _isotropic(x: torch.Tensor, embed_dim_noise: int) -> torch.Tensor:
-            lmax = conditional_model.itrans_up.lmax
-            mmax = conditional_model.itrans_up.mmax
-            return isotropic_noise(
-                (x.shape[0], embed_dim_noise),
-                lmax,
-                mmax,
-                conditional_model.itrans_up,
-                device=x.device,
-            )
-
-        return _isotropic
-    else:
-        raise ValueError(f"Invalid noise type: {noise_type}")
 
 
 def NoiseConditionedSFNO(
@@ -97,7 +32,12 @@ def NoiseConditionedSFNO(
         embed_dim_noise=embed_dim_noise,
         embed_dim_pos=embed_dim_pos,
         embed_dim_labels=embed_dim_labels,
-        noise_generator=_make_sfno_noise_generator(noise_type, conditional_model),
+        noise_generator=make_noise_generator(
+            noise_type,
+            isht=conditional_model.itrans_up,
+            lmax=conditional_model.itrans_up.lmax,
+            mmax=conditional_model.itrans_up.mmax,
+        ),
     )
 
 

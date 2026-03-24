@@ -155,6 +155,21 @@ def test_local_net_noise_produces_stochastic_output():
     assert not torch.allclose(out1, out2)
 
 
+def test_local_net_isotropic_noise():
+    n_in, n_out = 3, 2
+    dataset_info = _get_dataset_info()
+    builder = LocalNetBuilder(
+        embed_dim=16,
+        noise_embed_dim=8,
+        noise_type="isotropic",
+        block_types=["disco", "disco"],
+    )
+    module = builder.build(n_in, n_out, dataset_info).to(fme.get_device())
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    out = module(x)
+    assert out.shape == (2, n_out, *IMG_SHAPE)
+
+
 def test_local_net_with_context_pos_embed():
     n_in, n_out = 3, 2
     dataset_info = _get_dataset_info()
