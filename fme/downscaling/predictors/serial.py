@@ -86,11 +86,10 @@ class SerialPredictor:
     def _run_first_model(
         self,
         batch: BatchData,
+        n_samples: int = 1,
     ) -> TensorDict:
-        """Run first model and squeeze the sample dimension."""
-        generated = self.first_model.generate_on_batch_no_target(batch, n_samples=1)
-        # generated values have shape [batch, 1, lat, lon]; squeeze sample dim
-        return {k: v.squeeze(1) for k, v in generated.items()}
+        """Run first model returning shape [batch, n_samples, lat, lon]."""
+        return self.first_model.generate_on_batch_no_target(batch, n_samples=n_samples)
 
     @torch.no_grad()
     def generate_on_batch_no_target(
@@ -98,18 +97,18 @@ class SerialPredictor:
         batch: BatchData,
         n_samples: int = 1,
     ) -> TensorDict:
-        first_output = self._run_first_model(batch)
+        first_output = self._run_first_model(batch, n_samples=n_samples)
+        # Use the first sample as conditioning for the second model
         fine_data = {
-            k: v for k, v in first_output.items() if k in self._high_res_cond_names
+            k: v[:, 0]
+            for k, v in first_output.items()
+            if k in self._high_res_cond_names
         }
         second_output = self.second_model.generate_on_batch_no_target(
             batch, n_samples=n_samples, fine_data=fine_data
         )
-        # Include first-model passthrough outputs with a sample dimension
         for name in self._first_model_output_names:
-            second_output[name] = (
-                first_output[name].unsqueeze(1).expand(-1, n_samples, -1, -1)
-            )
+            second_output[name] = first_output[name]
         return second_output
 
     @torch.no_grad()
@@ -118,11 +117,13 @@ class SerialPredictor:
         batch: PairedBatchData,
         n_samples: int = 1,
     ) -> ModelOutputs:
-        first_output = self._run_first_model(batch.coarse)
+        first_output = self._run_first_model(batch.coarse, n_samples=n_samples)
+        # Use the first sample as conditioning for the second model
         fine_data = {
-            k: v for k, v in first_output.items() if k in self._high_res_cond_names
+            k: v[:, 0]
+            for k, v in first_output.items()
+            if k in self._high_res_cond_names
         }
-        # Merge conditioning into fine data for the second model
         merged_fine = {**batch.fine.data, **fine_data}
         merged_batch = PairedBatchData(
             fine=BatchData(
@@ -133,11 +134,8 @@ class SerialPredictor:
             coarse=batch.coarse,
         )
         result = self.second_model.generate_on_batch(merged_batch, n_samples)
-        # Add first-model passthrough outputs to prediction and target
         for name in self._first_model_output_names:
-            result.prediction[name] = (
-                first_output[name].unsqueeze(1).expand(-1, n_samples, -1, -1)
-            )
+            result.prediction[name] = first_output[name]
             if name in batch.fine.data:
                 result.target[name] = batch.fine.data[name].unsqueeze(1)
         return result
