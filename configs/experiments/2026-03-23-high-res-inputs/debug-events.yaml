@@ -1,0 +1,67 @@
+experiment_dir: /results
+n_samples: 2
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /prate/best.ckpt
+  # first_model:
+  #   checkpoint_path: /winds_prmsl/best.ckpt
+  # second_model:
+  #   checkpoint_path: /prate/best.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start: 0
+        stop: 2
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: pressfc_renamed_to_prmsl_100km.zarr
+      engine: zarr
+      subset:
+        start: 0
+        stop: 2
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+      subset:
+        start: 0
+        stop: 2
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+      subset:
+        start: 0
+        stop: 2
+  lat_extent:
+    start: 0
+    stop: 16
+  lon_extent:
+    start: 0
+    stop: 16
+  batch_size: 2
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
+events:
+- name: Phl_tc_landfall_20230514T06
+  date: 2023-05-14T06:00
+  lat_extent:
+    start: 4
+    stop: 20
+  lon_extent:
+    start: 117
+    stop: 133
+  save_generated_samples: true
+  n_samples: 24

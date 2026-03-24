@@ -3,9 +3,9 @@
 set -e
 
 #JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-xshield-amip-100km-to-3km-prate-only-high-res-inputs-tropics"
+JOB_NAME="eval-debug-event-channel-mixing"
 
-CONFIG_FILENAME="eval-tropic-pac.yaml"
+CONFIG_FILENAME="debug-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -29,6 +29,8 @@ wandb_group=""
 #     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
 
 #    --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/checkpoints/best.ckpt \
+#    --dataset $EXISTING_RESULTS_DATASET_PRATE:checkpoints:/prate  \
+
 
 gantry run \
     --name $JOB_NAME \
@@ -46,7 +48,6 @@ gantry run \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $EXISTING_RESULTS_DATASET_WINDSPRMSL:checkpoints:/winds_prmsl  \
-    --dataset $EXISTING_RESULTS_DATASET_PRATE:checkpoints:/prate  \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
