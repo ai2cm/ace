@@ -34,7 +34,7 @@ for name in "${!MODELS[@]}"; do
         --name $job_name \
         --description 'Run ACE radiation multi call inference' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/climate-titan \
+        --workspace ai2/ace \
         --priority high \
         --preemptible \
         --cluster ai2/jupiter \
