@@ -4,8 +4,7 @@ import pytest
 import torch
 from torch_harmonics import InverseRealSHT
 
-from fme.ace.registry.noise_conditioned import isotropic_noise
-from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO, isotropic_noise
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context
 
@@ -37,9 +36,8 @@ def test_noise_conditioned_sfno_conditioning():
     n_pos = 8
     n_labels = 4
     model = NoiseConditionedSFNO(
-        conditional_model=mock_sfno,
+        module=mock_sfno,
         img_shape=img_shape,
-        noise_type="gaussian",  # needed so we don't need a SHT in this test
         embed_dim_noise=n_noise,
         embed_dim_pos=n_pos,
         embed_dim_labels=n_labels,

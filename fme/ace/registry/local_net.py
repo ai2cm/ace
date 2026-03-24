@@ -4,12 +4,10 @@ from typing import Literal
 import torch
 from torch import nn
 
-from fme.ace.registry.noise_conditioned import (
-    NoiseConditionedModule,
-    make_noise_generator,
-)
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed import Distributed
 from fme.core.models.conditional_sfno.ankur import (
     AnkurLocalNetConfig,
     get_lat_lon_ankur_localnet,
@@ -199,23 +197,21 @@ class LocalNetBuilder(ModuleConfig):
         )
         img_shape = dataset_info.img_shape
         if self.noise_type == "isotropic":
-            from torch_harmonics import InverseRealSHT
-
-            grid_mapping = {
-                "legendre-gauss": "legendre-gauss",
-                "equiangular": "equiangular",
-            }
-            isht = InverseRealSHT(*img_shape, grid=grid_mapping[self.data_grid])
-            noise_generator = make_noise_generator(
-                self.noise_type, isht=isht, lmax=isht.lmax, mmax=isht.mmax
-            )
+            dist = Distributed.get_instance()
+            inverse_sht = dist.get_isht(*img_shape, grid=self.data_grid)
+            lmax = inverse_sht.lmax
+            mmax = inverse_sht.mmax
         else:
-            noise_generator = make_noise_generator(self.noise_type)
-        return NoiseConditionedModule(
+            inverse_sht = None
+            lmax = 0
+            mmax = 0
+        return NoiseConditionedModel(
             net,
             img_shape=img_shape,
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=self.context_pos_embed_dim,
             embed_dim_labels=embed_dim_labels,
-            noise_generator=noise_generator,
+            inverse_sht=inverse_sht,
+            lmax=lmax,
+            mmax=mmax,
         )
