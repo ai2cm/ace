@@ -5,7 +5,11 @@ from typing import Literal
 
 import torch
 
-from fme.ace.registry.noise_conditioned import NoiseConditionedModule
+from fme.ace.registry.noise_conditioned import (
+    NoiseConditionedModule,
+    NoiseGenerator,
+    gaussian_noise,
+)
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.distributed import Distributed
@@ -48,46 +52,53 @@ def isotropic_noise(
     return isht(alm)
 
 
-class NoiseConditionedSFNO(NoiseConditionedModule):
-    """Noise-conditioned SFNO with support for isotropic noise.
+def _make_sfno_noise_generator(
+    noise_type: Literal["isotropic", "gaussian"],
+    conditional_model: ConditionalSFNO,
+) -> NoiseGenerator:
+    """Create a noise generator for an SFNO model.
 
-    Extends NoiseConditionedModule with isotropic noise generation that uses
-    the SFNO's inverse spherical harmonic transform.
+    For gaussian noise, returns the default generator. For isotropic noise,
+    returns a generator that uses the SFNO's inverse spherical harmonic
+    transform.
     """
+    if noise_type == "gaussian":
+        return gaussian_noise
+    elif noise_type == "isotropic":
 
-    def __init__(
-        self,
-        conditional_model: ConditionalSFNO,
-        img_shape: tuple[int, int],
-        noise_type: Literal["isotropic", "gaussian"] = "gaussian",
-        embed_dim_noise: int = 256,
-        embed_dim_pos: int = 0,
-        embed_dim_labels: int = 0,
-    ):
-        super().__init__(
-            module=conditional_model,
-            img_shape=img_shape,
-            embed_dim_noise=embed_dim_noise,
-            embed_dim_pos=embed_dim_pos,
-            embed_dim_labels=embed_dim_labels,
-        )
-        self.noise_type = noise_type
-
-    def _generate_noise(self, x: torch.Tensor) -> torch.Tensor:
-        if self.noise_type == "isotropic":
-            lmax = self.module.itrans_up.lmax
-            mmax = self.module.itrans_up.mmax
+        def _isotropic(x: torch.Tensor, embed_dim_noise: int) -> torch.Tensor:
+            lmax = conditional_model.itrans_up.lmax
+            mmax = conditional_model.itrans_up.mmax
             return isotropic_noise(
-                (x.shape[0], self.embed_dim_noise),
+                (x.shape[0], embed_dim_noise),
                 lmax,
                 mmax,
-                self.module.itrans_up,
+                conditional_model.itrans_up,
                 device=x.device,
             )
-        elif self.noise_type == "gaussian":
-            return super()._generate_noise(x)
-        else:
-            raise ValueError(f"Invalid noise type: {self.noise_type}")
+
+        return _isotropic
+    else:
+        raise ValueError(f"Invalid noise type: {noise_type}")
+
+
+def NoiseConditionedSFNO(
+    conditional_model: ConditionalSFNO,
+    img_shape: tuple[int, int],
+    noise_type: Literal["isotropic", "gaussian"] = "gaussian",
+    embed_dim_noise: int = 256,
+    embed_dim_pos: int = 0,
+    embed_dim_labels: int = 0,
+) -> NoiseConditionedModule:
+    """Create a noise-conditioned SFNO with support for isotropic noise."""
+    return NoiseConditionedModule(
+        module=conditional_model,
+        img_shape=img_shape,
+        embed_dim_noise=embed_dim_noise,
+        embed_dim_pos=embed_dim_pos,
+        embed_dim_labels=embed_dim_labels,
+        noise_generator=_make_sfno_noise_generator(noise_type, conditional_model),
+    )
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
