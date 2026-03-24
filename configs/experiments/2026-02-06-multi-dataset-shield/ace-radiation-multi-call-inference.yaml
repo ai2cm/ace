@@ -1,0 +1,47 @@
+checkpoint_path: /ckpt.tar
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+experiment_dir: /results
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2024-10-22-vertically-resolved-1deg-c96-shield-som-radiation-multi-call-fme-dataset/netcdfs/radiation-multi-call
+  num_data_workers: 8
+forward_steps_in_memory: 40
+initial_condition:
+  path: /climate-default/2024-10-22-vertically-resolved-1deg-c96-shield-som-radiation-multi-call-fme-dataset/netcdfs/radiation-multi-call/2031010100.nc
+  start_indices:
+    times:
+    - "2031-01-01T00:00:00"
+logging:
+  log_to_file: true
+  log_to_screen: true
+  log_to_wandb: true
+  project: ace-shield
+n_forward_steps: 1460
+stepper_override:
+  multi_call:
+    forcing_name: global_mean_co2
+    forcing_multipliers:
+      _with_halved_co2: 0.5
+      _with_three_halved_co2: 1.5
+      _with_doubled_co2: 2.0
+      _with_five_halved_co2: 2.5
+      _with_tripled_co2: 3.0
+      _with_seven_halved_co2: 3.5
+      _with_quadrupled_co2: 4.0
+      _with_octupled_co2: 8.0
+    output_names:
+      - DLWRFsfc
+      - ULWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - ULWRFtoa
+      - USWRFtoa
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+    interpolate: true
+    slab:
+      mixed_layer_depth_name: prescribed_mixed_layer_depth
+      q_flux_name: prescribed_qflux
