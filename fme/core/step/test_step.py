@@ -402,8 +402,8 @@ def get_single_module_with_secondary_selector(
                 out_names=["prog_a", "prog_b"],
                 normalization=normalization,
                 secondary_builder=ModuleSelector(type="MLP", config={}),
-                secondary_out_names=["prog_a", "diag_a"],
-                secondary_residual_names=["prog_a"],
+                secondary_out_names=["diag_a"],
+                secondary_residual_out_names=["prog_a"],
             ),
         ),
     )
@@ -716,40 +716,56 @@ def test_secondary_builder_none_with_out_names_raises():
         )
 
 
-def test_secondary_builder_none_with_residual_names_raises():
+def test_secondary_builder_none_with_residual_out_names_raises():
     normalization = get_network_and_loss_normalization_config(
         names=["a", "b"],
     )
-    with pytest.raises(ValueError, match="secondary_residual_names must be empty"):
+    with pytest.raises(ValueError, match="secondary_residual_out_names must be empty"):
         SingleModuleStepConfig(
             builder=ModuleSelector(type="MLP", config={}),
             in_names=["a"],
             out_names=["b"],
             normalization=normalization,
-            secondary_residual_names=["b"],
+            secondary_residual_out_names=["b"],
         )
 
 
-def test_secondary_builder_with_empty_out_names_raises():
+def test_secondary_builder_with_empty_names_raises():
     normalization = get_network_and_loss_normalization_config(
         names=["a", "b"],
     )
-    with pytest.raises(ValueError, match="secondary_out_names must not be empty"):
+    with pytest.raises(ValueError, match="at least one of"):
         SingleModuleStepConfig(
             builder=ModuleSelector(type="MLP", config={}),
             in_names=["a"],
             out_names=["b"],
             normalization=normalization,
             secondary_builder=ModuleSelector(type="MLP", config={}),
-            secondary_out_names=[],
         )
 
 
-def test_secondary_residual_name_not_in_secondary_out_names_raises():
+def test_secondary_out_name_overlaps_out_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    with pytest.raises(ValueError, match="secondary_out_names must not overlap"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+            secondary_out_names=["b"],
+        )
+
+
+def test_secondary_out_name_overlaps_residual_out_names_raises():
     normalization = get_network_and_loss_normalization_config(
         names=["a", "b", "c"],
     )
-    with pytest.raises(ValueError, match="secondary_residual_name 'b'.*secondary_out"):
+    with pytest.raises(
+        ValueError, match="secondary_out_names must not overlap.*residual"
+    ):
         SingleModuleStepConfig(
             builder=ModuleSelector(type="MLP", config={}),
             in_names=["a"],
@@ -757,64 +773,28 @@ def test_secondary_residual_name_not_in_secondary_out_names_raises():
             normalization=normalization,
             secondary_builder=ModuleSelector(type="MLP", config={}),
             secondary_out_names=["c"],
-            secondary_residual_names=["b"],
+            secondary_residual_out_names=["c"],
         )
 
 
-def test_secondary_residual_name_not_in_out_names_raises():
+def test_secondary_residual_out_name_not_in_out_or_in_names_raises():
     normalization = get_network_and_loss_normalization_config(
         names=["a", "b", "c"],
     )
-    with pytest.raises(ValueError, match="secondary_residual_name 'c'.*out_names"):
+    with pytest.raises(ValueError, match="secondary_residual_out_name 'c'"):
         SingleModuleStepConfig(
             builder=ModuleSelector(type="MLP", config={}),
             in_names=["a"],
             out_names=["b"],
             normalization=normalization,
             secondary_builder=ModuleSelector(type="MLP", config={}),
-            secondary_out_names=["c"],
-            secondary_residual_names=["c"],
-        )
-
-
-def test_secondary_out_name_overlaps_out_name_without_residual_raises():
-    normalization = get_network_and_loss_normalization_config(
-        names=["a", "b", "c"],
-    )
-    with pytest.raises(ValueError, match="secondary_residual_names"):
-        SingleModuleStepConfig(
-            builder=ModuleSelector(type="MLP", config={}),
-            in_names=["a"],
-            out_names=["b"],
-            normalization=normalization,
-            secondary_builder=ModuleSelector(type="MLP", config={}),
-            secondary_out_names=["b", "c"],
-            secondary_residual_names=[],
-        )
-
-
-def test_secondary_out_name_overlaps_secondary_decoder_raises():
-    normalization = get_network_and_loss_normalization_config(
-        names=["a", "b", "c"],
-    )
-    with pytest.raises(ValueError, match="secondary_diagnostic_name is an output"):
-        SingleModuleStepConfig(
-            builder=ModuleSelector(type="MLP", config={}),
-            in_names=["a"],
-            out_names=["b"],
-            normalization=normalization,
-            secondary_builder=ModuleSelector(type="MLP", config={}),
-            secondary_out_names=["c"],
-            secondary_decoder=SecondaryDecoderConfig(
-                secondary_diagnostic_names=["c"],
-                network=ModuleSelector(type="MLP", config={}),
-            ),
+            secondary_residual_out_names=["c"],
         )
 
 
 @pytest.mark.parallel
-def test_secondary_network_residual_adds_to_backbone():
-    """Test that secondary_residual_names outputs are added to backbone outputs."""
+def test_secondary_network_full_field_and_residual():
+    """Test secondary_out_names and secondary_residual_out_names together."""
     torch.manual_seed(0)
     normalization = get_network_and_loss_normalization_config(
         names=["forcing", "prog", "diag"],
@@ -835,8 +815,8 @@ def test_secondary_network_residual_adds_to_backbone():
                 out_names=["prog"],
                 normalization=normalization,
                 secondary_builder=ModuleSelector(type="MLP", config={}),
-                secondary_out_names=["prog", "diag"],
-                secondary_residual_names=["prog"],
+                secondary_out_names=["diag"],
+                secondary_residual_out_names=["prog"],
             ),
         ),
     )
@@ -880,8 +860,8 @@ def test_secondary_network_state_round_trip():
         out_names=["prog"],
         normalization=normalization,
         secondary_builder=ModuleSelector(type="MLP", config={}),
-        secondary_out_names=["prog", "diag"],
-        secondary_residual_names=["prog"],
+        secondary_out_names=["diag"],
+        secondary_residual_out_names=["prog"],
     )
     img_shape = DEFAULT_IMG_SHAPE
     step1 = get_step(

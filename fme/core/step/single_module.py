@@ -56,12 +56,13 @@ class SingleModuleStepConfig(StepConfigABC):
         residual_prediction: Whether to use residual prediction.
         secondary_builder: Optional builder for a secondary network that receives
             the same input as the primary module.
-        secondary_out_names: Names of variables output by the secondary network.
-            Names that overlap with out_names must appear in
-            secondary_residual_names.
-        secondary_residual_names: Names of variables (a subset of both out_names
-            and secondary_out_names) for which the secondary network's output is
-            added as a residual to the primary module's output.
+        secondary_out_names: Names of variables output by the secondary network
+            as full fields (used directly as output). Must not overlap with
+            out_names.
+        secondary_residual_out_names: Names of variables for which the secondary
+            network predicts a residual correction. If the name is also in
+            out_names, the residual is added to the backbone's output;
+            otherwise it is added to the (normalized) input value.
     """
 
     builder: ModuleSelector
@@ -78,7 +79,7 @@ class SingleModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
     secondary_builder: ModuleSelector | None = None
     secondary_out_names: list[str] = dataclasses.field(default_factory=list)
-    secondary_residual_names: list[str] = dataclasses.field(default_factory=list)
+    secondary_residual_out_names: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -97,14 +98,16 @@ class SingleModuleStepConfig(StepConfigABC):
                 raise ValueError(
                     f"next_step_forcing_name is an output variable: '{name}'"
                 )
-        all_out_names = set(self.out_names) | set(self.secondary_out_names)
+        all_secondary_names = set(self.secondary_out_names) | set(
+            self.secondary_residual_out_names
+        )
         if self.secondary_decoder is not None:
             for name in self.secondary_decoder.secondary_diagnostic_names:
                 if name in self.in_names:
                     raise ValueError(
                         f"secondary_diagnostic_name is an input variable: '{name}'"
                     )
-                if name in all_out_names:
+                if name in set(self.out_names) | all_secondary_names:
                     raise ValueError(
                         f"secondary_diagnostic_name is an output variable: '{name}'"
                     )
@@ -114,36 +117,38 @@ class SingleModuleStepConfig(StepConfigABC):
                     "secondary_out_names must be empty when "
                     "secondary_builder is not provided"
                 )
-            if self.secondary_residual_names:
+            if self.secondary_residual_out_names:
                 raise ValueError(
-                    "secondary_residual_names must be empty when "
+                    "secondary_residual_out_names must be empty when "
                     "secondary_builder is not provided"
                 )
         else:
-            if not self.secondary_out_names:
+            if not self.secondary_out_names and not self.secondary_residual_out_names:
                 raise ValueError(
-                    "secondary_out_names must not be empty when "
+                    "at least one of secondary_out_names or "
+                    "secondary_residual_out_names must be non-empty when "
                     "secondary_builder is provided"
                 )
-            for name in self.secondary_residual_names:
-                if name not in self.secondary_out_names:
-                    raise ValueError(
-                        f"secondary_residual_name '{name}' must be in "
-                        f"secondary_out_names: {self.secondary_out_names}"
-                    )
-                if name not in self.out_names:
-                    raise ValueError(
-                        f"secondary_residual_name '{name}' must be in "
-                        f"out_names: {self.out_names}"
-                    )
             overlap = set(self.secondary_out_names) & set(self.out_names)
-            if overlap != set(self.secondary_residual_names):
+            if overlap:
                 raise ValueError(
-                    f"Names appearing in both out_names and secondary_out_names "
-                    f"must be listed in secondary_residual_names. "
-                    f"Overlap: {overlap}, "
-                    f"secondary_residual_names: {set(self.secondary_residual_names)}"
+                    f"secondary_out_names must not overlap with out_names. "
+                    f"Overlap: {overlap}"
                 )
+            overlap = set(self.secondary_out_names) & set(
+                self.secondary_residual_out_names
+            )
+            if overlap:
+                raise ValueError(
+                    f"secondary_out_names must not overlap with "
+                    f"secondary_residual_out_names. Overlap: {overlap}"
+                )
+            for name in self.secondary_residual_out_names:
+                if name not in self.out_names and name not in self.in_names:
+                    raise ValueError(
+                        f"secondary_residual_out_name '{name}' must be in "
+                        f"out_names or in_names: {self.out_names}, {self.in_names}"
+                    )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -209,6 +214,7 @@ class SingleModuleStepConfig(StepConfigABC):
             set(self.out_names)
             .union(secondary_decoder_names)
             .union(self.secondary_out_names)
+            .union(self.secondary_residual_out_names)
         )
 
     @property
@@ -321,15 +327,16 @@ class SingleModuleStep(StepABC):
         dist = Distributed.get_instance()
 
         if config.secondary_builder is not None:
+            all_secondary_names = (
+                config.secondary_out_names + config.secondary_residual_out_names
+            )
             secondary_module = config.secondary_builder.build(
                 n_in_channels=n_in_channels,
-                n_out_channels=len(config.secondary_out_names),
+                n_out_channels=len(all_secondary_names),
                 dataset_info=dataset_info,
             )
             self.secondary_module: Module | None = secondary_module.to(get_device())
-            self.secondary_out_packer: Packer | None = Packer(
-                config.secondary_out_names
-            )
+            self.secondary_out_packer: Packer | None = Packer(all_secondary_names)
         else:
             self.secondary_module = None
             self.secondary_out_packer = None
@@ -436,11 +443,13 @@ class SingleModuleStep(StepABC):
                 secondary_dict = self.secondary_out_packer.unpack(
                     secondary_tensor, axis=self.CHANNEL_DIM
                 )
-                for name in self._config.secondary_residual_names:
-                    output_dict[name] = output_dict[name] + secondary_dict[name]
                 for name in self._config.secondary_out_names:
-                    if name not in self._config.secondary_residual_names:
-                        output_dict[name] = secondary_dict[name]
+                    output_dict[name] = secondary_dict[name]
+                for name in self._config.secondary_residual_out_names:
+                    if name in output_dict:
+                        output_dict[name] = output_dict[name] + secondary_dict[name]
+                    else:
+                        output_dict[name] = input_norm[name] + secondary_dict[name]
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
                 output_tensor.detach()  # detach avoids changing base outputs
             )
