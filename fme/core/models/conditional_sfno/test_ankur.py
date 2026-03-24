@@ -1,10 +1,15 @@
+import os
+
 import pytest
 import torch
 
 from fme.core.device import get_device
+from fme.core.testing.regression import validate_tensor
 
 from .ankur import AnkurLocalNetConfig, get_lat_lon_ankur_localnet
 from .layers import Context, ContextConfig
+
+DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 @pytest.mark.parametrize("use_disco_encoder", [True, False])
@@ -157,3 +162,38 @@ def test_ankur_localnet_disco_kernel_size():
     )
     output = model(x, context)
     assert output.shape == (n_samples, output_channels, *img_shape)
+
+
+def setup_ankur_localnet():
+    input_channels = 2
+    output_channels = 3
+    img_shape = (9, 18)
+    n_samples = 4
+    device = get_device()
+    params = AnkurLocalNetConfig(embed_dim=16, use_disco_encoder=True)
+    model = get_lat_lon_ankur_localnet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    # must initialize on CPU to get the same results on GPU
+    x = torch.randn(n_samples, input_channels, *img_shape).to(device)
+    context = Context(
+        embedding_scalar=torch.randn(n_samples, 0).to(device),
+        labels=torch.randn(n_samples, 0).to(device),
+        noise=torch.randn(n_samples, 0, *img_shape).to(device),
+        embedding_pos=torch.randn(n_samples, 0, *img_shape).to(device),
+    )
+    return model, x, context
+
+
+def test_ankur_localnet_output_is_unchanged():
+    torch.manual_seed(0)
+    model, x, context = setup_ankur_localnet()
+    with torch.no_grad():
+        output = model(x, context)
+    validate_tensor(
+        output,
+        os.path.join(DIR, "testdata/test_ankur_localnet_output.pt"),
+    )
