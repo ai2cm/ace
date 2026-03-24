@@ -207,40 +207,6 @@ def test_model_raises_when_no_static_fields_but_topography_required():
         )
 
 
-def test_from_state_backward_compat_migrates_fine_coords_from_old_static_inputs():
-    """Old checkpoints that stored coords in static_inputs fields should have
-    fine_coords auto-migrated on from_state."""
-    coarse_shape = (8, 16)
-    fine_shape = (16, 32)
-    downscale_factor = 2
-    static_inputs = make_static_inputs(fine_shape)
-    fine_coords = static_inputs.coords
-    model = _get_diffusion_model(
-        coarse_shape=coarse_shape,
-        downscale_factor=downscale_factor,
-        full_fine_coords=fine_coords,
-        predict_residual=True,
-        use_fine_topography=True,
-        static_inputs=static_inputs,
-    )
-    state = model.get_state()
-    # Simulate old format: coords embedded in fields, not in static_inputs state
-    del state["static_inputs"]["coords"]
-    del state["full_fine_coords"]
-    state["static_inputs"]["fields"][0]["coords"] = fine_coords.to(
-        get_device()
-    ).get_state()
-
-    model_from_old_state = DiffusionModel.from_state(state)
-    assert model_from_old_state.full_fine_coords is not None
-    assert torch.equal(
-        model_from_old_state.full_fine_coords.lat.cpu(), fine_coords.lat.cpu()
-    )
-    assert torch.equal(
-        model_from_old_state.full_fine_coords.lon.cpu(), fine_coords.lon.cpu()
-    )
-
-
 def _get_diffusion_model(
     coarse_shape,
     downscale_factor,
@@ -365,65 +331,31 @@ def test_normalizer_serialization(tmp_path):
     assert model_from_disk.normalizer.coarse.stds == {"x": 1}
 
 
-def test_model_error_cases():
-    fine_shape = (8, 16)
-    coarse_shape = (4, 8)
-    upscaling_factor = 2
+def test_use_fine_topography_raises_when_module_does_not_use_interpolated_input():
     normalization_config = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
-
-    selector: type[DiffusionModuleRegistrySelector]
-    model_class = DiffusionModelConfig
-    selector = DiffusionModuleRegistrySelector
-    extra_kwargs = {
-        "p_mean": -1.0,
-        "p_std": 1.0,
-        "sigma_min": 0.1,
-        "sigma_max": 1.0,
-        "churn": 0.5,
-        "num_diffusion_generation_steps": 3,
-        "predict_residual": True,
-    }
-
-    # Incompatible on init check
-    invalid_selector = selector(
+    invalid_selector = DiffusionModuleRegistrySelector(
         "prebuilt",
         {"module": None},
         expects_interpolated_input=False,
     )
     with pytest.raises(ValueError):
-        model_class(  # type: ignore
+        DiffusionModelConfig(  # type: ignore
             invalid_selector,  # type: ignore
             LossConfig(type="MSE"),
             ["x"],
             ["x"],
             normalization_config,
             use_fine_topography=True,
-            **extra_kwargs,  # type: ignore
-        )
-
-    # use_fine_topography=True requires non-empty static input fields at build time
-    module_selector = selector(
-        "prebuilt",
-        {"module": DummyModule()},
-        expects_interpolated_input=True,
-    )
-    with pytest.raises(ValueError):
-        model_class(  # type: ignore
-            module_selector,  # type: ignore
-            LossConfig(type="MSE"),
-            ["x"],
-            ["x"],
-            normalization_config,
-            use_fine_topography=True,
-            **extra_kwargs,  # type: ignore
-        ).build(
-            coarse_shape,
-            upscaling_factor,
-            full_fine_coords=make_fine_coords(fine_shape),
-            static_inputs=StaticInputs(fields=[], coords=make_fine_coords(fine_shape)),
+            p_mean=-1.0,
+            p_std=1.0,
+            sigma_min=0.1,
+            sigma_max=1.0,
+            churn=0.5,
+            num_diffusion_generation_steps=3,
+            predict_residual=True,
         )
 
 
@@ -668,3 +600,67 @@ def test_checkpoint_model_build_with_fine_coordinates_path(tmp_path):
     assert loaded_model.full_fine_coords is not None
     assert torch.equal(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat.cpu())
     assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
+
+
+def test_checkpoint_model_build(tmp_path):
+    """CheckpointModelConfig loads a modern checkpoint and restores the model."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=False,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+    )
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": model.get_state()}, checkpoint_path)
+
+    loaded_model = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
+    assert all(
+        torch.equal(p1, p2)
+        for p1, p2 in zip(model.module.parameters(), loaded_model.module.parameters())
+    )
+    assert torch.equal(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat.cpu())
+    assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
+
+
+def test_build_raises_when_static_inputs_coords_mismatch_full_fine_coords():
+    """Building with static_inputs whose coords differ from full_fine_coords raises."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    # Same shape but offset values — a different grid covering a different region
+    shifted_coords = LatLonCoordinates(
+        lat=fine_coords.lat + 10.0,
+        lon=fine_coords.lon + 10.0,
+    )
+    with pytest.raises(ValueError):
+        _get_diffusion_model(
+            coarse_shape=coarse_shape,
+            downscale_factor=2,
+            full_fine_coords=fine_coords,
+            use_fine_topography=False,
+            static_inputs=StaticInputs(fields=[], coords=shifted_coords),
+        )
+
+
+def test_from_state_raises_for_unresolvable_old_checkpoint(tmp_path):
+    """DiffusionModel.from_state raises clearly when checkpoint has no fine coords."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=False,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+    )
+    state = model.get_state()
+    del state["full_fine_coords"]
+    state["static_inputs"] = None
+
+    with pytest.raises(ValueError, match="full_fine_coords"):
+        DiffusionModel.from_state(state)

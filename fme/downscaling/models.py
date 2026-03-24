@@ -387,28 +387,21 @@ class DiffusionModel:
         )
         interpolated = interpolate(normalized, self.downscale_factor)
 
-        if self.config.use_fine_topography:
-            if static_inputs is None or not static_inputs.fields:
+        if self.config.use_fine_topography and static_inputs is not None:
+            expected_shape = interpolated.shape[-2:]
+            if static_inputs.shape != expected_shape:
                 raise ValueError(
-                    "Static inputs must be provided for each batch when flag "
-                    "use_fine_topography is enabled, but no static input fields "
-                    "were found."
+                    f"Subsetted static input shape {static_inputs.shape} does not "
+                    f"match expected fine spatial shape {expected_shape}."
                 )
-            else:
-                expected_shape = interpolated.shape[-2:]
-                if static_inputs.shape != expected_shape:
-                    raise ValueError(
-                        f"Subsetted static input shape {static_inputs.shape} does not "
-                        f"match expected fine spatial shape {expected_shape}."
-                    )
-                n_batches = normalized.shape[0]
-                # Join normalized static inputs to input (see dataset for details)
-                fields: list[torch.Tensor] = [interpolated]
-                for field in static_inputs.fields:
-                    static_field = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
-                    static_field = static_field.unsqueeze(self._channel_axis)
-                    fields.append(static_field)
-                interpolated = torch.concat(fields, dim=self._channel_axis)
+            n_batches = normalized.shape[0]
+            # Join normalized static inputs to input (see dataset for details)
+            fields: list[torch.Tensor] = [interpolated]
+            for field in static_inputs.fields:
+                static_field = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
+                static_field = static_field.unsqueeze(self._channel_axis)
+                fields.append(static_field)
+            interpolated = torch.concat(fields, dim=self._channel_axis)
 
         if self.config._interpolate_input:
             return interpolated
@@ -564,15 +557,18 @@ class DiffusionModel:
         )
 
     def get_state(self) -> Mapping[str, Any]:
+        if self.static_inputs is not None:
+            static_inputs_state = self.static_inputs.get_state()
+        else:
+            static_inputs_state = None
+
         return {
             "config": self.config.get_state(),
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
             "full_fine_coords": self.full_fine_coords.get_state(),
-            "static_inputs": self.static_inputs.get_state()
-            if self.static_inputs is not None
-            else None,
+            "static_inputs": static_inputs_state,
         }
 
     @classmethod
