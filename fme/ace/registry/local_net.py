@@ -59,8 +59,6 @@ class AnkurLocalNetBuilder(ModuleConfig):
         pos_embed: Whether to add a learned positional embedding after the
             first layer.
         activation_function: Activation function name ('relu', 'gelu', 'silu').
-        data_grid: Grid type for spherical harmonic transforms used by
-            DISCO convolutions.
     """
 
     embed_dim: int = 256
@@ -68,7 +66,6 @@ class AnkurLocalNetBuilder(ModuleConfig):
     disco_kernel_size: int = 3
     pos_embed: bool = False
     activation_function: str = "gelu"
-    data_grid: Literal["legendre-gauss", "equiangular"] = "equiangular"
 
     def build(
         self,
@@ -94,7 +91,7 @@ class AnkurLocalNetBuilder(ModuleConfig):
             in_chans=n_in_channels,
             out_chans=n_out_channels,
             img_shape=dataset_info.img_shape,
-            data_grid=self.data_grid,
+            data_grid="legendre-gauss",
             context_config=context_config,
         )
         return _ContextWrappedModule(net)
@@ -135,8 +132,6 @@ class LocalNetBuilder(ModuleConfig):
         lora_rank: Rank of LoRA adaptations. 0 disables LoRA.
         lora_alpha: Strength of LoRA adaptations. Defaults to lora_rank
             if None.
-        data_grid: Grid type for spherical harmonic transforms used by
-            DISCO convolutions and isotropic noise generation.
     """
 
     embed_dim: int = 256
@@ -157,7 +152,6 @@ class LocalNetBuilder(ModuleConfig):
     affine_norms: bool = False
     lora_rank: int = 0
     lora_alpha: float | None = None
-    data_grid: Literal["legendre-gauss", "equiangular"] = "equiangular"
 
     def build(
         self,
@@ -192,13 +186,13 @@ class LocalNetBuilder(ModuleConfig):
             in_chans=n_in_channels,
             out_chans=n_out_channels,
             img_shape=dataset_info.img_shape,
-            data_grid=self.data_grid,
+            data_grid="legendre-gauss",
             context_config=context_config,
         )
         img_shape = dataset_info.img_shape
         if self.noise_type == "isotropic":
             dist = Distributed.get_instance()
-            inverse_sht = dist.get_isht(*img_shape, grid=self.data_grid)
+            inverse_sht = dist.get_isht(*img_shape, grid="legendre-gauss")
             lmax = inverse_sht.lmax
             mmax = inverse_sht.mmax
         else:
