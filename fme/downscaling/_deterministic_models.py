@@ -184,7 +184,7 @@ class DeterministicModel:
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
         predicted_norm = self.module(coarse_norm)
-        loss = self.loss(predicted_norm, targets_norm, self._channel_axis).sum()
+        loss = self.loss(predicted_norm, targets_norm).mean()
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
         target = filter_tensor_mapping(fine, set(self.out_packer.names))
