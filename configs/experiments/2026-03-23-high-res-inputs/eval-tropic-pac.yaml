@@ -5,10 +5,10 @@ patch:
   composite_prediction: true
   coarse_horizontal_overlap: 1
 model:
-  checkpoint_path: /checkpoints/best.ckpt
-  model_updates:
-   sigma_max: 2000.0
-   sigma_min: 0.005
+  first_model:
+    checkpoint_path: /winds_prmsl/best.ckpt
+  second_model:
+    checkpoint_path: /prate/best.ckpt
 data:
   #topography: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   fine:
