@@ -99,13 +99,13 @@ class ConditionalSFNOBuilder(ModuleConfig):
             pos_embed=self.pos_embed,
             big_skip=self.big_skip,
             checkpointing=self.checkpointing,
-            data_grid=self.data_grid,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
             img_shape=img_shape,
+            data_grid=self.data_grid,
             context_config=ContextConfig(
                 embed_dim_scalar=n_sigma_embedding_channels,
                 embed_dim_labels=0,

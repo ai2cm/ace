@@ -269,7 +269,6 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             pos_embed=self.pos_embed,
             big_skip=self.big_skip,
             checkpointing=self.checkpointing,
-            data_grid=self.data_grid,
             filter_residual=self.filter_residual,
             filter_output=self.filter_output,
             local_blocks=self.local_blocks,
@@ -286,6 +285,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             in_chans=n_in_channels,
             out_chans=n_out_channels,
             img_shape=dataset_info.img_shape,
+            data_grid=self.data_grid,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
                 embed_dim_pos=self.context_pos_embed_dim,

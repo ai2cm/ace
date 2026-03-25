@@ -85,8 +85,6 @@ class SFNONetConfig:
             0 disables LoRA.
         spectral_lora_alpha: Strength of LoRA adaptations for spectral
             convolutions. Defaults to spectral_lora_rank if None.
-        data_grid: Grid type for spherical harmonic transforms
-            ('equiangular', 'legendre-gauss').
     """
 
     embed_dim: int = 256
@@ -114,7 +112,6 @@ class SFNONetConfig:
     lora_alpha: float | None = None
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
-    data_grid: str = "equiangular"
 
 
 # heuristic for finding theta_cutoff
@@ -399,6 +396,7 @@ def get_lat_lon_sfnonet(
     in_chans: int,
     out_chans: int,
     img_shape: Tuple[int, int],
+    data_grid: str = "equiangular",
     context_config: ContextConfig = ContextConfig(
         embed_dim_scalar=0,
         embed_dim_noise=0,
@@ -413,10 +411,10 @@ def get_lat_lon_sfnonet(
     dist = Distributed.get_instance()
 
     trans_down = dist.get_sht(
-        *img_shape, lmax=modes_lat, mmax=modes_lon, grid=params.data_grid
+        *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
     )
     itrans_up = dist.get_isht(
-        *img_shape, lmax=modes_lat, mmax=modes_lon, grid=params.data_grid
+        *img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
     )
     trans = dist.get_sht(
         *img_shape, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
