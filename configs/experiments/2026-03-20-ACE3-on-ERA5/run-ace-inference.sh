@@ -3,10 +3,10 @@
 
 set -e
 
-JOB_NAME_BASE="ace-era5-pt-multi-step-shield-ft-lr1e-4-rs0-inference-year-long-zero-epoch"
+JOB_NAME_BASE="ace-era5-pt-multi-step-shield-ft-lr1e-4-rs0-inference-year-step122"
 JOB_GROUP="ace-foundation-model"
 # this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
-EXISTING_RESULTS_DATASET="01KHJ5F1M6YKVZESPZAAVVD6G8"
+EXISTING_RESULTS_DATASET="01KMGYKTC1YGSNZ44K9BEYWN94"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
