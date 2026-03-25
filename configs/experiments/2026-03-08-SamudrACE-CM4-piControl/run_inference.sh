@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME="v2025-06-03-inference-no-target-400yr"
-JOB_GROUP="v2025-06-03-inference-no-target-400yr"
+JOB_NAME="SamudrACE-v2025-06-03-inference-no-target-40yr-timing"
+JOB_GROUP="v2025-06-03-inference-no-target-40yr"
 CONFIG_FILENAME="inference_config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"

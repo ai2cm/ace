@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_coupled_steps: 29200
+n_coupled_steps: 2920
 coupled_steps_in_memory: 20
 checkpoint_path: /climate-default/home/jamesd/SamudrACE-CM4-piControl/samudrACE_CM4_piControl_ckpt.tar
 data_writer:
@@ -26,7 +26,7 @@ initial_condition:
     n_initial_conditions: 1
 logging:
   log_to_screen: true
-  log_to_wandb: true
+  log_to_wandb: false
   log_to_file: true
   project: ace-samudra-coupled-cm4
   entity: ai2cm
