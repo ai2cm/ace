@@ -57,7 +57,7 @@ from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
 )
-from fme.coupled.typing_ import CoupledTensorMapping
+from fme.coupled.typing_ import CoupledNames, CoupledTensorMapping
 
 
 @dataclasses.dataclass
@@ -247,9 +247,11 @@ class CoupledStepperConfig:
         self._validate_component_configs()
 
         atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
-        # this was already checked in _validate_component_configs, so an
-        # assertion will do fine here to appease mypy
-        assert atmosphere_ocean_config is not None
+        if atmosphere_ocean_config is None:
+            raise RuntimeError(
+                "atmosphere ocean config is None after validation; "
+                "this should not happen"
+            )
         self._atmosphere_ocean_config = atmosphere_ocean_config
 
         # set timesteps
@@ -385,6 +387,20 @@ class CoupledStepperConfig:
 
         """
         return self._shared_forcing_exogenous_names
+
+    @property
+    def all_names(self) -> CoupledNames:
+        """All variable names to log (outputs plus input-only forcings)."""
+        atmosphere_names = list(
+            set(
+                self.atmosphere.stepper.output_names
+                + self._atmosphere_forcing_exogenous_names
+            )
+        )
+        ocean_names = list(
+            set(self.ocean.stepper.output_names + self._ocean_forcing_exogenous_names)
+        )
+        return CoupledNames(ocean=ocean_names, atmosphere=atmosphere_names)
 
     @property
     def atmosphere_to_ocean_forcing_names(self) -> list[str]:
@@ -832,7 +848,7 @@ class CoupledStepper:
             "config": self._config.get_state(),
             "atmosphere_state": self.atmosphere.get_state(),
             "ocean_state": self.ocean.get_state(),
-            "dataset_info": self._dataset_info.to_state(),
+            "dataset_info": self._dataset_info.get_state(),
         }
 
     def load_state(self, state: dict[str, Any]):

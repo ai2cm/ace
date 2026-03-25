@@ -19,20 +19,55 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any, TypeVar
 
 import torch
 import torch.distributed
+import torch.nn as nn
+import torch_harmonics.distributed as thd
 from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
+from fme.core import metrics
 from fme.core.device import using_gpu, using_srun
 
+from ._gloo_patch import patch_gloo_alltoall
 from .base import DistributedBackend
 from .external.pnd_manager import DistributedManager
 from .non_distributed import DummyWrapper
 from .torch_distributed import _gather_irregular
 
 logger = logging.getLogger(__name__)
+
+
+T = TypeVar("T")
+
+
+class _AutogradAllReduce(torch.autograd.Function):
+    """Autograd-aware all-reduce (sum) for spatial parallelism.
+    Forward: all-reduce (sum) the input across the given process group.
+    Backward: identity — gradients pass through without communication.
+    This makes ``spatial_reduce_sum`` differentiable so that gradients
+    flow correctly through the loss computation path::
+        AreaWeightedMSELoss → area_weighted_mean → weighted_mean
+            → spatial_reduce_sum (uses this function)
+    Without this, the raw ``torch.distributed.all_reduce`` would break
+    the autograd graph because it is an in-place, non-differentiable op.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        input: torch.Tensor,
+        group: torch.distributed.ProcessGroup,
+    ) -> torch.Tensor:
+        output = input.clone()
+        torch.distributed.all_reduce(output, group=group)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return grad_output, None
 
 
 class ModelTorchDistributed(DistributedBackend):
@@ -57,7 +92,7 @@ class ModelTorchDistributed(DistributedBackend):
         w_size: int = 1,
         verbose: bool = False,
     ):
-        # Initialise PhysicsNeMo DistributedManager.
+        # Initialize PhysicsNeMo DistributedManager.
         DistributedManager.initialize()
         self._dm = DistributedManager()
 
@@ -90,6 +125,7 @@ class ModelTorchDistributed(DistributedBackend):
         self._data_group = self._dm.get_mesh_group(mesh["data"])
         self._h_group = self._dm.get_mesh_group(mesh["h"])
         self._w_group = self._dm.get_mesh_group(mesh["w"])
+        self._spatial_group = self._dm.get_mesh_group(mesh["h", "w"])
 
         self._data_size = torch.distributed.get_world_size(group=self._data_group)
         self._data_rank = torch.distributed.get_rank(group=self._data_group)
@@ -106,6 +142,10 @@ class ModelTorchDistributed(DistributedBackend):
         if using_gpu():
             self._device_id = self._local_rank
             torch.cuda.set_device(self._device_id)
+
+        if not thd.is_initialized():
+            thd.init(self._h_group, self._w_group)
+        patch_gloo_alltoall()
 
         logger.info(
             "ModelTorchDistributed initialized: "
@@ -146,8 +186,54 @@ class ModelTorchDistributed(DistributedBackend):
         """Number of data-parallel ranks."""
         return self._data_size
 
-    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None):
-        """Return index slices for the data-parallel chunk."""
+    def _get_local_spatial_shape(self, h: int, w: int):
+        """Compute the local spatial slice for this rank.
+
+        Args:
+            h (int): Global height.
+            w (int): Global width.
+
+        Returns:
+            tuple[slice, slice]: Slices for the local height and width.
+        """
+        from torch_harmonics.distributed import compute_split_shapes
+
+        h_shapes = compute_split_shapes(h, self._h_size)
+        w_shapes = compute_split_shapes(w, self._w_size)
+        h_start = sum(h_shapes[: self._h_rank])
+        w_start = sum(w_shapes[: self._w_rank])
+        return (
+            slice(h_start, h_start + h_shapes[self._h_rank]),
+            slice(w_start, w_start + w_shapes[self._w_rank]),
+        )
+
+    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None = None):
+        """Return index slices for this rank's local chunk.
+
+        Slices the ``data_parallel_dim`` across data-parallel ranks and
+        the last two dimensions across spatial (h, w) model-parallel ranks.
+        """
+        if len(tensor_shape) < 2:
+            raise ValueError(
+                "expected tensor_shape with at least 2 dimensions for "
+                "spatial slicing, "
+                f"got shape {tensor_shape}"
+            )
+        if len(tensor_shape) == 2 and data_parallel_dim is not None:
+            raise ValueError(
+                "data_parallel_dim cannot be specified for 2D tensors, since the "
+                "spatial slicing would consume both dimensions; got shape "
+                f"{tensor_shape}"
+            )
+        if data_parallel_dim is not None and (
+            data_parallel_dim in (-1, -2) or data_parallel_dim >= len(tensor_shape) - 2
+        ):
+            raise ValueError(
+                "data_parallel_dim must be a non-negative integer less than "
+                "the last two dimensions (reserved for spatial slicing), "
+                f"got data_parallel_dim={data_parallel_dim} and shape "
+                f"{tensor_shape}"
+            )
         return_list = [slice(None, None) for _ in tensor_shape]
         if data_parallel_dim is not None:
             n_dp = self.total_data_parallel_ranks
@@ -162,15 +248,17 @@ class ModelTorchDistributed(DistributedBackend):
             return_list[data_parallel_dim] = slice(
                 self._data_rank * per_rank, (self._data_rank + 1) * per_rank
             )
+        # Spatial slicing on the last two dimensions (H, W).
+        if len(tensor_shape) >= 2:
+            return_list[-2], return_list[-1] = self._get_local_spatial_shape(
+                tensor_shape[-2], tensor_shape[-1]
+            )
         return tuple(return_list)
 
     def local_batch_size(self, batch_size: int) -> int:
         """Divide global batch among data-parallel ranks."""
         return batch_size // self.total_data_parallel_ranks
 
-    # NOTE: reductions are performed over the data-parallel group only, since
-    # the spatial groups are meant for model parallelism, and for now we assume
-    # that any tensors being reduced are replicated across the spatial groups.
     def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None:
         torch.distributed.all_reduce(tensor, group=self._data_group)
         return tensor / self.total_data_parallel_ranks
@@ -196,36 +284,36 @@ class ModelTorchDistributed(DistributedBackend):
         tensor: torch.Tensor,
         gather_list: list[torch.Tensor] | None = None,
     ) -> list[torch.Tensor] | None:
-        # NOTE: gather is performed over the data-parallel group only, like reductions
-        # NOTE: dst must be a *global* rank that belongs to the data group.
-        # data_rank=0 corresponds to the first entry in the group's rank list.
-        root_global_rank = torch.distributed.get_process_group_ranks(self._data_group)[
-            0
-        ]
-        if gather_list is None and self._data_rank == 0:
+        # NOTE: gather is performed globally, unlike reductions
+        if gather_list is None and self.rank == 0:
             gather_list = [tensor] + [
-                torch.empty_like(tensor) for _ in range(self._data_size - 1)
+                torch.empty_like(tensor) for _ in range(self.total_ranks - 1)
             ]
-        torch.distributed.gather(
-            tensor,
-            gather_list,
-            dst=root_global_rank,
-            group=self._data_group,
+        torch.distributed.gather(tensor, gather_list)
+        return gather_list
+
+    def gather_object(self, obj: T) -> list[T] | None:
+        """Gather a picklable object globally."""
+        gather_list: list[Any] | None = (
+            [None for _ in range(self.total_ranks)] if self._rank == 0 else None
         )
+        torch.distributed.gather_object(obj, gather_list)
         return gather_list if self._rank == 0 else None
 
-    def gather_object(self, obj: object) -> list[object] | None:
-        """Gather a picklable object over the data-parallel group."""
-        root_global_rank = torch.distributed.get_process_group_ranks(self._data_group)[
-            0
-        ]
-        gather_list: list[object] | None = (
-            [None for _ in range(self._data_size)] if self._data_rank == 0 else None
+    def scatter_object(self, obj: T | None) -> T:
+        """Scatter a picklable object from the root process to all processes."""
+        if self._data_rank == 0:
+            if obj is None:
+                raise ValueError("Root process must provide an object to scatter")
+            object_list = [obj for _ in range(self.total_ranks)]
+        else:
+            object_list = None
+        output_list = [None]
+        torch.distributed.scatter_object_list(
+            scatter_object_output_list=output_list,
+            scatter_object_input_list=object_list,
         )
-        torch.distributed.gather_object(
-            obj, gather_list, dst=root_global_rank, group=self._data_group
-        )
-        return gather_list if self._rank == 0 else None
+        return output_list[0]  # type: ignore[return-value]
 
     # For now, let's just borrow the same gather_irregular implementation
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
@@ -244,27 +332,110 @@ class ModelTorchDistributed(DistributedBackend):
     def wrap_module(self, module: torch.nn.Module) -> torch.nn.Module:
         """Wrap with DDP over the **data** process group.
 
-        For now, we assume spatial communication is expected to be handled
-        inside the model layers themselves. If we need to change course, we
-        can revisit...
+        Spatial model parallelism is handled by:
+        - Forward: communication inside model layers (distributed SHT/iSHT)
+        - Backward: gradient hooks registered here that all-reduce across
+          spatial ranks, so every rank sees the global-mean gradient.
+
+        ``broadcast_buffers=False`` is required because the SHT/iSHT layers
+        store precomputed Legendre polynomial buffers.  DDP's default
+        buffer broadcast modifies these in-place between forward calls,
+        which breaks autograd's tensor-version tracking.
         """
         if any(p.requires_grad for p in module.parameters()):
             if using_gpu():
                 output_device = [self._device_id]
             else:
                 output_device = None
-            return DistributedDataParallel(
+            wrapped = DistributedDataParallel(
                 SyncBatchNorm.convert_sync_batchnorm(module),
                 device_ids=self._device_ids,
                 output_device=output_device,
                 process_group=self._data_group,
+                broadcast_buffers=False,
             )
+            self._register_spatial_grad_hooks(wrapped)
+            return wrapped
         return DummyWrapper(module)
+
+    def _register_spatial_grad_hooks(self, module: torch.nn.Module) -> None:
+        """All-reduce gradients across spatial ranks after each backward.
+
+        Each spatial rank only sees its local slice of the input, so its
+        gradient is a partial sum.  This hook sums those partials so
+        that every rank applies the same weight update.
+
+        The hook fires via ``register_hook`` on each parameter, which is
+        invoked with the per-backward gradient tensor before it is
+        accumulated into ``.grad`` and before DDP's data-parallel
+        all-reduce. The two reductions commute (orthogonal groups), so
+        ordering does not matter.
+        """
+        if self._h_size <= 1 and self._w_size <= 1:
+            return
+        spatial_group = self._spatial_group
+
+        def _hook(grad: torch.Tensor) -> torch.Tensor:
+            if grad is None:
+                return grad
+
+            reduced = grad.contiguous().clone()
+            torch.distributed.all_reduce(reduced, group=spatial_group)
+            return reduced
+
+        for p in module.parameters():
+            if p.requires_grad:
+                p.register_hook(_hook)
 
     def barrier(self):
         """Global barrier across all ranks."""
         logger.debug("Barrier on rank %d", self._rank)
         torch.distributed.barrier(device_ids=self._device_ids)
+
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self._h_size > 1 or self._w_size > 1:
+            return _AutogradAllReduce.apply(tensor, self._spatial_group)
+        return tensor
+
+    def weighted_mean(
+        self,
+        data: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+        keepdim: bool = False,
+    ) -> torch.Tensor:
+        local_weighted_sum = metrics.weighted_sum(
+            data, weights, dim=dim, keepdim=keepdim
+        )
+        local_weight_sum = weights.expand(data.shape).sum(dim=dim, keepdim=keepdim)
+        return self.spatial_reduce_sum(local_weighted_sum) / self.spatial_reduce_sum(
+            local_weight_sum
+        )
+
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        # If we have 1 rank along the longitude dimension, quickly return the local mean
+        if self._w_size == 1:
+            return data.nanmean(dim=-1)
+
+        # Distributed nanmean over the longitude (w) dimension.
+        local_sum = data.nansum(dim=-1)
+        local_count = (~torch.isnan(data)).to(data.dtype).sum(dim=-1)
+        torch.distributed.all_reduce(local_sum, group=self._w_group)
+        torch.distributed.all_reduce(local_count, group=self._w_group)
+        return local_sum / local_count
+
+    def get_sht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
+        return thd.DistributedRealSHT(
+            nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
+        ).float()
+
+    def get_isht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
+        return thd.DistributedInverseRealSHT(
+            nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
+        ).float()
+
+    def get_disco_conv_s2(self, *args, **kwargs) -> nn.Module:
+        return thd.DistributedDiscreteContinuousConvS2(*args, **kwargs)
 
     def shutdown(self):
         self.barrier()

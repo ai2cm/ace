@@ -1,10 +1,12 @@
 import numpy as np
+import pytest
 import torch
 
 from fme.core import get_device
 from fme.core.distributed import Distributed
 
 
+@pytest.mark.parallel
 def test_gather_tensor_from_local_slices():
     """
     Only tests get_local_slices and gather.
@@ -30,6 +32,28 @@ def test_gather_tensor_from_local_slices():
         assert gathered is None
 
 
+@pytest.mark.parallel
+def test_local_slices_cover_full_domain():
+    """Union of slices from every rank should cover every element exactly once."""
+    dist = Distributed.get_instance()
+    n_dp = dist.total_data_parallel_ranks
+    rows = 4 * n_dp
+    global_shape = (rows, 8, 6)
+    local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
+    # Collect one slice per data-parallel rank on root and verify full coverage.
+    # gather_object gathers over the data-parallel group, so all_slices has
+    # n_dp entries — one unique slice per dp rank, each covering a distinct
+    # portion of the domain.
+    all_slices = dist.gather_object(local_slices)
+    if dist.is_root():
+        assert all_slices is not None
+        canvas = torch.zeros(global_shape)
+        for s in all_slices:
+            canvas[s] += 1
+        torch.testing.assert_close(canvas, torch.ones_like(canvas))
+
+
+@pytest.mark.parallel
 def test_local_slices_subdivide_domain():
     """
     Only tests get_local_slices and gather.
@@ -43,20 +67,17 @@ def test_local_slices_subdivide_domain():
     dist = Distributed.get_instance()
     n_dp = dist.total_data_parallel_ranks
     global_shape = (2 * n_dp, 4, 4)
-    x_global = torch.zeros(global_shape, device=get_device())
+    canvas = torch.zeros(global_shape, device=get_device())
     local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
-    gathered_local_slices = dist.gather_object(local_slices)
-    if dist.is_root():
-        assert gathered_local_slices is not None
-        for i in range(n_dp):
-            x_global[gathered_local_slices[i]] += 1.0
-        torch.testing.assert_close(
-            x_global, torch.ones_like(x_global)
-        )  # the entire domain should get selected, and only once
-    else:
-        assert gathered_local_slices is None
+    canvas[local_slices] += 1.0
+    # Combine spatial contributions then data-parallel contributions.
+    canvas = dist.spatial_reduce_sum(canvas)
+    canvas = dist.reduce_sum(canvas)
+    # The entire domain should be covered exactly once.
+    torch.testing.assert_close(canvas, torch.ones_like(canvas))
 
 
+@pytest.mark.parallel
 def test_gather_global_tensor():
     """
     Test that gather_object and gather_global produce consistent results.
@@ -78,6 +99,17 @@ def test_gather_global_tensor():
         assert gathered_local_slices is None
 
 
+@pytest.mark.parallel
+def test_local_slices_no_data_parallel_dim():
+    """Without a dp dim, the data-parallel dims are untouched."""
+    dist = Distributed.get_instance()
+    shape = (8, 6, 8)  # (batch, H, W) — 3D so batch is separate from spatial
+    slices = dist.get_local_slices(shape)
+    # batch dim should be full (no dp dim specified)
+    assert slices[0] == slice(None, None)
+
+
+@pytest.mark.parallel
 def test_local_slices_match_gather_tensors():
     """
     Test that gather_object and gather produce consistent results.
@@ -91,7 +123,7 @@ def test_local_slices_match_gather_tensors():
     local_slices = dist.get_local_slices(global_shape, data_parallel_dim=0)
     gathered_local_slices = dist.gather_object(local_slices)
     gathered_tensors = dist.gather(
-        x_global[local_slices],
+        x_global[local_slices].contiguous(),
     )
     if dist.is_root():
         assert gathered_local_slices is not None
@@ -109,6 +141,7 @@ def test_local_slices_match_gather_tensors():
         assert gathered_tensors is None
 
 
+@pytest.mark.parallel
 def test_reduce_mean_from_multiple_ranks():
     """
     dist.reduce_mean should only reduce along the "data parallel" dimension, not
@@ -122,7 +155,7 @@ def test_reduce_mean_from_multiple_ranks():
     # each global/model domain is a reshaped arange, with a different constant offset
     # depending on the batch/data parallel index/rank.
     x_global_ranked = x_global_base + dist.data_parallel_rank
-    x_local_ranked = x_global_ranked[dist.get_local_slices(global_shape)]
+    x_local_ranked = x_global_ranked[dist.get_local_slices(global_shape)].contiguous()
     x_local_reduced = dist.reduce_mean(x_local_ranked)
 
     # we expect the offsets to average out, giving the arange map plus an average offset

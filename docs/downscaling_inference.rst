@@ -268,10 +268,6 @@ Related Configuration Classes
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.downscaling.predictors.cascade.CascadePredictorConfig
-   :show-inheritance:
-   :noindex:
-
 .. autoclass:: fme.downscaling.predictors.PatchPredictionConfig
    :show-inheritance:
    :noindex:

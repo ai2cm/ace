@@ -1,9 +1,7 @@
 import abc
 import dataclasses
-from collections.abc import Callable
-
-# we use Type to distinguish from type attr of StepSelector
-from typing import Any, ClassVar, Self, Type, TypeVar, cast, final  # noqa: UP035
+from collections.abc import Callable, Mapping
+from typing import Any, ClassVar, Self, TypeVar, final
 
 import dacite
 import torch
@@ -120,30 +118,25 @@ class StepConfigABC(abc.ABC):
         pass
 
     @classmethod
-    def from_state(cls, state: dict[str, Any]) -> Self:
+    def from_state(cls, state: Mapping[str, Any]) -> Self:
         return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
-
-
-T = TypeVar("T", bound=StepConfigABC)
 
 
 @dataclasses.dataclass
 class StepSelector(StepConfigABC):
     type: str
     config: dict[str, Any]
-    registry: ClassVar[Registry] = Registry()
+    registry: ClassVar[Registry[StepConfigABC]] = Registry[StepConfigABC]()
 
     def __post_init__(self):
-        self._step_config_instance: StepConfigABC = cast(
-            StepConfigABC, self.registry.get(self.type, self.config)
-        )
+        self._step_config_instance = self.registry.get(self.type, self.config)
 
     @property
     def n_ic_timesteps(self) -> int:
         return self._step_config_instance.n_ic_timesteps
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:  # noqa: UP006
+    def register(cls, name: str):
         return cls.registry.register(name)
 
     def get_step(
