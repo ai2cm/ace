@@ -1,10 +1,10 @@
 loss_weights:
   weights:
     PRATEsfc:
-      start_epoch: 250
-      end_epoch: 400
+      start_epoch: 600
+      end_epoch: 1100
       start_weight: 0.0
-      end_weight: 0.7
+      end_weight: 1.0
 loss_weight_exponent: 0.75
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
@@ -49,11 +49,11 @@ model:
   num_diffusion_generation_steps: 18
   churn: 0.0
   training_noise_distribution:
-    p_min: 0.01
-    p_max: 200.0
+    p_min: 0.005
+    p_max: 2000.0
   predict_residual: true
-  sigma_max: 200.0
-  sigma_min: 0.01
+  sigma_max: 2000.0
+  sigma_min: 0.005
   use_fine_topography: true
 optimization:
   lr: 0.0001
@@ -145,7 +145,7 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 250
+max_epochs: 600
 validate_interval: 15
 experiment_dir: /results
 save_checkpoints: false
