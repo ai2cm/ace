@@ -75,7 +75,7 @@ class NoiseConditionedModel(torch.nn.Module):
         mmax: int = 0,
     ):
         super().__init__()
-        self.module = module
+        self.conditional_model = module
         self.embed_dim = embed_dim_noise
         self.img_shape = img_shape
         self._inverse_sht = inverse_sht
@@ -138,7 +138,7 @@ class NoiseConditionedModel(torch.nn.Module):
         else:
             embedding_pos = None
 
-        return self.module(
+        return self.conditional_model(
             x,
             Context(
                 embedding_scalar=None,
