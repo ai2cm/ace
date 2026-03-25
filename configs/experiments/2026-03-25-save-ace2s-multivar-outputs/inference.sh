@@ -15,6 +15,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 STATS_DATASET="01K5A6EH0XE13D7RYWW4GGWCNE"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
+IMAGE="$(cat latest_deps_only_image.txt)"
 
 python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 
@@ -22,7 +23,7 @@ cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
     --description 'Run ACE2S evaluator' \
-    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
+    --beaker-image $IMAGE \
     --workspace ai2/climate-titan \
     --priority high \
     --not-preemptible \
@@ -42,6 +43,7 @@ cd $REPO_ROOT && gantry run \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
+    --no-conda \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- python -I -m fme.ace.evaluator $CONFIG_PATH
