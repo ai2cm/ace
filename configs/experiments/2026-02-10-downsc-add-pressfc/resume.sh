@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-prate-weight-ramp-exp0.75-tropics-resume"
+JOB_NAME="xshield-downscaling-100km-to-3km-prate-weight-ramp-from600exp0.75-tropics-resume"
 CONFIG_FILENAME="resume-train-100-to-3km-multivar-prate-weight-ramp-exp0.75.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -22,7 +22,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 
-PREVIOUS_RESULTS_DATASET="01KMDYKAY9EHY7C4KNRKPGD6Q1"
+PREVIOUS_RESULTS_DATASET="01KMH2EMVN0WA3E6GFC2WAFFQ0"
 
 
 gantry run \
