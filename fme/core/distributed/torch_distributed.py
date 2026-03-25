@@ -207,7 +207,9 @@ class TorchDistributed(DistributedBackend):
         return th.InverseRealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
 
     def get_disco_conv_s2(self, *args, **kwargs) -> nn.Module:
-        return th.DiscreteContinuousConvS2(*args, **kwargs).float()
+        from fme.core.disco import DiscreteContinuousConvS2
+
+        return DiscreteContinuousConvS2(*args, **kwargs).float()
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor

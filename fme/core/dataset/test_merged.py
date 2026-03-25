@@ -2,12 +2,12 @@ import pytest
 import torch
 
 from fme.core.dataset.merged import MergedXarrayDataset
-from fme.core.dataset.testing import TestingDataset
+from fme.core.dataset.testing import MockDataset
 
 
 def test_merged_contains_all_data():
     datasets = [
-        TestingDataset.new(
+        MockDataset.new(
             n_times=10, varnames=[f"var_{i}"], sample_n_times=3, initial_epoch=None
         )
         for i in range(3)
@@ -23,7 +23,7 @@ def test_merged_contains_all_data():
 
 def test_merged_set_epoch():
     datasets = [
-        TestingDataset.new(
+        MockDataset.new(
             n_times=10, varnames=[f"var_{i}"], sample_n_times=3, initial_epoch=None
         )
         for i in range(3)
@@ -38,7 +38,7 @@ def test_merged_set_epoch():
 
 def test_merged_raises_on_different_epochs():
     datasets = [
-        TestingDataset.new(
+        MockDataset.new(
             n_times=10, varnames=[f"var_{i}"], sample_n_times=3, initial_epoch=i
         )
         for i in range(3)
@@ -52,10 +52,10 @@ def test_merged_raises_on_different_epochs():
 
 def test_merged_raises_on_different_epochs_with_none():
     datasets = [
-        TestingDataset.new(
+        MockDataset.new(
             n_times=10, varnames=[f"var_none"], sample_n_times=3, initial_epoch=None
         ),
-        TestingDataset.new(
+        MockDataset.new(
             n_times=10, varnames=[f"var_0"], sample_n_times=3, initial_epoch=0
         ),
     ]
