@@ -277,7 +277,12 @@ def checkpointed_model_config(
     # loader_config is passed in to add static inputs into model
     # that correspond to the dataset coordinates
     static_inputs = load_static_inputs({"HGTsfc": f"{data_paths.fine}/data.nc"})
-    model = model_config.build(coarse_shape, 2, static_inputs=static_inputs)
+    model = model_config.build(
+        coarse_shape,
+        2,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
+    )
 
     checkpoint_path = tmp_path / "model_checkpoint.pth"
     model.get_state()
