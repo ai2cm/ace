@@ -648,18 +648,20 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
                 ] = (bias_upper + bias_lower) / 2.0
         return return_dict
 
-    def _get_percentile_metrics_for_field(self, histogram: _Histogram, field_name: str, prefix: str) -> dict[str, float]:
+    def _get_percentile_metrics_for_field(
+            self, histogram: _Histogram, field_name: str
+    ) -> dict[str, float]:
         tail = self._variable_distribution_tail(field_name)
         percentile_metrics: dict[str, float] = {}
         for p in self.percentiles:
             if tail in ["upper", "both"]:
                 p_key = _format_percentile_for_metric_key(p, p)
-                percentile_metrics[f"{prefix}/{p_key}th-percentile/{field_name}"] = quantile(
+                percentile_metrics[f"{p_key}th-percentile/{field_name}"] = quantile(
                     histogram.bin_edges, histogram.counts, p / 100.0
                 )
             if tail in ["lower", "both"]:
                 p_key = _format_percentile_for_metric_key(100.0 - p, p)
-                percentile_metrics[f"{prefix}/{p_key}th-percentile/{field_name}"] = quantile(
+                percentile_metrics[f"{p_key}th-percentile/{field_name}"] = quantile(
                     histogram.bin_edges, histogram.counts, (100.0 - p) / 100.0
                 )
         return percentile_metrics
@@ -673,31 +675,13 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
             fig = self._plot_histogram(target, prediction)
             return_dict[field_name] = fig
             plt.close(fig)
-            percentile_entries = self._percentile_entries_for_field(field_name)
-            if target is not None:
-                for p, p_key in percentile_entries:
-                    return_dict[f"target/{p_key}th-percentile/{field_name}"] = quantile(
-                        target.bin_edges, target.counts, p / 100.0
-                    )
             if prediction is not None:
-                for p, p_key in percentile_entries:
-                    return_dict[f"prediction/{p_key}th-percentile/{field_name}"] = (
-                        quantile(prediction.bin_edges, prediction.counts, p / 100.0)
-                    )
-                    if self._compute_percentile_frac and target is not None:
-                        return_dict[
-                            f"prediction_frac_of_target/{p_key}th-percentile/{field_name}"
-                        ] = (
-                            return_dict[f"prediction/{p_key}th-percentile/{field_name}"]
-                            / return_dict[f"target/{p_key}th-percentile/{field_name}"]
-                        )
+                return_dict = self._get_percentile_metrics_for_field(prediction, field_name)
 
-                if target is not None:
-                    return_dict.update(
-                        self._get_abs_norm_tail_biases_beyond_percentile(
-                            field_name, prediction, target
-                        )
-                    )
+                if self._compute_percentile_frac and target is not None:
+                    target_dict = self._get_percentile_metrics_for_field(target, field_name,)
+                    for key, value in return_dict.items():
+                        return_dict[f"prediction_frac_of_target/{key}"] = value / target_dict[key]
 
         return return_dict
 
