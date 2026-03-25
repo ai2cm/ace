@@ -42,6 +42,6 @@ cd $REPO_ROOT && gantry run \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
-    --system-python \
     --install "pip install --no-deps ." \
+    --allow-dirty \
     -- python -I -m fme.ace.evaluator $CONFIG_PATH
