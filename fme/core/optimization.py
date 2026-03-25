@@ -191,6 +191,10 @@ class Optimization(OptimizationABC):
             self.gscaler.update()
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
 
+    def set_learning_rate(self, lr: float):
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = lr
+
     def get_state(self):
         """
         Returns state as a serializable data structure.
@@ -203,10 +207,6 @@ class Optimization(OptimizationABC):
             ),
         }
         return state
-
-    def set_learning_rate(self, lr: float):
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = lr
 
     def load_state(self, state):
         """

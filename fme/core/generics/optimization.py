@@ -17,6 +17,13 @@ class OptimizationABC(abc.ABC):
     def learning_rate(self) -> float: ...
 
     @abc.abstractmethod
+    def set_learning_rate(self, lr: float):
+        """
+        Set the learning rate for all parameter groups.
+        """
+        ...
+
+    @abc.abstractmethod
     def set_mode(self, modules: nn.ModuleList):
         """
         Sets the mode of the module to train.
@@ -91,13 +98,6 @@ class OptimizationABC(abc.ABC):
     def get_state(self):
         """
         Returns state as a serializable data structure.
-        """
-        ...
-
-    @abc.abstractmethod
-    def set_learning_rate(self, lr: float):
-        """
-        Set the learning rate for all parameter groups.
         """
         ...
 
