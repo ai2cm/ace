@@ -876,3 +876,97 @@ PRATEsfc is striking. Key findings:
 - Unlike `specific_total_water_0` where most of the change is at the 1979 boundary, PRATEsfc evolves continuously, suggesting it reflects ongoing improvements to ERA5's assimilation system and convection parameterization rather than a single regime shift.
 
 Now let me update the transcript and commit.
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+
+[Tool: Bash] Update transcript
+  $ python scripts/era5_investigation/extract_transcript.py ~/.claude/projects/-home-mcgibbon-python-ace/9002ffcd-fea0-4f20-9c82-71574fe9940d.jsonl scripts/era5_investigation/t03_conversation_transcript.t...
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+
+[Tool: Bash] Stage changed/new files
+  $ git add scripts/era5_investigation/s07_spectral_power_periods.py scripts/era5_investigation/t03_conversation_transcript.txt scripts/era5_investigation/plots/spectral_power_PRATEsfc.png scripts/era5_in...
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+
+[Tool: Bash] Commit PRATEsfc addition
+  $ git commit -m "$(cat <<'EOF'
+Add PRATEsfc to spectral power analysis per review comment
+
+PRATEsfc shows the largest spectral evolution of any variable analyzed:
+nearly 2x increase in small-scale power...
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+Committed as `3744064f9`. The only actionable review comment was from @Arcomano1234 asking to add PRATEsfc — done. The other comments are discussion threads between you, Spencer, and Andre about the discontinuities and USWRFsfc negatives, with no outstanding code change requests.
+
+
+================================================================================
+USER:
+================================================================================
+
+Add specific total water 1 to the power spectrum analysis as well.
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+
+[Tool: Edit] /home/mcgibbon/python/ace/scripts/era5_investigation/s07_spectral_power_periods.py
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+
+[Tool: Bash] Re-run with specific_total_water_1
+  $ rm /tmp/era5_samples/spectral_sample_*.nc && python scripts/era5_investigation/s07_spectral_power_periods.py 2>&1
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+`specific_total_water_1` (tropopause level, ~98 hPa) is by far the most extreme — **4.3x** more small-scale power in 2010-2022 vs pre-1979, with RMSE 0.636 dwarfing everything else. The shift is large across all boundaries: 2.19x at 1979, another ~1.27x by 2009, and another 1.55x by 2010-2022. Let me look at the plots.
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+
+[Tool: Read] /home/mcgibbon/python/ace/scripts/era5_investigation/plots/spectral_power_specific_total_water_1.png
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+
+[Tool: Read] /home/mcgibbon/python/ace/scripts/era5_investigation/plots/spectral_ratio_specific_total_water_1.png
+
+
+--------------------------------------------------------------------------------
+ASSISTANT:
+--------------------------------------------------------------------------------
+
+Dramatic. `specific_total_water_1` shows the spectra clearly fanning apart at all scales, with the ratio reaching 3-5x at the highest wavenumbers. The shift is progressive across all four periods — not just a 1979 jump.
+
+Now let me commit.

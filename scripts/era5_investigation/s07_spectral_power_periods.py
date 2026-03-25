@@ -36,6 +36,7 @@ VARIABLES = [
     "air_temperature_0",
     "air_temperature_7",
     "specific_total_water_0",
+    "specific_total_water_1",
     "specific_total_water_7",
     "eastward_wind_0",
     "PRESsfc",
