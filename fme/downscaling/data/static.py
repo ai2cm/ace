@@ -62,9 +62,22 @@ def _load_coords_from_ds(ds: xr.Dataset) -> LatLonCoordinates:
     )
 
 
+def _open_ds_from_path(path: str) -> xr.Dataset:
+    if path.endswith(".zarr"):
+        ds = xr.open_zarr(path, mask_and_scale=False)
+    else:
+        ds = xr.open_dataset(path, mask_and_scale=False)
+    return ds
+
+
+def load_coords_from_path(path: str) -> LatLonCoordinates:
+    ds = _open_ds_from_path(path)
+    return _load_coords_from_ds(ds)
+
+
 def _get_normalized_static_input(
     path: str, field_name: str
-) -> tuple["StaticInput", LatLonCoordinates]:
+) -> tuple[StaticInput, LatLonCoordinates]:
     """
     Load a static input field from a given file path and field name and
     normalize it.
@@ -74,11 +87,7 @@ def _get_normalized_static_input(
 
     Raises ValueError if lat/lon coordinates are not found in the dataset.
     """
-    if path.endswith(".zarr"):
-        ds = xr.open_zarr(path, mask_and_scale=False)
-    else:
-        ds = xr.open_dataset(path, mask_and_scale=False)
-
+    ds = _open_ds_from_path(path)
     coords = _load_coords_from_ds(ds)
     da = ds[field_name]
 

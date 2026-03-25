@@ -111,10 +111,12 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
         n_samples,
     )
     model_config = get_model_config(coarse_shape, downscale_factor=downscale_factor)
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
     model = model_config.build(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
-        static_inputs=load_static_inputs({"HGTsfc": fine_data_path}),
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
@@ -158,10 +160,12 @@ def test_predictor_renaming(
     model_config = get_model_config(
         coarse_shape, downscale_factor, use_fine_topography=False
     )
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
     model = model_config.build(
         coarse_shape=coarse_shape,
         downscale_factor=2,
-        static_inputs=load_static_inputs({"HGTsfc": fine_data_path}),
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
