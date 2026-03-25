@@ -40,6 +40,7 @@ VARIABLES = [
     "eastward_wind_0",
     "PRESsfc",
     "TMP2m",
+    "PRATEsfc",
 ]
 
 # Sample years from each period — 12 sparse timesteps per year keeps it fast
