@@ -139,7 +139,16 @@ class LocalNetBuilder(ModuleConfig):
     noise_type: Literal["gaussian", "isotropic"] = "gaussian"
     context_pos_embed_dim: int = 0
     block_types: list[BlockType] = dataclasses.field(
-        default_factory=lambda: ["disco"] * 12
+        default_factory=lambda: [
+            "disco",
+            "disco",
+            "disco",
+            "disco",
+            "conv1x1",
+            "conv1x1",
+            "conv1x1",
+            "conv1x1",
+        ]
     )
     global_layer_norm: bool = False
     use_mlp: bool = True

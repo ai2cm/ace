@@ -74,22 +74,6 @@ class NoiseConditionedModel(torch.nn.Module):
         lmax: int = 0,
         mmax: int = 0,
     ):
-        """
-        Args:
-            module: An nn.Module with forward signature (x, context: Context).
-            img_shape: Global spatial dimensions (lat, lon) of the input data.
-            embed_dim_noise: Dimension of noise channels.
-            embed_dim_pos: Dimension of learned positional embedding.
-                0 disables.
-            embed_dim_labels: Dimension of label embeddings. 0 disables.
-            inverse_sht: Optional inverse spherical harmonic transform. When
-                provided, noise conditioning uses isotropic noise generated
-                via the inverse SHT. When None, gaussian noise is used.
-            lmax: Maximum spherical harmonic degree for isotropic noise.
-                Required when inverse_sht is provided.
-            mmax: Maximum spherical harmonic order for isotropic noise.
-                Required when inverse_sht is provided.
-        """
         super().__init__()
         self.module = module
         self.embed_dim = embed_dim_noise
