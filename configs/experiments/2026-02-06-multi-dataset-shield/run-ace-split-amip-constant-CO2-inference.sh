@@ -20,13 +20,13 @@ declare -A MODELS=( \
     # [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
     # [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
     # [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
-    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
     # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
     # [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
     # [full-rs1]="01KHJ5EQ04XTFG46QCKX3TTAHF" \
     # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
     # [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
-    # ["ACE2-SHiELD"]="brianhenn/shield-amip-1deg-ace2-train-RS2-best-inference-ckpt" \
+    ["ACE2-SHiELD"]="brianhenn/shield-amip-1deg-ace2-train-RS2-best-inference-ckpt" \
 )
 
 SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
@@ -46,7 +46,7 @@ for name in "${!MODELS[@]}"; do
     job_name="${DATE}-${name}-split-amip-constant-CO2-inference"
     existing_results_dataset=${MODELS[$name]}
 
-    if [ $model == "ACE2-SHiELD" ]; then
+    if [ "$name" = "ACE2-SHiELD" ]; then
         interpolate=false
     else
         interpolate=true
