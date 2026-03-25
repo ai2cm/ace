@@ -91,6 +91,25 @@ class SerialPredictor:
         """Run first model returning shape [batch, n_samples, lat, lon]."""
         return self.first_model.generate_on_batch_no_target(batch, n_samples=n_samples)
 
+    def _fold_first_output_conditioning(
+        self, first_output: TensorDict, B: int, n_samples: int
+    ) -> TensorDict:
+        """Reshape conditioning from [B, S, H, W] to [B*S, H, W]."""
+        return {
+            k: v.reshape(B * n_samples, *v.shape[2:])
+            for k, v in first_output.items()
+            if k in self._high_res_cond_names
+        }
+
+    @staticmethod
+    def _unfold_samples(flat: TensorDict, B: int, n_samples: int) -> TensorDict:
+        """Reshape from [B*S, 1, H, W] to [B, S, H, W]."""
+        result = {}
+        for k, v in flat.items():
+            squeezed = v.squeeze(1)  # [B*S, H, W]
+            result[k] = squeezed.reshape(B, n_samples, *squeezed.shape[1:])
+        return result
+
     @torch.no_grad()
     def generate_on_batch_no_target(
         self,
@@ -98,15 +117,14 @@ class SerialPredictor:
         n_samples: int = 1,
     ) -> TensorDict:
         first_output = self._run_first_model(batch, n_samples=n_samples)
-        # Use the first sample as conditioning for the second model
-        fine_data = {
-            k: v[:, 0]
-            for k, v in first_output.items()
-            if k in self._high_res_cond_names
-        }
-        second_output = self.second_model.generate_on_batch_no_target(
-            batch, n_samples=n_samples, fine_data=fine_data
+        B = next(iter(first_output.values())).shape[0]
+
+        fine_data = self._fold_first_output_conditioning(first_output, B, n_samples)
+        expanded_batch = batch.expand_and_fold(n_samples, sample_dim=1)
+        second_output_flat = self.second_model.generate_on_batch_no_target(
+            expanded_batch, n_samples=1, fine_data=fine_data
         )
+        second_output = self._unfold_samples(second_output_flat, B, n_samples)
         for name in self._first_model_output_names:
             second_output[name] = first_output[name]
         return second_output
@@ -118,22 +136,24 @@ class SerialPredictor:
         n_samples: int = 1,
     ) -> ModelOutputs:
         first_output = self._run_first_model(batch.coarse, n_samples=n_samples)
-        # Use the first sample as conditioning for the second model
-        fine_data = {
-            k: v[:, 0]
-            for k, v in first_output.items()
-            if k in self._high_res_cond_names
-        }
-        merged_fine = {**batch.fine.data, **fine_data}
+        B = next(iter(first_output.values())).shape[0]
+
+        folded_cond = self._fold_first_output_conditioning(first_output, B, n_samples)
+        expanded = batch.expand_and_fold(n_samples, sample_dim=1)
+        merged_fine_data = {**expanded.fine.data, **folded_cond}
         merged_batch = PairedBatchData(
             fine=BatchData(
-                data=merged_fine,
-                time=batch.fine.time,
-                latlon_coordinates=batch.fine.latlon_coordinates,
+                data=merged_fine_data,
+                time=expanded.fine.time,
+                latlon_coordinates=expanded.fine.latlon_coordinates,
             ),
-            coarse=batch.coarse,
+            coarse=expanded.coarse,
         )
-        result = self.second_model.generate_on_batch(merged_batch, n_samples)
+        result = self.second_model.generate_on_batch(merged_batch, n_samples=1)
+
+        result.prediction = self._unfold_samples(result.prediction, B, n_samples)
+        result.target = {k: v[::n_samples] for k, v in result.target.items()}
+
         for name in self._first_model_output_names:
             result.prediction[name] = first_output[name]
             if name in batch.fine.data:

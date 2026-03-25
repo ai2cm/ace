@@ -157,12 +157,12 @@ def test_generate_on_batch_no_target_passthrough_outputs():
 
     n_samples = 3
     result = predictor.generate_on_batch_no_target(batch, n_samples=n_samples)
+    assert "b" in result
     assert "c" in result
     assert "d" in result
+    assert result["b"].shape == (batch_size, n_samples, *FINE_SHAPE)
     assert result["c"].shape == (batch_size, n_samples, *FINE_SHAPE)
     assert result["d"].shape == (batch_size, n_samples, *FINE_SHAPE)
-    # "b" is consumed as conditioning, not in final output
-    assert "b" not in result
 
 
 def test_generate_on_batch():

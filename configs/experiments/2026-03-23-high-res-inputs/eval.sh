@@ -3,9 +3,9 @@
 set -e
 
 #JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-debug-event-channel-mixing-serial-predictor"
+JOB_NAME="eval-serial-predictor-events"
 
-CONFIG_FILENAME="debug-events.yaml"
+CONFIG_FILENAME="eval-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
