@@ -172,20 +172,6 @@ class OceanCorrector(CorrectorABC):
         self._gridded_operations = gridded_operations
         self._vertical_coordinate = vertical_coordinate
         self._timestep = timestep
-        self._global_mean_depth: torch.Tensor | None = None
-
-    @property
-    def global_mean_depth(self) -> torch.Tensor:
-        if self._vertical_coordinate is None:
-            raise RuntimeError(
-                "Global mean ocean depth cannot be computed without the ocean depth "
-                "coordinate."
-            )
-        if self._global_mean_depth is None:
-            self._global_mean_depth = self._gridded_operations.area_weighted_mean(
-                self._vertical_coordinate.sea_floor_depth, name="global_mean_depth"
-            )
-        return self._global_mean_depth
 
     def __call__(
         self,

@@ -28,9 +28,6 @@ _MASK[_LAT, _LON, :] = 0.0
 
 
 class _MockDepth:
-    def sea_floor_depth(self) -> torch.Tensor:
-        return torch.full_like(_MASK, 15)
-
     def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
         idepth = torch.tensor([0, 5, 15], device=DEVICE)
         thickness = idepth.diff(dim=-1)

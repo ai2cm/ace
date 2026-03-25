@@ -32,9 +32,6 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 
 @runtime_checkable
 class HasOceanDepthIntegral(Protocol):
-    @property
-    def sea_floor_depth(self) -> torch.Tensor: ...
-
     def depth_integral(
         self,
         integrand: torch.Tensor,
