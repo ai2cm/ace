@@ -9,9 +9,6 @@ from fme.core.benchmark.timer import NullTimer, Timer
 from fme.core.distributed import Distributed
 
 from .initialization import trunc_normal_
-from .isotropic_filter import (
-    IsotropicMorletFilterBasis as _IsotropicMorletFilterBasis,  # noqa: F401 (monkey-patches torch-harmonics on import)
-)
 from .layers import MLP, ConditionalLayerNorm, Context, ContextConfig
 from .lora import LoRAConv2d
 from .sfnonet import DiscreteContinuousConvS2, NoLayerNorm, _compute_cutoff_radius
