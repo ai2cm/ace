@@ -69,11 +69,7 @@ from fme.core.coordinates import (
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.core.generics.trainer import (
-    _restore_checkpoint,
-    count_parameters,
-    epoch_checkpoint_enabled,
-)
+from fme.core.generics.trainer import _restore_checkpoint
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -87,7 +83,6 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing.model import compare_parameters, compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
-from fme.core.typing_ import Slice
 
 JOB_SUBMISSION_SCRIPT_PATH = (
     pathlib.PurePath(__file__).parent / "run-train-and-inference.sh"
@@ -888,6 +883,7 @@ def test_restore_checkpoint(
             )
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 @pytest.mark.skipif(
     fme.get_device().type == "mps", reason="MPS does not support multi-device training."
@@ -957,31 +953,6 @@ def test_copy_weights_after_batch(tmp_path, nettype, skip_slow: bool):
         train_config, ckpt, experiment_dir=str(tmp_path / "fine_tuning_dir")
     )
     train_main(yaml_config=fine_tuning_config)
-
-
-@pytest.mark.parametrize(
-    "checkpoint_save_epochs,expected_save_epochs",
-    [(None, []), (Slice(start=-2), [2, 3]), (Slice(step=2), [0, 2])],
-)
-def test_epoch_checkpoint_enabled(checkpoint_save_epochs, expected_save_epochs):
-    max_epochs = 4
-    for i in range(max_epochs):
-        if i in expected_save_epochs:
-            assert epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
-        else:
-            assert not epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
-
-
-@pytest.mark.parametrize(
-    "module_list,expected_num_parameters",
-    [
-        (torch.nn.ModuleList([torch.nn.Linear(10, 5), torch.nn.Linear(5, 2)]), 67),
-        (torch.nn.ModuleList([]), 0),
-    ],
-)
-def test_count_parameters(module_list, expected_num_parameters):
-    num_parameters = count_parameters(module_list)
-    assert num_parameters == expected_num_parameters
 
 
 def test_train_without_inline_inference(tmp_path, very_fast_only: bool):

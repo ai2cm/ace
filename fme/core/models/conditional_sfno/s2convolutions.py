@@ -14,28 +14,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# import FactorizedTensor from tensorly for tensorized operations
 import math
 import torch
 import torch.nn as nn
 
-import torch_harmonics as th
-
 from fme.core.benchmark.timer import NullTimer, Timer
 from fme.core.distributed.distributed import Distributed
 
-# import convenience functions for factorized tensors
 from .activations import ComplexReLU
 
-# for the experimental module
 from .contractions import (
-    _contract_localconv_fwd,
     compl_exp_mul2d_fwd,
     compl_exp_muladd2d_fwd,
     compl_mul2d_fwd,
     compl_muladd2d_fwd,
-    real_mul2d_fwd,
-    real_muladd2d_fwd,
 )
 
 
@@ -98,35 +90,12 @@ class SpectralConvS2(nn.Module):
         in_channels,
         out_channels,
         num_groups: int = 1,
-        scale="auto",
-        operator_type="diagonal",
-        rank=0.2,
-        factorization=None,
-        separable=False,
-        decomposition_kwargs=dict(),
         bias=False,
-        use_tensorly=True,
         filter_residual: bool = False,
         lora_rank: int = 0,
         lora_alpha: float | None = None,
     ):  # pragma: no cover
         super(SpectralConvS2, self).__init__()
-        if operator_type != "dhconv":
-            raise NotImplementedError(
-                "Only 'dhconv' operator type is currently supported."
-            )
-        if factorization is not None:
-            raise NotImplementedError(
-                "Factorizations other than None are not currently supported."
-            )
-        if use_tensorly:
-            raise NotImplementedError(
-                "Tensorly-based implementation is not currently supported."
-            )
-        if separable:
-            raise NotImplementedError(
-                "Separable convolutions are not currently supported."
-            )
 
         if in_channels != out_channels:
             raise NotImplementedError(
@@ -136,11 +105,6 @@ class SpectralConvS2(nn.Module):
         assert in_channels % num_groups == 0
         assert out_channels % num_groups == 0
         self.num_groups = num_groups
-
-        if in_channels != out_channels:
-            raise NotImplementedError(
-                "Currently only in_channels == out_channels is supported."
-            )
 
         self.forward_transform = forward_transform
         self.inverse_transform = inverse_transform
@@ -153,18 +117,6 @@ class SpectralConvS2(nn.Module):
             or (self.forward_transform.nlon != self.inverse_transform.nlon)
             or (self.forward_transform.grid != self.inverse_transform.grid)
         )
-        # Make sure we are using a Complex Factorized Tensor
-        if factorization is None:
-            factorization = "Dense"  # No factorization
-
-        if not factorization.lower().startswith("complex"):
-            factorization = f"Complex{factorization}"
-
-        # remember factorization details
-        self.operator_type = operator_type
-        self.rank = rank
-        self.factorization = factorization
-        self.separable = separable
 
         assert self.inverse_transform.lmax == self.modes_lat
         assert self.inverse_transform.mmax == self.modes_lon
@@ -175,10 +127,9 @@ class SpectralConvS2(nn.Module):
         self.modes_lat_local = l_stop - l_start
         self._l_slice = l_slice
 
-        if scale == "auto":
-            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
-            # seemingly the first weight is not really complex, so we need to account for that
-            scale[0, :] *= math.sqrt(2.0)
+        scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
+        # seemingly the first weight is not really complex, so we need to account for that
+        scale[0, :] *= math.sqrt(2.0)
 
         weight_shape = [
             num_groups,
@@ -187,7 +138,6 @@ class SpectralConvS2(nn.Module):
             in_channels // num_groups,
         ]
 
-        assert factorization == "ComplexDense"
         self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
 
         self.lora_rank = lora_rank
@@ -368,93 +318,6 @@ class SpectralConvS2(nn.Module):
         return x, residual
 
 
-class LocalConvS2(nn.Module):
-    """
-    S2 Convolution according to Driscoll & Healy
-    """
-
-    def __init__(
-        self,
-        forward_transform,
-        inverse_transform,
-        in_channels,
-        out_channels,
-        nradius=120,
-        scale="auto",
-        bias=False,
-    ):  # pragma: no cover
-        super(LocalConvS2, self).__init__()
-
-        if scale == "auto":
-            scale = 1 / (in_channels * out_channels)
-
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.nradius = nradius
-
-        self.forward_transform = forward_transform
-        self.zonal_transform = th.RealSHT(
-            forward_transform.nlat,
-            1,
-            lmax=forward_transform.lmax,
-            mmax=1,
-            grid=forward_transform.grid,
-        ).float()
-        self.inverse_transform = inverse_transform
-
-        self.modes_lat = self.inverse_transform.lmax
-        self.modes_lon = self.inverse_transform.mmax
-        self.output_dims = (self.inverse_transform.nlat, self.inverse_transform.nlon)
-
-        assert self.inverse_transform.lmax == self.modes_lat
-        assert self.inverse_transform.mmax == self.modes_lon
-
-        self.weight = nn.Parameter(
-            scale * torch.randn(in_channels, out_channels, nradius, 1)
-        )
-
-        self._contract = _contract_localconv_fwd
-
-        if bias:
-            self.bias = nn.Parameter(
-                scale * torch.randn(1, out_channels, *self.output_dims)
-            )
-
-    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
-        dtype = x.dtype
-        x = x.float()
-        B, C, H, W = x.shape
-
-        with torch.amp.autocast("cuda", enabled=False):
-            f = torch.zeros(
-                (self.in_channels, self.out_channels, H, 1),
-                dtype=x.dtype,
-                device=x.device,
-            )
-            f[..., : self.nradius, :] = self.weight
-
-            x = self.forward_transform(x)
-            f = self.zonal_transform(f)[..., :, 0]
-
-            x = torch.view_as_real(x)
-            f = torch.view_as_real(f)
-
-        x = self._contract(x, f)
-        x = x.contiguous()
-
-        x = torch.view_as_complex(x)
-
-        with torch.amp.autocast("cuda", enabled=False):
-            x = self.inverse_transform(x)
-
-        if hasattr(self, "bias"):
-            x = x + self.bias
-
-        x = x.type(dtype)
-
-        return x
-
-
 class SpectralAttentionS2(nn.Module):
     """
     Spherical non-linear FNO layer
@@ -628,120 +491,3 @@ class SpectralAttentionS2(nn.Module):
         x = x.to(dtype)
 
         return x, residual
-
-
-class RealSpectralAttentionS2(nn.Module):
-    """
-    Non-linear SFNO layer using a real-valued NN instead of a complex one
-    """
-
-    def __init__(
-        self,
-        forward_transform,
-        inverse_transform,
-        embed_dim,
-        operator_type="diagonal",
-        sparsity_threshold=0.0,
-        hidden_size_factor=2,
-        complex_activation="real",
-        scale="auto",
-        bias=False,
-        spectral_layers=1,
-        drop_rate=0.0,
-    ):  # pragma: no cover
-        super(RealSpectralAttentionS2, self).__init__()
-
-        self.embed_dim = embed_dim
-        self.sparsity_threshold = sparsity_threshold
-        self.operator_type = operator_type
-        self.spectral_layers = spectral_layers
-
-        if scale == "auto":
-            self.scale = 1 / (embed_dim * embed_dim)
-
-        self.modes_lat = forward_transform.lmax
-        self.modes_lon = forward_transform.mmax
-
-        # only storing the forward handle to be able to call it
-        self.forward_transform = forward_transform
-        self.inverse_transform = inverse_transform
-
-        self.scale_residual = (
-            self.forward_transform.nlat != self.inverse_transform.nlat
-        ) or (self.forward_transform.nlon != self.inverse_transform.nlon)
-
-        assert inverse_transform.lmax == self.modes_lat
-        assert inverse_transform.mmax == self.modes_lon
-
-        hidden_size = int(hidden_size_factor * self.embed_dim * 2)
-
-        self.mul_add_handle = real_muladd2d_fwd
-        self.mul_handle = real_mul2d_fwd
-
-        # weights
-        w = [self.scale * torch.randn(2 * self.embed_dim, hidden_size)]
-        for l in range(1, self.spectral_layers):
-            w.append(self.scale * torch.randn(hidden_size, hidden_size))
-        self.w = nn.ParameterList(w)
-
-        self.wout = nn.Parameter(
-            self.scale * torch.randn(hidden_size, 2 * self.embed_dim)
-        )
-
-        if bias:
-            self.b = nn.ParameterList(
-                [
-                    self.scale * torch.randn(hidden_size, 1, 1)
-                    for _ in range(self.spectral_layers)
-                ]
-            )
-
-        self.activations = nn.ModuleList([])
-        for l in range(0, self.spectral_layers):
-            self.activations.append(nn.ReLU())
-
-        self.drop = nn.Dropout(drop_rate) if drop_rate > 0.0 else nn.Identity()
-
-    def forward_mlp(self, x):  # pragma: no cover
-        """forward pass of the MLP"""
-        B, C, H, W = x.shape
-
-        xr = torch.view_as_real(x)
-        xr = xr.permute(0, 1, 4, 2, 3).reshape(B, C * 2, H, W)
-
-        for l in range(self.spectral_layers):
-            if hasattr(self, "b"):
-                xr = self.mul_add_handle(xr, self.w[l], self.b[l])
-            else:
-                xr = self.mul_handle(xr, self.w[l])
-            xr = self.activations[l](xr)
-            xr = self.drop(xr)
-
-        # final MLP
-        xr = self.mul_handle(xr, self.wout)
-
-        xr = xr.reshape(B, C, 2, H, W).permute(0, 1, 3, 4, 2)
-
-        x = torch.view_as_complex(xr)
-
-        return x
-
-    def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
-        dtype = x.dtype
-        x = x.to(torch.float32)
-
-        # FWD transform
-        with torch.amp.autocast("cuda", enabled=False):
-            x = self.forward_transform(x)
-
-        # MLP
-        x = self.forward_mlp(x)
-
-        # BWD transform
-        with torch.amp.autocast("cuda", enabled=False):
-            x = self.inverse_transform(x)
-
-        # cast back to initial precision
-        x = x.to(dtype)
-
-        return x

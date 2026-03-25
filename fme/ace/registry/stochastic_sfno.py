@@ -11,6 +11,7 @@ from fme.core.distributed.distributed import Distributed
 from fme.core.models.conditional_sfno.sfnonet import (
     Context,
     ContextConfig,
+    SFNONetConfig,
     get_lat_lon_sfnonet,
 )
 from fme.core.models.conditional_sfno.sfnonet import (
@@ -145,10 +146,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     Noise is provided as conditioning input to conditional layer normalization.
 
     Attributes:
-        spectral_transform: Type of spherical transform to use.
-            Kept for backwards compatibility.
+        spectral_transform: Unused, kept for backwards compatibility only.
         filter_type: Type of filter to use.
-        operator_type: Type of operator to use. Only "dhconv" is supported.
+        operator_type: Unused, kept for backwards compatibility only.
+            Must be "dhconv".
         residual_filter_factor: Factor by which to downsample the residual.
         embed_dim: Dimension of the embedding.
         noise_embed_dim: Dimension of the noise embedding.
@@ -157,21 +158,24 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             for conditioning.
         global_layer_norm: Whether to reduce along the spatial domain when applying
             layer normalization.
-        num_layers: Number of blocks (SFNO and MLP)in the model.
-        use_mlp: Whether to use a MLP in the model.
+        num_layers: Number of blocks (SFNO and MLP) in the model.
+        use_mlp: Whether to use an MLP in the model.
         mlp_ratio: Ratio of the MLP hidden dimension
             to the embedding dimension.
         activation_function: Activation function to use.
         encoder_layers: Number of encoder layers in the model.
         pos_embed: Whether to use a position embedding.
         big_skip: Whether to use a big skip connection in the model.
-        rank: Rank of the model.
+        rank: Unused, kept for backwards compatibility only.
         factorization: Unused, kept for backwards compatibility only.
+            Must be None.
         separable: Unused, kept for backwards compatibility only.
-        complex_network: Whether to use a complex network.
-        complex_activation: Activation function to use.
-        spectral_layers: Number of spectral layers in the model.
+            Must be False.
+        complex_network: Unused, kept for backwards compatibility only.
+        complex_activation: Unused, kept for backwards compatibility only.
+        spectral_layers: Unused, kept for backwards compatibility only.
         checkpointing: Whether to use checkpointing.
+        data_grid: Grid type for spherical harmonic transforms.
         filter_residual: Whether to filter residual connections through a
             SHT round-trip. These will always be filtered if residual_filter_factor
             is not 1.
@@ -253,11 +257,35 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ):
+        sfno_config = SFNONetConfig(
+            embed_dim=self.embed_dim,
+            filter_type=self.filter_type,
+            global_layer_norm=self.global_layer_norm,
+            num_layers=self.num_layers,
+            use_mlp=self.use_mlp,
+            mlp_ratio=self.mlp_ratio,
+            activation_function=self.activation_function,
+            encoder_layers=self.encoder_layers,
+            pos_embed=self.pos_embed,
+            big_skip=self.big_skip,
+            checkpointing=self.checkpointing,
+            filter_residual=self.filter_residual,
+            filter_output=self.filter_output,
+            local_blocks=self.local_blocks,
+            normalize_big_skip=self.normalize_big_skip,
+            affine_norms=self.affine_norms,
+            filter_num_groups=self.filter_num_groups,
+            lora_rank=self.lora_rank,
+            lora_alpha=self.lora_alpha,
+            spectral_lora_rank=self.spectral_lora_rank,
+            spectral_lora_alpha=self.spectral_lora_alpha,
+        )
         sfno_net = get_lat_lon_sfnonet(
-            params=self,
+            params=sfno_config,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
             img_shape=dataset_info.img_shape,
+            data_grid=self.data_grid,
             context_config=ContextConfig(
                 embed_dim_scalar=0,
                 embed_dim_pos=self.context_pos_embed_dim,

@@ -21,7 +21,7 @@ class GriddedOperations(abc.ABC):
         if not isinstance(other, GriddedOperations):
             return False
         try:
-            assert_dict_allclose(self.to_state(), other.to_state())
+            assert_dict_allclose(self.get_state(), other.get_state())
         except AssertionError:
             return False
         return True
@@ -207,7 +207,7 @@ class GriddedOperations(abc.ABC):
         self,
     ) -> nn.Module: ...
 
-    def to_state(self) -> dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         return {
             "type": self.__class__.__name__,
             "state": self.get_initialization_kwargs(),
@@ -372,8 +372,16 @@ class LatLonOperations(GriddedOperations):
         name: str | None = None,
     ):
         area_weights = self._get_area_weights(truth, name)
+        img_shape = (
+            self._cpu_area_global.shape[-2],
+            self._cpu_area_global.shape[-1],
+        )
         return Distributed.get_instance().gradient_magnitude_percent_diff(
-            truth, predicted, weights=area_weights, dim=self.HORIZONTAL_DIMS
+            truth,
+            predicted,
+            weights=area_weights,
+            dim=self.HORIZONTAL_DIMS,
+            img_shape=img_shape,
         )
 
     def get_real_sht(self) -> nn.Module:

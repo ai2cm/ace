@@ -10,7 +10,7 @@ from fme.core.generics.aggregator import AggregatorABC
 from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainStepperABC
-from fme.core.generics.validation import run_validation
+from fme.core.generics.validation import run_validation_loop
 from fme.core.typing_ import Slice
 
 
@@ -116,20 +116,25 @@ def run_lr_tuning_trial(
         candidate_ema(candidate_stepper.modules)
 
     # Validate both forks
-    baseline_val_logs = run_validation(
+    baseline_agg = get_validation_aggregator()
+    run_validation_loop(
         stepper=baseline_stepper,
         valid_data=valid_data,
-        aggregator=get_validation_aggregator(),
+        aggregator=baseline_agg,
         ema=baseline_ema,
         validate_using_ema=validate_using_ema,
     )
-    candidate_val_logs = run_validation(
+    baseline_val_logs = baseline_agg.get_logs(label="val")
+
+    candidate_agg = get_validation_aggregator()
+    run_validation_loop(
         stepper=candidate_stepper,
         valid_data=valid_data,
-        aggregator=get_validation_aggregator(),
+        aggregator=candidate_agg,
         ema=candidate_ema,
         validate_using_ema=validate_using_ema,
     )
+    candidate_val_logs = candidate_agg.get_logs(label="val")
 
     baseline_val_loss = baseline_val_logs["val/mean/loss"]
     candidate_val_loss = candidate_val_logs["val/mean/loss"]

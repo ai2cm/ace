@@ -173,8 +173,6 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 return time_coarsen.build_paired(data_writer)
             return data_writer
 
-        n_samples = len(initial_condition_times)
-
         if enable_prediction_netcdfs:
             self._writers.append(
                 _time_coarsen_builder(
@@ -192,7 +190,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             self._writers.append(
                 PairedMonthlyDataWriter(
                     path=path,
-                    n_samples=n_samples,
+                    initial_condition_times=initial_condition_times,
                     n_timesteps=n_timesteps,
                     timestep=timestep,
                     save_names=save_names,
@@ -357,8 +355,6 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 return time_coarsen.build(data_writer)
             return data_writer
 
-        n_initial_conditions = len(initial_condition_times)
-
         if enable_prediction_netcdfs:
             self._writers.append(
                 _time_coarsen_builder(
@@ -379,7 +375,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 MonthlyDataWriter(
                     path=path,
                     label="monthly_mean_predictions",
-                    n_samples=n_initial_conditions,
+                    initial_condition_times=initial_condition_times,
                     save_names=save_names,
                     variable_metadata=variable_metadata,
                     coords=coords,

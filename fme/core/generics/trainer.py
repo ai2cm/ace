@@ -618,17 +618,15 @@ class Trainer:
         self.valid_data.set_epoch(self._epochs_trained)
         aggregator = self._aggregator_builder.get_validation_aggregator()
         logging.info("Starting loop over validation data")
-        logs = run_validation(
-            stepper=self.stepper,
-            valid_data=self.valid_data,
+        return run_validation(
+            train_stepper=self.stepper,
+            validation_data=self.valid_data,
             aggregator=aggregator,
+            diagnostics_subdir=f"epoch_{self._epochs_trained:04d}",
+            record_logs=lambda logs: None,
             ema=self._ema,
             validate_using_ema=self.config.validate_using_ema,
         )
-        logging.info("Starting flush of reduced diagnostics to disk")
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
-        logging.info("Getting validation aggregator logs")
-        return logs
 
     def inference_one_epoch(
         self,

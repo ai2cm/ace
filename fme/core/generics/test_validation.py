@@ -4,16 +4,16 @@ import torch
 
 from fme.core.ema import EMATracker
 from fme.core.generics.test_trainer import TrainData, TrainStepper, ValidationAggregator
-from fme.core.generics.validation import run_validation
+from fme.core.generics.validation import run_validation_loop
 
 
-def test_run_validation_returns_logs():
+def test_run_validation_loop_returns_none():
     stepper = TrainStepper()
     valid_data = TrainData(n_batches=3, shuffle=False)
     aggregator = ValidationAggregator(validation_loss=0.5)
     ema = EMATracker(stepper.modules, decay=0.9999)
 
-    logs = run_validation(
+    run_validation_loop(
         stepper=stepper,
         valid_data=valid_data,
         aggregator=aggregator,
@@ -21,12 +21,13 @@ def test_run_validation_returns_logs():
         validate_using_ema=False,
     )
 
+    assert stepper.validation_batches_seen == [0, 1, 2]
+    logs = aggregator.get_logs(label="val")
     assert "val/mean/loss" in logs
     assert logs["val/mean/loss"] == 0.5
-    assert stepper.validation_batches_seen == [0, 1, 2]
 
 
-def test_run_validation_with_ema():
+def test_run_validation_loop_with_ema():
     """When validate_using_ema=True, EMA params are applied during validation."""
     stepper = TrainStepper()
     valid_data = TrainData(n_batches=2, shuffle=False)
@@ -41,7 +42,7 @@ def test_run_validation_with_ema():
 
     weight_before = stepper.modules[0].weight.data.clone()
 
-    logs = run_validation(
+    run_validation_loop(
         stepper=stepper,
         valid_data=valid_data,
         aggregator=aggregator,
@@ -49,18 +50,19 @@ def test_run_validation_with_ema():
         validate_using_ema=True,
     )
 
-    # After run_validation, the original weights should be restored
+    # After run_validation_loop, the original weights should be restored
     assert torch.allclose(stepper.modules[0].weight.data, weight_before)
+    logs = aggregator.get_logs(label="val")
     assert "val/mean/loss" in logs
 
 
-def test_run_validation_without_ema_none():
+def test_run_validation_loop_without_ema_none():
     """When ema is None and validate_using_ema=False, validation still works."""
     stepper = TrainStepper()
     valid_data = TrainData(n_batches=2, shuffle=False)
     aggregator = ValidationAggregator(validation_loss=0.7)
 
-    logs = run_validation(
+    run_validation_loop(
         stepper=stepper,
         valid_data=valid_data,
         aggregator=aggregator,
@@ -68,17 +70,18 @@ def test_run_validation_without_ema_none():
         validate_using_ema=False,
     )
 
+    logs = aggregator.get_logs(label="val")
     assert logs["val/mean/loss"] == 0.7
 
 
-def test_run_validation_does_not_flush_diagnostics():
-    """run_validation should not call flush_diagnostics on the aggregator."""
+def test_run_validation_loop_does_not_flush_diagnostics():
+    """run_validation_loop should not call flush_diagnostics on the aggregator."""
     stepper = TrainStepper()
     valid_data = TrainData(n_batches=2, shuffle=False)
     aggregator = ValidationAggregator(validation_loss=0.1)
     aggregator.flush_diagnostics = unittest.mock.MagicMock()  # type: ignore
 
-    run_validation(
+    run_validation_loop(
         stepper=stepper,
         valid_data=valid_data,
         aggregator=aggregator,
