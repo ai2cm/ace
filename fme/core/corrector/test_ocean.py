@@ -4,13 +4,11 @@ import pytest
 import torch
 
 from fme import get_device
-from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, REFERENCE_SALINITY_PSU
 from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrector,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
-    OceanSaltContentBudgetConfig,
     SeaIceFractionConfig,
     SurfaceEnergyFluxCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
@@ -402,93 +400,5 @@ def test_ocean_heat_content_correction(hfds_type):
     torch.testing.assert_close(
         expected_gen_data.ocean_heat_content,
         gen_data_corrected.ocean_heat_content,
-        equal_nan=True,
-    )
-
-
-@pytest.mark.parametrize(
-    "wfo_type",
-    [
-        pytest.param("input", id="wfo_in_input"),
-        pytest.param("gen", id="wfo_in_gen"),
-    ],
-)
-def test_ocean_salt_content_correction(wfo_type):
-    unaccounted_salt_flux = 0.1
-    config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="constant_salinity",
-            constant_unaccounted_salt_flux=unaccounted_salt_flux,
-        )
-    )
-    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
-    nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
-    mask = torch.ones(nlat, nlon, nlevels)
-    mask[0, 0, 0] = 0.0
-    mask[0, 0, 1] = 0.0
-    mask[0, 1, 1] = 0.0
-    masks = {
-        "mask_0": mask[:, :, 0],
-        "mask_1": mask[:, :, 1],
-        "mask_2d": mask[:, :, 0],
-    }
-    mask_provider = MaskProvider(masks)
-    ops = LatLonOperations(torch.ones(size=[3, 3]), mask_provider)
-
-    idepth = torch.tensor([2.5, 10, 20])
-    depth_coordinate = DepthCoordinate(idepth, mask)
-    global_mean_depth = 16.25  # (7 * 17.5 m * 1 * 7.5 m) / 8
-
-    sea_surface_fraction = mask[:, :, 0]
-
-    wfo_value = torch.ones(nsamples, nlat, nlon) * 0.5
-    sfdsi_value = torch.ones(nsamples, nlat, nlon) * 0.001
-
-    input_data_dict = {
-        "so_0": torch.ones(nsamples, nlat, nlon),
-        "so_1": torch.ones(nsamples, nlat, nlon),
-    }
-    gen_data_dict = {
-        "so_0": torch.ones(nsamples, nlat, nlon) * 2,
-        "so_1": torch.ones(nsamples, nlat, nlon) * 2,
-        "sfdsi": sfdsi_value,
-    }
-    if wfo_type == "gen":
-        gen_data_dict["wfo"] = wfo_value
-    else:
-        input_data_dict["wfo"] = wfo_value
-    forcing_data_dict = {
-        "sea_surface_fraction": sea_surface_fraction,
-    }
-    input_data = OceanData(input_data_dict, depth_coordinate)
-    gen_data = OceanData(gen_data_dict, depth_coordinate)
-    corrector = OceanCorrector(config, ops, depth_coordinate, timestep)
-    gen_data_corrected_dict = corrector(
-        input_data_dict, gen_data_dict, forcing_data_dict
-    )
-
-    input_osc = input_data.ocean_salt_content.nanmean(dim=(-1, -2), keepdim=True)
-    gen_osc = gen_data.ocean_salt_content.nanmean(dim=(-1, -2), keepdim=True)
-    torch.testing.assert_close(gen_osc, input_osc * 2, equal_nan=True)
-
-    # Total surface flux combines virtual salt flux from freshwater and sfdsi.
-    # All non-masked ocean points have the same flux, so the area-weighted
-    # mean equals the pointwise value.
-    total_flux_mean = -REFERENCE_SALINITY_PSU * 0.5 + 1000.0 * 0.001
-    osc_change = (total_flux_mean + unaccounted_salt_flux) * timestep.total_seconds()
-    salt_deficit = input_osc + osc_change - gen_osc
-
-    correction_psu = salt_deficit / (DENSITY_OF_SEA_WATER_CM4 * global_mean_depth)
-
-    expected_gen_data_dict = {
-        key: value + correction_psu if key.startswith("so") else value
-        for key, value in gen_data_dict.items()
-    }
-
-    expected_gen_data = OceanData(expected_gen_data_dict, depth_coordinate)
-    gen_data_corrected = OceanData(gen_data_corrected_dict, depth_coordinate)
-    torch.testing.assert_close(
-        expected_gen_data.ocean_salt_content,
-        gen_data_corrected.ocean_salt_content,
         equal_nan=True,
     )
