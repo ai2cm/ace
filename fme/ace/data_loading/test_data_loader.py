@@ -962,6 +962,31 @@ def test_inference_persistence_names(tmp_path):
     assert not torch.all(first_item["bar"] == second_item["bar"])
 
 
+def test_inference_dataset_label_override_without_dataset_labels(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        start_indices=ExplicitIndices([0]),
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=3,
+    )
+    dataset = InferenceDataset(
+        config,
+        total_forward_steps=3,
+        requirements=window_requirements,
+        label_override=["era5"],
+    )
+    batch = dataset[0]
+    # assert that the labels are not None and are the correct labels set during
+    # inference config initialization
+    assert batch.labels is not None
+    assert batch.labels.names == ["era5"]
+    assert batch.labels.tensor.shape[0] == 1
+    assert batch.labels.tensor.shape[1] == 1
+
+
 def test_zarr_engine_used_sequence():
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(

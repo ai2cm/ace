@@ -1,7 +1,7 @@
 import math
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import torch
 
@@ -36,6 +36,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 )
 
 
+@runtime_checkable
 class HasOceanDepthIntegral(Protocol):
     @property
     def sea_floor_depth(self) -> torch.Tensor: ...
