@@ -14,16 +14,17 @@ AMIP_DATA_ROOT="/climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-
 declare -A INITIAL_CONDITIONS
 INITIAL_CONDITIONS=( \
     ["1"]="1979-01-01T06:00:00" \
-    ["2"]="1979-01-01T12:00:00" \
-    ["3"]="1979-01-01T18:00:00" \
-    ["4"]="1979-01-02T00:00:00" \
-    ["5"]="1979-01-02T06:00:00" \
+    # ["2"]="1979-01-01T12:00:00" \
+    # ["3"]="1979-01-01T18:00:00" \
+    # ["4"]="1979-01-02T00:00:00" \
+    # ["5"]="1979-01-02T06:00:00" \
 )
 
 declare -A MODELS=( \
     # [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
     # ["ACE2-SHiELD"]="brianhenn/shield-amip-1deg-ace2-train-RS2-best-inference-ckpt" \
-    [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
