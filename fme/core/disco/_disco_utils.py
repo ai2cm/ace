@@ -7,7 +7,8 @@
 
 
 import torch
-from torch_harmonics.fft import irfft, rfft
+
+from ._fft import irfft, rfft
 
 
 def _get_psi(

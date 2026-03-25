@@ -11,12 +11,12 @@ import math
 
 import torch
 import torch.nn as nn
-from torch_harmonics import filter_basis as _filter_basis_module
-from torch_harmonics.cache import lru_cache
-from torch_harmonics.filter_basis import FilterBasis
-from torch_harmonics.quadrature import precompute_latitudes, precompute_longitudes
 
+from . import _filter_basis as _filter_basis_module
+from ._cache import lru_cache
 from ._disco_utils import _disco_s2_contraction_fft, _get_psi, _precompute_psi_banded
+from ._filter_basis import FilterBasis
+from ._quadrature import precompute_latitudes, precompute_longitudes
 
 
 def _normalize_convolution_tensor_s2(
