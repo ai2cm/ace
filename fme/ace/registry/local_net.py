@@ -14,6 +14,7 @@ from fme.core.models.conditional_sfno.ankur import (
 )
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.conditional_sfno.localnet import (
+    BasisType,
     BlockType,
     LocalNetConfig,
     get_lat_lon_localnet,
@@ -109,6 +110,15 @@ class LocalNetBuilder(ModuleConfig):
 
     Attributes:
         embed_dim: Dimension of the embeddings.
+        kernel_shape: Shape of the DISCO convolution filter basis, passed
+            to the filter basis constructor. For the "piecewise linear" and
+            "morlet" basis types this is a two-element tuple
+            (n_radial_modes, n_azimuthal_modes). When n_azimuthal_modes is
+            1, the "piecewise linear" basis produces isotropic (radially
+            symmetric) filters. Only affects 'disco' blocks.
+        basis_type: Type of filter basis for the DISCO convolution
+            ('morlet', 'piecewise linear', or 'zernike'). Only affects
+            'disco' blocks.
         noise_embed_dim: Dimension of the noise conditioning channels.
         noise_type: Type of noise for conditioning ('gaussian' or 'isotropic').
             Isotropic noise is generated via inverse spherical harmonic
@@ -135,6 +145,8 @@ class LocalNetBuilder(ModuleConfig):
     """
 
     embed_dim: int = 256
+    kernel_shape: tuple[int, int] = (3, 3)
+    basis_type: BasisType = "morlet"
     noise_embed_dim: int = 256
     noise_type: Literal["gaussian", "isotropic"] = "gaussian"
     context_pos_embed_dim: int = 0
@@ -170,6 +182,8 @@ class LocalNetBuilder(ModuleConfig):
     ) -> nn.Module:
         params = LocalNetConfig(
             embed_dim=self.embed_dim,
+            kernel_shape=self.kernel_shape,
+            basis_type=self.basis_type,
             block_types=self.block_types,
             global_layer_norm=self.global_layer_norm,
             use_mlp=self.use_mlp,
