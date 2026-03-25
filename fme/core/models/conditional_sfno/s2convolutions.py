@@ -90,35 +90,12 @@ class SpectralConvS2(nn.Module):
         in_channels,
         out_channels,
         num_groups: int = 1,
-        scale="auto",
-        operator_type="diagonal",
-        rank=0.2,
-        factorization=None,
-        separable=False,
-        decomposition_kwargs=dict(),
         bias=False,
-        use_tensorly=True,
         filter_residual: bool = False,
         lora_rank: int = 0,
         lora_alpha: float | None = None,
     ):  # pragma: no cover
         super(SpectralConvS2, self).__init__()
-        if operator_type != "dhconv":
-            raise NotImplementedError(
-                "Only 'dhconv' operator type is currently supported."
-            )
-        if factorization is not None:
-            raise NotImplementedError(
-                "Factorizations other than None are not currently supported."
-            )
-        if use_tensorly:
-            raise NotImplementedError(
-                "Tensorly-based implementation is not currently supported."
-            )
-        if separable:
-            raise NotImplementedError(
-                "Separable convolutions are not currently supported."
-            )
 
         if in_channels != out_channels:
             raise NotImplementedError(
@@ -128,11 +105,6 @@ class SpectralConvS2(nn.Module):
         assert in_channels % num_groups == 0
         assert out_channels % num_groups == 0
         self.num_groups = num_groups
-
-        if in_channels != out_channels:
-            raise NotImplementedError(
-                "Currently only in_channels == out_channels is supported."
-            )
 
         self.forward_transform = forward_transform
         self.inverse_transform = inverse_transform
@@ -145,18 +117,6 @@ class SpectralConvS2(nn.Module):
             or (self.forward_transform.nlon != self.inverse_transform.nlon)
             or (self.forward_transform.grid != self.inverse_transform.grid)
         )
-        # Make sure we are using a Complex Factorized Tensor
-        if factorization is None:
-            factorization = "Dense"  # No factorization
-
-        if not factorization.lower().startswith("complex"):
-            factorization = f"Complex{factorization}"
-
-        # remember factorization details
-        self.operator_type = operator_type
-        self.rank = rank
-        self.factorization = factorization
-        self.separable = separable
 
         assert self.inverse_transform.lmax == self.modes_lat
         assert self.inverse_transform.mmax == self.modes_lon
@@ -167,10 +127,9 @@ class SpectralConvS2(nn.Module):
         self.modes_lat_local = l_stop - l_start
         self._l_slice = l_slice
 
-        if scale == "auto":
-            scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
-            # seemingly the first weight is not really complex, so we need to account for that
-            scale[0, :] *= math.sqrt(2.0)
+        scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
+        # seemingly the first weight is not really complex, so we need to account for that
+        scale[0, :] *= math.sqrt(2.0)
 
         weight_shape = [
             num_groups,
@@ -179,7 +138,6 @@ class SpectralConvS2(nn.Module):
             in_channels // num_groups,
         ]
 
-        assert factorization == "ComplexDense"
         self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
 
         self.lora_rank = lora_rank

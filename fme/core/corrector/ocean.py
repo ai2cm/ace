@@ -3,7 +3,6 @@ import datetime
 from collections.abc import Mapping
 from typing import Any, Literal, Protocol
 
-import dacite
 import torch
 
 from fme.core.atmosphere_data import AtmosphereData
@@ -12,8 +11,9 @@ from fme.core.constants import (
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.corrector.utils import force_positive
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
@@ -110,18 +110,11 @@ class SurfaceEnergyFluxCorrectionConfig:
 
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
-class OceanCorrectorConfig:
+class OceanCorrectorConfig(CorrectorConfigABC):
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
-
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
-        state = cls.remove_deprecated_keys(state)
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -146,6 +139,17 @@ class OceanCorrectorConfig:
                         thickness_name
                     )
         return state_copy
+
+    def get_corrector(
+        self,
+        dataset_info: DatasetInfo,
+    ) -> "OceanCorrector":
+        return OceanCorrector(
+            self,
+            dataset_info.gridded_operations,
+            dataset_info.ocean_vertical_coordinate,
+            dataset_info.timestep,
+        )
 
 
 class OceanCorrector(CorrectorABC):
