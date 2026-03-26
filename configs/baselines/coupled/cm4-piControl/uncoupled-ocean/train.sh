@@ -4,7 +4,7 @@ set -e
 
 JOB_NAME="cm4-piControl-ocean-train"
 JOB_GROUP="cm4-piControl-ocean"
-CONFIG_FILENAME="ace-train-config.yaml"
+CONFIG_FILENAME="train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
@@ -19,7 +19,7 @@ python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
-    --description "ACE-Samudra CM4 piControl ocean training" \
+    --description "SamudraI CM4 piControl ocean training" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \

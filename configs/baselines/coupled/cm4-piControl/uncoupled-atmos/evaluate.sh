@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="cm4-piControl-ocean-evaluator"
-JOB_GROUP="cm4-piControl-ocean"
-EXISTING_RESULTS_DATASET="TODO"  # beaker dataset ID containing the training checkpoint
-CONFIG_FILENAME="ace-evaluator-config.yaml"
+JOB_NAME="cm4-piControl-atmos-evaluator"
+JOB_GROUP="cm4-piControl-atmos"
+EXISTING_RESULTS_DATASET="01JXXESTVASYBEKBM1VAWCRV87"  # beaker dataset ID containing the training checkpoint
+CONFIG_FILENAME="evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
@@ -18,12 +18,13 @@ python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
-    --description "ACE-Samudra CM4 piControl ocean evaluator" \
+    --description "ACE2 CM4 piControl atmosphere evaluator" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
     --not-preemptible \
     --cluster ai2/ceres-cirrascale \
+    --cluster ai2/jupiter-cirrascale \
     --cluster ai2/saturn-cirrascale \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME=$BEAKER_USERNAME \

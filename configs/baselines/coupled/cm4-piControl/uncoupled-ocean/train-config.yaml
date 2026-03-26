@@ -89,9 +89,10 @@ optimization:
   optimizer_type: FusedAdam
   kwargs:
     weight_decay: 0.01
-stepper:
+stepper_training:
   loss:
     type: MSE
+stepper:
   input_masking:
     mask_value: 0
     fill_value: 0.0
