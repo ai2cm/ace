@@ -27,11 +27,11 @@ def run_validation_loop(
     ema: EMATracker | None = None,
     validate_using_ema: bool = False,
     compute_derived_variables: bool = True,
+    log_progress: bool = False,
 ) -> None:
     """Run the core validation loop: iterate batches and record to aggregator.
 
-    This is the minimal validation loop used by both `run_validation` and
-    LR tuning trials. It does NOT call `aggregator.get_logs`,
+    This is the minimal validation loop. It does NOT call `aggregator.get_logs`,
     `aggregator.flush_diagnostics`, or log to WandB — callers are responsible
     for those.
 
@@ -42,7 +42,9 @@ def run_validation_loop(
         ema: The EMA tracker, or None if EMA is not used.
         validate_using_ema: Whether to use EMA parameters during validation.
         compute_derived_variables: Whether to compute derived variables.
+        log_progress: Whether to log per-batch progress messages.
     """
+    timer = GlobalTimer.get_instance()
     stepper.set_eval()
     ema_context: contextlib.AbstractContextManager = (
         ema.applied_params(stepper.modules)
@@ -50,14 +52,18 @@ def run_validation_loop(
         else contextlib.nullcontext()
     )
     no_opt = NullOptimization()
+    n_batches = len(valid_data.loader)
     with torch.no_grad(), ema_context:
-        for batch in valid_data.loader:
+        for i, batch in enumerate(valid_data.loader):
+            if log_progress:
+                logging.info(f"Validation: processing batch {i + 1} of {n_batches}.")
             stepped = stepper.train_on_batch(
                 batch,
                 optimization=no_opt,
                 compute_derived_variables=compute_derived_variables,
             )
-            aggregator.record_batch(batch=stepped)
+            with timer.context("aggregator"):
+                aggregator.record_batch(batch=stepped)
 
 
 def _get_record_to_wandb() -> Callable[[dict[str, float]], None]:
@@ -81,6 +87,7 @@ def run_validation(
     compute_derived_variables: bool = True,
     ema: EMATracker | None = None,
     validate_using_ema: bool = False,
+    log_progress: bool = False,
 ) -> dict[str, float]:
     """Run validation loop for a train stepper and validation dataset.
 
@@ -97,6 +104,7 @@ def run_validation(
         compute_derived_variables: Whether to compute derived variables.
         ema: The EMA tracker, or None if EMA is not used.
         validate_using_ema: Whether to use EMA parameters during validation.
+        log_progress: Whether to log per-batch progress messages.
 
     Returns:
         Dictionary of validation metrics (keys prefixed by the label).
@@ -115,6 +123,7 @@ def run_validation(
         ema=ema,
         validate_using_ema=validate_using_ema,
         compute_derived_variables=compute_derived_variables,
+        log_progress=log_progress,
     )
 
     logging.info("Flushing validation diagnostics")
