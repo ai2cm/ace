@@ -1060,7 +1060,7 @@ class CoupledStepper:
         initial_condition: CoupledPrognosticState,
         forcing_data: CoupledBatchData,
         optimizer: OptimizationABC,
-        step_is_optimized: Callable[[str, int], bool] | None = None,
+        step_is_optimized: Callable[[str, int], bool] = lambda n, c: True,
     ) -> Generator[ComponentStepPrediction, None, None]:
         if (
             initial_condition.atmosphere_data.as_batch_data().n_timesteps
@@ -1120,9 +1120,7 @@ class CoupledStepper:
             # predict and yield atmosphere steps
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
-                optimized = step_is_optimized is None or step_is_optimized(
-                    "atmosphere", atmos_step_num
-                )
+                optimized = step_is_optimized("atmosphere", atmos_step_num)
                 context = contextlib.nullcontext() if optimized else torch.no_grad()
                 with context:
                     atmos_step = next(atmos_generator)
@@ -1155,9 +1153,7 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_optimized = step_is_optimized is None or step_is_optimized(
-                "ocean", i_outer
-            )
+            ocean_optimized = step_is_optimized("ocean", i_outer)
             ocean_context = (
                 contextlib.nullcontext() if ocean_optimized else torch.no_grad()
             )
