@@ -19,7 +19,7 @@ python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
-    --description "ACE2 CM4 piControl atmosphere training" \
+    --description "ACE2 CM4 piControl atmosphere pretraining" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \

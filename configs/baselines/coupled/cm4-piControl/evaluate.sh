@@ -4,8 +4,8 @@ set -e
 
 JOB_NAME="cm4-piControl-coupled-evaluator"
 JOB_GROUP="cm4-piControl-coupled"
-EXISTING_RESULTS_DATASET="TODO"  # beaker dataset ID from coupled training or fine-tuning
-CONFIG_FILENAME="evaluator-config-ICx1.yaml"
+EXISTING_RESULTS_DATASET="01JZHQJXC4EYAPTCSP188YSVC0"  # beaker dataset ID from coupled training or fine-tuning
+CONFIG_FILENAME="evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')

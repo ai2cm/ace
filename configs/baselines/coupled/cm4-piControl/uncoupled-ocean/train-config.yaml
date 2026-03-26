@@ -37,7 +37,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace-samudra-cm4
+  project: SamudrACE-CM4-piControl
   entity: ai2cm
 train_loader:
   batch_size: 16

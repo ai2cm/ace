@@ -6,7 +6,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace-samudra-cm4
+  project: SamudrACE-CM4-piControl
   entity: ai2cm
 loader:
   start_indices:
@@ -26,6 +26,6 @@ loader:
   num_data_workers: 1
 data_writer:
   save_prediction_files: false
-  save_monthly_files: true
+  save_monthly_files: false
 aggregator:
   log_histograms: true

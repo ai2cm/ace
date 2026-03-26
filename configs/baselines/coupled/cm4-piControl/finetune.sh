@@ -1,10 +1,8 @@
 #!/bin/bash
 #
-# Coupled fine-tuning: starting from a coupled training checkpoint, fine-tunes
-# both atmosphere and ocean models jointly with a cosine-annealing LR schedule.
-# Generates the full coupled config by merging stepper definitions from the
-# uncoupled training configs into finetune-config-template.yaml.
-# Requires yq >= 4.
+# SamudrACE CM4 piControl training stage 2: starting from the stage 1
+# checkpoint, fine-tunes both atmosphere and ocean models jointly with a
+# cosine-annealing LR schedule.
 
 set -e
 
@@ -14,6 +12,7 @@ EXISTING_RESULTS_DATASET="TODO"  # beaker dataset ID from coupled training (trai
 CKPT_TYPE="best_inference_ckpt"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
+SCRIPT_PATH=${SCRIPT_PATH%/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
@@ -23,30 +22,21 @@ OCEAN_STATS_DATA=jamesd/2025-06-03-cm4-piControl-200yr-coupled-stats-ocean
 
 cd "$REPO_ROOT"  # so config path is valid no matter where we are running this script
 
-# --- Generate coupled-finetune-config.yaml from template + uncoupled configs ---
+# --- Generate finetune-config.yaml from template + uncoupled configs ---
 
-TEMPLATE_CONFIG_PATH="${SCRIPT_PATH}finetune-config-template.yaml"
-CONFIG_PATH="${SCRIPT_PATH}coupled-finetune-config.yaml"
+TEMPLATE_CONFIG_PATH="${SCRIPT_PATH}/finetune-config-template.yaml"
+CONFIG_PATH="${SCRIPT_PATH}/finetune-config.yaml"
 
-cp "${SCRIPT_PATH}uncoupled-atmos/ace-train-config.yaml" ./atmos-config.yaml
+cp "${SCRIPT_PATH}/uncoupled-atmos/train-config.yaml" ./atmos-config.yaml
 sed -i 's/statsdata/atmos_stats/g' ./atmos-config.yaml
 
-cp "${SCRIPT_PATH}uncoupled-ocean/ace-train-config.yaml" ./ocean-config.yaml
+cp "${SCRIPT_PATH}/uncoupled-ocean/train-config.yaml" ./ocean-config.yaml
 sed -i 's/statsdata/ocean_stats/g' ./ocean-config.yaml
-
-yq -i 'del(.stepper.loss, .stepper.optimize_last_step_only, .stepper.n_ensemble, .stepper.parameter_init, .stepper.train_n_forward_step)' ./ocean-config.yaml
-yq -i 'del(.stepper.loss, .stepper.optimize_last_step_only, .stepper.n_ensemble, .stepper.parameter_init, .stepper.train_n_forward_step)' ./atmos-config.yaml
-
-SIC_NAME=$(yq '.stepper.step.config.corrector.config.sea_ice_fraction_correction.sea_ice_fraction_name' ./ocean-config.yaml)
-if [[ "$SIC_NAME" == "null" ]]; then
-    echo "Failed to extract sea_ice_fraction_name from the ocean config"
-    exit 1
-fi
 
 cp "$TEMPLATE_CONFIG_PATH" "$CONFIG_PATH"
 
+# update component stepper configs, preserving template values on conflict
 yq -i '.stepper.ocean.stepper *=n load("ocean-config.yaml").stepper' "$CONFIG_PATH"
-SIC_NAME=$SIC_NAME yq -i '.stepper.ocean_fraction_prediction.sea_ice_fraction_name = env(SIC_NAME)' "$CONFIG_PATH"
 yq -i '.stepper.atmosphere.stepper *=n load("atmos-config.yaml").stepper' "$CONFIG_PATH"
 
 rm ./atmos-config.yaml ./ocean-config.yaml
@@ -58,13 +48,13 @@ python -m fme.coupled.validate_config "$CONFIG_PATH" --config_type train
 gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
-    --description "ACE coupled CM4 piControl fine-tuning" \
+    --description "Run SamudrACE CM4 piControl ocean + atmos fine-tuning" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
     --preemptible \
     --cluster ai2/ceres-cirrascale \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/jupiter-cirrascale \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \

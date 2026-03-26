@@ -19,7 +19,7 @@ python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
-    --description "SamudraI CM4 piControl ocean training" \
+    --description "SamudraI CM4 piControl ocean pretraining" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
