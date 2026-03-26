@@ -52,6 +52,8 @@ class AnkurLocalNetBuilder(ModuleConfig):
     A simple 3-hidden-layer MLP that optionally uses a DISCO convolution
     for the first layer and a learned positional embedding.
 
+    Reference: https://arxiv.org/html/2602.16090v1
+
     Attributes:
         embed_dim: Dimension of the hidden layers.
         use_disco_encoder: Whether to use a DISCO convolution for the first
