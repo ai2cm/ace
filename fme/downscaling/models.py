@@ -729,6 +729,7 @@ class CheckpointModelConfig:
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(self._checkpoint["model"]["module"])
+        model.module.eval()
         return model
 
     @property
