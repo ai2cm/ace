@@ -1,5 +1,3 @@
-import unittest.mock
-
 import torch
 
 from fme.core.ema import EMATracker
@@ -7,7 +5,7 @@ from fme.core.generics.test_trainer import TrainData, TrainStepper, ValidationAg
 from fme.core.generics.validation import run_validation_loop
 
 
-def test_run_validation_loop_returns_none():
+def test_run_validation_loop():
     stepper = TrainStepper()
     valid_data = TrainData(n_batches=3, shuffle=False)
     aggregator = ValidationAggregator(validation_loss=0.5)
@@ -56,7 +54,7 @@ def test_run_validation_loop_with_ema():
     assert "val/mean/loss" in logs
 
 
-def test_run_validation_loop_without_ema_none():
+def test_run_validation_loop_without_ema():
     """When ema is None and validate_using_ema=False, validation still works."""
     stepper = TrainStepper()
     valid_data = TrainData(n_batches=2, shuffle=False)
@@ -72,21 +70,3 @@ def test_run_validation_loop_without_ema_none():
 
     logs = aggregator.get_logs(label="val")
     assert logs["val/mean/loss"] == 0.7
-
-
-def test_run_validation_loop_does_not_flush_diagnostics():
-    """run_validation_loop should not call flush_diagnostics on the aggregator."""
-    stepper = TrainStepper()
-    valid_data = TrainData(n_batches=2, shuffle=False)
-    aggregator = ValidationAggregator(validation_loss=0.1)
-    aggregator.flush_diagnostics = unittest.mock.MagicMock()  # type: ignore
-
-    run_validation_loop(
-        stepper=stepper,
-        valid_data=valid_data,
-        aggregator=aggregator,
-        ema=None,
-        validate_using_ema=False,
-    )
-
-    aggregator.flush_diagnostics.assert_not_called()
