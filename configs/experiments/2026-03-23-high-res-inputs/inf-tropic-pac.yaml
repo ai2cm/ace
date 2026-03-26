@@ -9,10 +9,11 @@ model:
     rename:
       eastward_wind_at_ten_meters: UGRD10m
       northward_wind_at_ten_meters: VGRD10m
-      PRESsfc: PRMSL
+      PRMSL: PRESsfc
   second_model:
     checkpoint_path: /prate/best.ckpt
     rename:
+      PRMSL: PRESsfc
       eastward_wind_at_ten_meters: UGRD10m
       northward_wind_at_ten_meters: VGRD10m
 data:
