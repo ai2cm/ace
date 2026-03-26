@@ -14,7 +14,7 @@ from .lora import LoRAConv2d
 from .sfnonet import DiscreteContinuousConvS2, NoLayerNorm, _compute_cutoff_radius
 
 BlockType = Literal["disco", "conv1x1"]
-BasisType = Literal["morlet", "isotropic morlet", "piecewise linear", "zernike"]
+BasisType = Literal["morlet", "piecewise linear", "zernike"]
 
 
 @dataclasses.dataclass
@@ -27,7 +27,7 @@ class LocalNetConfig:
         kernel_shape: Shape of the DISCO convolution filter basis, passed
             to the filter basis constructor. Only affects 'disco' blocks.
         basis_type: Type of filter basis for the DISCO convolution
-            ('morlet', 'isotropic morlet', 'piecewise linear', or 'zernike').
+            ('morlet', 'piecewise linear', or 'zernike').
             Only affects 'disco' blocks.
         block_types: List of filter types for each block ('disco', 'conv1x1').
             The length determines the number of blocks.
