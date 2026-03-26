@@ -15,10 +15,8 @@ model:
     rename:
       eastward_wind_at_ten_meters: UGRD10m
       northward_wind_at_ten_meters: VGRD10m
-      PRESsfc: PRMSL
 data:
   coarse:
-  - merge:
     - data_path: /climate-default/2026-03-25-ace2s-multivar-outputs
       file_pattern: output_6hourly_predictions_ic0000.zarr
       engine: zarr
@@ -29,8 +27,8 @@ outputs:
   - name: "tropics_wpac_2023"
     save_vars:
       - PRATEsfc
-      - eastward_wind_at_ten_meters
-      - northward_wind_at_ten_meters
+      - UGRD10m
+      - VGRD10m
       - PRMSL
     n_ens: 2
     max_samples_per_gpu: 32
