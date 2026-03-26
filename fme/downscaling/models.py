@@ -215,11 +215,16 @@ class DiffusionModelConfig:
         invert_rename = {v: k for k, v in (rename or {}).items()}
         orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
         orig_out_names = [invert_rename.get(name, name) for name in self.out_names]
+        orig_high_res_conditioning = (
+            [invert_rename.get(name, name) for name in self.high_res_conditioning]
+            if self.high_res_conditioning
+            else None
+        )
         normalizer = self.normalization.build(
             orig_in_names,
             orig_out_names,
             rename,
-            high_res_conditioning=self.high_res_conditioning,
+            high_res_conditioning=orig_high_res_conditioning,
         )
         loss = self.loss.build(reduction="none", gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
