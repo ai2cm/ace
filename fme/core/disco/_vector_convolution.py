@@ -1,10 +1,12 @@
 import math
 
 import torch
+import torch.nn as nn
 
+from . import _filter_basis as _filter_basis_module
 from ._cache import lru_cache
 from ._convolution import _normalize_convolution_tensor_s2
-from ._disco_utils import _get_psi, _precompute_psi_banded
+from ._disco_utils import _disco_s2_contraction_fft, _get_psi, _precompute_psi_banded
 from ._fft import rfft
 from ._filter_basis import FilterBasis
 from ._quadrature import precompute_latitudes, precompute_longitudes
@@ -228,3 +230,187 @@ def build_vector_psi_fft(
     )
 
     return psi_scalar_fft, psi_cos_fft, psi_sin_fft, gather_idx
+
+
+class VectorDiscoConvS2(nn.Module):
+    """DISCO convolution on S2 with scalar and vector channels.
+
+    Handles rotationally invariant convolution where scalar and vector
+    (u, v) channels are treated with appropriate frame rotation geometry.
+    See vector_filter_basis.md for design details.
+    """
+
+    def __init__(
+        self,
+        in_channels_scalar: int,
+        in_channels_vector: int,
+        out_channels_scalar: int,
+        out_channels_vector: int,
+        in_shape: tuple[int, int],
+        out_shape: tuple[int, int],
+        kernel_shape: int | tuple[int, ...],
+        basis_type: str = "piecewise linear",
+        basis_norm_mode: str = "mean",
+        grid_in: str = "equiangular",
+        grid_out: str = "equiangular",
+        bias: bool = True,
+        theta_cutoff: float | None = None,
+    ):
+        super().__init__()
+
+        self.in_channels_scalar = in_channels_scalar
+        self.in_channels_vector = in_channels_vector
+        self.out_channels_scalar = out_channels_scalar
+        self.out_channels_vector = out_channels_vector
+        self.nlat_in, self.nlon_in = in_shape
+        self.nlat_out, self.nlon_out = out_shape
+        self.kernel_shape = kernel_shape
+
+        if self.nlon_in % self.nlon_out != 0:
+            raise ValueError("nlon_in must be divisible by nlon_out")
+
+        filter_basis = _filter_basis_module.get_filter_basis(
+            kernel_shape=kernel_shape, basis_type=basis_type
+        )
+        K = filter_basis.kernel_size
+        self._kernel_size = K
+
+        if theta_cutoff is None:
+            theta_cutoff = torch.pi / float(self.nlat_out - 1)
+        self.theta_cutoff = theta_cutoff
+        if self.theta_cutoff <= 0.0:
+            raise ValueError("theta_cutoff must be positive")
+
+        psi_s, psi_c, psi_sin, gather_idx = build_vector_psi_fft(
+            in_shape,
+            out_shape,
+            filter_basis,
+            grid_in=grid_in,
+            grid_out=grid_out,
+            theta_cutoff=self.theta_cutoff,
+            basis_norm_mode=basis_norm_mode,
+        )
+        self.register_buffer("psi_scalar_fft", psi_s, persistent=False)
+        self.register_buffer("psi_cos_fft", psi_c, persistent=False)
+        self.register_buffer("psi_sin_fft", psi_sin, persistent=False)
+        # Integer index tensor stored as plain attr for DDP compatibility
+        self.psi_gather_idx = gather_idx
+
+        # Weight initialization: scale so total output variance ≈ 1
+        N_s_in = in_channels_scalar
+        N_v_in = in_channels_vector
+        N_s_out = out_channels_scalar
+        N_v_out = out_channels_vector
+
+        s_fan = max(1, K * (N_s_in + 2 * N_v_in))
+        v_fan = max(1, K * 2 * (N_s_in + N_v_in))
+        s_scale = 1.0 / math.sqrt(s_fan)
+        v_scale = 1.0 / math.sqrt(v_fan)
+
+        self.W_ss = nn.Parameter(s_scale * torch.randn(N_s_out, N_s_in, K))
+        self.W_vs = nn.Parameter(s_scale * torch.randn(N_s_out, N_v_in, K, 2))
+        self.W_sv = nn.Parameter(v_scale * torch.randn(N_v_out, N_s_in, K, 2))
+        self.W_vv = nn.Parameter(v_scale * torch.randn(N_v_out, N_v_in, K, 2))
+
+        if bias and N_s_out > 0:
+            self.bias_scalar = nn.Parameter(torch.zeros(N_s_out))
+        else:
+            self.bias_scalar = None
+
+    def _apply(self, fn, recurse=True):
+        super()._apply(fn, recurse=recurse)
+        self.psi_gather_idx = fn(self.psi_gather_idx)
+        return self
+
+    def extra_repr(self):
+        return (
+            f"in_s={self.in_channels_scalar}, "
+            f"in_v={self.in_channels_vector}, "
+            f"out_s={self.out_channels_scalar}, "
+            f"out_v={self.out_channels_vector}, "
+            f"in_shape={self.nlat_in, self.nlon_in}, "
+            f"out_shape={self.nlat_out, self.nlon_out}, "
+            f"kernel_shape={self.kernel_shape}, "
+            f"theta_cutoff={self.theta_cutoff}"
+        )
+
+    def forward(
+        self,
+        x_scalar: torch.Tensor,
+        x_vector: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass.
+
+        Args:
+            x_scalar: (B, N_s_in, H, W)
+            x_vector: (B, N_v_in, H, W, 2) where last dim is (u, v)
+
+        Returns:
+            y_scalar: (B, N_s_out, H, W)
+            y_vector: (B, N_v_out, H, W, 2)
+        """
+        psi_s = self.psi_scalar_fft
+        psi_c = self.psi_cos_fft
+        psi_sn = self.psi_sin_fft
+        gather = self.psi_gather_idx
+        nlon_out = self.nlon_out
+        N_s_in = self.in_channels_scalar
+        N_v_in = self.in_channels_vector
+        B = x_scalar.shape[0]
+        K = self._kernel_size
+        H, W = self.nlat_out, self.nlon_out
+
+        # --- Contractions on scalar inputs (3 calls) ---
+        if N_s_in > 0:
+            f_s = _disco_s2_contraction_fft(x_scalar, psi_s, gather, nlon_out)
+            f_cs = _disco_s2_contraction_fft(x_scalar, psi_c, gather, nlon_out)
+            f_ss = _disco_s2_contraction_fft(x_scalar, psi_sn, gather, nlon_out)
+        else:
+            f_s = x_scalar.new_zeros(B, 0, K, H, W)
+            f_cs = f_s
+            f_ss = f_s
+
+        # --- Contractions on vector inputs (2 calls) ---
+        if N_v_in > 0:
+            u = x_vector[..., 0]
+            v = x_vector[..., 1]
+            uv = torch.cat([u, v], dim=1)
+
+            cos_uv = _disco_s2_contraction_fft(uv, psi_c, gather, nlon_out)
+            sin_uv = _disco_s2_contraction_fft(uv, psi_sn, gather, nlon_out)
+
+            A = cos_uv[:, :N_v_in]
+            C = cos_uv[:, N_v_in:]
+            B_v = sin_uv[:, :N_v_in]
+            D = sin_uv[:, N_v_in:]
+
+            conv_u = A - D
+            conv_v = B_v + C
+            div = A + D
+            curl = C - B_v
+        else:
+            empty_v = x_scalar.new_zeros(B, 0, K, H, W)
+            conv_u = conv_v = div = curl = empty_v
+
+        # --- Scalar output ---
+        y_s = torch.einsum("ock,bckxy->boxy", self.W_ss, f_s)
+        div_curl = torch.stack([div, curl], dim=-1)
+        y_s = y_s + torch.einsum("ockd,bckxyd->boxy", self.W_vs, div_curl)
+        if self.bias_scalar is not None:
+            y_s = y_s + self.bias_scalar.reshape(1, -1, 1, 1)
+
+        # --- Vector output ---
+        # scalar → vector (gradient + perpendicular gradient)
+        M_u_s = torch.stack([f_cs, -f_ss], dim=-1)
+        M_v_s = torch.stack([f_ss, f_cs], dim=-1)
+        y_u = torch.einsum("ockd,bckxyd->boxy", self.W_sv, M_u_s)
+        y_v = torch.einsum("ockd,bckxyd->boxy", self.W_sv, M_v_s)
+
+        # vector → vector (stretch + 90° rotation)
+        M_u_v = torch.stack([conv_u, -conv_v], dim=-1)
+        M_v_v = torch.stack([conv_v, conv_u], dim=-1)
+        y_u = y_u + torch.einsum("ockd,bckxyd->boxy", self.W_vv, M_u_v)
+        y_v = y_v + torch.einsum("ockd,bckxyd->boxy", self.W_vv, M_v_v)
+
+        y_vector = torch.stack([y_u, y_v], dim=-1)
+        return y_s, y_vector
