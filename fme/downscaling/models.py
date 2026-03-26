@@ -741,6 +741,10 @@ class CheckpointModelConfig:
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["out_names"]
             ]
+            checkpoint_data["model"]["config"]["high_res_conditioning"] = [
+                self._rename.get(name, name)
+                for name in checkpoint_data["model"]["config"]["high_res_conditioning"]
+            ]
             # backwards compatibility for models before static inputs serialization
             checkpoint_data["model"].setdefault("static_inputs", None)
 
