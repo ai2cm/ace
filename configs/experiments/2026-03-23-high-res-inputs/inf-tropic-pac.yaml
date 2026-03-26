@@ -30,7 +30,7 @@ outputs:
       - PRATEsfc
       - UGRD10m
       - VGRD10m
-      - PRMSL
+      - PRESsfc
     n_ens: 2
     max_samples_per_gpu: 32
     time_range:
