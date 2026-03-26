@@ -1202,11 +1202,11 @@ def test_count_parameters(module_list, expected_num_parameters):
 
 @pytest.mark.parametrize(
     "checkpoint_save_epochs,expected_save_epochs",
-    [(None, []), (Slice(start=-2), [2, 3]), (Slice(step=2), [0, 2])],
+    [(None, []), (Slice(start=-2), [3, 4]), (Slice(step=2), [0, 2, 4])],
 )
 def test_epoch_checkpoint_enabled(checkpoint_save_epochs, expected_save_epochs):
     max_epochs = 4
-    for i in range(max_epochs):
+    for i in range(max_epochs + 1):
         if i in expected_save_epochs:
             assert epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
         else:
