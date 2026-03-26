@@ -65,7 +65,7 @@ class AnkurLocalNetBuilder(ModuleConfig):
     """
 
     embed_dim: int = 256
-    use_disco_encoder: bool = False
+    use_disco_encoder: bool = True
     disco_kernel_size: int = 3
     pos_embed: bool = False
     activation_function: str = "gelu"
@@ -171,8 +171,8 @@ class LocalNetBuilder(ModuleConfig):
     encoder_layers: int = 1
     pos_embed: bool = True
     big_skip: bool = True
-    normalize_big_skip: bool = False
-    affine_norms: bool = False
+    normalize_big_skip: bool = True
+    affine_norms: bool = True
     lora_rank: int = 0
     lora_alpha: float | None = None
 
