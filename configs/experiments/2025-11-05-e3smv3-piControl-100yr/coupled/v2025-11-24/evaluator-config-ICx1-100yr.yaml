@@ -5,7 +5,7 @@ checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: true
   atmosphere:
     save_prediction_files: false
     save_monthly_files: false
