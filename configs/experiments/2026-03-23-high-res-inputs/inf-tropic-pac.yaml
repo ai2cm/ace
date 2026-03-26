@@ -44,7 +44,7 @@ outputs:
       stop:  195 #246.0
 logging:
   log_to_screen: true
-  log_to_wandb: true
+  log_to_wandb: false
   log_to_file: true
   project: multivariate-downscaling
   entity: ai2cm
