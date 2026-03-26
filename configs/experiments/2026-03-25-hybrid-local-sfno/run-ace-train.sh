@@ -52,5 +52,5 @@ run_training() {
 }
 
 # run_training "hybrid-local-ankur-ace-train-config.yaml" "ace2-era5-hybrid-local-ankur-test" "ace2-era5"
-run_training "hybrid-local-net-ace-train-config.yaml" "ace2-era5-hybrid-local-net-deterministic" "ace2-era5"
+# run_training "hybrid-local-net-ace-train-config.yaml" "ace2-era5-hybrid-local-net-deterministic" "ace2-era5"
 run_training "hybrid-local-net-ace-train-config-stochastic.yaml" "ace2-era5-hybrid-local-net-stochastic" "ace2-era5"
