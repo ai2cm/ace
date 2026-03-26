@@ -49,6 +49,23 @@ def test_adjust_fine_coord_range(downscale_factor, lat_range):
     assert len(subsel_fine_lat) / len(subsel_coarse_lat) == downscale_factor
 
 
+def test_adjust_fine_coord_range_raises_near_domain_boundary():
+    downscale_factor = 4  # n_half_fine = 2
+    coarse_edges = torch.linspace(0, 6, 7)
+    coarse_lat = _fine_midpoints(coarse_edges, 1)
+    fine_lat = _fine_midpoints(coarse_edges, downscale_factor)
+    # Drop the first fine point so only 1 fine point exists below coarse_min=0.5,
+    # but n_half_fine=2 are required — simulating a grid truncated at the domain edge.
+    fine_lat_truncated = fine_lat[1:]
+    with pytest.raises(ValueError):
+        adjust_fine_coord_range(
+            ClosedInterval(0, 4),
+            full_coarse_coord=coarse_lat,
+            full_fine_coord=fine_lat_truncated,
+            downscale_factor=downscale_factor,
+        )
+
+
 @pytest.mark.parametrize(
     "input_slice,expected",
     [
@@ -62,3 +79,47 @@ def test_scale_slice(input_slice, expected):
     scaled = scale_slice(input_slice, scale=2)
     assert scaled.start == expected.start
     assert scaled.stop == expected.stop
+
+
+@pytest.mark.parametrize(
+    "interval,expected_slice",
+    [
+        pytest.param(ClosedInterval(2, 4), slice(2, 5), id="middle"),
+        pytest.param(ClosedInterval(float("-inf"), 2), slice(0, 3), id="start_inf"),
+        pytest.param(ClosedInterval(4, float("inf")), slice(4, 5), id="end_inf"),
+        pytest.param(
+            ClosedInterval(float("-inf"), float("inf")), slice(0, 5), id="all_inf"
+        ),
+    ],
+)
+def test_ClosedInterval_slice_from(interval, expected_slice):
+    coords = torch.arange(5)
+    result_slice = interval.slice_from(coords)
+    assert result_slice == expected_slice
+
+
+def test_ClosedInterval_fail_on_empty_slice():
+    coords = torch.arange(5)
+    with pytest.raises(ValueError):
+        ClosedInterval(5.5, 7).slice_from(coords)
+
+
+@pytest.mark.parametrize(
+    "interval,expected_values",
+    [
+        pytest.param(ClosedInterval(2, 4), torch.tensor([2, 3, 4]), id="middle"),
+        pytest.param(
+            ClosedInterval(float("-inf"), 2), torch.tensor([0, 1, 2]), id="start_inf"
+        ),
+        pytest.param(ClosedInterval(4, float("inf")), torch.tensor([4]), id="end_inf"),
+        pytest.param(
+            ClosedInterval(float("-inf"), float("inf")),
+            torch.arange(5),
+            id="all_inf",
+        ),
+    ],
+)
+def test_ClosedInterval_subset_of(interval, expected_values):
+    coords = torch.arange(5)
+    result = interval.subset_of(coords)
+    assert torch.equal(result, expected_values)

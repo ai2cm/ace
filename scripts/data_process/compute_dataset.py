@@ -323,7 +323,7 @@ class DatasetConfig:
             data = yaml.safe_load(file)
 
         return dacite.from_dict(
-            data_class=cls, data=data, config=dacite.Config(cast=[tuple], strict=True)
+            data_class=cls, data=data, config=dacite.Config(cast=[tuple])
         )
 
 

@@ -39,14 +39,26 @@ def test_get_sampler_covers_all_indices():
     dataset = _make_dataset(4 * n_dp)
 
     sampler = dist.get_sampler(dataset, shuffle=False)
-    local_indices = list(sampler)
+    sampler_indices = list(sampler)
 
-    all_indices = dist.gather_object(local_indices)
+    all_sampler_indices = dist.gather_object(sampler_indices)
+    H, W = 9, 18
+    local_slices = dist.get_local_slices([H, W])
+    all_local_slices = dist.gather_object(local_slices)
     if dist.is_root():
-        assert all_indices is not None
-        gathered = cast(list[list[int]], all_indices)
-        flat = [idx for rank_indices in gathered for idx in rank_indices]
-        assert sorted(flat) == list(range(len(dataset)))
+        assert all_local_slices is not None
+        assert all_sampler_indices is not None
+        canvas = torch.zeros([len(dataset), H, W])
+        for sample_list, local_slices in zip(all_sampler_indices, all_local_slices):
+            for idx in sample_list:
+                # Verify that the index is within the dataset bounds
+                assert 0 <= idx < len(dataset)
+                # Mark the index on the canvas for coverage verification
+                canvas[idx, *local_slices] += 1
+        # Verify that every index is covered exactly once across all ranks
+        torch.testing.assert_close(canvas, torch.ones_like(canvas))
+        flat = [idx for rank_indices in all_sampler_indices for idx in rank_indices]
+        assert len(flat) == 4 * n_dp * dist.world_size / dist.total_data_parallel_ranks
 
 
 @pytest.mark.parallel
@@ -82,8 +94,11 @@ def test_get_sampler_drop_last_true():
             assert all_indices is not None
             gathered = cast(list[list[int]], all_indices)
             flat = [idx for rank_indices in gathered for idx in rank_indices]
-            # 3 * n_dp unique indices, all within dataset bounds, no duplicates
-            assert len(flat) == 3 * n_dp
+            # Spatial co-ranks share the same sampler indices, so flat
+            # contains duplicates when spatial_size > 1.  The number of
+            # *unique* indices must equal 3 * n_dp.
+            spatial_size = dist.world_size // n_dp
+            assert len(flat) == 3 * n_dp * spatial_size
             assert len(set(flat)) == 3 * n_dp
             assert all(0 <= i < len(dataset) for i in flat)
 
