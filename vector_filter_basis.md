@@ -2,23 +2,22 @@
 
 ## Overview
 
-This document specifies an approach for handling directional (vector-valued) data in DISCO convolution on the sphere. Rather than constructing a continuous directional filter basis (as in the cube-gauged approach), this design uses **isotropic radial filters** combined with a **frame-rotation matrix** that correctly transforms vector inputs from each input point's local meridian frame into the output point's meridian frame.
+This document specifies an approach for handling directional (vector-valued) data in DISCO convolution on the sphere. The design uses **radial filter basis functions** `ψ_k(r)` combined with **geometric angular factors** `cos(γ)` and `sin(γ)` (the frame-rotation angle between input and output points) to create filters that are rotationally invariant but not isotropic. The angular dependence enables gradient-like, divergence-like, and curl-like operations on the sphere while correctly transforming vectors between different local meridian frames.
 
-The key insight is that the meridian frame's polar singularity does not pose a problem: the physics is mostly rotationally invariant, so it is acceptable for the reference orientation to be discontinuous at the poles. What matters is that vector-valued inputs are correctly handled — that is, the convolution accounts for the fact that neighboring points have different definitions of "north" and "east."
+The key insight is that a single set of radial basis functions ψ_k(r) generates three filter tensors — `ψ_k(r)` (scalar), `ψ_k(r)·cos(γ)`, and `ψ_k(r)·sin(γ)` — which are always applied in matched pairs. The cos/sin pairing is determined by geometry, not learned weights, so the network cannot break rotational symmetry. For example, a d/dx filter (for the u component) automatically has a corresponding d/dy filter (for the v component) from the same radial basis.
 
-The frame-rotation angle between two points depends only on `(lat_out, lat_in, lon_in - lon_out)`, making it invariant to translations along longitude. This means the rotation can be baked into the filter tensor without breaking the FFT-based cross-convolution optimization.
+The frame-rotation angle between two points depends only on `(lat_out, lat_in, lon_in - lon_out)`, making it invariant to translations along longitude. This means all three filter tensors can use the FFT-based cross-convolution optimization.
+
+The meridian frame's polar singularity does not pose a problem: the physics is mostly rotationally invariant, so it is acceptable for the reference orientation to be discontinuous at the poles. What matters is that vector-valued inputs are correctly handled — that is, the convolution accounts for the fact that neighboring points have different definitions of "north" and "east."
 
 ## Hidden Representation
 
-The network maintains three types of hidden feature channels at each grid point:
+The network maintains two types of hidden feature channels at each grid point:
 
-- **Scalar channels** `s(lat, lon)`: Frame-independent quantities (temperature, pressure, geopotential, etc.). No special treatment needed in convolution.
-- **u channels** `u(lat, lon)`: East component of a vector in the local meridian frame (eastward wind, etc.).
-- **v channels** `v(lat, lon)`: North component of a vector in the local meridian frame (northward wind, etc.).
+- **Scalar channels** `x_scalar`: shape `(B, N_s, H, W)`. Frame-independent quantities (temperature, pressure, geopotential, etc.).
+- **Vector channels** `x_vector`: shape `(B, N_v, H, W, 2)`. Each channel is a tangent vector `(u, v)` in the local meridian frame, where `u` is the eastward component and `v` is the northward component. The last dimension indexes `(u, v)`.
 
-Each `(u, v)` pair represents a tangent vector at the grid point, expressed in the local geographic frame where "east" = direction of increasing longitude and "north" = direction of decreasing colatitude (toward the geographic north pole).
-
-Initially, `u` and `v` channels are the physical eastward and northward components of the input data. Through the network, new vector channels can be created via pointwise interactions (e.g., scalar times vector), and the convolution propagates them while correctly handling the frame geometry.
+The number of scalar channels `N_s` and vector channels `N_v` are independent. Initially, vector channels hold the physical eastward and northward components of the input data (e.g., wind). Through the network, new vector channels are created by the convolution's scalar-to-vector pathway and weighted by interactions with scalar channels.
 
 ## The Meridian Frame and Its Discontinuity
 
@@ -47,7 +46,7 @@ The rotation acts as:
 [v_rotated] = [sin γ   cos γ] [v_in]
 ```
 
-where `(u_in, v_in)` are the input vector components in the input's meridian frame, and `(u_rotated, v_rotated)` are the same vector expressed in the output's meridian frame.
+where `(u_in, v_in)` are the input vector components in the input's meridian frame, and `(u_rotated, v_rotated)` are the same vector expressed in the output's meridian frame. This rotation is not applied at runtime — it is baked into the precomputed filter tensors `psi_cos` and `psi_sin`.
 
 ### Longitude Invariance
 
@@ -99,7 +98,7 @@ cos(γ) = cos(φ − β) = cos φ · cos β + sin φ · sin β
 sin(γ) = sin(φ − β) = sin φ · cos β − cos φ · sin β
 ```
 
-These quantities can be computed in the existing precomputation loop alongside `θ` and `φ`, adding only a few vector dot products per support point.
+These quantities can be computed in the precomputation loop alongside `θ` and `φ`, adding only a few vector dot products per support point.
 
 ### Geometric Meaning
 
@@ -112,77 +111,88 @@ At the output point's location (where `θ → 0`), the Euler frame's `φ = 0` di
 
 ## Convolution Operation
 
-### Filter Tensor for Scalar Channels
+### Filter Tensors
 
-Unchanged from the current implementation. The filter basis functions `ψ_k(r)` depend only on geodesic distance. The precomputed banded FFT tensor is:
-
-```
-psi_scalar_fft: shape (K, nlat_out, max_bw, nfreq)
-```
-
-The contraction gives:
+Three banded FFT tensors are precomputed from the same radial basis functions `ψ_k(r)`:
 
 ```
-conv_scalar[b, c, k, lat, lon] = Σ_in ψ_k(r) · s_c(lat_in, lon_in)
+psi_scalar_fft: shape (K, nlat_out, max_bw, nfreq)  — FFT of ψ_k(r)
+psi_cos_fft:    shape (K, nlat_out, max_bw, nfreq)  — FFT of ψ_k(r) · cos(γ)
+psi_sin_fft:    shape (K, nlat_out, max_bw, nfreq)  — FFT of ψ_k(r) · sin(γ)
 ```
 
-### Filter Tensor for Vector Channels
+The scalar filter `psi_scalar` is isotropic (depends only on geodesic distance). The oriented filters `psi_cos` and `psi_sin` have angular dependence — they are the same radial envelope modulated by the frame rotation angle. All three share the same sparsity pattern and banding structure.
 
-For vector channels, the filter tensor incorporates the frame rotation. Two banded FFT tensors are precomputed:
+### Contraction Intermediates
 
-```
-psi_cos_fft: shape (K, nlat_out, max_bw, nfreq)  — FFT of ψ_k(r) · cos(γ)
-psi_sin_fft: shape (K, nlat_out, max_bw, nfreq)  — FFT of ψ_k(r) · sin(γ)
-```
+Using `contraction(psi, x)` to denote the standard FFT-based DISCO contraction (`_disco_s2_contraction_fft`), the convolution produces these intermediate features:
 
-These are built from the same radial filter basis `ψ_k(r)`, multiplied by `cos(γ)` and `sin(γ)` at each support point before banding and FFT.
+**From scalar inputs** (shape `(B, N_s, K, H, W)` each):
+- `f_s = contraction(psi_scalar, x_scalar)` — isotropic filtering
+- `f_cs = contraction(psi_cos, x_scalar)` — gradient-like, u-aligned
+- `f_ss = contraction(psi_sin, x_scalar)` — gradient-like, v-aligned
 
-### Vector Convolution
+**From vector inputs** — define shorthand `u = x_vector[..., 0]`, `v = x_vector[..., 1]` (each `(B, N_v, H, W)`):
+- `A = contraction(psi_cos, u)` — shape `(B, N_v, K, H, W)`
+- `B = contraction(psi_sin, u)`
+- `C = contraction(psi_cos, v)`
+- `D = contraction(psi_sin, v)`
 
-For each vector input pair `(u_c, v_c)` with radial basis `k`, the frame-rotated convolution gives the vector in the output point's frame:
+From these four, we form rotationally invariant combinations:
+- **Frame-rotated vector:** `conv_u = A − D`, `conv_v = B + C`
+- **Divergence-like scalar:** `div = A + D`
+- **Curl-like scalar:** `curl = C − B`
 
-```
-conv_u[b, c, k, lat, lon] = contraction(psi_cos, u_c) − contraction(psi_sin, v_c)
-conv_v[b, c, k, lat, lon] = contraction(psi_sin, u_c) + contraction(psi_cos, v_c)
-```
-
-where `contraction(psi, x)` denotes the standard FFT-based DISCO contraction (`_disco_s2_contraction_fft`).
-
-This requires two contraction calls for vector channels (one with `psi_cos`, one with `psi_sin`), each processing all `u` and `v` channels together. The reassembly into `(conv_u, conv_v)` is a cheap pointwise operation.
+Total contraction calls: 1 (psi_scalar on scalars) + 2 (psi_cos and psi_sin on scalars) + 2 (psi_cos and psi_sin on each of u, v, but these can be batched as 2 calls over 2·N_v channels) = **5 contraction calls**.
 
 ### Weight Contraction
 
-After convolution, the intermediate features are:
+The weight tensor has separate blocks for each type interaction. Within each block, u and v pathways share the same weight values, enforcing rotational invariance.
 
-- From scalar inputs: `conv_scalar` with shape `(B, N_scalar, K, H, W)`
-- From vector inputs: `conv_u` and `conv_v`, each with shape `(B, N_vec, K, H, W)`
+**Scalar output from scalar input** — `W_ss`: shape `(N_s_out, N_s_in, K)`:
+```
+s_out += einsum("ock,bckxy->boxy", W_ss, f_s)
+```
 
-All intermediate features are in the output point's meridian frame, so they can be freely mixed by the learned weight tensor. The weight produces output scalar, u, and v channels:
+**Scalar output from vector input** — `W_vs`: shape `(N_s_out, N_v_in, K, 2)`:
+```
+s_out += einsum("ock,bckxy->boxy", W_vs[..., 0], div)    # divergence-like
+s_out += einsum("ock,bckxy->boxy", W_vs[..., 1], curl)   # curl-like
+```
 
-- **Scalar output from scalar input:** Standard — weight contracts over `(c_in, k)`.
-- **Scalar output from vector input:** Weight contracts over `(c_in, k)` separately for `conv_u` and `conv_v`, producing a scalar from vector components (analogous to divergence or a directional projection).
-- **Vector output from vector input:** Weight contracts over `(c_in, k)` for `conv_u` and `conv_v` to produce output `u` and `v` components. The weight can independently scale and mix the u/v components.
-- **Vector output from scalar input:** The weight assigns a scalar intermediate feature to a vector output channel. This implicitly creates a preferred direction in the meridian frame, and is therefore not rotationally equivariant. But if `u_out` and `v_out` channels are created from the same scalar feature with appropriate weights, the network can learn latitude-dependent directional structures (e.g., patterns aligned with Coriolis deflection).
+**Vector output from scalar input** — `W_sv`: shape `(N_v_out, N_s_in, K, 2)`:
+```
+u_out += einsum("ock,bckxy->boxy", W_sv[..., 0], f_cs)               # gradient
+u_out += einsum("ock,bckxy->boxy", W_sv[..., 1], -f_ss)              # perp gradient
+v_out += einsum("ock,bckxy->boxy", W_sv[..., 0], f_ss)               # gradient
+v_out += einsum("ock,bckxy->boxy", W_sv[..., 1], f_cs)               # perp gradient
+```
 
-In practice, the simplest implementation treats all intermediate features as a flat channel dimension of size `N_scalar + 2 · N_vec` (with `conv_u` and `conv_v` occupying separate channel slots), and uses a single weight tensor of shape `(C_out, C_in_effective, K)` that mixes everything. The type labels (scalar, u, v) are bookkeeping for the next layer's convolution, not a constraint on the weight.
+Note: the same `W_sv` weight values produce both u and v, with the cos/sin factors swapped. The "gradient" component (index 0) produces a vector aligned with the spatial gradient of the scalar field. The "perpendicular gradient" component (index 1) produces a vector 90° rotated from the gradient — physically meaningful for e.g. geostrophic wind from pressure.
 
-## Nonlinearities and Vector-Scalar Interactions
+**Vector output from vector input** — `W_vv`: shape `(N_v_out, N_v_in, K, 2)`:
+```
+u_out += einsum("ock,bckxy->boxy", W_vv[..., 0], conv_u)             # stretch
+u_out += einsum("ock,bckxy->boxy", W_vv[..., 1], -conv_v)            # rotate 90°
+v_out += einsum("ock,bckxy->boxy", W_vv[..., 0], conv_v)             # stretch
+v_out += einsum("ock,bckxy->boxy", W_vv[..., 1], conv_u)             # rotate 90°
+```
 
-Between convolution layers, pointwise nonlinearities must respect the typed channel structure. All operations below are pointwise (per grid point) and therefore frame-consistent, since all channels at a given grid point share the same meridian frame.
+The "stretch" component (index 0) preserves vector direction (scaling, advection-like). The "rotate" component (index 1) rotates vectors 90° (Coriolis-like).
 
-### Safe Nonlinearities
+### Why This Is Rotationally Invariant
 
-- **Scalar channels:** Any standard nonlinearity (ReLU, GELU, etc.) applied independently.
-- **Vector norm → scalar:** `n = sqrt(u² + v²)` is frame-invariant and produces a true scalar.
-- **Norm-gated vectors:** `σ(n) · (u, v) / n` applies a nonlinearity to the vector magnitude while preserving direction.
-- **Scalar × vector → vector:** `s · (u, v)` multiplies a scalar channel with a vector pair to produce a new vector pair. This is how the network creates new vector features from scalar-vector interactions.
-- **Vector dot product → scalar:** `u₁·u₂ + v₁·v₂` produces a frame-invariant scalar from two vector pairs.
-- **2D cross product → scalar:** `u₁·v₂ − u₂·v₁` produces a pseudo-scalar (changes sign under reflection but is frame-rotation invariant).
+Each weight block uses the same scalar weight for both u and v pathways. The directional structure comes entirely from the geometric factors cos(γ) and sin(γ), which are precomputed from the grid geometry. Because these factors always appear in matched cos/sin pairs, the resulting operations are invariant under rotations about the polar axis:
 
-### Unsafe Nonlinearities
+- Gradient and perpendicular gradient of a scalar are geometrically locked — rotating the input rotates the output vector consistently.
+- Divergence and curl of a vector field are true scalars — they don't depend on the frame.
+- Frame-rotated vector convolution and 90°-rotation both preserve vector transformation rules.
 
-- **Independent nonlinearities on u and v:** Applying `ReLU(u)`, `ReLU(v)` independently breaks rotational structure — the result depends on the frame orientation.
-- **Adding scalar to vector component:** `u + s` breaks vector transformation rules.
+## Nonlinearities
+
+Between convolution layers, **nonlinearities are applied only to scalar channels**. Standard activations (ReLU, GELU, etc.) can be applied freely to scalars without breaking any symmetry.
+
+Vector channels do **not** receive direct nonlinearities. Applying independent nonlinearities to u and v (e.g., `ReLU(u)`, `ReLU(v)`) would break rotational structure because the result would depend on the frame orientation. Instead, vectors gain nonlinear behavior indirectly: scalar channels pass through nonlinearities, and the next convolution layer's scalar-to-vector pathway (via `psi_cos`/`psi_sin`) produces new vector features that depend nonlinearly on the original inputs.
 
 ## Performance Characteristics
 
@@ -190,18 +200,17 @@ Between convolution layers, pointwise nonlinearities must respect the typed chan
 
 For a layer with `N_s` scalar input channels and `N_v` vector input pairs:
 
-| Operation | Filter calls | Relative to scalar-only |
+| Operation | Contraction calls | Description |
 |---|---|---|
-| Scalar convolution | 1 call with `psi_scalar` over `N_s` channels | baseline |
-| Vector convolution | 2 calls (`psi_cos`, `psi_sin`) over `2·N_v` channels each | 4× per vector pair vs 1× per scalar |
+| Scalar→scalar | 1 call over `N_s` channels | `psi_scalar` on scalars |
+| Scalar→vector | 2 calls over `N_s` channels each | `psi_cos`, `psi_sin` on scalars |
+| Vector→(vector+scalar) | 2 calls over `2·N_v` channels each | `psi_cos`, `psi_sin` on u and v |
 
-Each "filter call" is one invocation of `_disco_s2_contraction_fft`. The cost per call scales with `(channels × K × nlat × nlon × log(nlon))`.
-
-The total cost is `(N_s + 4·N_v) · K` filter applications, compared to `(N_s + 2·N_v) · K` if vector channels were treated as independent scalars (ignoring frame rotation). The overhead is a factor of 2× for the vector channels only.
+Total: 5 contraction calls (3 for scalar inputs, 2 for vector inputs). The cost per call scales with `(channels × K × nlat × nlon × log(nlon))`.
 
 ### Memory Cost
 
-Two additional banded FFT tensors (`psi_cos_fft`, `psi_sin_fft`) of the same shape as `psi_scalar_fft` are stored per layer. Total filter storage is 3× the scalar-only case. The extra memory is typically small relative to activations and weights.
+Three banded FFT tensors (`psi_scalar_fft`, `psi_cos_fft`, `psi_sin_fft`) of the same shape are stored per layer. Total filter storage is 3× the scalar-only case. The extra memory is typically small relative to activations and weights.
 
 ### Comparison with Cube-Gauged Directional Filters
 
@@ -209,29 +218,81 @@ The cube-gauged approach (documented in `cube_filter_basis.md`) adds angular mod
 
 This approach is different in character:
 
-- **No angular filter modes.** The filters remain isotropic (radial only). Directional information enters through the vector channels, not through the filter shape.
+- **Angular dependence from geometry, not learned modes.** The cos(γ)/sin(γ) angular factors are determined by the grid geometry, not learned. This means the angular structure is fixed (dipole-like), while the cube-gauged approach can learn arbitrary angular patterns.
 - **No cube geometry.** No cube partition, blending zones, transition maps, or equivariant nonlinearity constraints.
-- **Frame rotation is per-input-point.** The rotation matrix varies across the filter support (different input points have different frame mismatches), so it must be baked into the filter tensor, doubling the vector channel cost. In contrast, the cube-frame rotation is at the output point only (constant across the sum, negligible cost).
-- **Simpler but less expressive filters.** Isotropic filters cannot detect angular structure in scalar fields. Directional sensitivity comes only from vector inputs. This is sufficient if the physically important directional information is carried by vector quantities (wind, currents, etc.), which is typically the case in atmospheric modeling.
+- **Frame rotation is per-input-point.** The rotation matrix varies across the filter support (different input points have different frame mismatches), so it must be baked into the filter tensor. In contrast, the cube-frame rotation is at the output point only (constant across the sum, negligible cost).
+- **Directional sensitivity through vector channels.** Gradient-like operations on scalar fields are possible (via the scalar-to-vector pathway), but the angular resolution is limited to the first angular mode (dipole). This is sufficient if the physically important directional information is carried by vector quantities (wind, currents, etc.), which is typically the case in atmospheric modeling.
 
 ## Design Parameters
 
-- **K (radial basis size):** Number of radial filter basis functions per convolution layer. Same as the current `kernel_shape` for `IsotropicMorletFilterBasis`. Controls the radial resolution of the filter.
-- **N_s, N_v (channel counts):** Number of scalar and vector channel pairs in the hidden representation. The network architecture determines these. A reasonable starting point is to match the current total channel count, reserving some for vector pairs.
-- **Nonlinearity design:** The choice of how to combine scalar and vector channels between layers (norm-gating, scalar-vector products, etc.) is an architectural decision. Simple norm-gating plus scalar×vector products provide the essential interactions.
+- **K (radial basis size):** Number of radial filter basis functions per convolution layer. Same as the current `kernel_shape` for the filter basis. Controls the radial resolution of the filter.
+- **N_s, N_v (channel counts):** Number of scalar channels and vector channels in the hidden representation. These are independent. A reasonable starting point is to match the current total channel count, reserving some for vector pairs.
+
+## Module Interface
+
+The new module `VectorDiscoConvS2` has this interface:
+
+```python
+class VectorDiscoConvS2(nn.Module):
+    def __init__(
+        self,
+        in_channels_scalar: int,
+        in_channels_vector: int,
+        out_channels_scalar: int,
+        out_channels_vector: int,
+        in_shape: tuple[int, int],
+        out_shape: tuple[int, int],
+        kernel_shape: int | tuple[int, ...],
+        basis_type: str = "piecewise linear",
+        basis_norm_mode: str = "mean",
+        grid_in: str = "equiangular",
+        grid_out: str = "equiangular",
+        bias: bool = True,
+        theta_cutoff: float | None = None,
+    ): ...
+
+    def forward(
+        self,
+        x_scalar: torch.Tensor,   # (B, N_s_in, H, W)
+        x_vector: torch.Tensor,   # (B, N_v_in, H, W, 2)
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Returns (y_scalar, y_vector)
+        # y_scalar: (B, N_s_out, H, W)
+        # y_vector: (B, N_v_out, H, W, 2)
+        ...
+```
 
 ## Summary of Implementation Steps
 
-1. **Extend the precomputation loop.** In `_precompute_convolution_tensor_s2`, after computing `(θ, φ)` for each support point, additionally compute `cos(γ)` and `sin(γ)` from the input point's Euler-rotated north direction (as described in "Computing the Frame Rotation Angle"). Store three sets of sparse filter values: `ψ_k(r)` (scalar), `ψ_k(r)·cos(γ)` (vector cosine), `ψ_k(r)·sin(γ)` (vector sine).
+1. **New precomputation function.** Create `_precompute_vector_convolution_tensor_s2` (in a new file `fme/core/disco/_vector_convolution.py`) that extends the existing precomputation logic. For each support point, compute `cos(γ)` and `sin(γ)` alongside `(θ, φ)`. Return three sets of sparse values: `vals_scalar = ψ_k(r)`, `vals_cos = ψ_k(r)·cos(γ)`, `vals_sin = ψ_k(r)·sin(γ)`. Call the existing `_precompute_psi_banded` three times (with shared sparsity pattern) to produce the three banded FFT tensors. Reuse the existing `FilterBasis`, `_normalize_convolution_tensor_s2`, and `_precompute_psi_banded` utilities.
 
-2. **Build banded FFT tensors.** Run `_precompute_psi_banded` three times to produce `psi_scalar_fft`, `psi_cos_fft`, and `psi_sin_fft`. All three share the same sparsity pattern (same support points), so the banding and gather indices are identical.
+2. **New convolution module.** Create `VectorDiscoConvS2` in the same new file. The `__init__` method:
+   - Calls the new precomputation to get `psi_scalar_fft`, `psi_cos_fft`, `psi_sin_fft`.
+   - Creates the four weight tensors: `W_ss`, `W_sv`, `W_vs`, `W_vv` with shapes as described above.
+   - Creates bias parameters for scalar and vector outputs.
 
-3. **Modify the forward pass.** The convolution layer:
-   - Applies `psi_scalar_fft` to scalar input channels → scalar intermediate features.
-   - Applies `psi_cos_fft` and `psi_sin_fft` to vector input channels (u and v concatenated) → four intermediate tensors.
-   - Reassembles the four vector intermediates into `(conv_u, conv_v)` via the rotation formula.
-   - Concatenates scalar and vector intermediates and contracts with the weight tensor.
+3. **Forward pass.** The `forward` method:
+   - Runs 5 contraction calls (1 scalar-on-scalar, 2 cos/sin-on-scalar, 2 cos/sin-on-vector-uv).
+   - Assembles intermediate features into the rotationally invariant combinations (conv_u, conv_v, div, curl, f_cs, f_ss).
+   - Applies the four weight blocks to produce scalar and vector outputs.
+   - Returns `(y_scalar, y_vector)`.
 
-4. **Type-aware channel management.** Track which output channels are scalar vs. vector (u, v). This metadata is used by the next convolution layer to determine which channels need frame rotation and by the nonlinearity to apply type-appropriate operations.
+4. **Export.** Add `VectorDiscoConvS2` to `fme/core/disco/__init__.py`.
 
-5. **Implement equivariant nonlinearities.** Between convolution layers, apply norm-gated activations to vector pairs and standard activations to scalar channels. Optionally include scalar×vector product layers to enable cross-type feature creation.
+## Testing Plan
+
+1. **Uniform vector field is preserved.** Create a constant vector field (e.g., everywhere pointing east). After vector→vector convolution, the output should still be uniform and pointing east — frame rotations cancel for a constant field.
+
+2. **Longitude shift equivariance.** Shift scalar and vector inputs by N longitude points. Verify outputs shift by N points (both scalar and vector channels). Tests that the FFT structure preserves translational symmetry.
+
+3. **Arbitrary rotation equivariance.** Rotate the entire input field by moving the north pole elsewhere (a full SO(3) rotation, not just a longitude shift). Verify the output field rotates consistently — scalar outputs match under the rotation, vector outputs transform correctly into the new frame. This is the strongest test of rotational invariance, exercising the frame rotation geometry at every latitude.
+
+4. **Scalar gradient produces correct vector.** Apply scalar→vector to a scalar field with a known gradient (e.g., linear ramp in longitude → expect u output, zero v). Verify the output vector direction matches the gradient direction.
+
+5. **Divergence recovery.** Create a radially diverging vector field from a point. Apply vector→scalar with divergence-like weights. Verify the output scalar is positive at the source.
+
+6. **Curl recovery.** Create a rotating vector field. Apply vector→scalar with curl-like weights. Verify the result reflects the rotation.
+
+7. **Scalar-only consistency.** When `N_v_in = N_v_out = 0`, verify the module produces identical results to the existing `DiscreteContinuousConvS2`.
+
+8. **Regression baselines.** Save reference outputs from known inputs/weights, verify they don't change across refactors (using `validate_tensor_dict`).
