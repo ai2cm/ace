@@ -7,7 +7,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference import InferenceEvaluatorAggregator
+from fme.ace.aggregator.inference import InferenceEvaluatorAggregator, StepMeanEntry
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
@@ -92,9 +92,13 @@ def test_logs_regression():
 
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_time,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
         initial_time=initial_time,
-        record_step_20=True,
+        log_step_means=[
+            StepMeanEntry(step=20),
+            StepMeanEntry(step=4, name="one_day_mean"),
+        ],
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         normalize=lambda x: dict(x),
         save_diagnostics=False,
@@ -151,6 +155,11 @@ def test_logs_regression():
         "mean_step_20/weighted_grad_mag_percent_diff/a",
         "mean_step_20_norm/weighted_rmse/a",
         "mean_step_20_norm/weighted_rmse/channel_mean",
+        "one_day_mean/weighted_rmse/a",
+        "one_day_mean/weighted_bias/a",
+        "one_day_mean/weighted_grad_mag_percent_diff/a",
+        "one_day_mean_norm/weighted_rmse/a",
+        "one_day_mean_norm/weighted_rmse/channel_mean",
         "power_spectrum/a",
         "power_spectrum/negative_norm_bias/a",
         "power_spectrum/positive_norm_bias/a",
@@ -178,10 +187,14 @@ def test_inference_logs_labels_exist():
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_time,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
         initial_time=initial_time,
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        record_step_20=True,
+        log_step_means=[
+            StepMeanEntry(step=20),
+            StepMeanEntry(step=4, name="one_day_mean"),
+        ],
         log_video=True,
         normalize=lambda x: dict(x),
         save_diagnostics=False,
@@ -229,10 +242,13 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     nx, ny = 4, 4
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
+    n_forward_steps = window_len * n_windows - 1
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        n_timesteps=window_len * n_windows,
+        n_ic_steps=1,
+        n_forward_steps=n_forward_steps,
+        log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         initial_time=initial_time,
         normalize=lambda x: dict(x),
         save_diagnostics=False,
@@ -267,11 +283,12 @@ def test_flush_diagnostics(tmpdir):
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_time,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
         output_dir=tmpdir,
-        record_step_20=True,
+        log_step_means=[StepMeanEntry(step=20)],
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         log_video=True,
         log_histograms=True,
@@ -308,7 +325,9 @@ def test_agg_raises_without_output_dir():
     ):
         InferenceEvaluatorAggregator(
             dataset_info=ds_info,
-            n_timesteps=1,
+            log_step_means=[],
+            n_ic_steps=1,
+            n_forward_steps=1,
             initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
             normalize=lambda x: dict(x),
             log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,

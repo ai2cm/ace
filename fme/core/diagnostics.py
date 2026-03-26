@@ -5,6 +5,7 @@ from typing import Protocol
 import numpy as np
 import xarray as xr
 
+from fme.core.cloud import makedirs, to_netcdf_via_inter_filesystem_copy
 from fme.core.distributed import Distributed
 
 
@@ -52,7 +53,8 @@ def write_reduced_diagnostics(
         output_dir = os.path.join(output_dir, subdir)
     dist = Distributed.get_instance()
     if dist.is_root():
-        os.makedirs(output_dir, exist_ok=True)
+        makedirs(output_dir, exist_ok=True)
         for name, ds in reduced_diagnostics.items():
             if len(ds) > 0:
-                ds.to_netcdf(os.path.join(output_dir, f"{name}_diagnostics.nc"))
+                filename = os.path.join(output_dir, f"{name}_diagnostics.nc")
+                to_netcdf_via_inter_filesystem_copy(ds, filename)

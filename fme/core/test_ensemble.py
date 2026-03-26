@@ -13,20 +13,23 @@ class CRPSExperiment:
     random_amount: float
 
 
+@pytest.mark.parametrize("n_ensemble", [2, 5])
 @pytest.mark.parametrize("alpha", [1.0, 0.95])
-def test_crps(alpha: float):
+def test_crps(n_ensemble: int, alpha: float):
     """
     Test that get_crps is a proper scoring rule.
 
     Scoring rules that are proper are proven to have the lowest
     expected score if the predicted distribution equals the
-    underlying distribution of the target variable.
+    underlying distribution of the target variable. Note that
+    the assumptions in this test are only valid for values of
+    alpha near 1.
     """
     torch.manual_seed(0)
     nx = 1
     ny = 1
     n_batch = 10000
-    n_sample = 2
+    n_sample = n_ensemble
     truth_amount = 0.8
     random_amount = 0.5
     experiments = [

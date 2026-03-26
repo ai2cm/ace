@@ -23,7 +23,11 @@ from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
 )
-from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
+from fme.coupled.stepper import (
+    CoupledStepperConfig,
+    CoupledTrainStepper,
+    CoupledTrainStepperConfig,
+)
 
 
 @dataclasses.dataclass
@@ -128,6 +132,7 @@ class TrainConfig:
     train_loader: CoupledDataLoaderConfig
     validation_loader: CoupledDataLoaderConfig
     stepper: CoupledStepperConfig
+    stepper_training: CoupledTrainStepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
@@ -242,8 +247,11 @@ class TrainBuilders:
     def ocean_timestep(self) -> datetime.timedelta:
         return self.config.stepper.ocean_timestep
 
-    def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledStepper:
-        return self.config.stepper.get_stepper(dataset_info)
+    def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledTrainStepper:
+        return self.config.stepper_training.get_train_stepper(
+            stepper_config=self.config.stepper,
+            dataset_info=dataset_info,
+        )
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)

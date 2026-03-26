@@ -1,6 +1,7 @@
 """Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
+import math
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Literal, Self, cast
 
@@ -19,14 +20,12 @@ from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.generics.data import SizedMap
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.data.patching import Patch, get_patches
-from fme.downscaling.data.topography import Topography
 from fme.downscaling.data.utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,
     check_leading_dim,
     expand_and_fold_tensor,
     get_offset,
-    null_generator,
     paired_shuffle,
     scale_tuple,
 )
@@ -100,7 +99,6 @@ class BatchItem:
         return True
 
 
-# TODO: If we move the subsetting, we still have to handle the latlon coordinates
 class HorizontalSubsetDataset(torch.utils.data.Dataset):
     """Subsets the horizontal latitude-longitude dimensions of a dataset."""
 
@@ -122,20 +120,6 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             )
 
         self._orig_coords: LatLonCoordinates = properties.horizontal_coordinates
-        lats = torch.tensor(
-            [
-                i
-                for i in range(len(self._orig_coords.lat))
-                if float(self._orig_coords.lat[i]) in self.lat_interval
-            ]
-        )
-        lons = torch.tensor(
-            [
-                i
-                for i in range(len(self._orig_coords.lon))
-                if float(self._orig_coords.lon[i]) in self.lon_interval
-            ]
-        )
 
         if (self.lon_interval.stop != float("inf")) and (
             torch.any(self._orig_coords.lon < self.lon_interval.stop - 360.0)
@@ -154,16 +138,11 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
                 f"expected lon_min < {self.lon_interval.start + 360.0}"
             )
 
-        assert lats.numel() > 0, "No latitudes found in the specified range."
-        assert lons.numel() > 0, "No longitudes found in the specified range."
-
-        self.mask_indices = LatLonCoordinates(
-            lat=lats,
-            lon=lons,
-        )
+        self._lats_slice = self.lat_interval.slice_from(self._orig_coords.lat)
+        self._lons_slice = self.lon_interval.slice_from(self._orig_coords.lon)
         self._latlon_coordinates = LatLonCoordinates(
-            lat=self._orig_coords.lat[self.mask_indices.lat],
-            lon=self._orig_coords.lon[self.mask_indices.lon],
+            lat=self._orig_coords.lat[self._lats_slice],
+            lon=self._orig_coords.lon[self._lons_slice],
         )
         self._area_weights = self._latlon_coordinates.area_weights
 
@@ -191,8 +170,8 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
         batch = {
             k: v[
                 ...,
-                self.mask_indices.lat.unsqueeze(1),
-                self.mask_indices.lon.unsqueeze(0),
+                self._lats_slice,
+                self._lons_slice,
             ]
             for k, v in batch.items()
         }
@@ -317,7 +296,6 @@ class GriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
-    topography: Topography | None
 
     @property
     def loader(self) -> DataLoader[BatchItem]:
@@ -326,26 +304,8 @@ class GriddedData:
 
         return SizedMap(on_device, self._loader)
 
-    @property
-    def topography_downscale_factor(self) -> int | None:
-        if self.topography:
-            if (
-                self.topography.shape[0] % self.shape[0] != 0
-                or self.topography.shape[1] % self.shape[1] != 0
-            ):
-                raise ValueError(
-                    "Topography shape must be evenly divisible by data shape. "
-                    f"Got topography {self.topography.shape} and data {self.shape}"
-                )
-            return self.topography.shape[0] // self.shape[0]
-        else:
-            return None
-
-    def get_generator(
-        self,
-    ) -> Iterator[tuple["BatchData", Topography | None]]:
-        for batch in self.loader:
-            yield (batch, self.topography)
+    def get_generator(self) -> Iterator["BatchData"]:
+        yield from self.loader
 
     def get_patched_generator(
         self,
@@ -353,20 +313,18 @@ class GriddedData:
         overlap: int = 0,
         drop_partial_patches: bool = True,
         random_offset: bool = False,
-    ) -> Iterator[tuple["BatchData", Topography | None]]:
+    ) -> Iterator["BatchData"]:
         patched_generator = patched_batch_gen_from_loader(
             loader=self.loader,
-            topography=self.topography,
             coarse_yx_extent=self.shape,
             coarse_yx_patch_extent=yx_patch_extent,
-            downscale_factor=self.topography_downscale_factor,
             coarse_overlap=overlap,
             drop_partial_patches=drop_partial_patches,
             random_offset=random_offset,
         )
 
         return cast(
-            Iterator[tuple[BatchData, Topography | None]],
+            Iterator[BatchData],
             patched_generator,
         )
 
@@ -379,7 +337,7 @@ class PairedGriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
-    topography: Topography | None
+    fine_coords: LatLonCoordinates
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:
@@ -388,11 +346,8 @@ class PairedGriddedData:
 
         return SizedMap(on_device, self._loader)
 
-    def get_generator(
-        self,
-    ) -> Iterator[tuple["PairedBatchData", Topography | None]]:
-        for batch in self.loader:
-            yield (batch, self.topography)
+    def get_generator(self) -> Iterator["PairedBatchData"]:
+        yield from self.loader
 
     def get_patched_generator(
         self,
@@ -401,10 +356,9 @@ class PairedGriddedData:
         drop_partial_patches: bool = True,
         random_offset: bool = False,
         shuffle: bool = False,
-    ) -> Iterator[tuple["PairedBatchData", Topography | None]]:
+    ) -> Iterator["PairedBatchData"]:
         patched_generator = patched_batch_gen_from_paired_loader(
             self.loader,
-            self.topography,
             coarse_yx_extent=self.coarse_shape,
             coarse_yx_patch_extent=coarse_yx_patch_extent,
             downscale_factor=self.downscale_factor,
@@ -414,7 +368,7 @@ class PairedGriddedData:
             shuffle=shuffle,
         )
         return cast(
-            Iterator[tuple[PairedBatchData, Topography | None]],
+            Iterator[PairedBatchData],
             patched_generator,
         )
 
@@ -459,6 +413,16 @@ class BatchData:
     def horizontal_shape(self) -> tuple[int, int]:
         return self._horizontal_shape
 
+    @property
+    def lat_interval(self) -> ClosedInterval:
+        lat = self.latlon_coordinates.lat[0]  # all batch members identical; use first
+        return ClosedInterval(lat.min().item(), lat.max().item())
+
+    @property
+    def lon_interval(self) -> ClosedInterval:
+        lon = self.latlon_coordinates.lon[0]  # all batch members identical; use first
+        return ClosedInterval(lon.min().item(), lon.max().item())
+
     @classmethod
     def from_sequence(
         cls,
@@ -482,7 +446,7 @@ class BatchData:
 
     def __getitem__(self, k):
         return BatchItem(
-            {key: value[k].squeeze() for key, value in self.data.items()},
+            {key: value[k] for key, value in self.data.items()},
             self.time[k],
             self.latlon_coordinates[k],
         )
@@ -638,17 +602,35 @@ class ContiguousDistributedSampler(DistributedSampler):
     in time, for example generating new datasets for downstream training.
     """
 
-    def __init__(
-        self,
-        dataset,
-        num_replicas=None,
-        rank=None,
-    ):
-        super().__init__(dataset, num_replicas=num_replicas, rank=rank, shuffle=False)
+    def __init__(self, dataset, num_replicas=None, rank=None, drop_last: bool = False):
+        super().__init__(
+            dataset,
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=False,
+            drop_last=drop_last,
+        )
+
+        # If the dataset length is evenly divisible by # of replicas, then there
+        # is no need to drop any data, since the dataset will be split equally.
+        if self.drop_last and len(self.dataset) % self.num_replicas != 0:  # type: ignore[arg-type]
+            # Split to nearest available length that is evenly divisible.
+            # This is to ensure each rank receives the same amount of data when
+            # using this Sampler.
+            self.num_samples = math.ceil(
+                (len(self.dataset) - self.num_replicas) / self.num_replicas  # type: ignore[arg-type]
+            )
+        else:
+            self.num_samples = math.ceil(len(self.dataset) / self.num_replicas)  # type: ignore[arg-type]
+        self.total_size = self.num_samples * self.num_replicas
 
     def __iter__(self):
         # Deterministically split data into contiguous chunks
         indices = list(range(len(self.dataset)))
+
+        if self.drop_last:
+            # remove tail of data to make it evenly divisible.
+            indices = indices[: self.total_size]
 
         # Subsample contiguous chunk for this rank
         total_size = len(indices)
@@ -659,6 +641,9 @@ class ContiguousDistributedSampler(DistributedSampler):
         return iter(indices[start:end])
 
 
+# downscale_factor=None means fine patches not needed here, but reusing
+# _get_paired_patches in both paired and no-target cases to share the
+# coincident offset logic.
 def _get_paired_patches(
     coarse_yx_extent: tuple[int, int],
     coarse_yx_patch_extent: tuple[int, int],
@@ -703,44 +688,28 @@ def _get_paired_patches(
 
 def patched_batch_gen_from_loader(
     loader: DataLoader[BatchItem],
-    topography: Topography | None,
     coarse_yx_extent: tuple[int, int],
     coarse_yx_patch_extent: tuple[int, int],
-    downscale_factor: int | None,
     coarse_overlap: int = 0,
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
-) -> Iterator[tuple[BatchData, Topography | None]]:
+) -> Iterator[BatchData]:
     for batch in loader:
-        coarse_patches, fine_patches = _get_paired_patches(
+        coarse_patches, _ = _get_paired_patches(
             coarse_yx_extent=coarse_yx_extent,
             coarse_yx_patch_extent=coarse_yx_patch_extent,
             coarse_overlap=coarse_overlap,
-            downscale_factor=downscale_factor,
+            downscale_factor=None,
             random_offset=random_offset,
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
-    batch_data_patches = batch.generate_from_patches(coarse_patches)
-
-    if topography is not None:
-        if fine_patches is None:
-            raise ValueError(
-                "Topography provided but downscale_factor is None, cannot "
-                "generate fine patches."
-            )
-        topography_patches = topography.generate_from_patches(fine_patches)
-    else:
-        topography_patches = null_generator(len(coarse_patches))
-
-    # Combine outputs from both generators
-    yield from zip(batch_data_patches, topography_patches)
+        yield from batch.generate_from_patches(coarse_patches)
 
 
 def patched_batch_gen_from_paired_loader(
     loader: DataLoader[PairedBatchItem],
-    topography: Topography | None,
     coarse_yx_extent: tuple[int, int],
     coarse_yx_patch_extent: tuple[int, int],
     downscale_factor: int,
@@ -748,7 +717,7 @@ def patched_batch_gen_from_paired_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
-) -> Iterator[tuple[PairedBatchData, Topography | None]]:
+) -> Iterator[PairedBatchData]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
             coarse_yx_extent=coarse_yx_extent,
@@ -759,17 +728,4 @@ def patched_batch_gen_from_paired_loader(
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
-        batch_data_patches = batch.generate_from_patches(coarse_patches, fine_patches)
-
-        if topography is not None:
-            if fine_patches is None:
-                raise ValueError(
-                    "Topography provided but downscale_factor is None, cannot "
-                    "generate fine patches."
-                )
-            topography_patches = topography.generate_from_patches(fine_patches)
-        else:
-            topography_patches = null_generator(len(coarse_patches))
-
-        # Combine outputs from both generators
-        yield from zip(batch_data_patches, topography_patches)
+        yield from batch.generate_from_patches(coarse_patches, fine_patches)

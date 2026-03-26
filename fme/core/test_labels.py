@@ -7,7 +7,7 @@ from fme.core.labels import BatchLabels, InvalidLabelError, LabelEncoding
 
 def test_label_encoder_encode():
     encoder = LabelEncoding(["a", "b", "c"])
-    encoded = encoder.encode([{"a", "b"}, {"a", "c"}])
+    encoded = encoder.encode([{"a", "b"}, {"a", "c"}], device=get_device())
     assert encoded.names == ["a", "b", "c"]
     assert encoded.tensor.device == get_device()
     assert encoded.tensor.tolist() == [[1.0, 1.0, 0.0], [1.0, 0.0, 1.0]]
@@ -16,7 +16,7 @@ def test_label_encoder_encode():
 
 def test_label_encoder_encode_non_sorted():
     encoder = LabelEncoding(["c", "b", "a"])
-    encoded = encoder.encode([{"a", "b"}, {"a", "c"}])
+    encoded = encoder.encode([{"a", "b"}, {"a", "c"}], device=get_device())
     assert encoded.names == ["c", "b", "a"]
     assert encoded.tensor.device == get_device()
     assert encoded.tensor.tolist() == [[0.0, 1.0, 1.0], [1.0, 0.0, 1.0]]
@@ -26,7 +26,7 @@ def test_label_encoder_encode_non_sorted():
 def test_label_encoder_invalid_labels():
     encoder = LabelEncoding(["a"])
     with pytest.raises(InvalidLabelError):
-        encoder.encode([{"a", "b"}])
+        encoder.encode([{"a", "b"}], device=get_device())
 
 
 def test_label_encoder_conform_to_encoding_with_more_labels():

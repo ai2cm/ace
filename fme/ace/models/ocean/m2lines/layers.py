@@ -1,8 +1,9 @@
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import torch.nn as nn
+import torch.utils.checkpoint
 
 from .activations import CappedGELU
 
@@ -47,6 +48,7 @@ class ConvNeXtBlock(torch.nn.Module):
         norm: str | None = "instance",
         norm_kwargs: Mapping[str, Any] | None = None,
         upscale_factor: int = 4,
+        checkpoint_strategy: Literal["all", "simple"] | None = None,
     ):
         super().__init__()
         assert kernel_size % 2 != 0, "Cannot use even kernel sizes!"
@@ -58,7 +60,7 @@ class ConvNeXtBlock(torch.nn.Module):
         self.norm_kwargs = norm_kwargs
         if self.norm_kwargs is None:
             self.norm_kwargs = {}
-
+        self.checkpoint_strategy = checkpoint_strategy
         assert n_layers == 1, "Can only use a single layer here!"  # Needs fixing
 
         # 1x1 conv to increase/decrease channel depth if necessary
@@ -151,6 +153,13 @@ class ConvNeXtBlock(torch.nn.Module):
         )
         self.convblock = torch.nn.Sequential(*convblock)
 
+    def _apply_simple_checkpoint(self, layer, x):
+        if self.checkpoint_strategy == "simple" and not isinstance(layer, nn.Conv2d):
+            x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
+        else:
+            x = layer(x)
+        return x
+
     def forward(self, x):
         skip = self.skip_module(x)
         for layer in self.convblock:
@@ -163,8 +172,8 @@ class ConvNeXtBlock(torch.nn.Module):
                 )
             if isinstance(layer, torch.nn.LayerNorm):
                 x = x.permute(0, 2, 3, 1).contiguous()
-                x = layer(x)
+                x = self._apply_simple_checkpoint(layer, x)
                 x = x.permute(0, 3, 1, 2).contiguous()
             else:
-                x = layer(x)
+                x = self._apply_simple_checkpoint(layer, x)
         return skip + x

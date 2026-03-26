@@ -1,10 +1,11 @@
-from collections.abc import Callable, Mapping
+import math
+from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import torch
 
-from fme.core.constants import DENSITY_OF_WATER_CM4, SPECIFIC_HEAT_OF_WATER_CM4
+from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -17,36 +18,31 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "sea_surface_height_above_geoid": ["zos"],
         "sea_surface_temperature": ["sst"],
         "sea_ice_fraction": ["sea_ice_fraction"],
-        "sea_ice_thickness": ["sea_ice_thickness"],
+        "sea_ice_thickness": ["HI"],
         "sea_ice_volume": ["sea_ice_volume"],
         "ocean_sea_ice_fraction": ["ocean_sea_ice_fraction"],
         "land_fraction": ["land_fraction"],
         "net_downward_surface_heat_flux": ["hfds"],
+        "net_downward_surface_heat_flux_total_area": ["hfds_total_area"],
         "geothermal_heat_flux": ["hfgeou"],
         "sea_surface_fraction": ["sea_surface_fraction"],
     }
 )
 
 
+@runtime_checkable
 class HasOceanDepthIntegral(Protocol):
-    def __len__(self) -> int: ...
-
-    def get_mask(self) -> torch.Tensor: ...
-
-    def get_mask_level(self, level: int) -> torch.Tensor: ...
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None: ...
-
-    def get_idepth(self) -> torch.Tensor: ...
-
     def depth_integral(
         self,
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
 
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
 
-    def to(self, device: str) -> "HasOceanDepthIntegral": ...
+class HasCellAreaInMetersSquared(Protocol):
+    """Protocol for objects that can provide cell areas in square meters."""
+
+    @property
+    def area_weights_m2(self) -> torch.Tensor: ...
 
 
 class OceanData:
@@ -59,6 +55,7 @@ class OceanData:
         ocean_data: TensorMapping,
         depth_coordinate: HasOceanDepthIntegral | None = None,
         ocean_field_name_prefixes: Mapping[str, list[str]] = OCEAN_FIELD_NAME_PREFIXES,
+        cell_area_provider: HasCellAreaInMetersSquared | None = None,
     ):
         """
         Initializes the instance based on the provided data and prefixes.
@@ -71,11 +68,15 @@ class OceanData:
                 "potential_temperature" or "salinity") and lists of possible
                 names or prefix variants (e.g., ["thetao_"] or
                 ["zos"]) found in the data.
+            cell_area_provider: An object providing cell areas in square meters
+                via the ``area_weights_m2`` property. Used by derived variables
+                that need cell area information (e.g. sea ice thickness).
         """
         self._data = dict(ocean_data)
         self._prefix_map = ocean_field_name_prefixes
         self._depth_coordinate = depth_coordinate
         self._stacker = Stacker(ocean_field_name_prefixes)
+        self._cell_area_provider = cell_area_provider
 
     @property
     def data(self) -> TensorDict:
@@ -144,24 +145,50 @@ class OceanData:
             )
         return self._depth_coordinate.depth_integral(
             self.sea_water_potential_temperature
-            * SPECIFIC_HEAT_OF_WATER_CM4
-            * DENSITY_OF_WATER_CM4
+            * SPECIFIC_HEAT_OF_SEA_WATER_CM4
+            * DENSITY_OF_SEA_WATER_CM4
         )
 
     @property
     def sea_surface_fraction(self) -> torch.Tensor:
         """Returns the sea surface fraction."""
-        return self._get("sea_surface_fraction")
+        try:
+            return self._get("sea_surface_fraction")
+        except KeyError:
+            return 1 - self.land_fraction
 
     @property
     def net_downward_surface_heat_flux(self) -> torch.Tensor:
         """Net heat flux downward across the ocean surface (below the sea-ice)."""
-        return self._get("net_downward_surface_heat_flux")
+        try:
+            return self._get("net_downward_surface_heat_flux")
+        except KeyError:
+            # derive from the sea-surface-fraction-weighted version
+            return (
+                self.net_downward_surface_heat_flux_total_area
+                / self.sea_surface_fraction
+            )
+
+    @property
+    def net_downward_surface_heat_flux_total_area(self) -> torch.Tensor:
+        """Net heat flux downward across the ocean surface (below the sea-ice),
+        normalized by total grid cell area.
+        """
+        return self._get("net_downward_surface_heat_flux_total_area")
 
     @property
     def geothermal_heat_flux(self) -> torch.Tensor:
         """Geothermal heat flux."""
-        return self._get("geothermal_heat_flux")
+        try:
+            return self._get("geothermal_heat_flux")
+        except KeyError:
+            return torch.zeros_like(self.sea_surface_fraction)
+
+    @property
+    def net_energy_flux_into_ocean(self) -> torch.Tensor:
+        return (
+            self.net_downward_surface_heat_flux + self.geothermal_heat_flux
+        ) * self.sea_surface_fraction
 
     @property
     def sea_ice_fraction(self) -> torch.Tensor:
@@ -189,3 +216,50 @@ class OceanData:
         fraction and land fraction.
         """
         return 1 - self.land_fraction - self.sea_ice_fraction
+
+    @property
+    def area_weights_m2(self) -> torch.Tensor:
+        """Returns cell areas in square meters.
+
+        Raises:
+            ValueError: If a cell area provider was not provided.
+        """
+        if self._cell_area_provider is None:
+            raise ValueError(
+                "A cell area provider must be provided to access cell area information."
+            )
+        return self._cell_area_provider.area_weights_m2
+
+    @property
+    def sea_ice_thickness(self) -> torch.Tensor:
+        """Returns the sea ice thickness."""
+        try:
+            return self._get("sea_ice_thickness")
+        except KeyError:
+            sfrac = self.sea_surface_fraction
+            sea_ice_vol = self.sea_ice_volume
+            try:
+                sea_ice_frac = self.ocean_sea_ice_fraction * sfrac
+            except KeyError:
+                # assumes that sea_ice_fraction comes from compute_coupled_sea_ice
+                # in scripts/data_process/coupled_dataset_utils.py
+                lfrac = self.land_fraction
+                sea_ice_frac = self.sea_ice_fraction * sfrac / (1 - lfrac)
+            cell_area = self.area_weights_m2
+            return torch.where(
+                torch.isnan(sea_ice_vol),
+                float("nan"),
+                torch.nan_to_num(
+                    torch.exp(
+                        9 * math.log(10)
+                        + torch.log(sea_ice_vol)
+                        - torch.log(cell_area)
+                        - torch.log(sea_ice_frac)
+                    )
+                ),
+            )
+
+    @property
+    def sea_ice_volume(self) -> torch.Tensor:
+        """Returns the sea ice volume."""
+        return self._get("sea_ice_volume")

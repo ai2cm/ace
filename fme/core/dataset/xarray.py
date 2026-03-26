@@ -103,7 +103,7 @@ def _get_vertical_coordinate(
         )
 
     coordinate: VerticalCoordinate
-    surface_mask = None
+    deptho = None
     if len(idepth_list) > 0:
         if "mask_0" in ds.data_vars:
             mask_layers = {
@@ -116,18 +116,23 @@ def _get_vertical_coordinate(
                     raise ValueError("The ocean mask must by time-independent.")
             stacker = Stacker({"mask": ["mask_"]})
             mask = stacker("mask", mask_layers)
-            if "surface_mask" in ds.data_vars:
-                if "time" in ds["surface_mask"].dims:
-                    raise ValueError("The surface mask must be time-independent.")
-                surface_mask = torch.as_tensor(ds["surface_mask"].values, dtype=dtype)
         else:
             logger.warning(
                 "Dataset does not contain a mask. Providing a DepthCoordinate with "
                 "mask set to 1 at all layers."
             )
             mask = torch.ones(len(idepth_list) - 1, dtype=dtype)
+        if "deptho" in ds.data_vars:
+            if "time" in ds["deptho"].dims:
+                raise ValueError("'deptho' must be time-independent.")
+            deptho = torch.as_tensor(ds["deptho"].values, dtype=dtype)
+        else:
+            logger.warning(
+                "Dataset does not have a variable named 'deptho' (sea floor depth). "
+                "The ocean depth integral will not account for partial bottom cells."
+            )
         coordinate = DepthCoordinate(
-            torch.as_tensor(idepth_list, dtype=dtype), mask, surface_mask
+            torch.as_tensor(idepth_list, dtype=dtype), mask, deptho
         )
     elif len(ak_list) > 0 and len(bk_list) > 0:
         coordinate = HybridSigmaPressureCoordinate(
@@ -329,22 +334,22 @@ def get_raw_paths(path, file_pattern):
 
 
 def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvider:
-    """
-    Get mask provider from a dataset.
+    """Get mask provider from a dataset.
 
-    If the dataset contains static variables that start with the string "mask_" or a
-    variable named "surface_mask", then these variables will be used to instantiate
-    a MaskProvider object. Otherwise, an empty MaskProvider is returned.
+    If the dataset contains time-invariant variables that start with the string
+    "mask_" then these variables will be used to instantiate a MaskProvider
+    object. Otherwise, an empty MaskProvider is returned.
 
     Args:
         ds: Dataset to get vertical coordinates from.
         dtype: Data type of the returned tensors. If None, the dtype is not
             changed from the original in ds.
+
     """
     masks: dict[str, torch.Tensor] = {
         name: torch.as_tensor(ds[name].values, dtype=dtype)
         for name in ds.data_vars
-        if "mask_" in name
+        if name.startswith("mask_")
     }
     for name in masks:
         if "time" in ds[name].dims:
@@ -502,9 +507,10 @@ class XarrayDataConfig(DatasetConfigABC):
             )
         self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()
-        self.zarr_engine_used = False
-        if self.engine == "zarr":
-            self.zarr_engine_used = True
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        return self.engine == "zarr"
 
     def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
         self.subset = subset
@@ -1091,15 +1097,8 @@ def get_xarray_datasets(
         datasets.append(dataset)
         if properties is None:
             properties = new_properties
-        elif not strict:
-            try:
-                properties.update(new_properties)
-            except ValueError as e:
-                warnings.warn(
-                    f"Metadata for each ensemble member are not the same: {e}"
-                )
         else:
-            properties.update(new_properties)
+            properties.update(new_properties, strict=strict)
     if properties is None:
         raise ValueError("At least one dataset must be provided.")
 

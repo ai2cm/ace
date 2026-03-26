@@ -61,7 +61,7 @@ SHIELD_RES ?= c96
 .PHONY: shield_AMIP_dataset
 shield_AMIP_dataset:
 	./compute_dataset.sh \
-	--config configs/shield-amip-ensemble-$(SHIELD_RES)-$(RESOLUTION)-8layer.yaml
+	--config configs/shield-amip-$(SHIELD_RES)-$(RESOLUTION)-8layer.yaml
 
 .PHONY: shield_AMIP_monthly_netcdfs
 shield_AMIP_monthly_netcdfs:
@@ -194,7 +194,7 @@ shield_som_c96_spin_up_dataset:
 
 .PHONY: shield_som_ensemble_c96_dataset
 shield_som_ensemble_c96_dataset:
-	./compute_dataset.sh --config configs/shield-som-ensemble-c96-$(RESOLUTION)-$(LAYERS).yaml
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-som-ensemble-c96-$(RESOLUTION)-$(LAYERS).yaml
 
 .PHONY: shield_som_abrupt_co2_increase_c96_dataset
 shield_som_abrupt_co2_increase_c96_dataset:
@@ -262,9 +262,13 @@ compute_cm4_trial_run_atmosphere_dataset:
 compute_cm4_trial_run_atmosphere_stats:
 	python -u get_stats.py configs/pre-industrial-CM4-1deg-8layer-trial-run.yaml 0
 
-.PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr
-cm4_picontrol_atmosphere_1deg_8layer_200yr:
-	./compute_dataset.sh --config configs/CM4-piControl-atmosphere-1deg-8layer-200yr.yaml
+.PHONY: cm4_picontrol_atmosphere_8layer_200yr
+cm4_picontrol_atmosphere_8layer_200yr:
+	./compute_dataset.sh --dataset --stats --config configs/CM4-piControl-atmosphere-$(RESOLUTION)deg-8layer-200yr.yaml
+
+.PHONY: cm4_1pctCO2_atmosphere_8layer_140yr
+cm4_1pctCO2_atmosphere_8layer_140yr:
+	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)deg-8layer-140yr.yaml
 
 .PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs
 cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
@@ -304,7 +308,15 @@ shield_amip_c96_idealized_0p1_heating_ensemble_dataset:
 
 .PHONY: xshield_amip_dataset_and_stats
 xshield_amip_dataset_and_stats:
-	./compute_dataset.sh --config configs/X-SHiELD-AMIP-1deg-$(LAYERS)-11yr.yaml
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/X-SHiELD-AMIP-$(RESOLUTION)-$(LAYERS)-11yr.yaml
+
+.PHONY: xshield_amip_plus_4K_dataset_and_stats
+xshield_amip_plus_4K_dataset_and_stats:
+	./compute_dataset.sh --config configs/X-SHiELD-AMIP-plus-4K-1deg-$(LAYERS)-1yr.yaml
+
+.PHONY: shield_c96_ramped_climSST_random_CO2_ensemble_dataset
+shield_c96_ramped_climSST_random_CO2_ensemble_dataset:
+	./compute_dataset.sh --dataset --stats --config configs/shield-ramped-climSST-random-CO2-ensemble-c96-$(RESOLUTION)deg-$(LAYERS).yaml
 
 .PHONY: build_atmosphere_processing_image
 build_atmosphere_processing_image:
@@ -342,8 +354,12 @@ e3smv3_piControl_100yr_coupled:
 
 .PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
 cm4_like_am4_random_co2_ensemble_atmosphere:
-	./compute_dataset.sh --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)deg-8layer.yaml
 
 .PHONY:
 cm4_like_am4_random_co2_ensemble_coupled:
 	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-like-AM4-random-CO2-ensemble-coupled.yaml
+
+.PHONY: shield_amip_constant_co2_c96_dataset
+shield_amip_constant_co2_c96_dataset:
+	./compute_dataset.sh --config configs/shield-amip-constant-co2-c96-1deg-8layer.yaml

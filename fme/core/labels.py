@@ -3,8 +3,6 @@ from typing import Any
 
 import torch
 
-from fme.core.device import get_device
-
 
 class BatchLabels:
     def __init__(self, tensor: torch.Tensor, names: list[str]):
@@ -122,13 +120,14 @@ class LabelEncoding:
             raise ValueError("Labels must be an ordered list of strings")
         self.names = labels.copy()
 
-    def encode(self, labels: list[set[str]]) -> BatchLabels:
+    def encode(self, labels: list[set[str]], device: torch.device) -> BatchLabels:
         """
         Encodes a list of sets of labels into a tensor of one-hot encoded labels.
 
         Args:
             labels: List of sets of labels, where each set contains the labels
                 for a single batch member.
+            device: The device to place the resulting tensor on.
 
         Returns:
             Tensor of one-hot encoded labels, of shape (batch_size, n_labels).
@@ -147,7 +146,7 @@ class LabelEncoding:
             tensor=torch.tensor(
                 list_data,
                 dtype=torch.float32,
-                device=get_device(),
+                device=device,
             ),
             names=self.names,
         )

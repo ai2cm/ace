@@ -7,14 +7,20 @@ import torch
 import fme
 from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import NullVerticalCoordinate
+from fme.core.loss import StepLossConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.registry.module import ModuleSelector
 
 from .data_loading.data_typing import CoupledVerticalCoordinate
+from .stepper import (
+    ComponentTrainingConfig,
+    CoupledParameterInitConfig,
+    CoupledTrainStepperConfig,
+)
 from .test_stepper import (
     CoupledDatasetInfoBuilder,
-    get_stepper_and_batch,
     get_stepper_config,
+    get_train_stepper_and_batch,
 )
 
 DEVICE = fme.get_device()
@@ -35,7 +41,7 @@ def test_stepper_gradient_accumulation_integration():
     atmos_in_names = ["a_prog1", "a_prog2", "a_sfc_temp", "ocean_frac", "o_prog"]
     atmos_out_names = ["a_prog1", "a_prog2", "a_sfc_temp", "a_diag1", "a_diag2"]
 
-    coupler, coupled_data = get_stepper_and_batch(
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -51,6 +57,7 @@ def test_stepper_gradient_accumulation_integration():
             type="prebuilt", config={"module": AddBias()}
         ),
     )
+    coupler = train_stepper._stepper
 
     assert len(coupler.atmosphere.modules) == 1
     assert len(coupler.ocean.modules) == 1
@@ -86,7 +93,7 @@ def test_stepper_gradient_accumulation_integration():
     optim = OptimizationConfig(use_gradient_accumulation=False).build(
         coupler.modules, 1
     )
-    _ = coupler.train_on_batch(
+    _ = train_stepper.train_on_batch(
         data=coupled_data.data,
         optimization=optim,
     )
@@ -118,7 +125,7 @@ def test_stepper_gradient_accumulation_integration():
     # with gradient accumulation, atmos steps detached
     optim = OptimizationConfig(use_gradient_accumulation=True).build(coupler.modules, 1)
 
-    _ = coupler.train_on_batch(
+    _ = train_stepper.train_on_batch(
         data=coupled_data.data,
         optimization=optim,
     )
@@ -196,15 +203,21 @@ def test_stepper_parameter_init_integration(
         atmosphere_builder=ModuleSelector(
             type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
         ),
-        ocean_parameter_init=ParameterInitializationConfig(weights_path=ocean_path),
-        atmosphere_parameter_init=ParameterInitializationConfig(
-            weights_path=atmos_path
-        ),
-        checkpoint_path=ckpt_path,
     )
-    coupled_stepper = config.get_stepper(dataset_info)
-    coupled_ocean_state = coupled_stepper.ocean.modules.state_dict()
-    coupled_atmos_state = coupled_stepper.atmosphere.modules.state_dict()
+    train_stepper_config = CoupledTrainStepperConfig(
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            parameter_init=ParameterInitializationConfig(weights_path=ocean_path),
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            parameter_init=ParameterInitializationConfig(weights_path=atmos_path),
+        ),
+        parameter_init=CoupledParameterInitConfig(checkpoint_path=ckpt_path),
+    )
+    coupled_train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
+    coupled_ocean_state = coupled_train_stepper.ocean.modules.state_dict()
+    coupled_atmos_state = coupled_train_stepper.atmosphere.modules.state_dict()
     for name, param in ocean_state.items():
         torch.testing.assert_close(param, coupled_ocean_state[name])
     for name, param in atmos_state.items():

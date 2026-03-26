@@ -15,7 +15,6 @@
 # limitations under the License.
 
 import dataclasses
-import math
 from typing import Tuple
 
 import torch
@@ -23,6 +22,9 @@ import torch.fft
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
+
+from fme.core.benchmark.timer import Timer, NullTimer
+from fme.core.models.conditional_sfno.lora import LoRAConv2d
 
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
@@ -37,6 +39,7 @@ class ContextConfig:
     embed_dim_scalar: int
     embed_dim_labels: int
     embed_dim_noise: int
+    embed_dim_pos: int
 
 
 @dataclasses.dataclass
@@ -47,12 +50,15 @@ class Context:
     Parameters:
         embedding_scalar: The scalar embedding to condition on. The
             last dimension is the channel dimension.
+        embedding_pos: The positional embedding to condition on. The last
+            three dimensions are (channels, height, width).
         labels: The labels to condition on, of shape (batch_size, n_labels).
         noise: The 2D noise embedding to condition on. The last
             three dimensions are (channels, height, width).
     """
 
     embedding_scalar: torch.Tensor | None
+    embedding_pos: torch.Tensor | None
     labels: torch.Tensor | None
     noise: torch.Tensor | None
 
@@ -65,6 +71,23 @@ class Context:
             raise ValueError("noise must have 2 more dimensions than embedding_scalar")
         if self.labels is not None and self.labels.ndim != 2:
             raise ValueError("labels must have 2 dimensions")
+
+    def asdict(self) -> dict[str, torch.Tensor | None]:
+        return {
+            "embedding_scalar": self.embedding_scalar,
+            "embedding_pos": self.embedding_pos,
+            "labels": self.labels,
+            "noise": self.noise,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, torch.Tensor | None]) -> "Context":
+        return cls(
+            embedding_scalar=data.get("embedding_scalar"),
+            embedding_pos=data.get("embedding_pos"),
+            labels=data.get("labels"),
+            noise=data.get("noise"),
+        )
 
 
 class ChannelLayerNorm(nn.Module):
@@ -136,6 +159,7 @@ class ConditionalLayerNorm(nn.Module):
         self.n_channels = n_channels
         self.embed_dim_scalar = context_config.embed_dim_scalar
         self.embed_dim_labels = context_config.embed_dim_labels
+        self.embed_dim_pos = context_config.embed_dim_pos
         self.embed_dim_noise = context_config.embed_dim_noise
         self.epsilon = epsilon
         if self.embed_dim_scalar > 0:
@@ -165,6 +189,17 @@ class ConditionalLayerNorm(nn.Module):
         else:
             self.W_scale_2d = None
             self.W_bias_2d = None
+        if self.embed_dim_pos > 0:
+            # no bias as it is already handled in the non-2d layers
+            self.W_scale_pos = nn.Conv2d(
+                self.embed_dim_pos, self.n_channels, kernel_size=1, bias=False
+            )
+            self.W_bias_pos = nn.Conv2d(
+                self.embed_dim_pos, self.n_channels, kernel_size=1, bias=False
+            )
+        else:
+            self.W_scale_pos = None
+            self.W_bias_pos = None
         if global_layer_norm:
             self.norm = nn.LayerNorm(
                 (self.n_channels, img_shape[0], img_shape[1]),
@@ -199,8 +234,18 @@ class ConditionalLayerNorm(nn.Module):
             torch.nn.init.constant_(self.W_scale_2d.weight, 0.0)
         if self.W_bias_2d is not None:
             torch.nn.init.constant_(self.W_bias_2d.weight, 0.0)
+        if self.W_scale_pos is not None:
+            torch.nn.init.constant_(self.W_scale_pos.weight, 0.0)
+        if self.W_bias_pos is not None:
+            torch.nn.init.constant_(self.W_bias_pos.weight, 0.0)
+        # no bias on 2d layers as it is already handled in the non-2d layers
 
-    def forward(self, x: torch.Tensor, context: Context) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        context: Context,
+        timer: Timer = NullTimer(),
+    ) -> torch.Tensor:
         """
         Conditional Layer Normalization
 
@@ -219,44 +264,58 @@ class ConditionalLayerNorm(nn.Module):
             self.W_scale_labels is not None or self.W_bias_labels is not None
         ):
             raise ValueError("labels must be provided")
-        if self.W_scale is not None:
-            if context.embedding_scalar is None:
-                raise ValueError("embedding_scalar must be provided")
-            scale: torch.Tensor = (
-                self.W_scale(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
-            )
-        else:
-            scale = torch.ones(
-                list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
-            )
+        with timer.child("compute_scaling_and_bias"):
+            if self.W_scale is not None:
+                if context.embedding_scalar is None:
+                    raise ValueError("embedding_scalar must be provided")
+                scale: torch.Tensor = (
+                    self.W_scale(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
+                )
+            else:
+                scale = torch.ones(
+                    list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
+                )
 
-        if self.W_scale_2d is not None:
-            if context.noise is None:
-                raise ValueError("embedding_2d must be provided")
-            scale = scale + self.W_scale_2d(context.noise)
-        if self.W_bias is not None:
-            if context.embedding_scalar is None:
-                raise ValueError("embedding_scalar must be provided")
-            bias: torch.Tensor = (
-                self.W_bias(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
-            )
-        else:
-            bias = torch.zeros(
-                list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
-            )
+            if self.W_scale_2d is not None:
+                if context.noise is None:
+                    raise ValueError("embedding_2d must be provided")
+                scale = scale + self.W_scale_2d(context.noise)
+            if self.W_bias is not None:
+                if context.embedding_scalar is None:
+                    raise ValueError("embedding_scalar must be provided")
+                bias: torch.Tensor = (
+                    self.W_bias(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
+                )
+            else:
+                bias = torch.zeros(
+                    list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
+                )
 
-        if self.W_scale_labels is not None:
-            scale = scale + self.W_scale_labels(context.labels).unsqueeze(-1).unsqueeze(
-                -1
-            )
-        if self.W_bias_labels is not None:
-            bias = bias + self.W_bias_labels(context.labels).unsqueeze(-1).unsqueeze(-1)
-        if self.W_bias_2d is not None:
-            if context.noise is None:
-                raise ValueError("embedding_2d must be provided")
-            bias = bias + self.W_bias_2d(context.noise)
-        x_norm: torch.Tensor = self.norm(x)
-        return x_norm * scale + bias
+            if self.W_scale_labels is not None:
+                scale = scale + self.W_scale_labels(context.labels).unsqueeze(
+                    -1
+                ).unsqueeze(-1)
+            if self.W_bias_labels is not None:
+                bias = bias + self.W_bias_labels(context.labels).unsqueeze(
+                    -1
+                ).unsqueeze(-1)
+            if self.W_bias_2d is not None:
+                if context.noise is None:
+                    raise ValueError("embedding_2d must be provided")
+                bias = bias + self.W_bias_2d(context.noise)
+            if self.W_scale_pos is not None:
+                if context.embedding_pos is None:
+                    raise ValueError("embedding_pos must be provided")
+                scale = scale + self.W_scale_pos(context.embedding_pos)
+            if self.W_bias_pos is not None:
+                if context.embedding_pos is None:
+                    raise ValueError("embedding_pos must be provided")
+                bias = bias + self.W_bias_pos(context.embedding_pos)
+        with timer.child("normalize"):
+            x_norm: torch.Tensor = self.norm(x)
+        with timer.child("apply_scaling_and_bias"):
+            return_value = x_norm * scale + bias
+        return return_value
 
 
 @torch.jit.script
@@ -298,35 +357,6 @@ class DropPath(nn.Module):
         return drop_path(x, self.drop_prob, self.training)
 
 
-class PatchEmbed(nn.Module):
-    """
-    Divides the input image into patches and embeds them into a specified dimension
-    using a convolutional layer.
-    """
-
-    def __init__(
-        self, img_size=(224, 224), patch_size=(16, 16), in_chans=3, embed_dim=768
-    ):  # pragma: no cover
-        super(PatchEmbed, self).__init__()
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.num_patches = num_patches
-        self.proj = nn.Conv2d(
-            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
-        )
-
-    def forward(self, x):  # pragma: no cover
-        # gather input
-        B, C, H, W = x.shape
-        assert (
-            H == self.img_size[0] and W == self.img_size[1]
-        ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        # new: B, C, H*W
-        x = self.proj(x).flatten(2)
-        return x
-
-
 class MLP(nn.Module):
     """
     Basic CNN with support for gradient checkpointing
@@ -341,15 +371,31 @@ class MLP(nn.Module):
         output_bias=True,
         drop_rate=0.0,
         checkpointing=0,
+        lora_rank: int = 0,
+        lora_alpha: float | None = None,
     ):  # pragma: no cover
         super(MLP, self).__init__()
         self.checkpointing = checkpointing
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
 
-        fc1 = nn.Conv2d(in_features, hidden_features, 1, bias=True)
+        fc1 = LoRAConv2d(
+            in_features,
+            hidden_features,
+            1,
+            bias=True,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+        )
         act = act_layer()
-        fc2 = nn.Conv2d(hidden_features, out_features, 1, bias=output_bias)
+        fc2 = LoRAConv2d(
+            hidden_features,
+            out_features,
+            1,
+            bias=output_bias,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+        )
         if drop_rate > 0.0:
             drop = nn.Dropout(drop_rate)
             self.fwd = nn.Sequential(fc1, act, drop, fc2, drop)
@@ -368,175 +414,6 @@ class MLP(nn.Module):
             return self.checkpoint_forward(x)
         else:
             return self.fwd(x)
-
-
-class RealFFT2(nn.Module):
-    """
-    Helper routine to wrap FFT similarly to the SHT
-    """
-
-    def __init__(self, nlat, nlon, lmax=None, mmax=None):  # pragma: no cover
-        super(RealFFT2, self).__init__()
-
-        # use local FFT here
-        self.fft_handle = torch.fft.rfft2
-
-        self.nlat = nlat
-        self.nlon = nlon
-        self.lmax = lmax or self.nlat
-        self.mmax = mmax or self.nlon // 2 + 1
-
-        self.truncate = True
-        if (self.lmax == self.nlat) and (self.mmax == (self.nlon // 2 + 1)):
-            self.truncate = False
-
-        # self.num_batches = 1
-        assert self.lmax % 2 == 0
-
-    def forward(self, x):  # pragma: no cover
-        y = self.fft_handle(x, (self.nlat, self.nlon), (-2, -1), "ortho")
-
-        if self.truncate:
-            y = torch.cat(
-                (
-                    y[..., : math.ceil(self.lmax / 2), : self.mmax],
-                    y[..., -math.floor(self.lmax / 2) :, : self.mmax],
-                ),
-                dim=-2,
-            )
-
-        return y
-
-
-class InverseRealFFT2(nn.Module):
-    """
-    Helper routine to wrap FFT similarly to the SHT
-    """
-
-    def __init__(self, nlat, nlon, lmax=None, mmax=None):  # pragma: no cover
-        super(InverseRealFFT2, self).__init__()
-
-        # use local FFT here
-        self.ifft_handle = torch.fft.irfft2
-
-        self.nlat = nlat
-        self.nlon = nlon
-        self.lmax = lmax or self.nlat
-        self.mmax = mmax or self.nlon // 2 + 1
-
-    def forward(self, x):  # pragma: no cover
-        out = self.ifft_handle(x, (self.nlat, self.nlon), (-2, -1), "ortho")
-
-        return out
-
-
-class SpectralAttention2d(nn.Module):
-    """
-    2d Spectral Attention layer
-    """
-
-    def __init__(
-        self,
-        forward_transform,
-        inverse_transform,
-        embed_dim,
-        sparsity_threshold=0.0,
-        hidden_size_factor=2,
-        use_complex_network=True,
-        use_complex_kernels=False,
-        complex_activation="real",
-        bias=False,
-        spectral_layers=1,
-        drop_rate=0.0,
-    ):  # pragma: no cover
-        super(SpectralAttention2d, self).__init__()
-
-        self.embed_dim = embed_dim
-        self.sparsity_threshold = sparsity_threshold
-        self.hidden_size = int(hidden_size_factor * self.embed_dim)
-        self.scale = 0.02
-        self.spectral_layers = spectral_layers
-        if use_complex_kernels:
-            raise NotImplementedError("complex kernels not supported")
-        self.mul_add_handle = compl_muladd2d_fwd
-        self.mul_handle = compl_mul2d_fwd
-
-        self.modes_lat = forward_transform.lmax
-        self.modes_lon = forward_transform.mmax
-
-        # only storing the forward handle to be able to call it
-        self.forward_transform = forward_transform.forward
-        self.inverse_transform = inverse_transform.forward
-
-        assert inverse_transform.lmax == self.modes_lat
-        assert inverse_transform.mmax == self.modes_lon
-
-        # weights
-        w = [self.scale * torch.randn(self.embed_dim, self.hidden_size, 2)]
-        # w = [self.scale * torch.randn(self.embed_dim + 2*self.embed_freqs, self.hidden_size, 2)]
-        # w = [self.scale * torch.randn(self.embed_dim + 4*self.embed_freqs, self.hidden_size, 2)]
-        for l in range(1, self.spectral_layers):
-            w.append(self.scale * torch.randn(self.hidden_size, self.hidden_size, 2))
-        self.w = nn.ParameterList(w)
-
-        if bias:
-            self.b = nn.ParameterList(
-                [
-                    self.scale * torch.randn(self.hidden_size, 1, 2)
-                    for _ in range(self.spectral_layers)
-                ]
-            )
-
-        self.wout = nn.Parameter(
-            self.scale * torch.randn(self.hidden_size, self.embed_dim, 2)
-        )
-
-        self.drop = nn.Dropout(drop_rate) if drop_rate > 0.0 else nn.Identity()
-
-        self.activation = ComplexReLU(
-            mode=complex_activation, bias_shape=(self.hidden_size, 1, 1)
-        )
-
-    def forward_mlp(self, xr):  # pragma: no cover
-        """forward method for the MLP part of the network"""
-        for l in range(self.spectral_layers):
-            if hasattr(self, "b"):
-                xr = self.mul_add_handle(
-                    xr, self.w[l].to(xr.dtype), self.b[l].to(xr.dtype)
-                )
-            else:
-                xr = self.mul_handle(xr, self.w[l].to(xr.dtype))
-            xr = torch.view_as_complex(xr)
-            xr = self.activation(xr)
-            xr = self.drop(xr)
-            xr = torch.view_as_real(xr)
-
-        xr = self.mul_handle(xr, self.wout)
-
-        return xr
-
-    def forward(self, x):  # pragma: no cover
-        dtype = x.dtype
-        # x = x.to(torch.float32)
-
-        # FWD transform
-        with torch.amp.autocast("cuda", enabled=False):
-            x = x.to(torch.float32)
-            x = x.contiguous()
-            x = self.forward_transform(x)
-            x = torch.view_as_real(x)
-
-        # MLP
-        x = self.forward_mlp(x)
-
-        # BWD transform
-        with torch.amp.autocast("cuda", enabled=False):
-            x = torch.view_as_complex(x)
-            x = x.contiguous()
-            x = self.inverse_transform(x)
-            x = x.to(dtype)
-
-        return x
 
 
 class SpectralAttentionS2(nn.Module):
@@ -566,9 +443,7 @@ class SpectralAttentionS2(nn.Module):
         self.scale = 0.02
         if use_complex_kernels:
             raise NotImplementedError("complex kernels not supported")
-        # self.mul_add_handle = compl_muladd1d_fwd_c if use_complex_kernels else compl_muladd1d_fwd
         self.mul_add_handle = compl_muladd2d_fwd
-        # self.mul_handle = compl_mul1d_fwd_c if use_complex_kernels else compl_mul1d_fwd
         self.mul_handle = compl_mul2d_fwd
         self.spectral_layers = spectral_layers
 

@@ -4,19 +4,17 @@ import logging
 import os
 from typing import List, Sequence, Tuple
 
+import cftime
 import dacite
+import numpy.typing as npt
 import torch.utils.data
 import xarray as xr
 import yaml
 
-import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.batch_data import BatchData, default_collate
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
-from fme.ace.inference.data_writer.monthly import (
-    MonthlyDataWriter,
-    months_for_timesteps,
-)
+from fme.ace.inference.data_writer.monthly import MonthlyDataWriter
 from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import (
     AtmosphericDeriveFn,
@@ -97,6 +95,15 @@ def get_timesteps(data_loaders: List[torch.utils.data.DataLoader]) -> int:
     return timesteps_per_dataset
 
 
+def get_initial_condition_times(
+    data_loaders: List[torch.utils.data.DataLoader],
+) -> npt.NDArray[cftime.datetime]:
+    for window_batch_data in merge_loaders(data_loaders):
+        initial_condition_times = window_batch_data.time.isel(time=0).to_numpy()
+        break
+    return initial_condition_times
+
+
 @dataclasses.dataclass
 class Config:
     """
@@ -139,21 +146,23 @@ class Config:
         )
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=False
+        )
 
     def get_data_writer(self, data: "Data") -> MonthlyDataWriter:
         assert data.properties.timestep is not None
-        n_months = months_for_timesteps(data.n_timesteps, data.properties.timestep)
         coords = {
             **data.properties.horizontal_coordinates.coords,
             **data.properties.vertical_coordinate.coords,
         }
+        initial_condition_times = get_initial_condition_times(data.loaders)
         return MonthlyDataWriter(
             path=self.experiment_dir,
             label="monthly_mean_data",
             save_names=None,  # save all data given
-            n_samples=self.data_loader.batch_size * len(data.loaders),
-            n_months=n_months,
+            initial_condition_times=initial_condition_times,
             variable_metadata=data.properties.variable_metadata,
             coords=coords,
             dataset_metadata=DatasetMetadata.from_env(),
@@ -184,7 +193,6 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
 
 def run(config: Config):
     config.configure_logging(log_filename="write_monthly_data_out.log")
-    logging_utils.log_versions()
 
     data = config.get_data()
     writer = config.get_data_writer(data)
@@ -243,6 +251,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(
-        yaml_config=args.yaml_config,
-    )
+    with Distributed.context():
+        main(
+            yaml_config=args.yaml_config,
+        )

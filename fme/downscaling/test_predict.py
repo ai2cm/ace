@@ -8,6 +8,7 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
+from fme.downscaling.data import load_static_inputs
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
@@ -19,7 +20,11 @@ class LinearDownscalingDiffusion(LinearDownscaling):
         return super().forward(coarse)
 
 
-def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
+def get_model_config(
+    coarse_shape: tuple[int, int],
+    downscale_factor: int,
+    use_fine_topography: bool = True,
+):
     fine_shape = (
         coarse_shape[0] * downscale_factor,
         coarse_shape[1] * downscale_factor,
@@ -31,7 +36,7 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
                 "module": LinearDownscalingDiffusion(
                     factor=1,  # will pass coarse input interpolated to fine shape
                     fine_img_shape=fine_shape,
-                    n_channels_in=3,
+                    n_channels_in=3 if use_fine_topography else 2,
                     n_channels_out=2,
                 )
             },
@@ -55,7 +60,7 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
         churn=1,
         num_diffusion_generation_steps=2,
         predict_residual=True,
-        use_fine_topography=True,
+        use_fine_topography=use_fine_topography,
     )
 
 
@@ -77,7 +82,6 @@ def create_predictor_config(
     experiment_dir.mkdir()
     with open(file_path) as file:
         config = yaml.safe_load(file)
-    config["data"]["topography"] = f"{paths.fine}/data.nc"
     config["data"]["coarse"] = [{"data_path": str(paths.coarse)}]
     config["data"]["lat_extent"] = {"start": 1, "stop": 6}
     config["experiment_dir"] = str(experiment_dir)
@@ -93,7 +97,7 @@ def create_predictor_config(
     out_path = tmp_path / "predictor-config.yaml"
     with open(out_path, "w") as file:
         yaml.dump(config, file)
-    return out_path
+    return out_path, f"{paths.fine}/data.nc"
 
 
 def test_predictor_runs(tmp_path, very_fast_only: bool):
@@ -102,25 +106,31 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
     n_samples = 2
     coarse_shape = (4, 4)
     downscale_factor = 2
-    predictor_config_path = create_predictor_config(
+    predictor_config_path, fine_data_path = create_predictor_config(
         tmp_path,
         n_samples,
     )
     model_config = get_model_config(coarse_shape, downscale_factor=downscale_factor)
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
     model = model_config.build(
-        coarse_shape=coarse_shape, downscale_factor=downscale_factor
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
     os.makedirs(
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
     )
+
     torch.save(
         {
             "model": model.get_state(),
         },
         predictor_config["model"]["checkpoint_path"],
     )
+
     with mock_wandb():
         predict.main(str(predictor_config_path))
     assert os.path.exists(
@@ -139,7 +149,7 @@ def test_predictor_renaming(
     coarse_shape = (4, 4)
     downscale_factor = 2
     renaming = {"var0": "var0_renamed", "var1": "var1_renamed"}
-    predictor_config_path = create_predictor_config(
+    predictor_config_path, fine_data_path = create_predictor_config(
         tmp_path,
         n_samples,
         model_renaming=renaming,
@@ -147,13 +157,22 @@ def test_predictor_renaming(
             "rename": {"var0": "var0_renamed", "var1": "var1_renamed"}
         },
     )
-    model_config = get_model_config(coarse_shape, downscale_factor)
-    model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)
+    model_config = get_model_config(
+        coarse_shape, downscale_factor, use_fine_topography=False
+    )
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
+    model = model_config.build(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
+    )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
     os.makedirs(
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
     )
+
     torch.save(
         {
             "model": model.get_state(),

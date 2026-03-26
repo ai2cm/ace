@@ -1,4 +1,5 @@
 import datetime
+import warnings
 
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
@@ -37,18 +38,40 @@ class DatasetProperties:
             self.all_labels,
         )
 
-    def update(self, other: "DatasetProperties"):
+    def localize(self) -> "DatasetProperties":
+        """Return a copy with coordinates and masks sliced to the local
+        spatial chunk based on the current distributed layout.
+        """
+        return DatasetProperties(
+            self.variable_metadata,
+            self.vertical_coordinate,
+            self.horizontal_coordinates.localize(),
+            self.mask_provider.localize(),
+            self.timestep,
+            self.is_remote,
+            self.all_labels,
+        )
+
+    def update(self, other: "DatasetProperties", strict: bool = True):
+        try:
+            if self.timestep != other.timestep:
+                raise ValueError("Inconsistent timesteps between datasets")
+            if self.variable_metadata != other.variable_metadata:
+                raise ValueError("Inconsistent metadata between datasets")
+            if self.vertical_coordinate != other.vertical_coordinate:
+                raise ValueError("Inconsistent vertical coordinates between datasets")
+            if self.horizontal_coordinates != other.horizontal_coordinates:
+                raise ValueError("Inconsistent horizontal coordinates between datasets")
+            if self.mask_provider != other.mask_provider:
+                raise ValueError("Inconsistent mask providers between datasets")
+        except ValueError as e:
+            if strict:
+                raise e
+            else:
+                warnings.warn(
+                    f"Metadata for each ensemble member are not the same: {e}"
+                )
         self.is_remote = self.is_remote or other.is_remote
-        if self.timestep != other.timestep:
-            raise ValueError("Inconsistent timesteps between datasets")
-        if self.variable_metadata != other.variable_metadata:
-            raise ValueError("Inconsistent metadata between datasets")
-        if self.vertical_coordinate != other.vertical_coordinate:
-            raise ValueError("Inconsistent vertical coordinates between datasets")
-        if self.horizontal_coordinates != other.horizontal_coordinates:
-            raise ValueError("Inconsistent horizontal coordinates between datasets")
-        if self.mask_provider != other.mask_provider:
-            raise ValueError("Inconsistent mask providers between datasets")
         self._update_labels(other)
 
     def _update_labels(self, other: "DatasetProperties"):

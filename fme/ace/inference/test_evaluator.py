@@ -7,7 +7,9 @@ import tempfile
 from collections.abc import Iterable
 from unittest.mock import patch
 
+import cftime
 import dacite
+import fsspec
 import numpy as np
 import pytest
 import torch
@@ -15,6 +17,8 @@ import xarray as xr
 import yaml
 
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference.main import StepMeanEntry
+from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
@@ -22,9 +26,11 @@ from fme.ace.data_loading.inference import (
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
+from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
     StepperOverrideConfig,
+    ValidationConfig,
     main,
     resolve_variable_metadata,
 )
@@ -32,7 +38,11 @@ from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import Stepper, TrainOutput
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLengthProbabilities,
+    TimeLengthProbability,
+)
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import (
@@ -322,7 +332,9 @@ def inference_helper(
         loader=data.inference_data_loader_config,
         prediction_loader=prediction_data,
         aggregator=InferenceEvaluatorAggregatorConfig(
-            monthly_reference_data=monthly_reference_filename, log_video=True
+            monthly_reference_data=monthly_reference_filename,
+            log_video=True,
+            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
@@ -372,11 +384,19 @@ def inference_helper(
             assert dim_name in initial_condition_ds.data_vars[example_output_var].dims
             assert dim_name in initial_condition_ds.coords
 
+    decode_times = xr.coders.CFDatetimeCoder(use_cftime=True)
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc",
         decode_timedelta=False,
-        decode_times=False,
+        decode_times=decode_times,
     )
+
+    # Regression test for GitHub issue #886; ensure the init_time is properly
+    # propagated from the initial conditions to the prediction outputs.
+    expected_init_time = cftime.DatetimeProlepticGregorian(2000, 1, 1)
+    result_init_time = prediction_ds["init_time"].squeeze("sample").item()
+    assert result_init_time == expected_init_time
+
     assert len(prediction_ds["time"]) == config.n_forward_steps
     for i in range(config.n_forward_steps - 1):
         np.testing.assert_allclose(
@@ -500,6 +520,9 @@ def test_inference_writer_boundaries(
             save_monthly_files=False,
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
+        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
@@ -656,6 +679,9 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -801,6 +827,9 @@ def test_derived_metrics_run_without_errors(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
@@ -921,6 +950,9 @@ def test_inference_override(tmp_path: pathlib.Path):
             save_monthly_files=False,
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
+        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
@@ -1182,6 +1214,9 @@ def test_evaluator_with_derived_forcings(
             log_to_file=False,
             log_to_wandb=False,
         ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_monthly_files=False,
@@ -1204,3 +1239,205 @@ def test_evaluator_with_derived_forcings(
 
     # Forcings, including those that are derived, do not end up in output.
     assert insolation_name not in ds
+
+
+def test_evaluator_with_non_local_experiment_dir(
+    tmp_path: pathlib.Path, very_fast_only: bool
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    # Use an in-memory filesystem for the experiment directory to test using
+    # an experiment_dir on a non-local filesystem.
+    experiment_dir = "memory://experiment_dir"
+
+    forward_steps_in_memory = 2
+    in_names = ["var", "forcing_var"]
+    out_names = ["var"]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = tmp_path / "stepper"
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+    )
+    files = [FileWriterConfig("autoregressive", format=ZarrWriterConfig())]
+    config = InferenceEvaluatorConfig(
+        experiment_dir=experiment_dir,
+        n_forward_steps=2,
+        forward_steps_in_memory=forward_steps_in_memory,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=True,
+            log_to_wandb=False,
+        ),
+        loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_step_means=[],
+        ),
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=files,
+        ),
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    with pytest.warns(UserWarning, match="local file system"):
+        main(yaml_config=str(config_filename))
+
+    expected_files = [
+        "config.yaml",
+        "initial_condition.nc",
+        "restart.nc",
+        "mean_diagnostics.nc",
+        "mean_norm_diagnostics.nc",
+        "zonal_mean_diagnostics.nc",
+        "time_mean_diagnostics.nc",
+        "time_mean_norm_diagnostics.nc",
+    ]
+    fs, _ = fsspec.url_to_fs(experiment_dir)
+    for file in expected_files:
+        assert fs.exists(os.path.join(experiment_dir, file))
+
+    expected_directories = [
+        "autoregressive_predictions.zarr",
+        "autoregressive_target.zarr",
+    ]
+    for directory in expected_directories:
+        assert fs.isdir(os.path.join(experiment_dir, directory))
+
+    fs.rm(experiment_dir, recursive=True)
+
+
+@pytest.mark.parametrize(
+    "validation_config_kwargs",
+    [
+        pytest.param(dict(), id="default"),
+        pytest.param(
+            dict(stepper_training=TrainStepperConfig(train_n_forward_steps=1)),
+            id="stepper_training_int",
+        ),
+        pytest.param(
+            dict(
+                stepper_training=TrainStepperConfig(
+                    train_n_forward_steps=TimeLengthProbabilities(
+                        outcomes=[TimeLengthProbability(steps=1, probability=1.0)]
+                    )
+                )
+            ),
+            id="stepper_training_probabilities",
+        ),
+    ],
+)
+def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwargs):
+    """Test that validation runs before inference and produces val/ metrics."""
+    in_names = ["var"]
+    out_names = ["var"]
+    stepper_path = tmp_path / "stepper"
+    n_forward_steps = 2
+
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    # std=10.0 so the PlusOne model has nonzero errors (avoids edge cases
+    # with zero RMSE in the aggregator)
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=10.0,
+        data_shape=dim_sizes.shape_nd,
+        timestep=TIMESTEP,
+    )
+
+    all_names = list(set(in_names).union(out_names))
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        time_varying_values=[float(i) for i in range(dim_sizes.n_time)],
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+        save_vertical_coordinate=False,
+    )
+    validation_config = ValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(str(data.data_path)),
+            batch_size=1,
+        ),
+        **validation_config_kwargs,
+    )
+
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=True,
+        ),
+        loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_video=False,
+            log_step_means=[],
+        ),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        forward_steps_in_memory=1,
+        allow_incompatible_dataset=True,
+        validation=validation_config,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+        wandb_logs = wandb.get_logs()
+
+    all_logged = {}
+    for log in wandb_logs:
+        all_logged.update(log)
+
+    for var in out_names:
+        assert (
+            f"val/mean/weighted_rmse/{var}" in all_logged
+        ), f"Expected val/mean/weighted_rmse/{var} in logged metrics"
+
+    assert "val/mean/loss" in all_logged
+
+    for var in out_names:
+        assert (
+            f"inference/mean/weighted_rmse/{var}" in all_logged
+        ), f"Inference metrics should still be present"
+
+    assert os.path.isdir(tmp_path / "validation")
