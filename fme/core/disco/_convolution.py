@@ -304,9 +304,14 @@ class DiscreteContinuousConvS2(DiscreteContinuousConv):
         col_idx = idx[2, ...].contiguous()
         vals = vals.contiguous()
 
-        self.register_buffer("psi_ker_idx", ker_idx, persistent=False)
-        self.register_buffer("psi_row_idx", row_idx, persistent=False)
-        self.register_buffer("psi_col_idx", col_idx, persistent=False)
+        # Store index tensors as plain attributes instead of buffers so that
+        # DDP's _broadcast_coalesced (which cannot handle integer dtypes) does
+        # not attempt to synchronise them.  They are deterministic across ranks
+        # so synchronisation is unnecessary.  Device tracking is handled by the
+        # _apply override below.
+        self.psi_ker_idx = ker_idx
+        self.psi_row_idx = row_idx
+        self.psi_col_idx = col_idx
         self.register_buffer("psi_vals", vals, persistent=False)
 
         # Precompute banded FFT of psi for FFT-based contraction
@@ -323,7 +328,18 @@ class DiscreteContinuousConvS2(DiscreteContinuousConv):
             psi_sparse, self.nlat_in, self.nlon_in
         )
         self.register_buffer("psi_fft_conj", psi_fft_conj, persistent=False)
-        self.register_buffer("psi_gather_idx", gather_idx, persistent=False)
+        self.psi_gather_idx = gather_idx
+
+    def _apply(self, fn, recurse=True):
+        # Required because integer index tensors are stored as plain attributes
+        # (not buffers) to avoid DDP's _broadcast_coalesced failing on non-float
+        # dtypes.  This ensures they follow .to() / .cuda() device transfers.
+        super()._apply(fn, recurse=recurse)
+        self.psi_ker_idx = fn(self.psi_ker_idx)
+        self.psi_row_idx = fn(self.psi_row_idx)
+        self.psi_col_idx = fn(self.psi_col_idx)
+        self.psi_gather_idx = fn(self.psi_gather_idx)
+        return self
 
     def extra_repr(self):
         return (
