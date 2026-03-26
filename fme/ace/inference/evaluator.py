@@ -399,6 +399,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             validation_data=valid_data,
             aggregator=aggregator,
             label="val",
+            log_progress=True,
         )
         timer.stop_outer("validation")
         timer.start_outer("inference")

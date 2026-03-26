@@ -119,6 +119,7 @@ def _compute_cutoff_radius(nlat, kernel_shape, basis_type):
     theta_cutoff_factor = {
         "piecewise linear": 0.5,
         "morlet": 0.5,
+        "isotropic morlet": 0.5,
         "zernike": math.sqrt(2.0),
     }
 

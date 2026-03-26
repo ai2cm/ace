@@ -11,7 +11,7 @@ from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import TensorMapping
 
 
-class TestingDataset(DatasetABC):
+class MockDataset(DatasetABC):
     START_DATE = "2000-01-01"
     START_DATE_CF = cftime.DatetimeGregorian(2000, 1, 1)
     CALENDAR = "gregorian"

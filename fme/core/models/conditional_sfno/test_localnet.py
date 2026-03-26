@@ -9,6 +9,7 @@ from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
 from .localnet import LocalNetConfig, get_lat_lon_localnet
+from .sfnonet import DiscreteContinuousConvS2, _compute_cutoff_radius
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -224,6 +225,112 @@ def test_no_big_skip():
     )
     output = model(x, context)
     assert output.shape == (n_samples, output_channels, *img_shape)
+
+
+@pytest.mark.parametrize(
+    "kernel_shape, basis_type",
+    [
+        ((1, 1), "morlet"),
+        ((5, 1), "morlet"),
+        ((3, 5), "morlet"),
+        ((3, 3), "piecewise linear"),
+        ((3, 1), "piecewise linear"),
+        ((3, 3), "isotropic morlet"),
+        ((5, 3), "isotropic morlet"),
+    ],
+)
+def test_can_call_localnet_with_kernel_shape(kernel_shape, basis_type):
+    input_channels = 2
+    output_channels = 3
+    img_shape = (9, 18)
+    n_samples = 4
+    device = get_device()
+    params = LocalNetConfig(
+        embed_dim=16,
+        kernel_shape=kernel_shape,
+        basis_type=basis_type,
+        block_types=["disco", "disco"],
+    )
+    model = get_lat_lon_localnet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    x = torch.randn(n_samples, input_channels, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.randn(n_samples, 0, device=device),
+        labels=torch.randn(n_samples, 0, device=device),
+        noise=torch.randn(n_samples, 0, *img_shape, device=device),
+        embedding_pos=torch.randn(n_samples, 0, *img_shape, device=device),
+    )
+    output = model(x, context)
+    assert output.shape == (n_samples, output_channels, *img_shape)
+
+
+def test_isotropic_disco_conv_commutes_with_latitude_reflection():
+    """An isotropic DISCO conv must commute with latitude reflection.
+
+    Latitude reflection (θ → π−θ) is an isometry of the sphere that maps
+    equiangular grid points exactly onto other grid points.  For an
+    isotropic filter the convolution kernel depends only on geodesic
+    distance, which is preserved by the reflection, so
+    ``flip(conv(x)) == conv(flip(x))``.  An anisotropic filter also
+    depends on the local azimuthal angle, which the reflection reverses,
+    so the equality generally fails.
+    """
+    torch.manual_seed(0)
+    img_shape = (16, 32)
+    embed_dim = 4
+    kernel_shape = (3, 3)
+    data_grid = "equiangular"
+    lat_dim = 2  # dimension index for latitude in (batch, channel, lat, lon)
+
+    def make_disco_conv(basis_type):
+        theta_cutoff = 2 * _compute_cutoff_radius(
+            nlat=img_shape[0],
+            kernel_shape=kernel_shape,
+            basis_type=basis_type,
+        )
+        return DiscreteContinuousConvS2(
+            embed_dim,
+            embed_dim,
+            in_shape=img_shape,
+            out_shape=img_shape,
+            kernel_shape=kernel_shape,
+            basis_type=basis_type,
+            basis_norm_mode="mean",
+            groups=1,
+            grid_in=data_grid,
+            grid_out=data_grid,
+            bias=False,
+            theta_cutoff=theta_cutoff,
+        )
+
+    x = torch.randn(1, embed_dim, *img_shape)
+    x_flipped = torch.flip(x, dims=[lat_dim])
+
+    # Isotropic basis: convolution must commute with the reflection.
+    iso_conv = make_disco_conv("isotropic morlet")
+    with torch.no_grad():
+        out, _ = iso_conv(x)
+        out_from_flipped, _ = iso_conv(x_flipped)
+    torch.testing.assert_close(
+        torch.flip(out, dims=[lat_dim]),
+        out_from_flipped,
+    )
+
+    # Anisotropic basis: convolution should NOT commute (random weights
+    # activate the azimuthal modes that break the symmetry).
+    aniso_conv = make_disco_conv("morlet")
+    with torch.no_grad():
+        out, _ = aniso_conv(x)
+        out_from_flipped, _ = aniso_conv(x_flipped)
+    assert not torch.allclose(
+        torch.flip(out, dims=[lat_dim]),
+        out_from_flipped,
+        atol=1e-5,
+    )
 
 
 def test_unknown_filter_type_raises():
