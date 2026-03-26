@@ -103,12 +103,25 @@ class Config:
     time_coarsen: TimeCoarsenConfig | None = None
 
 
+def _out_dir_exists(out_dir: str) -> bool:
+    """Check if the stats output directory already has results."""
+    if out_dir.startswith("gs:"):
+        fs = fsspec.filesystem("gs")
+        return fs.exists(out_dir + "/centering.nc")
+    else:
+        return os.path.exists(os.path.join(out_dir, "centering.nc"))
+
+
 def get_stats(
     config: StatsConfig,
     input_zarr: str,
     out_dir: str,
     debug: bool,
 ):
+    if not debug and _out_dir_exists(out_dir):
+        logging.info(f"Stats already exist at {out_dir}. Skipping.")
+        return
+
     # Import dask-related things here to enable testing in environments without dask.
     try:
         import dask

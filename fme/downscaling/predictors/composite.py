@@ -83,6 +83,10 @@ class PatchPredictor:
     def static_inputs(self):
         return self.model.static_inputs
 
+    @property
+    def full_fine_coords(self):
+        return self.model.full_fine_coords
+
     def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
         return self.model.get_fine_coords_for_batch(batch)
 
