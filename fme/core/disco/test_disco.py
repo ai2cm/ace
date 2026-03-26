@@ -56,7 +56,6 @@ def test_matches_torch_harmonics_reference():
         in_channels,
         out_channels,
         **conv_kwargs,  # type: ignore[arg-type]
-        use_fft_contraction=False,
     )
 
     # Copy weights from fft_conv to ref_conv so they use the same parameters
