@@ -94,10 +94,12 @@ class ShallowWaterStepper(nn.Module):
             self.conv.W_vv.zero_()
             self.conv.W_sv.zero_()
             self.conv.W_vs.zero_()
-            # Divergence: vs path component 0
-            self.conv.W_vs[0, 0, :, 0] = -mean_depth
-            # Gradient: sv path component 0
-            self.conv.W_sv[0, 0, :, 0] = -g
+            # Divergence: vs path component 1
+            # (component 0 is curl-like due to φ=0→south convention)
+            self.conv.W_vs[0, 0, :, 1] = mean_depth
+            # Gradient: sv path component 1
+            # (component 0 is perpendicular gradient in physical coords)
+            self.conv.W_sv[0, 0, :, 1] = g
 
     def compute_tendencies(
         self, h: torch.Tensor, uv: torch.Tensor

@@ -53,15 +53,23 @@ def run(
     n_steps=2000,
     dt=0.01,
     amplitude=0.01,
+    omega=0.5,
+    lat0=30.0,
+    lon0=90.0,
     frames_per_step=10,
-    output="shallow_water.mp4",
+    output="shallow_water.gif",
 ):
-    shape = (nlat, nlon)
-    stepper = ShallowWaterStepper(shape=shape)
+    from fme.core.device import get_device
 
-    h = amplitude * gaussian_bump(nlat, nlon, sigma_deg=12.0)
-    h = h.unsqueeze(0).unsqueeze(0)  # (1, 1, nlat, nlon)
-    uv = torch.zeros(1, 1, nlat, nlon, 2)
+    device = get_device()
+    shape = (nlat, nlon)
+    stepper = ShallowWaterStepper(shape=shape, omega=omega).to(device)
+
+    h = amplitude * gaussian_bump(
+        nlat, nlon, lat0_deg=lat0, lon0_deg=lon0, sigma_deg=12.0
+    )
+    h = h.unsqueeze(0).unsqueeze(0).to(device)
+    uv = torch.zeros(1, 1, nlat, nlon, 2, device=device)
 
     # Collect snapshots
     n_frames = n_steps // frames_per_step
@@ -71,9 +79,9 @@ def run(
 
     for i in range(n_steps):
         if i % frames_per_step == 0:
-            h_frames.append(h[0, 0].detach().numpy().copy())
-            u_frames.append(uv[0, 0, :, :, 0].detach().numpy().copy())
-            v_frames.append(uv[0, 0, :, :, 1].detach().numpy().copy())
+            h_frames.append(h[0, 0].detach().cpu().numpy().copy())
+            u_frames.append(uv[0, 0, :, :, 0].detach().cpu().numpy().copy())
+            v_frames.append(uv[0, 0, :, :, 1].detach().cpu().numpy().copy())
         h, uv = stepper.step(h, uv, dt)
 
     lon_deg, lat_deg = make_grid(nlat, nlon)
@@ -156,11 +164,21 @@ if __name__ == "__main__":
         help="Grid shape (nlat nlon)",
     )
     parser.add_argument("--dt", type=float, default=0.01, help="Time step")
+    parser.add_argument("--omega", type=float, default=0.5, help="Rotation rate")
+    parser.add_argument(
+        "--lat0", type=float, default=30.0, help="Bump center latitude (degrees)"
+    )
+    parser.add_argument(
+        "--lon0", type=float, default=90.0, help="Bump center longitude (degrees)"
+    )
     args = parser.parse_args()
     run(
         nlat=args.shape[0],
         nlon=args.shape[1],
         n_steps=args.steps,
         dt=args.dt,
+        omega=args.omega,
+        lat0=args.lat0,
+        lon0=args.lon0,
         output=args.output,
     )
