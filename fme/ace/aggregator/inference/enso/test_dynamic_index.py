@@ -8,12 +8,11 @@ import xarray as xr
 from matplotlib import pyplot as plt
 
 from fme import get_device
-from fme.core.coordinates import LatLonCoordinates
+from fme.core.coordinates import LatLonCoordinates, LatLonRegion
 from fme.core.testing import mock_distributed
 from fme.core.typing_ import TensorMapping
 
 from .dynamic_index import (
-    LatLonRegion,
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
     _calculate_sample_average_power_spectrum,

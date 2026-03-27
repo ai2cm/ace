@@ -8,7 +8,7 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.core.coordinates import LatLonCoordinates
+from fme.core.coordinates import LatLonCoordinates, LatLonRegion
 from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import (
@@ -24,7 +24,6 @@ from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
 from .enso import (
     EnsoCoefficientEvaluatorAggregator,
-    LatLonRegion,
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
 )

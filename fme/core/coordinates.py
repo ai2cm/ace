@@ -3,7 +3,7 @@ import dataclasses
 import math
 from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import Literal, TypeVar
+from typing import ClassVar, Literal, TypeVar
 
 import dacite
 import numpy as np
@@ -591,6 +591,33 @@ class HorizontalCoordinates(abc.ABC):
     @abc.abstractmethod
     def get_state(self) -> TensorMapping:
         pass
+
+
+LAT_DIM, LON_DIM = -2, -1
+
+
+@dataclasses.dataclass
+class LatLonRegion:
+    lat: torch.Tensor
+    lon: torch.Tensor
+    lat_bounds: tuple[float, float]
+    lon_bounds: tuple[float, float]
+    horizontal_dims: ClassVar[tuple[int, int]] = (LAT_DIM, LON_DIM)
+
+    def __post_init__(self):
+        lat_mask = (
+            (self.lat >= self.lat_bounds[0]) & (self.lat <= self.lat_bounds[1])
+        ).unsqueeze(self.horizontal_dims[1])
+        lon_mask = (
+            (self.lon >= self.lon_bounds[0]) & (self.lon <= self.lon_bounds[1])
+        ).unsqueeze(self.horizontal_dims[0])
+        self._regional_weights = torch.where(
+            torch.logical_and(lat_mask, lon_mask), 1.0, 0.0
+        )
+
+    @property
+    def regional_weights(self) -> torch.Tensor:
+        return self._regional_weights
 
 
 @dataclasses.dataclass
