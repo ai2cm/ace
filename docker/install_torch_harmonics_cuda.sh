@@ -20,7 +20,7 @@ conda install -y -c nvidia cuda-nvcc=12.8 cuda-toolkit=12.8
 echo ""
 echo "[2/3] Building torch-harmonics with CUDA extensions..."
 FORCE_CUDA_EXTENSION=1 \
-    TORCH_CUDA_ARCH_LIST="7.5 9.0 10.0+PTX" \  # T4 (7.5), H100 (9.0), B200 (10.0)
+    TORCH_CUDA_ARCH_LIST="7.5 8.0 8.9 9.0 10.0+PTX" \  # T4 (7.5), A100 (8.0), L40 (8.9), H100 (9.0), B200 (10.0)
     CPLUS_INCLUDE_PATH=/opt/conda/targets/x86_64-linux/include:$CPLUS_INCLUDE_PATH \
     pip install --no-build-isolation --no-cache-dir --no-deps --force-reinstall torch-harmonics==0.8.0
 
