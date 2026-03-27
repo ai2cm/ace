@@ -3,7 +3,7 @@
 set -e
 
 #JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-xshield-amip-100km-to-3km-winds-multivar-prate0-till600-exp0.75-tropics"
+JOB_NAME="eval-xshield-amip-100km-to-3km-winds-multivar-prate0-till600-exp0.75-evalmode-tropics"
 
 CONFIG_FILENAME="eval-tropic-pac.yaml"
 
@@ -34,6 +34,7 @@ gantry run \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
     --priority urgent \
+    --not-preemptible \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
