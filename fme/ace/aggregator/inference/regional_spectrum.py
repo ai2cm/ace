@@ -6,13 +6,11 @@ import matplotlib.pyplot as plt
 import torch
 import xarray as xr
 
+from fme.core.coordinates import LatLonRegion
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorMapping
 
 from .spectrum import _get_spectrum_metrics, _plot_spectrum_pair
-
-LAT_BOUNDS = (-40, 35)
-LON_BOUNDS = (180, 243)
 
 
 def _detrend_linear(data):
@@ -59,8 +57,7 @@ def compute_isotropic_spectrum(
     cutoff_before_bins: bool = True,
     weights=None,
 ):
-    """
-    Compute the isotropic 1D power spectrum from 2D, 3D, or 4D data.
+    """Compute the isotropic 1D power spectrum from 2D, 3D, or 4D data.
 
     Matches `xrft.isotropic_power_spectrum(scaling="density")`.
     The output spectrum is computed for each batch and channel element.
@@ -70,7 +67,8 @@ def compute_isotropic_spectrum(
         dx: Grid spacing in the x-dimension.
         dy: Grid spacing in the y-dimension.
         num_bins: Number of bins. If None, defaults to min(H, W) // n_factor.
-        n_factor: Factor to determine number of bins when num_bins is None.
+        n_factor: Factor to determine number of bins when num_bins is None:
+            num_bins = min(H, W) // n_factor - 1
         remove_mean: If True, removes spatial mean. Overridden by `detrend`.
         detrend: Detrending method, either 'linear' or 'constant'.
         window: Window function to apply, currently only 'hann' is supported.
@@ -86,6 +84,7 @@ def compute_isotropic_spectrum(
         - k_bins_centers: 1D tensor of bin center wavenumbers with shape (num_bins,).
         - iso_spectrum: The (k * P(k)) spectrum with shape matching input
           dimensionality: (num_bins,), (B, num_bins), or (B, C, num_bins).
+
     """
     # --- 1. Input Validation and Setup ---
     device = data.device
@@ -189,9 +188,9 @@ class RegionalSpectrumAggregator:
 
     def __init__(
         self,
-        regional_weights: torch.Tensor,
+        region: LatLonRegion,
     ):
-        self._regional_weights = regional_weights
+        self._regional_weights = region.regional_weights
         self._power_spectrum: dict[str, torch.Tensor] = {}
         self._wavenumbers: torch.Tensor | None = None
         self._counts: dict[str, int] = defaultdict(int)
@@ -250,11 +249,11 @@ class PairedRegionalSpectrumAggregator:
 
     def __init__(
         self,
-        regional_weights: torch.Tensor,
+        region: LatLonRegion,
         report_plot: bool,
     ):
-        self._gen_aggregator = RegionalSpectrumAggregator(regional_weights)
-        self._target_aggregator = RegionalSpectrumAggregator(regional_weights)
+        self._gen_aggregator = RegionalSpectrumAggregator(region)
+        self._target_aggregator = RegionalSpectrumAggregator(region)
         self._report_plot = report_plot
 
     @torch.no_grad()
