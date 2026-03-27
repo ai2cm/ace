@@ -10,7 +10,11 @@ from fme.core.coordinates import LatLonRegion
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorMapping
 
-from .spectrum import _get_spectrum_metrics, _plot_spectrum_pair
+from .spectrum import (
+    _get_spectrum_metrics,
+    _plot_spectrum_pair,
+    update_running_mean_spectrum,
+)
 
 
 def _detrend_linear(data):
@@ -55,7 +59,6 @@ def compute_isotropic_spectrum(
     window="Hann",
     truncate=True,
     cutoff_before_bins: bool = True,
-    weights=None,
 ):
     """Compute the isotropic 1D power spectrum from 2D, 3D, or 4D data.
 
@@ -75,9 +78,6 @@ def compute_isotropic_spectrum(
         truncate: If True, truncates spectrum at the smallest Nyquist frequency.
         cutoff_before_bins: If True, truncates the spectrum after computing
             the bin locations. Matches xrft implementation.
-        weights: Regional weights for masking with shape (H, W). Will be
-            broadcast to match data shape. Regions with weight=0 will not
-            contribute to spectrum.
 
     Returns:
         A tuple of (k_bins_centers, iso_spectrum) where:
@@ -106,19 +106,6 @@ def compute_isotropic_spectrum(
 
     if num_bins is None:
         num_bins = min(H, W) // n_factor - 1
-
-    # Apply regional weights if provided
-    if weights is not None:
-        # Ensure weights are on the same device and have the right shape
-        if weights.shape != (H, W):
-            raise ValueError(
-                f"Weights shape {weights.shape} "
-                f"does not match data spatial shape ({H}, {W})"
-            )
-        weights = weights.to(device=device, dtype=dtype)
-        # Broadcast weights to match data shape (B, C, H, W)
-        weights_broadcast = weights.unsqueeze(0).unsqueeze(0)
-        data = data * weights_broadcast
 
     if detrend == "linear":
         data = _detrend_linear(data)
@@ -190,7 +177,6 @@ class RegionalSpectrumAggregator:
         self,
         region: LatLonRegion,
     ):
-        self._regional_weights = region.regional_weights
         self._power_spectrum: dict[str, torch.Tensor] = {}
         self._wavenumbers: torch.Tensor | None = None
         self._counts: dict[str, int] = defaultdict(int)
@@ -202,34 +188,20 @@ class RegionalSpectrumAggregator:
             batch_size = data[name].shape[0]
             time_size = data[name].shape[1]
 
-            # Reshape to (batch*time, lat, lon) for spectrum computation
-            data_reshaped = data[name].reshape(
-                batch_size * time_size, data[name].shape[2], data[name].shape[3]
-            )
+            wavenumbers, power_spectrum = compute_isotropic_spectrum(data)
 
-            # Compute spectrum with regional weights
-            wavenumbers, power_spectrum = compute_isotropic_spectrum(
-                data_reshaped, weights=self._regional_weights
-            )
-
-            # Store wavenumbers (same for all variables)
             if self._wavenumbers is None:
+                # wavenumbers same for all variables / batches
                 self._wavenumbers = wavenumbers
 
-            # Average over batch*time dimension
-            mean_power_spectrum = torch.mean(power_spectrum, dim=0)
-
-            new_count = batch_size * time_size
-            if name not in self._power_spectrum:
-                self._power_spectrum[name] = mean_power_spectrum
-            else:
-                # Weighted average with previous values
-                weighted_average = (
-                    new_count * mean_power_spectrum
-                    + self._counts[name] * self._power_spectrum[name]
-                ) / (new_count + self._counts[name])
-                self._power_spectrum[name] = weighted_average
-            self._counts[name] += new_count
+            update_running_mean_spectrum(
+                self._power_spectrum,
+                self._counts,
+                name,
+                power_spectrum,
+                batch_size,
+                time_size,
+            )
 
     def get_mean(self) -> dict[str, torch.Tensor]:
         dist = Distributed.get_instance()
