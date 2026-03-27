@@ -70,8 +70,8 @@ def _precompute_vector_convolution_tensor_s2(
 ):
     r"""Precompute filter tensors for vector DISCO convolution.
 
-    Like _precompute_convolution_tensor_s2, but additionally computes
-    cos(γ) and sin(γ) (frame rotation angle) at each support point.
+    Computes filter basis values and three angular pairs (φ, β, γ) at
+    each support point. Returns normalized values modulated by each pair.
 
     Returns:
     -------
@@ -79,10 +79,12 @@ def _precompute_vector_convolution_tensor_s2(
         Indices [kernel, out_lat, in_lat*nlon_in + in_lon].
     out_vals_scalar : (nnz,) float tensor
         Normalized ψ_k(r) values with quadrature weights merged.
-    out_vals_cos : (nnz,) float tensor
-        ψ_k(r)·cos(γ) values (normalized, quadrature merged).
-    out_vals_sin : (nnz,) float tensor
-        ψ_k(r)·sin(γ) values (normalized, quadrature merged).
+    out_vals_cos_gamma, out_vals_sin_gamma : (nnz,) float tensors
+        ψ_k(r)·cos(γ), ψ_k(r)·sin(γ) — for frame rotation (vv path).
+    out_vals_cos_phi, out_vals_sin_phi : (nnz,) float tensors
+        ψ_k(r)·cos(φ), ψ_k(r)·sin(φ) — bearing at output (sv path).
+    out_vals_cos_beta, out_vals_sin_beta : (nnz,) float tensors
+        ψ_k(r)·cos(β), ψ_k(r)·sin(β) — bearing at input (vs path).
     """
     assert len(in_shape) == 2
     assert len(out_shape) == 2
@@ -100,8 +102,12 @@ def _precompute_vector_convolution_tensor_s2(
 
     collected_idx = []
     collected_vals = []
-    collected_cos = []
-    collected_sin = []
+    collected_cos_gamma = []
+    collected_sin_gamma = []
+    collected_cos_phi = []
+    collected_sin_phi = []
+    collected_cos_beta = []
+    collected_sin_beta = []
 
     # Input coordinates: beta = longitude (λ), gamma = colatitude
     beta = lons_in
@@ -159,9 +165,6 @@ def _precompute_vector_convolution_tensor_s2(
             theta, phi, r_cutoff=theta_cutoff_eff
         )
 
-        support_cos = cos_gamma_frame[iidx[:, 1], iidx[:, 2]]
-        support_sin = sin_gamma_frame[iidx[:, 1], iidx[:, 2]]
-
         idx = torch.stack(
             [
                 iidx[:, 0],
@@ -171,15 +174,38 @@ def _precompute_vector_convolution_tensor_s2(
             dim=0,
         )
 
+        si, sj = iidx[:, 1], iidx[:, 2]
+
+        # At θ=0 (input coincides with output), the bearing direction
+        # is undefined. Zero out bearing-based angles (φ, β) there;
+        # the frame rotation γ remains valid (identity at θ=0).
+        near_pole = theta[si, sj] < 1e-10
+        s_cp = cos_phi[si, sj].clone()
+        s_sp = sin_phi[si, sj].clone()
+        s_cb = cos_beta_angle[si, sj].clone()
+        s_sb = sin_beta_angle[si, sj].clone()
+        s_cp[near_pole] = 0.0
+        s_sp[near_pole] = 0.0
+        s_cb[near_pole] = 0.0
+        s_sb[near_pole] = 0.0
+
         collected_idx.append(idx)
         collected_vals.append(vals)
-        collected_cos.append(support_cos)
-        collected_sin.append(support_sin)
+        collected_cos_gamma.append(cos_gamma_frame[si, sj])
+        collected_sin_gamma.append(sin_gamma_frame[si, sj])
+        collected_cos_phi.append(s_cp)
+        collected_sin_phi.append(s_sp)
+        collected_cos_beta.append(s_cb)
+        collected_sin_beta.append(s_sb)
 
     out_idx = torch.cat(collected_idx, dim=-1)
     out_vals = torch.cat(collected_vals, dim=-1)
-    out_cos = torch.cat(collected_cos, dim=-1)
-    out_sin = torch.cat(collected_sin, dim=-1)
+    cos_g = torch.cat(collected_cos_gamma, dim=-1)
+    sin_g = torch.cat(collected_sin_gamma, dim=-1)
+    cos_p = torch.cat(collected_cos_phi, dim=-1)
+    sin_p = torch.cat(collected_sin_phi, dim=-1)
+    cos_b = torch.cat(collected_cos_beta, dim=-1)
+    sin_b = torch.cat(collected_sin_beta, dim=-1)
 
     # Normalize scalar values with quadrature weights merged
     out_vals = _normalize_convolution_tensor_s2(
@@ -194,16 +220,23 @@ def _precompute_vector_convolution_tensor_s2(
         merge_quadrature=True,
     )
 
-    # cos/sin filter values share the scalar normalization
-    out_vals_cos = out_vals * out_cos
-    out_vals_sin = out_vals * out_sin
+    # Angular-modulated values share the scalar normalization
+    def _finalize(t):
+        return (out_vals * t).to(dtype=torch.float32).contiguous()
 
     out_idx = out_idx.contiguous()
     out_vals = out_vals.to(dtype=torch.float32).contiguous()
-    out_vals_cos = out_vals_cos.to(dtype=torch.float32).contiguous()
-    out_vals_sin = out_vals_sin.to(dtype=torch.float32).contiguous()
 
-    return out_idx, out_vals, out_vals_cos, out_vals_sin
+    return (
+        out_idx,
+        out_vals,
+        _finalize(cos_g),
+        _finalize(sin_g),
+        _finalize(cos_p),
+        _finalize(sin_p),
+        _finalize(cos_b),
+        _finalize(sin_b),
+    )
 
 
 def _banded_fft_from_values(
@@ -232,13 +265,26 @@ def _build_fft_for_basis(
     theta_cutoff,
     basis_norm_mode,
 ):
-    """Build banded FFT tensors (scalar, cos, sin) for one FilterBasis.
+    """Build all banded FFT tensors for one FilterBasis.
 
-    Returns (psi_fft, cos_fft, sin_fft, gather_idx) where all FFT
-    tensors have shape (K, nlat_out, max_bw, nfreq) and gather_idx
-    has shape (nlat_out, max_bw).
+    Returns:
+    -------
+    psi_fft : isotropic filter FFT
+    cos_gamma_fft, sin_gamma_fft : frame rotation (γ) modulated
+    cos_phi_fft, sin_phi_fft : bearing at output (φ) modulated
+    cos_beta_fft, sin_beta_fft : bearing at input (β) modulated
+    gather_idx : banding gather index
     """
-    idx, vals, vals_cos, vals_sin = _precompute_vector_convolution_tensor_s2(
+    (
+        idx,
+        vals,
+        vals_cg,
+        vals_sg,
+        vals_cp,
+        vals_sp,
+        vals_cb,
+        vals_sb,
+    ) = _precompute_vector_convolution_tensor_s2(
         in_shape,
         out_shape,
         filter_basis,
@@ -258,14 +304,21 @@ def _build_fft_for_basis(
     lat_min = gather_idx[:, 0]
     max_bw = gather_idx.shape[1]
 
-    cos_fft = _banded_fft_from_values(
-        idx, vals_cos, K, nlat_in, nlon_in, nlat_out, lat_min, max_bw
-    )
-    sin_fft = _banded_fft_from_values(
-        idx, vals_sin, K, nlat_in, nlon_in, nlat_out, lat_min, max_bw
-    )
+    def _fft(v):
+        return _banded_fft_from_values(
+            idx, v, K, nlat_in, nlon_in, nlat_out, lat_min, max_bw
+        )
 
-    return psi_fft, cos_fft, sin_fft, gather_idx
+    return (
+        psi_fft,
+        _fft(vals_cg),
+        _fft(vals_sg),
+        _fft(vals_cp),
+        _fft(vals_sp),
+        _fft(vals_cb),
+        _fft(vals_sb),
+        gather_idx,
+    )
 
 
 def build_vector_psi_fft(
@@ -279,19 +332,14 @@ def build_vector_psi_fft(
 ):
     """Build banded FFT tensors for vector DISCO convolution.
 
-    Evaluates both the scalar and vector bases, producing separate
-    FFT tensors for each. When both bases are the same object, the
-    cached precomputation avoids redundant work.
-
     Returns:
     -------
-    psi_scalar_fft : (K_s, nlat_out, bw_s, nfreq) complex
-    psi_s_cos_fft : (K_s, nlat_out, bw_s, nfreq) complex
-    psi_s_sin_fft : (K_s, nlat_out, bw_s, nfreq) complex
-    scalar_gather_idx : (nlat_out, bw_s) long
-    psi_v_cos_fft : (K_v, nlat_out, bw_v, nfreq) complex
-    psi_v_sin_fft : (K_v, nlat_out, bw_v, nfreq) complex
-    vector_gather_idx : (nlat_out, bw_v) long
+    psi_scalar_fft : (K_s, ...) — isotropic, for ss
+    psi_s_cos_γ_fft, psi_s_sin_γ_fft : (K_s, ...) — frame rotation, for vv
+    scalar_gather_idx : (nlat_out, bw_s)
+    psi_v_cos_φ_fft, psi_v_sin_φ_fft : (K_v, ...) — bearing at output, for sv
+    psi_v_cos_β_fft, psi_v_sin_β_fft : (K_v, ...) — bearing at input, for vs
+    vector_gather_idx : (nlat_out, bw_v)
     """
     common = dict(
         in_shape=in_shape,
@@ -302,20 +350,36 @@ def build_vector_psi_fft(
         basis_norm_mode=basis_norm_mode,
     )
 
-    s_fft, s_cos_fft, s_sin_fft, s_gather = _build_fft_for_basis(
-        filter_basis=vector_filter_basis.scalar_basis, **common
-    )
-    _, v_cos_fft, v_sin_fft, v_gather = _build_fft_for_basis(
-        filter_basis=vector_filter_basis.vector_basis, **common
-    )
+    (
+        s_fft,
+        s_cg,
+        s_sg,
+        _s_cp,
+        _s_sp,
+        _s_cb,
+        _s_sb,
+        s_gather,
+    ) = _build_fft_for_basis(filter_basis=vector_filter_basis.scalar_basis, **common)
+    (
+        _v_fft,
+        _v_cg,
+        _v_sg,
+        v_cp,
+        v_sp,
+        v_cb,
+        v_sb,
+        v_gather,
+    ) = _build_fft_for_basis(filter_basis=vector_filter_basis.vector_basis, **common)
 
     return (
         s_fft,
-        s_cos_fft,
-        s_sin_fft,
+        s_cg,
+        s_sg,
         s_gather,
-        v_cos_fft,
-        v_sin_fft,
+        v_cp,
+        v_sp,
+        v_cb,
+        v_sb,
         v_gather,
     )
 
@@ -380,11 +444,13 @@ class VectorDiscoConvS2(nn.Module):
 
         (
             psi_s,
-            psi_s_cos,
-            psi_s_sin,
+            psi_s_cg,
+            psi_s_sg,
             s_gather,
-            psi_v_cos,
-            psi_v_sin,
+            psi_v_cp,
+            psi_v_sp,
+            psi_v_cb,
+            psi_v_sb,
             v_gather,
         ) = build_vector_psi_fft(
             in_shape,
@@ -395,11 +461,15 @@ class VectorDiscoConvS2(nn.Module):
             theta_cutoff=self.theta_cutoff,
             basis_norm_mode=basis_norm_mode,
         )
+        # Scalar basis: isotropic + frame rotation (γ)
         self.register_buffer("psi_scalar_fft", psi_s, persistent=False)
-        self.register_buffer("psi_s_cos_fft", psi_s_cos, persistent=False)
-        self.register_buffer("psi_s_sin_fft", psi_s_sin, persistent=False)
-        self.register_buffer("psi_v_cos_fft", psi_v_cos, persistent=False)
-        self.register_buffer("psi_v_sin_fft", psi_v_sin, persistent=False)
+        self.register_buffer("psi_s_cos_g_fft", psi_s_cg, persistent=False)
+        self.register_buffer("psi_s_sin_g_fft", psi_s_sg, persistent=False)
+        # Vector basis: bearing at output (φ) and bearing at input (β)
+        self.register_buffer("psi_v_cos_p_fft", psi_v_cp, persistent=False)
+        self.register_buffer("psi_v_sin_p_fft", psi_v_sp, persistent=False)
+        self.register_buffer("psi_v_cos_b_fft", psi_v_cb, persistent=False)
+        self.register_buffer("psi_v_sin_b_fft", psi_v_sb, persistent=False)
         # Integer index tensors as plain attrs for DDP compatibility
         self.scalar_gather_idx = s_gather
         self.vector_gather_idx = v_gather
@@ -469,39 +539,41 @@ class VectorDiscoConvS2(nn.Module):
         s_g = self.scalar_gather_idx
         v_g = self.vector_gather_idx
 
-        # --- Scalar input contractions ---
+        # --- Scalar input contractions (3 calls) ---
         if N_s_in > 0:
+            # Isotropic filter on scalars (for ss)
             f_s = _disco_s2_contraction_fft(
                 x_scalar, self.psi_scalar_fft, s_g, nlon_out
             )
-            f_vc = _disco_s2_contraction_fft(
-                x_scalar, self.psi_v_cos_fft, v_g, nlon_out
+            # Bearing (φ) filter on scalars (for sv)
+            f_cp = _disco_s2_contraction_fft(
+                x_scalar, self.psi_v_cos_p_fft, v_g, nlon_out
             )
-            f_vs = _disco_s2_contraction_fft(
-                x_scalar, self.psi_v_sin_fft, v_g, nlon_out
+            f_sp = _disco_s2_contraction_fft(
+                x_scalar, self.psi_v_sin_p_fft, v_g, nlon_out
             )
         else:
             f_s = x_scalar.new_zeros(B, 0, K_s, H, W)
-            f_vc = x_scalar.new_zeros(B, 0, K_v, H, W)
-            f_vs = f_vc
+            f_cp = x_scalar.new_zeros(B, 0, K_v, H, W)
+            f_sp = f_cp
 
-        # --- Vector input contractions ---
+        # --- Vector input contractions (4 calls) ---
         if N_v_in > 0:
             u = x_vector[..., 0]
             v = x_vector[..., 1]
             uv = torch.cat([u, v], dim=1)
 
-            # Scalar-basis cos/sin on vectors (for vv frame rotation)
-            sc_uv = _disco_s2_contraction_fft(uv, self.psi_s_cos_fft, s_g, nlon_out)
-            ss_uv = _disco_s2_contraction_fft(uv, self.psi_s_sin_fft, s_g, nlon_out)
-            conv_u = sc_uv[:, :N_v_in] - ss_uv[:, N_v_in:]
-            conv_v = ss_uv[:, :N_v_in] + sc_uv[:, N_v_in:]
+            # Frame rotation (γ) on vectors (for vv)
+            cg_uv = _disco_s2_contraction_fft(uv, self.psi_s_cos_g_fft, s_g, nlon_out)
+            sg_uv = _disco_s2_contraction_fft(uv, self.psi_s_sin_g_fft, s_g, nlon_out)
+            conv_u = cg_uv[:, :N_v_in] - sg_uv[:, N_v_in:]
+            conv_v = sg_uv[:, :N_v_in] + cg_uv[:, N_v_in:]
 
-            # Vector-basis cos/sin on vectors (for vs div/curl)
-            vc_uv = _disco_s2_contraction_fft(uv, self.psi_v_cos_fft, v_g, nlon_out)
-            vs_uv = _disco_s2_contraction_fft(uv, self.psi_v_sin_fft, v_g, nlon_out)
-            div = vc_uv[:, :N_v_in] + vs_uv[:, N_v_in:]
-            curl = vc_uv[:, N_v_in:] - vs_uv[:, :N_v_in]
+            # Bearing at input (β) on vectors (for vs)
+            cb_uv = _disco_s2_contraction_fft(uv, self.psi_v_cos_b_fft, v_g, nlon_out)
+            sb_uv = _disco_s2_contraction_fft(uv, self.psi_v_sin_b_fft, v_g, nlon_out)
+            div = cb_uv[:, :N_v_in] + sb_uv[:, N_v_in:]
+            curl = cb_uv[:, N_v_in:] - sb_uv[:, :N_v_in]
         else:
             conv_u = x_scalar.new_zeros(B, 0, K_s, H, W)
             conv_v = conv_u
@@ -516,9 +588,9 @@ class VectorDiscoConvS2(nn.Module):
             y_s = y_s + self.bias_scalar.reshape(1, -1, 1, 1)
 
         # --- Vector output ---
-        # scalar → vector (vector filter: gradient + perp gradient)
-        M_u_s = torch.stack([f_vc, -f_vs], dim=-1)
-        M_v_s = torch.stack([f_vs, f_vc], dim=-1)
+        # scalar → vector (bearing φ filter: gradient + perp gradient)
+        M_u_s = torch.stack([f_cp, -f_sp], dim=-1)
+        M_v_s = torch.stack([f_sp, f_cp], dim=-1)
         y_u = torch.einsum("ockd,bckxyd->boxy", self.W_sv, M_u_s)
         y_v = torch.einsum("ockd,bckxyd->boxy", self.W_sv, M_v_s)
 

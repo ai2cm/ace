@@ -5,7 +5,7 @@
 This document specifies an approach for handling directional (vector-valued) data in DISCO convolution on the sphere. The design distinguishes between two types of filters:
 
 - **Scalar filters** — isotropic radial basis functions `ψ_k(r)` that depend only on geodesic distance.
-- **Vector filters** — oriented filter pairs `(ψ_k(r)·cos(γ), ψ_k(r)·sin(γ))` formed by modulating a radial basis with the geometric frame-rotation angle `γ`. The two components are perpendicular by construction (they are the cosine and sine of the same angle), so rotating the first component by 90° gives the second.
+- **Vector filters** — oriented filter pairs formed by modulating a radial basis with the bearing angle `φ` (the direction from the output point to the input point, in the output's local frame). The two components `(ψ_k(r)·cos(φ), ψ_k(r)·sin(φ))` are perpendicular by construction, since they are the cosine and sine of the same angle.
 
 The type of the output is determined by the types of the input and filter:
 
@@ -16,11 +16,13 @@ The type of the output is determined by the types of the input and filter:
 | vector | scalar | vector | advection of momentum |
 | vector | vector | scalar | divergence, curl |
 
-Each interaction involving a vector (either as input, filter, or output) carries two weight components — one for the operation and one for its 90° rotation. These two components correspond to a single weight on the two-component vector filter. The weight is shared between the u and v pathways, so the network cannot break rotational symmetry. This structure is equivalent to complex-valued weights: the "real" part gives gradient/divergence/stretch, and the "imaginary" part gives perpendicular-gradient/curl/rotation.
+All operations are defined in the output point's local meridian frame. When the input is a vector, it is first rotated from its own meridian frame into the output's frame (via the frame rotation angle γ), then the filter is applied. This separation — frame rotation for vectors, bearing angle for directional filters — gives all four paths full equivariance under rotations.
+
+Each interaction involving a vector (either as input, filter, or output) carries two weight components — one for the operation and one for its 90° rotation. These two components correspond to a single weight on the two-component vector filter. The weight is shared between the u and v pathways, so the network cannot break rotational symmetry.
 
 The scalar and vector filter bases can use different numbers of radial basis functions (`K_s` and `K_v`), allowing independent radial resolution for isotropic and oriented operations. They are paired in a `VectorFilterBasis`.
 
-The frame-rotation angle between two points depends only on `(lat_out, lat_in, lon_in - lon_out)`, making it invariant to translations along longitude. This means all filter tensors can use the FFT-based cross-convolution optimization.
+All angular factors (`φ`, `β`, `γ`) depend only on `(lat_out, lat_in, lon_in - lon_out)`, so all filter tensors are compatible with the FFT-based cross-convolution optimization.
 
 ## Hidden Representation
 
@@ -41,85 +43,94 @@ This discontinuity is acceptable because:
 2. **The discontinuity is at a measure-zero set of points.** On a discrete grid, the poles are either absent (Gaussian grid) or have a single row of points. The network can learn to handle these points through the local structure of the filter.
 3. **Vector channels are correctly rotated within the filter support.** The frame rotation baked into the filter tensor ensures that each input vector is seen in the output point's frame, regardless of how different their meridian frames are.
 
-## Frame Rotation in the Convolution
+## Geometric Angles
 
-### The Problem
+Three angles characterize the relationship between an output point and each input point in its filter support. All three depend only on `(lat_out, lat_in, Δlon)` and are computed during the precomputation step.
 
-When a filter centered at an output point looks at a neighboring input point, the input's `(u, v)` components are measured in the input point's meridian frame. If the two points have different "north" directions (which they always do, unless they share a meridian), the raw `u` and `v` values cannot be directly combined — they would be mixing vectors expressed in different coordinate systems.
+### The bearing angle φ
 
-### The Solution
+The Euler rotation brings the output point to the north pole. In the Euler-rotated frame, each input point has an azimuthal position `φ = atan2(y', x')`. This is the **bearing angle**: the direction from the output point toward the input point, measured in the output's local frame.
 
-Before the filter integrates over input points, each input vector is rotated from the input point's meridian frame into the output point's meridian frame. This rotation is characterized by a single angle `γ(lat_out, lat_in, Δlon)` — the angle between the two points' north directions, as measured via parallel transport along the connecting geodesic.
+At the output point's location (θ → 0 in the Euler frame), φ = 0 corresponds to geographic south and φ = π/2 corresponds to geographic east. So the bearing from the output toward an input at azimuth φ has components `(sin(φ), −cos(φ))` in the output's (east, north) frame.
 
-The rotation acts as:
+The vector filter uses `cos(φ)` and `sin(φ)` as its two perpendicular components. Under a rotation of the sphere, the bearing rotates with the output's frame, so the vector filter output transforms correctly as a vector.
 
-```
-[u_rotated]   [cos γ  −sin γ] [u_in]
-[v_rotated] = [sin γ   cos γ] [v_in]
-```
+### The frame correction angle β
 
-where `(u_in, v_in)` are the input vector components in the input's meridian frame, and `(u_rotated, v_rotated)` are the same vector expressed in the output's meridian frame. This rotation is not applied at runtime — it is baked into the precomputed filter tensors.
-
-### Longitude Invariance
-
-The rotation angle `γ` depends on `(lat_out, lat_in, Δlon)` where `Δlon = lon_in − lon_out`. It does **not** depend on absolute longitude. This is because the relative geometry of any two points — their geodesic distance, bearing angles, and frame rotation — is invariant under rotations about the polar axis.
-
-This means `ψ_k(r) · cos(γ)` and `ψ_k(r) · sin(γ)` are both functions of the longitude difference, just like the scalar filter `ψ_k(r)`. The FFT-based cross-convolution optimization applies to all of them.
-
-## Computing the Frame Rotation Angle
-
-### Setup
-
-The DISCO precomputation uses a YZY Euler rotation (rotation about the y-axis by `α = −θ_out`, where `θ_out` is the output colatitude) to bring the output point to the north pole. For each input point at colatitude `γ` and longitude `λ`, the rotated Cartesian position is:
-
-```
-x' = cos(α) cos(λ) sin(γ) + sin(α) cos(γ)
-y' = sin(λ) sin(γ)
-z' = −sin(α) cos(λ) sin(γ) + cos(α) cos(γ)
-```
-
-From this, `θ = arccos(z')` and `φ = atan2(y', x')` give the angular position in the Euler-rotated frame.
-
-### Computing γ
-
-The frame rotation angle `γ = φ − β`, where `β` is the angle that the input point's geographic north makes with the local "toward-pole" direction in the Euler-rotated frame. The components of `β` are:
+The angle β measures the orientation of the input point's meridian frame relative to the Euler-rotated frame's local basis. It is computed from the Euler-rotated geographic north direction of the input point:
 
 ```
 cos(β) = ê_N' · (−θ̂)
 sin(β) = ê_N' · φ̂
 ```
 
-where:
+where `ê_N'` is the input's geographic north after Euler rotation, and `−θ̂`, `φ̂` are the local basis vectors at the input's Euler-rotated position.
 
-- `ê_N'` is the input point's geographic north direction, Euler-rotated to the new frame:
-  ```
-  ê_N'_x = −cos(α) cos(γ) cos(λ) + sin(α) sin(γ)
-  ê_N'_y = −cos(γ) sin(λ)
-  ê_N'_z =  sin(α) cos(γ) cos(λ) + cos(α) sin(γ)
-  ```
-- `−θ̂` and `φ̂` are the local basis vectors at the rotated position `(θ, φ)`:
-  ```
-  −θ̂ = (−cos θ cos φ,  −cos θ sin φ,  sin θ)
-  φ̂  = (−sin φ,          cos φ,         0    )
-  ```
+### The frame rotation angle γ = φ − β
+
+The frame rotation `γ` is the total angle between the input's and output's meridian frames. It combines the bearing (φ) with the frame correction (β). This is the angle used to rotate input vectors from the input's frame into the output's frame:
+
+```
+[u_rotated]   [cos γ  −sin γ] [u_in]
+[v_rotated] = [sin γ   cos γ] [v_in]
+```
+
+### Which angle is used where
+
+| Path | Angular factor | Reason |
+|---|---|---|
+| vv (vector→vector) | γ (frame rotation) | Rotates input vector to output frame |
+| sv (scalar→vector) | φ (bearing) | Bearing direction is a vector at the output |
+| vs (vector→scalar) | β = φ − γ (frame correction) | Equivalent to: rotate input vector to output frame, then project onto bearing |
+
+The vs path uses β because the operation is conceptually two steps: (1) rotate the input vector to the output's frame using γ, then (2) project onto the bearing direction using φ. Expanding the composition `cos(φ)·[cos(γ)·u − sin(γ)·v] + sin(φ)·[sin(γ)·u + cos(γ)·v]` simplifies to `cos(β)·u + sin(β)·v`, where `β = φ − γ`.
+
+## Computing the Geometric Angles
+
+### Setup
+
+The DISCO precomputation uses a YZY Euler rotation (rotation about the y-axis by `α = −θ_out`, where `θ_out` is the output colatitude) to bring the output point to the north pole. For each input point at colatitude `γ_in` and longitude `λ`, the rotated Cartesian position is:
+
+```
+x' = cos(α) cos(λ) sin(γ_in) + sin(α) cos(γ_in)
+y' = sin(λ) sin(γ_in)
+z' = −sin(α) cos(λ) sin(γ_in) + cos(α) cos(γ_in)
+```
+
+From this, `θ = arccos(z')` gives the geodesic distance and `φ = atan2(y', x')` gives the bearing angle.
+
+### Computing β
+
+The Euler-rotated geographic north of the input point is:
+
+```
+ê_N'_x = −cos(α) cos(γ_in) cos(λ) + sin(α) sin(γ_in)
+ê_N'_y = −cos(γ_in) sin(λ)
+ê_N'_z =  sin(α) cos(γ_in) cos(λ) + cos(α) sin(γ_in)
+```
+
+The local basis vectors at the rotated position `(θ, φ)`:
+
+```
+−θ̂ = (−cos θ cos φ,  −cos θ sin φ,  sin θ)
+ φ̂ = (−sin φ,          cos φ,         0    )
+```
 
 Then:
+
+```
+cos(β) = ê_N' · (−θ̂)
+sin(β) = ê_N' · φ̂
+```
+
+### Computing γ from φ and β
 
 ```
 cos(γ) = cos(φ − β) = cos φ · cos β + sin φ · sin β
 sin(γ) = sin(φ − β) = sin φ · cos β − cos φ · sin β
 ```
 
-These quantities can be computed in the precomputation loop alongside `θ` and `φ`, adding only a few vector dot products per support point.
-
-### Geometric Meaning
-
-The angle `γ` is the total rotation from the input's meridian frame to the output's meridian frame, accounting for:
-
-1. The input's geographic north direction relative to the Euler-frame local basis (the angle `β`)
-2. The azimuthal position of the input point relative to the output point's meridian (the angle `φ`)
-
-At the output point's location (where `θ → 0`), the Euler frame's `φ = 0` direction corresponds to the output point's geographic south, and `φ = π/2` corresponds to geographic east. The parallel transport of the input's north vector to the output point arrives at Cartesian angle `π + γ` from the x-axis in the output's tangent plane (since north is the `−x` direction).
+All three angle pairs `(cos φ, sin φ)`, `(cos β, sin β)`, `(cos γ, sin γ)` are computed in the precomputation loop and stored at each support point.
 
 ## Convolution Operation
 
@@ -128,32 +139,34 @@ At the output point's location (where `θ → 0`), the Euler frame's `φ = 0` di
 A `VectorFilterBasis` pairs two radial `FilterBasis` instances:
 
 - **Scalar basis** (K_s radial functions): used for the scalar→scalar path (isotropic filtering) and the vector→vector path (isotropic filtering with frame rotation).
-- **Vector basis** (K_v radial functions): used for the scalar→vector path (gradient-like operations) and the vector→scalar path (divergence/curl-like operations). Each radial function generates a perpendicular filter pair via cos(γ) and sin(γ).
+- **Vector basis** (K_v radial functions): used for the scalar→vector path (bearing-based gradient) and the vector→scalar path (bearing-based divergence/curl).
 
-K_s and K_v can differ, allowing independent radial resolution for isotropic and oriented operations. When the same basis is used for both, K_s = K_v and the behavior matches the simpler single-basis case.
+K_s and K_v can differ, allowing independent radial resolution for isotropic and oriented operations.
 
 ### Filter Tensors
 
-Five banded FFT tensors are precomputed (from two bases):
+Seven banded FFT tensors are precomputed from two bases:
 
 **From the scalar basis** (K_s radial functions each):
 ```
-psi_scalar_fft:  (K_s, nlat_out, bw_s, nfreq)  — FFT of ψ_k^s(r)
-psi_s_cos_fft:   (K_s, nlat_out, bw_s, nfreq)  — FFT of ψ_k^s(r)·cos(γ)
-psi_s_sin_fft:   (K_s, nlat_out, bw_s, nfreq)  — FFT of ψ_k^s(r)·sin(γ)
+psi_scalar_fft:    (K_s, nlat_out, bw_s, nfreq)  — FFT of ψ_k^s(r)
+psi_s_cos_γ_fft:   (K_s, nlat_out, bw_s, nfreq)  — FFT of ψ_k^s(r)·cos(γ)
+psi_s_sin_γ_fft:   (K_s, nlat_out, bw_s, nfreq)  — FFT of ψ_k^s(r)·sin(γ)
 ```
 
 **From the vector basis** (K_v radial functions each):
 ```
-psi_v_cos_fft:   (K_v, nlat_out, bw_v, nfreq)  — FFT of ψ_k^v(r)·cos(γ)
-psi_v_sin_fft:   (K_v, nlat_out, bw_v, nfreq)  — FFT of ψ_k^v(r)·sin(γ)
+psi_v_cos_φ_fft:   (K_v, nlat_out, bw_v, nfreq)  — FFT of ψ_k^v(r)·cos(φ)
+psi_v_sin_φ_fft:   (K_v, nlat_out, bw_v, nfreq)  — FFT of ψ_k^v(r)·sin(φ)
+psi_v_cos_β_fft:   (K_v, nlat_out, bw_v, nfreq)  — FFT of ψ_k^v(r)·cos(β)
+psi_v_sin_β_fft:   (K_v, nlat_out, bw_v, nfreq)  — FFT of ψ_k^v(r)·sin(β)
 ```
 
 Each basis has its own banding width (bw_s, bw_v) and gather index, since the support radii may differ.
 
-The scalar filter `psi_scalar` is isotropic (depends only on geodesic distance). The cos/sin tensors from the scalar basis are used for frame rotation in the vector→vector path. The cos/sin tensors from the vector basis provide the oriented (gradient/divergence) operations.
+The scalar filter `psi_scalar` is isotropic. The γ-modulated tensors from the scalar basis handle frame rotation for the vv path. The φ-modulated tensors from the vector basis provide the bearing-based gradient for sv. The β-modulated tensors provide the bearing-projected divergence/curl for vs.
 
-The two components of each vector filter are perpendicular by construction: cos(γ) and sin(γ) are the cosine and sine of the same angle, so one is the 90° rotation of the other. This is verified by tests (Pythagorean identity and weighted orthogonality) for all supported basis types.
+The two components of each angular pair are perpendicular by construction (cosine and sine of the same angle).
 
 ### Contraction Calls
 
@@ -161,21 +174,21 @@ Using `contraction(psi, x)` to denote the standard FFT-based DISCO contraction:
 
 **Scalar input contractions** (3 calls):
 1. `f_s = contraction(psi_scalar, x_scalar)` — shape `(B, N_s, K_s, H, W)`, for W_ss
-2. `f_vc = contraction(psi_v_cos, x_scalar)` — shape `(B, N_s, K_v, H, W)`, for W_sv
-3. `f_vs = contraction(psi_v_sin, x_scalar)` — shape `(B, N_s, K_v, H, W)`, for W_sv
+2. `f_vc = contraction(psi_v_cos_φ, x_scalar)` — shape `(B, N_s, K_v, H, W)`, for W_sv
+3. `f_vs = contraction(psi_v_sin_φ, x_scalar)` — shape `(B, N_s, K_v, H, W)`, for W_sv
 
 **Vector input contractions** (4 calls, on `[u, v]` concatenated):
-4. `sc_uv = contraction(psi_s_cos, [u, v])` — shape `(B, 2·N_v, K_s, H, W)`, for W_vv
-5. `ss_uv = contraction(psi_s_sin, [u, v])` — shape `(B, 2·N_v, K_s, H, W)`, for W_vv
-6. `vc_uv = contraction(psi_v_cos, [u, v])` — shape `(B, 2·N_v, K_v, H, W)`, for W_vs
-7. `vs_uv = contraction(psi_v_sin, [u, v])` — shape `(B, 2·N_v, K_v, H, W)`, for W_vs
+4. `sc_uv = contraction(psi_s_cos_γ, [u, v])` — shape `(B, 2·N_v, K_s, H, W)`, for W_vv
+5. `ss_uv = contraction(psi_s_sin_γ, [u, v])` — shape `(B, 2·N_v, K_s, H, W)`, for W_vv
+6. `bc_uv = contraction(psi_v_cos_β, [u, v])` — shape `(B, 2·N_v, K_v, H, W)`, for W_vs
+7. `bs_uv = contraction(psi_v_sin_β, [u, v])` — shape `(B, 2·N_v, K_v, H, W)`, for W_vs
 
-Total: **7 contraction calls** when K_s ≠ K_v. When both bases are the same (K_s = K_v, same `FilterBasis` object), calls 4+6 and 5+7 use identical filters and can be shared, reducing to **5 calls**.
+Total: **7 contraction calls** always.
 
 From the vector contractions, form rotationally invariant intermediates:
-- **Frame-rotated vector** (from scalar basis): `conv_u = sc_uv[:,:N_v] − ss_uv[:,N_v:]`, `conv_v = ss_uv[:,:N_v] + sc_uv[:,N_v:]`
-- **Divergence** (from vector basis): `div = vc_uv[:,:N_v] + vs_uv[:,N_v:]`
-- **Curl** (from vector basis): `curl = vc_uv[:,N_v:] − vs_uv[:,:N_v]`
+- **Frame-rotated vector** (from scalar basis, using γ): `conv_u = sc_uv[:,:N_v] − ss_uv[:,N_v:]`, `conv_v = ss_uv[:,:N_v] + sc_uv[:,N_v:]`
+- **Divergence** (from vector basis, using β): `div = bc_uv[:,:N_v] + bs_uv[:,N_v:]`
+- **Curl** (from vector basis, using β): `curl = bc_uv[:,N_v:] − bs_uv[:,:N_v]`
 
 ### Weight Contraction
 
@@ -190,14 +203,14 @@ s_out += einsum("ock,bckxy->boxy", W_ss, f_s)
 ```
 s_out += einsum("ockd,bckxyd->boxy", W_vs, stack([div, curl], dim=-1))
 ```
-Component 0 computes divergence (vector filter aligned with the vector), component 1 computes curl (vector filter perpendicular to the vector).
+Component 0 computes divergence (bearing-aligned projection of the frame-rotated input vector). Component 1 computes curl (perpendicular projection).
 
 **Vector output from scalar input** — `W_sv`: shape `(N_v_out, N_s_in, K_v, 2)`:
 ```
 u_out += einsum("ockd,bckxyd->boxy", W_sv, stack([f_vc, -f_vs], dim=-1))
 v_out += einsum("ockd,bckxyd->boxy", W_sv, stack([f_vs,  f_vc], dim=-1))
 ```
-The same weight produces both u and v, with cos/sin factors swapped. Component 0 is the gradient, component 1 is the perpendicular gradient (e.g., geostrophic wind from pressure).
+The same weight produces both u and v, with cos/sin factors swapped. Component 0 is the gradient (bearing-aligned), component 1 is the perpendicular gradient (e.g., geostrophic wind from pressure).
 
 **Vector output from vector input** — `W_vv`: shape `(N_v_out, N_v_in, K_s, 2)`:
 ```
@@ -210,7 +223,12 @@ Component 0 preserves vector direction (scaling, advection-like). Component 1 ro
 
 The convolution is **exactly equivariant under longitude shifts** (azimuthal rotations), guaranteed by the FFT structure.
 
-For non-azimuthal rotations (e.g., 180° rotation about the x-axis, which flips both latitude and longitude), the **scalar→scalar and vector→vector paths are equivariant**, but the **scalar↔vector cross-type paths are not**. This is because the cos(γ)/sin(γ) angular factors are invariant under such rotations while the output meridian frame rotates — the cross-type paths produce local frame components that don't track the frame change. This is inherent to the meridian-frame design and acceptable for atmospheric modeling, where the Coriolis force already breaks full SO(3) symmetry.
+All four paths are equivariant under non-azimuthal rotations (e.g., 180° rotation about the x-axis). This is because:
+
+- The **vv path** uses the frame rotation γ to correctly transform input vectors to the output frame, then applies an isotropic filter. Both the frame rotation and the isotropic filter are equivariant.
+- The **sv path** uses the bearing angle φ, which transforms as a vector at the output point. Under rotation, the bearing rotates with the output frame, so the vector output transforms correctly.
+- The **vs path** uses β = φ − γ, which is equivalent to first frame-rotating the input vector (via γ) then projecting onto the bearing (via φ). Since both steps are equivariant, the composition is equivariant, producing a true scalar.
+- The **ss path** is isotropic and trivially equivariant.
 
 ## Nonlinearities
 
@@ -224,18 +242,18 @@ Vector channels do **not** receive direct nonlinearities. Applying independent n
 
 For a layer with `N_s` scalar and `N_v` vector input channels, using scalar basis size K_s and vector basis size K_v:
 
-| Operation | Contraction calls | Filter basis used |
-|---|---|---|
-| scalar + scalar filter → scalar | 1 over `N_s` channels | scalar (K_s) |
-| scalar + vector filter → vector | 2 over `N_s` channels each | vector (K_v) |
-| vector + scalar filter → vector | 2 over `2·N_v` channels each | scalar (K_s) |
-| vector + vector filter → scalar | 2 over `2·N_v` channels each | vector (K_v) |
+| Operation | Contraction calls | Angular factor | Filter basis |
+|---|---|---|---|
+| scalar + scalar filter → scalar | 1 over `N_s` channels | (none) | scalar (K_s) |
+| scalar + vector filter → vector | 2 over `N_s` channels each | φ (bearing) | vector (K_v) |
+| vector + scalar filter → vector | 2 over `2·N_v` channels each | γ (frame rotation) | scalar (K_s) |
+| vector + vector filter → scalar | 2 over `2·N_v` channels each | β (frame correction) | vector (K_v) |
 
-Total: 7 contraction calls when K_s ≠ K_v, or 5 when K_s = K_v (sharing cos/sin tensors). The cost per call scales with `(channels × K × nlat × nlon × log(nlon))`.
+Total: 7 contraction calls. The cost per call scales with `(channels × K × nlat × nlon × log(nlon))`.
 
 ### Memory Cost
 
-Five banded FFT tensors are stored per layer: 3 from the scalar basis (K_s each) and 2 from the vector basis (K_v each), plus two gather index tensors. When K_s = K_v with the same basis, this reduces to 3 unique tensors (the cos/sin tensors are shared).
+Seven banded FFT tensors are stored per layer: 3 from the scalar basis (K_s each) and 4 from the vector basis (K_v each), plus two gather index tensors.
 
 ## Module Interface
 
@@ -285,13 +303,13 @@ When `kernel_shape` is provided instead of `vector_filter_basis`, a `VectorFilte
 
 ## Testing Plan
 
-1. **Precomputation correctness.** Scalar filter values and indices match the scalar-only DISCO convolution precomputation. Pythagorean identity cos²(γ) + sin²(γ) = 1 at all support points. Filter component orthogonality verified for all basis types (piecewise linear, morlet, zernike).
+1. **Precomputation correctness.** Scalar filter values and indices match the scalar-only DISCO convolution precomputation. Pythagorean identity cos² + sin² = 1 holds for each angular pair (φ, β, γ) at all support points. Filter component orthogonality verified for all basis types (piecewise linear, morlet, zernike).
 
 2. **Frame rotation geometry.** Zero frame rotation on the same meridian (Δlon = 0). sin(γ) antisymmetric under Δlon → −Δlon. Scalar FFT tensors match the scalar-only DISCO convolution pipeline end-to-end.
 
 3. **Longitude shift equivariance.** Shift scalar and vector inputs by N longitude points. Verify outputs shift by N points (both scalar and vector channels).
 
-4. **R_x(π) rotation equivariance.** 180° rotation about the x-axis maps the equiangular grid to itself exactly. Verify scalar→scalar and vector→vector paths are equivariant. (Cross-type paths are not, by design.)
+4. **R_x(π) rotation equivariance.** 180° rotation about the x-axis maps the equiangular grid to itself exactly. Verify all four paths (ss, sv, vs, vv) are equivariant under this rotation.
 
 5. **Scalar gradient direction.** Apply scalar→vector to a longitude-varying scalar field. Verify the output vector points in the eastward direction at the equator.
 
